@@ -1,69 +1,35 @@
-export type EventKind =
-  | "document"
-  | "meal"
-  | "symptom"
-  | "note"
-  | "observation"
-  | "experiment_event"
-  | "medication_intake"
-  | "supplement_intake"
-  | "activity_session"
-  | "sleep_session";
+type ContractSchemaVersion = typeof import("./constants.js").CONTRACT_SCHEMA_VERSION;
+type ContractIdFormat = typeof import("./constants.js").CONTRACT_ID_FORMAT;
+type FrontmatterDocTypes = typeof import("./constants.js").FRONTMATTER_DOC_TYPES;
 
-export type EventSource = "manual" | "import" | "device" | "derived";
-export type ExperimentPhase = "start" | "checkpoint" | "stop";
+export type EventKind = (typeof import("./constants.js").EVENT_KINDS)[number];
+export type EventSource = (typeof import("./constants.js").EVENT_SOURCES)[number];
+export type ExperimentPhase = (typeof import("./constants.js").EXPERIMENT_PHASES)[number];
+export type SampleStream = (typeof import("./constants.js").SAMPLE_STREAMS)[number];
+export type SampleSource = (typeof import("./constants.js").SAMPLE_SOURCES)[number];
+export type SampleQuality = (typeof import("./constants.js").SAMPLE_QUALITIES)[number];
+export type SleepStage = (typeof import("./constants.js").SLEEP_STAGES)[number];
+export type AuditAction = (typeof import("./constants.js").AUDIT_ACTIONS)[number];
+export type AuditActor = (typeof import("./constants.js").AUDIT_ACTORS)[number];
+export type AuditStatus = (typeof import("./constants.js").AUDIT_STATUSES)[number];
+export type FileChangeOperation = (typeof import("./constants.js").FILE_CHANGE_OPERATIONS)[number];
+export type ExperimentStatus = (typeof import("./constants.js").EXPERIMENT_STATUSES)[number];
+export type ErrorCodeValue = (typeof import("./constants.js").ERROR_CODE_VALUES)[number];
 
-export type SampleStream =
-  | "heart_rate"
-  | "hrv"
-  | "steps"
-  | "sleep_stage"
-  | "respiratory_rate"
-  | "temperature"
-  | "glucose";
-
-export type SampleSource = "device" | "import" | "manual" | "derived";
-export type SampleQuality = "raw" | "normalized" | "derived";
-export type SleepStage = "awake" | "light" | "deep" | "rem";
-
-export type AuditAction =
-  | "vault_init"
-  | "document_import"
-  | "meal_add"
-  | "samples_import_csv"
-  | "experiment_create"
-  | "journal_ensure"
-  | "validate"
-  | "show"
-  | "list"
-  | "export_pack";
-
-export type AuditActor = "cli" | "core" | "importer" | "query";
-export type AuditStatus = "success" | "failure";
-export type FileChangeOperation = "create" | "append" | "update" | "copy";
-export type ExperimentStatus = "planned" | "active" | "paused" | "completed" | "abandoned";
-
-export type ErrorCodeValue =
-  | "HB_CONTRACT_INVALID"
-  | "HB_ID_INVALID"
-  | "HB_PATH_INVALID"
-  | "HB_VAULT_INVALID"
-  | "HB_EVENT_INVALID"
-  | "HB_SAMPLE_INVALID"
-  | "HB_AUDIT_INVALID"
-  | "HB_FRONTMATTER_INVALID"
-  | "HB_ENUM_UNSUPPORTED"
-  | "HB_SHARD_KEY_INVALID"
-  | "HB_SCHEMA_ARTIFACT_STALE";
+export interface ErrorCodeEntry {
+  code: ErrorCodeValue;
+  retryable: boolean;
+  summary: string;
+}
 
 export interface VaultMetadata {
-  schemaVersion: "hb.vault.v1";
+  schemaVersion: ContractSchemaVersion["vault"];
   vaultId: string;
   createdAt: string;
   title: string;
   timezone: string;
   idPolicy: {
-    format: "prefix_ulid";
+    format: ContractIdFormat;
     prefixes: {
       audit: "aud";
       document: "doc";
@@ -96,7 +62,7 @@ export interface VaultMetadata {
 }
 
 export interface EventRecordBase {
-  schemaVersion: "hb.event.v1";
+  schemaVersion: ContractSchemaVersion["event"];
   id: string;
   kind: EventKind;
   occurredAt: string;
@@ -192,7 +158,7 @@ export type EventRecord =
   | SleepSessionEventRecord;
 
 export interface SampleRecordBase {
-  schemaVersion: "hb.sample.v1";
+  schemaVersion: ContractSchemaVersion["sample"];
   id: string;
   stream: SampleStream;
   recordedAt: string;
@@ -256,7 +222,7 @@ export type SampleRecord =
   | GlucoseSampleRecord;
 
 export interface AuditRecord {
-  schemaVersion: "hb.audit.v1";
+  schemaVersion: ContractSchemaVersion["audit"];
   id: string;
   action: AuditAction;
   status: AuditStatus;
@@ -273,8 +239,8 @@ export interface AuditRecord {
 }
 
 export interface CoreFrontmatter {
-  schemaVersion: "hb.frontmatter.core.v1";
-  docType: "core";
+  schemaVersion: ContractSchemaVersion["coreFrontmatter"];
+  docType: FrontmatterDocTypes["core"];
   vaultId: string;
   title: string;
   timezone: string;
@@ -283,16 +249,16 @@ export interface CoreFrontmatter {
 }
 
 export interface JournalDayFrontmatter {
-  schemaVersion: "hb.frontmatter.journal-day.v1";
-  docType: "journal_day";
+  schemaVersion: ContractSchemaVersion["journalDayFrontmatter"];
+  docType: FrontmatterDocTypes["journalDay"];
   dayKey: string;
   eventIds: string[];
   sampleStreams: SampleStream[];
 }
 
 export interface ExperimentFrontmatter {
-  schemaVersion: "hb.frontmatter.experiment.v1";
-  docType: "experiment";
+  schemaVersion: ContractSchemaVersion["experimentFrontmatter"];
+  docType: FrontmatterDocTypes["experiment"];
   experimentId: string;
   slug: string;
   status: ExperimentStatus;
@@ -301,4 +267,37 @@ export interface ExperimentFrontmatter {
   endedOn?: string;
   hypothesis?: string;
   tags?: string[];
+}
+
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+export type JsonSchemaTypeName = "array" | "boolean" | "integer" | "null" | "number" | "object" | "string";
+
+export interface JsonSchema {
+  $schema?: string;
+  $id?: string;
+  title?: string;
+  const?: JsonValue;
+  enum?: readonly JsonValue[];
+  type?: JsonSchemaTypeName | readonly JsonSchemaTypeName[];
+  format?: string;
+  pattern?: string;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  oneOf?: readonly JsonSchema[];
+  items?: JsonSchema;
+  properties?: Record<string, JsonSchema>;
+  required?: readonly string[];
+  additionalProperties?: boolean;
+  [key: string]: unknown;
 }

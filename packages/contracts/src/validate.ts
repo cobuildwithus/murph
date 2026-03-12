@@ -1,12 +1,16 @@
-function isPlainObject(value) {
+import type { JsonSchema, JsonSchemaTypeName, JsonValue } from "./types.js";
+
+type FrontmatterValue = string | string[];
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function formatError(path, message) {
+function formatError(path: string, message: string): string {
   return `${path}: ${message}`;
 }
 
-function matchesType(value, type) {
+function matchesType(value: unknown, type: JsonSchemaTypeName): boolean {
   if (type === "array") {
     return Array.isArray(value);
   }
@@ -26,7 +30,7 @@ function matchesType(value, type) {
   return typeof value === type;
 }
 
-function validateFormat(value, format) {
+function validateFormat(value: unknown, format: string): boolean {
   if (typeof value !== "string") {
     return false;
   }
@@ -50,8 +54,8 @@ function validateFormat(value, format) {
   return true;
 }
 
-export function validateAgainstSchema(schema, value, path = "$") {
-  const errors = [];
+export function validateAgainstSchema(schema: JsonSchema, value: unknown, path = "$"): string[] {
+  const errors: string[] = [];
 
   if (schema.oneOf) {
     const passingVariants = schema.oneOf.filter((variant) => validateAgainstSchema(variant, value, path).length === 0);
@@ -66,7 +70,7 @@ export function validateAgainstSchema(schema, value, path = "$") {
     return errors;
   }
 
-  if (schema.enum && !schema.enum.includes(value)) {
+  if (schema.enum && !schema.enum.includes(value as JsonValue)) {
     errors.push(formatError(path, `expected one of ${schema.enum.join(", ")}`));
   }
 
@@ -122,9 +126,10 @@ export function validateAgainstSchema(schema, value, path = "$") {
       }
     }
 
-    if (schema.items) {
+    const itemSchema = schema.items;
+    if (itemSchema) {
       value.forEach((item, index) => {
-        errors.push(...validateAgainstSchema(schema.items, item, `${path}[${index}]`));
+        errors.push(...validateAgainstSchema(itemSchema, item, `${path}[${index}]`));
       });
     }
   }
@@ -157,7 +162,7 @@ export function validateAgainstSchema(schema, value, path = "$") {
   return errors;
 }
 
-export function assertValidAgainstSchema(schema, value, label = "value") {
+export function assertValidAgainstSchema<T>(schema: JsonSchema, value: T, label = "value"): T {
   const errors = validateAgainstSchema(schema, value);
   if (errors.length > 0) {
     throw new TypeError(`${label} failed validation:\n${errors.join("\n")}`);
@@ -165,13 +170,13 @@ export function assertValidAgainstSchema(schema, value, label = "value") {
   return value;
 }
 
-export function parseFrontmatterMarkdown(markdown) {
+export function parseFrontmatterMarkdown(markdown: string): Record<string, FrontmatterValue> {
   const lines = markdown.split(/\r?\n/);
   if (lines[0] !== "---") {
     throw new TypeError("Frontmatter must start with ---");
   }
 
-  const result = {};
+  const result: Record<string, FrontmatterValue> = {};
   let index = 1;
 
   while (index < lines.length) {
@@ -193,7 +198,7 @@ export function parseFrontmatterMarkdown(markdown) {
     const [, key, rawValue = ""] = keyMatch;
 
     if (rawValue === "") {
-      const values = [];
+      const values: string[] = [];
       index += 1;
       while (index < lines.length && /^  - /.test(lines[index])) {
         values.push(lines[index].slice(4));

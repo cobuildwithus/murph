@@ -18,6 +18,30 @@ import {
   SLEEP_STAGES,
 } from "./constants.js";
 import { GENERIC_CONTRACT_ID_PATTERN, idPattern } from "./ids.js";
+import type { EventKind, JsonSchema, SampleStream } from "./types.js";
+
+type StringSchemaOptions = {
+  const?: string;
+  enum?: readonly string[];
+  format?: string;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+};
+
+type NumericSchemaOptions = {
+  const?: number;
+  minimum?: number;
+  maximum?: number;
+};
+
+type ArraySchemaOptions = {
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+};
+
+export type { JsonSchema } from "./types.js";
 
 const JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema";
 const DAY_KEY_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
@@ -26,23 +50,23 @@ const RAW_PATH_PATTERN = "^raw/[A-Za-z0-9._/-]+$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 
-function stringSchema(options = {}) {
+function stringSchema(options: StringSchemaOptions = {}): JsonSchema {
   return { type: "string", ...options };
 }
 
-function idSchema(prefix) {
+function idSchema(prefix: string): JsonSchema {
   return stringSchema({ pattern: idPattern(prefix) });
 }
 
-function integerSchema(options = {}) {
+function integerSchema(options: NumericSchemaOptions = {}): JsonSchema {
   return { type: "integer", ...options };
 }
 
-function numberSchema(options = {}) {
+function numberSchema(options: NumericSchemaOptions = {}): JsonSchema {
   return { type: "number", ...options };
 }
 
-function stringArraySchema(itemSchema = stringSchema(), options = {}) {
+function stringArraySchema(itemSchema: JsonSchema = stringSchema(), options: ArraySchemaOptions = {}): JsonSchema {
   return {
     type: "array",
     items: itemSchema,
@@ -50,7 +74,7 @@ function stringArraySchema(itemSchema = stringSchema(), options = {}) {
   };
 }
 
-function closedObject(required, properties) {
+function closedObject(required: readonly string[], properties: Record<string, JsonSchema>): JsonSchema {
   return {
     type: "object",
     additionalProperties: false,
@@ -59,7 +83,7 @@ function closedObject(required, properties) {
   };
 }
 
-function withDraft(id, title, schema) {
+function withDraft(id: string, title: string, schema: JsonSchema): JsonSchema {
   return {
     $schema: JSON_SCHEMA_DRAFT,
     $id: id,
@@ -68,7 +92,7 @@ function withDraft(id, title, schema) {
   };
 }
 
-const baseEventProperties = {
+const baseEventProperties: Record<string, JsonSchema> = {
   schemaVersion: { const: CONTRACT_SCHEMA_VERSION.event },
   id: idSchema(ID_PREFIXES.event),
   kind: stringSchema({ enum: EVENT_KINDS }),
@@ -83,7 +107,11 @@ const baseEventProperties = {
   rawRefs: stringArraySchema(stringSchema({ pattern: RAW_PATH_PATTERN }), { uniqueItems: true }),
 };
 
-function eventSchema(kind, extraRequired, extraProperties) {
+function eventSchema(
+  kind: EventKind,
+  extraRequired: readonly string[],
+  extraProperties: Record<string, JsonSchema>,
+): JsonSchema {
   return closedObject(
     [
       "schemaVersion",
@@ -104,7 +132,7 @@ function eventSchema(kind, extraRequired, extraProperties) {
   );
 }
 
-const baseSampleProperties = {
+const baseSampleProperties: Record<string, JsonSchema> = {
   schemaVersion: { const: CONTRACT_SCHEMA_VERSION.sample },
   id: idSchema(ID_PREFIXES.sample),
   stream: stringSchema({ enum: SAMPLE_STREAMS }),
@@ -114,7 +142,11 @@ const baseSampleProperties = {
   quality: stringSchema({ enum: SAMPLE_QUALITIES }),
 };
 
-function sampleSchema(stream, extraRequired, extraProperties) {
+function sampleSchema(
+  stream: SampleStream,
+  extraRequired: readonly string[],
+  extraProperties: Record<string, JsonSchema>,
+): JsonSchema {
   return closedObject(
     [
       "schemaVersion",

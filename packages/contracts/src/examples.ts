@@ -1,4 +1,20 @@
-export const exampleVaultMetadata = Object.freeze({
+import type {
+  AuditRecord,
+  CoreFrontmatter,
+  EventRecord,
+  ExperimentFrontmatter,
+  JournalDayFrontmatter,
+  SampleRecord,
+  VaultMetadata,
+} from "./types.js";
+
+type FrontmatterExamples = {
+  core: CoreFrontmatter;
+  journalDay: JournalDayFrontmatter;
+  experiment: ExperimentFrontmatter;
+};
+
+export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<VaultMetadata>({
   schemaVersion: "hb.vault.v1",
   vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
   createdAt: "2026-03-12T14:00:00Z",
@@ -37,7 +53,7 @@ export const exampleVaultMetadata = Object.freeze({
   },
 });
 
-export const exampleEventRecords = Object.freeze([
+export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.freeze([
   {
     schemaVersion: "hb.event.v1",
     id: "evt_01JNV41B483QH9GQ1Y08D7RMTA",
@@ -179,7 +195,7 @@ export const exampleEventRecords = Object.freeze([
   },
 ]);
 
-export const exampleSampleRecords = Object.freeze([
+export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.freeze([
   {
     schemaVersion: "hb.sample.v1",
     id: "smp_01JNV45RHN0TQ9ZXE0A7YSE1YQ",
@@ -262,7 +278,7 @@ export const exampleSampleRecords = Object.freeze([
   },
 ]);
 
-export const exampleAuditRecords = Object.freeze([
+export const exampleAuditRecords: readonly Readonly<AuditRecord>[] = Object.freeze([
   {
     schemaVersion: "hb.audit.v1",
     id: "aud_01JNV480C4MP7R7QX3T2Q1XMD1",
@@ -298,7 +314,7 @@ export const exampleAuditRecords = Object.freeze([
   },
 ]);
 
-export const exampleFrontmatterObjects = Object.freeze({
+export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.freeze({
   core: {
     schemaVersion: "hb.frontmatter.core.v1",
     docType: "core",
@@ -328,7 +344,7 @@ export const exampleFrontmatterObjects = Object.freeze({
   },
 });
 
-export const exampleFrontmatterMarkdown = Object.freeze({
+export const exampleFrontmatterMarkdown: Readonly<Record<keyof FrontmatterExamples, string>> = Object.freeze({
   core: `---
 schemaVersion: hb.frontmatter.core.v1
 docType: core

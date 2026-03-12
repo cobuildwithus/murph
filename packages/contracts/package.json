@@ -3,40 +3,45 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "files": [
     "README.md",
     "generated",
-    "src"
+    "dist"
   ],
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
-      "default": "./src/index.js"
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
     },
     "./constants": {
-      "types": "./src/constants.d.ts",
-      "default": "./src/constants.js"
+      "types": "./dist/src/constants.d.ts",
+      "default": "./dist/src/constants.js"
     },
     "./examples": {
-      "types": "./src/examples.d.ts",
-      "default": "./src/examples.js"
+      "types": "./dist/src/examples.d.ts",
+      "default": "./dist/src/examples.js"
     },
     "./ids": {
-      "types": "./src/ids.d.ts",
-      "default": "./src/ids.js"
+      "types": "./dist/src/ids.d.ts",
+      "default": "./dist/src/ids.js"
     },
     "./schemas": {
-      "types": "./src/schemas.d.ts",
-      "default": "./src/schemas.js"
+      "types": "./dist/src/schemas.d.ts",
+      "default": "./dist/src/schemas.js"
     },
     "./validate": {
-      "types": "./src/validate.d.ts",
-      "default": "./src/validate.js"
+      "types": "./dist/src/validate.d.ts",
+      "default": "./dist/src/validate.js"
     },
     "./generated/*": "./generated/*"
   },
   "scripts": {
-    "generate": "node ./scripts/generate-json-schema.mjs",
-    "verify": "node ./scripts/verify.mjs"
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "generate": "pnpm build && node ./dist/scripts/generate-json-schema.js",
+    "test": "pnpm build && node ./dist/scripts/verify.js",
+    "verify": "pnpm test"
   }
 }

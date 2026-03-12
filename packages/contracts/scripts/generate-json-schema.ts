@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { schemaCatalog } from "../src/schemas.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const generatedDir = path.resolve(__dirname, "../generated");
+const generatedDir = path.resolve(__dirname, "../../generated");
 
 await mkdir(generatedDir, { recursive: true });
 

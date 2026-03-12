@@ -24,9 +24,9 @@ import {
 import { parseFrontmatterMarkdown, validateAgainstSchema } from "../src/validate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const generatedDir = path.resolve(__dirname, "../generated");
+const generatedDir = path.resolve(__dirname, "../../generated");
 
-function assertNoErrors(label, schema, value) {
+function assertNoErrors(label: string, schema: Record<string, unknown>, value: unknown): void {
   const errors = validateAgainstSchema(schema, value);
   if (errors.length > 0) {
     throw new Error(`${label} failed validation:\n${errors.join("\n")}`);
