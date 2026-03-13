@@ -389,7 +389,7 @@ function createIntegratedQueryServices(): QueryServices {
       kind?: string
       from?: string
       to?: string
-      tag?: string
+      tag?: string[]
       experiment?: string
       limit: number
     }) {
