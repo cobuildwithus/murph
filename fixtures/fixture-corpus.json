@@ -87,6 +87,14 @@
       "path": "fixtures/golden-outputs/search"
     },
     {
+      "id": "search-index-status",
+      "path": "fixtures/golden-outputs/search-index-status"
+    },
+    {
+      "id": "search-index-rebuild",
+      "path": "fixtures/golden-outputs/search-index-rebuild"
+    },
+    {
       "id": "timeline",
       "path": "fixtures/golden-outputs/timeline"
     },
