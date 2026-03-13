@@ -37,10 +37,7 @@ Last verified: 2026-03-13
 
 ## CLI Framework Notes
 
-- `packages/cli` is built on incur. Model nested verbs with real mounted sub-CLIs such as `search -> query` and `search -> index -> status|rebuild`; do not simulate nested commands with argv rewrites or positional action enums.
-- Treat output/discovery transport such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp` as incur-owned global behavior. Healthy Bob command docs should focus on domain semantics unless the repo intentionally constrains that surface.
-- Keep the root CLI default-exported from `packages/cli/src/index.ts` and keep `packages/cli/src/incur.generated.ts` aligned with command-topology changes so typed CTAs and generated skill metadata stay truthful.
-- Source-only CLI checks are useful for triage, but repo acceptance still depends on the built CLI path because package tests execute `packages/cli/dist/bin.js`.
+- `packages/cli` is incur-backed. If you touch CLI routing, help text, schemas, discovery output, or generated CLI typing, use the `incur` skill and read `agent-docs/references/incur-notes.md` first.
 
 ## Source Of Truth
 

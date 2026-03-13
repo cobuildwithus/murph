@@ -1,8 +1,8 @@
 # Health extensions cutover
 
-Status: active
+Status: completed
 Created: 2026-03-12
-Updated: 2026-03-12
+Updated: 2026-03-13
 
 ## Goal
 
@@ -122,3 +122,4 @@ Updated: 2026-03-12
 - Expected outcomes:
 - New health contracts validate and generated schemas stay in sync.
 - CLI smoke scenarios cover the new nouns and their documented command shapes.
+Completed: 2026-03-13

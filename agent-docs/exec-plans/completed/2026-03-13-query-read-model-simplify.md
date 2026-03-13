@@ -40,3 +40,6 @@ Reduce immediate duplication and nesting in the allowed query read-model and hea
 
 - Leave `packages/query/src/markdown.ts`, `packages/query/src/health/shared.ts`, `packages/query/test/health-tail.test.ts`, and `packages/query/src/export-pack.ts` untouched because other active ledger rows own them.
 - If a useful simplification depends on those owned files, record it in handoff instead of applying it.
+Status: completed
+Updated: 2026-03-13
+Completed: 2026-03-13

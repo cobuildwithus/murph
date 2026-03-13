@@ -19,3 +19,6 @@ Finish the CLI app-layer cutover to the generic entity model by switching the ge
 2. Update the generic `list` path to use `listEntities()`.
 3. Add/adjust a CLI regression test that proves generic reads return canonical entity data for non-health-specific generic flows.
 4. Run the narrowest relevant CLI/query verification first, then repo checks as far as the shared tree allows.
+Status: completed
+Updated: 2026-03-13
+Completed: 2026-03-13

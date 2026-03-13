@@ -37,3 +37,6 @@ Land the user-requested Track 4 follow-up patch as far as it can be applied trut
 - `pnpm typecheck`: fails outside this lane in `packages/contracts/scripts/generate-json-schema.ts` and `packages/contracts/scripts/verify.ts` because `@healthybob/contracts/schemas` is unresolved in the current tree.
 - `pnpm test`: fails outside this lane during the shared workspace build in `packages/cli/src/commands/event.ts`, `packages/cli/src/commands/provider.ts`, and `packages/cli/src/commands/provider-event-read-helpers.ts`.
 - `pnpm test:coverage`: fails for the same shared workspace build errors as `pnpm test`.
+Status: completed
+Updated: 2026-03-13
+Completed: 2026-03-13

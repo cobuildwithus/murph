@@ -22,12 +22,9 @@ Last verified: 2026-03-13
 - `pnpm test:coverage`: runs doc-gardening validation, `pnpm test:packages:coverage`, verifies every documented baseline command has smoke coverage plus a golden-output scaffold, and fails if handwritten `.js`, `.mjs`, `.cjs`, or `.d.ts` source files remain under `packages/` or `e2e/`, or if tracked `dist/`, `.test-dist/`, or `*.tsbuildinfo` residue is committed there.
 - `pnpm test:smoke`: runs only the fixture/scenario integrity verifier.
 
-## Incur-Backed CLI Guardrails
+## Incur-Backed CLI Note
 
-- Model nested CLI verbs with real incur router groups. Do not use argv rewrites or synthetic action args to mimic nested commands, because `--schema`, `--llms`, `skills add`, and command-map typegen only stay truthful when the router tree itself is truthful.
-- Treat incur-owned transport and discovery features as framework behavior: `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Command-surface docs should describe Healthy Bob semantics and payloads, not restate incur defaults command-by-command unless the repo is deliberately constraining them.
-- Keep `packages/cli/src/index.ts` default-exporting the root CLI and refresh `packages/cli/src/incur.generated.ts` whenever command topology changes. If `incur gen` is blocked by an unrelated build failure, record that explicitly in the handoff instead of silently leaving stale generated types.
-- `packages/cli/test/cli-test-helpers.ts` executes `packages/cli/dist/bin.js`, so source checks like `pnpm exec tsx packages/cli/src/bin.ts ...` are only a diagnostic shortcut. Final verification still needs the built CLI path or a clearly documented unrelated blocker.
+- If you touch `packages/cli`, use the `incur` skill and read `agent-docs/references/incur-notes.md` before changing routing, help/schema behavior, discovery output, or generated CLI typing.
 
 ## Runtime Status
 

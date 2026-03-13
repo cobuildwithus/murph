@@ -64,3 +64,4 @@ Updated: 2026-03-13
 - `pnpm typecheck` passed.
 - `pnpm test` failed for a pre-existing unrelated regression in `packages/cli/test/list-cursor-compat.test.ts` asserting that `goal list` help must not expose `--cursor`.
 - `pnpm test:coverage` failed for the same pre-existing unrelated `packages/cli/test/list-cursor-compat.test.ts` assertion.
+Completed: 2026-03-13

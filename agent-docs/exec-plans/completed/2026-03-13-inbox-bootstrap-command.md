@@ -63,3 +63,4 @@ Updated: 2026-03-13
 - `pnpm typecheck` failed for pre-existing workspace issues outside this change: `packages/core` typecheck is blocked by `packages/contracts/dist/index.d.ts` build-state errors (`TS6305`) plus an existing `packages/core/src/mutations.ts` indexing error (`TS7053`).
 - `pnpm test` failed for a pre-existing unrelated CLI package-shape guard: `packages/cli/scripts/verify-package-shape.ts` reports `test/canonical-write-lock.test.ts still reaches into another package's src tree`.
 - `pnpm test:coverage` failed for the same pre-existing unrelated CLI package-shape guard before coverage reached the new bootstrap scenario.
+Completed: 2026-03-13

@@ -1,6 +1,6 @@
 # CLI release flow
 
-Status: complete
+Status: completed
 Created: 2026-03-13
 Updated: 2026-03-13
 
@@ -89,3 +89,4 @@ Updated: 2026-03-13
 - Release wrapper scripts stay thin and deterministic.
 - Workflow/package identity checks fail fast if the release target drifts away from `@healthybob/cli`.
 - Docs and verification references describe the actual release path instead of the old “no CI/workflow” state.
+Completed: 2026-03-13

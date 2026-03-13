@@ -1,6 +1,6 @@
 # CLI health simplify 2
 
-Status: complete
+Status: completed
 Created: 2026-03-13
 Updated: 2026-03-13
 
@@ -75,3 +75,4 @@ Updated: 2026-03-13
 - Simplify audit: no further immediate duplication remains in the allowed health command files beyond the completed group-registration extraction.
 - Coverage audit: no safe in-scope test additions were applied because the strongest direct coverage already exists in `health-tail.test.ts` and `runtime.test.ts`; the remaining failing cursor test wants a behavior change that this task was not allowed to make.
 - Finish review: no new behavior regressions reproduced after the targeted health/runtime reruns.
+Completed: 2026-03-13

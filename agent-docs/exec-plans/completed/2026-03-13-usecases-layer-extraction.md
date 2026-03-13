@@ -77,3 +77,4 @@ Updated: 2026-03-13
 - Required repo checks still fail for pre-existing unrelated issues:
   - `pnpm typecheck` fails in `packages/contracts/scripts/{generate-json-schema.ts,verify.ts}` resolving `@healthybob/contracts/schemas`.
   - `pnpm test` and `pnpm test:coverage` fail in `packages/cli/scripts/verify-package-shape.ts` because `packages/cli/test/canonical-write-lock.test.ts` still imports another package's `src` tree.
+Completed: 2026-03-13

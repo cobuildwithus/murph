@@ -48,3 +48,4 @@ Updated: 2026-03-13
 2. Normalize health and noun-specific list/show mappers to emit the canonical entity shape plus stable list envelopes.
 3. Update focused CLI tests for the new shape.
 4. Run required verification and completion-workflow audits, then clear the ledger row and commit only touched files.
+Completed: 2026-03-13

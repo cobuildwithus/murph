@@ -34,3 +34,6 @@ Working set (files/ids/commands):
 - Files: `packages/cli/src/commands/inbox.ts`, `packages/cli/src/inbox-cli-contracts.ts`, `packages/cli/src/inbox-services.ts`, `packages/parsers/src/**`, `package.json`, `packages/cli/package.json`, `packages/cli/tsconfig.json`, `scripts/setup-inbox-local.sh`, CLI tests.
 - Inputs: follow-up Track 3 patch, follow-up landing plan, follow-up validation notes.
 - Verification targets: `pnpm typecheck`, `pnpm test`, `pnpm test:coverage`.
+Status: completed
+Updated: 2026-03-13
+Completed: 2026-03-13

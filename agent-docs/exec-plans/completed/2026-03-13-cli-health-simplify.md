@@ -1,6 +1,6 @@
 # CLI health simplify
 
-Status: complete
+Status: completed
 Created: 2026-03-13
 Updated: 2026-03-13
 
@@ -79,3 +79,4 @@ Updated: 2026-03-13
 - `agent-docs/prompts/test-coverage-audit.md`
 - `agent-docs/prompts/task-finish-review.md`
 - Audit outcome: no additional safe simplifications or in-scope test additions identified beyond the completed factory cleanup; residual risk remains the pre-existing cursor-contract/test mismatch.
+Completed: 2026-03-13
