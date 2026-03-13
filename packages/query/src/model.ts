@@ -1,6 +1,38 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  HEALTH_HISTORY_KINDS,
+  compareCanonicalEntities,
+  fallbackCurrentProfileEntity,
+  normalizeCanonicalDate,
+  projectAssessmentEntity,
+  projectCurrentProfileEntity,
+  projectHistoryEntity,
+  projectProfileSnapshotEntity,
+  projectRegistryEntity,
+  uniqueStrings,
+  type CanonicalEntity,
+  type CanonicalEntityFamily,
+} from "./canonical-entities.js";
+import {
+  allergyRegistryDefinition,
+  conditionRegistryDefinition,
+  familyRegistryDefinition,
+  geneticsRegistryDefinition,
+  goalRegistryDefinition,
+  regimenRegistryDefinition,
+  toRegistryRecord,
+  type RegistryDefinition,
+  type RegistryMarkdownRecord,
+} from "./health/registries.js";
+import {
+  readJsonlRecordOutcomes,
+  readMarkdownDocumentOutcome,
+  readOptionalMarkdownDocumentOutcome,
+  walkRelativeFiles,
+} from "./health/loaders.js";
+import { maybeString } from "./health/shared.js";
 import { deriveVaultRecordIdentity } from "./id-families.js";
 import { parseMarkdownDocument } from "./markdown.js";
 
@@ -8,13 +40,7 @@ type QueryRecordData = Record<string, unknown>;
 type FrontmatterRecordType = "core" | "experiment" | "journal";
 type JsonRecordType = "audit" | "event" | "sample";
 
-export type VaultRecordType =
-  | "audit"
-  | "core"
-  | "event"
-  | "experiment"
-  | "journal"
-  | "sample";
+export type VaultRecordType = CanonicalEntityFamily;
 
 export interface VaultRecord {
   displayId: string;
@@ -28,6 +54,7 @@ export interface VaultRecord {
   occurredAt: string | null;
   date: string | null;
   kind: string | null;
+  status?: string | null;
   stream: string | null;
   experimentSlug: string | null;
   title: string | null;
@@ -35,19 +62,45 @@ export interface VaultRecord {
   data: QueryRecordData;
   body: string | null;
   frontmatter: QueryRecordData | null;
+  relatedIds?: string[];
 }
 
 export interface VaultReadModel {
   format: "healthybob.query.v1";
   vaultRoot: string;
   metadata: QueryRecordData | null;
+  entities?: CanonicalEntity[];
   coreDocument: VaultRecord | null;
   experiments: VaultRecord[];
   journalEntries: VaultRecord[];
   events: VaultRecord[];
   samples: VaultRecord[];
   audits: VaultRecord[];
+  assessments?: VaultRecord[];
+  profileSnapshots?: VaultRecord[];
+  currentProfile?: VaultRecord | null;
+  goals?: VaultRecord[];
+  conditions?: VaultRecord[];
+  allergies?: VaultRecord[];
+  regimens?: VaultRecord[];
+  history?: VaultRecord[];
+  familyMembers?: VaultRecord[];
+  geneticVariants?: VaultRecord[];
   records: VaultRecord[];
+}
+
+export interface EntityFilter {
+  ids?: string[];
+  families?: CanonicalEntityFamily[];
+  kinds?: string[];
+  statuses?: string[];
+  streams?: string[];
+  experimentSlug?: string;
+  date?: string;
+  from?: string;
+  to?: string;
+  tags?: string[];
+  text?: string;
 }
 
 export interface RecordFilter {
@@ -77,36 +130,171 @@ export interface JournalFilter {
   text?: string;
 }
 
+const DEFAULT_LIST_RECORD_TYPES: VaultRecordType[] = [
+  "audit",
+  "core",
+  "event",
+  "experiment",
+  "journal",
+  "sample",
+];
+
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
   const metadata = await readOptionalJson(path.join(vaultRoot, "vault.json"));
-  const coreDocument = await readOptionalCoreDocument(vaultRoot, metadata);
-  const experiments = await readExperimentPages(vaultRoot);
-  const journalEntries = await readJournalPages(vaultRoot);
-  const events = await readJsonlRecordFamily(vaultRoot, "ledger/events", "event");
-  const samples = await readSampleRecords(vaultRoot);
-  const audits = await readJsonlRecordFamily(vaultRoot, "audit", "audit");
+  const entities = (
+    await Promise.all([
+      readBaseEntities(vaultRoot, metadata),
+      readHealthEntities(vaultRoot),
+    ])
+  )
+    .flat()
+    .sort(compareCanonicalEntities);
+  const records = entities.map((entity) => toVaultRecord(entity, vaultRoot));
 
-  const records = [
-    ...(coreDocument ? [coreDocument] : []),
-    ...experiments,
-    ...journalEntries,
-    ...events,
-    ...samples,
-    ...audits,
-  ].sort(compareRecords);
+  const coreDocument = firstRecordOfType(records, "core");
+  const experiments = recordsOfType(records, "experiment");
+  const journalEntries = recordsOfType(records, "journal");
+  const events = recordsOfType(records, "event");
+  const samples = recordsOfType(records, "sample");
+  const audits = recordsOfType(records, "audit");
+  const assessments = recordsOfType(records, "assessment");
+  const profileSnapshots = recordsOfType(records, "profile_snapshot");
+  const currentProfile = firstRecordOfType(records, "current_profile");
+  const goals = recordsOfType(records, "goal");
+  const conditions = recordsOfType(records, "condition");
+  const allergies = recordsOfType(records, "allergy");
+  const regimens = recordsOfType(records, "regimen");
+  const history = recordsOfType(records, "history");
+  const familyMembers = recordsOfType(records, "family");
+  const geneticVariants = recordsOfType(records, "genetics");
 
   return {
     format: "healthybob.query.v1",
     vaultRoot,
     metadata,
+    entities,
     coreDocument,
     experiments,
     journalEntries,
     events,
     samples,
     audits,
+    assessments,
+    profileSnapshots,
+    currentProfile,
+    goals,
+    conditions,
+    allergies,
+    regimens,
+    history,
+    familyMembers,
+    geneticVariants,
     records,
   };
+}
+
+export function getVaultEntities(vault: VaultReadModel): CanonicalEntity[] {
+  return vault.entities ?? vault.records.map(recordToCanonicalEntity);
+}
+
+export function lookupEntityById(
+  vault: VaultReadModel,
+  entityId: string,
+): CanonicalEntity | null {
+  if (typeof entityId !== "string" || !entityId.trim()) {
+    return null;
+  }
+
+  const normalizedId = entityId.trim();
+  const entities = getVaultEntities(vault);
+
+  return (
+    entities.find((entity) => entity.entityId === normalizedId) ??
+    entities.find((entity) => entity.lookupIds.includes(normalizedId)) ??
+    null
+  );
+}
+
+export function listEntities(
+  vault: VaultReadModel,
+  filters: EntityFilter = {},
+): CanonicalEntity[] {
+  const {
+    ids,
+    families,
+    kinds,
+    statuses,
+    streams,
+    experimentSlug,
+    date,
+    from,
+    to,
+    tags,
+    text,
+  } = filters;
+
+  const idSet = ids ? new Set(ids) : null;
+  const familySet = families ? new Set(families) : null;
+  const kindSet = kinds ? new Set(kinds) : null;
+  const statusSet = statuses ? new Set(statuses) : null;
+  const streamSet = streams ? new Set(streams) : null;
+  const tagSet = tags ? new Set(tags) : null;
+  const normalizedText = normalizeFilterText(text);
+
+  return getVaultEntities(vault).filter((entity) => {
+    if (idSet && !entity.lookupIds.some((lookupId) => idSet.has(lookupId))) {
+      return false;
+    }
+
+    if (familySet && !familySet.has(entity.family)) {
+      return false;
+    }
+
+    if (kindSet && !kindSet.has(entity.kind)) {
+      return false;
+    }
+
+    if (statusSet && (!entity.status || !statusSet.has(entity.status))) {
+      return false;
+    }
+
+    if (streamSet && (!entity.stream || !streamSet.has(entity.stream))) {
+      return false;
+    }
+
+    if (experimentSlug && entity.experimentSlug !== experimentSlug) {
+      return false;
+    }
+
+    if (date && entity.date !== date) {
+      return false;
+    }
+
+    if (!matchesDateBounds(entity.date ?? entity.occurredAt, from, to)) {
+      return false;
+    }
+
+    if (!matchesTagSet(entity.tags, tagSet)) {
+      return false;
+    }
+
+    return matchesFilterText(
+      [
+        entity.entityId,
+        entity.primaryLookupId,
+        ...entity.lookupIds,
+        entity.family,
+        entity.kind,
+        entity.status,
+        entity.stream,
+        entity.experimentSlug,
+        entity.title,
+        entity.body,
+        JSON.stringify(entity.attributes),
+      ],
+      normalizedText,
+    );
+  });
 }
 
 export function lookupRecordById(
@@ -144,7 +332,7 @@ export function listRecords(
   } = filters;
 
   const idSet = ids ? new Set(ids) : null;
-  const typeSet = recordTypes ? new Set(recordTypes) : null;
+  const typeSet = new Set(recordTypes ?? DEFAULT_LIST_RECORD_TYPES);
   const kindSet = kinds ? new Set(kinds) : null;
   const streamSet = streams ? new Set(streams) : null;
   const tagSet = tags ? new Set(tags) : null;
@@ -155,7 +343,7 @@ export function listRecords(
       return false;
     }
 
-    if (typeSet && !typeSet.has(record.recordType)) {
+    if (!typeSet.has(record.recordType)) {
       return false;
     }
 
@@ -186,8 +374,10 @@ export function listRecords(
     return matchesFilterText(
       [
         record.displayId,
+        record.primaryLookupId,
         ...record.lookupIds,
         record.kind,
+        record.status,
         record.stream,
         record.experimentSlug,
         record.title,
@@ -278,10 +468,144 @@ async function readOptionalJson(filePath: string): Promise<QueryRecordData | nul
   }
 }
 
-async function readOptionalCoreDocument(
+async function readBaseEntities(
   vaultRoot: string,
   metadata: QueryRecordData | null,
-): Promise<VaultRecord | null> {
+): Promise<CanonicalEntity[]> {
+  const coreDocument = await readOptionalCoreEntity(vaultRoot, metadata);
+  const experiments = await readExperimentEntities(vaultRoot);
+  const journalEntries = await readJournalEntities(vaultRoot);
+  const events = await readJsonlRecordFamily(vaultRoot, "ledger/events", "event");
+  const samples = await readSampleEntities(vaultRoot);
+  const audits = await readJsonlRecordFamily(vaultRoot, "audit", "audit");
+
+  return [
+    ...(coreDocument ? [coreDocument] : []),
+    ...experiments,
+    ...journalEntries,
+    ...events,
+    ...samples,
+    ...audits,
+  ];
+}
+
+async function readHealthEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
+  const [
+    assessments,
+    profileSnapshots,
+    history,
+    goals,
+    conditions,
+    allergies,
+    regimens,
+    familyMembers,
+    geneticVariants,
+  ] = await Promise.all([
+    readHealthJsonlEntities(vaultRoot, "ledger/assessments", projectAssessmentEntity),
+    readHealthJsonlEntities(
+      vaultRoot,
+      "ledger/profile-snapshots",
+      projectProfileSnapshotEntity,
+    ),
+    readHealthJsonlEntities(vaultRoot, "ledger/events", projectHistoryEntity),
+    readRegistryEntities(vaultRoot, goalRegistryDefinition, "goal"),
+    readRegistryEntities(vaultRoot, conditionRegistryDefinition, "condition"),
+    readRegistryEntities(vaultRoot, allergyRegistryDefinition, "allergy"),
+    readRegistryEntities(vaultRoot, regimenRegistryDefinition, "regimen"),
+    readRegistryEntities(vaultRoot, familyRegistryDefinition, "family"),
+    readRegistryEntities(vaultRoot, geneticsRegistryDefinition, "genetics"),
+  ]);
+  const currentProfile = await readCurrentProfileEntity(vaultRoot, profileSnapshots);
+
+  return [
+    ...assessments,
+    ...profileSnapshots,
+    ...(currentProfile ? [currentProfile] : []),
+    ...history,
+    ...goals,
+    ...conditions,
+    ...allergies,
+    ...regimens,
+    ...familyMembers,
+    ...geneticVariants,
+  ];
+}
+
+async function readHealthJsonlEntities(
+  vaultRoot: string,
+  relativeRoot: string,
+  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
+): Promise<CanonicalEntity[]> {
+  const outcomes = await readJsonlRecordOutcomes(vaultRoot, relativeRoot);
+  return outcomes
+    .filter((outcome): outcome is Extract<typeof outcome, { ok: true }> => outcome.ok)
+    .map((entry) => project(entry.value, entry.relativePath))
+    .filter((entity): entity is CanonicalEntity => entity !== null)
+    .sort(compareCanonicalEntities);
+}
+
+async function readRegistryEntities<TRecord extends RegistryMarkdownRecord>(
+  vaultRoot: string,
+  definition: RegistryDefinition<TRecord>,
+  family: Extract<
+    CanonicalEntityFamily,
+    "allergy" | "condition" | "family" | "genetics" | "goal" | "regimen"
+  >,
+): Promise<CanonicalEntity[]> {
+  const relativePaths = await walkRelativeFiles(vaultRoot, definition.directory, ".md");
+  const entities: CanonicalEntity[] = [];
+
+  for (const relativePath of relativePaths) {
+    const outcome = await readMarkdownDocumentOutcome(vaultRoot, relativePath);
+    if (!outcome.ok) {
+      continue;
+    }
+
+    const record = toRegistryRecord(outcome.document, definition);
+    if (record) {
+      entities.push(projectRegistryEntity(family, record));
+    }
+  }
+
+  return entities.sort(compareCanonicalEntities);
+}
+
+async function readCurrentProfileEntity(
+  vaultRoot: string,
+  profileSnapshots: CanonicalEntity[],
+): Promise<CanonicalEntity | null> {
+  const latestSnapshot =
+    [...profileSnapshots].sort(compareLatestEntity).find(
+      (entity) => entity.family === "profile_snapshot",
+    ) ?? null;
+  const outcome = await readOptionalMarkdownDocumentOutcome(
+    vaultRoot,
+    "bank/profile/current.md",
+  );
+
+  if (!outcome) {
+    return latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null;
+  }
+
+  if (!outcome.ok) {
+    return latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null;
+  }
+
+  const currentProfile = projectCurrentProfileEntity(outcome.document);
+  if (
+    latestSnapshot &&
+    pickString(currentProfile.attributes, ["snapshotId"]) !== latestSnapshot.entityId
+  ) {
+    return fallbackCurrentProfileEntity(latestSnapshot);
+  }
+
+  return currentProfile;
+}
+
+async function readOptionalCoreEntity(
+  vaultRoot: string,
+  metadata: QueryRecordData | null,
+): Promise<CanonicalEntity | null> {
   const filePath = path.join(vaultRoot, "CORE.md");
 
   try {
@@ -295,26 +619,26 @@ async function readOptionalCoreDocument(
       "core";
 
     return {
-      displayId: id,
+      entityId: id,
       primaryLookupId: id,
-      id,
       lookupIds: uniqueStrings([id]),
-      recordType: "core",
-      sourcePath: "CORE.md",
-      sourceFile: filePath,
+      family: "core",
+      kind: "core_document",
+      status: null,
       occurredAt: pickString(attributes, ["updatedAt", "updated_at"]),
       date: null,
-      kind: "core_document",
-      stream: null,
-      experimentSlug: null,
+      path: "CORE.md",
       title,
-      tags: normalizeTags(document.attributes.tags),
-      data: {
+      body: document.body,
+      attributes: {
         ...(metadata ?? {}),
         ...attributes,
       },
-      body: document.body,
       frontmatter: attributes,
+      relatedIds: [],
+      stream: null,
+      experimentSlug: null,
+      tags: normalizeTags(document.attributes.tags),
     };
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -325,7 +649,7 @@ async function readOptionalCoreDocument(
   }
 }
 
-async function readExperimentPages(vaultRoot: string): Promise<VaultRecord[]> {
+async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
   const experimentDir = path.join(vaultRoot, "bank/experiments");
   const fileEntries = await listDirectoryFiles(experimentDir);
 
@@ -347,36 +671,39 @@ async function readExperimentPages(vaultRoot: string): Promise<VaultRecord[]> {
       const id = pickString(attributes, ["experimentId", "id"]) ?? `experiment:${slug}`;
 
       return {
-        displayId: id,
+        entityId: id,
         primaryLookupId: id,
-        id,
         lookupIds: uniqueStrings([id, slug]),
-        recordType: "experiment",
-        sourcePath: path.posix.join("bank/experiments", entry),
-        sourceFile: filePath,
-        occurredAt: pickString(attributes, ["updatedAt", "updated_at"]) ?? startedOn,
-        date: normalizeDate(startedOn),
+        family: "experiment",
         kind: "experiment",
-        stream: null,
-        experimentSlug: slug,
+        status: pickString(attributes, ["status"]),
+        occurredAt: pickString(attributes, ["updatedAt", "updated_at"]) ?? startedOn,
+        date: normalizeCanonicalDate(startedOn),
+        path: path.posix.join("bank/experiments", entry),
         title,
-        tags: normalizeTags(attributes.tags),
-        data: {
+        body: document.body,
+        attributes: {
           ...attributes,
         },
-        body: document.body,
         frontmatter: attributes,
-      } satisfies VaultRecord;
+        relatedIds: uniqueStrings([
+          ...normalizeStringArray(attributes.relatedIds),
+          ...normalizeStringArray(attributes.eventIds),
+        ]),
+        stream: null,
+        experimentSlug: slug,
+        tags: normalizeTags(attributes.tags),
+      } satisfies CanonicalEntity;
     }),
   );
 
-  return pages.sort(compareRecords);
+  return pages.sort(compareCanonicalEntities);
 }
 
-async function readJournalPages(vaultRoot: string): Promise<VaultRecord[]> {
+async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
   const journalDir = path.join(vaultRoot, "journal");
   const yearEntries = await listDirectoryFiles(journalDir);
-  const pages: VaultRecord[] = [];
+  const pages: CanonicalEntity[] = [];
 
   for (const yearEntry of yearEntries) {
     const yearDir = path.join(journalDir, yearEntry);
@@ -397,44 +724,55 @@ async function readJournalPages(vaultRoot: string): Promise<VaultRecord[]> {
         extractMarkdownHeading(document.body) ??
         date;
       const id = pickString(attributes, ["id"]) ?? `journal:${date}`;
+      const relatedIds = uniqueStrings([
+        ...normalizeStringArray(attributes.relatedIds),
+        ...normalizeStringArray(attributes.eventIds),
+      ]);
 
       pages.push({
-        displayId: id,
+        entityId: id,
         primaryLookupId: id,
-        id,
         lookupIds: uniqueStrings([id, date]),
-        recordType: "journal",
-        sourcePath: path.posix.join("journal", yearEntry, dayEntry),
-        sourceFile: filePath,
+        family: "journal",
+        kind: "journal_day",
+        status: pickString(attributes, ["status"]),
         occurredAt: pickString(attributes, ["updatedAt", "updated_at"]),
         date,
-        kind: "journal_day",
-        stream: null,
-        experimentSlug: pickString(attributes, ["experimentSlug", "experiment_slug"]),
+        path: path.posix.join("journal", yearEntry, dayEntry),
         title,
-        tags: normalizeTags(attributes.tags),
-        data: {
+        body: document.body,
+        attributes: {
           ...attributes,
         },
-        body: document.body,
         frontmatter: attributes,
+        relatedIds,
+        stream: null,
+        experimentSlug: pickString(attributes, ["experimentSlug", "experiment_slug"]),
+        tags: normalizeTags(attributes.tags),
       });
     }
   }
 
-  return pages.sort(compareRecords);
+  return pages.sort(compareCanonicalEntities);
 }
 
 async function readJsonlRecordFamily(
   vaultRoot: string,
   relativeDir: string,
   recordType: Exclude<JsonRecordType, "sample">,
-): Promise<VaultRecord[]> {
+): Promise<CanonicalEntity[]> {
   return readSortedJsonlRecords(
     vaultRoot,
     relativeDir,
-    (filePath, sourcePath, lineNumber, rawPayload) => {
+    (sourcePath, lineNumber, rawPayload) => {
       const payload = normalizeJsonRecordPayload(recordType, rawPayload);
+      const kind =
+        pickString(payload, ["kind"]) ?? (recordType === "audit" ? "audit" : recordType);
+
+      if (recordType === "event" && kind && HEALTH_HISTORY_KINDS.has(kind as never)) {
+        return null;
+      }
+
       const rawRecordId =
         pickString(payload, ["id"]) ??
         `${recordType}:${sourcePath}:${lineNumber}`;
@@ -445,50 +783,50 @@ async function readJsonlRecordFamily(
         "recorded_at",
         "timestamp",
       ]);
-      const kind =
-        pickString(payload, ["kind"]) ?? (recordType === "audit" ? "audit" : recordType);
       const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
-      const lookupIds = uniqueStrings([
-        identity.displayId,
-        identity.primaryLookupId,
-        rawRecordId,
+      const relatedIds = uniqueStrings([
         ...normalizeStringArray(payload.relatedIds),
         ...normalizeStringArray(payload.eventIds),
       ]);
 
       return {
-        displayId: identity.displayId,
+        entityId: identity.displayId,
         primaryLookupId: identity.primaryLookupId,
-        id: identity.displayId,
-        lookupIds,
-        recordType,
-        sourcePath,
-        sourceFile: filePath,
-        occurredAt,
-        date: normalizeDate(occurredAt) ?? pickString(payload, ["dayKey", "day_key"]),
+        lookupIds: uniqueStrings([
+          identity.displayId,
+          identity.primaryLookupId,
+          rawRecordId,
+          ...relatedIds,
+        ]),
+        family: recordType,
         kind,
-        stream: null,
-        experimentSlug: pickString(payload, ["experimentSlug", "experiment_slug"]),
+        status: pickString(payload, ["status"]),
+        occurredAt,
+        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey", "day_key"]),
+        path: sourcePath,
         title: pickString(payload, ["title", "summary"]),
-        tags: normalizeTags(payload.tags),
-        data: normalizeRecordData(payload, {
+        body: pickString(payload, ["note", "summary"]),
+        attributes: normalizeRecordData(payload, {
           recordType,
           displayId: identity.displayId,
           primaryLookupId: identity.primaryLookupId,
           rawRecordId,
         }),
-        body: pickString(payload, ["note", "summary"]),
         frontmatter: null,
+        relatedIds,
+        stream: null,
+        experimentSlug: pickString(payload, ["experimentSlug", "experiment_slug"]),
+        tags: normalizeTags(payload.tags),
       };
     },
   );
 }
 
-async function readSampleRecords(vaultRoot: string): Promise<VaultRecord[]> {
+async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
   return readSortedJsonlRecords(
     vaultRoot,
     "ledger/samples",
-    (filePath, sourcePath, lineNumber, rawPayload) => {
+    (sourcePath, lineNumber, rawPayload) => {
       const streamFromPath = inferSampleStreamFromPath(sourcePath);
       const payload = normalizeJsonRecordPayload("sample", rawPayload);
       const rawRecordId =
@@ -503,23 +841,23 @@ async function readSampleRecords(vaultRoot: string): Promise<VaultRecord[]> {
       const stream = pickString(payload, ["stream"]) ?? streamFromPath;
 
       return {
-        displayId: rawRecordId,
+        entityId: rawRecordId,
         primaryLookupId: rawRecordId,
-        id: rawRecordId,
         lookupIds: uniqueStrings([rawRecordId]),
-        recordType: "sample",
-        sourcePath,
-        sourceFile: filePath,
-        occurredAt,
-        date: normalizeDate(occurredAt) ?? pickString(payload, ["dayKey", "day_key"]),
+        family: "sample",
         kind: "sample",
+        status: pickString(payload, ["quality"]),
+        occurredAt,
+        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey", "day_key"]),
+        path: sourcePath,
+        title: stream ? `${stream} sample` : "sample",
+        body: null,
+        attributes: payload,
+        frontmatter: null,
+        relatedIds: uniqueStrings(normalizeStringArray(payload.relatedIds)),
         stream,
         experimentSlug: pickString(payload, ["experimentSlug", "experiment_slug"]),
-        title: stream ? `${stream} sample` : "sample",
         tags: normalizeTags(payload.tags),
-        data: payload,
-        body: null,
-        frontmatter: null,
       };
     },
   );
@@ -528,31 +866,28 @@ async function readSampleRecords(vaultRoot: string): Promise<VaultRecord[]> {
 async function readSortedJsonlRecords(
   vaultRoot: string,
   relativeDir: string,
-  buildRecord: (
-    filePath: string,
+  buildEntity: (
     sourcePath: string,
     lineNumber: number,
     payload: QueryRecordData,
-  ) => VaultRecord,
-): Promise<VaultRecord[]> {
-  const records: VaultRecord[] = [];
+  ) => CanonicalEntity | null,
+): Promise<CanonicalEntity[]> {
+  const entities: CanonicalEntity[] = [];
 
-  await forEachJsonlPayload(
-    vaultRoot,
-    relativeDir,
-    (filePath, sourcePath, lineNumber, payload) => {
-      records.push(buildRecord(filePath, sourcePath, lineNumber, payload));
-    },
-  );
+  await forEachJsonlPayload(vaultRoot, relativeDir, (sourcePath, lineNumber, payload) => {
+    const entity = buildEntity(sourcePath, lineNumber, payload);
+    if (entity) {
+      entities.push(entity);
+    }
+  });
 
-  return records.sort(compareRecords);
+  return entities.sort(compareCanonicalEntities);
 }
 
 async function forEachJsonlPayload(
   vaultRoot: string,
   relativeDir: string,
   visit: (
-    filePath: string,
     sourcePath: string,
     lineNumber: number,
     payload: QueryRecordData,
@@ -570,7 +905,6 @@ async function readJsonlFile(
   filePath: string,
   sourcePath: string,
   visit: (
-    filePath: string,
     sourcePath: string,
     lineNumber: number,
     payload: QueryRecordData,
@@ -585,7 +919,6 @@ async function readJsonlFile(
     }
 
     visit(
-      filePath,
       sourcePath,
       index + 1,
       JSON.parse(line) as QueryRecordData,
@@ -641,19 +974,80 @@ async function walkFiles(directoryPath: string): Promise<string[]> {
   }
 }
 
-function compareRecords(left: VaultRecord, right: VaultRecord): number {
-  const leftSortKey = left.occurredAt ?? left.date ?? left.displayId;
-  const rightSortKey = right.occurredAt ?? right.date ?? right.displayId;
+function toVaultRecord(entity: CanonicalEntity, vaultRoot: string): VaultRecord {
+  return {
+    displayId: entity.entityId,
+    primaryLookupId: entity.primaryLookupId,
+    id: entity.entityId,
+    lookupIds: entity.lookupIds,
+    recordType: entity.family,
+    sourcePath: entity.path,
+    sourceFile: path.join(vaultRoot, ...entity.path.split("/")),
+    occurredAt: entity.occurredAt,
+    date: entity.date,
+    kind: entity.kind,
+    status: entity.status,
+    stream: entity.stream,
+    experimentSlug: entity.experimentSlug,
+    title: entity.title,
+    tags: entity.tags,
+    data: entity.attributes,
+    body: entity.body,
+    frontmatter: entity.frontmatter,
+    relatedIds: entity.relatedIds,
+  };
+}
 
-  if (leftSortKey < rightSortKey) {
-    return -1;
+function recordToCanonicalEntity(record: VaultRecord): CanonicalEntity {
+  return {
+    entityId: record.displayId,
+    primaryLookupId: record.primaryLookupId,
+    lookupIds: record.lookupIds,
+    family: record.recordType,
+    kind: record.kind ?? record.recordType,
+    status: record.status ?? maybeString(record.data.status),
+    occurredAt: record.occurredAt,
+    date: record.date,
+    path: record.sourcePath,
+    title: record.title,
+    body: record.body,
+    attributes: record.data,
+    frontmatter: record.frontmatter,
+    relatedIds:
+      record.relatedIds ??
+      uniqueStrings([
+        ...normalizeStringArray(record.data.relatedIds),
+        ...normalizeStringArray(record.data.eventIds),
+      ]),
+    stream: record.stream,
+    experimentSlug: record.experimentSlug,
+    tags: record.tags,
+  };
+}
+
+function firstRecordOfType(
+  records: readonly VaultRecord[],
+  recordType: VaultRecordType,
+): VaultRecord | null {
+  return records.find((record) => record.recordType === recordType) ?? null;
+}
+
+function recordsOfType(
+  records: readonly VaultRecord[],
+  recordType: VaultRecordType,
+): VaultRecord[] {
+  return records.filter((record) => record.recordType === recordType);
+}
+
+function compareLatestEntity(left: CanonicalEntity, right: CanonicalEntity): number {
+  const leftSortKey = left.occurredAt ?? left.date ?? "";
+  const rightSortKey = right.occurredAt ?? right.date ?? "";
+
+  if (leftSortKey !== rightSortKey) {
+    return rightSortKey.localeCompare(leftSortKey);
   }
 
-  if (leftSortKey > rightSortKey) {
-    return 1;
-  }
-
-  return left.displayId.localeCompare(right.displayId);
+  return left.entityId.localeCompare(right.entityId);
 }
 
 function compareDateStrings(
@@ -690,14 +1084,6 @@ function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
 function extractMarkdownHeading(body: string): string | null {
   const match = /^#\s+(.+)$/m.exec(body);
   return match ? match[1].trim() : null;
-}
-
-function normalizeDate(value: string | null | undefined): string | null {
-  if (typeof value !== "string" || value.length === 0) {
-    return null;
-  }
-
-  return value.length >= 10 ? value.slice(0, 10) : value;
 }
 
 function normalizeTags(value: unknown): string[] {
@@ -838,6 +1224,7 @@ function normalizeJsonRecordPayload(
     ["mimeType", ["mimeType", "mime_type"]],
     ["mealId", ["mealId", "meal_id"]],
     ["transformId", ["transformId", "transform_id"]],
+    ["status", ["status"]],
   ]);
   assignCanonicalArrays(normalized, payload, [
     ["tags", ["tags"]],
@@ -861,7 +1248,7 @@ function normalizeJsonRecordPayload(
 function normalizeRecordData(
   payload: QueryRecordData,
   meta: {
-    recordType: VaultRecordType;
+    recordType: "audit" | "event";
     displayId: string;
     primaryLookupId: string;
     rawRecordId: string;
@@ -965,21 +1352,10 @@ function normalizeStringArray(value: unknown): string[] {
   );
 }
 
-function uniqueStrings(values: readonly unknown[]): string[] {
-  return [
-    ...new Set(
-      values.filter(
-        (value): value is string =>
-          typeof value === "string" && value.trim().length > 0,
-      ),
-    ),
-  ];
+function hasMarkdownExtension(entry: string): boolean {
+  return entry.endsWith(".md");
 }
 
 function toPosixRelative(root: string, filePath: string): string {
   return path.relative(root, filePath).split(path.sep).join(path.posix.sep);
-}
-
-function hasMarkdownExtension(entry: string): boolean {
-  return entry.endsWith(".md");
 }

@@ -228,6 +228,7 @@ export function buildExportPack(
   };
 
   const records = listRecords(vault, {
+    recordTypes: ["audit", "core", "event", "experiment", "history", "journal", "sample"],
     from: filters.from ?? undefined,
     to: filters.to ?? undefined,
     experimentSlug: filters.experimentSlug ?? undefined,

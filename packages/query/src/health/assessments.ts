@@ -3,12 +3,14 @@ import {
   asObject,
   firstObject,
   firstString,
-  firstStringArray,
   matchesDateRange,
   matchesLookup,
   matchesText,
 } from "./shared.js";
 import { readJsonlRecords } from "./loaders.js";
+import { projectAssessmentEntity } from "../canonical-entities.js";
+
+import type { CanonicalEntity } from "../canonical-entities.js";
 
 export interface AssessmentQueryRecord {
   id: string;
@@ -31,33 +33,39 @@ export interface AssessmentListOptions {
   limit?: number;
 }
 
-export function toAssessmentRecord(
-  value: unknown,
-  relativePath: string,
+function assessmentRecordFromEntity(
+  entity: CanonicalEntity,
 ): AssessmentQueryRecord | null {
-  const source = asObject(value);
-  if (!source) {
+  if (entity.family !== "assessment") {
     return null;
   }
 
-  const id = firstString(source, ["id"]);
-  if (!id?.startsWith("asmt_")) {
+  const attributes = asObject(entity.attributes);
+  if (!attributes) {
     return null;
   }
 
   return {
-    id,
-    title: firstString(source, ["title"]),
-    assessmentType: firstString(source, ["assessmentType"]),
-    recordedAt: firstString(source, ["recordedAt", "occurredAt", "importedAt"]),
-    importedAt: firstString(source, ["importedAt"]),
-    source: firstString(source, ["source"]),
-    sourcePath: firstString(source, ["rawPath", "sourcePath"]),
-    questionnaireSlug: firstString(source, ["questionnaireSlug"]),
-    relatedIds: firstStringArray(source, ["relatedIds"]),
-    responses: firstObject(source, ["responses", "response"]) ?? {},
-    relativePath,
+    id: entity.entityId,
+    title: entity.title,
+    assessmentType: firstString(attributes, ["assessmentType"]),
+    recordedAt: firstString(attributes, ["recordedAt", "occurredAt", "importedAt"]),
+    importedAt: firstString(attributes, ["importedAt"]),
+    source: firstString(attributes, ["source"]),
+    sourcePath: firstString(attributes, ["rawPath", "sourcePath"]),
+    questionnaireSlug: firstString(attributes, ["questionnaireSlug"]),
+    relatedIds: entity.relatedIds,
+    responses: firstObject(attributes, ["responses", "response"]) ?? {},
+    relativePath: entity.path,
   };
+}
+
+export function toAssessmentRecord(
+  value: unknown,
+  relativePath: string,
+): AssessmentQueryRecord | null {
+  const entity = projectAssessmentEntity(value, relativePath);
+  return entity ? assessmentRecordFromEntity(entity) : null;
 }
 
 export function compareAssessments(
@@ -80,35 +88,17 @@ function isAssessmentRecord(
   return record !== null;
 }
 
-function matchesAssessmentOptions(
-  record: AssessmentQueryRecord,
-  options: AssessmentListOptions,
-): boolean {
-  return (
-    matchesDateRange(record.recordedAt ?? record.importedAt, options.from, options.to) &&
-    matchesText(
-      [
-        record.id,
-        record.title,
-        record.assessmentType,
-        record.source,
-        record.responses,
-        record.relatedIds,
-      ],
-      options.text,
-    )
-  );
-}
-
 export async function listAssessments(
   vaultRoot: string,
   options: AssessmentListOptions = {},
 ): Promise<AssessmentQueryRecord[]> {
   const entries = await readJsonlRecords(vaultRoot, "ledger/assessments");
   const records = entries
-    .map((entry) => toAssessmentRecord(entry.value, entry.relativePath))
+    .map((entry) => projectAssessmentEntity(entry.value, entry.relativePath))
+    .map((entity) => (entity ? assessmentRecordFromEntity(entity) : null))
     .filter(isAssessmentRecord)
-    .filter((entry) => matchesAssessmentOptions(entry, options))
+    .filter((record) => matchesDateRange(record.recordedAt ?? record.importedAt, options.from, options.to))
+    .filter((record) => matchesText([record], options.text))
     .sort(compareAssessments);
 
   return applyLimit(records, options.limit);

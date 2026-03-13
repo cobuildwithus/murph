@@ -4,9 +4,20 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 
-import { buildExportPack, readVault, showProfile } from "../src/index.js";
+import {
+  buildExportPack,
+  buildTimeline,
+  getVaultEntities,
+  listEntities,
+  listRecords,
+  lookupEntityById,
+  readVault,
+  searchVault,
+  showProfile,
+} from "../src/index.js";
 import { readHealthContext } from "../src/export-pack-health.js";
 import { listAssessments } from "../src/health/assessments.js";
+import type { VaultReadModel, VaultRecord } from "../src/model.js";
 
 async function writeVaultFile(
   vaultRoot: string,
@@ -300,6 +311,61 @@ updatedAt: 2026-03-12
   return vaultRoot;
 }
 
+function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displayId" | "recordType">): VaultRecord {
+  const hasTitle = Object.prototype.hasOwnProperty.call(overrides, "title");
+  const hasKind = Object.prototype.hasOwnProperty.call(overrides, "kind");
+  const hasStatus = Object.prototype.hasOwnProperty.call(overrides, "status");
+  const hasStream = Object.prototype.hasOwnProperty.call(overrides, "stream");
+  const hasExperimentSlug = Object.prototype.hasOwnProperty.call(overrides, "experimentSlug");
+
+  return {
+    displayId: overrides.displayId,
+    primaryLookupId: overrides.primaryLookupId ?? overrides.displayId,
+    id: overrides.id ?? overrides.displayId,
+    lookupIds: overrides.lookupIds ?? [overrides.displayId],
+    recordType: overrides.recordType,
+    sourcePath: overrides.sourcePath ?? `${overrides.recordType}/${overrides.displayId}`,
+    sourceFile: overrides.sourceFile ?? `${overrides.recordType}/${overrides.displayId}`,
+    occurredAt: overrides.occurredAt ?? null,
+    date: overrides.date ?? null,
+    kind: hasKind ? overrides.kind ?? null : overrides.recordType,
+    status: hasStatus ? overrides.status ?? null : null,
+    stream: hasStream ? overrides.stream ?? null : null,
+    experimentSlug: hasExperimentSlug ? overrides.experimentSlug ?? null : null,
+    title: hasTitle ? overrides.title ?? null : overrides.displayId,
+    tags: overrides.tags ?? [],
+    data: overrides.data ?? {},
+    body: overrides.body ?? null,
+    frontmatter: overrides.frontmatter ?? null,
+    relatedIds: overrides.relatedIds,
+  };
+}
+
+function createManualVault(records: VaultRecord[]): VaultReadModel {
+  return {
+    format: "healthybob.query.v1",
+    vaultRoot: "manual-vault",
+    metadata: null,
+    coreDocument: records.find((record) => record.recordType === "core") ?? null,
+    experiments: records.filter((record) => record.recordType === "experiment"),
+    journalEntries: records.filter((record) => record.recordType === "journal"),
+    events: records.filter((record) => record.recordType === "event"),
+    samples: records.filter((record) => record.recordType === "sample"),
+    audits: records.filter((record) => record.recordType === "audit"),
+    assessments: records.filter((record) => record.recordType === "assessment"),
+    profileSnapshots: records.filter((record) => record.recordType === "profile_snapshot"),
+    currentProfile: records.find((record) => record.recordType === "current_profile") ?? null,
+    goals: records.filter((record) => record.recordType === "goal"),
+    conditions: records.filter((record) => record.recordType === "condition"),
+    allergies: records.filter((record) => record.recordType === "allergy"),
+    regimens: records.filter((record) => record.recordType === "regimen"),
+    history: records.filter((record) => record.recordType === "history"),
+    familyMembers: records.filter((record) => record.recordType === "family"),
+    geneticVariants: records.filter((record) => record.recordType === "genetics"),
+    records,
+  };
+}
+
 test("showProfile derives the current profile from the latest snapshot when the markdown page is stale", async () => {
   const vaultRoot = await createHealthVault();
 
@@ -317,6 +383,287 @@ test("showProfile derives the current profile from the latest snapshot when the 
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+test("readVault promotes health families into the shared search and timeline projection", async () => {
+  const vaultRoot = await createHealthVault();
+
+  try {
+    const vault = await readVault(vaultRoot);
+    const searchResult = searchVault(vault, "sleep", {
+      recordTypes: ["history", "assessment", "goal"],
+    });
+    const timeline = buildTimeline(vault, {
+      from: "2026-03-12",
+      to: "2026-03-12",
+    });
+
+    assert.deepEqual(
+      new Set(vault.records.map((record) => record.recordType)),
+      new Set([
+        "allergy",
+        "assessment",
+        "condition",
+        "current_profile",
+        "family",
+        "genetics",
+        "goal",
+        "history",
+        "profile_snapshot",
+        "regimen",
+      ]),
+    );
+    assert.deepEqual(
+      new Set(searchResult.hits.map((hit) => hit.recordType)),
+      new Set(["history", "assessment", "goal"]),
+    );
+    assert.deepEqual(
+      new Set(timeline.map((entry) => entry.entryType)),
+      new Set(["assessment", "history", "profile_snapshot"]),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("canonical entity helpers filter projected health families and preserve legacy record defaults", () => {
+  const records = [
+    createRecord({
+      displayId: "asmt_manual_01",
+      recordType: "assessment",
+      occurredAt: "2026-03-12T09:00:00Z",
+      date: "2026-03-12",
+      kind: "assessment",
+      status: "accepted",
+      title: "Mood follow-up",
+      tags: ["sleep", "health"],
+      data: {
+        assessmentType: "mood",
+        relatedIds: ["goal_manual_01"],
+      },
+    }),
+    createRecord({
+      displayId: "goal_manual_01",
+      recordType: "goal",
+      lookupIds: ["goal_manual_01", "improve-sleep"],
+      date: "2026-03-12",
+      status: "active",
+      title: "Improve sleep consistency",
+      tags: ["sleep"],
+      data: {
+        slug: "improve-sleep",
+        status: "active",
+      },
+    }),
+    createRecord({
+      displayId: "sample_manual_01",
+      recordType: "sample",
+      occurredAt: "2026-03-12T07:00:00Z",
+      date: "2026-03-12",
+      stream: "glucose",
+      title: "glucose sample",
+      tags: ["glucose"],
+      data: {
+        value: 91,
+        unit: "mg_dL",
+      },
+    }),
+  ];
+  const vault = createManualVault(records);
+
+  assert.deepEqual(
+    getVaultEntities(vault).map((entity) => entity.family),
+    ["assessment", "goal", "sample"],
+  );
+  assert.equal(lookupEntityById(vault, "improve-sleep")?.entityId, "goal_manual_01");
+  assert.equal(lookupEntityById(vault, "  ")?.entityId, undefined);
+  assert.deepEqual(
+    listEntities(vault, {
+      families: ["assessment"],
+      statuses: ["accepted"],
+      tags: ["sleep"],
+      from: "2026-03-12",
+      to: "2026-03-12",
+      text: "mood",
+    }).map((entity) => entity.entityId),
+    ["asmt_manual_01"],
+  );
+  assert.deepEqual(
+    listEntities(vault, {
+      streams: ["glucose"],
+      from: "2026-03-12",
+      to: "2026-03-12",
+      text: "mg_dl",
+    }).map((entity) => entity.entityId),
+    ["sample_manual_01"],
+  );
+  assert.deepEqual(
+    listRecords(vault).map((record) => record.recordType),
+    ["sample"],
+  );
+  assert.deepEqual(
+    listRecords(vault, {
+      recordTypes: ["assessment", "goal"],
+      text: "sleep",
+    }).map((record) => record.displayId),
+    ["goal_manual_01"],
+  );
+});
+
+test("readVault falls back to the latest snapshot when current profile is missing and skips malformed health inputs", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+    includeAlternateRecords: true,
+  });
+
+  try {
+    await rm(path.join(vaultRoot, "bank/profile/current.md"), { force: true });
+    await appendVaultFile(
+      vaultRoot,
+      "ledger/profile-snapshots/2026/2026-03.jsonl",
+      "{this is not valid json}\n",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "bank/conditions/broken.md",
+      `---
+schemaVersion: hv/condition@v1
+conditionId cond_broken
+---
+# Broken
+`,
+    );
+
+    const vault = await readVault(vaultRoot);
+
+    assert.equal(vault.currentProfile?.displayId, "current");
+    assert.equal(vault.currentProfile?.data.snapshotId, "psnap_health_01");
+    assert.deepEqual(
+      vault.profileSnapshots?.map((record) => record.displayId),
+      ["psnap_health_00", "psnap_health_01", "psnap_health_missing_date"],
+    );
+    assert.deepEqual(
+      vault.conditions?.map((record) => record.displayId),
+      ["cond_sleep_01"],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildTimeline applies health-specific fallbacks, related-id defaults, and toggles", () => {
+  const vault = createManualVault([
+    createRecord({
+      displayId: "journal_manual_01",
+      recordType: "journal",
+      occurredAt: "2026-03-12T21:00:00Z",
+      date: "2026-03-12",
+      title: "Daily journal",
+    }),
+    createRecord({
+      displayId: "event_manual_01",
+      recordType: "event",
+      date: "2026-03-12",
+      kind: null,
+      stream: "glucose",
+      title: null,
+      lookupIds: ["event_manual_01", "evt_lookup"],
+    }),
+    createRecord({
+      displayId: "assessment_manual_01",
+      recordType: "assessment",
+      date: "2026-03-12",
+      kind: null,
+      title: null,
+      lookupIds: ["assessment_manual_01", "goal_manual_01"],
+      data: {
+        assessmentType: "Mood check",
+      },
+    }),
+    createRecord({
+      displayId: "assessment_skip",
+      recordType: "assessment",
+      occurredAt: null,
+      date: null,
+      title: "Skipped assessment",
+    }),
+    createRecord({
+      displayId: "history_manual_01",
+      recordType: "history",
+      date: "2026-03-12",
+      kind: null,
+      title: null,
+      lookupIds: ["history_manual_01", "evt_health_lookup"],
+    }),
+    createRecord({
+      displayId: "history_skip",
+      recordType: "history",
+      occurredAt: null,
+      date: null,
+      title: "Skipped history",
+    }),
+    createRecord({
+      displayId: "snapshot_manual_01",
+      recordType: "profile_snapshot",
+      date: "2026-03-12",
+      kind: null,
+      title: null,
+      lookupIds: ["snapshot_manual_01", "psnap_lookup"],
+    }),
+    createRecord({
+      displayId: "snapshot_skip",
+      recordType: "profile_snapshot",
+      occurredAt: null,
+      date: null,
+      title: "Skipped snapshot",
+    }),
+    createRecord({
+      displayId: "sample_manual_01",
+      recordType: "sample",
+      occurredAt: "2026-03-12T06:00:00Z",
+      date: "2026-03-12",
+      stream: "glucose",
+      data: {
+        value: 92,
+        unit: "mg_dL",
+      },
+    }),
+    createRecord({
+      displayId: "sample_skip",
+      recordType: "sample",
+      occurredAt: null,
+      date: null,
+      stream: null,
+    }),
+  ]);
+
+  const limitedHealthTimeline = buildTimeline(vault, {
+    includeJournal: false,
+    includeEvents: false,
+    includeDailySampleSummaries: false,
+    limit: 0,
+  });
+
+  assert.deepEqual(limitedHealthTimeline.map((entry) => entry.id), ["assessment_manual_01"]);
+  assert.equal(limitedHealthTimeline[0]?.title, "Mood check");
+  assert.deepEqual(limitedHealthTimeline[0]?.relatedIds, ["assessment_manual_01", "goal_manual_01"]);
+
+  const filteredTimeline = buildTimeline(vault, {
+    kinds: ["assessment", "history", "sample_summary"],
+    streams: ["glucose"],
+    includeJournal: false,
+    includeProfileSnapshots: false,
+    limit: 999,
+  });
+
+  assert.deepEqual(
+    filteredTimeline.map((entry) => [entry.id, entry.entryType, entry.occurredAt, entry.title]),
+    [
+      ["assessment_manual_01", "assessment", "2026-03-12T12:00:00", "Mood check"],
+      ["sample-summary:2026-03-12:glucose", "sample_summary", "2026-03-12T06:00:00Z", "glucose daily summary"],
+      ["history_manual_01", "history", "2026-03-12T00:00:00", "history"],
+    ],
+  );
 });
 
 test("buildExportPack preserves the five-file pack while embedding health context", async () => {

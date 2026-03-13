@@ -1,16 +1,33 @@
 import {
+  conditionRecordFromEntity,
   conditionRegistryDefinition,
-  createRegistryQueries,
+  createProjectedRegistryQueries,
+  type RegistryListOptions,
 } from "./registries.js";
 
-import type { ConditionQueryRecord, RegistryListOptions } from "./registries.js";
+const conditionQueries = createProjectedRegistryQueries(
+  conditionRegistryDefinition,
+  "condition",
+  conditionRecordFromEntity,
+);
 
-const conditionQueries: {
-  list(vaultRoot: string, options?: RegistryListOptions): Promise<ConditionQueryRecord[]>;
-  read(vaultRoot: string, conditionId: string): Promise<ConditionQueryRecord | null>;
-  show(vaultRoot: string, lookup: string): Promise<ConditionQueryRecord | null>;
-} = createRegistryQueries(conditionRegistryDefinition);
+export async function listConditions(
+  vaultRoot: string,
+  options: RegistryListOptions = {},
+): ReturnType<typeof conditionQueries.list> {
+  return conditionQueries.list(vaultRoot, options);
+}
 
-export const listConditions = conditionQueries.list;
-export const readCondition = conditionQueries.read;
-export const showCondition = conditionQueries.show;
+export async function readCondition(
+  vaultRoot: string,
+  conditionId: string,
+): ReturnType<typeof conditionQueries.read> {
+  return conditionQueries.read(vaultRoot, conditionId);
+}
+
+export async function showCondition(
+  vaultRoot: string,
+  lookup: string,
+): ReturnType<typeof conditionQueries.show> {
+  return conditionQueries.show(vaultRoot, lookup);
+}

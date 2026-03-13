@@ -50,6 +50,9 @@ export interface QueryRuntimeModule {
       streams?: string[]
       includeJournal?: boolean
       includeEvents?: boolean
+      includeAssessments?: boolean
+      includeHistory?: boolean
+      includeProfileSnapshots?: boolean
       includeDailySampleSummaries?: boolean
       limit?: number
     },

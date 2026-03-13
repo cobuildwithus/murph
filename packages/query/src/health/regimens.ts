@@ -1,16 +1,33 @@
 import {
-  createRegistryQueries,
+  createProjectedRegistryQueries,
+  regimenRecordFromEntity,
   regimenRegistryDefinition,
+  type RegistryListOptions,
 } from "./registries.js";
 
-import type { RegimenQueryRecord, RegistryListOptions } from "./registries.js";
+const regimenQueries = createProjectedRegistryQueries(
+  regimenRegistryDefinition,
+  "regimen",
+  regimenRecordFromEntity,
+);
 
-const regimenQueries: {
-  list(vaultRoot: string, options?: RegistryListOptions): Promise<RegimenQueryRecord[]>;
-  read(vaultRoot: string, regimenId: string): Promise<RegimenQueryRecord | null>;
-  show(vaultRoot: string, lookup: string): Promise<RegimenQueryRecord | null>;
-} = createRegistryQueries(regimenRegistryDefinition);
+export async function listRegimens(
+  vaultRoot: string,
+  options: RegistryListOptions = {},
+): ReturnType<typeof regimenQueries.list> {
+  return regimenQueries.list(vaultRoot, options);
+}
 
-export const listRegimens = regimenQueries.list;
-export const readRegimen = regimenQueries.read;
-export const showRegimen = regimenQueries.show;
+export async function readRegimen(
+  vaultRoot: string,
+  regimenId: string,
+): ReturnType<typeof regimenQueries.read> {
+  return regimenQueries.read(vaultRoot, regimenId);
+}
+
+export async function showRegimen(
+  vaultRoot: string,
+  lookup: string,
+): ReturnType<typeof regimenQueries.show> {
+  return regimenQueries.show(vaultRoot, lookup);
+}

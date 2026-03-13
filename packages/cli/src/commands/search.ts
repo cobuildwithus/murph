@@ -10,16 +10,29 @@ import { loadQueryRuntime } from '../query-runtime.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
 const recordTypeValues = [
+  'allergy',
+  'assessment',
   'audit',
+  'condition',
   'core',
+  'current_profile',
   'event',
   'experiment',
+  'family',
+  'genetics',
+  'goal',
+  'history',
   'journal',
+  'profile_snapshot',
+  'regimen',
   'sample',
 ] as const
 
 const timelineEntryTypeValues = [
+  'assessment',
+  'history',
   'journal',
+  'profile_snapshot',
   'event',
   'sample_summary',
 ] as const
@@ -138,7 +151,7 @@ export function registerSearchCommands(
       recordType: z
         .string()
         .optional()
-        .describe('Optional comma-separated record types: core, experiment, journal, event, sample, audit.'),
+        .describe('Optional comma-separated record families: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, regimen, history, family, genetics.'),
       kind: z
         .string()
         .optional()
@@ -233,7 +246,7 @@ export function registerSearchCommands(
   cli.command(
     'timeline',
     {
-      description: 'Build a descending timeline from journals, events, and daily sample summaries.',
+      description: 'Build a descending timeline from journals, events, assessments, health history, profile snapshots, and daily sample summaries.',
       args: emptyArgsSchema,
       options: withBaseOptions({
         from: localDateSchema
@@ -256,7 +269,7 @@ export function registerSearchCommands(
         entryType: z
           .string()
           .optional()
-          .describe('Optional comma-separated entry types: journal, event, sample_summary.'),
+          .describe('Optional comma-separated entry types: journal, event, assessment, history, profile_snapshot, sample_summary.'),
         limit: z
           .number()
           .int()
@@ -281,6 +294,11 @@ export function registerSearchCommands(
           streams: streams.length > 0 ? streams : undefined,
           includeJournal: entryTypeSet ? entryTypeSet.has('journal') : true,
           includeEvents: entryTypeSet ? entryTypeSet.has('event') : true,
+          includeAssessments: entryTypeSet ? entryTypeSet.has('assessment') : true,
+          includeHistory: entryTypeSet ? entryTypeSet.has('history') : true,
+          includeProfileSnapshots: entryTypeSet
+            ? entryTypeSet.has('profile_snapshot')
+            : true,
           includeDailySampleSummaries: entryTypeSet
             ? entryTypeSet.has('sample_summary')
             : true,

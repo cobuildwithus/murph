@@ -1,16 +1,33 @@
 import {
+  allergyRecordFromEntity,
   allergyRegistryDefinition,
-  createRegistryQueries,
+  createProjectedRegistryQueries,
+  type RegistryListOptions,
 } from "./registries.js";
 
-import type { AllergyQueryRecord, RegistryListOptions } from "./registries.js";
+const allergyQueries = createProjectedRegistryQueries(
+  allergyRegistryDefinition,
+  "allergy",
+  allergyRecordFromEntity,
+);
 
-const allergyQueries: {
-  list(vaultRoot: string, options?: RegistryListOptions): Promise<AllergyQueryRecord[]>;
-  read(vaultRoot: string, allergyId: string): Promise<AllergyQueryRecord | null>;
-  show(vaultRoot: string, lookup: string): Promise<AllergyQueryRecord | null>;
-} = createRegistryQueries(allergyRegistryDefinition);
+export async function listAllergies(
+  vaultRoot: string,
+  options: RegistryListOptions = {},
+): ReturnType<typeof allergyQueries.list> {
+  return allergyQueries.list(vaultRoot, options);
+}
 
-export const listAllergies = allergyQueries.list;
-export const readAllergy = allergyQueries.read;
-export const showAllergy = allergyQueries.show;
+export async function readAllergy(
+  vaultRoot: string,
+  allergyId: string,
+): ReturnType<typeof allergyQueries.read> {
+  return allergyQueries.read(vaultRoot, allergyId);
+}
+
+export async function showAllergy(
+  vaultRoot: string,
+  lookup: string,
+): ReturnType<typeof allergyQueries.show> {
+  return allergyQueries.show(vaultRoot, lookup);
+}

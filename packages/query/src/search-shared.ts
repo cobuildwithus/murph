@@ -68,6 +68,7 @@ export function materializeSearchDocument(record: VaultRecord): SearchDocument {
   const titleText = compactStrings([
     record.title,
     record.kind,
+    record.status ?? null,
     record.stream,
     record.experimentSlug,
   ]).join(" · ");
@@ -79,6 +80,7 @@ export function materializeSearchDocument(record: VaultRecord): SearchDocument {
     record.sourcePath,
     record.sourceFile,
     ...record.lookupIds,
+    ...(record.relatedIds ?? []),
     safeJsonStringify(record.data),
     record.frontmatter ? safeJsonStringify(record.frontmatter) : null,
   ]).join("\n");

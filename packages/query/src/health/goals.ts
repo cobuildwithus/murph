@@ -1,16 +1,33 @@
 import {
-  createRegistryQueries,
+  createProjectedRegistryQueries,
+  goalRecordFromEntity,
   goalRegistryDefinition,
+  type RegistryListOptions,
 } from "./registries.js";
 
-import type { GoalQueryRecord, RegistryListOptions } from "./registries.js";
+const goalQueries = createProjectedRegistryQueries(
+  goalRegistryDefinition,
+  "goal",
+  goalRecordFromEntity,
+);
 
-const goalQueries: {
-  list(vaultRoot: string, options?: RegistryListOptions): Promise<GoalQueryRecord[]>;
-  read(vaultRoot: string, goalId: string): Promise<GoalQueryRecord | null>;
-  show(vaultRoot: string, lookup: string): Promise<GoalQueryRecord | null>;
-} = createRegistryQueries(goalRegistryDefinition);
+export async function listGoals(
+  vaultRoot: string,
+  options: RegistryListOptions = {},
+): ReturnType<typeof goalQueries.list> {
+  return goalQueries.list(vaultRoot, options);
+}
 
-export const listGoals = goalQueries.list;
-export const readGoal = goalQueries.read;
-export const showGoal = goalQueries.show;
+export async function readGoal(
+  vaultRoot: string,
+  goalId: string,
+): ReturnType<typeof goalQueries.read> {
+  return goalQueries.read(vaultRoot, goalId);
+}
+
+export async function showGoal(
+  vaultRoot: string,
+  lookup: string,
+): ReturnType<typeof goalQueries.show> {
+  return goalQueries.show(vaultRoot, lookup);
+}

@@ -2,13 +2,18 @@ import {
   applyLimit,
   asObject,
   firstString,
-  firstStringArray,
   matchesDateRange,
   matchesLookup,
   matchesStatus,
   matchesText,
 } from "./shared.js";
 import { readJsonlRecords } from "./loaders.js";
+import {
+  HEALTH_HISTORY_KINDS,
+  projectHistoryEntity,
+} from "../canonical-entities.js";
+
+import type { CanonicalEntity } from "../canonical-entities.js";
 
 export type HealthHistoryKind =
   | "encounter"
@@ -40,45 +45,39 @@ export interface HistoryListOptions {
   limit?: number;
 }
 
-const HEALTH_HISTORY_KINDS = new Set<HealthHistoryKind>([
-  "encounter",
-  "procedure",
-  "test",
-  "adverse_effect",
-  "exposure",
-]);
+function historyRecordFromEntity(
+  entity: CanonicalEntity,
+): HistoryQueryRecord | null {
+  if (entity.family !== "history") {
+    return null;
+  }
+
+  const data = asObject(entity.attributes);
+  if (!data || !HEALTH_HISTORY_KINDS.has(entity.kind as HealthHistoryKind) || !entity.occurredAt || !entity.title) {
+    return null;
+  }
+
+  return {
+    id: entity.entityId,
+    kind: entity.kind as HealthHistoryKind,
+    occurredAt: entity.occurredAt,
+    recordedAt: firstString(data, ["recordedAt"]),
+    source: firstString(data, ["source"]),
+    title: entity.title,
+    status: entity.status,
+    tags: entity.tags,
+    relatedIds: entity.relatedIds,
+    relativePath: entity.path,
+    data,
+  };
+}
 
 export function toHistoryRecord(
   value: unknown,
   relativePath: string,
 ): HistoryQueryRecord | null {
-  const source = asObject(value);
-  if (!source) {
-    return null;
-  }
-
-  const id = firstString(source, ["id"]);
-  const kind = firstString(source, ["kind"]);
-  const occurredAt = firstString(source, ["occurredAt"]);
-  const title = firstString(source, ["title"]);
-
-  if (!id?.startsWith("evt_") || !kind || !HEALTH_HISTORY_KINDS.has(kind as HealthHistoryKind) || !occurredAt || !title) {
-    return null;
-  }
-
-  return {
-    id,
-    kind: kind as HealthHistoryKind,
-    occurredAt,
-    recordedAt: firstString(source, ["recordedAt"]),
-    source: firstString(source, ["source"]),
-    title,
-    status: firstString(source, ["status"]),
-    tags: firstStringArray(source, ["tags"]),
-    relatedIds: firstStringArray(source, ["relatedIds"]),
-    relativePath,
-    data: source,
-  };
+  const entity = projectHistoryEntity(value, relativePath);
+  return entity ? historyRecordFromEntity(entity) : null;
 }
 
 export function compareHistory(left: HistoryQueryRecord, right: HistoryQueryRecord): number {
@@ -107,7 +106,6 @@ function matchesHistoryOptions(
 ): boolean {
   return (
     matchesKindFilter(record, kindFilters) &&
-    matchesDateRange(record.occurredAt, options.from, options.to) &&
     matchesStatus(record.status, options.status) &&
     matchesText(
       [
@@ -135,8 +133,10 @@ export async function listHistoryEvents(
       : null;
   const entries = await readJsonlRecords(vaultRoot, "ledger/events");
   const records = entries
-    .map((entry) => toHistoryRecord(entry.value, entry.relativePath))
+    .map((entry) => projectHistoryEntity(entry.value, entry.relativePath))
+    .map((entity) => (entity ? historyRecordFromEntity(entity) : null))
     .filter(isHistoryRecord)
+    .filter((entry) => matchesDateRange(entry.occurredAt, options.from, options.to))
     .filter((entry) => matchesHistoryOptions(entry, options, kindFilters))
     .sort(compareHistory);
 

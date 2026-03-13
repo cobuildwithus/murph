@@ -1,12 +1,16 @@
 export {
   getExperiment,
+  getVaultEntities,
   getJournalEntry,
+  listEntities,
   listExperiments,
   listJournalEntries,
   listRecords,
+  lookupEntityById,
   lookupRecordById,
   readVault,
 } from "./model.js";
+export type { CanonicalEntity, CanonicalEntityFamily } from "./canonical-entities.js";
 export {
   describeLookupConstraint,
   ID_FAMILY_REGISTRY,

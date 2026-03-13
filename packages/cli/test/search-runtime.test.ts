@@ -18,6 +18,80 @@ interface RetrievalFixture {
   vaultRoot: string
 }
 
+async function makeCanonicalHealthFixture(): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-canonical-'))
+
+  await writeVaultFile(
+    vaultRoot,
+    'ledger/assessments/2026/2026-03.jsonl',
+    `${JSON.stringify({
+      schemaVersion: 'hb.assessment-response.v1',
+      id: 'asmt_health_01',
+      assessmentType: 'full-intake',
+      recordedAt: '2026-03-12T13:00:00Z',
+      source: 'import',
+      title: 'Sleep intake questionnaire',
+      responses: {
+        sleep: {
+          averageHours: 6.5,
+        },
+      },
+      relatedIds: ['goal_sleep_01'],
+    })}\n`,
+  )
+
+  await writeVaultFile(
+    vaultRoot,
+    'ledger/profile-snapshots/2026/2026-03.jsonl',
+    `${JSON.stringify({
+      schemaVersion: 'hb.profile-snapshot.v1',
+      id: 'psnap_health_01',
+      recordedAt: '2026-03-12T14:00:00Z',
+      source: 'assessment_projection',
+      sourceAssessmentIds: ['asmt_health_01'],
+      sourceEventIds: ['evt_history_01'],
+      profile: {
+        topGoalIds: ['goal_sleep_01'],
+      },
+      summary: 'Sleep remains the primary concern.',
+    })}\n`,
+  )
+
+  await writeVaultFile(
+    vaultRoot,
+    'ledger/events/2026/2026-03.jsonl',
+    `${JSON.stringify({
+      schemaVersion: 'hb.event.v1',
+      id: 'evt_history_01',
+      kind: 'encounter',
+      occurredAt: '2026-03-12T12:45:00Z',
+      recordedAt: '2026-03-12T12:50:00Z',
+      source: 'manual',
+      title: 'Sleep clinic intake visit',
+      relatedIds: ['goal_sleep_01'],
+      tags: ['sleep', 'clinic'],
+    })}\n`,
+  )
+
+  await writeVaultFile(
+    vaultRoot,
+    'bank/goals/improve-sleep.md',
+    `---
+goalId: goal_sleep_01
+slug: improve-sleep
+title: Improve sleep quality
+status: active
+priority: 1
+---
+# Improve sleep quality
+
+Reduce sleep latency and improve recovery.
+`,
+  )
+
+  return vaultRoot
+}
+
 async function makeRetrievalFixture(): Promise<RetrievalFixture> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-retrieval-'))
   const csvPath = path.join(vaultRoot, 'heart-rate.csv')
@@ -102,6 +176,17 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
     mealId: requireData(mealResult).mealId,
     vaultRoot,
   }
+}
+
+async function writeVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  contents: string,
+) {
+  await mkdir(path.dirname(path.join(vaultRoot, relativePath)), {
+    recursive: true,
+  })
+  await writeFile(path.join(vaultRoot, relativePath), contents, 'utf8')
 }
 
 test.sequential('search returns lexical hits and excludes raw sample rows by default', async () => {
@@ -515,5 +600,66 @@ Steady energy after saffron tea.
     )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('search accepts projected health record families', async () => {
+  const vaultRoot = await makeCanonicalHealthFixture()
+
+  try {
+    const result = await runCli<{
+      hits: Array<{
+        recordId: string
+        recordType: string
+      }>
+      total: number
+    }>([
+      'search',
+      '--text',
+      'sleep',
+      '--record-type',
+      'history,assessment,goal',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(
+      new Set(requireData(result).hits.map((hit) => hit.recordType)),
+      new Set(['history', 'assessment', 'goal']),
+    )
+    assert.equal(requireData(result).total, 3)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('timeline exposes projected health entry types', async () => {
+  const vaultRoot = await makeCanonicalHealthFixture()
+
+  try {
+    const result = await runCli<{
+      items: Array<{
+        entryType: string
+      }>
+    }>([
+      'timeline',
+      '--entry-type',
+      'assessment,history,profile_snapshot',
+      '--from',
+      '2026-03-12',
+      '--to',
+      '2026-03-12',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.ok, true)
+    assert.deepEqual(
+      requireData(result).items.map((item) => item.entryType),
+      ['profile_snapshot', 'assessment', 'history'],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
   }
 })

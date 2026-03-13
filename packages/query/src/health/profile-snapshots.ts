@@ -7,13 +7,21 @@ import {
   matchesDateRange,
   matchesLookup,
   matchesText,
-  maybeString,
-  type MarkdownDocumentRecord,
 } from "./shared.js";
 import {
   readJsonlRecords,
   readOptionalMarkdownDocument,
 } from "./loaders.js";
+import {
+  fallbackCurrentProfileEntity,
+  projectCurrentProfileEntity,
+  projectProfileSnapshotEntity,
+} from "../canonical-entities.js";
+
+import type {
+  CanonicalEntity,
+} from "../canonical-entities.js";
+import type { MarkdownDocumentRecord } from "./shared.js";
 
 export interface ProfileSnapshotQueryRecord {
   id: string;
@@ -47,6 +55,57 @@ export interface ProfileSnapshotListOptions {
   limit?: number;
 }
 
+function profileSnapshotRecordFromEntity(
+  entity: CanonicalEntity,
+): ProfileSnapshotQueryRecord | null {
+  if (entity.family !== "profile_snapshot") {
+    return null;
+  }
+
+  const attributes = asObject(entity.attributes);
+  if (!attributes) {
+    return null;
+  }
+
+  return {
+    id: entity.entityId,
+    capturedAt: firstString(attributes, ["capturedAt", "recordedAt"]),
+    recordedAt: firstString(attributes, ["recordedAt", "capturedAt"]),
+    status: firstString(attributes, ["status"]) ?? "accepted",
+    summary: firstString(attributes, ["summary"]),
+    source: firstString(attributes, ["source"]),
+    sourceAssessmentIds: firstStringArray(attributes, ["sourceAssessmentIds"]),
+    sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
+    profile: firstObject(attributes, ["profile"]) ?? {},
+    relativePath: entity.path,
+  };
+}
+
+function currentProfileRecordFromEntity(
+  entity: CanonicalEntity,
+): CurrentProfileQueryRecord | null {
+  if (entity.family !== "current_profile") {
+    return null;
+  }
+
+  const attributes = asObject(entity.attributes);
+  if (!attributes) {
+    return null;
+  }
+
+  return {
+    id: "current",
+    snapshotId: firstString(attributes, ["snapshotId"]),
+    updatedAt: firstString(attributes, ["updatedAt"]),
+    sourceAssessmentIds: firstStringArray(attributes, ["sourceAssessmentIds"]),
+    sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
+    topGoalIds: firstStringArray(attributes, ["topGoalIds"]),
+    relativePath: entity.path,
+    markdown: entity.frontmatter ? entity.body : entity.body,
+    body: entity.body,
+  };
+}
+
 export function buildCurrentProfileRecord(input: {
   snapshotId: string;
   updatedAt: string | null;
@@ -73,40 +132,8 @@ export function toProfileSnapshotRecord(
   value: unknown,
   relativePath: string,
 ): ProfileSnapshotQueryRecord | null {
-  const source = asObject(value);
-  if (!source) {
-    return null;
-  }
-
-  const id = firstString(source, ["id"]);
-  if (!id?.startsWith("psnap_")) {
-    return null;
-  }
-
-  const sourceObject = firstObject(source, ["source"]);
-  const sourceDetails = sourceObject ?? {};
-  const sourceAssessmentIds = firstStringArray(source, ["sourceAssessmentIds"]);
-  const sourceAssessmentId = firstString(sourceDetails, ["assessmentId"]);
-
-  return {
-    id,
-    capturedAt: firstString(source, ["capturedAt", "recordedAt"]),
-    recordedAt: firstString(source, ["recordedAt", "capturedAt"]),
-    status: firstString(source, ["status"]) ?? "accepted",
-    summary: firstString(source, ["summary"]),
-    source:
-      firstString(source, ["source"]) ??
-      firstString(sourceDetails, ["kind", "source", "importedFrom"]),
-    sourceAssessmentIds:
-      sourceAssessmentIds.length > 0
-        ? sourceAssessmentIds
-        : sourceAssessmentId
-          ? [sourceAssessmentId]
-          : [],
-    sourceEventIds: firstStringArray(source, ["sourceEventIds"]),
-    profile: firstObject(source, ["profile"]) ?? {},
-    relativePath,
-  };
+  const entity = projectProfileSnapshotEntity(value, relativePath);
+  return entity ? profileSnapshotRecordFromEntity(entity) : null;
 }
 
 export function compareSnapshots(
@@ -129,64 +156,19 @@ function isProfileSnapshotRecord(
   return record !== null;
 }
 
-function matchesProfileSnapshotOptions(
-  record: ProfileSnapshotQueryRecord,
-  options: ProfileSnapshotListOptions,
-): boolean {
-  return (
-    matchesDateRange(record.recordedAt ?? record.capturedAt, options.from, options.to) &&
-    matchesText(
-      [
-        record.id,
-        record.summary,
-        record.source,
-        record.profile,
-        record.sourceAssessmentIds,
-        record.sourceEventIds,
-      ],
-      options.text,
-    )
-  );
-}
-
-function fallbackCurrentProfile(
-  latestSnapshot: ProfileSnapshotQueryRecord,
-): CurrentProfileQueryRecord {
-  return buildCurrentProfileRecord({
-    snapshotId: latestSnapshot.id,
-    updatedAt: latestSnapshot.recordedAt ?? latestSnapshot.capturedAt,
-    sourceAssessmentIds: latestSnapshot.sourceAssessmentIds,
-    sourceEventIds: latestSnapshot.sourceEventIds,
-    topGoalIds: firstStringArray(latestSnapshot.profile, ["topGoalIds"]),
-    markdown: null,
-    body: null,
-  });
-}
-
 export function toCurrentProfileRecord(
   document: MarkdownDocumentRecord,
 ): CurrentProfileQueryRecord {
-  const attributes = document.attributes;
-  const body = document.body || document.markdown.trim();
-  const snapshotId =
-    maybeString(attributes.snapshotId) ??
-    body.match(/Snapshot ID:\s+`([^`]+)`/u)?.[1] ??
-    null;
-  const updatedAt =
-    maybeString(attributes.updatedAt) ??
-    body.match(/Recorded At:\s+([^\n]+)/u)?.[1]?.trim() ??
-    null;
+  const entity = projectCurrentProfileEntity(document);
+  const record = currentProfileRecordFromEntity(entity);
+
+  if (!record) {
+    throw new Error("Failed to project current profile.");
+  }
 
   return {
-    id: "current",
-    snapshotId,
-    updatedAt,
-    sourceAssessmentIds: firstStringArray(attributes, ["sourceAssessmentIds"]),
-    sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
-    topGoalIds: firstStringArray(attributes, ["topGoalIds"]),
-    relativePath: document.relativePath,
+    ...record,
     markdown: document.markdown,
-    body,
   };
 }
 
@@ -196,9 +178,11 @@ export async function listProfileSnapshots(
 ): Promise<ProfileSnapshotQueryRecord[]> {
   const entries = await readJsonlRecords(vaultRoot, "ledger/profile-snapshots");
   const records = entries
-    .map((entry) => toProfileSnapshotRecord(entry.value, entry.relativePath))
+    .map((entry) => projectProfileSnapshotEntity(entry.value, entry.relativePath))
+    .map((entity) => (entity ? profileSnapshotRecordFromEntity(entity) : null))
     .filter(isProfileSnapshotRecord)
-    .filter((entry) => matchesProfileSnapshotOptions(entry, options))
+    .filter((record) => matchesDateRange(record.recordedAt ?? record.capturedAt, options.from, options.to))
+    .filter((record) => matchesText([record], options.text))
     .sort(compareSnapshots);
 
   return applyLimit(records, options.limit);
@@ -222,28 +206,62 @@ export async function readCurrentProfile(
     return null;
   }
 
-  const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
+  try {
+    const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
+    if (!document) {
+      return fallbackCurrent(latestSnapshot);
+    }
 
-  if (!document) {
-    return fallbackCurrentProfile(latestSnapshot);
+    const record = toCurrentProfileRecord(document);
+    if (record.snapshotId !== latestSnapshot.id) {
+      return fallbackCurrent(latestSnapshot);
+    }
+
+    return record;
+  } catch {
+    return fallbackCurrent(latestSnapshot);
   }
-
-  const parsed = toCurrentProfileRecord(document);
-  if (parsed.snapshotId === latestSnapshot.id) {
-    return parsed;
-  }
-
-  return fallbackCurrentProfile(latestSnapshot);
 }
 
 export async function showProfile(
   vaultRoot: string,
   lookup: string,
 ): Promise<ProfileSnapshotQueryRecord | CurrentProfileQueryRecord | null> {
-  if (matchesLookup(lookup, "current")) {
-    return readCurrentProfile(vaultRoot);
+  const current = await readCurrentProfile(vaultRoot);
+  if (current && matchesLookup(lookup, current.id, current.snapshotId)) {
+    return current;
   }
 
   const snapshots = await listProfileSnapshots(vaultRoot);
   return snapshots.find((snapshot) => matchesLookup(lookup, snapshot.id, snapshot.summary)) ?? null;
+}
+
+function fallbackCurrent(
+  latestSnapshot: ProfileSnapshotQueryRecord,
+): CurrentProfileQueryRecord | null {
+  const fallback = fallbackCurrentProfileEntity({
+    entityId: latestSnapshot.id,
+    primaryLookupId: latestSnapshot.id,
+    lookupIds: [latestSnapshot.id],
+    family: "profile_snapshot",
+    kind: "profile_snapshot",
+    status: latestSnapshot.status,
+    occurredAt: latestSnapshot.recordedAt ?? latestSnapshot.capturedAt,
+    date: (latestSnapshot.recordedAt ?? latestSnapshot.capturedAt)?.slice(0, 10) ?? null,
+    path: latestSnapshot.relativePath,
+    title: latestSnapshot.summary ?? latestSnapshot.id,
+    body: latestSnapshot.summary,
+    attributes: {
+      profile: latestSnapshot.profile,
+      sourceAssessmentIds: latestSnapshot.sourceAssessmentIds,
+      sourceEventIds: latestSnapshot.sourceEventIds,
+    },
+    frontmatter: null,
+    relatedIds: [...latestSnapshot.sourceAssessmentIds, ...latestSnapshot.sourceEventIds],
+    stream: null,
+    experimentSlug: null,
+    tags: ["profile_snapshot", latestSnapshot.status],
+  });
+
+  return fallback ? currentProfileRecordFromEntity(fallback) : null;
 }

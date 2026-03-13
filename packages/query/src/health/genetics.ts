@@ -1,16 +1,33 @@
 import {
-  createRegistryQueries,
+  geneticsRecordFromEntity,
   geneticsRegistryDefinition,
+  createProjectedRegistryQueries,
+  type RegistryListOptions,
 } from "./registries.js";
 
-import type { GeneticsQueryRecord, RegistryListOptions } from "./registries.js";
+const geneticsQueries = createProjectedRegistryQueries(
+  geneticsRegistryDefinition,
+  "genetics",
+  geneticsRecordFromEntity,
+);
 
-const geneticsQueries: {
-  list(vaultRoot: string, options?: RegistryListOptions): Promise<GeneticsQueryRecord[]>;
-  read(vaultRoot: string, variantId: string): Promise<GeneticsQueryRecord | null>;
-  show(vaultRoot: string, lookup: string): Promise<GeneticsQueryRecord | null>;
-} = createRegistryQueries(geneticsRegistryDefinition);
+export async function listGeneticVariants(
+  vaultRoot: string,
+  options: RegistryListOptions = {},
+): ReturnType<typeof geneticsQueries.list> {
+  return geneticsQueries.list(vaultRoot, options);
+}
 
-export const listGeneticVariants = geneticsQueries.list;
-export const readGeneticVariant = geneticsQueries.read;
-export const showGeneticVariant = geneticsQueries.show;
+export async function readGeneticVariant(
+  vaultRoot: string,
+  variantId: string,
+): ReturnType<typeof geneticsQueries.read> {
+  return geneticsQueries.read(vaultRoot, variantId);
+}
+
+export async function showGeneticVariant(
+  vaultRoot: string,
+  lookup: string,
+): ReturnType<typeof geneticsQueries.show> {
+  return geneticsQueries.show(vaultRoot, lookup);
+}

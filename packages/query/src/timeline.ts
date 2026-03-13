@@ -1,4 +1,4 @@
-import type { VaultReadModel, VaultRecord } from "./model.js";
+import { listRecords, type VaultReadModel, type VaultRecord } from "./model.js";
 import {
   summarizeDailySamples,
   type DailySampleSummary,
@@ -15,13 +15,22 @@ export interface TimelineFilters {
   streams?: string[];
   includeJournal?: boolean;
   includeEvents?: boolean;
+  includeAssessments?: boolean;
+  includeHistory?: boolean;
+  includeProfileSnapshots?: boolean;
   includeDailySampleSummaries?: boolean;
   limit?: number;
 }
 
 export interface TimelineEntry {
   id: string;
-  entryType: "journal" | "event" | "sample_summary";
+  entryType:
+    | "assessment"
+    | "event"
+    | "history"
+    | "journal"
+    | "profile_snapshot"
+    | "sample_summary";
   occurredAt: string;
   date: string;
   title: string;
@@ -42,17 +51,21 @@ export function buildTimeline(
   const streamSet = filters.streams?.length ? new Set(filters.streams) : null;
   const includeJournal = filters.includeJournal ?? true;
   const includeEvents = filters.includeEvents ?? true;
+  const includeAssessments = filters.includeAssessments ?? true;
+  const includeHistory = filters.includeHistory ?? true;
+  const includeProfileSnapshots = filters.includeProfileSnapshots ?? true;
   const includeDailySampleSummaries =
     filters.includeDailySampleSummaries ?? true;
 
   const entries: TimelineEntry[] = [];
 
   if (includeJournal) {
-    for (const journal of vault.journalEntries) {
-      if (!matchesRecordFilters(journal, filters)) {
-        continue;
-      }
-
+    for (const journal of listRecords(vault, {
+      recordTypes: ["journal"],
+      experimentSlug: filters.experimentSlug,
+      from: filters.from,
+      to: filters.to,
+    })) {
       const journalKind = journal.kind ?? "journal_day";
       if (kindSet && !kindSet.has(journalKind)) {
         continue;
@@ -73,7 +86,7 @@ export function buildTimeline(
         stream: null,
         experimentSlug: journal.experimentSlug,
         path: journal.sourcePath,
-        relatedIds: journal.lookupIds,
+        relatedIds: timelineRelatedIds(journal),
         tags: journal.tags,
         data: journal.data,
       });
@@ -81,11 +94,12 @@ export function buildTimeline(
   }
 
   if (includeEvents) {
-    for (const event of vault.events) {
-      if (!matchesRecordFilters(event, filters)) {
-        continue;
-      }
-
+    for (const event of listRecords(vault, {
+      recordTypes: ["event"],
+      experimentSlug: filters.experimentSlug,
+      from: filters.from,
+      to: filters.to,
+    })) {
       if (streamSet && (!event.stream || !streamSet.has(event.stream))) {
         continue;
       }
@@ -112,9 +126,117 @@ export function buildTimeline(
         stream: event.stream,
         experimentSlug: event.experimentSlug,
         path: event.sourcePath,
-        relatedIds: event.lookupIds,
+        relatedIds: timelineRelatedIds(event),
         tags: event.tags,
         data: event.data,
+      });
+    }
+  }
+
+  if (includeAssessments) {
+    for (const assessment of listRecords(vault, {
+      recordTypes: ["assessment"],
+      from: filters.from,
+      to: filters.to,
+    })) {
+      const assessmentKind = assessment.kind ?? "assessment";
+      if (kindSet && !kindSet.has(assessmentKind)) {
+        continue;
+      }
+
+      const date = assessment.date ?? extractDate(assessment.occurredAt);
+      const occurredAt = assessment.occurredAt ?? (date ? `${date}T12:00:00` : "");
+
+      if (!date || !occurredAt) {
+        continue;
+      }
+
+      entries.push({
+        id: assessment.displayId,
+        entryType: "assessment",
+        occurredAt,
+        date,
+        title:
+          assessment.title ??
+          stringData(assessment.data.assessmentType) ??
+          assessment.displayId,
+        kind: assessmentKind,
+        stream: null,
+        experimentSlug: null,
+        path: assessment.sourcePath,
+        relatedIds: timelineRelatedIds(assessment),
+        tags: assessment.tags,
+        data: assessment.data,
+      });
+    }
+  }
+
+  if (includeHistory) {
+    for (const history of listRecords(vault, {
+      recordTypes: ["history"],
+      from: filters.from,
+      to: filters.to,
+    })) {
+      const historyKind = history.kind ?? "history";
+      if (kindSet && !kindSet.has(historyKind)) {
+        continue;
+      }
+
+      const date = history.date ?? extractDate(history.occurredAt);
+      const occurredAt = history.occurredAt ?? (date ? `${date}T00:00:00` : "");
+
+      if (!date || !occurredAt) {
+        continue;
+      }
+
+      entries.push({
+        id: history.displayId,
+        entryType: "history",
+        occurredAt,
+        date,
+        title: history.title ?? historyKind,
+        kind: historyKind,
+        stream: null,
+        experimentSlug: null,
+        path: history.sourcePath,
+        relatedIds: timelineRelatedIds(history),
+        tags: history.tags,
+        data: history.data,
+      });
+    }
+  }
+
+  if (includeProfileSnapshots) {
+    for (const snapshot of listRecords(vault, {
+      recordTypes: ["profile_snapshot"],
+      from: filters.from,
+      to: filters.to,
+    })) {
+      const snapshotKind = snapshot.kind ?? "profile_snapshot";
+      if (kindSet && !kindSet.has(snapshotKind)) {
+        continue;
+      }
+
+      const date = snapshot.date ?? extractDate(snapshot.occurredAt);
+      const occurredAt = snapshot.occurredAt ?? (date ? `${date}T12:00:00` : "");
+
+      if (!date || !occurredAt) {
+        continue;
+      }
+
+      entries.push({
+        id: snapshot.displayId,
+        entryType: "profile_snapshot",
+        occurredAt,
+        date,
+        title: snapshot.title ?? snapshot.displayId,
+        kind: snapshotKind,
+        stream: null,
+        experimentSlug: null,
+        path: snapshot.sourcePath,
+        relatedIds: timelineRelatedIds(snapshot),
+        tags: snapshot.tags,
+        data: snapshot.data,
       });
     }
   }
@@ -145,22 +267,8 @@ export function buildTimeline(
     .slice(0, normalizeLimit(filters.limit));
 }
 
-function matchesRecordFilters(record: VaultRecord, filters: TimelineFilters): boolean {
-  const dateLike = record.date ?? record.occurredAt;
-
-  if (filters.experimentSlug && record.experimentSlug !== filters.experimentSlug) {
-    return false;
-  }
-
-  if (filters.from && compareDateLike(dateLike, filters.from) < 0) {
-    return false;
-  }
-
-  if (filters.to && compareDateLike(dateLike, filters.to) > 0) {
-    return false;
-  }
-
-  return true;
+function timelineRelatedIds(record: VaultRecord): string[] {
+  return record.relatedIds ?? record.lookupIds;
 }
 
 function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {
@@ -213,21 +321,14 @@ function extractDate(value: string | null | undefined): string {
   return value.length >= 10 ? value.slice(0, 10) : value;
 }
 
-function compareDateLike(value: string | null | undefined, boundary: string): number {
-  if (!value) {
-    return -1;
-  }
-
-  const normalizedValue = value.length > 10 ? value.slice(0, 10) : value;
-  const normalizedBoundary = boundary.length > 10 ? boundary.slice(0, 10) : boundary;
-
-  return normalizedValue.localeCompare(normalizedBoundary);
-}
-
 function normalizeLimit(limit: number | undefined): number {
   if (!Number.isFinite(limit)) {
     return DEFAULT_LIMIT;
   }
 
   return Math.max(1, Math.min(MAX_LIMIT, Math.trunc(limit ?? DEFAULT_LIMIT)));
+}
+
+function stringData(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
