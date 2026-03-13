@@ -76,8 +76,8 @@ Updated: 2026-03-13
 
 - `pnpm exec vitest run packages/core/test/core.test.ts packages/core/test/health-bank.test.ts packages/core/test/health-history-family.test.ts --no-coverage --maxWorkers 1`
 - Result: passed.
-- `pnpm exec tsc -p packages/core/tsconfig.json --noEmit`
-- Result: failed for pre-existing workspace build artifact/typecheck setup issues outside this diff (`packages/contracts/dist` expectations and an existing `mutations.ts` indexed-access error in the package-only invocation).
+- `pnpm --dir packages/contracts build && pnpm --dir packages/core typecheck`
+- Result: passed.
 - `pnpm typecheck`
 - Result: failed for pre-existing CLI/build issues outside this diff, including `packages/cli/src/commands/{document,meal,experiment,journal,vault}.ts`, `packages/cli/src/health-cli-descriptors.ts`, and `packages/cli/src/vault-cli-services.ts`.
 - `pnpm test:packages`
