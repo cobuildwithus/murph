@@ -8,11 +8,16 @@ import {
   matchesStatus,
   matchesText,
   pathSlug,
+} from "./shared.js";
+import {
   readMarkdownDocument,
   walkRelativeFiles,
-} from "./shared.js";
+} from "./loaders.js";
 
-import type { FrontmatterObject } from "./shared.js";
+import type {
+  FrontmatterObject,
+  MarkdownDocumentRecord,
+} from "./shared.js";
 
 export interface RegistryMarkdownRecord {
   id: string;
@@ -71,6 +76,40 @@ export function readRegistryStrings(
   return firstStringArray(attributes, keys);
 }
 
+export function toRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+  document: MarkdownDocumentRecord,
+  definition: RegistryDefinition<TRecord>,
+): TRecord | null {
+  const id = firstString(document.attributes, definition.idKeys);
+  if (!id) {
+    return null;
+  }
+
+  const base: RegistryMarkdownRecord = {
+    id,
+    slug: firstString(document.attributes, ["slug"]) ?? pathSlug(document.relativePath),
+    title: firstString(document.attributes, definition.titleKeys),
+    status: firstString(document.attributes, definition.statusKeys),
+    relativePath: document.relativePath,
+    markdown: document.markdown,
+    body: document.body,
+    attributes: document.attributes,
+  };
+
+  return definition.transform(base, document.attributes);
+}
+
+export function sortRegistryRecords<TRecord extends RegistryMarkdownRecord>(
+  records: TRecord[],
+  definition: RegistryDefinition<TRecord>,
+): TRecord[] {
+  const compare =
+    definition.compare ??
+    ((left: TRecord, right: TRecord) => compareNullableStrings(left.title, right.title));
+
+  return records.sort(compare);
+}
+
 async function loadRegistry<TRecord extends RegistryMarkdownRecord>(
   vaultRoot: string,
   definition: RegistryDefinition<TRecord>,
@@ -80,30 +119,13 @@ async function loadRegistry<TRecord extends RegistryMarkdownRecord>(
 
   for (const relativePath of relativePaths) {
     const document = await readMarkdownDocument(vaultRoot, relativePath);
-    const id = firstString(document.attributes, definition.idKeys);
-    if (!id) {
-      continue;
+    const record = toRegistryRecord(document, definition);
+    if (record) {
+      records.push(record);
     }
-
-    const base: RegistryMarkdownRecord = {
-      id,
-      slug: firstString(document.attributes, ["slug"]) ?? pathSlug(relativePath),
-      title: firstString(document.attributes, definition.titleKeys),
-      status: firstString(document.attributes, definition.statusKeys),
-      relativePath,
-      markdown: document.markdown,
-      body: document.body,
-      attributes: document.attributes,
-    };
-
-    records.push(definition.transform(base, document.attributes));
   }
 
-  const compare =
-    definition.compare ??
-    ((left: TRecord, right: TRecord) => compareNullableStrings(left.title, right.title));
-
-  return records.sort(compare);
+  return sortRegistryRecords(records, definition);
 }
 
 export async function listRegistryRecords<TRecord extends RegistryMarkdownRecord>(

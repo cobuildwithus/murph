@@ -1,4 +1,3 @@
-import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 
@@ -291,83 +290,6 @@ export function parseFrontmatterDocument(
     attributes: parsed.value,
     body,
   };
-}
-
-export async function walkRelativeFiles(
-  vaultRoot: string,
-  relativeRoot: string,
-  extension: string,
-): Promise<string[]> {
-  const basePath = path.join(vaultRoot, relativeRoot);
-  let entries;
-
-  try {
-    entries = await readdir(basePath, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
-
-    throw error;
-  }
-
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const relativePath = path.posix.join(relativeRoot, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(...(await walkRelativeFiles(vaultRoot, relativePath, extension)));
-      continue;
-    }
-
-    if (entry.isFile() && entry.name.endsWith(extension)) {
-      files.push(relativePath);
-    }
-  }
-
-  files.sort((left, right) => left.localeCompare(right));
-  return files;
-}
-
-export async function readMarkdownDocument(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<MarkdownDocumentRecord> {
-  const markdown = await readFile(path.join(vaultRoot, relativePath), "utf8");
-  const parsed = parseFrontmatterDocument(markdown);
-
-  return {
-    relativePath,
-    markdown,
-    body: parsed.body,
-    attributes: parsed.attributes,
-  };
-}
-
-export async function readJsonlRecords(
-  vaultRoot: string,
-  relativeRoot: string,
-): Promise<Array<{ relativePath: string; value: unknown }>> {
-  const shardPaths = await walkRelativeFiles(vaultRoot, relativeRoot, ".jsonl");
-  const records: Array<{ relativePath: string; value: unknown }> = [];
-
-  for (const relativePath of shardPaths) {
-    const raw = await readFile(path.join(vaultRoot, relativePath), "utf8");
-    const lines = raw
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    for (const line of lines) {
-      records.push({
-        relativePath,
-        value: JSON.parse(line) as unknown,
-      });
-    }
-  }
-
-  return records;
 }
 
 export function asObject(value: unknown): Record<string, unknown> | null {

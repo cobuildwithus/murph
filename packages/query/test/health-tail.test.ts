@@ -5,6 +5,8 @@ import path from "node:path";
 import { test } from "vitest";
 
 import { buildExportPack, readVault, showProfile } from "../src/index.js";
+import { readHealthContext } from "../src/export-pack-health.js";
+import { listAssessments } from "../src/health/assessments.js";
 
 async function writeVaultFile(
   vaultRoot: string,
@@ -421,6 +423,11 @@ slug broken-frontmatter
     );
 
     const vault = await readVault(vaultRoot);
+    const healthRead = readHealthContext(vaultRoot, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      experimentSlug: null,
+    });
     const pack = buildExportPack(vault, {
       from: "2026-03-01",
       to: "2026-03-31",
@@ -439,6 +446,25 @@ slug broken-frontmatter
     assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
     assert.deepEqual(pack.health.profileSnapshots[1]?.sourceAssessmentIds, ["asmt_health_00"]);
     assert.match(pack.health.currentProfile?.markdown ?? "", /Snapshot ID: `psnap_health_01`/);
+    assert.deepEqual(
+      healthRead.failures.map((failure) => ({
+        parser: failure.parser,
+        relativePath: failure.relativePath,
+        lineNumber: failure.lineNumber ?? null,
+      })),
+      [
+        {
+          parser: "json",
+          relativePath: "ledger/assessments/2026/2026-03.jsonl",
+          lineNumber: 6,
+        },
+        {
+          parser: "frontmatter",
+          relativePath: "bank/genetics/broken.md",
+          lineNumber: null,
+        },
+      ],
+    );
 
     const assistantFile = pack.files.find((file) => file.path.endsWith("assistant-context.md"));
 
@@ -446,6 +472,45 @@ slug broken-frontmatter
     assert.match(assistantFile.contents, /### Goals/);
     assert.match(assistantFile.contents, /Ignored note event/);
     assert.doesNotMatch(assistantFile.contents, /Missing id should be ignored/);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("health query readers surface actionable parse failures while export-pack reads stay tolerant", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+    includeAlternateRecords: true,
+  });
+
+  try {
+    await appendVaultFile(
+      vaultRoot,
+      "ledger/assessments/2026/2026-03.jsonl",
+      "{this is not valid json}\n",
+    );
+
+    await assert.rejects(
+      () => listAssessments(vaultRoot),
+      /Failed to parse JSONL at ledger\/assessments\/2026\/2026-03\.jsonl:6:/,
+    );
+
+    const healthRead = readHealthContext(vaultRoot, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      experimentSlug: null,
+    });
+
+    assert.deepEqual(
+      healthRead.health.assessments.map((entry) => entry.id),
+      ["asmt_health_01", "asmt_health_00"],
+    );
+    assert.equal(healthRead.failures[0]?.parser, "json");
+    assert.equal(
+      healthRead.failures[0]?.relativePath,
+      "ledger/assessments/2026/2026-03.jsonl",
+    );
+    assert.equal(healthRead.failures[0]?.lineNumber, 6);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -469,6 +534,11 @@ snapshotId psnap_health_01
     );
 
     const vault = await readVault(vaultRoot);
+    const healthRead = readHealthContext(vaultRoot, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      experimentSlug: null,
+    });
     const pack = buildExportPack(vault, {
       from: "2026-03-01",
       to: "2026-03-31",
@@ -478,6 +548,10 @@ snapshotId psnap_health_01
 
     assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
     assert.equal(pack.health.currentProfile?.markdown, null);
+    assert.deepEqual(
+      healthRead.failures.map((failure) => failure.relativePath),
+      ["bank/profile/current.md"],
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

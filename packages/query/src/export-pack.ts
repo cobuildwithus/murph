@@ -1,10 +1,4 @@
-import {
-  readAssessmentRecords,
-  readBankPages,
-  readCurrentProfileRecord,
-  readHistoryRecords,
-  readProfileSnapshotRecords,
-} from "./export-pack-health.js";
+import { readHealthContext } from "./export-pack-health.js";
 import type { FrontmatterObject } from "./health/shared.js";
 import { getExperiment, listJournalEntries, listRecords } from "./model.js";
 import type { VaultReadModel, VaultRecord } from "./model.js";
@@ -667,26 +661,7 @@ function buildHealthContext(
   vault: VaultReadModel,
   filters: ExportPackFilters,
 ): ExportPackHealthContext {
-  const assessments = readAssessmentRecords(vault.vaultRoot, filters);
-  const profileSnapshots = readProfileSnapshotRecords(vault.vaultRoot, filters);
-  const allProfileSnapshots = readProfileSnapshotRecords(vault.vaultRoot, {
-    from: null,
-    to: null,
-    experimentSlug: null,
-  });
-  const historyEvents = readHistoryRecords(vault.vaultRoot, filters);
-  const currentProfile = readCurrentProfileRecord(vault.vaultRoot, allProfileSnapshots);
-
-  return {
-    assessments,
-    profileSnapshots,
-    historyEvents,
-    currentProfile,
-    goals: readBankPages(vault.vaultRoot, "bank/goals", ["goalId"]),
-    conditions: readBankPages(vault.vaultRoot, "bank/conditions", ["conditionId"]),
-    allergies: readBankPages(vault.vaultRoot, "bank/allergies", ["allergyId"]),
-    regimens: readBankPages(vault.vaultRoot, "bank/regimens", ["regimenId"]),
-    familyMembers: readBankPages(vault.vaultRoot, "bank/family", ["familyMemberId", "memberId"]),
-    geneticVariants: readBankPages(vault.vaultRoot, "bank/genetics", ["variantId"]),
-  };
+  const result = readHealthContext(vault.vaultRoot, filters);
+  void result.failures;
+  return result.health;
 }

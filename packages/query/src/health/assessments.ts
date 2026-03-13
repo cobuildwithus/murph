@@ -7,8 +7,8 @@ import {
   matchesDateRange,
   matchesLookup,
   matchesText,
-  readJsonlRecords,
 } from "./shared.js";
+import { readJsonlRecords } from "./loaders.js";
 
 export interface AssessmentQueryRecord {
   id: string;
@@ -31,7 +31,7 @@ export interface AssessmentListOptions {
   limit?: number;
 }
 
-function toAssessmentRecord(
+export function toAssessmentRecord(
   value: unknown,
   relativePath: string,
 ): AssessmentQueryRecord | null {
@@ -60,7 +60,7 @@ function toAssessmentRecord(
   };
 }
 
-function compareAssessments(
+export function compareAssessments(
   left: AssessmentQueryRecord,
   right: AssessmentQueryRecord,
 ): number {

@@ -1,6 +1,3 @@
-import { access, readFile } from "node:fs/promises";
-import path from "node:path";
-
 import {
   applyLimit,
   asObject,
@@ -11,9 +8,12 @@ import {
   matchesLookup,
   matchesText,
   maybeString,
-  parseFrontmatterDocument,
-  readJsonlRecords,
+  type MarkdownDocumentRecord,
 } from "./shared.js";
+import {
+  readJsonlRecords,
+  readOptionalMarkdownDocument,
+} from "./loaders.js";
 
 export interface ProfileSnapshotQueryRecord {
   id: string;
@@ -47,7 +47,7 @@ export interface ProfileSnapshotListOptions {
   limit?: number;
 }
 
-function buildCurrentProfileRecord(input: {
+export function buildCurrentProfileRecord(input: {
   snapshotId: string;
   updatedAt: string | null;
   sourceAssessmentIds: string[];
@@ -69,21 +69,7 @@ function buildCurrentProfileRecord(input: {
   };
 }
 
-async function readOptionalUtf8(absolutePath: string): Promise<string | null> {
-  try {
-    await access(absolutePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
-    }
-
-    throw error;
-  }
-
-  return readFile(absolutePath, "utf8");
-}
-
-function toProfileSnapshotRecord(
+export function toProfileSnapshotRecord(
   value: unknown,
   relativePath: string,
 ): ProfileSnapshotQueryRecord | null {
@@ -121,7 +107,7 @@ function toProfileSnapshotRecord(
   };
 }
 
-function compareSnapshots(
+export function compareSnapshots(
   left: ProfileSnapshotQueryRecord,
   right: ProfileSnapshotQueryRecord,
 ): number {
@@ -135,10 +121,11 @@ function compareSnapshots(
   return left.id.localeCompare(right.id);
 }
 
-function parseCurrentProfileMarkdown(markdown: string): CurrentProfileQueryRecord {
-  const parsed = parseFrontmatterDocument(markdown);
-  const attributes = parsed.attributes;
-  const body = parsed.body || markdown.trim();
+export function toCurrentProfileRecord(
+  document: MarkdownDocumentRecord,
+): CurrentProfileQueryRecord {
+  const attributes = document.attributes;
+  const body = document.body || document.markdown.trim();
   const snapshotId =
     maybeString(attributes.snapshotId) ??
     body.match(/Snapshot ID:\s+`([^`]+)`/u)?.[1] ??
@@ -155,8 +142,8 @@ function parseCurrentProfileMarkdown(markdown: string): CurrentProfileQueryRecor
     sourceAssessmentIds: firstStringArray(attributes, ["sourceAssessmentIds"]),
     sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
     topGoalIds: firstStringArray(attributes, ["topGoalIds"]),
-    relativePath: "bank/profile/current.md",
-    markdown,
+    relativePath: document.relativePath,
+    markdown: document.markdown,
     body,
   };
 }
@@ -200,10 +187,9 @@ export async function readCurrentProfile(
     return null;
   }
 
-  const absolutePath = path.join(vaultRoot, "bank/profile/current.md");
-  const markdown = await readOptionalUtf8(absolutePath);
+  const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
 
-  if (!markdown) {
+  if (!document) {
     return buildCurrentProfileRecord({
       snapshotId: latestSnapshot.id,
       updatedAt: latestSnapshot.recordedAt ?? latestSnapshot.capturedAt,
@@ -215,7 +201,7 @@ export async function readCurrentProfile(
     });
   }
 
-  const parsed = parseCurrentProfileMarkdown(markdown);
+  const parsed = toCurrentProfileRecord(document);
   if (parsed.snapshotId === latestSnapshot.id) {
     return parsed;
   }

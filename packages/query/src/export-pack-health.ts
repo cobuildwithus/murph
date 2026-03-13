@@ -1,286 +1,338 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import path from "node:path";
-
 import {
-  asObject,
-  firstObject,
-  firstString,
-  firstStringArray,
-  parseFrontmatterDocument,
-} from "./health/shared.js";
+  compareAssessments,
+  toAssessmentRecord,
+} from "./health/assessments.js";
+import {
+  compareHistory,
+  toHistoryRecord,
+} from "./health/history.js";
+import {
+  readJsonlRecordOutcomesSync,
+  readOptionalMarkdownDocumentOutcomeSync,
+  readMarkdownDocumentOutcomeSync,
+  walkRelativeFilesSync,
+  type ParseFailure,
+  type JsonlRecordOutcome,
+} from "./health/loaders.js";
+import {
+  buildCurrentProfileRecord,
+  compareSnapshots,
+  toCurrentProfileRecord,
+  toProfileSnapshotRecord,
+} from "./health/profile-snapshots.js";
+import {
+  allergyRegistryDefinition,
+  conditionRegistryDefinition,
+  familyRegistryDefinition,
+  geneticsRegistryDefinition,
+  goalRegistryDefinition,
+  regimenRegistryDefinition,
+  sortRegistryRecords,
+  toRegistryRecord,
+  type RegistryDefinition,
+  type RegistryMarkdownRecord,
+} from "./health/registries.js";
+import { firstStringArray } from "./health/shared.js";
 
 import type {
   ExportPackAssessmentRecord,
   ExportPackBankPage,
   ExportPackCurrentProfile,
   ExportPackFilters,
+  ExportPackHealthContext,
   ExportPackHistoryRecord,
   ExportPackProfileSnapshotRecord,
 } from "./export-pack.js";
 
-export function readAssessmentRecords(
-  vaultRoot: string,
-  filters: ExportPackFilters,
-): ExportPackAssessmentRecord[] {
-  return readJsonlDirectory(vaultRoot, "ledger/assessments")
-    .map(({ relativePath, value }) => {
-      const source = asObject(value);
-      const id = firstStringOrNull(source, ["id"]);
-      if (!source || !id?.startsWith("asmt_")) {
-        return null;
-      }
-
-      return {
-        id,
-        title: firstStringOrNull(source, ["title"]),
-        assessmentType: firstStringOrNull(source, ["assessmentType"]),
-        recordedAt: firstStringOrNull(source, ["recordedAt", "occurredAt", "importedAt"]),
-        importedAt: firstStringOrNull(source, ["importedAt"]),
-        source: firstStringOrNull(source, ["source"]),
-        sourcePath: firstStringOrNull(source, ["rawPath", "sourcePath"]),
-        questionnaireSlug: firstStringOrNull(source, ["questionnaireSlug"]),
-        relatedIds: firstStringArrayOrEmpty(source, ["relatedIds"]),
-        responses: firstObjectOrEmpty(source, ["responses", "response"]),
-        relativePath,
-      };
-    })
-    .filter((entry): entry is ExportPackAssessmentRecord => entry !== null)
-    .filter((entry) => matchesDateWindow(entry.recordedAt ?? entry.importedAt, filters))
-    .sort((left, right) =>
-      (right.recordedAt ?? right.importedAt ?? "").localeCompare(left.recordedAt ?? left.importedAt ?? "") ||
-      left.id.localeCompare(right.id),
-    );
+interface TolerantCollection<TRecord> {
+  records: TRecord[];
+  failures: ParseFailure[];
 }
 
-export function readProfileSnapshotRecords(
-  vaultRoot: string,
-  filters: ExportPackFilters,
-): ExportPackProfileSnapshotRecord[] {
-  return readJsonlDirectory(vaultRoot, "ledger/profile-snapshots")
-    .map(({ relativePath, value }) => {
-      const source = asObject(value);
-      const id = firstStringOrNull(source, ["id"]);
-      if (!source || !id?.startsWith("psnap_")) {
-        return null;
-      }
-
-      const sourceObject = firstObjectOrEmpty(source, ["source"]);
-      const fallbackAssessmentId = firstString(sourceObject, ["assessmentId"]);
-      const sourceAssessmentIds = firstStringArrayOrEmpty(source, ["sourceAssessmentIds"]);
-
-      return {
-        id,
-        recordedAt: firstStringOrNull(source, ["recordedAt", "capturedAt"]),
-        source:
-          firstStringOrNull(source, ["source"]) ??
-          firstString(sourceObject, ["kind", "source", "importedFrom"]),
-        sourceAssessmentIds:
-          sourceAssessmentIds.length > 0
-            ? sourceAssessmentIds
-            : fallbackAssessmentId
-              ? [fallbackAssessmentId]
-              : [],
-        sourceEventIds: firstStringArrayOrEmpty(source, ["sourceEventIds"]),
-        profile: firstObjectOrEmpty(source, ["profile"]),
-        relativePath,
-      };
-    })
-    .filter((entry): entry is ExportPackProfileSnapshotRecord => entry !== null)
-    .filter((entry) => matchesDateWindow(entry.recordedAt, filters))
-    .sort((left, right) =>
-      (right.recordedAt ?? "").localeCompare(left.recordedAt ?? "") || left.id.localeCompare(right.id),
-    );
+export interface ExportPackHealthReadResult {
+  health: ExportPackHealthContext;
+  failures: ParseFailure[];
 }
 
-export function readHistoryRecords(
-  vaultRoot: string,
-  filters: ExportPackFilters,
-): ExportPackHistoryRecord[] {
-  const healthKinds = new Set(["encounter", "procedure", "test", "adverse_effect", "exposure"]);
+function collectJsonlRecords<TRecord>(
+  outcomes: JsonlRecordOutcome[],
+  transform: (value: unknown, relativePath: string) => TRecord | null,
+): TolerantCollection<TRecord> {
+  const failures: ParseFailure[] = [];
+  const records: TRecord[] = [];
 
-  return readJsonlDirectory(vaultRoot, "ledger/events")
-    .map(({ relativePath, value }) => {
-      const source = asObject(value);
-      const id = firstStringOrNull(source, ["id"]);
-      const kind = firstStringOrNull(source, ["kind"]);
-      const occurredAt = firstStringOrNull(source, ["occurredAt"]);
-      const title = firstStringOrNull(source, ["title"]);
+  for (const outcome of outcomes) {
+    if (!outcome.ok) {
+      failures.push(outcome);
+      continue;
+    }
 
-      if (!source || !id?.startsWith("evt_") || !kind || !healthKinds.has(kind) || !occurredAt || !title) {
-        return null;
-      }
-
-      return {
-        id,
-        kind,
-        occurredAt,
-        recordedAt: firstStringOrNull(source, ["recordedAt"]),
-        source: firstStringOrNull(source, ["source"]),
-        title,
-        status: firstStringOrNull(source, ["status"]),
-        tags: firstStringArrayOrEmpty(source, ["tags"]),
-        relatedIds: firstStringArrayOrEmpty(source, ["relatedIds"]),
-        relativePath,
-        data: source,
-      };
-    })
-    .filter((entry): entry is ExportPackHistoryRecord => entry !== null)
-    .filter((entry) => matchesDateWindow(entry.occurredAt, filters))
-    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt) || left.id.localeCompare(right.id));
-}
-
-export function readCurrentProfileRecord(
-  vaultRoot: string,
-  profileSnapshots: ExportPackProfileSnapshotRecord[],
-): ExportPackCurrentProfile | null {
-  const latestSnapshot = profileSnapshots[0] ?? null;
-  if (!latestSnapshot) {
-    return null;
+    const record = transform(outcome.value, outcome.relativePath);
+    if (record) {
+      records.push(record);
+    }
   }
 
-  const relativePath = "bank/profile/current.md";
-  const absolutePath = path.join(vaultRoot, relativePath);
-  const markdown = existsSync(absolutePath) ? readFileSync(absolutePath, "utf8") : null;
+  return { records, failures };
+}
 
-  if (markdown) {
-    const parsed = tryParseFrontmatterDocument(markdown);
-    if (parsed) {
-      const snapshotId =
-        firstString(parsed.attributes, ["snapshotId"]) ??
-        markdown.match(/Snapshot ID:\s+`([^`]+)`/u)?.[1] ??
-        null;
+function toExportPackAssessmentRecord(
+  record: NonNullable<ReturnType<typeof toAssessmentRecord>>,
+): ExportPackAssessmentRecord {
+  return {
+    id: record.id,
+    title: record.title,
+    assessmentType: record.assessmentType,
+    recordedAt: record.recordedAt,
+    importedAt: record.importedAt,
+    source: record.source,
+    sourcePath: record.sourcePath,
+    questionnaireSlug: record.questionnaireSlug,
+    relatedIds: record.relatedIds,
+    responses: record.responses,
+    relativePath: record.relativePath,
+  };
+}
 
-      if (snapshotId === latestSnapshot.id) {
-        return {
-          snapshotId,
-          updatedAt:
-            firstString(parsed.attributes, ["updatedAt"]) ??
-            markdown.match(/Recorded At:\s+([^\n]+)/u)?.[1]?.trim() ??
-            latestSnapshot.recordedAt,
-          sourceAssessmentIds: firstStringArray(parsed.attributes, ["sourceAssessmentIds"]),
-          sourceEventIds: firstStringArray(parsed.attributes, ["sourceEventIds"]),
-          topGoalIds: firstStringArray(parsed.attributes, ["topGoalIds"]),
-          relativePath,
-          markdown,
-          body: parsed.body,
-        };
-      }
+function toExportPackProfileSnapshotRecord(
+  record: NonNullable<ReturnType<typeof toProfileSnapshotRecord>>,
+): ExportPackProfileSnapshotRecord {
+  return {
+    id: record.id,
+    recordedAt: record.recordedAt,
+    source: record.source,
+    sourceAssessmentIds: record.sourceAssessmentIds,
+    sourceEventIds: record.sourceEventIds,
+    profile: record.profile,
+    relativePath: record.relativePath,
+  };
+}
+
+function toExportPackHistoryRecord(
+  record: NonNullable<ReturnType<typeof toHistoryRecord>>,
+): ExportPackHistoryRecord {
+  return {
+    id: record.id,
+    kind: record.kind,
+    occurredAt: record.occurredAt,
+    recordedAt: record.recordedAt,
+    source: record.source,
+    title: record.title,
+    status: record.status,
+    tags: record.tags,
+    relatedIds: record.relatedIds,
+    relativePath: record.relativePath,
+    data: record.data,
+  };
+}
+
+function toExportPackCurrentProfile(
+  record: {
+    snapshotId: string | null;
+    updatedAt: string | null;
+    sourceAssessmentIds: string[];
+    sourceEventIds: string[];
+    topGoalIds: string[];
+    relativePath: string;
+    markdown: string | null;
+    body: string | null;
+  },
+): ExportPackCurrentProfile {
+  return {
+    snapshotId: record.snapshotId,
+    updatedAt: record.updatedAt,
+    sourceAssessmentIds: record.sourceAssessmentIds,
+    sourceEventIds: record.sourceEventIds,
+    topGoalIds: record.topGoalIds,
+    relativePath: record.relativePath,
+    markdown: record.markdown,
+    body: record.body,
+  };
+}
+
+function readAssessmentRecords(
+  vaultRoot: string,
+  filters: ExportPackFilters,
+): TolerantCollection<ExportPackAssessmentRecord> {
+  const loaded = collectJsonlRecords(
+    readJsonlRecordOutcomesSync(vaultRoot, "ledger/assessments"),
+    toAssessmentRecord,
+  );
+
+  return {
+    records: loaded.records
+    .filter((entry) => matchesDateWindow(entry.recordedAt ?? entry.importedAt, filters))
+    .sort(compareAssessments)
+    .map(toExportPackAssessmentRecord),
+    failures: loaded.failures,
+  };
+}
+
+function readProfileSnapshotRecords(
+  vaultRoot: string,
+): TolerantCollection<ExportPackProfileSnapshotRecord> {
+  const loaded = collectJsonlRecords(
+    readJsonlRecordOutcomesSync(vaultRoot, "ledger/profile-snapshots"),
+    toProfileSnapshotRecord,
+  );
+
+  return {
+    records: loaded.records.sort(compareSnapshots).map(toExportPackProfileSnapshotRecord),
+    failures: loaded.failures,
+  };
+}
+
+function readHistoryRecords(
+  vaultRoot: string,
+  filters: ExportPackFilters,
+): TolerantCollection<ExportPackHistoryRecord> {
+  const loaded = collectJsonlRecords(
+    readJsonlRecordOutcomesSync(vaultRoot, "ledger/events"),
+    toHistoryRecord,
+  );
+
+  return {
+    records: loaded.records
+    .filter((entry) => matchesDateWindow(entry.occurredAt, filters))
+    .sort(compareHistory)
+    .map(toExportPackHistoryRecord),
+    failures: loaded.failures,
+  };
+}
+
+function fallbackCurrentProfile(
+  latestSnapshot: ExportPackProfileSnapshotRecord,
+): ExportPackCurrentProfile {
+  return toExportPackCurrentProfile(
+    buildCurrentProfileRecord({
+      snapshotId: latestSnapshot.id,
+      updatedAt: latestSnapshot.recordedAt,
+      sourceAssessmentIds: latestSnapshot.sourceAssessmentIds,
+      sourceEventIds: latestSnapshot.sourceEventIds,
+      topGoalIds: firstStringArray(latestSnapshot.profile, ["topGoalIds"]),
+      markdown: null,
+      body: null,
+    }),
+  );
+}
+
+function readCurrentProfileRecord(
+  vaultRoot: string,
+  profileSnapshots: ExportPackProfileSnapshotRecord[],
+): { record: ExportPackCurrentProfile | null; failures: ParseFailure[] } {
+  const latestSnapshot = profileSnapshots[0] ?? null;
+  if (!latestSnapshot) {
+    return { record: null, failures: [] };
+  }
+
+  const outcome = readOptionalMarkdownDocumentOutcomeSync(vaultRoot, "bank/profile/current.md");
+  if (!outcome) {
+    return {
+      record: fallbackCurrentProfile(latestSnapshot),
+      failures: [],
+    };
+  }
+
+  if (!outcome.ok) {
+    return {
+      record: fallbackCurrentProfile(latestSnapshot),
+      failures: [outcome],
+    };
+  }
+
+  const record = toCurrentProfileRecord(outcome.document);
+  if (record.snapshotId === latestSnapshot.id) {
+    return {
+      record: toExportPackCurrentProfile(record),
+      failures: [],
+    };
+  }
+
+  return {
+    record: fallbackCurrentProfile(latestSnapshot),
+    failures: [],
+  };
+}
+
+function readRegistryPages<TRecord extends RegistryMarkdownRecord>(
+  vaultRoot: string,
+  definition: RegistryDefinition<TRecord>,
+): TolerantCollection<ExportPackBankPage> {
+  const failures: ParseFailure[] = [];
+  const records: TRecord[] = [];
+  const relativePaths = walkRelativeFilesSync(vaultRoot, definition.directory, ".md");
+
+  for (const relativePath of relativePaths) {
+    const outcome = readMarkdownDocumentOutcomeSync(vaultRoot, relativePath);
+    if (!outcome.ok) {
+      failures.push(outcome);
+      continue;
+    }
+
+    const record = toRegistryRecord(outcome.document, definition);
+    if (record) {
+      records.push(record);
     }
   }
 
   return {
-    snapshotId: latestSnapshot.id,
-    updatedAt: latestSnapshot.recordedAt,
-    sourceAssessmentIds: latestSnapshot.sourceAssessmentIds,
-    sourceEventIds: latestSnapshot.sourceEventIds,
-    topGoalIds: firstStringArray(latestSnapshot.profile, ["topGoalIds"]),
-    relativePath,
-    markdown: null,
-    body: null,
+    records: sortRegistryRecords(records, definition).map((record) => ({
+      id: record.id,
+      slug: record.slug,
+      title: record.title,
+      status: record.status,
+      relativePath: record.relativePath,
+      markdown: record.markdown,
+      body: record.body,
+      attributes: record.attributes,
+    })),
+    failures,
   };
 }
 
-export function readBankPages(
+export function readHealthContext(
   vaultRoot: string,
-  relativeRoot: string,
-  idKeys: readonly string[],
-): ExportPackBankPage[] {
-  return walkRelativeMarkdownFiles(vaultRoot, relativeRoot)
-    .map((relativePath) => {
-      const markdown = readFileSync(path.join(vaultRoot, relativePath), "utf8");
-      const parsed = tryParseFrontmatterDocument(markdown);
-      if (!parsed) {
-        return null;
-      }
+  filters: ExportPackFilters,
+): ExportPackHealthReadResult {
+  const assessmentRead = readAssessmentRecords(vaultRoot, filters);
+  const allProfileSnapshotRead = readProfileSnapshotRecords(vaultRoot);
+  const historyRead = readHistoryRecords(vaultRoot, filters);
+  const currentProfileRead = readCurrentProfileRecord(vaultRoot, allProfileSnapshotRead.records);
+  const goalsRead = readRegistryPages(vaultRoot, goalRegistryDefinition);
+  const conditionsRead = readRegistryPages(vaultRoot, conditionRegistryDefinition);
+  const allergiesRead = readRegistryPages(vaultRoot, allergyRegistryDefinition);
+  const regimensRead = readRegistryPages(vaultRoot, regimenRegistryDefinition);
+  const familyRead = readRegistryPages(vaultRoot, familyRegistryDefinition);
+  const geneticsRead = readRegistryPages(vaultRoot, geneticsRegistryDefinition);
 
-      const id = firstString(parsed.attributes, idKeys);
-      if (!id) {
-        return null;
-      }
-
-      return {
-        id,
-        slug: firstString(parsed.attributes, ["slug"]) ?? path.basename(relativePath, ".md"),
-        title: firstString(parsed.attributes, ["title", "name", "label"]),
-        status: firstString(parsed.attributes, ["status", "clinicalStatus", "significance"]),
-        relativePath,
-        markdown,
-        body: parsed.body,
-        attributes: parsed.attributes,
-      };
-    })
-    .filter((entry): entry is ExportPackBankPage => entry !== null)
-    .sort((left, right) => (left.title ?? left.slug).localeCompare(right.title ?? right.slug));
-}
-
-function walkRelativeMarkdownFiles(vaultRoot: string, relativeRoot: string): string[] {
-  const absoluteRoot = path.join(vaultRoot, relativeRoot);
-  if (!existsSync(absoluteRoot)) {
-    return [];
-  }
-
-  return walkRelativeFilesByExtension(vaultRoot, relativeRoot, ".md");
-}
-
-function readJsonlDirectory(
-  vaultRoot: string,
-  relativeRoot: string,
-): Array<{ relativePath: string; value: unknown }> {
-  const absoluteRoot = path.join(vaultRoot, relativeRoot);
-  if (!existsSync(absoluteRoot)) {
-    return [];
-  }
-
-  const files = walkRelativeFilesByExtension(vaultRoot, relativeRoot, ".jsonl");
-  const results: Array<{ relativePath: string; value: unknown }> = [];
-
-  for (const relativePath of files) {
-    const contents = readFileSync(path.join(vaultRoot, relativePath), "utf8");
-    for (const line of contents.split(/\r?\n/u)) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-
-      const value = tryParseJson(trimmed);
-      if (value === undefined) {
-        continue;
-      }
-
-      results.push({ relativePath, value });
-    }
-  }
-
-  return results;
-}
-
-function walkRelativeFilesByExtension(
-  vaultRoot: string,
-  relativeRoot: string,
-  extension: string,
-): string[] {
-  const results: string[] = [];
-  const stack = [relativeRoot];
-
-  while (stack.length > 0) {
-    const currentRelative = stack.pop() as string;
-    const absoluteCurrent = path.join(vaultRoot, currentRelative);
-    const entries = readdirSync(absoluteCurrent, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const childRelative = path.join(currentRelative, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(childRelative);
-        continue;
-      }
-
-      if (entry.isFile() && childRelative.endsWith(extension)) {
-        results.push(childRelative);
-      }
-    }
-  }
-
-  return results.sort();
+  return {
+    health: {
+      assessments: assessmentRead.records,
+      profileSnapshots: allProfileSnapshotRead.records.filter((entry) =>
+        matchesDateWindow(entry.recordedAt, filters),
+      ),
+      historyEvents: historyRead.records,
+      currentProfile: currentProfileRead.record,
+      goals: goalsRead.records,
+      conditions: conditionsRead.records,
+      allergies: allergiesRead.records,
+      regimens: regimensRead.records,
+      familyMembers: familyRead.records,
+      geneticVariants: geneticsRead.records,
+    },
+    failures: [
+      ...assessmentRead.failures,
+      ...allProfileSnapshotRead.failures,
+      ...historyRead.failures,
+      ...currentProfileRead.failures,
+      ...goalsRead.failures,
+      ...conditionsRead.failures,
+      ...allergiesRead.failures,
+      ...regimensRead.failures,
+      ...familyRead.failures,
+      ...geneticsRead.failures,
+    ],
+  };
 }
 
 function matchesDateWindow(
@@ -301,53 +353,4 @@ function matchesDateWindow(
   }
 
   return true;
-}
-
-function firstObjectOrEmpty(
-  value: Record<string, unknown> | null,
-  keys: readonly string[],
-): Record<string, unknown> {
-  if (!value) {
-    return {};
-  }
-
-  return firstObject(value, keys) ?? {};
-}
-
-function firstStringOrNull(
-  value: Record<string, unknown> | null,
-  keys: readonly string[],
-): string | null {
-  if (!value) {
-    return null;
-  }
-
-  return firstString(value, keys);
-}
-
-function firstStringArrayOrEmpty(
-  value: Record<string, unknown> | null,
-  keys: readonly string[],
-): string[] {
-  if (!value) {
-    return [];
-  }
-
-  return firstStringArray(value, keys);
-}
-
-function tryParseFrontmatterDocument(markdown: string) {
-  try {
-    return parseFrontmatterDocument(markdown);
-  } catch {
-    return null;
-  }
-}
-
-function tryParseJson(value: string): unknown | undefined {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return undefined;
-  }
 }

@@ -7,8 +7,8 @@ import {
   matchesLookup,
   matchesStatus,
   matchesText,
-  readJsonlRecords,
 } from "./shared.js";
+import { readJsonlRecords } from "./loaders.js";
 
 export type HealthHistoryKind =
   | "encounter"
@@ -48,7 +48,7 @@ const HEALTH_HISTORY_KINDS = new Set<HealthHistoryKind>([
   "exposure",
 ]);
 
-function toHistoryRecord(
+export function toHistoryRecord(
   value: unknown,
   relativePath: string,
 ): HistoryQueryRecord | null {
@@ -81,7 +81,7 @@ function toHistoryRecord(
   };
 }
 
-function compareHistory(left: HistoryQueryRecord, right: HistoryQueryRecord): number {
+export function compareHistory(left: HistoryQueryRecord, right: HistoryQueryRecord): number {
   if (left.occurredAt !== right.occurredAt) {
     return right.occurredAt.localeCompare(left.occurredAt);
   }
