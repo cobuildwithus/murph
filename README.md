@@ -169,35 +169,40 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | --- | --- |
 | `vault-cli init` | Bootstraps a new vault with `vault.json`, `CORE.md`, directory structure, and an audit entry. |
 | `vault-cli validate` | Validates vault metadata, frontmatter, and contract-shaped records. |
-| `vault-cli vault show|paths|stats` | Exposes explicit read-only vault metadata, layout, and record-count summaries. |
+| `vault-cli vault show|paths|stats|update` | Exposes explicit vault metadata, layout, record-count summaries, and stable metadata updates. |
 | `vault-cli audit show|list|tail` | Exposes first-class audit inspection and filtering over canonical audit shards. |
+| `vault-cli provider scaffold|upsert|show|list` | Gives `bank/providers/*.md` a first-class noun with stable `prov_*` ids and slug-based follow-up reads. |
+| `vault-cli event scaffold|upsert|show|list` | Covers the non-specialized canonical event kinds without requiring a separate noun per kind. |
 | `vault-cli document import <file>` | Copies a source document into `raw/documents/...`, writes an immutable raw manifest, and appends a document event. |
 | `vault-cli document show|list|manifest` | Lets operators follow `doc_*`/`evt_*` ids back to the event record and immutable raw manifest. |
 | `vault-cli meal add` | Copies meal attachments into `raw/meals/...`, writes an immutable raw manifest, and appends a meal event. |
 | `vault-cli meal show|list|manifest` | Lets operators follow `meal_*`/`evt_*` ids back to the event record and immutable raw manifest. |
+| `vault-cli samples add` | Appends one or more manually curated sample records from a JSON payload without going through CSV import. |
 | `vault-cli samples import-csv <file>` | Copies a CSV into `raw/samples/...`, writes an immutable batch manifest, and appends sample records into sharded sample ledgers. |
 | `vault-cli samples show|list|batch show|batch list` | Adds first-class sample follow-up reads plus `xfm_*` import-batch inspection. |
-| `vault-cli experiment create|show|list` | Creates or reuses an experiment page, then exposes direct experiment follow-up reads by id or slug. |
-| `vault-cli journal ensure|show|list` | Creates journal pages and exposes first-class day reads over the journal surface. |
+| `vault-cli experiment create|show|list|update|checkpoint|stop` | Creates or reuses experiment pages, then supports direct lifecycle mutations and follow-up reads by id or slug. |
+| `vault-cli journal ensure|show|list|append|link-event|unlink-event|link-stream|unlink-stream` | Creates journal pages, exposes first-class day reads, and adds focused day-level mutation helpers without arbitrary markdown editing. |
 | `vault-cli show <id>` | Resolves one queryable record or document view. |
-| `vault-cli list` | Lists records through the read model with filters. |
-| `vault-cli export pack` | Builds a derived export pack for a date range and optional experiment scope. |
+| `vault-cli list` | Lists records through the read model with `recordType`, `kind`, `status`, `stream`, `tag`, experiment, and date filters. |
+| `vault-cli export pack|show|list|materialize|prune` | Builds, inspects, copies, and removes derived export packs under `exports/packs/`. |
 
 ### Inbox + Parser Commands
 
 The repo also includes local-first inbox parser controls:
 
+- `vault-cli inbox bootstrap --vault <path>` initializes `.runtime/inboxd`, optionally rebuilds from raw inbox envelopes, and writes parser toolchain config in one step
 - `vault-cli inbox setup --vault <path>` writes parser toolchain config under `.runtime/parsers/toolchain.json`
 - `vault-cli inbox doctor --vault <path>` reports connector readiness plus discovered parser-toolchain availability
 - `vault-cli inbox parse --vault <path> [--captureId <captureId>] [--limit <n>]` drains queued attachment parse jobs
 - `vault-cli inbox requeue --vault <path> [--captureId <captureId>] [--attachmentId <attachmentId>] [--state failed|running]` resets failed or interrupted jobs back to pending
+- `vault-cli inbox attachment list|show|show-status|parse|reparse` exposes attachment-level inspection plus single-attachment parser control
+- `vault-cli inbox promote meal|journal|experiment-note` exposes implemented promotion flows for deterministic meal, journal, and experiment-note follow-ups
 
 ### Health Extension Commands
 
 The repo also includes a larger health-record surface:
 
-- `vault-cli intake import <file>`
-- `vault-cli intake project <assessmentId>`
+- `vault-cli intake import|show|list|manifest|raw|project`
 - `vault-cli profile scaffold`
 - `vault-cli profile upsert --input @file.json`
 - `vault-cli profile show <id|current>`
@@ -216,6 +221,7 @@ The noun-oriented commands follow one payload-first grammar:
 - `scaffold` emits a template payload
 - `upsert --input @file.json` writes one canonical record from a JSON payload
 - `show` and `list` read through the query layer
+- `history list` also exposes `--kind`, `--from`, and `--to`; `profile list` exposes `--from` and `--to`
 - `profile current rebuild` derives `bank/profile/current.md` from the latest accepted snapshot
 - `regimen stop` updates a regimen while preserving its canonical id
 
@@ -227,7 +233,7 @@ For a local-first parser setup, the repo exposes one bootstrap command:
 pnpm setup:inbox -- --vault ./vault
 ```
 
-That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox setup` against the target vault so the parser toolchain config is created without hand-editing runtime files. External tools such as `ffmpeg`, `pdftotext`, `whisper.cpp`, and PaddleOCR still need to be installed through your OS or environment.
+That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime and parser toolchain config are created without hand-editing runtime files. External tools such as `ffmpeg`, `pdftotext`, `whisper.cpp`, and PaddleOCR still need to be installed through your OS or environment.
 
 For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so new captures automatically drain their attachment parse jobs without a separate manual worker step.
 
@@ -236,8 +242,11 @@ For product integration code, prefer `createParsedInboxPipeline(...)` or `runInb
 The query layer distinguishes between the primary lookup id used for follow-on reads and the display id surfaced on the record itself.
 
 - `show` accepts query-layer ids such as `journal:2026-03-12`, `evt_*`, `smp_*`, `exp_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
+- `provider show` accepts either the canonical `prov_*` id or the provider slug from `bank/providers/<slug>.md`
+- `event show` accepts `evt_*`; specialized nouns such as `document`, `meal`, `history`, and `experiment` remain the preferred follow-up surface when they exist
 - generic `show` still expects query-layer ids for event-backed records, but `document show` and `meal show` also accept `doc_*` and `meal_*`
 - `samples batch show` and `samples batch list` are the follow-up surface for `xfm_*`; generic `show` still does not accept import-batch ids
+- `intake manifest` and `intake raw` are the follow-up surface for immutable assessment artifacts under `raw/assessments/**`
 - export-pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 
 If you chain commands together, prefer the `lookupId` or `lookupIds` returned by the write command rather than guessing which surfaced id is queryable.
@@ -254,10 +263,20 @@ The main write flows map cleanly onto the vault:
   copies photo/audio attachments into `raw/meals/...`, writes an immutable raw manifest with checksums/provenance, appends a `kind: "meal"` event, and appends an audit record
 - `samples import-csv`
   copies the CSV into `raw/samples/...`, writes an immutable batch manifest with checksum/import config/row provenance, returns an `xfm_*` batch id, and appends `smp_*` records to stream-specific sample ledgers
+- `samples add`
+  appends one or more manually curated `smp_*` records into the same stream-specific sample ledgers without writing a new raw CSV batch
 - `experiment create`
   creates `bank/experiments/<slug>.md` and is idempotent when the page already exists with the same baseline attributes
+- `experiment update|checkpoint|stop`
+  mutates experiment frontmatter/body or appends `experiment_event` lifecycle records while preserving the existing `exp_*` identity
 - `journal ensure`
   creates `journal/YYYY/YYYY-MM-DD.md` if missing and returns a stable `journal:<date>` lookup id
+- `journal append|link-event|unlink-event|link-stream|unlink-stream`
+  mutates only the targeted journal page through focused append/frontmatter helpers
+- `provider upsert`
+  creates or updates `bank/providers/<slug>.md` with a stable `prov_*` id
+- `event upsert`
+  appends one canonical `evt_*` event record for supported generic event kinds
 - `intake import`
   copies an assessment payload into `raw/assessments/...`, writes an immutable raw manifest with checksum/provenance, appends an `asmt_*` assessment record, and returns a queryable lookup id
 - `profile upsert`

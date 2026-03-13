@@ -6,15 +6,18 @@ import {
 } from '../command-helpers.js'
 import {
   inboxAttachmentListResultSchema,
+  inboxAttachmentParseResultSchema,
   inboxAttachmentReparseResultSchema,
   inboxAttachmentShowResultSchema,
   inboxAttachmentStatusResultSchema,
   inboxBackfillResultSchema,
+  inboxBootstrapResultSchema,
   inboxDaemonStateSchema,
   inboxDoctorResultSchema,
   inboxInitResultSchema,
   inboxListResultSchema,
   inboxParseResultSchema,
+  inboxPromoteExperimentNoteResultSchema,
   inboxPromoteMealResultSchema,
   inboxPromoteJournalResultSchema,
   inboxRequeueResultSchema,
@@ -29,6 +32,41 @@ import {
 } from '../inbox-cli-contracts.js'
 import type { InboxCliServices } from '../inbox-services.js'
 
+const inboxInitOptionFields = {
+  rebuild: z
+    .boolean()
+    .optional()
+    .describe('Rebuild the runtime index from raw inbox envelope files after initialization.'),
+}
+
+const inboxSetupOptionFields = {
+  ffmpegCommand: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional explicit ffmpeg command or path to persist.'),
+  pdftotextCommand: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional explicit pdftotext command or path to persist.'),
+  whisperCommand: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional explicit whisper.cpp command or path to persist.'),
+  whisperModelPath: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional explicit whisper model path to persist.'),
+  paddleocrCommand: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional explicit PaddleOCR command or path to persist.'),
+}
+
 export function registerInboxCommands(
   cli: Cli.Cli,
   services: InboxCliServices,
@@ -37,6 +75,40 @@ export function registerInboxCommands(
     description:
       'Inbox runtime setup, diagnostics, capture review, and daemon operations.',
   })
+
+  const inboxPostInitCta = {
+    cta: {
+      description: 'Next:',
+      commands: [
+        {
+          command: 'vault-cli inbox source add imessage',
+          description: 'Add an iMessage connector.',
+          options: {
+            id: 'imessage:self',
+            account: 'self',
+            includeOwn: true,
+            vault: true,
+          },
+        },
+        {
+          command: 'vault-cli inbox doctor',
+          description: 'Verify runtime setup before backfill.',
+          args: { sourceId: 'imessage:self' },
+          options: { vault: true },
+        },
+        {
+          command: 'vault-cli inbox backfill',
+          description: 'Import recent messages into the inbox runtime.',
+          options: { source: 'imessage:self', vault: true },
+        },
+        {
+          command: 'vault-cli inbox run',
+          description: 'Start the foreground inbox daemon.',
+          options: { vault: true },
+        },
+      ],
+    },
+  }
 
   inbox.command('init', {
     args: emptyArgsSchema,
@@ -54,12 +126,7 @@ export function registerInboxCommands(
     ],
     hint:
       'Run this after `vault-cli init`; it creates only machine-local inbox runtime state.',
-    options: withBaseOptions({
-      rebuild: z
-        .boolean()
-        .optional()
-        .describe('Rebuild the runtime index from raw inbox envelope files after initialization.'),
-    }),
+    options: withBaseOptions(inboxInitOptionFields),
     output: inboxInitResultSchema,
     async run(context) {
       const result = await services.init({
@@ -68,39 +135,57 @@ export function registerInboxCommands(
         rebuild: context.options.rebuild,
       })
 
-      return context.ok(result, {
-        cta: {
-          description: 'Next:',
-          commands: [
-            {
-              command: 'vault-cli inbox source add imessage',
-              description: 'Add an iMessage connector.',
-              options: {
-                id: 'imessage:self',
-                account: 'self',
-                includeOwn: true,
-                vault: true,
-              },
-            },
-            {
-              command: 'vault-cli inbox doctor',
-              description: 'Verify runtime setup before backfill.',
-              args: { sourceId: 'imessage:self' },
-              options: { vault: true },
-            },
-            {
-              command: 'vault-cli inbox backfill',
-              description: 'Import recent messages into the inbox runtime.',
-              options: { source: 'imessage:self', vault: true },
-            },
-            {
-              command: 'vault-cli inbox run',
-              description: 'Start the foreground inbox daemon.',
-              options: { vault: true },
-            },
-          ],
+      return context.ok(result, inboxPostInitCta)
+    },
+  })
+
+  inbox.command('bootstrap', {
+    args: emptyArgsSchema,
+    description:
+      'Initialize local inbox runtime state and write parser toolchain config in one step.',
+    examples: [
+      {
+        options: { vault: './vault' },
+        description: 'Create local inbox runtime state and parser toolchain config together.',
+      },
+      {
+        options: {
+          vault: './vault',
+          rebuild: true,
+          whisperCommand: '/usr/local/bin/whisper-cli',
+          whisperModelPath: './models/ggml-base.en.bin',
         },
+        description:
+          'Rebuild runtime indexes while persisting explicit whisper.cpp command and model-path overrides.',
+      },
+    ],
+    hint:
+      'Use this for local-first inbox/parser bootstrap; it composes `inbox init` and `inbox setup` without mixing their flag sets.',
+    options: withBaseOptions({
+      ...inboxInitOptionFields,
+      ...inboxSetupOptionFields,
+      strict: z
+        .boolean()
+        .optional()
+        .describe(
+          'Fail if bootstrap doctor finds blocking runtime issues or unavailable explicitly configured parser tools.',
+        ),
+    }),
+    output: inboxBootstrapResultSchema,
+    async run(context) {
+      const result = await services.bootstrap({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        rebuild: context.options.rebuild,
+        ffmpegCommand: context.options.ffmpegCommand,
+        pdftotextCommand: context.options.pdftotextCommand,
+        whisperCommand: context.options.whisperCommand,
+        whisperModelPath: context.options.whisperModelPath,
+        paddleocrCommand: context.options.paddleocrCommand,
+        strict: context.options.strict,
       })
+
+      return context.ok(result, inboxPostInitCta)
     },
   })
 
@@ -124,33 +209,7 @@ export function registerInboxCommands(
     ],
     hint:
       'This config is local runtime state only; it does not write canonical health records.',
-    options: withBaseOptions({
-      ffmpegCommand: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional explicit ffmpeg command or path to persist.'),
-      pdftotextCommand: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional explicit pdftotext command or path to persist.'),
-      whisperCommand: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional explicit whisper.cpp command or path to persist.'),
-      whisperModelPath: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional explicit whisper model path to persist.'),
-      paddleocrCommand: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional explicit PaddleOCR command or path to persist.'),
-    }),
+    options: withBaseOptions(inboxSetupOptionFields),
     output: inboxSetupResultSchema,
     async run(context) {
       return services.setup({
@@ -378,6 +437,10 @@ export function registerInboxCommands(
         .max(5000)
         .optional()
         .describe('Optional override backfill limit for this run.'),
+      parse: z
+        .boolean()
+        .optional()
+        .describe('Also drain parser jobs for each imported capture during this backfill run.'),
     }),
     output: inboxBackfillResultSchema,
     async run(context) {
@@ -386,13 +449,15 @@ export function registerInboxCommands(
         requestId: requestIdFromOptions(context.options),
         sourceId: context.options.source,
         limit: context.options.limit,
+        parse: context.options.parse,
       })
     },
   })
 
   inbox.command('run', {
     args: emptyArgsSchema,
-    description: 'Run all enabled inbox connectors in the foreground until stopped.',
+    description:
+      'Run all enabled inbox connectors in the foreground until stopped, auto-draining parser jobs for new captures.',
     hint:
       'Use `vault-cli inbox status` in another shell to inspect daemon state and `vault-cli inbox stop` to send SIGTERM.',
     options: withBaseOptions(),
@@ -557,6 +622,22 @@ export function registerInboxCommands(
     },
   })
 
+  attachment.command('parse', {
+    args: z.object({
+      attachmentId: z.string().min(1).describe('Inbox attachment id to parse now.'),
+    }),
+    description: 'Drain the current parse queue entry for one parseable inbox attachment.',
+    options: withBaseOptions(),
+    output: inboxAttachmentParseResultSchema,
+    async run(context) {
+      return services.parseAttachment({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        attachmentId: context.args.attachmentId,
+      })
+    },
+  })
+
   attachment.command('reparse', {
     args: z.object({
       attachmentId: z.string().min(1).describe('Inbox attachment id to requeue.'),
@@ -620,8 +701,9 @@ export function registerInboxCommands(
       captureId: z.string().min(1).describe('Inbox capture id to promote.'),
     }),
     description:
-      'Reserved placeholder for future experiment-note promotion. The current runtime does not expose a deterministic experiment target-selection rule.',
+      'Promote one inbox capture into a single unambiguous experiment page using an idempotent markdown note block.',
     options: withBaseOptions(),
+    output: inboxPromoteExperimentNoteResultSchema,
     async run(context) {
       return services.promoteExperimentNote({
         vault: context.options.vault,

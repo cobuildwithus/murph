@@ -27,10 +27,31 @@ test('inbox source add schema exposes the local runtime config options', async (
   assert.deepEqual(schema.options.required, ['vault', 'id', 'backfillLimit'])
 })
 
+test('inbox bootstrap schema exposes init and setup option families together', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['inbox', 'bootstrap', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('rebuild' in schema.options.properties, true)
+  assert.equal('whisperCommand' in schema.options.properties, true)
+  assert.equal('whisperModelPath' in schema.options.properties, true)
+  assert.equal('paddleocrCommand' in schema.options.properties, true)
+  assert.equal(schema.options.required?.includes('vault') ?? false, true)
+})
+
 test('inbox help surfaces the first-pass operator commands', async () => {
   const help = await runRawCli(['inbox', '--help'])
 
   assert.match(help, /init\s+Initialize local inbox runtime state/u)
+  assert.match(
+    help,
+    /bootstrap\s+Initialize local inbox runtime state and write parser toolchain config/u,
+  )
   assert.match(help, /setup\s+Write parser toolchain config/u)
   assert.match(help, /source\s+Manage machine-local inbox connector configuration/u)
   assert.match(help, /doctor\s+Verify inbox runtime configuration/u)

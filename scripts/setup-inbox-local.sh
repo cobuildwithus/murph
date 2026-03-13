@@ -6,5 +6,4 @@ cd "$repo_root"
 
 pnpm install
 pnpm build
-node packages/cli/dist/bin.js inbox init "$@"
-node packages/cli/dist/bin.js inbox setup "$@"
+node packages/cli/dist/bin.js inbox bootstrap "$@"

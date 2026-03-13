@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto'
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { experimentFrontmatterSchema } from '@healthybob/contracts'
 import { resolveRuntimePaths, type RuntimePaths } from '@healthybob/runtime-state'
 import { z } from 'incur'
 import { loadRuntimeModule } from './runtime-import.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
   type InboxAttachmentListResult,
+  type InboxAttachmentParseResult,
   type InboxAttachmentReparseResult,
   type InboxAttachmentShowResult,
   type InboxAttachmentStatusResult,
@@ -16,6 +18,7 @@ import {
   inboxPromotionStoreSchema,
   inboxRuntimeConfigSchema,
   type InboxBackfillResult,
+  type InboxBootstrapResult,
   type InboxConnectorConfig,
   type InboxDaemonState,
   type InboxDoctorCheck,
@@ -26,6 +29,7 @@ import {
   type InboxParserToolStatus,
   type InboxParserToolchainStatus,
   type InboxPromotionEntry,
+  type InboxPromoteExperimentNoteResult,
   type InboxPromoteMealResult,
   type InboxPromoteJournalResult,
   type InboxRequeueResult,
@@ -128,6 +132,8 @@ interface RuntimeAttachmentParseJobRecord {
   startedAt?: string | null
   finishedAt?: string | null
 }
+
+type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>
 
 interface RuntimeStore {
   close(): void
@@ -293,6 +299,17 @@ interface ParsersRuntimeModule {
   createConfiguredParserRegistry(input: {
     vaultRoot: string
   }): Promise<ConfiguredParserRegistryRuntime>
+  runInboxDaemonWithParsers(input: {
+    vaultRoot: string
+    runtime: RuntimeStore
+    registry: unknown
+    ffmpeg?: {
+      commandCandidates?: string[]
+      allowSystemLookup?: boolean
+    }
+    connectors: PollConnector[]
+    signal: AbortSignal
+  }): Promise<void>
   createInboxParserService(input: {
     vaultRoot: string
     runtime: RuntimeStore
@@ -392,12 +409,20 @@ interface DoctorInput extends CommandContext {
   sourceId?: string | null
 }
 
+interface InitInput extends CommandContext {
+  rebuild?: boolean
+}
+
 interface SetupInput extends CommandContext {
   ffmpegCommand?: string
   paddleocrCommand?: string
   pdftotextCommand?: string
   whisperCommand?: string
   whisperModelPath?: string
+}
+
+interface BootstrapInput extends SetupInput {
+  rebuild?: boolean
 }
 
 interface ParseInput extends CommandContext {
@@ -430,7 +455,8 @@ interface PromoteInput extends CommandContext {
 }
 
 export interface InboxCliServices {
-  init(input: CommandContext & { rebuild?: boolean }): Promise<InboxInitResult>
+  bootstrap(input: BootstrapInput): Promise<InboxBootstrapResult>
+  init(input: InitInput): Promise<InboxInitResult>
   sourceAdd(input: SourceAddInput): Promise<InboxSourceAddResult>
   sourceList(input: CommandContext): Promise<InboxSourceListResult>
   sourceRemove(input: SourceRemoveInput): Promise<InboxSourceRemoveResult>
@@ -457,6 +483,9 @@ export interface InboxCliServices {
   showAttachmentStatus(
     input: CommandContext & { attachmentId: string },
   ): Promise<InboxAttachmentStatusResult>
+  parseAttachment(
+    input: CommandContext & { attachmentId: string },
+  ): Promise<InboxAttachmentParseResult>
   reparseAttachment(
     input: CommandContext & { attachmentId: string },
   ): Promise<InboxAttachmentReparseResult>
@@ -464,7 +493,9 @@ export interface InboxCliServices {
   search(input: SearchInput): Promise<InboxSearchResult>
   promoteMeal(input: PromoteInput): Promise<InboxPromoteMealResult>
   promoteJournal(input: PromoteInput): Promise<InboxPromoteJournalResult>
-  promoteExperimentNote(input: PromoteInput): Promise<never>
+  promoteExperimentNote(
+    input: PromoteInput,
+  ): Promise<InboxPromoteExperimentNoteResult>
 }
 
 const IMESSAGE_MESSAGES_DB_RELATIVE_PATH = path.join(
@@ -477,6 +508,8 @@ const PROMOTION_STORE_VERSION = 1
 const RAW_MEALS_DIRECTORY = path.posix.join('raw', 'meals')
 const JOURNAL_PROMOTION_SECTION_START = '<!-- inbox-promotions:start -->'
 const JOURNAL_PROMOTION_SECTION_END = '<!-- inbox-promotions:end -->'
+const EXPERIMENT_NOTE_SECTION_START = '<!-- inbox-experiment-notes:start -->'
+const EXPERIMENT_NOTE_SECTION_END = '<!-- inbox-experiment-notes:end -->'
 
 function createParserRuntimeUnavailableError(
   operation: string,
@@ -551,46 +584,141 @@ export function createIntegratedInboxCliServices(
   const journalPromotionEnabled =
     dependencies.enableJournalPromotion ?? dependencies.loadCoreModule === undefined
 
-  return {
-    async init(input) {
-      const paths = resolveRuntimePaths(input.vault)
-      const inboxd = await loadInbox()
-      await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
+  const initInboxRuntime = async (input: InitInput): Promise<InboxInitResult> => {
+    const paths = resolveRuntimePaths(input.vault)
+    const inboxd = await loadInbox()
+    await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
 
-      const createdPaths: string[] = []
-      await ensureDirectory(paths.runtimeRoot, createdPaths, paths.absoluteVaultRoot)
-      await ensureDirectory(
-        paths.inboxRuntimeRoot,
-        createdPaths,
+    const createdPaths: string[] = []
+    await ensureDirectory(paths.runtimeRoot, createdPaths, paths.absoluteVaultRoot)
+    await ensureDirectory(
+      paths.inboxRuntimeRoot,
+      createdPaths,
+      paths.absoluteVaultRoot,
+    )
+    await ensureConfigFile(paths, createdPaths)
+
+    if (!(await fileExists(paths.inboxDbPath))) {
+      createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath))
+    }
+
+    const runtime = await inboxd.openInboxRuntime({
+      vaultRoot: paths.absoluteVaultRoot,
+    })
+    runtime.close()
+
+    let rebuiltCaptures = 0
+    if (input.rebuild) {
+      rebuiltCaptures = await rebuildRuntime(paths, inboxd)
+    }
+
+    return {
+      vault: paths.absoluteVaultRoot,
+      runtimeDirectory: relativeToVault(
         paths.absoluteVaultRoot,
-      )
-      await ensureConfigFile(paths, createdPaths)
+        paths.inboxRuntimeRoot,
+      ),
+      databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
+      configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
+      createdPaths,
+      rebuiltCaptures,
+    }
+  }
 
-      if (!(await fileExists(paths.inboxDbPath))) {
-        createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath))
-      }
+  const setupInboxToolchain = async (
+    input: SetupInput,
+  ): Promise<InboxSetupResult> => {
+    const paths = resolveRuntimePaths(input.vault)
+    const inboxd = await loadInbox()
+    const parsers = await requireParsers('inbox parser setup')
 
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-      runtime.close()
+    await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
 
-      let rebuiltCaptures = 0
-      if (input.rebuild) {
-        rebuiltCaptures = await rebuildRuntime(paths, inboxd)
-      }
+    const written = await parsers.writeParserToolchainConfig({
+      vaultRoot: paths.absoluteVaultRoot,
+      tools: {
+        ...(input.ffmpegCommand
+          ? {
+              ffmpeg: {
+                command: input.ffmpegCommand,
+              },
+            }
+          : {}),
+        ...(input.pdftotextCommand
+          ? {
+              pdftotext: {
+                command: input.pdftotextCommand,
+              },
+            }
+          : {}),
+        ...(input.whisperCommand || input.whisperModelPath
+          ? {
+              whisper: {
+                ...(input.whisperCommand
+                  ? {
+                      command: input.whisperCommand,
+                    }
+                  : {}),
+                ...(input.whisperModelPath
+                  ? {
+                      modelPath: input.whisperModelPath,
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(input.paddleocrCommand
+          ? {
+              paddleocr: {
+                command: input.paddleocrCommand,
+              },
+            }
+          : {}),
+      },
+    })
+    const doctor = await parsers.discoverParserToolchain({
+      vaultRoot: paths.absoluteVaultRoot,
+    })
+    const parserToolchain = toCliParserToolchain(paths.absoluteVaultRoot, doctor)
 
-      return {
-        vault: paths.absoluteVaultRoot,
-        runtimeDirectory: relativeToVault(
-          paths.absoluteVaultRoot,
-          paths.inboxRuntimeRoot,
-        ),
-        databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
-        configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-        createdPaths,
-        rebuiltCaptures,
-      }
+    return {
+      vault: paths.absoluteVaultRoot,
+      configPath: relativeToVault(paths.absoluteVaultRoot, written.configPath),
+      updatedAt: written.config.updatedAt,
+      tools: parserToolchain.tools,
+    }
+  }
+
+  const bootstrapInboxRuntime = async (
+    input: BootstrapInput,
+  ): Promise<InboxBootstrapResult> => {
+    const initResult = await initInboxRuntime(input)
+    const setupResult = await setupInboxToolchain(input)
+
+    return {
+      vault: initResult.vault,
+      init: {
+        runtimeDirectory: initResult.runtimeDirectory,
+        databasePath: initResult.databasePath,
+        configPath: initResult.configPath,
+        createdPaths: initResult.createdPaths,
+        rebuiltCaptures: initResult.rebuiltCaptures,
+      },
+      setup: {
+        configPath: setupResult.configPath,
+        updatedAt: setupResult.updatedAt,
+        tools: setupResult.tools,
+      },
+    }
+  }
+
+  return {
+    async bootstrap(input) {
+      return bootstrapInboxRuntime(input)
+    },
+
+    async init(input) {
+      return initInboxRuntime(input)
     },
 
     async sourceAdd(input) {
@@ -940,65 +1068,7 @@ export function createIntegratedInboxCliServices(
     },
 
     async setup(input) {
-      const paths = resolveRuntimePaths(input.vault)
-      const inboxd = await loadInbox()
-      const parsers = await requireParsers('inbox parser setup')
-
-      await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
-
-      const written = await parsers.writeParserToolchainConfig({
-        vaultRoot: paths.absoluteVaultRoot,
-        tools: {
-          ...(input.ffmpegCommand
-            ? {
-                ffmpeg: {
-                  command: input.ffmpegCommand,
-                },
-              }
-            : {}),
-          ...(input.pdftotextCommand
-            ? {
-                pdftotext: {
-                  command: input.pdftotextCommand,
-                },
-              }
-            : {}),
-          ...(input.whisperCommand || input.whisperModelPath
-            ? {
-                whisper: {
-                  ...(input.whisperCommand
-                    ? {
-                        command: input.whisperCommand,
-                      }
-                    : {}),
-                  ...(input.whisperModelPath
-                    ? {
-                        modelPath: input.whisperModelPath,
-                      }
-                    : {}),
-                },
-              }
-            : {}),
-          ...(input.paddleocrCommand
-            ? {
-                paddleocr: {
-                  command: input.paddleocrCommand,
-                },
-              }
-            : {}),
-        },
-      })
-      const doctor = await parsers.discoverParserToolchain({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-      const parserToolchain = toCliParserToolchain(paths.absoluteVaultRoot, doctor)
-
-      return {
-        vault: paths.absoluteVaultRoot,
-        configPath: relativeToVault(paths.absoluteVaultRoot, written.configPath),
-        updatedAt: written.config.updatedAt,
-        tools: parserToolchain.tools,
-      }
+      return setupInboxToolchain(input)
     },
 
     async parse(input) {
@@ -1138,6 +1208,7 @@ export function createIntegratedInboxCliServices(
     async run(input, options) {
       const paths = await ensureInitialized(loadInbox, input.vault)
       const inboxd = await loadInbox()
+      const parsers = await requireParsers('inbox daemon parser integration')
       const config = await readConfig(paths)
       const enabledConnectors = config.connectors.filter(
         (connector) => connector.enabled,
@@ -1164,14 +1235,9 @@ export function createIntegratedInboxCliServices(
         )
       }
 
-      const runtime = await inboxd.openInboxRuntime({
+      const configured = await parsers.createConfiguredParserRegistry({
         vaultRoot: paths.absoluteVaultRoot,
       })
-      const pipeline = await inboxd.createInboxPipeline({
-        vaultRoot: paths.absoluteVaultRoot,
-        runtime,
-      })
-
       const connectors = await Promise.all(
         enabledConnectors.map((connector) =>
           instantiateConnector({
@@ -1185,9 +1251,10 @@ export function createIntegratedInboxCliServices(
       const startedAt = clock().toISOString()
       const signalBridge = options?.signal
         ? { cleanup: () => {}, signal: options.signal }
-        : createProcessSignalBridge()
+            : createProcessSignalBridge()
       const runSignal = signalBridge.signal
       const shouldReportSignal = runSignal.aborted === false
+
       await writeDaemonState(paths, {
         running: true,
         stale: false,
@@ -1205,8 +1272,14 @@ export function createIntegratedInboxCliServices(
       let reason: InboxRunResult['reason'] = 'completed'
 
       try {
-        await inboxd.runInboxDaemon({
-          pipeline,
+        const runtime = await inboxd.openInboxRuntime({
+          vaultRoot: paths.absoluteVaultRoot,
+        })
+        await parsers.runInboxDaemonWithParsers({
+          vaultRoot: paths.absoluteVaultRoot,
+          runtime,
+          registry: configured.registry,
+          ffmpeg: configured.ffmpeg,
           connectors,
           signal: runSignal,
         })
@@ -1228,7 +1301,6 @@ export function createIntegratedInboxCliServices(
         throw error
       } finally {
         signalBridge.cleanup()
-        pipeline.close()
       }
 
       if (runSignal.aborted) {
@@ -1403,6 +1475,76 @@ export function createIntegratedInboxCliServices(
           parseable: isParseableAttachment(match.attachment),
           currentState: resolveAttachmentParseState(match.attachment, jobs),
           jobs: jobs.map(toCliAttachmentParseJob),
+        }
+      } finally {
+        runtime.close()
+      }
+    },
+
+    async parseAttachment(input) {
+      const paths = await ensureInitialized(loadInbox, input.vault)
+      const inboxd = await loadInbox()
+      const parsers = await requireParsers('attachment-level inbox parser drains')
+      const runtime = await inboxd.openInboxRuntime({
+        vaultRoot: paths.absoluteVaultRoot,
+      })
+
+      try {
+        if (!runtime.listAttachmentParseJobs) {
+          throw unsupportedAttachmentParse('parse')
+        }
+        const match = requireAttachmentRecord(runtime, input.attachmentId)
+        if (!isParseableAttachment(match.attachment)) {
+          throw new VaultCliError(
+            'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
+            `Attachment "${input.attachmentId}" is not supported by the current runtime parse queue.`,
+          )
+        }
+
+        const configured = await parsers.createConfiguredParserRegistry({
+          vaultRoot: paths.absoluteVaultRoot,
+        })
+        const parserService = parsers.createInboxParserService({
+          vaultRoot: paths.absoluteVaultRoot,
+          runtime,
+          registry: configured.registry,
+          ffmpeg: configured.ffmpeg,
+        })
+        const results = await parserService.drain({
+          attachmentId: input.attachmentId,
+          maxJobs: 1,
+        })
+        const refreshedCapture = runtime.getCapture(match.capture.captureId)
+        const refreshedAttachment =
+          refreshedCapture?.attachments.find(
+            (attachment) => attachment.attachmentId === input.attachmentId,
+          ) ?? match.attachment
+        const jobs = runtime.listAttachmentParseJobs({
+          attachmentId: input.attachmentId,
+          limit: 20,
+        })
+
+        return {
+          vault: paths.absoluteVaultRoot,
+          captureId: match.capture.captureId,
+          attachmentId: input.attachmentId,
+          parseable: true,
+          attempted: results.length,
+          succeeded: results.filter((result) => result.status === 'succeeded').length,
+          failed: results.filter((result) => result.status === 'failed').length,
+          currentState: resolveAttachmentParseState(refreshedAttachment, jobs),
+          jobs: jobs.map(toCliAttachmentParseJob),
+          results: results.map((result) => ({
+            captureId: result.job.captureId,
+            attachmentId: result.job.attachmentId,
+            status: result.status,
+            providerId: result.providerId ?? null,
+            manifestPath: result.manifestPath
+              ? normalizeVaultPathOutput(paths.absoluteVaultRoot, result.manifestPath)
+              : null,
+            errorCode: result.errorCode ?? null,
+            errorMessage: result.errorMessage ?? null,
+          })),
         }
       } finally {
         runtime.close()
@@ -1763,8 +1905,101 @@ export function createIntegratedInboxCliServices(
       }
     },
 
-    async promoteExperimentNote() {
-      throw unsupportedPromotion('experiment-note')
+    async promoteExperimentNote(input) {
+      const paths = await ensureInitialized(loadInbox, input.vault)
+      const inboxd = await loadInbox()
+      const core = await loadCore()
+      const runtime = await inboxd.openInboxRuntime({
+        vaultRoot: paths.absoluteVaultRoot,
+      })
+
+      try {
+        const capture = runtime.getCapture(input.captureId)
+        if (!capture) {
+          throw new VaultCliError(
+            'INBOX_CAPTURE_NOT_FOUND',
+            `Inbox capture "${input.captureId}" was not found.`,
+          )
+        }
+
+        if (
+          !core.parseFrontmatterDocument ||
+          !core.stringifyFrontmatterDocument ||
+          !core.acquireCanonicalWriteLock
+        ) {
+          throw unsupportedPromotion('experiment-note')
+        }
+
+        const promotionStore = await readPromotionStore(paths)
+        const existing = promotionStore.entries.find(
+          (entry) =>
+            entry.captureId === input.captureId &&
+            entry.target === 'experiment-note' &&
+            entry.status === 'applied',
+        )
+        const experimentEntries = await readExperimentEntries(
+          paths.absoluteVaultRoot,
+          core,
+        )
+        const target = existing
+          ? requireExperimentPromotionEntry(
+              experimentEntries,
+              existing.lookupId,
+              existing.relatedId,
+              capture,
+            )
+          : resolveExperimentPromotionTarget(experimentEntries)
+
+        const lock = await core.acquireCanonicalWriteLock(paths.absoluteVaultRoot)
+        try {
+          const absoluteExperimentPath = path.join(
+            paths.absoluteVaultRoot,
+            target.relativePath,
+          )
+          const rawExperiment = await readFile(absoluteExperimentPath, 'utf8')
+          const parsedExperiment = core.parseFrontmatterDocument(rawExperiment)
+          const experimentAttributes = validateExperimentFrontmatter(
+            parsedExperiment.attributes,
+          )
+          const nextBody = upsertExperimentPromotionBody(
+            parsedExperiment.body,
+            capture,
+            experimentAttributes.slug,
+          )
+          const nextExperiment = core.stringifyFrontmatterDocument({
+            attributes: experimentAttributes,
+            body: nextBody.body,
+          })
+
+          if (nextExperiment !== rawExperiment) {
+            await writeFile(absoluteExperimentPath, nextExperiment, 'utf8')
+          }
+
+          upsertExperimentPromotionEntry(promotionStore, {
+            captureId: input.captureId,
+            lookupId: experimentAttributes.experimentId,
+            promotedAt: clock().toISOString(),
+            relatedId: capture.eventId,
+            note: capture.text ?? null,
+          })
+          await writePromotionStore(paths, promotionStore)
+
+          return {
+            vault: paths.absoluteVaultRoot,
+            captureId: input.captureId,
+            target: 'experiment-note',
+            lookupId: experimentAttributes.experimentId,
+            relatedId: capture.eventId,
+            experimentPath: target.relativePath,
+            experimentSlug: experimentAttributes.slug,
+            appended: nextBody.appended,
+          }
+        } finally {
+          await lock.release()
+        }
+      } finally {
+        runtime.close()
+      }
     },
   }
 }
@@ -2649,6 +2884,39 @@ function upsertJournalPromotionEntry(
   store.entries[existingIndex] = nextEntry
 }
 
+function upsertExperimentPromotionEntry(
+  store: z.infer<typeof inboxPromotionStoreSchema>,
+  input: {
+    captureId: string
+    lookupId: string
+    promotedAt: string
+    relatedId: string
+    note: string | null
+  },
+): void {
+  const existingIndex = store.entries.findIndex(
+    (entry) =>
+      entry.captureId === input.captureId &&
+      entry.target === 'experiment-note',
+  )
+  const nextEntry = {
+    captureId: input.captureId,
+    target: 'experiment-note',
+    status: 'applied',
+    promotedAt: input.promotedAt,
+    lookupId: input.lookupId,
+    relatedId: input.relatedId,
+    note: input.note,
+  } satisfies InboxPromotionEntry
+
+  if (existingIndex === -1) {
+    store.entries.push(nextEntry)
+    return
+  }
+
+  store.entries[existingIndex] = nextEntry
+}
+
 function upsertJournalPromotionBody(
   body: string,
   capture: RuntimeCaptureRecord,
@@ -2731,6 +2999,226 @@ function buildJournalPromotionBlock(
   return lines.join('\n')
 }
 
+function upsertExperimentPromotionBody(
+  body: string,
+  capture: RuntimeCaptureRecord,
+  experimentSlug: string,
+): {
+  body: string
+  appended: boolean
+} {
+  const marker = `<!-- inbox-capture:${capture.captureId} -->`
+  if (body.includes(marker)) {
+    return {
+      body,
+      appended: false,
+    }
+  }
+
+  const block = buildExperimentPromotionBlock(capture, marker, experimentSlug)
+  const normalizedBody = body.replace(/\s*$/, '')
+
+  if (
+    normalizedBody.includes(EXPERIMENT_NOTE_SECTION_START) &&
+    normalizedBody.includes(EXPERIMENT_NOTE_SECTION_END)
+  ) {
+    return {
+      body: normalizedBody.replace(
+        EXPERIMENT_NOTE_SECTION_END,
+        `${block}\n\n${EXPERIMENT_NOTE_SECTION_END}`,
+      ),
+      appended: true,
+    }
+  }
+
+  const separator = normalizedBody.length > 0 ? '\n\n' : ''
+  return {
+    body:
+      `${normalizedBody}${separator}## Inbox Experiment Notes\n\n` +
+      `${EXPERIMENT_NOTE_SECTION_START}\n\n${block}\n\n${EXPERIMENT_NOTE_SECTION_END}\n`,
+    appended: true,
+  }
+}
+
+function buildExperimentPromotionBlock(
+  capture: RuntimeCaptureRecord,
+  marker: string,
+  experimentSlug: string,
+): string {
+  const lines = [
+    marker,
+    `### Inbox Note ${capture.captureId}`,
+    `Experiment: ${experimentSlug}`,
+    `Occurred at: ${capture.occurredAt}`,
+    `Source: ${capture.source}`,
+    `Thread: ${capture.thread.title ?? capture.thread.id}`,
+    `Event: ${capture.eventId}`,
+  ]
+
+  const actorName = normalizeNullableString(capture.actor.displayName)
+  const actorId = normalizeNullableString(capture.actor.id)
+  if (actorName || actorId) {
+    lines.push(`Actor: ${actorName ?? actorId ?? 'unknown'}`)
+  }
+
+  if (capture.attachments.length > 0) {
+    lines.push('Attachments:')
+    for (const attachment of capture.attachments) {
+      const attachmentLabel =
+        attachment.fileName ??
+        attachment.storedPath ??
+        attachment.originalPath ??
+        attachment.externalId ??
+        `attachment-${attachment.ordinal}`
+      lines.push(
+        `- ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`} | ${attachment.kind} | ${attachmentLabel}`,
+      )
+    }
+  }
+
+  const text = normalizeNullableString(capture.text)
+  if (text) {
+    lines.push('', text)
+  }
+
+  return lines.join('\n')
+}
+
+async function readExperimentEntries(
+  vaultRoot: string,
+  core: Pick<CoreRuntimeModule, 'parseFrontmatterDocument'>,
+): Promise<
+  Array<{
+    relativePath: string
+    markdown: string
+    body: string
+    attributes: ExperimentFrontmatter
+  }>
+> {
+  if (!core.parseFrontmatterDocument) {
+    throw unsupportedPromotion('experiment-note')
+  }
+
+  const experimentsRoot = path.join(vaultRoot, 'bank', 'experiments')
+  const files = await safeReadMarkdownFiles(experimentsRoot)
+  const entries: Array<{
+    relativePath: string
+    markdown: string
+    body: string
+    attributes: ExperimentFrontmatter
+  }> = []
+
+  for (const fileName of files) {
+    const relativePath = path.posix.join('bank/experiments', fileName)
+    const markdown = await readFile(path.join(vaultRoot, relativePath), 'utf8')
+    const document = core.parseFrontmatterDocument(markdown)
+    entries.push({
+      relativePath,
+      markdown,
+      body: document.body,
+      attributes: validateExperimentFrontmatter(document.attributes),
+    })
+  }
+
+  return entries
+}
+
+function validateExperimentFrontmatter(value: unknown): ExperimentFrontmatter {
+  const result = experimentFrontmatterSchema.safeParse(value)
+  if (!result.success) {
+    throw new VaultCliError(
+      'contract_invalid',
+      'Experiment frontmatter is invalid.',
+      { errors: result.error.flatten() },
+    )
+  }
+
+  return result.data
+}
+
+function resolveExperimentPromotionTarget(
+  entries: Array<{
+    relativePath: string
+    attributes: ExperimentFrontmatter
+  }>,
+) {
+  const openEntries = entries.filter(
+    (entry) =>
+      entry.attributes.status !== 'completed' &&
+      entry.attributes.status !== 'abandoned',
+  )
+
+  if (openEntries.length === 1) {
+    return openEntries[0]
+  }
+
+  if (entries.length === 1) {
+    return entries[0]
+  }
+
+  const candidates = openEntries.length > 0 ? openEntries : entries
+  if (candidates.length === 0) {
+    throw new VaultCliError(
+      'INBOX_EXPERIMENT_TARGET_MISSING',
+      'Experiment-note promotion requires at least one experiment document in bank/experiments.',
+    )
+  }
+
+  throw new VaultCliError(
+    'INBOX_EXPERIMENT_TARGET_AMBIGUOUS',
+    'Experiment-note promotion needs exactly one unambiguous experiment target.',
+    {
+      candidates: candidates.map((entry) => ({
+        experimentId: entry.attributes.experimentId,
+        slug: entry.attributes.slug,
+        status: entry.attributes.status,
+      })),
+    },
+  )
+}
+
+function requireExperimentPromotionEntry(
+  entries: Array<{
+    relativePath: string
+    attributes: ExperimentFrontmatter
+  }>,
+  lookupId: string | null,
+  relatedId: string | null,
+  capture: RuntimeCaptureRecord,
+) {
+  if (!lookupId || !relatedId) {
+    throw new VaultCliError(
+      'INBOX_PROMOTION_STATE_INVALID',
+      'Stored experiment-note promotion state is missing canonical ids.',
+    )
+  }
+
+  if (relatedId !== capture.eventId) {
+    throw new VaultCliError(
+      'INBOX_PROMOTION_STATE_INVALID',
+      'Stored experiment-note promotion state does not match the capture event.',
+    )
+  }
+
+  const existing = entries.find(
+    (entry) =>
+      entry.attributes.experimentId === lookupId ||
+      entry.attributes.slug === lookupId,
+  )
+  if (!existing) {
+    throw new VaultCliError(
+      'INBOX_PROMOTION_CANONICAL_MISSING',
+      'Local experiment-note promotion state exists, but the target experiment could not be verified.',
+      {
+        captureId: capture.captureId,
+        lookupId,
+      },
+    )
+  }
+
+  return existing
+}
+
 async function listCanonicalMealManifestPaths(
   absoluteVaultRoot: string,
 ): Promise<string[]> {
@@ -2773,6 +3261,27 @@ async function walkRelativeFiles(
   }
 
   return matches.sort((left, right) => left.localeCompare(right))
+}
+
+async function safeReadMarkdownFiles(directory: string): Promise<string[]> {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true })
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => entry.name)
+      .sort((left, right) => left.localeCompare(right))
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      String((error as { code?: string }).code) === 'ENOENT'
+    ) {
+      return []
+    }
+
+    throw error
+  }
 }
 
 async function readCanonicalMealManifest(
@@ -2879,7 +3388,9 @@ function unsupportedPromotion(target: 'journal' | 'experiment-note'): VaultCliEr
   )
 }
 
-function unsupportedAttachmentParse(action: 'show status' | 'reparse'): VaultCliError {
+function unsupportedAttachmentParse(
+  action: 'show status' | 'parse' | 'reparse',
+): VaultCliError {
   return new VaultCliError(
     'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
     `Attachment parse ${action} is not available through the current inbox runtime boundary.`,

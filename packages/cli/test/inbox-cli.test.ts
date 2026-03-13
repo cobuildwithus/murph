@@ -256,6 +256,23 @@ function createFakeParsersRuntimeModule(input?: {
     }>
     vaultRoot: string
   }): void
+  onRunInboxDaemonWithParsers?(payload: {
+    connectors: Array<{
+      accountId?: string | null
+      id: string
+      source: string
+    }>
+    runtime: {
+      getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
+      setCursor(
+        source: string,
+        accountId: string | null | undefined,
+        cursor: Record<string, unknown> | null,
+      ): void
+    }
+    signal: AbortSignal
+    vaultRoot: string
+  }): Promise<void> | void
 }) {
   const discoveredAt = input?.discoveredAt ?? '2026-03-13T12:34:56.000Z'
   const toolchainByVault = new Map<
@@ -389,6 +406,35 @@ function createFakeParsersRuntimeModule(input?: {
 
           return []
         },
+      }
+    },
+    async runInboxDaemonWithParsers(payload: {
+      connectors: Array<{
+        accountId?: string | null
+        id: string
+        source: string
+      }>
+      runtime: {
+        getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
+        setCursor(
+          source: string,
+          accountId: string | null | undefined,
+          cursor: Record<string, unknown> | null,
+        ): void
+        close(): void
+      }
+      signal: AbortSignal
+      vaultRoot: string
+    }) {
+      try {
+        await input?.onRunInboxDaemonWithParsers?.({
+          connectors: payload.connectors,
+          runtime: payload.runtime,
+          signal: payload.signal,
+          vaultRoot: payload.vaultRoot,
+        })
+      } finally {
+        payload.runtime.close()
       }
     },
     async discoverParserToolchain(inputPayload: { vaultRoot: string }) {
@@ -878,6 +924,105 @@ test.sequential(
 )
 
 test.sequential(
+  'vault-cli inbox bootstrap composes init and setup without cross-wiring options',
+  async () => {
+    const fixture = await makeVaultFixture('healthybob-inbox-bootstrap-command')
+    const writes: Array<{
+      tools?: Record<string, {
+        command?: string | null
+        modelPath?: string | null
+      }>
+      vaultRoot: string
+    }> = []
+    const services = createIntegratedInboxCliServices({
+      loadInboxModule: async () =>
+        createFakeInboxRuntimeModule({
+          rebuiltCaptureCount: 257,
+        }),
+      loadParsersModule: async () =>
+        createFakeParsersRuntimeModule({
+          onWrite(payload) {
+            writes.push(payload)
+          },
+        }),
+    })
+
+    try {
+      const bootstrapResult = requireData(
+        await runInProcessInboxCli<{
+          init: {
+            runtimeDirectory: string
+            databasePath: string
+            configPath: string
+            createdPaths: string[]
+            rebuiltCaptures: number
+          }
+          setup: {
+            configPath: string
+            updatedAt: string
+            tools: {
+              whisper: {
+                available: boolean
+                command: string | null
+                modelPath: string | null
+              }
+              paddleocr: {
+                available: boolean
+                command: string | null
+              }
+            }
+          }
+        }>([
+          'inbox',
+          'bootstrap',
+          '--vault',
+          fixture.vaultRoot,
+          '--rebuild',
+          '--whisperCommand',
+          '/opt/whisper-cli',
+          '--whisperModelPath',
+          './models/ggml-base.en.bin',
+          '--paddleocrCommand',
+          'paddleocr',
+        ], services),
+      )
+
+      assert.equal(bootstrapResult.init.runtimeDirectory, '.runtime/inboxd')
+      assert.equal(bootstrapResult.init.databasePath, '.runtime/inboxd.sqlite')
+      assert.equal(bootstrapResult.init.configPath, '.runtime/inboxd/config.json')
+      assert.equal(
+        bootstrapResult.init.createdPaths.includes('.runtime/inboxd/config.json'),
+        true,
+      )
+      assert.equal(bootstrapResult.init.rebuiltCaptures, 257)
+      assert.equal(bootstrapResult.setup.configPath, '.runtime/parsers/toolchain.json')
+      assert.equal(bootstrapResult.setup.tools.whisper.available, true)
+      assert.equal(bootstrapResult.setup.tools.whisper.command, '/opt/whisper-cli')
+      assert.equal(
+        bootstrapResult.setup.tools.whisper.modelPath,
+        './models/ggml-base.en.bin',
+      )
+      assert.equal(bootstrapResult.setup.tools.paddleocr.available, true)
+      assert.equal(bootstrapResult.setup.tools.paddleocr.command, 'paddleocr')
+      assert.equal(writes.length, 1)
+      assert.equal(writes[0]?.vaultRoot, fixture.vaultRoot)
+      assert.deepEqual(writes[0]?.tools, {
+        whisper: {
+          command: '/opt/whisper-cli',
+          modelPath: './models/ggml-base.en.bin',
+        },
+        paddleocr: {
+          command: 'paddleocr',
+        },
+      })
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true })
+      await rm(fixture.homeRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'vault-cli inbox list/show/search emit contract-shaped envelopes from runtime data',
   async () => {
     const fixture = await makeVaultFixture('healthybob-inbox-runtime-envelope')
@@ -1088,6 +1233,15 @@ test.sequential('run forwards the configured connector id and account namespace 
   let createdConnectorAccountId: string | null = null
   let seenDaemonConnectorId: string | null = null
   let seenDaemonConnectorAccountId: string | null = null
+  const fakeParsers = createFakeParsersRuntimeModule({
+    onRunInboxDaemonWithParsers({ connectors, runtime }) {
+      seenDaemonConnectorId = connectors[0]?.id ?? null
+      seenDaemonConnectorAccountId = connectors[0]?.accountId ?? null
+      runtime.setCursor('imessage', connectors[0]?.accountId ?? null, {
+        externalId: 'daemon-cursor',
+      })
+    },
+  })
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPid: () => 4242,
@@ -1099,14 +1253,11 @@ test.sequential('run forwards the configured connector id and account namespace 
           createdConnectorId = options.id ?? null
           createdConnectorAccountId = options.accountId ?? null
         },
-        onRunInboxDaemon({ connectors, runtime }) {
-          seenDaemonConnectorId = connectors[0]?.id ?? null
-          seenDaemonConnectorAccountId = connectors[0]?.accountId ?? null
-          runtime.setCursor('imessage', connectors[0]?.accountId ?? null, {
-            externalId: 'daemon-cursor',
-          })
+        onRunInboxDaemon() {
+          throw new Error('expected parser-aware daemon path')
         },
       }),
+    loadParsersModule: async () => fakeParsers,
   })
 
   try {
@@ -1139,6 +1290,17 @@ test.sequential('run forwards the configured connector id and account namespace 
 
 test.sequential('run writes daemon state and status updates after abort', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-run')
+  const fakeParsers = createFakeParsersRuntimeModule({
+    async onRunInboxDaemonWithParsers({ signal }) {
+      if (signal.aborted) {
+        return
+      }
+
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+    },
+  })
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPid: () => 4242,
@@ -1150,6 +1312,7 @@ test.sequential('run writes daemon state and status updates after abort', async 
         photoPath: fixture.photoPath,
         watchDelayMs: 1000,
       }),
+    loadParsersModule: async () => fakeParsers,
   })
 
   try {
@@ -1320,6 +1483,7 @@ test.sequential(
       loadCoreModule: loadBuiltCoreRuntime,
       loadInboxModule: loadBuiltInboxRuntime,
       loadImessageDriver: async () => driver,
+      loadParsersModule: async () => createFakeParsersRuntimeModule(),
     })
 
     const failingServices = createIntegratedInboxCliServices({
@@ -1327,16 +1491,14 @@ test.sequential(
       getPid: () => 5151,
       getPlatform: () => 'darwin',
       loadCoreModule: loadBuiltCoreRuntime,
-      loadInboxModule: async () => {
-        const inboxd = await loadBuiltInboxRuntime()
-        return {
-          ...inboxd,
-          async runInboxDaemon() {
+      loadInboxModule: loadBuiltInboxRuntime,
+      loadImessageDriver: async () => driver,
+      loadParsersModule: async () =>
+        createFakeParsersRuntimeModule({
+          async onRunInboxDaemonWithParsers() {
             throw new Error('daemon failed while polling')
           },
-        }
-      },
-      loadImessageDriver: async () => driver,
+        }),
     })
 
     try {
@@ -1918,6 +2080,79 @@ test.sequential('inbox parse and requeue drive parser queue controls without rea
   }
 })
 
+test.sequential('inbox requeue can reset running attachment parse jobs', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-requeue-running')
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+  })
+
+  try {
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+
+    const captureId = await captureSingleCaptureId({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const inboxd = await loadBuiltInboxRuntime()
+    const runtime = await inboxd.openInboxRuntime({
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    try {
+      const claimed = runtime.claimNextAttachmentParseJob({
+        captureId,
+      })
+      assert.ok(claimed)
+      assert.equal(claimed.state, 'running')
+    } finally {
+      runtime.close()
+    }
+
+    const requeueResult = await services.requeue({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+      state: 'running',
+    })
+    assert.equal(requeueResult.count, 1)
+    assert.equal(requeueResult.filters.state, 'running')
+
+    const runtimeAfterRequeue = await inboxd.openInboxRuntime({
+      vaultRoot: fixture.vaultRoot,
+    })
+    try {
+      const [job] = runtimeAfterRequeue.listAttachmentParseJobs({
+        captureId,
+        limit: 1,
+      })
+      assert.equal(job?.state, 'pending')
+      assert.equal(
+        runtimeAfterRequeue.getCapture(captureId)?.attachments[0]?.parseState,
+        'pending',
+      )
+    } finally {
+      runtimeAfterRequeue.close()
+    }
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('status and stop reject corrupted daemon state, and inbox operations reject corrupted promotion state', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-corruption')
   const paths = inboxPaths(fixture.vaultRoot)
@@ -2217,7 +2452,7 @@ test.sequential('promotion safeguards cover missing photos, invalid stored ids, 
           requestId: null,
           captureId: photoCaptureId,
         }),
-        'INBOX_PROMOTION_UNSUPPORTED',
+        'INBOX_EXPERIMENT_TARGET_MISSING',
       )
     } finally {
       await rm(photoFixture.vaultRoot, { recursive: true, force: true })
