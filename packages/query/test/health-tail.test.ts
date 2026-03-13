@@ -57,6 +57,34 @@ async function createHealthVault(options: {
             },
           })
         : null,
+      options.includeAlternateRecords
+        ? JSON.stringify({
+            schemaVersion: "hb.assessment-response.v1",
+            id: "asmt_health_missing_date",
+            assessmentType: "partial",
+            source: "import",
+            responses: {
+              notes: "Missing date should be filtered from date-scoped exports.",
+            },
+          })
+        : null,
+      options.includeAlternateRecords
+        ? JSON.stringify({
+            schemaVersion: "hb.assessment-response.v1",
+            id: "asmt_health_before",
+            assessmentType: "historical",
+            recordedAt: "2026-02-20T08:00:00Z",
+            source: "import",
+          })
+        : null,
+      options.includeAlternateRecords
+        ? JSON.stringify({
+            schemaVersion: "hb.assessment-response.v1",
+            id: "asmt_health_undated",
+            assessmentType: "undated",
+            source: "import",
+          })
+        : null,
     ]
       .filter((line): line is string => line !== null)
       .join("\n") + "\n",
@@ -90,6 +118,16 @@ async function createHealthVault(options: {
             },
             profile: {
               topGoalIds: ["goal_sleep_legacy"],
+            },
+          })
+        : null,
+      options.includeAlternateRecords
+        ? JSON.stringify({
+            schemaVersion: "hb.profile-snapshot.v1",
+            id: "psnap_health_missing_date",
+            source: "manual",
+            profile: {
+              topGoalIds: ["goal_missing_date"],
             },
           })
         : null,
@@ -367,6 +405,51 @@ test("buildExportPack keeps matching current-profile markdown and ignores malfor
     assert.match(assistantFile.contents, /### Goals/);
     assert.match(assistantFile.contents, /Ignored note event/);
     assert.doesNotMatch(assistantFile.contents, /Missing id should be ignored/);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildExportPack date filters exclude older health slices while keeping current profile derivation", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+    includeAlternateRecords: true,
+  });
+
+  try {
+    const vault = await readVault(vaultRoot);
+    const pack = buildExportPack(vault, {
+      from: "2026-03-05",
+      to: "2026-03-31",
+      packId: "health-pack-filtered",
+      generatedAt: "2026-03-13T12:00:00.000Z",
+    });
+
+    assert.deepEqual(pack.health.assessments.map((entry) => entry.id), ["asmt_health_01"]);
+    assert.deepEqual(pack.health.profileSnapshots.map((entry) => entry.id), ["psnap_health_01"]);
+    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildExportPack tolerates vaults with no health directories", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-health-empty-"));
+
+  try {
+    const vault = await readVault(vaultRoot);
+    const pack = buildExportPack(vault, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      packId: "health-pack-empty",
+      generatedAt: "2026-03-13T12:00:00.000Z",
+    });
+
+    assert.equal(pack.health.assessments.length, 0);
+    assert.equal(pack.health.profileSnapshots.length, 0);
+    assert.equal(pack.health.historyEvents.length, 0);
+    assert.equal(pack.health.currentProfile, null);
+    assert.equal(pack.manifest.bankPageCount, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
