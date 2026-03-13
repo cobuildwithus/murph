@@ -4,34 +4,12 @@ import path from "node:path";
 import {
   HEALTH_HISTORY_KINDS,
   compareCanonicalEntities,
-  fallbackCurrentProfileEntity,
   normalizeCanonicalDate,
-  projectAssessmentEntity,
-  projectCurrentProfileEntity,
-  projectHistoryEntity,
-  projectProfileSnapshotEntity,
-  projectRegistryEntity,
   uniqueStrings,
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "./canonical-entities.js";
-import {
-  allergyRegistryDefinition,
-  conditionRegistryDefinition,
-  familyRegistryDefinition,
-  geneticsRegistryDefinition,
-  goalRegistryDefinition,
-  regimenRegistryDefinition,
-  toRegistryRecord,
-  type RegistryDefinition,
-  type RegistryMarkdownRecord,
-} from "./health/registries.js";
-import {
-  readJsonlRecordOutcomes,
-  readMarkdownDocumentOutcome,
-  readOptionalMarkdownDocumentOutcome,
-  walkRelativeFiles,
-} from "./health/loaders.js";
+import { collectCanonicalEntities } from "./health/canonical-collector.js";
 import { maybeString } from "./health/shared.js";
 import { deriveVaultRecordIdentity } from "./id-families.js";
 import { parseMarkdownDocument } from "./markdown.js";
@@ -69,23 +47,23 @@ export interface VaultReadModel {
   format: "healthybob.query.v1";
   vaultRoot: string;
   metadata: QueryRecordData | null;
-  entities?: CanonicalEntity[];
+  entities: CanonicalEntity[];
   coreDocument: VaultRecord | null;
   experiments: VaultRecord[];
   journalEntries: VaultRecord[];
   events: VaultRecord[];
   samples: VaultRecord[];
   audits: VaultRecord[];
-  assessments?: VaultRecord[];
-  profileSnapshots?: VaultRecord[];
-  currentProfile?: VaultRecord | null;
-  goals?: VaultRecord[];
-  conditions?: VaultRecord[];
-  allergies?: VaultRecord[];
-  regimens?: VaultRecord[];
-  history?: VaultRecord[];
-  familyMembers?: VaultRecord[];
-  geneticVariants?: VaultRecord[];
+  assessments: VaultRecord[];
+  profileSnapshots: VaultRecord[];
+  currentProfile: VaultRecord | null;
+  goals: VaultRecord[];
+  conditions: VaultRecord[];
+  allergies: VaultRecord[];
+  regimens: VaultRecord[];
+  history: VaultRecord[];
+  familyMembers: VaultRecord[];
+  geneticVariants: VaultRecord[];
   records: VaultRecord[];
 }
 
@@ -141,13 +119,11 @@ const DEFAULT_LIST_RECORD_TYPES: VaultRecordType[] = [
 
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
   const metadata = await readOptionalJson(path.join(vaultRoot, "vault.json"));
-  const entities = (
-    await Promise.all([
-      readBaseEntities(vaultRoot, metadata),
-      readHealthEntities(vaultRoot),
-    ])
-  )
-    .flat()
+  const [baseEntities, healthEntities] = await Promise.all([
+    readBaseEntities(vaultRoot, metadata),
+    collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
+  ]);
+  const entities = [...baseEntities, ...healthEntities.entities]
     .sort(compareCanonicalEntities);
   const records = entities.map((entity) => toVaultRecord(entity, vaultRoot));
 
@@ -194,7 +170,7 @@ export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
 }
 
 export function getVaultEntities(vault: VaultReadModel): CanonicalEntity[] {
-  return vault.entities ?? vault.records.map(recordToCanonicalEntity);
+  return vault.entities;
 }
 
 export function lookupEntityById(
@@ -487,119 +463,6 @@ async function readBaseEntities(
     ...samples,
     ...audits,
   ];
-}
-
-async function readHealthEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  const [
-    assessments,
-    profileSnapshots,
-    history,
-    goals,
-    conditions,
-    allergies,
-    regimens,
-    familyMembers,
-    geneticVariants,
-  ] = await Promise.all([
-    readHealthJsonlEntities(vaultRoot, "ledger/assessments", projectAssessmentEntity),
-    readHealthJsonlEntities(
-      vaultRoot,
-      "ledger/profile-snapshots",
-      projectProfileSnapshotEntity,
-    ),
-    readHealthJsonlEntities(vaultRoot, "ledger/events", projectHistoryEntity),
-    readRegistryEntities(vaultRoot, goalRegistryDefinition, "goal"),
-    readRegistryEntities(vaultRoot, conditionRegistryDefinition, "condition"),
-    readRegistryEntities(vaultRoot, allergyRegistryDefinition, "allergy"),
-    readRegistryEntities(vaultRoot, regimenRegistryDefinition, "regimen"),
-    readRegistryEntities(vaultRoot, familyRegistryDefinition, "family"),
-    readRegistryEntities(vaultRoot, geneticsRegistryDefinition, "genetics"),
-  ]);
-  const currentProfile = await readCurrentProfileEntity(vaultRoot, profileSnapshots);
-
-  return [
-    ...assessments,
-    ...profileSnapshots,
-    ...(currentProfile ? [currentProfile] : []),
-    ...history,
-    ...goals,
-    ...conditions,
-    ...allergies,
-    ...regimens,
-    ...familyMembers,
-    ...geneticVariants,
-  ];
-}
-
-async function readHealthJsonlEntities(
-  vaultRoot: string,
-  relativeRoot: string,
-  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
-): Promise<CanonicalEntity[]> {
-  const outcomes = await readJsonlRecordOutcomes(vaultRoot, relativeRoot);
-  return outcomes
-    .filter((outcome): outcome is Extract<typeof outcome, { ok: true }> => outcome.ok)
-    .map((entry) => project(entry.value, entry.relativePath))
-    .filter((entity): entity is CanonicalEntity => entity !== null)
-    .sort(compareCanonicalEntities);
-}
-
-async function readRegistryEntities<TRecord extends RegistryMarkdownRecord>(
-  vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
-  family: Extract<
-    CanonicalEntityFamily,
-    "allergy" | "condition" | "family" | "genetics" | "goal" | "regimen"
-  >,
-): Promise<CanonicalEntity[]> {
-  const relativePaths = await walkRelativeFiles(vaultRoot, definition.directory, ".md");
-  const entities: CanonicalEntity[] = [];
-
-  for (const relativePath of relativePaths) {
-    const outcome = await readMarkdownDocumentOutcome(vaultRoot, relativePath);
-    if (!outcome.ok) {
-      continue;
-    }
-
-    const record = toRegistryRecord(outcome.document, definition);
-    if (record) {
-      entities.push(projectRegistryEntity(family, record));
-    }
-  }
-
-  return entities.sort(compareCanonicalEntities);
-}
-
-async function readCurrentProfileEntity(
-  vaultRoot: string,
-  profileSnapshots: CanonicalEntity[],
-): Promise<CanonicalEntity | null> {
-  const latestSnapshot =
-    [...profileSnapshots].sort(compareLatestEntity).find(
-      (entity) => entity.family === "profile_snapshot",
-    ) ?? null;
-  const outcome = await readOptionalMarkdownDocumentOutcome(
-    vaultRoot,
-    "bank/profile/current.md",
-  );
-
-  if (!outcome) {
-    return latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null;
-  }
-
-  if (!outcome.ok) {
-    return latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null;
-  }
-
-  const currentProfile = projectCurrentProfileEntity(outcome.document);
-  if (
-    latestSnapshot &&
-    pickString(currentProfile.attributes, ["snapshotId"]) !== latestSnapshot.entityId
-  ) {
-    return fallbackCurrentProfileEntity(latestSnapshot);
-  }
-
-  return currentProfile;
 }
 
 async function readOptionalCoreEntity(
@@ -1037,17 +900,6 @@ function recordsOfType(
   recordType: VaultRecordType,
 ): VaultRecord[] {
   return records.filter((record) => record.recordType === recordType);
-}
-
-function compareLatestEntity(left: CanonicalEntity, right: CanonicalEntity): number {
-  const leftSortKey = left.occurredAt ?? left.date ?? "";
-  const rightSortKey = right.occurredAt ?? right.date ?? "";
-
-  if (leftSortKey !== rightSortKey) {
-    return rightSortKey.localeCompare(leftSortKey);
-  }
-
-  return left.entityId.localeCompare(right.entityId);
 }
 
 function compareDateStrings(
