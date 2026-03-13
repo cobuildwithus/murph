@@ -1,13 +1,14 @@
 import { Cli, z } from 'incur'
-import { registerHealthCrudCommands, healthPayloadSchema } from './health-command-factory.js'
+import { registerHealthCrudCommands } from './health-command-factory.js'
+import {
+  createHealthScaffoldResultSchema,
+  healthListResultSchema,
+  healthShowResultSchema,
+} from '../health-cli-descriptors.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
-const scaffoldResultSchema = z.object({
-  vault: pathSchema,
-  noun: z.literal('allergy'),
-  payload: healthPayloadSchema,
-})
+const scaffoldResultSchema = createHealthScaffoldResultSchema('allergy')
 
 const upsertResultSchema = z.object({
   vault: pathSchema,
@@ -17,16 +18,8 @@ const upsertResultSchema = z.object({
   created: z.boolean(),
 })
 
-const showResultSchema = z.object({
-  vault: pathSchema,
-  entity: healthPayloadSchema,
-})
-
-const listResultSchema = z.object({
-  vault: pathSchema,
-  items: z.array(healthPayloadSchema),
-  count: z.number().int().nonnegative(),
-})
+const showResultSchema = healthShowResultSchema
+const listResultSchema = healthListResultSchema
 
 interface AllergyServices extends VaultCliServices {
   core: VaultCliServices['core'] & {

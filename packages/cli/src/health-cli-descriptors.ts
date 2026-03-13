@@ -356,7 +356,9 @@ export function hasHealthQueryDescriptor(
   return Boolean(descriptor.query)
 }
 
-const genericLookupDescriptors = healthEntityDescriptors.filter((descriptor) => {
+const queryHealthDescriptors = healthEntityDescriptors.filter(hasHealthQueryDescriptor);
+
+const genericLookupDescriptors = queryHealthDescriptors.filter((descriptor) => {
   const query = descriptor.query
   return Boolean(
     query &&
@@ -365,26 +367,21 @@ const genericLookupDescriptors = healthEntityDescriptors.filter((descriptor) => 
   )
 })
 
-const genericListDescriptors = healthEntityDescriptors.filter(
-  (descriptor) => Boolean(descriptor.query?.genericListKinds?.length),
+const genericListDescriptors = queryHealthDescriptors.filter(
+  (descriptor) => Boolean(descriptor.query.genericListKinds?.length),
 )
 
 export function findHealthDescriptorForLookup(id: string): HealthQueryDescriptorEntry | null {
   return (
     genericLookupDescriptors.find((descriptor) => {
-      const query = descriptor.query
-      if (!query) {
-        return false
-      }
-
-      const genericLookupValues = query.genericLookupValues ?? []
-      const genericLookupPrefixes = query.genericLookupPrefixes ?? []
+      const genericLookupValues = descriptor.query.genericLookupValues ?? []
+      const genericLookupPrefixes = descriptor.query.genericLookupPrefixes ?? []
 
       return (
         genericLookupValues.includes(id) ||
         genericLookupPrefixes.some((prefix) => id.startsWith(prefix))
       )
-    }) as HealthQueryDescriptorEntry | undefined
+    })
   ) ?? null
 }
 
@@ -395,8 +392,8 @@ export function findHealthDescriptorForListKind(kind?: string): HealthQueryDescr
 
   return (
     genericListDescriptors.find((descriptor) =>
-      descriptor.query?.genericListKinds?.includes(kind),
-    ) as HealthQueryDescriptorEntry | undefined
+      descriptor.query.genericListKinds?.includes(kind),
+    )
   )
     ?? null
 }

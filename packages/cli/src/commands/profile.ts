@@ -1,17 +1,16 @@
 import { Cli, z } from 'incur'
 import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
+import {
+  createHealthScaffoldResultSchema,
+  healthListResultSchema,
+  healthPayloadSchema,
+  healthShowResultSchema,
+} from '../health-cli-descriptors.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-import {
-  healthPayloadSchema,
-  registerHealthCrudCommands,
-} from './health-command-factory.js'
+import { registerHealthCrudCommands } from './health-command-factory.js'
 
-const scaffoldResultSchema = z.object({
-  vault: pathSchema,
-  noun: z.literal('profile'),
-  payload: healthPayloadSchema,
-})
+const scaffoldResultSchema = createHealthScaffoldResultSchema('profile')
 
 const upsertResultSchema = z.object({
   vault: pathSchema,
@@ -23,16 +22,8 @@ const upsertResultSchema = z.object({
   profile: healthPayloadSchema.optional(),
 })
 
-const profileShowResultSchema = z.object({
-  vault: pathSchema,
-  entity: healthPayloadSchema,
-})
-
-const profileListResultSchema = z.object({
-  vault: pathSchema,
-  items: z.array(healthPayloadSchema),
-  count: z.number().int().nonnegative(),
-})
+const profileShowResultSchema = healthShowResultSchema
+const profileListResultSchema = healthListResultSchema
 
 const rebuildResultSchema = z.object({
   vault: pathSchema,

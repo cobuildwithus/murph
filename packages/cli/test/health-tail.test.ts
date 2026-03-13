@@ -71,3 +71,160 @@ test.sequential("intake show and intake list route assessment reads through the 
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
+
+test.sequential("goal descriptor wiring keeps noun-specific and generic reads aligned", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "goal.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: "Sleep longer",
+        status: "active",
+        horizon: "long_term",
+        domains: ["sleep"],
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli<{
+      goalId: string;
+    }>([
+      "goal",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const goalId = requireData(upsertResult).goalId;
+
+    const nounShow = await runCli<{
+      entity: Record<string, unknown>;
+    }>([
+      "goal",
+      "show",
+      goalId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const nounList = await runCli<{
+      items: Array<Record<string, unknown>>;
+    }>([
+      "goal",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+      };
+    }>([
+      "show",
+      goalId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericList = await runCli<{
+      items: Array<{
+        id: string;
+        kind: string;
+      }>;
+    }>([
+      "list",
+      "--kind",
+      "goal",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, true);
+    assert.equal(nounShow.ok, true);
+    assert.equal(nounList.ok, true);
+    assert.equal(genericShow.ok, true);
+    assert.equal(genericList.ok, true);
+    assert.equal(requireData(genericShow).entity.id, goalId);
+    assert.equal(requireData(genericShow).entity.kind, "goal");
+    assert.equal(
+      requireData(nounShow).entity.id ?? requireData(nounShow).entity.goalId,
+      goalId,
+    );
+    assert.deepEqual(
+      requireData(nounList).items.map((item) => item.id),
+      [goalId],
+    );
+    assert.deepEqual(
+      requireData(genericList).items.map((item) => item.id),
+      [goalId],
+    );
+    assert.deepEqual(
+      requireData(genericList).items.map((item) => item.kind),
+      ["goal"],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("profile current lookup stays wired for both noun-specific and generic show", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "profile.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        source: "manual",
+        profile: {
+          domains: ["sleep"],
+          topGoalIds: [],
+        },
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli([
+      "profile",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const nounShow = await runCli<{
+      entity: Record<string, unknown>;
+    }>([
+      "profile",
+      "show",
+      "current",
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericShow = await runCli<{
+      entity: {
+        kind: string;
+      };
+    }>([
+      "show",
+      "current",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, true);
+    assert.equal(nounShow.ok, true);
+    assert.equal(genericShow.ok, true);
+    assert.equal(requireData(genericShow).entity.kind, "profile");
+    assert.equal(
+      requireData(nounShow).entity.id ?? requireData(nounShow).entity.snapshotId ?? "current",
+      "current",
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
