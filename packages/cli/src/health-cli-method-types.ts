@@ -14,6 +14,9 @@ export interface EntityLookupInput extends CommandContext {
 }
 
 export interface HealthListInput extends CommandContext {
+  from?: string
+  to?: string
+  kind?: string
   status?: string
   limit?: number
 }
