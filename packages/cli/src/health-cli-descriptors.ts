@@ -1,7 +1,17 @@
 import { z } from "incur"
+import type {
+  HealthCoreRuntimeMethodName,
+  HealthCoreScaffoldServiceMethodName,
+  HealthCoreUpsertServiceMethodName,
+  HealthQueryListServiceMethodName,
+  HealthQueryRuntimeListMethodName,
+  HealthQueryRuntimeShowMethodName,
+  HealthQueryShowServiceMethodName,
+  JsonObject,
+} from "./health-cli-method-types.js"
 import { pathSchema } from "./vault-cli-contracts.js"
 
-export type JsonObject = Record<string, unknown>
+export type { JsonObject } from "./health-cli-method-types.js"
 
 type GenericListMode = "date-range-limit" | "history-kind-date-range-limit" | "limit-only"
 type ServiceListMode = "status-limit"
@@ -12,11 +22,11 @@ export interface HealthCoreDescriptor {
   payloadTemplate: JsonObject
   resultIdField: string
   resultMode: HealthResultMode
-  runtimeMethod: string
+  runtimeMethod: HealthCoreRuntimeMethodName
   scaffoldNoun: string
-  scaffoldServiceMethod: string
+  scaffoldServiceMethod: HealthCoreScaffoldServiceMethodName
   upsertMode: HealthUpsertMode
-  upsertServiceMethod: string
+  upsertServiceMethod: HealthCoreUpsertServiceMethodName
 }
 
 export interface HealthQueryDescriptor {
@@ -24,12 +34,12 @@ export interface HealthQueryDescriptor {
   genericListMode?: GenericListMode
   genericLookupPrefixes?: readonly string[]
   genericLookupValues?: readonly string[]
-  listServiceMethod: string
+  listServiceMethod: HealthQueryListServiceMethodName
   notFoundLabel: string
-  runtimeListMethod: string
-  runtimeShowMethod: string
+  runtimeListMethod: HealthQueryRuntimeListMethodName
+  runtimeShowMethod: HealthQueryRuntimeShowMethodName
   serviceListMode: ServiceListMode
-  showServiceMethod: string
+  showServiceMethod: HealthQueryShowServiceMethodName
 }
 
 export interface HealthEntityDescriptor {
@@ -61,7 +71,7 @@ export const healthListResultSchema = z.object({
   count: z.number().int().nonnegative(),
 })
 
-export const healthEntityDescriptors: readonly HealthEntityDescriptor[] = [
+const checkedHealthEntityDescriptors = [
   {
     kind: "assessment",
     noun: "assessment",
@@ -330,7 +340,10 @@ export const healthEntityDescriptors: readonly HealthEntityDescriptor[] = [
       showServiceMethod: "showGeneticVariant",
     },
   },
-] as const
+] as const satisfies readonly HealthEntityDescriptor[]
+
+export const healthEntityDescriptors: readonly HealthEntityDescriptor[] =
+  checkedHealthEntityDescriptors
 
 export type HealthCoreDescriptorEntry = HealthEntityDescriptor & {
   core: HealthCoreDescriptor
@@ -410,24 +423,30 @@ export function isHealthQueryableRecordId(id: string) {
   return Boolean(findHealthDescriptorForLookup(id))
 }
 
-export const healthCoreRuntimeMethodNames = healthEntityDescriptors
+export const healthCoreRuntimeMethodNames: readonly HealthCoreRuntimeMethodName[] = healthEntityDescriptors
   .filter(hasHealthCoreDescriptor)
   .map((descriptor) => descriptor.core.runtimeMethod)
 
-export const healthQueryRuntimeMethodNames = healthEntityDescriptors.flatMap((descriptor) =>
+export const healthQueryRuntimeMethodNames: ReadonlyArray<
+  HealthQueryRuntimeShowMethodName | HealthQueryRuntimeListMethodName
+> = healthEntityDescriptors.flatMap((descriptor) =>
   descriptor.query
     ? [descriptor.query.runtimeShowMethod, descriptor.query.runtimeListMethod]
     : [],
 )
 
-export const healthCoreServiceMethodNames = healthEntityDescriptors
+export const healthCoreServiceMethodNames: ReadonlyArray<
+  HealthCoreScaffoldServiceMethodName | HealthCoreUpsertServiceMethodName
+> = healthEntityDescriptors
   .filter(hasHealthCoreDescriptor)
   .flatMap((descriptor) => [
     descriptor.core.scaffoldServiceMethod,
     descriptor.core.upsertServiceMethod,
   ])
 
-export const healthQueryServiceMethodNames = healthEntityDescriptors.flatMap((descriptor) =>
+export const healthQueryServiceMethodNames: ReadonlyArray<
+  HealthQueryShowServiceMethodName | HealthQueryListServiceMethodName
+> = healthEntityDescriptors.flatMap((descriptor) =>
   descriptor.query
     ? [descriptor.query.showServiceMethod, descriptor.query.listServiceMethod]
     : [],

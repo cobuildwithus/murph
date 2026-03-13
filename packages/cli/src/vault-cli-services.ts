@@ -17,7 +17,6 @@ import { VaultCliError } from "./vault-cli-errors.js"
 import {
   type HealthCoreDescriptorEntry,
   type HealthQueryDescriptorEntry,
-  type JsonObject,
   findHealthDescriptorForListKind,
   findHealthDescriptorForLookup,
   hasHealthCoreDescriptor,
@@ -31,7 +30,31 @@ import {
   inferHealthEntityKind,
   isHealthQueryableRecordId,
 } from "./health-cli-descriptors.js"
+import type {
+  CommandContext,
+  EntityLookupInput,
+  HealthCoreRuntimeInput,
+  HealthCoreRuntimeMethods,
+  HealthCoreRuntimeResult,
+  HealthCoreServiceMethods,
+  HealthEntityEnvelope,
+  HealthListEnvelope,
+  HealthListInput,
+  HealthQueryRuntimeListMethodName,
+  HealthQueryRuntimeMethods,
+  HealthQueryRuntimeShowMethodName,
+  HealthQueryServiceMethods,
+  HealthScaffoldResult,
+  JsonFileInput,
+  JsonObject,
+  ProfileSnapshotRuntimeResult,
+  ProfileSnapshotUpsertResult,
+  UpsertHistoryEventResult,
+  UpsertRecordResult,
+} from "./health-cli-method-types.js"
 import { loadRuntimeModule } from "./runtime-import.js"
+
+export type { CommandContext } from "./health-cli-method-types.js"
 
 const RUNTIME_PACKAGES = Object.freeze([
   "@healthybob/core",
@@ -40,24 +63,6 @@ const RUNTIME_PACKAGES = Object.freeze([
   "incur",
 ])
 
-export interface CommandContext {
-  vault: string
-  requestId: string | null
-}
-
-interface JsonFileInput extends CommandContext {
-  input: string
-}
-
-interface EntityLookupInput extends CommandContext {
-  id: string
-}
-
-interface HealthListInput extends CommandContext {
-  status?: string
-  limit?: number
-}
-
 interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string
 }
@@ -65,23 +70,6 @@ interface ProjectAssessmentInput extends CommandContext {
 interface StopRegimenInput extends CommandContext {
   regimenId: string
   stoppedOn?: string
-}
-
-interface HealthScaffoldResult<TNoun extends string> {
-  vault: string
-  noun: TNoun
-  payload: JsonObject
-}
-
-interface HealthEntityEnvelope {
-  vault: string
-  entity: JsonObject
-}
-
-interface HealthListEnvelope {
-  vault: string
-  items: JsonObject[]
-  count: number
 }
 
 interface AssessmentProjectionResult {
@@ -100,28 +88,11 @@ interface AssessmentImportResult {
   ledgerFile?: string
 }
 
-interface ProfileSnapshotUpsertResult {
-  vault: string
-  snapshotId: string
-  lookupId: string
-  ledgerFile?: string
-  currentProfilePath?: string
-  created: boolean
-  profile?: JsonObject
-}
-
 interface RebuildCurrentProfileResult {
   vault: string
   profilePath: string
   snapshotId: string | null
   updated: boolean
-}
-
-interface UpsertRecordResult {
-  vault: string
-  lookupId: string
-  path?: string
-  created: boolean
 }
 
 interface StopRegimenResult {
@@ -132,15 +103,7 @@ interface StopRegimenResult {
   status: string
 }
 
-interface UpsertHistoryEventResult {
-  vault: string
-  eventId: string
-  lookupId: string
-  ledgerFile: string
-  created: true
-}
-
-export interface CoreWriteServices {
+export interface CoreWriteServices extends HealthCoreServiceMethods {
   init(input: CommandContext): Promise<VaultInitResult>
   validate(input: CommandContext): Promise<VaultValidateResult>
   addMeal(
@@ -164,56 +127,10 @@ export interface CoreWriteServices {
   projectAssessment(
     input: ProjectAssessmentInput,
   ): Promise<AssessmentProjectionResult>
-  scaffoldProfileSnapshot(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'profile'>>
-  upsertProfileSnapshot(
-    input: JsonFileInput,
-  ): Promise<ProfileSnapshotUpsertResult>
   rebuildCurrentProfile(
     input: CommandContext,
   ): Promise<RebuildCurrentProfileResult>
-  scaffoldGoal(input: CommandContext): Promise<HealthScaffoldResult<'goal'>>
-  upsertGoal(
-    input: JsonFileInput,
-  ): Promise<UpsertRecordResult & { goalId: string }>
-  scaffoldCondition(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'condition'>>
-  upsertCondition(
-    input: JsonFileInput,
-  ): Promise<UpsertRecordResult & { conditionId: string }>
-  scaffoldAllergy(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'allergy'>>
-  upsertAllergy(
-    input: JsonFileInput,
-  ): Promise<UpsertRecordResult & { allergyId: string }>
-  scaffoldRegimen(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'regimen'>>
-  upsertRegimen(
-    input: JsonFileInput,
-  ): Promise<UpsertRecordResult & { regimenId: string }>
   stopRegimen(input: StopRegimenInput): Promise<StopRegimenResult>
-  scaffoldHistoryEvent(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'history'>>
-  upsertHistoryEvent(
-    input: JsonFileInput,
-  ): Promise<UpsertHistoryEventResult>
-  scaffoldFamilyMember(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'family'>>
-  upsertFamilyMember(
-    input: JsonFileInput,
-  ): Promise<UpsertRecordResult & { familyMemberId: string }>
-  scaffoldGeneticVariant(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'genetics'>>
-  upsertGeneticVariant(
-    input: JsonFileInput,
-  ): Promise<UpsertRecordResult & { variantId: string }>
 }
 
 export interface ImporterServices {
@@ -238,7 +155,7 @@ export interface ImporterServices {
   ): Promise<AssessmentImportResult>
 }
 
-export interface QueryServices {
+export interface QueryServices extends HealthQueryServiceMethods {
   show(
     input: CommandContext & {
       id: string
@@ -255,24 +172,6 @@ export interface QueryServices {
       out?: string
     },
   ): Promise<ExportPackResult>
-  showAssessment(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listAssessments(input: HealthListInput): Promise<HealthListEnvelope>
-  showProfile(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listProfileSnapshots(input: HealthListInput): Promise<HealthListEnvelope>
-  showGoal(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listGoals(input: HealthListInput): Promise<HealthListEnvelope>
-  showCondition(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listConditions(input: HealthListInput): Promise<HealthListEnvelope>
-  showAllergy(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listAllergies(input: HealthListInput): Promise<HealthListEnvelope>
-  showRegimen(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listRegimens(input: HealthListInput): Promise<HealthListEnvelope>
-  showHistoryEvent(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listHistoryEvents(input: HealthListInput): Promise<HealthListEnvelope>
-  showFamilyMember(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listFamilyMembers(input: HealthListInput): Promise<HealthListEnvelope>
-  showGeneticVariant(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  listGeneticVariants(input: HealthListInput): Promise<HealthListEnvelope>
 }
 
 export interface VaultCliServices {
@@ -281,7 +180,7 @@ export interface VaultCliServices {
   query: QueryServices
 }
 
-interface CoreRuntimeModule {
+interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   REQUIRED_DIRECTORIES: readonly string[]
   initializeVault(input: {
     vaultRoot: string
@@ -339,23 +238,6 @@ interface CoreRuntimeModule {
   projectAssessmentResponse(input: {
     assessmentResponse: JsonObject
   }): Promise<JsonObject>
-  appendProfileSnapshot(input: {
-    vaultRoot: string
-    recordedAt?: string | number | Date
-    source?: string
-    sourceAssessmentIds?: string[]
-    sourceEventIds?: string[]
-    profile: JsonObject
-  }): Promise<{
-    snapshot: {
-      id: string
-      profile: JsonObject
-    }
-    ledgerPath?: string
-    currentProfile: {
-      relativePath: string
-    }
-  }>
   rebuildCurrentProfile(input: {
     vaultRoot: string
   }): Promise<{
@@ -364,22 +246,6 @@ interface CoreRuntimeModule {
       id: string
     } | null
     updated: boolean
-  }>
-  upsertGoal(input: { vaultRoot: string } & JsonObject): Promise<{
-    record: JsonObject & { goalId: string }
-    created: boolean
-  }>
-  upsertCondition(input: { vaultRoot: string } & JsonObject): Promise<{
-    record: JsonObject & { conditionId: string }
-    created: boolean
-  }>
-  upsertAllergy(input: { vaultRoot: string } & JsonObject): Promise<{
-    record: JsonObject & { allergyId: string }
-    created: boolean
-  }>
-  upsertRegimenItem(input: { vaultRoot: string } & JsonObject): Promise<{
-    record: JsonObject & { regimenId: string }
-    created: boolean
   }>
   stopRegimenItem(input: {
     vaultRoot: string
@@ -391,20 +257,6 @@ interface CoreRuntimeModule {
       stoppedOn?: string | null
       status: string
     }
-  }>
-  appendHistoryEvent(input: { vaultRoot: string } & JsonObject): Promise<{
-    record: {
-      id: string
-    }
-    relativePath: string
-  }>
-  upsertFamilyMember(input: { vaultRoot: string } & JsonObject): Promise<{
-    record: JsonObject & { familyMemberId: string }
-    created: boolean
-  }>
-  upsertGeneticVariant(input: { vaultRoot: string } & JsonObject): Promise<{
-    record: JsonObject & { variantId: string }
-    created: boolean
   }>
 }
 
@@ -470,7 +322,7 @@ interface QueryRecord {
   data: Record<string, unknown>
 }
 
-interface QueryRuntimeModule {
+interface QueryRuntimeModule extends HealthQueryRuntimeMethods {
   readVault(vaultRoot: string): Promise<unknown>
   lookupRecordById(readModel: unknown, recordId: string): QueryRecord | null
   listRecords(
@@ -487,54 +339,6 @@ interface QueryRuntimeModule {
       contents: string
     }>
   }
-  showAssessment(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listAssessments(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
-  showProfile(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listProfileSnapshots(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
-  showGoal(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listGoals(vaultRoot: string, options?: Record<string, unknown>): Promise<JsonObject[]>
-  showCondition(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listConditions(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
-  showAllergy(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listAllergies(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
-  showRegimen(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listRegimens(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
-  showHistoryEvent(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listHistoryEvents(
-    vaultRoot: string,
-    options?: {
-      kind?: string
-      from?: string
-      to?: string
-      limit?: number
-      status?: string
-    },
-  ): Promise<JsonObject[]>
-  showFamilyMember(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listFamilyMembers(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
-  showGeneticVariant(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  listGeneticVariants(
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ): Promise<JsonObject[]>
 }
 
 interface IntegratedRuntime {
@@ -837,7 +641,7 @@ function buildHealthCoreRuntimeInput(
   descriptor: HealthCoreDescriptorEntry,
   vault: string,
   payload: JsonObject,
-) {
+): HealthCoreRuntimeInput {
   assertNoReservedPayloadKeys(payload)
 
   if (descriptor.core.upsertMode === "profile-snapshot") {
@@ -869,10 +673,10 @@ function buildHealthCoreRuntimeInput(
 function buildHealthCoreUpsertResult(
   descriptor: HealthCoreDescriptorEntry,
   vault: string,
-  result: unknown,
+  result: HealthCoreRuntimeResult,
 ) {
   if (descriptor.core.resultMode === "profile-snapshot") {
-    const profileResult = result as Awaited<ReturnType<CoreRuntimeModule["appendProfileSnapshot"]>>
+    const profileResult = result as ProfileSnapshotRuntimeResult
     return {
       vault,
       snapshotId: String(profileResult.snapshot.id),
@@ -885,7 +689,9 @@ function buildHealthCoreUpsertResult(
   }
 
   if (descriptor.core.resultMode === "history-ledger") {
-    const historyResult = result as Awaited<ReturnType<CoreRuntimeModule["appendHistoryEvent"]>>
+    const historyResult = result as Awaited<
+      ReturnType<HealthCoreRuntimeMethods["appendHistoryEvent"]>
+    >
     return {
       vault,
       eventId: String(historyResult.record.id),
@@ -951,27 +757,34 @@ function buildHealthGenericListOptions(
   }
 }
 
-function getQueryShowMethod(
-  query: QueryRuntimeModule,
-  descriptor: HealthQueryDescriptorEntry,
+function getCoreRuntimeMethod(
+  core: CoreRuntimeModule,
+  descriptor: HealthCoreDescriptorEntry,
 ) {
-  return query[descriptor.query.runtimeShowMethod as keyof QueryRuntimeModule] as (
-    vaultRoot: string,
-    lookup: string,
-  ) => Promise<JsonObject | null>
+  return core[descriptor.core.runtimeMethod] as (
+    input: HealthCoreRuntimeInput,
+  ) => Promise<HealthCoreRuntimeResult>
 }
 
-function getQueryListMethod(
+function getQueryShowMethod<TMethodName extends HealthQueryRuntimeShowMethodName>(
   query: QueryRuntimeModule,
-  descriptor: HealthQueryDescriptorEntry,
-) {
-  return query[descriptor.query.runtimeListMethod as keyof QueryRuntimeModule] as (
-    vaultRoot: string,
-    options?: Record<string, unknown>,
-  ) => Promise<JsonObject[]>
+  descriptor: HealthQueryDescriptorEntry & {
+    query: HealthQueryDescriptorEntry["query"] & { runtimeShowMethod: TMethodName }
+  },
+): QueryRuntimeModule[TMethodName] {
+  return query[descriptor.query.runtimeShowMethod]
 }
 
-function createHealthCoreServices() {
+function getQueryListMethod<TMethodName extends HealthQueryRuntimeListMethodName>(
+  query: QueryRuntimeModule,
+  descriptor: HealthQueryDescriptorEntry & {
+    query: HealthQueryDescriptorEntry["query"] & { runtimeListMethod: TMethodName }
+  },
+): QueryRuntimeModule[TMethodName] {
+  return query[descriptor.query.runtimeListMethod]
+}
+
+function createHealthCoreServices(): HealthCoreServiceMethods {
   const services: Record<string, unknown> = {}
 
   for (const descriptor of healthEntityDescriptors.filter(hasHealthCoreDescriptor)) {
@@ -985,19 +798,17 @@ function createHealthCoreServices() {
       const payload = await readJsonPayload(args.input)
       const runtimeInput = buildHealthCoreRuntimeInput(descriptor, args.vault, payload)
       const { core } = await loadIntegratedRuntime()
-      const runtimeMethod = core[descriptor.core.runtimeMethod as keyof CoreRuntimeModule] as (
-        input: Record<string, unknown>,
-      ) => Promise<unknown>
+      const runtimeMethod = getCoreRuntimeMethod(core, descriptor)
       const result = await runtimeMethod(runtimeInput)
 
       return buildHealthCoreUpsertResult(descriptor, args.vault, result)
     }
   }
 
-  return services as Record<typeof healthCoreServiceMethodNames[number], unknown>
+  return services as unknown as HealthCoreServiceMethods
 }
 
-function createHealthQueryServices() {
+function createHealthQueryServices(): HealthQueryServiceMethods {
   const services: Record<string, unknown> = {}
 
   for (const descriptor of healthEntityDescriptors.filter(hasHealthQueryDescriptor)) {
@@ -1022,7 +833,7 @@ function createHealthQueryServices() {
     }
   }
 
-  return services as Record<typeof healthQueryServiceMethodNames[number], unknown>
+  return services as unknown as HealthQueryServiceMethods
 }
 
 async function materializeExportPack(
@@ -1177,342 +988,352 @@ function toJournalLookupId(date: string) {
   return `journal:${date}`
 }
 
-export function createIntegratedVaultCliServices(): VaultCliServices {
-  const services: VaultCliServices = {
-    core: {
-      async init(input: CommandContext) {
-        const { vault } = input
-        const { core } = await loadIntegratedRuntime()
-        await core.initializeVault({ vaultRoot: vault })
-        return {
-          vault,
-          created: true,
-          directories: [...core.REQUIRED_DIRECTORIES],
-          files: ["vault.json", "CORE.md"],
-        }
-      },
-      async validate(input: CommandContext) {
-        const { vault } = input
-        const { core } = await loadIntegratedRuntime()
-        const result = await core.validateVault({ vaultRoot: vault })
-        return {
-          vault,
-          valid: result.valid,
-          issues: normalizeIssues(result.issues),
-        }
-      },
-      async addMeal(input: CommandContext & {
-        photo: string
-        audio?: string
-        note?: string
-        occurredAt?: string
-      }) {
-        const { vault, photo, audio, note, occurredAt } = input
-        const { core } = await loadIntegratedRuntime()
-        const result = await core.addMeal({
-          vaultRoot: vault,
-          photoPath: photo,
-          audioPath: audio,
-          note,
-          occurredAt,
-        })
-
-        return {
-          vault,
-          mealId: result.mealId,
-          eventId: result.event.id,
-          lookupId: result.event.id,
-          occurredAt: result.event.occurredAt ?? null,
-          photoPath: result.photo.relativePath,
-          audioPath: result.audio?.relativePath ?? null,
-          manifestFile: result.manifestPath,
-          note: result.event.note ?? note ?? null,
-        }
-      },
-      async createExperiment(input: CommandContext & {
-        slug: string
-      }) {
-        const { vault, slug } = input
-        const { core } = await loadIntegratedRuntime()
-        const result = await core.createExperiment({
-          vaultRoot: vault,
-          slug,
-          title: slug,
-        })
-
-        return {
-          vault,
-          experimentId: result.experiment.id,
-          lookupId: result.experiment.id,
-          slug: result.experiment.slug,
-          experimentPath: result.experiment.relativePath,
-          created: result.created ?? true,
-        }
-      },
-      async ensureJournal(input: CommandContext & {
-        date: string
-      }) {
-        const { vault, date } = input
-        const { core } = await loadIntegratedRuntime()
-        const result = await core.ensureJournalDay({
-          vaultRoot: vault,
-          date,
-        })
-
-        return {
-          vault,
-          date,
-          lookupId: toJournalLookupId(date),
-          journalPath: result.relativePath,
-          created: result.created,
-        }
-      },
-      async projectAssessment(input: ProjectAssessmentInput) {
-        const { vault, assessmentId } = input
-        const { core } = await loadIntegratedRuntime()
-        const assessment = await core.readAssessmentResponse({
-          vaultRoot: vault,
-          assessmentId,
-        })
-        const proposal = await core.projectAssessmentResponse({
-          assessmentResponse: assessment,
-        })
-
-        return {
-          vault,
-          assessmentId,
-          proposal,
-        }
-      },
-      ...createHealthCoreServices(),
-      async rebuildCurrentProfile(input: CommandContext) {
-        const { vault } = input
-        const { core } = await loadIntegratedRuntime()
-        const result = await core.rebuildCurrentProfile({
-          vaultRoot: vault,
-        })
-
-        return {
-          vault,
-          profilePath: result.relativePath,
-          snapshotId: result.snapshot?.id ?? null,
-          updated: result.updated,
-        }
-      },
-      async stopRegimen(input: StopRegimenInput) {
-        const { vault, regimenId, stoppedOn } = input
-        const { core } = await loadIntegratedRuntime()
-        const result = await core.stopRegimenItem({
-          vaultRoot: vault,
-          regimenId,
-          stoppedOn,
-        })
-
-        return {
-          vault,
-          regimenId: String(result.record.regimenId),
-          lookupId: String(result.record.regimenId),
-          stoppedOn: result.record.stoppedOn ?? null,
-          status: String(result.record.status),
-        }
-      },
-    } as unknown as CoreWriteServices,
-    importers: {
-      async importDocument(input) {
-        const { vault, file } = input
-        const importers = await loadImporterRuntime()
-        const result = await importers.importDocument({
-          filePath: file,
-          vaultRoot: vault,
-        })
-
-        return {
-          vault,
-          sourceFile: file,
-          rawFile: result.raw.relativePath,
-          manifestFile: result.manifestPath,
-          documentId: result.documentId,
-          eventId: result.event.id,
-          lookupId: result.event.id,
-        }
-      },
-      async importSamplesCsv(input) {
-        const { vault, file, stream, tsColumn, valueColumn, unit } = input
-        const importers = await loadImporterRuntime()
-        const result = await importers.importCsvSamples({
-          filePath: file,
-          vaultRoot: vault,
-          stream,
-          tsColumn,
-          valueColumn,
-          unit,
-        })
-
-        return {
-          vault,
-          sourceFile: file,
-          stream,
-          importedCount: result.count,
-          transformId: result.transformId,
-          manifestFile: result.manifestPath,
-          lookupIds: result.records.map((record) => record.id),
-          ledgerFiles: result.shardPaths,
-        }
-      },
-      async importAssessmentResponse(input) {
-        const { vault, file } = input
-        const importers = await loadImporterRuntime()
-        const result = await importers.importAssessmentResponse({
-          filePath: file,
-          vaultRoot: vault,
-        })
-
-        return {
-          vault,
-          sourceFile: file,
-          rawFile: result.raw.relativePath,
-          manifestFile: result.manifestPath,
-          assessmentId: result.assessment.id,
-          lookupId: result.assessment.id,
-          ledgerFile: result.ledgerPath,
-        }
-      },
+function createIntegratedCoreServices(): CoreWriteServices {
+  return {
+    async init(input: CommandContext) {
+      const { vault } = input
+      const { core } = await loadIntegratedRuntime()
+      await core.initializeVault({ vaultRoot: vault })
+      return {
+        vault,
+        created: true,
+        directories: [...core.REQUIRED_DIRECTORIES],
+        files: ["vault.json", "CORE.md"],
+      }
     },
-    query: {
-      ...createHealthQueryServices(),
-      async show(input: CommandContext & {
-        id: string
-      }) {
-        const { vault, id } = input
-        const constraint = describeLookupConstraint(id)
+    async validate(input: CommandContext) {
+      const { vault } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.validateVault({ vaultRoot: vault })
+      return {
+        vault,
+        valid: result.valid,
+        issues: normalizeIssues(result.issues),
+      }
+    },
+    async addMeal(input: CommandContext & {
+      photo: string
+      audio?: string
+      note?: string
+      occurredAt?: string
+    }) {
+      const { vault, photo, audio, note, occurredAt } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.addMeal({
+        vaultRoot: vault,
+        photoPath: photo,
+        audioPath: audio,
+        note,
+        occurredAt,
+      })
 
-        if (constraint) {
-          throw new VaultCliError("invalid_lookup_id", constraint, {
-            id,
-          })
-        }
+      return {
+        vault,
+        mealId: result.mealId,
+        eventId: result.event.id,
+        lookupId: result.event.id,
+        occurredAt: result.event.occurredAt ?? null,
+        photoPath: result.photo.relativePath,
+        audioPath: result.audio?.relativePath ?? null,
+        manifestFile: result.manifestPath,
+        note: result.event.note ?? note ?? null,
+      }
+    },
+    async createExperiment(input: CommandContext & {
+      slug: string
+    }) {
+      const { vault, slug } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.createExperiment({
+        vaultRoot: vault,
+        slug,
+        title: slug,
+      })
 
-        const { query } = await loadIntegratedRuntime()
-        const descriptor = findHealthDescriptorForLookup(id)
-        if (descriptor) {
-          const entity = await getQueryShowMethod(query, descriptor)(vault, id)
-          if (!entity) {
-            throw new VaultCliError(
-              "not_found",
-              `No ${descriptor.query.notFoundLabel} found for "${id}".`,
-            )
-          }
+      return {
+        vault,
+        experimentId: result.experiment.id,
+        lookupId: result.experiment.id,
+        slug: result.experiment.slug,
+        experimentPath: result.experiment.relativePath,
+        created: result.created ?? true,
+      }
+    },
+    async ensureJournal(input: CommandContext & {
+      date: string
+    }) {
+      const { vault, date } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.ensureJournalDay({
+        vaultRoot: vault,
+        date,
+      })
 
-          return {
-            vault,
-            entity: toHealthShowEntity(entity, descriptor.kind),
-          }
-        }
+      return {
+        vault,
+        date,
+        lookupId: toJournalLookupId(date),
+        journalPath: result.relativePath,
+        created: result.created,
+      }
+    },
+    async projectAssessment(input: ProjectAssessmentInput) {
+      const { vault, assessmentId } = input
+      const { core } = await loadIntegratedRuntime()
+      const assessment = await core.readAssessmentResponse({
+        vaultRoot: vault,
+        assessmentId,
+      })
+      const proposal = await core.projectAssessmentResponse({
+        assessmentResponse: assessment,
+      })
 
-        const readModel = await query.readVault(vault)
-        const record = query.lookupRecordById(readModel, id)
+      return {
+        vault,
+        assessmentId,
+        proposal,
+      }
+    },
+    ...createHealthCoreServices(),
+    async rebuildCurrentProfile(input: CommandContext) {
+      const { vault } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.rebuildCurrentProfile({
+        vaultRoot: vault,
+      })
 
-        if (!record) {
-          throw new VaultCliError("not_found", `No record found for "${id}".`)
+      return {
+        vault,
+        profilePath: result.relativePath,
+        snapshotId: result.snapshot?.id ?? null,
+        updated: result.updated,
+      }
+    },
+    async stopRegimen(input: StopRegimenInput) {
+      const { vault, regimenId, stoppedOn } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.stopRegimenItem({
+        vaultRoot: vault,
+        regimenId,
+        stoppedOn,
+      })
+
+      return {
+        vault,
+        regimenId: String(result.record.regimenId),
+        lookupId: String(result.record.regimenId),
+        stoppedOn: result.record.stoppedOn ?? null,
+        status: String(result.record.status),
+      }
+    },
+  } satisfies CoreWriteServices
+}
+
+function createIntegratedImporterServices(): ImporterServices {
+  return {
+    async importDocument(input) {
+      const { vault, file } = input
+      const importers = await loadImporterRuntime()
+      const result = await importers.importDocument({
+        filePath: file,
+        vaultRoot: vault,
+      })
+
+      return {
+        vault,
+        sourceFile: file,
+        rawFile: result.raw.relativePath,
+        manifestFile: result.manifestPath,
+        documentId: result.documentId,
+        eventId: result.event.id,
+        lookupId: result.event.id,
+      }
+    },
+    async importSamplesCsv(input) {
+      const { vault, file, stream, tsColumn, valueColumn, unit } = input
+      const importers = await loadImporterRuntime()
+      const result = await importers.importCsvSamples({
+        filePath: file,
+        vaultRoot: vault,
+        stream,
+        tsColumn,
+        valueColumn,
+        unit,
+      })
+
+      return {
+        vault,
+        sourceFile: file,
+        stream,
+        importedCount: result.count,
+        transformId: result.transformId,
+        manifestFile: result.manifestPath,
+        lookupIds: result.records.map((record) => record.id),
+        ledgerFiles: result.shardPaths,
+      }
+    },
+    async importAssessmentResponse(input) {
+      const { vault, file } = input
+      const importers = await loadImporterRuntime()
+      const result = await importers.importAssessmentResponse({
+        filePath: file,
+        vaultRoot: vault,
+      })
+
+      return {
+        vault,
+        sourceFile: file,
+        rawFile: result.raw.relativePath,
+        manifestFile: result.manifestPath,
+        assessmentId: result.assessment.id,
+        lookupId: result.assessment.id,
+        ledgerFile: result.ledgerPath,
+      }
+    },
+  } satisfies ImporterServices
+}
+
+function createIntegratedQueryServices(): QueryServices {
+  return {
+    ...createHealthQueryServices(),
+    async show(input: CommandContext & {
+      id: string
+    }) {
+      const { vault, id } = input
+      const constraint = describeLookupConstraint(id)
+
+      if (constraint) {
+        throw new VaultCliError("invalid_lookup_id", constraint, {
+          id,
+        })
+      }
+
+      const { query } = await loadIntegratedRuntime()
+      const descriptor = findHealthDescriptorForLookup(id)
+      if (descriptor) {
+        const entity = await getQueryShowMethod(query, descriptor)(vault, id)
+        if (!entity) {
+          throw new VaultCliError(
+            "not_found",
+            `No ${descriptor.query.notFoundLabel} found for "${id}".`,
+          )
         }
 
         return {
           vault,
-          entity: {
-            id: record.id,
-            kind: record.kind ?? record.recordType,
-            title: record.title ?? null,
-            occurredAt: record.occurredAt ?? null,
-            path: record.sourcePath ?? null,
-            markdown: record.body ?? null,
-            data: record.data,
-            links: buildEntityLinks(record),
-          },
+          entity: toHealthShowEntity(entity, descriptor.kind),
         }
-      },
-      async list(input: CommandContext & ListFilters) {
-        const { vault, kind, experiment, dateFrom, dateTo, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        const descriptor = findHealthDescriptorForListKind(kind)
-        if (descriptor) {
-          const items = (
-            await getQueryListMethod(query, descriptor)(
-              vault,
-              buildHealthGenericListOptions(descriptor, input),
-            )
-          ).map((record) => toHealthListItem(record, descriptor.kind))
+      }
 
-          return {
+      const readModel = await query.readVault(vault)
+      const record = query.lookupRecordById(readModel, id)
+
+      if (!record) {
+        throw new VaultCliError("not_found", `No record found for "${id}".`)
+      }
+
+      return {
+        vault,
+        entity: {
+          id: record.id,
+          kind: record.kind ?? record.recordType,
+          title: record.title ?? null,
+          occurredAt: record.occurredAt ?? null,
+          path: record.sourcePath ?? null,
+          markdown: record.body ?? null,
+          data: record.data,
+          links: buildEntityLinks(record),
+        },
+      }
+    },
+    async list(input: CommandContext & ListFilters) {
+      const { vault, kind, experiment, dateFrom, dateTo, limit } = input
+      const { query } = await loadIntegratedRuntime()
+      const descriptor = findHealthDescriptorForListKind(kind)
+      if (descriptor) {
+        const items = (
+          await getQueryListMethod(query, descriptor)(
             vault,
-            filters: { kind, experiment, dateFrom, dateTo, limit },
-            items,
-            nextCursor: null,
-          }
-        }
+            buildHealthGenericListOptions(descriptor, input),
+          )
+        ).map((record) => toHealthListItem(record, descriptor.kind))
 
-        const readModel = await query.readVault(vault)
-        const items = query
-          .listRecords(readModel, {
+        return {
+          vault,
+          filters: { kind, experiment, dateFrom, dateTo, limit },
+          items,
+          nextCursor: null,
+        }
+      }
+
+      const readModel = await query.readVault(vault)
+      const items = query
+        .listRecords(readModel, {
           kinds: kind ? [kind] : undefined,
           experimentSlug: experiment,
           from: dateFrom,
           to: dateTo,
         })
-          .slice(0, limit)
-          .map((record) => ({
-            id: record.id,
-            kind: record.kind ?? record.recordType,
-            title: record.title ?? null,
-            occurredAt: record.occurredAt ?? null,
-            path: record.sourcePath ?? null,
-          }))
+        .slice(0, limit)
+        .map((record) => ({
+          id: record.id,
+          kind: record.kind ?? record.recordType,
+          title: record.title ?? null,
+          occurredAt: record.occurredAt ?? null,
+          path: record.sourcePath ?? null,
+        }))
 
-        return {
-          vault,
-          filters: {
-            kind,
-            experiment,
-            dateFrom,
-            dateTo,
-            limit,
-          },
-          items,
-          nextCursor: null,
-        }
-      },
-      async exportPack(input: CommandContext & {
-        from: string
-        to: string
-        experiment?: string
-        out?: string
-      }) {
-        const { vault, from, to, experiment, out } = input
-        const { query } = await loadIntegratedRuntime()
-        const readModel = await query.readVault(vault)
-        const pack = query.buildExportPack(readModel, {
-          from,
-          to,
-          experimentSlug: experiment,
-        })
+      return {
+        vault,
+        filters: {
+          kind,
+          experiment,
+          dateFrom,
+          dateTo,
+          limit,
+        },
+        items,
+        nextCursor: null,
+      }
+    },
+    async exportPack(input: CommandContext & {
+      from: string
+      to: string
+      experiment?: string
+      out?: string
+    }) {
+      const { vault, from, to, experiment, out } = input
+      const { query } = await loadIntegratedRuntime()
+      const readModel = await query.readVault(vault)
+      const pack = query.buildExportPack(readModel, {
+        from,
+        to,
+        experimentSlug: experiment,
+      })
 
-        if (out) {
-          await materializeExportPack(out, pack.files)
-        }
+      if (out) {
+        await materializeExportPack(out, pack.files)
+      }
 
-        return {
-          vault,
-          from,
-          to,
-          experiment: experiment ?? null,
-          outDir: out ?? null,
-          packId: pack.packId,
-          files: pack.files.map((file) => file.path),
-        }
-      },
-    } as unknown as QueryServices,
+      return {
+        vault,
+        from,
+        to,
+        experiment: experiment ?? null,
+        outDir: out ?? null,
+        packId: pack.packId,
+        files: pack.files.map((file) => file.path),
+      }
+    },
+  } satisfies QueryServices
+}
+
+export function createIntegratedVaultCliServices(): VaultCliServices {
+  return {
+    core: createIntegratedCoreServices(),
+    importers: createIntegratedImporterServices(),
+    query: createIntegratedQueryServices(),
   }
-
-  return services
 }
 
 function createUnwiredHealthMethodSet<TMethods extends string>(
@@ -1525,7 +1346,7 @@ function createUnwiredHealthMethodSet<TMethods extends string>(
 }
 
 export function createUnwiredVaultCliServices(): VaultCliServices {
-  const services: VaultCliServices = {
+  return {
     core: {
       init: createUnwiredMethod("core.init"),
       validate: createUnwiredMethod("core.validate"),
@@ -1536,19 +1357,17 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
       ...createUnwiredHealthMethodSet(healthCoreServiceMethodNames, "core"),
       rebuildCurrentProfile: createUnwiredMethod("core.rebuildCurrentProfile"),
       stopRegimen: createUnwiredMethod("core.stopRegimen"),
-    } as unknown as CoreWriteServices,
+    } satisfies CoreWriteServices,
     importers: {
       importDocument: createUnwiredMethod("importers.importDocument"),
       importSamplesCsv: createUnwiredMethod("importers.importSamplesCsv"),
       importAssessmentResponse: createUnwiredMethod("importers.importAssessmentResponse"),
-    },
+    } satisfies ImporterServices,
     query: {
       show: createUnwiredMethod("query.show"),
       list: createUnwiredMethod("query.list"),
       exportPack: createUnwiredMethod("query.exportPack"),
       ...createUnwiredHealthMethodSet(healthQueryServiceMethodNames, "query"),
-    } as unknown as QueryServices,
+    } satisfies QueryServices,
   }
-
-  return services
 }
