@@ -1,17 +1,12 @@
 import { Cli, z } from 'incur'
-import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
+import { registerHealthCrudCommands, healthPayloadSchema } from './health-command-factory.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-
-const payloadSchema = z.record(z.string(), z.unknown())
-const inputFileSchema = z
-  .string()
-  .regex(/^@.+/u, 'Expected an @file.json payload reference.')
 
 const scaffoldResultSchema = z.object({
   vault: pathSchema,
   noun: z.literal('history'),
-  payload: payloadSchema,
+  payload: healthPayloadSchema,
 })
 
 const upsertResultSchema = z.object({
@@ -24,12 +19,12 @@ const upsertResultSchema = z.object({
 
 const showResultSchema = z.object({
   vault: pathSchema,
-  entity: payloadSchema,
+  entity: healthPayloadSchema,
 })
 
 const listResultSchema = z.object({
   vault: pathSchema,
-  items: z.array(payloadSchema),
+  items: z.array(healthPayloadSchema),
   count: z.number().int().nonnegative(),
 })
 
@@ -61,92 +56,53 @@ interface HistoryServices extends VaultCliServices {
   }
 }
 
-function stripAtPrefix(input: string) {
-  return input.slice(1)
-}
-
 export function registerHistoryCommands(cli: Cli.Cli, services: VaultCliServices) {
   const healthServices = services as HistoryServices
   const history = Cli.create('history', {
     description: 'Timed health history commands for the extension surface.',
   })
 
-  history.command(
-    'scaffold',
-    {
-      description: 'Emit a payload template for timed history events.',
-      args: z.object({}),
-      options: withBaseOptions(),
-      output: scaffoldResultSchema,
-      async run({ options }) {
-        return healthServices.core.scaffoldHistoryEvent({
-          vault: options.vault,
-          requestId: requestIdFromOptions(options),
-        })
+  registerHealthCrudCommands({
+    descriptions: {
+      list: 'List timed history events through the health read model.',
+      scaffold: 'Emit a payload template for timed history events.',
+      show: 'Show one timed history event.',
+      upsert: 'Append one timed history event from an @file.json payload.',
+    },
+    group: history,
+    groupName: 'history',
+    listStatusDescription: 'Optional health-event status to filter by.',
+    noun: 'history event',
+    outputs: {
+      list: listResultSchema,
+      scaffold: scaffoldResultSchema,
+      show: showResultSchema,
+      upsert: upsertResultSchema,
+    },
+    payloadFile: 'history.json',
+    pluralNoun: 'history events',
+    services: {
+      list(input) {
+        return healthServices.query.listHistoryEvents(input)
+      },
+      scaffold(input) {
+        return healthServices.core.scaffoldHistoryEvent(input)
+      },
+      show(input) {
+        return healthServices.query.showHistoryEvent(input)
+      },
+      upsert(input) {
+        return healthServices.core.upsertHistoryEvent(input)
       },
     },
-  )
-
-  history.command(
-    'upsert',
-    {
-      description: 'Append one timed history event from an @file.json payload.',
-      args: z.object({}),
-      options: withBaseOptions({
-        input: inputFileSchema,
-      }),
-      output: upsertResultSchema,
-      async run({ options }) {
-        return healthServices.core.upsertHistoryEvent({
-          input: stripAtPrefix(options.input),
-          vault: options.vault,
-          requestId: requestIdFromOptions(options),
-        })
+    showId: {
+      description: 'Timed history event id to show.',
+      example: '<history-event-id>',
+      fromUpsert(result) {
+        return result.eventId
       },
     },
-  )
-
-  history.command(
-    'show',
-    {
-      description: 'Show one timed history event.',
-      args: z.object({
-        id: z.string().min(1),
-      }),
-      options: withBaseOptions(),
-      output: showResultSchema,
-      async run({ args, options }) {
-        return healthServices.query.showHistoryEvent({
-          id: args.id,
-          vault: options.vault,
-          requestId: requestIdFromOptions(options),
-        })
-      },
-    },
-  )
-
-  history.command(
-    'list',
-    {
-      description: 'List timed history events through the health read model.',
-      args: z.object({}),
-      options: withBaseOptions({
-        status: z.string().min(1).optional(),
-        cursor: z.string().min(1).optional(),
-        limit: z.number().int().positive().max(200).default(50),
-      }),
-      output: listResultSchema,
-      async run({ options }) {
-        return healthServices.query.listHistoryEvents({
-          vault: options.vault,
-          requestId: requestIdFromOptions(options),
-          status: options.status,
-          cursor: options.cursor,
-          limit: options.limit,
-        })
-      },
-    },
-  )
+  })
 
   cli.command(history)
 }

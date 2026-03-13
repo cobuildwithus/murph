@@ -1,20 +1,9 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
-import { fileURLToPath } from 'node:url'
 import { test } from 'vitest'
-
-interface CliResult<TData = Record<string, unknown>> {
-  ok: boolean
-  data?: TData
-  error?: {
-    code?: string
-    message?: string
-  }
-}
+import { repoRoot, requireData, runCli } from './cli-test-helpers.js'
 
 interface FixtureVault {
   vaultRoot: string
@@ -39,73 +28,10 @@ interface EmptyVaultFixture {
   csvPath: string
 }
 
-const execFileAsync = promisify(execFile)
-const packageDir = fileURLToPath(new URL('../', import.meta.url))
-const repoRoot = path.resolve(packageDir, '../..')
-const binPath = path.join(packageDir, 'dist/bin.js')
 const sampleDocumentPath = path.join(
   repoRoot,
   'fixtures/sample-imports/README.md',
 )
-
-async function runCli<TData = Record<string, unknown>>(
-  args: string[],
-): Promise<CliResult<TData>> {
-  try {
-    const { stdout } = await execFileAsync(process.execPath, [binPath, ...args], {
-      cwd: repoRoot,
-    })
-
-    return {
-      ok: true,
-      data: JSON.parse(stdout) as TData,
-    }
-  } catch (error) {
-    const output = commandOutputFromError(error)
-    if (output !== null) {
-      return {
-        ok: false,
-        error: JSON.parse(output) as CliResult<TData>['error'],
-      }
-    }
-
-    throw error
-  }
-}
-
-function commandOutputFromError(error: unknown): string | null {
-  if (!error || typeof error !== 'object') {
-    return null
-  }
-
-  const maybeOutput = error as {
-    stdout?: Buffer | string
-    stderr?: Buffer | string
-  }
-
-  return decodeCommandOutput(maybeOutput.stdout) ?? decodeCommandOutput(maybeOutput.stderr)
-}
-
-function decodeCommandOutput(output: Buffer | string | undefined): string | null {
-  if (typeof output === 'string') {
-    return output.trim().length > 0 ? output : null
-  }
-
-  if (Buffer.isBuffer(output)) {
-    const text = output.toString('utf8').trim()
-    return text.length > 0 ? text : null
-  }
-
-  return null
-}
-
-function requireData<TData>(result: CliResult<TData>): TData {
-  if (result.data === undefined) {
-    throw new Error('CLI result did not include a data payload.')
-  }
-
-  return result.data
-}
 
 async function makeFixtureVault(): Promise<FixtureVault> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-test-'))
@@ -122,7 +48,7 @@ async function makeFixtureVault(): Promise<FixtureVault> {
     'utf8',
   )
 
-  await runCli(['init', '--vault', vaultRoot, '--format', 'json'])
+  await runCli(['init', '--vault', vaultRoot])
 
   const document = requireData(
     await runCli<{
@@ -134,8 +60,6 @@ async function makeFixtureVault(): Promise<FixtureVault> {
       sampleDocumentPath,
       '--vault',
       vaultRoot,
-      '--format',
-      'json',
     ]),
   )
   const meal = requireData(
@@ -148,8 +72,6 @@ async function makeFixtureVault(): Promise<FixtureVault> {
       sampleDocumentPath,
       '--vault',
       vaultRoot,
-      '--format',
-      'json',
     ]),
   )
   const journal = requireData(
@@ -161,8 +83,6 @@ async function makeFixtureVault(): Promise<FixtureVault> {
       '2026-03-12',
       '--vault',
       vaultRoot,
-      '--format',
-      'json',
     ]),
   )
   const samples = requireData(
@@ -183,8 +103,6 @@ async function makeFixtureVault(): Promise<FixtureVault> {
       'bpm',
       '--vault',
       vaultRoot,
-      '--format',
-      'json',
     ]),
   )
 
@@ -214,7 +132,7 @@ async function makeEmptyVaultFixture(): Promise<EmptyVaultFixture> {
 
   const initResult = await runCli<{
     created: boolean
-  }>(['init', '--vault', vaultRoot, '--format', 'json'])
+  }>(['init', '--vault', vaultRoot])
   assert.equal(initResult.ok, true)
   assert.equal(requireData(initResult).created, true)
 
@@ -240,10 +158,9 @@ test.sequential(
         sampleDocumentPath,
         '--vault',
         fixture.vaultRoot,
-        '--format',
-        'json',
       ])
       assert.equal(document.ok, true)
+      assert.equal(document.meta?.command, 'document import')
       assert.match(requireData(document).documentId, /^doc_/u)
       assert.match(requireData(document).lookupId, /^evt_/u)
       assert.equal(requireData(document).rawFile.length > 0, true)
@@ -265,10 +182,9 @@ test.sequential(
         'bpm',
         '--vault',
         fixture.vaultRoot,
-        '--format',
-        'json',
       ])
       assert.equal(samples.ok, true)
+      assert.equal(samples.meta?.command, 'samples import-csv')
       assert.equal(requireData(samples).lookupIds.length, 2)
       assert.equal(requireData(samples).ledgerFiles.length > 0, true)
     } finally {
@@ -292,10 +208,9 @@ test.sequential(
         fixture.document.lookupId,
         '--vault',
         fixture.vaultRoot,
-        '--format',
-        'json',
       ])
       assert.equal(showDocument.ok, true)
+      assert.equal(showDocument.meta?.command, 'show')
       assert.equal(requireData(showDocument).entity.kind, 'document')
 
       const showJournal = await runCli<{
@@ -307,8 +222,6 @@ test.sequential(
         fixture.journal.lookupId,
         '--vault',
         fixture.vaultRoot,
-        '--format',
-        'json',
       ])
       assert.equal(showJournal.ok, true)
       assert.equal(requireData(showJournal).entity.kind, 'journal_day')
@@ -322,8 +235,6 @@ test.sequential(
         fixture.samples.lookupIds[0],
         '--vault',
         fixture.vaultRoot,
-        '--format',
-        'json',
       ])
       assert.equal(showSample.ok, true)
       assert.equal(requireData(showSample).entity.kind, 'sample')
@@ -339,11 +250,10 @@ test.sequential(
           invalidId,
           '--vault',
           fixture.vaultRoot,
-          '--format',
-          'json',
         ])
         assert.equal(result.ok, false)
         assert.equal(result.error?.code, 'invalid_lookup_id')
+        assert.equal(result.meta?.command, 'show')
       }
     } finally {
       await rm(fixture.vaultRoot, { recursive: true, force: true })
@@ -369,11 +279,10 @@ test.sequential('export pack materializes the derived five-file pack when --out 
       outDir,
       '--vault',
       fixture.vaultRoot,
-      '--format',
-      'json',
     ])
 
     assert.equal(result.ok, true)
+    assert.equal(result.meta?.command, 'export pack')
     assert.equal(requireData(result).files.length, 5)
 
     for (const relativePath of requireData(result).files) {

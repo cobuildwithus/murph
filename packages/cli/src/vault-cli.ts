@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { Cli } from 'incur'
 import { registerDocumentCommands } from './commands/document.js'
 import { registerExperimentCommands } from './commands/experiment.js'
@@ -21,6 +22,9 @@ import {
   type VaultCliServices,
 } from './vault-cli-services.js'
 
+const require = createRequire(import.meta.url)
+const packageJson = require('../package.json') as { version?: string }
+
 export const CLI_DESCRIPTION =
   'Typed operator surface for the Healthy Bob vault baseline'
 
@@ -29,7 +33,7 @@ export function createVaultCli(
 ): Cli.Cli {
   const cli = Cli.create('vault-cli', {
     description: CLI_DESCRIPTION,
-    version: '0.0.0',
+    version: packageJson.version,
   })
 
   registerVaultCommands(cli, services)

@@ -12,7 +12,7 @@ export default defineConfig({
       "packages/query/test/health-tail.test.ts",
       "packages/query/test/query.test.ts",
       "packages/cli/test/health-tail.test.ts",
-      "packages/cli/test/root-middleware.test.ts",
+      "packages/cli/test/incur-smoke.test.ts",
       "packages/cli/test/runtime.test.ts",
     ],
     coverage: {

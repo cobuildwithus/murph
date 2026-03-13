@@ -1,10 +1,5 @@
 import { z } from 'incur'
 
-export const outputFormatSchema = z
-  .enum(['json', 'md'])
-  .default('json')
-  .describe('Structured output mode. `json` is the machine-stable default.')
-
 export const isoTimestampSchema = z
   .string()
   .datetime({ offset: true })
@@ -37,7 +32,6 @@ export const requestIdSchema = z
 
 export const baseCommandOptionsSchema = z.object({
   vault: pathSchema.describe('Vault root to operate against.'),
-  format: outputFormatSchema,
   requestId: requestIdSchema,
 })
 
@@ -162,7 +156,6 @@ export const exportPackResultSchema = z.object({
   files: z.array(pathSchema),
 })
 
-export type OutputFormat = z.infer<typeof outputFormatSchema>
 export type BaseCommandOptions = z.infer<typeof baseCommandOptionsSchema>
 export type VaultInitResult = z.infer<typeof vaultInitResultSchema>
 export type VaultValidateResult = z.infer<typeof vaultValidateResultSchema>
