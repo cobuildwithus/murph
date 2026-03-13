@@ -1,5 +1,17 @@
-// @ts-nocheck
-
+import type {
+  DocumentEventRecord,
+  EventKind,
+  EventRecord,
+  EventSource,
+  ExperimentEventRecord,
+  ExperimentFrontmatter,
+  ExperimentStatus,
+  JournalDayFrontmatter,
+  SampleQuality,
+  SampleRecord,
+  SampleSource,
+  SampleStream,
+} from "@healthybob/contracts";
 import {
   eventRecordSchema,
   experimentFrontmatterSchema,
@@ -7,6 +19,9 @@ import {
   sampleRecordSchema,
 } from "@healthybob/contracts/schemas";
 import { validateAgainstSchema } from "@healthybob/contracts/validate";
+
+import type { JsonSchema } from "@healthybob/contracts/schemas";
+
 import {
   BASELINE_EVENT_KINDS,
   BASELINE_SAMPLE_STREAMS,
@@ -21,24 +36,153 @@ import {
   VAULT_LAYOUT,
 } from "./constants.js";
 import { emitAuditRecord } from "./audit.js";
+import { VaultError } from "./errors.js";
 import { readUtf8File, writeVaultTextFile } from "./fs.js";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
-import { appendJsonlRecord, toMonthlyShardRelativePath } from "./jsonl.js";
 import { generateRecordId } from "./ids.js";
-import { VaultError } from "./errors.js";
+import { appendJsonlRecord, toMonthlyShardRelativePath } from "./jsonl.js";
 import { sanitizePathSegment } from "./path-safety.js";
 import { copyRawArtifact } from "./raw.js";
-import { loadVault } from "./vault.js";
 import { toDateOnly, toIsoTimestamp } from "./time.js";
+import { loadVault } from "./vault.js";
 
-const EVENT_KIND_SET = new Set(BASELINE_EVENT_KINDS);
-const EVENT_SOURCE_SET = new Set(EVENT_SOURCES);
-const SAMPLE_STREAM_SET = new Set(BASELINE_SAMPLE_STREAMS);
-const SAMPLE_SOURCE_SET = new Set(SAMPLE_SOURCES);
-const SAMPLE_QUALITY_SET = new Set(SAMPLE_QUALITIES);
-const EXPERIMENT_STATUS_SET = new Set(EXPERIMENT_STATUSES);
+import type { RawArtifact } from "./raw.js";
+import type { DateInput, FrontmatterObject, UnknownRecord } from "./types.js";
 
-function compactRecord(record) {
+type EventRecordByKind<K extends EventKind> = Extract<EventRecord, { kind: K }>;
+type LooseRecord = Record<string, unknown>;
+
+interface EnsureJournalDayInput {
+  vaultRoot: string;
+  date?: DateInput;
+}
+
+interface EnsureJournalDayResult {
+  created: boolean;
+  relativePath: string;
+  auditPath?: string;
+}
+
+interface CreateExperimentInput {
+  vaultRoot: string;
+  slug: string;
+  title?: string;
+  hypothesis?: string;
+  startedOn?: DateInput;
+  status?: string;
+}
+
+interface CreateExperimentResult {
+  created: boolean;
+  experiment: {
+    id: string;
+    slug: string;
+    relativePath: string;
+  };
+  event: ExperimentEventRecord | null;
+  auditPath: string | null;
+}
+
+interface ImportDocumentInput {
+  vaultRoot: string;
+  sourcePath: string;
+  occurredAt?: DateInput;
+  title?: string;
+  note?: string;
+  source?: string;
+}
+
+interface ImportDocumentResult {
+  documentId: string;
+  raw: RawArtifact;
+  event: DocumentEventRecord;
+  eventPath: string;
+  auditPath: string;
+}
+
+interface AddMealInput {
+  vaultRoot: string;
+  occurredAt?: DateInput;
+  note?: string;
+  photoPath?: string;
+  audioPath?: string;
+  source?: string;
+}
+
+interface AddMealResult {
+  mealId: string;
+  event: EventRecordByKind<"meal">;
+  eventPath: string;
+  photo: RawArtifact;
+  audio: RawArtifact | null;
+  auditPath: string;
+}
+
+interface SampleInputRecord extends LooseRecord {
+  occurredAt?: DateInput;
+  recordedAt?: DateInput;
+  value?: unknown;
+  stage?: unknown;
+  startAt?: DateInput;
+  endAt?: DateInput;
+  durationMinutes?: unknown;
+}
+
+interface ImportSamplesInput {
+  vaultRoot: string;
+  stream: string;
+  unit: string;
+  samples: SampleInputRecord[];
+  sourcePath?: string;
+  source?: string;
+  quality?: string;
+}
+
+interface ImportSamplesResult {
+  count: number;
+  records: SampleRecord[];
+  shardPaths: string[];
+  raw: RawArtifact | null;
+  transformId: string;
+  auditPath: string;
+}
+
+interface BuildEventRecordInput<K extends EventKind> {
+  kind: K;
+  occurredAt: DateInput;
+  recordedAt?: DateInput;
+  source?: string;
+  title?: string;
+  note?: string;
+  tags?: unknown;
+  relatedIds?: unknown;
+  rawRefs?: unknown;
+  fields?: LooseRecord;
+}
+
+interface AppendEventRecordInput<K extends EventKind> extends BuildEventRecordInput<K> {
+  vaultRoot: string;
+}
+
+interface BuildSampleRecordInput {
+  stream: SampleStream;
+  recordedAt?: DateInput;
+  source?: string;
+  quality?: string;
+  sample: SampleInputRecord;
+  unit: string;
+}
+
+const EVENT_KIND_SET = new Set<EventKind>(BASELINE_EVENT_KINDS as readonly EventKind[]);
+const EVENT_SOURCE_SET = new Set<EventSource>(EVENT_SOURCES as readonly EventSource[]);
+const SAMPLE_STREAM_SET = new Set<SampleStream>(BASELINE_SAMPLE_STREAMS as readonly SampleStream[]);
+const SAMPLE_SOURCE_SET = new Set<SampleSource>(SAMPLE_SOURCES as readonly SampleSource[]);
+const SAMPLE_QUALITY_SET = new Set<SampleQuality>(SAMPLE_QUALITIES as readonly SampleQuality[]);
+const EXPERIMENT_STATUS_SET = new Set<ExperimentStatus>(
+  EXPERIMENT_STATUSES as readonly ExperimentStatus[],
+);
+
+function compactRecord(record: LooseRecord): UnknownRecord {
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => {
       if (value === undefined || value === null) {
@@ -55,18 +199,27 @@ function compactRecord(record) {
 
       return true;
     }),
-  );
+  ) as UnknownRecord;
 }
 
-function assertPlainObject(value, code, message) {
+function assertPlainObject<T extends LooseRecord>(
+  value: unknown,
+  code: string,
+  message: string,
+): T {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new VaultError(code, message);
   }
 
-  return value;
+  return value as T;
 }
 
-function assertContractShape(schema, value, code, message) {
+function assertContractShape<T>(
+  schema: JsonSchema,
+  value: unknown,
+  code: string,
+  message: string,
+): asserts value is T {
   const errors = validateAgainstSchema(schema, value);
 
   if (errors.length > 0) {
@@ -74,85 +227,100 @@ function assertContractShape(schema, value, code, message) {
   }
 }
 
-function normalizeSource(value, allowed, fallback) {
-  return allowed.has(value) ? value : fallback;
+function normalizeSource<T extends string>(value: unknown, allowed: ReadonlySet<T>, fallback: T): T {
+  return typeof value === "string" && allowed.has(value as T) ? (value as T) : fallback;
 }
 
-function normalizeStringList(value) {
+function normalizeStringList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
 
   const entries = value
-    .filter((entry) => typeof entry === "string")
+    .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
     .filter(Boolean);
 
   return entries.length > 0 ? entries : undefined;
 }
 
-function normalizeExperimentHypothesis(value) {
+function normalizeExperimentHypothesis(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function normalizeExperimentStatus(value) {
-  return EXPERIMENT_STATUS_SET.has(value) ? value : "active";
+function normalizeExperimentStatus(value: unknown): ExperimentStatus {
+  return typeof value === "string" && EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)
+    ? (value as ExperimentStatus)
+    : "active";
 }
 
-function toExperimentComparableAttributes(attributes) {
+function frontmatterString(value: FrontmatterObject, key: string): string {
+  const candidate = value[key];
+  return typeof candidate === "string" ? candidate : "";
+}
+
+function toExperimentComparableAttributes(
+  attributes: Pick<ExperimentFrontmatter, "slug" | "status" | "title" | "startedOn" | "hypothesis"> | FrontmatterObject,
+): UnknownRecord {
   return compactRecord({
-    slug: String(attributes.slug ?? "").trim(),
-    status: normalizeExperimentStatus(attributes.status),
-    title: String(attributes.title ?? "").trim(),
-    startedOn: String(attributes.startedOn ?? "").trim(),
-    hypothesis: normalizeExperimentHypothesis(attributes.hypothesis),
+    slug: frontmatterString(attributes as FrontmatterObject, "slug").trim(),
+    status: normalizeExperimentStatus((attributes as FrontmatterObject).status),
+    title: frontmatterString(attributes as FrontmatterObject, "title").trim(),
+    startedOn: frontmatterString(attributes as FrontmatterObject, "startedOn").trim(),
+    hypothesis: normalizeExperimentHypothesis((attributes as FrontmatterObject).hypothesis),
   });
 }
 
-function normalizeNumericUnit(stream, unit) {
+const NUMERIC_UNIT_ALIASES = {
+  glucose: {
+    "mg/dl": "mg_dL",
+    "mg_dl": "mg_dL",
+    mg_dL: "mg_dL",
+  },
+  heart_rate: {
+    bpm: "bpm",
+  },
+  hrv: {
+    ms: "ms",
+  },
+  steps: {
+    count: "count",
+  },
+  respiratory_rate: {
+    breaths_per_minute: "breaths_per_minute",
+    "breaths/minute": "breaths_per_minute",
+  },
+  temperature: {
+    celsius: "celsius",
+    c: "celsius",
+  },
+  sleep_stage: {
+    stage: "stage",
+  },
+} as const;
+
+function normalizeNumericUnit(stream: SampleStream, unit: unknown): string {
   const normalized = String(unit ?? "").trim();
-
-  const aliases = {
-    glucose: {
-      "mg/dl": "mg_dL",
-      "mg_dl": "mg_dL",
-      mg_dL: "mg_dL",
-    },
-    heart_rate: {
-      bpm: "bpm",
-    },
-    hrv: {
-      ms: "ms",
-    },
-    steps: {
-      count: "count",
-    },
-    respiratory_rate: {
-      breaths_per_minute: "breaths_per_minute",
-      "breaths/minute": "breaths_per_minute",
-    },
-    temperature: {
-      celsius: "celsius",
-      c: "celsius",
-    },
-    sleep_stage: {
-      stage: "stage",
-    },
-  };
-
-  const candidate = aliases[stream]?.[normalized] ?? aliases[stream]?.[normalized.toLowerCase()];
+  const aliases = NUMERIC_UNIT_ALIASES[stream];
+  const candidate =
+    aliases[normalized as keyof typeof aliases] ??
+    aliases[normalized.toLowerCase() as keyof typeof aliases];
 
   if (!candidate) {
-    throw new VaultError("VAULT_INVALID_SAMPLE_UNIT", `Unsupported unit "${normalized}" for stream "${stream}".`, {
-      stream,
-      unit,
-    });
+    throw new VaultError(
+      "VAULT_INVALID_SAMPLE_UNIT",
+      `Unsupported unit "${normalized}" for stream "${stream}".`,
+      {
+        stream,
+        unit: normalized,
+      },
+    );
   }
 
   return candidate;
 }
 
-function buildEventRecord({
+function buildEventRecord<K extends EventKind>({
   kind,
   occurredAt,
   recordedAt = new Date(),
@@ -163,15 +331,22 @@ function buildEventRecord({
   relatedIds,
   rawRefs,
   fields = {},
-}) {
+}: BuildEventRecordInput<K>): EventRecordByKind<K> {
   if (!EVENT_KIND_SET.has(kind)) {
-    throw new VaultError("VAULT_UNSUPPORTED_EVENT_KIND", `Unsupported baseline event kind "${kind}".`, {
-      kind,
-    });
+    throw new VaultError(
+      "VAULT_UNSUPPORTED_EVENT_KIND",
+      `Unsupported baseline event kind "${kind}".`,
+      {
+        kind,
+      },
+    );
   }
 
-  assertPlainObject(fields, "VAULT_INVALID_EVENT_FIELDS", "Event fields must be a plain object.");
-
+  const normalizedFields = assertPlainObject<LooseRecord>(
+    fields,
+    "VAULT_INVALID_EVENT_FIELDS",
+    "Event fields must be a plain object.",
+  );
   const occurredTimestamp = toIsoTimestamp(occurredAt, "occurredAt");
   const recordedTimestamp = toIsoTimestamp(recordedAt, "recordedAt");
   const record = compactRecord({
@@ -187,10 +362,10 @@ function buildEventRecord({
     tags: normalizeStringList(tags),
     relatedIds: normalizeStringList(relatedIds),
     rawRefs: normalizeStringList(rawRefs),
-    ...fields,
+    ...normalizedFields,
   });
 
-  assertContractShape(
+  assertContractShape<EventRecordByKind<K>>(
     eventRecordSchema,
     record,
     "HB_EVENT_INVALID",
@@ -200,7 +375,10 @@ function buildEventRecord({
   return record;
 }
 
-async function appendEventRecord({ vaultRoot, ...input }) {
+async function appendEventRecord<K extends EventKind>({
+  vaultRoot,
+  ...input
+}: AppendEventRecordInput<K>): Promise<{ relativePath: string; record: EventRecordByKind<K> }> {
   const record = buildEventRecord(input);
   const relativePath = toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,
@@ -227,16 +405,16 @@ function buildSampleRecord({
   quality,
   sample,
   unit,
-}) {
+}: BuildSampleRecordInput): SampleRecord {
   const recordedTimestamp = toIsoTimestamp(sample.recordedAt ?? recordedAt, "recordedAt");
-  const baseRecord = {
+  const baseRecord: LooseRecord = {
     schemaVersion: SAMPLE_SCHEMA_VERSION,
     id: generateRecordId(ID_PREFIXES.sample),
     stream,
     recordedAt: recordedTimestamp,
     dayKey: toDateOnly(recordedTimestamp),
     source: normalizeSource(source, SAMPLE_SOURCE_SET, "import"),
-    quality: SAMPLE_QUALITY_SET.has(quality) ? quality : "raw",
+    quality: normalizeSource(quality, SAMPLE_QUALITY_SET, "raw"),
   };
 
   if (stream === "sleep_stage") {
@@ -249,7 +427,7 @@ function buildSampleRecord({
       unit: normalizeNumericUnit(stream, unit),
     });
 
-    assertContractShape(
+    assertContractShape<SampleRecord>(
       sampleRecordSchema,
       record,
       "HB_SAMPLE_INVALID",
@@ -262,7 +440,7 @@ function buildSampleRecord({
   if (typeof sample.value !== "number" || !Number.isFinite(sample.value)) {
     throw new VaultError("VAULT_INVALID_SAMPLE", "Sample value must be a finite number.", {
       stream,
-      sample,
+      sampleSummary: JSON.stringify(sample),
     });
   }
 
@@ -272,7 +450,7 @@ function buildSampleRecord({
     unit: normalizeNumericUnit(stream, unit),
   });
 
-  assertContractShape(
+  assertContractShape<SampleRecord>(
     sampleRecordSchema,
     record,
     "HB_SAMPLE_INVALID",
@@ -285,12 +463,12 @@ function buildSampleRecord({
 export async function ensureJournalDay({
   vaultRoot,
   date,
-} = {}) {
+}: EnsureJournalDayInput): Promise<EnsureJournalDayResult> {
   await loadVault({ vaultRoot });
   const day = toDateOnly(date, "date");
   const [year] = day.split("-");
   const relativePath = `${VAULT_LAYOUT.journalDirectory}/${year}/${day}.md`;
-  const attributes = {
+  const attributes: JournalDayFrontmatter = {
     schemaVersion: FRONTMATTER_SCHEMA_VERSIONS.journalDay,
     docType: "journal_day",
     dayKey: day,
@@ -298,7 +476,7 @@ export async function ensureJournalDay({
     sampleStreams: [],
   };
 
-  assertContractShape(
+  assertContractShape<JournalDayFrontmatter>(
     journalDayFrontmatterSchema,
     attributes,
     "HB_FRONTMATTER_INVALID",
@@ -310,7 +488,7 @@ export async function ensureJournalDay({
       vaultRoot,
       relativePath,
       stringifyFrontmatterDocument({
-        attributes,
+        attributes: { ...attributes },
         body: `# ${day}\n\n## Summary\n\n`,
       }),
       { overwrite: false },
@@ -349,7 +527,7 @@ export async function createExperiment({
   hypothesis,
   startedOn = new Date(),
   status = "active",
-} = {}) {
+}: CreateExperimentInput): Promise<CreateExperimentResult> {
   await loadVault({ vaultRoot });
   const safeSlug = sanitizePathSegment(slug, "experiment");
   const startedTimestamp = toIsoTimestamp(startedOn, "startedOn");
@@ -368,7 +546,10 @@ export async function createExperiment({
 
   try {
     const existingDocument = parseFrontmatterDocument(await readUtf8File(vaultRoot, relativePath));
-    const existingErrors = validateAgainstSchema(experimentFrontmatterSchema, existingDocument.attributes);
+    const existingErrors = validateAgainstSchema(
+      experimentFrontmatterSchema,
+      existingDocument.attributes,
+    );
 
     if (existingErrors.length > 0) {
       throw new VaultError(
@@ -381,8 +562,10 @@ export async function createExperiment({
       );
     }
 
+    const existingAttributes = existingDocument.attributes as unknown as ExperimentFrontmatter;
+
     if (
-      JSON.stringify(toExperimentComparableAttributes(existingDocument.attributes)) !==
+      JSON.stringify(toExperimentComparableAttributes(existingAttributes)) !==
       JSON.stringify(comparableAttributes)
     ) {
       throw new VaultError(
@@ -390,7 +573,7 @@ export async function createExperiment({
         `Experiment "${safeSlug}" already exists with different frontmatter.`,
         {
           relativePath,
-          experimentId: existingDocument.attributes.experimentId,
+          experimentId: existingAttributes.experimentId,
         },
       );
     }
@@ -398,8 +581,8 @@ export async function createExperiment({
     return {
       created: false,
       experiment: {
-        id: existingDocument.attributes.experimentId,
-        slug: existingDocument.attributes.slug,
+        id: existingAttributes.experimentId,
+        slug: existingAttributes.slug,
         relativePath,
       },
       event: null,
@@ -423,7 +606,7 @@ export async function createExperiment({
     hypothesis: normalizedHypothesis,
   });
 
-  assertContractShape(
+  assertContractShape<ExperimentFrontmatter>(
     experimentFrontmatterSchema,
     attributes,
     "HB_FRONTMATTER_INVALID",
@@ -434,7 +617,7 @@ export async function createExperiment({
     vaultRoot,
     relativePath,
     stringifyFrontmatterDocument({
-      attributes,
+      attributes: { ...attributes },
       body: `# ${normalizedTitle}\n\n## Plan\n\n## Notes\n\n`,
     }),
     { overwrite: false },
@@ -483,7 +666,7 @@ export async function importDocument({
   title,
   note,
   source = "import",
-} = {}) {
+}: ImportDocumentInput): Promise<ImportDocumentResult> {
   await loadVault({ vaultRoot });
   const documentId = generateRecordId(ID_PREFIXES.document);
   const raw = await copyRawArtifact({
@@ -534,7 +717,7 @@ export async function addMeal({
   photoPath,
   audioPath,
   source = "manual",
-} = {}) {
+}: AddMealInput): Promise<AddMealResult> {
   await loadVault({ vaultRoot });
 
   if (!photoPath) {
@@ -568,14 +751,18 @@ export async function addMeal({
     title: "Meal",
     note,
     relatedIds: [mealId],
-    rawRefs: [photo.relativePath, audio?.relativePath].filter(Boolean),
+    rawRefs: [photo.relativePath, audio?.relativePath].filter(
+      (value): value is string => typeof value === "string",
+    ),
     fields: {
       mealId,
       photoPaths: [photo.relativePath],
       audioPaths: audio ? [audio.relativePath] : [],
     },
   });
-  const touchedFiles = [photo.relativePath, audio?.relativePath, event.relativePath].filter(Boolean);
+  const touchedFiles = [photo.relativePath, audio?.relativePath, event.relativePath].filter(
+    (value): value is string => typeof value === "string",
+  );
   const audit = await emitAuditRecord({
     vaultRoot,
     action: "meal_add",
@@ -604,19 +791,24 @@ export async function importSamples({
   sourcePath,
   source = "import",
   quality = "raw",
-} = {}) {
+}: ImportSamplesInput): Promise<ImportSamplesResult> {
   await loadVault({ vaultRoot });
 
-  if (!SAMPLE_STREAM_SET.has(stream)) {
-    throw new VaultError("VAULT_UNSUPPORTED_SAMPLE_STREAM", `Unsupported baseline sample stream "${stream}".`, {
-      stream,
-    });
+  if (!SAMPLE_STREAM_SET.has(stream as SampleStream)) {
+    throw new VaultError(
+      "VAULT_UNSUPPORTED_SAMPLE_STREAM",
+      `Unsupported baseline sample stream "${stream}".`,
+      {
+        stream,
+      },
+    );
   }
 
   if (!Array.isArray(samples) || samples.length === 0) {
     throw new VaultError("VAULT_INVALID_SAMPLES", "importSamples requires a non-empty samples array.");
   }
 
+  const normalizedStream = stream as SampleStream;
   const transformId = generateRecordId(ID_PREFIXES.transform);
   const raw = sourcePath
     ? await copyRawArtifact({
@@ -625,26 +817,30 @@ export async function importSamples({
         category: "samples",
         occurredAt: samples[0]?.recordedAt ?? new Date(),
         recordId: transformId,
-        stream,
+        stream: normalizedStream,
       })
     : null;
 
   const touchedFiles = raw ? [raw.relativePath] : [];
-  const records = [];
-  const shardPaths = new Set();
+  const records: SampleRecord[] = [];
+  const shardPaths = new Set<string>();
 
   for (const sample of samples) {
-    assertPlainObject(sample, "VAULT_INVALID_SAMPLE", "Each sample must be a plain object.");
+    const normalizedSample = assertPlainObject<SampleInputRecord>(
+      sample,
+      "VAULT_INVALID_SAMPLE",
+      "Each sample must be a plain object.",
+    );
     const record = buildSampleRecord({
-      stream,
-      recordedAt: sample.recordedAt ?? sample.occurredAt,
+      stream: normalizedStream,
+      recordedAt: normalizedSample.recordedAt ?? normalizedSample.occurredAt,
       source,
       quality,
-      sample,
+      sample: normalizedSample,
       unit,
     });
     const relativePath = toMonthlyShardRelativePath(
-      `${VAULT_LAYOUT.sampleLedgerDirectory}/${stream}`,
+      `${VAULT_LAYOUT.sampleLedgerDirectory}/${normalizedStream}`,
       record.recordedAt,
       "recordedAt",
     );
@@ -666,8 +862,8 @@ export async function importSamples({
     vaultRoot,
     action: "samples_import_csv",
     commandName: "core.importSamples",
-    summary: `Imported ${records.length} ${stream} sample record(s).`,
-    occurredAt: records[0].recordedAt,
+    summary: `Imported ${records.length} ${normalizedStream} sample record(s).`,
+    occurredAt: records[0]?.recordedAt ?? new Date(),
     files: touchedFiles,
     targetIds: records.map((record) => record.id),
   });
