@@ -5,6 +5,9 @@
       "path": "./packages/contracts/tsconfig.build.json"
     },
     {
+      "path": "./packages/runtime-state"
+    },
+    {
       "path": "./packages/core/tsconfig.build.json"
     },
     {

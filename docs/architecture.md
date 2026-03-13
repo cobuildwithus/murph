@@ -20,6 +20,7 @@ repo/
 
   packages/
     contracts/
+    runtime-state/
     core/
     cli/
     importers/
@@ -42,11 +43,12 @@ repo/
 ## Package Boundaries
 
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, and generated JSON Schema artifacts.
+- `packages/runtime-state` defines canonical `.runtime` paths plus shared SQLite defaults for rebuildable local state.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
 - `packages/importers` parses external inputs but delegates all canonical writes to core.
-- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, runtime cursors/dedupe/search, and attachment-level derived-job orchestration.
+- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, inbox-local runtime cursors/capture indexes, and attachment-level derived-job orchestration.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
-- `packages/query` reads canonical vault state and builds derived export packs.
+- `packages/query` reads canonical vault state, builds derived export packs, and owns the optional lexical search index under `.runtime/search.sqlite`.
 - `packages/cli` exposes the `vault-cli` command surface and must not bypass core for writes.
 
 ## Storage Model
@@ -64,7 +66,9 @@ repo/
 - Rebuildable parser artifacts:
   - `derived/inbox/**`
 - Local runtime state:
-  - `.runtime/**`
+  - `.runtime/inboxd.sqlite`
+  - `.runtime/inboxd/*.json`
+  - `.runtime/search.sqlite`
 - Out-of-vault assistant/session state:
   - `assistant-state/`
 

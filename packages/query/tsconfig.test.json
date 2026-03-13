@@ -8,6 +8,9 @@
   "references": [
     {
       "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../runtime-state"
     }
   ],
   "include": [

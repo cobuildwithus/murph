@@ -3,7 +3,8 @@
 Source-agnostic inbox ingestion for Healthy Bob.
 
 This package keeps canonical inbox evidence in the vault and uses a local SQLite
-runtime database for cursors, transient dedupe caches, and search indexes.
+runtime database for cursors, transient dedupe caches, capture-local search
+tables, and attachment job state.
 
 ## Runtime expectations
 
@@ -11,6 +12,8 @@ runtime database for cursors, transient dedupe caches, and search indexes.
 - `@healthybob/inboxd` opens its runtime database through the built-in
   `node:sqlite` module and stores machine-local state under
   `<vault>/.runtime/inboxd.sqlite`.
+- Query-owned lexical search state lives separately under
+  `<vault>/.runtime/search.sqlite`.
 - The package writes runtime state next to the vault and expects normal local
   filesystem read/write access there.
 
@@ -19,7 +22,7 @@ runtime database for cursors, transient dedupe caches, and search indexes.
 - every inbound source normalizes into a single `InboundCapture` envelope
 - raw source evidence is persisted under `raw/inbox/<source>/...`
 - append-only vault events and audits record the canonical import trail
-- SQLite runtime state lives under `<vault>/.runtime/inboxd.sqlite`
+- inbox SQLite runtime state lives under `<vault>/.runtime/inboxd.sqlite`
 - any idempotent promotion from inbox captures into canonical records must be
   derivable from canonical vault evidence rather than local `.runtime` state alone
 

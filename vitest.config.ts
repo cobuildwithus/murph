@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@healthybob/contracts": path.resolve("packages/contracts/src/index.ts"),
+      "@healthybob/runtime-state": path.resolve("packages/runtime-state/src/index.ts"),
       "@healthybob/core": path.resolve("packages/core/src/index.ts"),
       "@healthybob/importers": path.resolve("packages/importers/src/index.ts"),
       "@healthybob/inboxd": path.resolve("packages/inboxd/src/index.ts"),
@@ -54,6 +55,7 @@ export default defineConfig({
         "packages/query/src/export-pack.ts",
         "packages/query/src/model.ts",
         "packages/query/src/search.ts",
+        "packages/query/src/search-sqlite.ts",
         "packages/query/src/summaries.ts",
         "packages/query/src/timeline.ts",
       ],

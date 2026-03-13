@@ -1,6 +1,13 @@
-import { existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import {
+  INBOX_DB_RELATIVE_PATH,
+  SEARCH_DB_RELATIVE_PATH,
+  openSqliteRuntimeDatabase,
+  resolveRuntimePaths,
+  tableExists,
+  withImmediateTransaction,
+} from "@healthybob/runtime-state";
 
 import { readVault } from "./model.js";
 import {
@@ -15,8 +22,6 @@ import {
 } from "./search-shared.js";
 
 const SEARCH_SCHEMA_VERSION = "hb.search.v1";
-const SEARCH_DB_RELATIVE_PATH = ".runtime/inboxd.sqlite";
-const DEFAULT_SQLITE_TIMEOUT_MS = 5_000;
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -37,6 +42,15 @@ interface SearchDocumentRow {
   body_text: string;
   tags_text: string;
   structured_text: string;
+}
+
+interface SearchDatabaseLocation {
+  absolutePath: string;
+  dbPath: string;
+}
+
+interface ResolvedSqliteSearchStatus extends SqliteSearchStatus {
+  absolutePath: string;
 }
 
 export type SearchBackend = "auto" | "scan" | "sqlite";
@@ -61,13 +75,12 @@ export async function rebuildSqliteSearchIndex(
   const indexedDocuments = materializeSearchDocuments(vault.records).filter(
     (document) => document.recordType !== "sample",
   );
-  const database = openSearchDatabase(vaultRoot, { create: true });
+  const searchDatabase = currentSearchDatabaseLocation(vaultRoot);
+  const database = openSearchDatabase(searchDatabase, { create: true });
 
   try {
     ensureSearchSchema(database);
-    database.exec("BEGIN IMMEDIATE");
-
-    try {
+    const indexedAt = withImmediateTransaction(database, () => {
       database.exec("DELETE FROM hb_search_document; DELETE FROM hb_search_fts;");
 
       const insertDocument = database.prepare(`
@@ -129,56 +142,25 @@ export async function rebuildSqliteSearchIndex(
       const indexedAt = new Date().toISOString();
       writeMeta(database, "schema_version", SEARCH_SCHEMA_VERSION);
       writeMeta(database, "indexed_at", indexedAt);
-      database.exec("COMMIT");
+      return indexedAt;
+    });
 
-      return {
-        backend: "sqlite",
-        dbPath: SEARCH_DB_RELATIVE_PATH,
-        exists: true,
-        schemaVersion: SEARCH_SCHEMA_VERSION,
-        indexedAt,
-        documentCount: indexedDocuments.length,
-        rebuilt: true,
-      };
-    } catch (error) {
-      database.exec("ROLLBACK");
-      throw error;
-    }
+    return {
+      backend: "sqlite",
+      dbPath: searchDatabase.dbPath,
+      exists: true,
+      schemaVersion: SEARCH_SCHEMA_VERSION,
+      indexedAt,
+      documentCount: indexedDocuments.length,
+      rebuilt: true,
+    };
   } finally {
     database.close();
   }
 }
 
 export function getSqliteSearchStatus(vaultRoot: string): SqliteSearchStatus {
-  const databasePath = resolveSearchDatabasePath(vaultRoot);
-
-  if (!existsSync(databasePath)) {
-    return emptySearchStatus();
-  }
-
-  const database = openSearchDatabase(vaultRoot, {
-    create: false,
-    readOnly: true,
-  });
-
-  try {
-    if (!hasIndexedSearchTables(database)) {
-      return emptySearchStatus();
-    }
-
-    const hasMeta = tableExists(database, "hb_search_meta");
-
-    return {
-      backend: "sqlite",
-      dbPath: SEARCH_DB_RELATIVE_PATH,
-      exists: true,
-      schemaVersion: hasMeta ? readMeta(database, "schema_version") : null,
-      indexedAt: hasMeta ? readMeta(database, "indexed_at") : null,
-      documentCount: countIndexedDocuments(database),
-    };
-  } finally {
-    database.close();
-  }
+  return resolveReadableSearchStatus(vaultRoot) ?? emptySearchStatus();
 }
 
 export async function searchVaultRuntime(
@@ -198,9 +180,9 @@ export async function searchVaultRuntime(
     return searchVaultSqlite(vaultRoot, query, filters);
   }
 
-  const status = getSqliteSearchStatus(vaultRoot);
-  if (status.exists) {
-    return searchVaultSqlite(vaultRoot, query, filters);
+  const status = resolveReadableSearchStatus(vaultRoot);
+  if (status) {
+    return searchVaultSqliteWithStatus(vaultRoot, query, filters, status);
   }
 
   const vault = await readVault(vaultRoot);
@@ -211,6 +193,15 @@ export async function searchVaultSqlite(
   vaultRoot: string,
   query: string,
   filters: SearchFilters = {},
+): Promise<SearchResult> {
+  return searchVaultSqliteWithStatus(vaultRoot, query, filters);
+}
+
+async function searchVaultSqliteWithStatus(
+  vaultRoot: string,
+  query: string,
+  filters: SearchFilters,
+  status: ResolvedSqliteSearchStatus | null = resolveReadableSearchStatus(vaultRoot),
 ): Promise<SearchResult> {
   const normalizedQuery = query.trim();
   const terms = tokenize(normalizedQuery);
@@ -224,17 +215,22 @@ export async function searchVaultSqlite(
     };
   }
 
-  const status = getSqliteSearchStatus(vaultRoot);
-  if (!status.exists) {
+  if (!status) {
     throw new Error(
       "SQLite search index is empty. Run `vault-cli search index-rebuild --vault <path>` first or use `--backend scan`.",
     );
   }
 
-  const database = openSearchDatabase(vaultRoot, {
-    create: false,
-    readOnly: true,
-  });
+  const database = openSearchDatabase(
+    {
+      absolutePath: status.absolutePath,
+      dbPath: status.dbPath,
+    },
+    {
+      create: false,
+      readOnly: true,
+    },
+  );
   const sampleRequested = wantsSampleRows(filters);
   const sqlRecordTypes = filters.recordTypes?.filter(
     (recordType) => recordType !== "sample",
@@ -334,31 +330,10 @@ export async function searchVaultSqlite(
 }
 
 function openSearchDatabase(
-  vaultRoot: string,
+  location: SearchDatabaseLocation,
   options: { create?: boolean; readOnly?: boolean } = {},
 ): DatabaseSync {
-  const databasePath = resolveSearchDatabasePath(vaultRoot);
-  const readOnly = options.readOnly ?? false;
-
-  if (!readOnly && (options.create ?? true)) {
-    mkdirSync(path.dirname(databasePath), { recursive: true });
-  }
-
-  const database = new DatabaseSync(databasePath, {
-    readOnly,
-    timeout: DEFAULT_SQLITE_TIMEOUT_MS,
-  });
-  database.exec("PRAGMA foreign_keys = ON;");
-
-  if (!readOnly) {
-    database.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
-  }
-
-  return database;
-}
-
-function resolveSearchDatabasePath(vaultRoot: string): string {
-  return path.resolve(vaultRoot, SEARCH_DB_RELATIVE_PATH);
+  return openSqliteRuntimeDatabase(location.absolutePath, options);
 }
 
 function emptySearchStatus(): SqliteSearchStatus {
@@ -369,6 +344,62 @@ function emptySearchStatus(): SqliteSearchStatus {
     schemaVersion: null,
     indexedAt: null,
     documentCount: 0,
+  };
+}
+
+function resolveReadableSearchStatus(vaultRoot: string): ResolvedSqliteSearchStatus | null {
+  return (
+    readSearchStatus(currentSearchDatabaseLocation(vaultRoot)) ??
+    readSearchStatus(legacySearchDatabaseLocation(vaultRoot))
+  );
+}
+
+function readSearchStatus(location: SearchDatabaseLocation): ResolvedSqliteSearchStatus | null {
+  if (!existsSync(location.absolutePath)) {
+    return null;
+  }
+
+  const database = openSearchDatabase(location, {
+    create: false,
+    readOnly: true,
+  });
+
+  try {
+    if (!hasIndexedSearchTables(database)) {
+      return null;
+    }
+
+    const hasMeta = tableExists(database, "hb_search_meta");
+
+    return {
+      backend: "sqlite",
+      absolutePath: location.absolutePath,
+      dbPath: location.dbPath,
+      exists: true,
+      schemaVersion: hasMeta ? readMeta(database, "schema_version") : null,
+      indexedAt: hasMeta ? readMeta(database, "indexed_at") : null,
+      documentCount: countIndexedDocuments(database),
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function currentSearchDatabaseLocation(vaultRoot: string): SearchDatabaseLocation {
+  const runtimePaths = resolveRuntimePaths(vaultRoot);
+
+  return {
+    absolutePath: runtimePaths.searchDbPath,
+    dbPath: SEARCH_DB_RELATIVE_PATH,
+  };
+}
+
+function legacySearchDatabaseLocation(vaultRoot: string): SearchDatabaseLocation {
+  const runtimePaths = resolveRuntimePaths(vaultRoot);
+
+  return {
+    absolutePath: runtimePaths.inboxDbPath,
+    dbPath: INBOX_DB_RELATIVE_PATH,
   };
 }
 
@@ -420,18 +451,6 @@ function hasIndexedSearchTables(database: DatabaseSync): boolean {
     tableExists(database, "hb_search_document") &&
     tableExists(database, "hb_search_fts")
   );
-}
-
-function tableExists(database: DatabaseSync, name: string): boolean {
-  const row = database
-    .prepare(`
-      SELECT name
-      FROM sqlite_master
-      WHERE type IN ('table', 'view') AND name = ?
-    `)
-    .get(name) as { name: string } | undefined;
-
-  return row?.name === name;
 }
 
 function appendEqualityFilters(

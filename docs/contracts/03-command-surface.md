@@ -341,7 +341,7 @@ The examples below are the full successful `--format json` response bodies.
 {
   "vault": "<path>",
   "backend": "sqlite",
-  "dbPath": ".runtime/inboxd.sqlite",
+  "dbPath": ".runtime/search.sqlite",
   "exists": true,
   "schemaVersion": "hb.search.v1",
   "indexedAt": "2026-03-13T03:55:00.000Z",
@@ -349,13 +349,16 @@ The examples below are the full successful `--format json` response bodies.
 }
 ```
 
+During the compatibility window, `dbPath` may report `.runtime/inboxd.sqlite` if
+legacy search tables have not been rebuilt into `.runtime/search.sqlite` yet.
+
 ### `search index-rebuild`
 
 ```json
 {
   "vault": "<path>",
   "backend": "sqlite",
-  "dbPath": ".runtime/inboxd.sqlite",
+  "dbPath": ".runtime/search.sqlite",
   "exists": true,
   "schemaVersion": "hb.search.v1",
   "indexedAt": "2026-03-13T03:55:00.000Z",

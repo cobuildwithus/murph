@@ -13,7 +13,7 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - `packages/cli` now extends the shared `../../tsconfig.base.json`; `tsconfig.json` is the buildable package project, `tsconfig.build.json` stays as the local build alias, and `tsconfig.typecheck.json` covers package-local scripts and tests.
 - Package-local verification scripts and runtime tests now live in TypeScript under `scripts/` and `test/`.
 - Local build now runs in this workspace, and the built binary can be exercised with `node dist/bin.js ...` after `pnpm --dir packages/cli build`.
-- Top-level retrieval commands now include `search` for lexical read-model search, `search index-status` / `search index-rebuild` for the optional SQLite FTS index stored in `.runtime/inboxd.sqlite`, and `timeline` for descending journal/event/sample-summary context, with the query package boundary isolated in `src/query-runtime.ts`.
+- Top-level retrieval commands now include `search` for lexical read-model search, `search index-status` / `search index-rebuild` for the optional SQLite FTS index stored in `.runtime/search.sqlite`, and `timeline` for descending journal/event/sample-summary context, with the query package boundary isolated in `src/query-runtime.ts`. During the compatibility window, `search index-status` may still report `.runtime/inboxd.sqlite` until the index is rebuilt into the canonical search DB.
 - The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion via `src/inbox-services.ts`.
 
 ## Release Flow

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -214,7 +214,7 @@ test.sequential('timeline merges journals, events, and sample summaries into one
 
 test.sequential('search index-status and index-rebuild expose the shared sqlite runtime state without creating it early', async () => {
   const fixture = await makeRetrievalFixture()
-  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/inboxd.sqlite')
+  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/search.sqlite')
 
   try {
     assert.equal(existsSync(runtimeDatabasePath), false)
@@ -234,7 +234,7 @@ test.sequential('search index-status and index-rebuild expose the shared sqlite 
     assert.equal(initialStatus.ok, true)
     assert.equal(requireData(initialStatus).backend, 'sqlite')
     assert.equal(requireData(initialStatus).exists, false)
-    assert.equal(requireData(initialStatus).dbPath, '.runtime/inboxd.sqlite')
+    assert.equal(requireData(initialStatus).dbPath, '.runtime/search.sqlite')
     assert.equal(existsSync(runtimeDatabasePath), false)
 
     const rebuild = await runCli<{
@@ -254,7 +254,7 @@ test.sequential('search index-status and index-rebuild expose the shared sqlite 
     assert.equal(requireData(rebuild).backend, 'sqlite')
     assert.equal(requireData(rebuild).exists, true)
     assert.equal(requireData(rebuild).rebuilt, true)
-    assert.equal(requireData(rebuild).dbPath, '.runtime/inboxd.sqlite')
+    assert.equal(requireData(rebuild).dbPath, '.runtime/search.sqlite')
     assert.equal(requireData(rebuild).documentCount > 0, true)
     assert.equal(existsSync(runtimeDatabasePath), true)
 
@@ -286,7 +286,91 @@ test.sequential('search index-status and index-rebuild expose the shared sqlite 
   }
 })
 
-test.sequential('search index-status treats a pre-existing shared runtime db as unindexed and sqlite backend returns operator guidance', async () => {
+test.sequential('search index-status keeps a legacy inbox search db readable until index-rebuild writes the canonical search db', async () => {
+  const fixture = await makeRetrievalFixture()
+  const searchDatabasePath = path.join(fixture.vaultRoot, '.runtime/search.sqlite')
+  const legacyDatabasePath = path.join(fixture.vaultRoot, '.runtime/inboxd.sqlite')
+
+  try {
+    const initialRebuild = await runCli<{
+      dbPath: string
+      rebuilt: boolean
+    }>([
+      'search',
+      'index-rebuild',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(initialRebuild.ok, true)
+    assert.equal(requireData(initialRebuild).dbPath, '.runtime/search.sqlite')
+
+    await mkdir(path.dirname(legacyDatabasePath), { recursive: true })
+    await copyFile(searchDatabasePath, legacyDatabasePath)
+    await rm(searchDatabasePath, { force: true })
+
+    const legacyStatus = await runCli<{
+      backend: string
+      exists: boolean
+      dbPath: string
+    }>([
+      'search',
+      'index-status',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(legacyStatus.ok, true)
+    assert.equal(requireData(legacyStatus).backend, 'sqlite')
+    assert.equal(requireData(legacyStatus).exists, true)
+    assert.equal(requireData(legacyStatus).dbPath, '.runtime/inboxd.sqlite')
+
+    const sqliteSearch = await runCli<{
+      filters: { backend: string }
+      hits: Array<{ recordId: string }>
+    }>([
+      'search',
+      '--text',
+      'heart_rate',
+      '--backend',
+      'sqlite',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(sqliteSearch.ok, true)
+    assert.equal(requireData(sqliteSearch).filters.backend, 'sqlite')
+    assert.equal(
+      requireData(sqliteSearch).hits.some((hit) => hit.recordId.startsWith('smp_')),
+      true,
+    )
+
+    const rebuilt = await runCli<{
+      backend: string
+      exists: boolean
+      rebuilt: boolean
+      dbPath: string
+    }>([
+      'search',
+      'index-rebuild',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(rebuilt.ok, true)
+    assert.equal(requireData(rebuilt).backend, 'sqlite')
+    assert.equal(requireData(rebuilt).exists, true)
+    assert.equal(requireData(rebuilt).rebuilt, true)
+    assert.equal(requireData(rebuilt).dbPath, '.runtime/search.sqlite')
+    assert.equal(existsSync(searchDatabasePath), true)
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('search index-status treats a pre-existing inbox runtime db as unindexed and sqlite backend returns operator guidance', async () => {
   const fixture = await makeRetrievalFixture()
   const runtimeRoot = path.join(fixture.vaultRoot, '.runtime')
   const runtimeDatabasePath = path.join(runtimeRoot, 'inboxd.sqlite')
@@ -311,7 +395,7 @@ test.sequential('search index-status treats a pre-existing shared runtime db as 
     assert.equal(initialStatus.ok, true)
     assert.equal(requireData(initialStatus).backend, 'sqlite')
     assert.equal(requireData(initialStatus).exists, false)
-    assert.equal(requireData(initialStatus).dbPath, '.runtime/inboxd.sqlite')
+    assert.equal(requireData(initialStatus).dbPath, '.runtime/search.sqlite')
 
     const sqliteSearch = await runCli([
       'search',

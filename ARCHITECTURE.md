@@ -1,14 +1,15 @@
 # Healthy Bob Architecture
 
-Last verified: 2026-03-12
+Last verified: 2026-03-13
 
 ## Module Map
 
 - `packages/contracts`: canonical Zod contracts, parse helpers, TypeScript types, and generated JSON Schema artifacts
+- `packages/runtime-state`: shared `.runtime` path resolution plus SQLite defaults for rebuildable local state
 - `packages/core`: the only package allowed to mutate canonical vault data
 - `packages/importers`: ingestion adapters that parse external files and delegate all writes to core
-- `packages/inboxd`: inbox capture ingestion/runtime package that persists canonical raw inbox evidence while keeping cursors and search indexes in local SQLite state
-- `packages/query`: read helpers and export-pack generation over canonical vault data
+- `packages/inboxd`: inbox capture ingestion/runtime package that persists canonical raw inbox evidence while keeping inbox-only cursors, capture indexes, and attachment job state in local SQLite state
+- `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
 - `packages/cli`: `vault-cli`, a typed operator surface over core/importers/query/inboxd
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
@@ -18,7 +19,8 @@ Last verified: 2026-03-12
 - Human-facing truth lives in Markdown documents such as `CORE.md`, journal pages, and experiment pages.
 - Machine-facing truth lives in append-only JSONL ledgers for events, samples, and audit records.
 - Raw imported artifacts are immutable once copied into `raw/`.
-- Inbox runtime state is local-only under `.runtime/` and is rebuildable from canonical vault evidence under `raw/inbox/**`.
+- Inbox runtime state is local-only under `.runtime/inboxd.sqlite` plus `.runtime/inboxd/*.json` and is rebuildable from canonical vault evidence under `raw/inbox/**`.
+- Query search runtime state is local-only under `.runtime/search.sqlite` and is rebuildable from canonical vault evidence.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - Assistant/session state belongs outside the canonical vault under `assistant-state/`.
 

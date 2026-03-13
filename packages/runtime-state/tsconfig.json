@@ -5,19 +5,10 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../runtime-state"
-    }
-  ],
   "include": [
     "src/**/*.ts"
   ],
   "exclude": [
-    "dist",
-    ".test-dist"
+    "dist"
   ]
 }

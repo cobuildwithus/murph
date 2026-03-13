@@ -24,6 +24,12 @@
       "@healthybob/contracts/*": [
         "packages/contracts/src/*"
       ],
+      "@healthybob/runtime-state": [
+        "packages/runtime-state/src/index.ts"
+      ],
+      "@healthybob/runtime-state/*": [
+        "packages/runtime-state/src/*"
+      ],
       "@healthybob/core": [
         "packages/core/src/index.ts"
       ],

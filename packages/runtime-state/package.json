@@ -1,0 +1,24 @@
+{
+  "name": "@healthybob/runtime-state",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -b tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}
