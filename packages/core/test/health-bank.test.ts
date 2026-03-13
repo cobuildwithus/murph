@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
 import { initializeVault, readJsonlRecords } from "../src/index.js";
+import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.js";
 import {
   listAllergies,
   listConditions,
@@ -185,6 +186,19 @@ test("conditions and allergies are stored as deterministic markdown registry pag
     allergyAuditRecords.filter((record) => (record as { action?: string }).action === "allergy_upsert").length,
     2,
   );
+
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+  const conditionOperations = operations.filter((operation) => operation.operationType === "condition_upsert");
+  const allergyOperations = operations.filter((operation) => operation.operationType === "allergy_upsert");
+
+  assert.equal(conditionOperations.length, 2);
+  assert.ok(conditionOperations.every((operation) => operation.status === "committed"));
+  assert.equal(allergyOperations.length, 2);
+  assert.ok(allergyOperations.every((operation) => operation.status === "committed"));
 });
 
 test("regimens support medication and supplement groups plus stop handling", async () => {

@@ -4,14 +4,13 @@ import {
   ID_PREFIXES,
 } from "@healthybob/contracts";
 
-import { emitAuditRecord } from "../audit.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { writeVaultTextFile } from "../fs.js";
 import { generateRecordId } from "../ids.js";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
   selectExistingRegistryRecord,
+  upsertMarkdownRegistryDocument,
 } from "../registry/markdown.js";
 
 import {
@@ -215,21 +214,24 @@ export async function upsertGeneticVariant(
       note,
     }),
   });
-
-  await writeVaultTextFile(input.vaultRoot, relativePath, markdown);
-  const audit = await emitAuditRecord({
+  const auditPath = await upsertMarkdownRegistryDocument({
     vaultRoot: input.vaultRoot,
-    action: "genetics_upsert",
-    commandName: "core.upsertGeneticVariant",
-    summary: `${created ? "Created" : "Updated"} genetic variant registry record.`,
-    files: [relativePath],
-    targetIds: [variantId],
-    changes: [{ path: relativePath, op: created ? "create" : "update" }],
+    operationType: "genetics_upsert",
+    summary: `Upsert genetic variant ${variantId}`,
+    relativePath,
+    markdown,
+    created,
+    audit: {
+      action: "genetics_upsert",
+      commandName: "core.upsertGeneticVariant",
+      summary: `${created ? "Created" : "Updated"} genetic variant registry record.`,
+      targetIds: [variantId],
+    },
   });
 
   return {
     created,
-    auditPath: audit.relativePath,
+    auditPath,
     record: recordFromParts(attributes, relativePath, markdown),
   };
 }

@@ -1,8 +1,7 @@
-import { emitAuditRecord } from "../audit.js";
 import { VaultError } from "../errors.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { writeVaultTextFile } from "../fs.js";
 import { generateRecordId } from "../ids.js";
+import { upsertMarkdownRegistryDocument } from "../registry/markdown.js";
 
 import {
   ALLERGIES_DIRECTORY,
@@ -159,25 +158,24 @@ export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAl
     attributes: buildAttributes(record),
     body: buildBody(record),
   });
-
-  await writeVaultTextFile(input.vaultRoot, record.relativePath, markdown);
-  const audit = await emitAuditRecord({
+  const auditPath = await upsertMarkdownRegistryDocument({
     vaultRoot: input.vaultRoot,
-    action: "allergy_upsert",
-    commandName: "core.upsertAllergy",
-    summary: `Upserted allergy ${record.allergyId}.`,
-    targetIds: [record.allergyId],
-    changes: [
-      {
-        path: record.relativePath,
-        op: existingRecord ? "update" : "create",
-      },
-    ],
+    operationType: "allergy_upsert",
+    summary: `Upsert allergy ${record.allergyId}`,
+    relativePath: record.relativePath,
+    markdown,
+    created: !existingRecord,
+    audit: {
+      action: "allergy_upsert",
+      commandName: "core.upsertAllergy",
+      summary: `Upserted allergy ${record.allergyId}.`,
+      targetIds: [record.allergyId],
+    },
   });
 
   return {
     created: !existingRecord,
-    auditPath: audit.relativePath,
+    auditPath,
     record: {
       ...record,
       markdown,

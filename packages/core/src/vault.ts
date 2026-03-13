@@ -39,8 +39,6 @@ import {
   readJsonFile,
   readUtf8File,
   walkVaultFiles,
-  writeVaultJsonFile,
-  writeVaultTextFile,
 } from "./fs.js";
 import { VaultError } from "./errors.js";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
@@ -51,6 +49,7 @@ import {
   isTerminalWriteOperationStatus,
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
+  runCanonicalWrite,
 } from "./operations/write-batch.js";
 import { buildCurrentProfileMarkdown, listProfileSnapshots } from "./profile/storage.js";
 import { toIsoTimestamp } from "./time.js";
@@ -236,28 +235,37 @@ export async function initializeVault({
     "VAULT_INVALID_METADATA",
     "Generated vault metadata failed contract validation.",
   );
-
-  await writeVaultJsonFile(absoluteRoot, VAULT_LAYOUT.metadata, metadata, { overwrite: false });
-  await writeVaultTextFile(
-    absoluteRoot,
-    VAULT_LAYOUT.coreDocument,
-    buildCoreDocument({
-      vaultId: metadata.vaultId,
-      title,
-      timezone,
-      updatedAt: createdTimestamp,
-    }),
-    { overwrite: false },
-  );
-
-  const audit = await emitAuditRecord({
+  const coreDocument = buildCoreDocument({
+    vaultId: metadata.vaultId,
+    title,
+    timezone,
+    updatedAt: createdTimestamp,
+  });
+  const auditPath = await runCanonicalWrite({
     vaultRoot: absoluteRoot,
-    action: "vault_init",
-    commandName: "core.initializeVault",
-    summary: "Initialized vault metadata and core document.",
+    operationType: "vault_init",
+    summary: `Initialize vault ${metadata.vaultId}`,
     occurredAt: createdTimestamp,
-    files: [VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument],
-    targetIds: [metadata.vaultId],
+    mutate: async ({ batch }) => {
+      await batch.stageTextWrite(VAULT_LAYOUT.metadata, `${JSON.stringify(metadata, null, 2)}\n`, {
+        overwrite: false,
+      });
+      await batch.stageTextWrite(VAULT_LAYOUT.coreDocument, coreDocument, {
+        overwrite: false,
+      });
+      const audit = await emitAuditRecord({
+        vaultRoot: absoluteRoot,
+        batch,
+        action: "vault_init",
+        commandName: "core.initializeVault",
+        summary: "Initialized vault metadata and core document.",
+        occurredAt: createdTimestamp,
+        files: [VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument],
+        targetIds: [metadata.vaultId],
+      });
+
+      return audit.relativePath;
+    },
   });
 
   const vault = await loadVault({ vaultRoot: absoluteRoot });
@@ -265,7 +273,7 @@ export async function initializeVault({
   return {
     ...vault,
     created: true,
-    auditPath: audit.relativePath,
+    auditPath,
   };
 }
 

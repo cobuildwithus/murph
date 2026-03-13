@@ -1,8 +1,9 @@
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.js";
 import { emitAuditRecord } from "../audit.js";
 import { VaultError } from "../errors.js";
-import { appendJsonlRecord, readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
+import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
 import { generateRecordId } from "../ids.js";
+import { runCanonicalWrite } from "../operations/index.js";
 import { toDateOnly } from "../time.js";
 import { walkVaultFiles } from "../fs.js";
 import { eventRecordSchema, safeParseContract } from "@healthybob/contracts";
@@ -328,32 +329,36 @@ export async function appendHistoryEvent(
     record.occurredAt,
     "occurredAt",
   );
-
-  await appendJsonlRecord({
+  return runCanonicalWrite({
     vaultRoot: input.vaultRoot,
-    relativePath,
-    record,
-  });
-  const audit = await emitAuditRecord({
-    vaultRoot: input.vaultRoot,
-    action: "history_add",
-    commandName: "core.appendHistoryEvent",
-    summary: `Appended ${record.kind} history event ${record.id}.`,
+    operationType: "history_add",
+    summary: `Append history event ${record.id}`,
     occurredAt: record.recordedAt,
-    targetIds: [record.id],
-    changes: [
-      {
-        path: relativePath,
-        op: "append",
-      },
-    ],
-  });
+    mutate: async ({ batch }) => {
+      await batch.stageJsonlAppend(relativePath, `${JSON.stringify(record)}\n`);
+      const audit = await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "history_add",
+        commandName: "core.appendHistoryEvent",
+        summary: `Appended ${record.kind} history event ${record.id}.`,
+        occurredAt: record.recordedAt,
+        targetIds: [record.id],
+        changes: [
+          {
+            path: relativePath,
+            op: "append",
+          },
+        ],
+      });
 
-  return {
-    auditPath: audit.relativePath,
-    relativePath,
-    record,
-  };
+      return {
+        auditPath: audit.relativePath,
+        relativePath,
+        record,
+      };
+    },
+  });
 }
 
 export async function listHistoryEvents({

@@ -16,6 +16,7 @@ import {
 import { appendHistoryEvent, listHistoryEvents, readHistoryEvent } from "../src/history/index.js";
 import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.js";
 import { listGeneticVariants, readGeneticVariant, upsertGeneticVariant } from "../src/genetics/index.js";
+import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.js";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -83,6 +84,16 @@ test("health history appends to the shared event ledger and supports list/read f
   assert.equal(filtered[0]?.id, adverseEffect.record.id);
   assert.equal(read.record.kind, "adverse_effect");
   assert.equal(read.record.effect, "rash");
+
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+  const historyOperations = operations.filter((operation) => operation.operationType === "history_add");
+
+  assert.equal(historyOperations.length, 2);
+  assert.ok(historyOperations.every((operation) => operation.status === "committed"));
 });
 
 test("history test-event normalization keeps write behavior strict while reading legacy status aliases", async () => {
@@ -99,6 +110,7 @@ test("history test-event normalization keeps write behavior strict while reading
   } as Parameters<typeof appendHistoryEvent>[0] & { status?: string };
 
   const appended = await appendHistoryEvent(writeInput);
+  assert.equal(appended.record.kind, "test");
   assert.equal(appended.record.resultStatus, "unknown");
 
   const storedWriteRecord = await readJsonlRecords({
@@ -234,6 +246,17 @@ test("family members are stored as deterministic markdown registry entries", asy
     auditRecords.filter((record) => (record as { action?: string }).action === "family_upsert").length,
     2,
   );
+
+  const familyOperations = (
+    await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+        readStoredWriteOperation(vaultRoot, relativePath),
+      ),
+    )
+  ).filter((operation) => operation.operationType === "family_upsert");
+
+  assert.equal(familyOperations.length, 2);
+  assert.ok(familyOperations.every((operation) => operation.status === "committed"));
 });
 
 test("family registry upserts reject conflicting family member ids and slugs", async () => {
@@ -315,6 +338,7 @@ test("genetic variants are stored in markdown registries and can link to family 
   const updated = await upsertGeneticVariant({
     vaultRoot,
     variantId: created.record.variantId,
+    gene: "APOE",
     significance: "risk_factor",
     note: "Maintain aggressive cardiometabolic prevention.",
     sourceFamilyMemberIds: [familyMember.record.familyMemberId],
@@ -346,6 +370,17 @@ test("genetic variants are stored in markdown registries and can link to family 
     auditRecords.filter((record) => (record as { action?: string }).action === "genetics_upsert").length,
     2,
   );
+
+  const geneticOperations = (
+    await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+        readStoredWriteOperation(vaultRoot, relativePath),
+      ),
+    )
+  ).filter((operation) => operation.operationType === "genetics_upsert");
+
+  assert.equal(geneticOperations.length, 2);
+  assert.ok(geneticOperations.every((operation) => operation.status === "committed"));
 });
 
 test("genetic registry upserts reject conflicting variant ids and slugs", async () => {

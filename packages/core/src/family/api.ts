@@ -4,14 +4,13 @@ import {
   ID_PREFIXES,
 } from "@healthybob/contracts";
 
-import { emitAuditRecord } from "../audit.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { writeVaultTextFile } from "../fs.js";
 import { generateRecordId } from "../ids.js";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
   selectExistingRegistryRecord,
+  upsertMarkdownRegistryDocument,
 } from "../registry/markdown.js";
 
 import {
@@ -215,21 +214,24 @@ export async function upsertFamilyMember(
       relatedVariantIds,
     }),
   });
-
-  await writeVaultTextFile(input.vaultRoot, relativePath, markdown);
-  const audit = await emitAuditRecord({
+  const auditPath = await upsertMarkdownRegistryDocument({
     vaultRoot: input.vaultRoot,
-    action: "family_upsert",
-    commandName: "core.upsertFamilyMember",
-    summary: `${created ? "Created" : "Updated"} family member registry record.`,
-    files: [relativePath],
-    targetIds: [familyMemberId],
-    changes: [{ path: relativePath, op: created ? "create" : "update" }],
+    operationType: "family_upsert",
+    summary: `Upsert family member ${familyMemberId}`,
+    relativePath,
+    markdown,
+    created,
+    audit: {
+      action: "family_upsert",
+      commandName: "core.upsertFamilyMember",
+      summary: `${created ? "Created" : "Updated"} family member registry record.`,
+      targetIds: [familyMemberId],
+    },
   });
 
   return {
     created,
-    auditPath: audit.relativePath,
+    auditPath,
     record: recordFromParts(attributes, relativePath, markdown),
   };
 }

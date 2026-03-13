@@ -1,8 +1,7 @@
-import { emitAuditRecord } from "../audit.js";
 import { VaultError } from "../errors.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { writeVaultTextFile } from "../fs.js";
 import { generateRecordId } from "../ids.js";
+import { upsertMarkdownRegistryDocument } from "../registry/markdown.js";
 
 import {
   CONDITIONS_DIRECTORY,
@@ -208,25 +207,24 @@ export async function upsertCondition(
     attributes: buildAttributes(record),
     body: buildBody(record),
   });
-
-  await writeVaultTextFile(input.vaultRoot, record.relativePath, markdown);
-  const audit = await emitAuditRecord({
+  const auditPath = await upsertMarkdownRegistryDocument({
     vaultRoot: input.vaultRoot,
-    action: "condition_upsert",
-    commandName: "core.upsertCondition",
-    summary: `Upserted condition ${record.conditionId}.`,
-    targetIds: [record.conditionId],
-    changes: [
-      {
-        path: record.relativePath,
-        op: existingRecord ? "update" : "create",
-      },
-    ],
+    operationType: "condition_upsert",
+    summary: `Upsert condition ${record.conditionId}`,
+    relativePath: record.relativePath,
+    markdown,
+    created: !existingRecord,
+    audit: {
+      action: "condition_upsert",
+      commandName: "core.upsertCondition",
+      summary: `Upserted condition ${record.conditionId}.`,
+      targetIds: [record.conditionId],
+    },
   });
 
   return {
     created: !existingRecord,
-    auditPath: audit.relativePath,
+    auditPath,
     record: {
       ...record,
       markdown,

@@ -1,8 +1,10 @@
 import { VaultError } from "../errors.js";
 import { parseFrontmatterDocument } from "../frontmatter.js";
 import { readUtf8File, walkVaultFiles } from "../fs.js";
+import { emitAuditRecord } from "../audit.js";
+import { runCanonicalWrite } from "../operations/index.js";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject, DateInput } from "../types.js";
 
 interface MarkdownRegistryLoadOptions<TRecord> {
   vaultRoot: string;
@@ -30,6 +32,24 @@ interface ExistingRegistrySelectionOptions<TRecord extends RegistryRecord>
   extends Omit<RegistrySelectionOptions<TRecord>, "readMissingCode" | "readMissingMessage"> {
   conflictCode: string;
   conflictMessage: string;
+}
+
+interface MarkdownRegistryUpsertAuditInput {
+  action: Parameters<typeof emitAuditRecord>[0]["action"];
+  commandName: string;
+  summary: string;
+  targetIds?: string[];
+  occurredAt?: DateInput;
+}
+
+interface UpsertMarkdownRegistryDocumentInput {
+  vaultRoot: string;
+  operationType: string;
+  summary: string;
+  relativePath: string;
+  markdown: string;
+  created: boolean;
+  audit: MarkdownRegistryUpsertAuditInput;
 }
 
 export async function loadMarkdownRegistryDocuments<TRecord>({
@@ -93,4 +113,42 @@ export function readRegistryRecord<TRecord extends RegistryRecord>({
   }
 
   return match;
+}
+
+export async function upsertMarkdownRegistryDocument({
+  vaultRoot,
+  operationType,
+  summary,
+  relativePath,
+  markdown,
+  created,
+  audit,
+}: UpsertMarkdownRegistryDocumentInput): Promise<string> {
+  const stagedAudit = await runCanonicalWrite({
+    vaultRoot,
+    operationType,
+    summary,
+    occurredAt: audit.occurredAt,
+    mutate: async ({ batch }) => {
+      await batch.stageTextWrite(relativePath, markdown);
+      return emitAuditRecord({
+        vaultRoot,
+        batch,
+        action: audit.action,
+        commandName: audit.commandName,
+        summary: audit.summary,
+        occurredAt: audit.occurredAt,
+        files: [relativePath],
+        targetIds: audit.targetIds ?? [],
+        changes: [
+          {
+            path: relativePath,
+            op: created ? "create" : "update",
+          },
+        ],
+      });
+    },
+  });
+
+  return stagedAudit.relativePath;
 }

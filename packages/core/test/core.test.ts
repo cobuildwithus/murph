@@ -74,9 +74,14 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
     relativePath: initialized.auditPath,
   });
   const auditRecord = expectRecord<AuditRecord>(auditRecords[0]);
+  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
+  const operation = await readStoredWriteOperation(vaultRoot, operationPaths[0] as string);
 
   assert.equal(auditRecords.length, 1);
   assert.equal(auditRecord.action, "vault_init");
+  assert.equal(operationPaths.length, 1);
+  assert.equal(operation.operationType, "vault_init");
+  assert.equal(operation.status, "committed");
   assert.deepEqual(
     auditRecord.changes.map((change: AuditRecord["changes"][number]) => change.path),
     ["CORE.md", "vault.json"],
@@ -312,6 +317,14 @@ test("createExperiment returns the existing experiment for idempotent retries", 
     ).length,
     1,
   );
+  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
+  const operations = await Promise.all(
+    operationPaths.map((relativePath) => readStoredWriteOperation(vaultRoot, relativePath)),
+  );
+  const experimentOperations = operations.filter((operation) => operation.operationType === "experiment_create");
+
+  assert.equal(experimentOperations.length, 1);
+  assert.equal(experimentOperations[0]?.status, "committed");
 });
 
 test("assessment imports append contract-shaped records and emit intake audits", async () => {
@@ -879,10 +892,14 @@ test("WriteBatch rolls back earlier writes when a later staged action fails duri
   await assert.rejects(() => batch.commit());
   await assert.rejects(() => fs.access(path.join(vaultRoot, "bank/goals/rollback-check.md")));
 
-  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
-  assert.equal(operationPaths.length, 1);
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+  const operation = operations.find((candidate) => candidate.operationType === "test_rollback");
 
-  const operation = await readStoredWriteOperation(vaultRoot, operationPaths[0] as string);
+  assert.ok(operation);
   assert.equal(operation.status, "rolled_back");
   assert.equal(
     operation.actions.filter((action) => action.state === "rolled_back").length,
