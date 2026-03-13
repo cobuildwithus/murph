@@ -55,7 +55,6 @@ interface EntityLookupInput extends CommandContext {
 
 interface HealthListInput extends CommandContext {
   status?: string
-  cursor?: string
   limit?: number
 }
 
@@ -651,6 +650,20 @@ function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+const RESERVED_PAYLOAD_KEYS = new Set([
+  'vault',
+  'vaultRoot',
+  'absolutePath',
+  'relativePath',
+  'path',
+  'auditPath',
+  'manifestPath',
+  'ledgerPath',
+  'lookupId',
+  'created',
+  'currentProfilePath',
+])
+
 async function readJsonPayload(filePath: string): Promise<JsonObject> {
   const raw = await readFile(filePath, "utf8")
   const parsed = JSON.parse(raw) as unknown
@@ -662,16 +675,50 @@ async function readJsonPayload(filePath: string): Promise<JsonObject> {
   return parsed
 }
 
-function optionalStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
+function assertNoReservedPayloadKeys(payload: JsonObject) {
+  const reservedKeys = Object.keys(payload).filter((key) => RESERVED_PAYLOAD_KEYS.has(key))
+
+  if (reservedKeys.length > 0) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Payload file may not set reserved field${reservedKeys.length === 1 ? '' : 's'}: ${reservedKeys.join(', ')}.`,
+      {
+        reservedKeys,
+      },
+    )
+  }
+}
+
+function optionalStringArray(value: unknown, fieldName: string): string[] | undefined {
+  if (value === undefined || value === null) {
     return undefined
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultCliError('invalid_payload', `${fieldName} must be an array of non-empty strings.`)
   }
 
   const items = value
     .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-    .filter(Boolean)
+
+  if (items.some((entry) => entry.length === 0)) {
+    throw new VaultCliError('invalid_payload', `${fieldName} must be an array of non-empty strings.`)
+  }
 
   return items.length > 0 ? items : undefined
+}
+
+function requirePayloadObjectField(payload: JsonObject, fieldName: string): JsonObject {
+  const value = payload[fieldName]
+
+  if (!isPlainObject(value)) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Payload file must include a plain-object "${fieldName}" field.`,
+    )
+  }
+
+  return value
 }
 
 function asEntityEnvelope<TEntity extends JsonObject>(
@@ -791,10 +838,12 @@ function buildHealthCoreRuntimeInput(
   vault: string,
   payload: JsonObject,
 ) {
+  assertNoReservedPayloadKeys(payload)
+
   if (descriptor.core.upsertMode === "profile-snapshot") {
     const recordedAtValue = payload.recordedAt
     const sourceValue = payload.source
-    const profileValue = payload.profile
+    const profileValue = requirePayloadObjectField(payload, 'profile')
 
     return {
       vaultRoot: vault,
@@ -805,15 +854,15 @@ function buildHealthCoreRuntimeInput(
           ? recordedAtValue
           : undefined,
       source: typeof sourceValue === "string" ? sourceValue : undefined,
-      sourceAssessmentIds: optionalStringArray(payload.sourceAssessmentIds),
-      sourceEventIds: optionalStringArray(payload.sourceEventIds),
-      profile: isPlainObject(profileValue) ? profileValue : {},
+      sourceAssessmentIds: optionalStringArray(payload.sourceAssessmentIds, 'sourceAssessmentIds'),
+      sourceEventIds: optionalStringArray(payload.sourceEventIds, 'sourceEventIds'),
+      profile: profileValue,
     }
   }
 
   return {
-    vaultRoot: vault,
     ...payload,
+    vaultRoot: vault,
   }
 }
 
@@ -981,8 +1030,33 @@ async function materializeExportPack(
   outDir: string,
   files: Array<{ path: string; contents: string }>,
 ) {
+  const absoluteOutDir = path.resolve(outDir)
+
   for (const file of files) {
-    const targetPath = path.join(outDir, file.path)
+    const relativePath = String(file.path ?? '').trim().replace(/\\/g, '/')
+
+    if (
+      relativePath.length === 0 ||
+      path.posix.isAbsolute(relativePath) ||
+      /^[A-Za-z]:/u.test(relativePath)
+    ) {
+      throw new VaultCliError('invalid_export_pack', `Export pack emitted an invalid file path "${file.path}".`)
+    }
+
+    const targetPath = path.resolve(absoluteOutDir, relativePath)
+    const containment = path.relative(absoluteOutDir, targetPath)
+
+    if (
+      containment === '..' ||
+      containment.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(containment)
+    ) {
+      throw new VaultCliError(
+        'invalid_export_pack',
+        `Export pack file path escaped the requested output directory: "${file.path}".`,
+      )
+    }
+
     await mkdir(path.dirname(targetPath), { recursive: true })
     await writeFile(targetPath, file.contents, "utf8")
   }
@@ -1358,7 +1432,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
         }
       },
       async list(input: CommandContext & ListFilters) {
-        const { vault, kind, experiment, dateFrom, dateTo, cursor, limit } = input
+        const { vault, kind, experiment, dateFrom, dateTo, limit } = input
         const { query } = await loadIntegratedRuntime()
         const descriptor = findHealthDescriptorForListKind(kind)
         if (descriptor) {
@@ -1371,7 +1445,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
           return {
             vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
+            filters: { kind, experiment, dateFrom, dateTo, limit },
             items,
             nextCursor: null,
           }
@@ -1401,7 +1475,6 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
             experiment,
             dateFrom,
             dateTo,
-            cursor,
             limit,
           },
           items,

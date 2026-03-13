@@ -1,6 +1,14 @@
 import path from "node:path";
+import { promises as fs } from "node:fs";
 
 import { VaultError } from "./errors.js";
+import { isErrnoException } from "./types.js";
+
+const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
+
+function toVaultRelativeDisplayPath(value: string): string {
+  return value.split(path.sep).join("/");
+}
 
 export function normalizeVaultRoot(vaultRoot: unknown): string {
   const candidate = String(vaultRoot ?? "").trim();
@@ -25,7 +33,7 @@ export function normalizeRelativeVaultPath(relativePath: unknown): string {
     });
   }
 
-  if (/^[A-Za-z]:\//.test(candidate) || path.posix.isAbsolute(candidate)) {
+  if (WINDOWS_DRIVE_PREFIX_PATTERN.test(candidate) || path.posix.isAbsolute(candidate)) {
     throw new VaultError("VAULT_INVALID_PATH", "Vault-relative path must not be absolute.", {
       relativePath: String(relativePath ?? ""),
     });
@@ -70,8 +78,77 @@ export function assertPathWithinVault(vaultRoot: unknown, absolutePath: unknown)
   const candidate = path.resolve(String(absolutePath ?? ""));
   const relative = path.relative(absoluteRoot, candidate);
 
-  if (relative === ".." || relative.startsWith(`..${path.sep}`)) {
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative) ||
+    WINDOWS_DRIVE_PREFIX_PATTERN.test(relative)
+  ) {
     throw new VaultError("VAULT_PATH_ESCAPE", "Resolved path escaped the vault root.");
+  }
+}
+
+async function resolveExistingPath(absolutePath: string, code: string, message: string): Promise<string> {
+  try {
+    return await fs.realpath(absolutePath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      throw new VaultError(code, message, {
+        absolutePath,
+      });
+    }
+
+    throw error;
+  }
+}
+
+export async function assertPathWithinVaultOnDisk(
+  vaultRoot: unknown,
+  absolutePath: unknown,
+): Promise<void> {
+  const absoluteRoot = normalizeVaultRoot(vaultRoot);
+  const candidate = path.resolve(String(absolutePath ?? ""));
+  assertPathWithinVault(absoluteRoot, candidate);
+
+  const canonicalRoot = await resolveExistingPath(
+    absoluteRoot,
+    "VAULT_INVALID_ROOT",
+    "Vault root does not exist on disk.",
+  );
+  const relative = path.relative(absoluteRoot, candidate);
+
+  if (!relative) {
+    return;
+  }
+
+  const segments = relative.split(path.sep).filter(Boolean);
+  let currentPath = canonicalRoot;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const nextPath = path.join(currentPath, segment);
+
+    try {
+      const stats = await fs.lstat(nextPath);
+
+      if (stats.isSymbolicLink()) {
+        throw new VaultError(
+          "VAULT_PATH_SYMLINK",
+          "Vault paths may not traverse symbolic links.",
+          {
+            relativePath: toVaultRelativeDisplayPath(segments.slice(0, index + 1).join(path.sep)),
+          },
+        );
+      }
+
+      currentPath = await fs.realpath(nextPath);
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") {
+        break;
+      }
+
+      throw error;
+    }
   }
 }
 

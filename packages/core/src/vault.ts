@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import {
   allergyFrontmatterSchema,
   assessmentResponseSchema,
@@ -45,9 +47,11 @@ import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontm
 import { generateVaultId } from "./ids.js";
 import { readJsonlRecords } from "./jsonl.js";
 import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.js";
+import { buildCurrentProfileMarkdown, listProfileSnapshots } from "./profile/storage.js";
 import { toIsoTimestamp } from "./time.js";
 
 import type { DateInput, UnknownRecord, ValidationIssue } from "./types.js";
+import { isPlainRecord } from "./types.js";
 
 interface BuildCoreDocumentInput {
   vaultId: string;
@@ -93,6 +97,13 @@ interface ValidateJsonlFamilyInput {
   relativeDirectory: string;
   schema: ContractSchema;
   code: string;
+  postValidateRecord?: (
+    record: UnknownRecord,
+    context: {
+      relativePath: string;
+      index: number;
+    },
+  ) => Promise<ValidationIssue[]>;
 }
 
 interface VaultMetadata extends UnknownRecord {
@@ -329,6 +340,7 @@ async function validateJsonlFamily({
   relativeDirectory,
   schema,
   code,
+  postValidateRecord,
 }: ValidateJsonlFamilyInput): Promise<ValidationIssue[]> {
   const jsonlFiles = await walkVaultFiles(vaultRoot, relativeDirectory, {
     extension: ".jsonl",
@@ -336,21 +348,343 @@ async function validateJsonlFamily({
   const issues: ValidationIssue[] = [];
 
   for (const relativePath of jsonlFiles) {
-    const records = await readJsonlRecords({
-      vaultRoot,
-      relativePath,
-    });
+    let records: UnknownRecord[];
 
-    records.forEach((record: UnknownRecord, index: number) => {
+    try {
+      records = await readJsonlRecords({
+        vaultRoot,
+        relativePath,
+      });
+    } catch (error) {
+      issues.push(
+        validationIssue(
+          error instanceof VaultError ? error.code : code,
+          error instanceof Error ? error.message : String(error),
+          relativePath,
+        ),
+      );
+      continue;
+    }
+
+    for (const [index, record] of records.entries()) {
       const result = safeParseContract(schema, record);
 
       if (!result.success) {
         issues.push(validationIssue(code, `record ${index + 1}: ${result.errors.join("; ")}`, relativePath));
+        continue;
       }
-    });
+
+      if (postValidateRecord) {
+        issues.push(
+          ...(await postValidateRecord(result.data as UnknownRecord, {
+            relativePath,
+            index,
+          })),
+        );
+      }
+    }
   }
 
   return issues;
+}
+
+function rawManifestPathForArtifact(relativePath: string): string {
+  return path.posix.join(path.posix.dirname(relativePath), "manifest.json");
+}
+
+async function validateExistingVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  code: string,
+  message: string,
+): Promise<ValidationIssue[]> {
+  try {
+    const resolved = resolveVaultPath(vaultRoot, relativePath);
+
+    if (!(await pathExists(resolved.absolutePath))) {
+      return [validationIssue(code, message, relativePath)];
+    }
+  } catch (error) {
+    return [
+      validationIssue(
+        error instanceof VaultError ? error.code : code,
+        error instanceof Error ? error.message : String(error),
+        relativePath,
+      ),
+    ];
+  }
+
+  return [];
+}
+
+async function validateAssessmentRecordReferences(
+  vaultRoot: string,
+  record: UnknownRecord,
+): Promise<ValidationIssue[]> {
+  if (typeof record.rawPath !== "string") {
+    return [];
+  }
+
+  const issues = await validateExistingVaultFile(
+    vaultRoot,
+    record.rawPath,
+    "HB_RAW_REFERENCE_MISSING",
+    `Assessment raw payload "${record.rawPath}" is missing.`,
+  );
+
+  issues.push(
+    ...(await validateExistingVaultFile(
+      vaultRoot,
+      rawManifestPathForArtifact(record.rawPath),
+      "HB_RAW_MANIFEST_INVALID",
+      `Raw import manifest is missing for "${record.rawPath}".`,
+    )),
+  );
+
+  return issues;
+}
+
+async function validateEventRecordReferences(
+  vaultRoot: string,
+  record: UnknownRecord,
+): Promise<ValidationIssue[]> {
+  const referencedPaths = new Set<string>();
+
+  if (Array.isArray(record.rawRefs)) {
+    for (const rawRef of record.rawRefs) {
+      if (typeof rawRef === "string") {
+        referencedPaths.add(rawRef);
+      }
+    }
+  }
+
+  if (typeof record.documentPath === "string") {
+    referencedPaths.add(record.documentPath);
+  }
+
+  if (Array.isArray(record.photoPaths)) {
+    for (const photoPath of record.photoPaths) {
+      if (typeof photoPath === "string") {
+        referencedPaths.add(photoPath);
+      }
+    }
+  }
+
+  if (Array.isArray(record.audioPaths)) {
+    for (const audioPath of record.audioPaths) {
+      if (typeof audioPath === "string") {
+        referencedPaths.add(audioPath);
+      }
+    }
+  }
+
+  const issues: ValidationIssue[] = [];
+  const manifestPaths = new Set<string>();
+
+  for (const referencedPath of [...referencedPaths].sort()) {
+    issues.push(
+      ...(await validateExistingVaultFile(
+        vaultRoot,
+        referencedPath,
+        "HB_RAW_REFERENCE_MISSING",
+        `Referenced raw artifact "${referencedPath}" is missing.`,
+      )),
+    );
+
+    if (referencedPath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`)) {
+      manifestPaths.add(rawManifestPathForArtifact(referencedPath));
+    }
+  }
+
+  for (const manifestPath of [...manifestPaths].sort()) {
+    issues.push(
+      ...(await validateExistingVaultFile(
+        vaultRoot,
+        manifestPath,
+        "HB_RAW_MANIFEST_INVALID",
+        `Raw import manifest is missing for "${manifestPath}".`,
+      )),
+    );
+  }
+
+  return issues;
+}
+
+async function validateRawManifestFile(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<ValidationIssue[]> {
+  let manifest: unknown;
+
+  try {
+    manifest = await readJsonFile(vaultRoot, relativePath);
+  } catch (error) {
+    return [
+      validationIssue(
+        error instanceof VaultError ? error.code : "HB_RAW_MANIFEST_INVALID",
+        error instanceof Error ? error.message : String(error),
+        relativePath,
+      ),
+    ];
+  }
+
+  if (!isPlainRecord(manifest)) {
+    return [validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest must be a JSON object.", relativePath)];
+  }
+
+  const issues: ValidationIssue[] = [];
+  const expectedRawDirectory = path.posix.dirname(relativePath);
+
+  if (typeof manifest.schemaVersion !== "string" || manifest.schemaVersion.trim().length === 0) {
+    issues.push(validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest is missing schemaVersion.", relativePath));
+  }
+
+  if (manifest.rawDirectory !== expectedRawDirectory) {
+    issues.push(
+      validationIssue(
+        "HB_RAW_MANIFEST_INVALID",
+        `Raw import manifest rawDirectory must equal "${expectedRawDirectory}".`,
+        relativePath,
+      ),
+    );
+  }
+
+  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
+    issues.push(validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest must list at least one artifact.", relativePath));
+    return issues;
+  }
+
+  for (const [index, artifact] of manifest.artifacts.entries()) {
+    if (!isPlainRecord(artifact) || typeof artifact.relativePath !== "string") {
+      issues.push(
+        validationIssue(
+          "HB_RAW_MANIFEST_INVALID",
+          `artifact ${index + 1} is missing a valid relativePath.`,
+          relativePath,
+        ),
+      );
+      continue;
+    }
+
+    if (path.posix.dirname(artifact.relativePath) !== expectedRawDirectory) {
+      issues.push(
+        validationIssue(
+          "HB_RAW_MANIFEST_INVALID",
+          `artifact ${index + 1} must remain inside "${expectedRawDirectory}".`,
+          relativePath,
+        ),
+      );
+    }
+
+    issues.push(
+      ...(await validateExistingVaultFile(
+        vaultRoot,
+        artifact.relativePath,
+        "HB_RAW_REFERENCE_MISSING",
+        `Manifest artifact "${artifact.relativePath}" is missing.`,
+      )),
+    );
+  }
+
+  return issues;
+}
+
+async function validateRawImportManifests(vaultRoot: string): Promise<ValidationIssue[]> {
+  const rawFiles = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawDirectory);
+  const artifactDirectories = new Set<string>();
+  const manifestFiles: string[] = [];
+
+  for (const relativePath of rawFiles) {
+    if (path.posix.basename(relativePath) === "manifest.json") {
+      manifestFiles.push(relativePath);
+      continue;
+    }
+
+    artifactDirectories.add(path.posix.dirname(relativePath));
+  }
+
+  const issues: ValidationIssue[] = [];
+
+  for (const directory of [...artifactDirectories].sort()) {
+    const manifestPath = path.posix.join(directory, "manifest.json");
+
+    if (!(await pathExists(resolveVaultPath(vaultRoot, manifestPath).absolutePath))) {
+      issues.push(
+        validationIssue(
+          "HB_RAW_MANIFEST_INVALID",
+          `Raw import directory "${directory}" is missing manifest.json.`,
+          manifestPath,
+        ),
+      );
+    }
+  }
+
+  for (const manifestPath of manifestFiles.sort()) {
+    issues.push(...(await validateRawManifestFile(vaultRoot, manifestPath)));
+  }
+
+  return issues;
+}
+
+async function validateCurrentProfileConsistency(vaultRoot: string): Promise<ValidationIssue[]> {
+  let snapshots;
+
+  try {
+    snapshots = await listProfileSnapshots({ vaultRoot });
+  } catch {
+    return [];
+  }
+
+  const latestSnapshot = snapshots.at(-1) ?? null;
+  const currentProfilePath = resolveVaultPath(vaultRoot, VAULT_LAYOUT.profileCurrentDocument);
+  const exists = await pathExists(currentProfilePath.absolutePath);
+
+  if (!latestSnapshot) {
+    return exists
+      ? [
+          validationIssue(
+            "HB_PROFILE_CURRENT_STALE",
+            "Current profile exists even though no profile snapshots are present.",
+            VAULT_LAYOUT.profileCurrentDocument,
+          ),
+        ]
+      : [];
+  }
+
+  if (!exists) {
+    return [
+      validationIssue(
+        "HB_PROFILE_CURRENT_STALE",
+        "Current profile is missing for the latest profile snapshot.",
+        VAULT_LAYOUT.profileCurrentDocument,
+      ),
+    ];
+  }
+
+  try {
+    const currentMarkdown = await readUtf8File(vaultRoot, VAULT_LAYOUT.profileCurrentDocument);
+    const expectedMarkdown = buildCurrentProfileMarkdown(latestSnapshot);
+
+    if (currentMarkdown !== expectedMarkdown) {
+      return [
+        validationIssue(
+          "HB_PROFILE_CURRENT_STALE",
+          "Current profile markdown does not match the latest profile snapshot.",
+          VAULT_LAYOUT.profileCurrentDocument,
+        ),
+      ];
+    }
+  } catch (error) {
+    return [
+      validationIssue(
+        error instanceof VaultError ? error.code : "HB_PROFILE_CURRENT_STALE",
+        error instanceof Error ? error.message : String(error),
+        VAULT_LAYOUT.profileCurrentDocument,
+      ),
+    ];
+  }
+
+  return [];
 }
 
 export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise<ValidateVaultResult> {
@@ -494,6 +828,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       relativeDirectory: VAULT_LAYOUT.assessmentLedgerDirectory,
       schema: assessmentResponseSchema,
       code: "HB_CONTRACT_INVALID",
+      postValidateRecord: async (record) => validateAssessmentRecordReferences(absoluteRoot, record),
     })),
   );
   issues.push(
@@ -502,6 +837,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       relativeDirectory: VAULT_LAYOUT.eventLedgerDirectory,
       schema: eventRecordSchema,
       code: "HB_EVENT_INVALID",
+      postValidateRecord: async (record) => validateEventRecordReferences(absoluteRoot, record),
     })),
   );
   issues.push(
@@ -528,6 +864,8 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       code: "HB_AUDIT_INVALID",
     })),
   );
+  issues.push(...(await validateRawImportManifests(absoluteRoot)));
+  issues.push(...(await validateCurrentProfileConsistency(absoluteRoot)));
 
   return {
     valid: issues.length === 0,

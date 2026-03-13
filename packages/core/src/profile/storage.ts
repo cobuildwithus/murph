@@ -1,6 +1,11 @@
 import { unlink } from "node:fs/promises";
 
-import { profileSnapshotSchema, safeParseContract } from "@healthybob/contracts";
+import {
+  jsonObjectSchema,
+  profileCurrentFrontmatterSchema,
+  profileSnapshotSchema,
+  safeParseContract,
+} from "@healthybob/contracts";
 
 import { emitAuditRecord } from "../audit.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
@@ -24,7 +29,6 @@ import {
   PROFILE_CURRENT_DOCUMENT_PATH,
   PROFILE_CURRENT_SCHEMA_VERSION,
   PROFILE_SNAPSHOT_LEDGER_DIRECTORY,
-  PROFILE_SNAPSHOT_SOURCES,
   PROFILE_SNAPSHOT_SCHEMA_VERSION,
 } from "./types.js";
 
@@ -41,13 +45,15 @@ interface RebuildCurrentProfileInput {
 }
 
 function assertProfile(value: unknown): asserts value is UnknownRecord {
-  if (!isPlainRecord(value)) {
+  const result = safeParseContract(jsonObjectSchema, value);
+
+  if (!result.success) {
     throw new VaultError("PROFILE_INVALID", "Profile snapshots require a plain-object profile payload.");
   }
 }
 
 function isProfileSnapshotSource(value: unknown): value is ProfileSnapshotRecord["source"] {
-  return PROFILE_SNAPSHOT_SOURCES.includes(value as (typeof PROFILE_SNAPSHOT_SOURCES)[number]);
+  return profileSnapshotSchema.shape.source.safeParse(value).success;
 }
 
 function toProfileSnapshotRecord(value: unknown): ProfileSnapshotRecord {
@@ -117,22 +123,29 @@ function renderProfileValue(
   return [`${indent}${String(value)}`];
 }
 
-function buildCurrentProfileMarkdown(snapshot: ProfileSnapshotRecord): string {
-  const topGoalIds = Array.isArray(snapshot.profile.topGoalIds)
-    ? snapshot.profile.topGoalIds.filter((entry): entry is string => typeof entry === "string")
-    : [];
+export function buildCurrentProfileMarkdown(snapshot: ProfileSnapshotRecord): string {
+  const topGoalIdsResult = profileCurrentFrontmatterSchema.shape.topGoalIds.safeParse(
+    snapshot.profile.topGoalIds,
+  );
+  const attributesResult = safeParseContract(profileCurrentFrontmatterSchema, {
+    schemaVersion: PROFILE_CURRENT_SCHEMA_VERSION,
+    docType: PROFILE_CURRENT_DOC_TYPE,
+    snapshotId: snapshot.id,
+    updatedAt: snapshot.recordedAt,
+    sourceAssessmentIds: snapshot.sourceAssessmentIds,
+    sourceEventIds: snapshot.sourceEventIds,
+    topGoalIds: topGoalIdsResult.success ? topGoalIdsResult.data : undefined,
+  });
+
+  if (!attributesResult.success) {
+    throw new VaultError("PROFILE_INVALID", "Current profile attributes failed contract validation.", {
+      errors: attributesResult.errors,
+    });
+  }
 
   return stringifyFrontmatterDocument({
     attributes: Object.fromEntries(
-      Object.entries({
-        schemaVersion: PROFILE_CURRENT_SCHEMA_VERSION,
-        docType: PROFILE_CURRENT_DOC_TYPE,
-        snapshotId: snapshot.id,
-        updatedAt: snapshot.recordedAt,
-        sourceAssessmentIds: snapshot.sourceAssessmentIds,
-        sourceEventIds: snapshot.sourceEventIds,
-        topGoalIds: topGoalIds.length > 0 ? topGoalIds : undefined,
-      }).filter(([, value]) => value !== undefined),
+      Object.entries(attributesResult.data).filter(([, value]) => value !== undefined),
     ) as FrontmatterObject,
     body: [
       "# Current Profile",

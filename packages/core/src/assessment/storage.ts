@@ -1,7 +1,11 @@
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
-import { assessmentResponseSchema, safeParseContract } from "@healthybob/contracts";
+import {
+  assessmentResponseSchema,
+  jsonObjectSchema,
+  safeParseContract,
+} from "@healthybob/contracts";
 
 import { emitAuditRecord } from "../audit.js";
 import { copyRawArtifact } from "../raw.js";
@@ -40,11 +44,13 @@ function parseAssessmentResponse(content: string): UnknownRecord {
     });
   }
 
-  if (!isPlainRecord(parsed)) {
+  const result = safeParseContract(jsonObjectSchema, parsed);
+
+  if (!result.success) {
     throw new VaultError("ASSESSMENT_INVALID_JSON", "Assessment response root must be a plain object.");
   }
 
-  return parsed;
+  return result.data;
 }
 
 function toAssessmentResponseRecord(value: unknown): AssessmentResponseRecord {
@@ -60,7 +66,7 @@ function toAssessmentResponseRecord(value: unknown): AssessmentResponseRecord {
     assessmentType: value.assessmentType,
     recordedAt: value.recordedAt,
     source: value.source,
-    rawPath: toAssessmentContractRawPath(rawPath),
+    rawPath,
     title: value.title,
     questionnaireSlug: value.questionnaireSlug,
     responses: value.responses,
@@ -99,10 +105,6 @@ function normalizeRawPath(value: unknown): string {
   }
 
   return value;
-}
-
-function toAssessmentContractRawPath(rawPath: string): string {
-  return rawPath.replace(/[^/]+$/u, "source.json");
 }
 
 function sortAssessmentResponses(records: readonly AssessmentResponseRecord[]): AssessmentResponseRecord[] {

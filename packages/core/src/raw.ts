@@ -90,6 +90,10 @@ function resolveRawRelativePath({
     return `${VAULT_LAYOUT.rawSamplesDirectory}/${safeStream}/${year}/${month}/${stableId}/${safeFileName}`;
   }
 
+  if (category === "assessments") {
+    return `${VAULT_LAYOUT.rawAssessmentsDirectory}/${year}/${month}/${stableId}/source.json`;
+  }
+
   return `${VAULT_LAYOUT.rawDirectory}/${sanitizePathSegment(category, "artifact")}/${year}/${month}/${stableId}/${safeFileName}`;
 }
 

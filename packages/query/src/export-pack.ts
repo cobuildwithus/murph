@@ -194,21 +194,32 @@ interface QuestionPackBuildInput {
   health: ExportPackHealthContext;
 }
 
+function buildDefaultPackId(options: BuildExportPackOptions): string {
+  return [
+    "pack",
+    options.from ?? "start",
+    options.to ?? "end",
+    options.experimentSlug ?? "all",
+  ].join("-");
+}
+
+function sanitizePackId(value: string): string {
+  return value
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export function buildExportPack(
   vault: VaultReadModel,
   options: BuildExportPackOptions = {},
 ): ExportPack {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const packId =
-    options.packId ??
-    [
-      "pack",
-      options.from ?? "start",
-      options.to ?? "end",
-      options.experimentSlug ?? "all",
-    ]
-      .join("-")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-");
+    sanitizePackId(options.packId ?? buildDefaultPackId(options)) ||
+    sanitizePackId(buildDefaultPackId(options)) ||
+    "pack";
   const basePath = `exports/packs/${packId}`;
   const filters: ExportPackFilters = {
     from: options.from ?? null,

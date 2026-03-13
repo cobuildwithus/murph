@@ -21,6 +21,7 @@ test.sequential("intake show and intake list route assessment reads through the 
         assessmentType: "full-intake",
         recordedAt: "2026-03-12T13:00:00Z",
         source: "import",
+        rawPath: "raw/assessments/2026/03/asmt_cli_01/source.json",
         title: "CLI intake fixture",
         responses: {
           sleep: {
@@ -170,6 +171,52 @@ test.sequential("goal descriptor wiring keeps noun-specific and generic reads al
   }
 });
 
+test.sequential("goal upsert rejects reserved vault-root overrides from JSON payloads", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const redirectVaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "goal-override.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await runCli(["init", "--vault", redirectVaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        vaultRoot: redirectVaultRoot,
+        title: "Redirect writes outside the chosen vault",
+        status: "active",
+        horizon: "long_term",
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli([
+      "goal",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const redirectList = await runCli<{
+      items: Array<{ id: string }>;
+    }>([
+      "goal",
+      "list",
+      "--vault",
+      redirectVaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, false);
+    assert.equal(upsertResult.error?.code, "invalid_payload");
+    assert.equal(redirectList.ok, true);
+    assert.deepEqual(requireData(redirectList).items, []);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+    await rm(redirectVaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("profile current lookup stays wired for both noun-specific and generic show", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
   const payloadPath = path.join(vaultRoot, "profile.json");
@@ -224,6 +271,47 @@ test.sequential("profile current lookup stays wired for both noun-specific and g
       requireData(nounShow).entity.id ?? requireData(nounShow).entity.snapshotId ?? "current",
       "current",
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("profile upsert rejects malformed profile payloads instead of coercing them to {}", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "profile-invalid.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        source: "manual",
+        profile: "oops",
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli([
+      "profile",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const profileList = await runCli<{
+      items: Array<{ id: string }>;
+    }>([
+      "profile",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, false);
+    assert.equal(upsertResult.error?.code, "invalid_payload");
+    assert.equal(profileList.ok, true);
+    assert.deepEqual(requireData(profileList).items, []);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

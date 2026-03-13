@@ -157,6 +157,38 @@ test("history test-event normalization keeps write behavior strict while reading
   );
 });
 
+test("history writes reject provider ids and raw refs that violate the canonical event contract", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-history-contracts");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      appendHistoryEvent({
+        vaultRoot,
+        kind: "encounter",
+        occurredAt: "2026-03-04T12:00:00.000Z",
+        title: "Contract-invalid encounter",
+        encounterType: "office_visit",
+        providerId: "dr-smith",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "HB_EVENT_INVALID",
+  );
+
+  await assert.rejects(
+    () =>
+      appendHistoryEvent({
+        vaultRoot,
+        kind: "adverse_effect",
+        occurredAt: "2026-03-04T12:00:00.000Z",
+        title: "Contract-invalid raw ref",
+        substance: "amoxicillin",
+        effect: "rash",
+        rawRefs: ["bank/goals/sleep.md"],
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "HB_EVENT_INVALID",
+  );
+});
+
 test("family members are stored as deterministic markdown registry entries", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-family");
   await initializeVault({ vaultRoot });

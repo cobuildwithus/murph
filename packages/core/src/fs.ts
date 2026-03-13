@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 
 import { VaultError } from "./errors.js";
 import {
+  assertPathWithinVaultOnDisk,
   isAppendOnlyRelativePath,
   isRawRelativePath,
   normalizeVaultRoot,
@@ -40,12 +41,15 @@ export async function ensureDirectory(absolutePath: string): Promise<void> {
 
 export async function ensureVaultDirectory(vaultRoot: string, relativePath: string): Promise<string> {
   const resolved = resolveVaultPath(vaultRoot, relativePath);
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   await ensureDirectory(resolved.absolutePath);
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   return resolved.relativePath;
 }
 
 export async function readUtf8File(vaultRoot: string, relativePath: string): Promise<string> {
   const resolved = resolveVaultPath(vaultRoot, relativePath);
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
 
   try {
     return await fs.readFile(resolved.absolutePath, "utf8");
@@ -99,7 +103,9 @@ export async function writeVaultTextFile(
     );
   }
 
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   await ensureDirectory(path.dirname(resolved.absolutePath));
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   try {
     await fs.writeFile(resolved.absolutePath, content, {
       encoding: "utf8",
@@ -151,7 +157,9 @@ export async function appendVaultTextFile(
     );
   }
 
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   await ensureDirectory(path.dirname(resolved.absolutePath));
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   await fs.appendFile(resolved.absolutePath, content, "utf8");
 
   return resolved.relativePath;
@@ -182,7 +190,9 @@ export async function copyImmutableFileIntoVaultRaw(
     });
   }
 
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   await ensureDirectory(path.dirname(resolved.absolutePath));
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
 
   try {
     await fs.copyFile(sourceAbsolutePath, resolved.absolutePath, fsConstants.COPYFILE_EXCL);
@@ -212,7 +222,9 @@ export async function writeImmutableJsonFileIntoVaultRaw(
     });
   }
 
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
   await ensureDirectory(path.dirname(resolved.absolutePath));
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
 
   try {
     await fs.writeFile(resolved.absolutePath, `${JSON.stringify(value, null, 2)}\n`, {
@@ -245,6 +257,8 @@ export async function walkVaultFiles(
   if (!(await pathExists(resolved.absolutePath))) {
     return matches;
   }
+
+  await assertPathWithinVaultOnDisk(absoluteRoot, resolved.absolutePath);
 
   async function walk(currentAbsolutePath: string): Promise<void> {
     const entries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });

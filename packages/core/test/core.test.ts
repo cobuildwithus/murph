@@ -14,6 +14,7 @@ import type {
 
 import {
   addMeal,
+  appendProfileSnapshot,
   appendJsonlRecord,
   copyRawArtifact,
   createExperiment,
@@ -317,7 +318,7 @@ test("assessment imports append contract-shaped records and emit intake audits",
     "intake.json",
     JSON.stringify({
       profile: {
-        topGoalIds: ["goal_sleep"],
+        topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
       },
       family: [
         {
@@ -333,7 +334,7 @@ test("assessment imports append contract-shaped records and emit intake audits",
     sourcePath: assessmentPath,
     assessmentType: "intake",
     questionnaireSlug: "baseline-intake",
-    relatedIds: ["goal_sleep"],
+    relatedIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
   });
   const projected = await projectAssessmentResponse({
     vaultRoot,
@@ -355,6 +356,8 @@ test("assessment imports append contract-shaped records and emit intake audits",
 
   assert.equal(assessmentRecords.length, 1);
   assert.equal(expectRecord<{ id: string }>(assessmentRecords[0]).id, imported.assessment.id);
+  assert.match(imported.raw.relativePath, /\/source\.json$/u);
+  assert.equal(imported.assessment.rawPath, imported.raw.relativePath);
   assert.equal(
     importAuditRecords.filter((record) => expectRecord<AuditRecord>(record).action === "intake_import").length,
     1,
@@ -365,6 +368,9 @@ test("assessment imports append contract-shaped records and emit intake audits",
   );
   assert.equal(projected.assessmentId, imported.assessment.id);
   assert.equal(projected.profileSnapshots.length, 1);
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
 });
 
 test("ensureJournalDay rethrows non-file-exists write failures", async () => {
@@ -472,6 +478,40 @@ test("append-only helpers block traversal and validateVault reports tampered cor
     validation.issues.map((issue) => issue.code).join(","),
     /HB_FRONTMATTER_INVALID/,
   );
+});
+
+test("append-only helpers reject drive-prefixed paths and symlink escapes", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const outsideRoot = await makeTempDirectory("healthybob-outside");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      appendJsonlRecord({
+        vaultRoot,
+        relativePath: "C:escape.jsonl",
+        record: { ok: true },
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_PATH",
+  );
+
+  await fs.rm(path.join(vaultRoot, "ledger/events"), {
+    recursive: true,
+    force: true,
+  });
+  await fs.symlink(outsideRoot, path.join(vaultRoot, "ledger/events"));
+
+  await assert.rejects(
+    () =>
+      appendJsonlRecord({
+        vaultRoot,
+        relativePath: "ledger/events/2026/2026-03.jsonl",
+        record: { ok: true },
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_PATH_SYMLINK",
+  );
+
+  assert.deepEqual(await fs.readdir(outsideRoot), []);
 });
 
 test("validateVault accumulates malformed journal and experiment frontmatter issues", async () => {
@@ -685,6 +725,58 @@ test("validateVault covers health ledgers, registries, and the derived current p
   assert.ok(issuePaths.has("bank/profile/current.md"));
 });
 
+test("validateVault checks raw manifests, referenced artifacts, and current-profile consistency", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const documentPath = await writeExternalFile(sourceRoot, "visit-summary.md", "# Visit summary\n");
+  const documentImport = await importDocument({
+    vaultRoot,
+    sourcePath: documentPath,
+    occurredAt: "2026-03-12T10:00:00.000Z",
+    title: "Visit summary",
+  });
+  await appendProfileSnapshot({
+    vaultRoot,
+    recordedAt: "2026-03-12T11:00:00.000Z",
+    source: "manual",
+    profile: {
+      domains: ["sleep"],
+      topGoalIds: [],
+    },
+  });
+
+  await fs.rm(path.join(vaultRoot, documentImport.raw.relativePath), { force: true });
+  await fs.rm(path.join(vaultRoot, documentImport.manifestPath), { force: true });
+  await fs.appendFile(path.join(vaultRoot, "bank/profile/current.md"), "\nStale view\n", "utf8");
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_RAW_REFERENCE_MISSING" &&
+        issue.path === documentImport.raw.relativePath,
+    ),
+  );
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.path === documentImport.manifestPath,
+    ),
+  );
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_PROFILE_CURRENT_STALE" &&
+        issue.path === "bank/profile/current.md",
+    ),
+  );
+});
+
 test("mutation helpers reject missing meal photos and invalid sample batches", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });
@@ -775,4 +867,49 @@ test("mutation helpers reject missing meal photos and invalid sample batches", a
   assert.equal(sleepStageImport.count, 1);
   assert.equal(sleepStageImport.records[0]?.stream, "sleep_stage");
   assert.equal(sleepStageImport.records[0]?.unit, "stage");
+});
+
+test("importSamples validates the full batch before copying raw artifacts or appending ledgers", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const csvPath = await writeExternalFile(
+    sourceRoot,
+    "bad-samples.csv",
+    [
+      "timestamp,bpm",
+      "2026-03-12T08:00:00.000Z,61",
+      "2026-03-12T08:01:00.000Z,not-a-number",
+      "",
+    ].join("\n"),
+  );
+
+  await assert.rejects(
+    () =>
+      importSamples({
+        vaultRoot,
+        stream: "heart_rate",
+        unit: "bpm",
+        sourcePath: csvPath,
+        samples: [
+          {
+            recordedAt: "2026-03-12T08:00:00.000Z",
+            value: 61,
+          },
+          {
+            recordedAt: "2026-03-12T08:01:00.000Z",
+            value: "not-a-number",
+          },
+        ] as unknown as Array<Record<string, unknown>>,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLE",
+  );
+
+  const rawFiles = await fs.readdir(path.join(vaultRoot, "raw/samples"));
+  const ledgerFiles = await fs.readdir(path.join(vaultRoot, "ledger/samples"));
+
+  assert.deepEqual(rawFiles, []);
+  assert.deepEqual(ledgerFiles, []);
 });

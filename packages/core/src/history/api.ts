@@ -5,6 +5,7 @@ import { appendJsonlRecord, readJsonlRecords, toMonthlyShardRelativePath } from 
 import { generateRecordId } from "../ids.js";
 import { toDateOnly } from "../time.js";
 import { walkVaultFiles } from "../fs.js";
+import { eventRecordSchema, safeParseContract } from "@healthybob/contracts";
 
 import {
   compareIsoTimestamps,
@@ -220,11 +221,20 @@ function buildHistoryEventRecord(input: AppendHistoryEventInput): HistoryEventRe
   }
 
   const baseRecord = normalizeBaseEvent(input);
-  return stripUndefined({
+  const record = stripUndefined({
     ...baseRecord,
     kind: input.kind,
     ...normalizeHistoryKindFields(input.kind, input as unknown as HistorySourceRecord, "build"),
-  }) as HistoryEventRecord;
+  });
+  const result = safeParseContract(eventRecordSchema, record);
+
+  if (!result.success) {
+    throw new VaultError("HB_EVENT_INVALID", "History event failed contract validation before write.", {
+      errors: result.errors,
+    });
+  }
+
+  return result.data as HistoryEventRecord;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

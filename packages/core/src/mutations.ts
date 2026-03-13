@@ -36,7 +36,7 @@ import {
 } from "./constants.js";
 import { emitAuditRecord } from "./audit.js";
 import { VaultError } from "./errors.js";
-import { readUtf8File, writeVaultTextFile } from "./fs.js";
+import { appendVaultTextFile, readUtf8File, writeVaultTextFile } from "./fs.js";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
 import { generateRecordId } from "./ids.js";
 import { appendJsonlRecord, toMonthlyShardRelativePath } from "./jsonl.js";
@@ -808,20 +808,7 @@ export async function importSamples({
 
   const normalizedStream = stream as SampleStream;
   const transformId = generateRecordId(ID_PREFIXES.transform);
-  const raw = sourcePath
-    ? await copyRawArtifact({
-        vaultRoot,
-        sourcePath,
-        category: "samples",
-        occurredAt: samples[0]?.recordedAt ?? new Date(),
-        recordId: transformId,
-        stream: normalizedStream,
-      })
-    : null;
-
-  const touchedFiles = raw ? [raw.relativePath] : [];
-  const records: SampleRecord[] = [];
-  const shardPaths = new Set<string>();
+  const preparedRecords: Array<{ record: SampleRecord; relativePath: string }> = [];
 
   for (const sample of samples) {
     const normalizedSample = assertPlainObject<SampleInputRecord>(
@@ -843,17 +830,40 @@ export async function importSamples({
       "recordedAt",
     );
 
-    await appendJsonlRecord({
-      vaultRoot,
-      relativePath,
-      record,
-    });
-
-    shardPaths.add(relativePath);
-    records.push(record);
+    preparedRecords.push({ record, relativePath });
   }
 
-  const sortedShardPaths = [...shardPaths].sort();
+  const raw = sourcePath
+    ? await copyRawArtifact({
+        vaultRoot,
+        sourcePath,
+        category: "samples",
+        occurredAt: preparedRecords[0]?.record.recordedAt ?? new Date(),
+        recordId: transformId,
+        stream: normalizedStream,
+      })
+    : null;
+
+  const touchedFiles = raw ? [raw.relativePath] : [];
+  const records = preparedRecords.map((entry) => entry.record);
+  const shardPayloads = new Map<string, string>();
+
+  for (const entry of preparedRecords) {
+    const existingPayload = shardPayloads.get(entry.relativePath) ?? "";
+    shardPayloads.set(entry.relativePath, `${existingPayload}${JSON.stringify(entry.record)}\n`);
+  }
+
+  const sortedShardPaths = [...shardPayloads.keys()].sort();
+  for (const relativePath of sortedShardPaths) {
+    const payload = shardPayloads.get(relativePath);
+
+    if (!payload) {
+      continue;
+    }
+
+    await appendVaultTextFile(vaultRoot, relativePath, payload);
+  }
+
   touchedFiles.push(...sortedShardPaths);
 
   const audit = await emitAuditRecord({
