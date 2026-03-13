@@ -8,11 +8,12 @@
     "clean": "rimraf packages/*/dist packages/*/.test-dist packages/*/*.tsbuildinfo",
     "typecheck": "bash -n scripts/check-agent-docs-drift.sh scripts/doc-gardening.sh scripts/open-exec-plan.sh scripts/close-exec-plan.sh scripts/committer scripts/package-audit-context.sh scripts/repo-tools.config.sh && tsc -p tsconfig.tools.json --pretty false && pnpm typecheck:packages && pnpm build",
     "typecheck:packages": "pnpm --dir packages/contracts typecheck && pnpm --dir packages/core typecheck && pnpm --dir packages/importers typecheck && pnpm --dir packages/query typecheck && pnpm --dir packages/cli typecheck",
-    "test": "bash scripts/check-agent-docs-drift.sh && pnpm test:packages && node --import=tsx e2e/smoke/verify-fixtures.ts",
-    "test:packages": "pnpm --dir packages/contracts test && pnpm --dir packages/core test && pnpm --dir packages/importers test && pnpm --dir packages/query test && pnpm --dir packages/cli test",
-    "test:coverage": "bash scripts/doc-gardening.sh --fail-on-issues && pnpm test:packages && node --import=tsx e2e/smoke/verify-fixtures.ts --coverage && pnpm no-js",
-    "test:smoke": "node --import=tsx e2e/smoke/verify-fixtures.ts",
-    "verify:cli": "pnpm --dir packages/cli typecheck && pnpm --dir packages/cli test",
+    "test": "bash scripts/check-agent-docs-drift.sh && pnpm test:packages && tsx e2e/smoke/verify-fixtures.ts",
+    "test:packages": "pnpm --dir packages/contracts test && pnpm build && tsx packages/cli/scripts/verify-package-shape.ts && vitest run --no-coverage",
+    "test:packages:coverage": "rimraf coverage && pnpm --dir packages/contracts test && pnpm build && tsx packages/cli/scripts/verify-package-shape.ts && vitest run --coverage",
+    "test:coverage": "bash scripts/doc-gardening.sh --fail-on-issues && pnpm test:packages:coverage && tsx e2e/smoke/verify-fixtures.ts --coverage && pnpm no-js",
+    "test:smoke": "tsx e2e/smoke/verify-fixtures.ts",
+    "verify:cli": "pnpm --dir packages/cli typecheck && pnpm build && tsx packages/cli/scripts/verify-package-shape.ts && vitest run packages/cli/test/runtime.test.ts --no-coverage",
     "no-js": "node --import=tsx scripts/check-no-js.ts",
     "docs:drift": "bash scripts/check-agent-docs-drift.sh",
     "docs:gardening": "bash scripts/doc-gardening.sh --fail-on-issues",
@@ -26,8 +27,10 @@
     "@cobuild/repo-tools": "^0.1.13",
     "@cobuild/review-gpt": "file:../review-gpt",
     "@types/node": "^25.5.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "rimraf": "^6.0.1",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   }
 }

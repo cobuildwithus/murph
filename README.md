@@ -32,8 +32,9 @@ Healthy Bob is a file-native health vault with Markdown as the human-reviewable 
 - `pnpm build`: compiles the workspace packages through the TypeScript project-reference graph
 - `pnpm typecheck`: validates repo shell wrappers, typechecks repo-owned TS tools, typechecks every package, and verifies the solution-style `tsc -b` build
 - `pnpm test`: runs agent-doc drift checks, package verification (`contracts`, `cli`, `core`, `importers`, `query`), and fixture/scenario integrity verification
-- `pnpm test:coverage`: runs doc-gardening checks, package verification, smoke coverage verification, and the no-source-JS guard for `packages/` plus `e2e/`
-- `pnpm test:packages`: runs the package-runtime checks without the worktree-sensitive doc-drift wrapper
+- `pnpm test:coverage`: runs doc-gardening checks, package verification, Vitest V8 per-file coverage gates on the directly exercised runtime modules, smoke coverage verification, and the no-source-JS guard for `packages/` plus `e2e/`
+- `pnpm test:packages`: runs the package-runtime checks without the worktree-sensitive doc-drift wrapper, then executes the root Vitest suite with `--no-coverage`
+- `pnpm test:packages:coverage`: runs the same package-runtime path with deterministic root Vitest execution and `vitest run --coverage` using the sibling CLI thresholds (`perFile`, `lines/functions/statements=85`, `branches=80`)
 
 These checks now execute a TypeScript-first package build path in-repo. Targeted manual runtime checks can execute `node packages/cli/dist/bin.js ...` against a local vault when a behavior seam needs end-to-end confirmation.
 

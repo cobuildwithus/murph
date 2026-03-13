@@ -51,18 +51,20 @@ function pushMissing(errors: string[], label: string, relativePath: string): voi
 }
 
 function extractDocumentedCommands(commandSurface: string): string[] {
-  const match = commandSurface.match(
-    /## (?:Baseline Commands|Command Groups)\s+```text\s*([\s\S]*?)```/,
-  );
+  const matches = [
+    ...commandSurface.matchAll(
+      /## (?:Baseline Commands|Command Groups|Health Noun Grammar)[\s\S]*?```text\s*([\s\S]*?)```/g,
+    ),
+  ];
 
-  if (!match) {
+  if (matches.length === 0) {
     throw new Error(
-      "Could not find the documented command block in docs/contracts/03-command-surface.md",
+      "Could not find any documented command blocks in docs/contracts/03-command-surface.md",
     );
   }
 
-  return match[1]
-    .split("\n")
+  return matches
+    .flatMap((match) => match[1]?.split("\n") ?? [])
     .map((line) => line.trim())
     .filter((line) => line.startsWith("vault-cli "));
 }

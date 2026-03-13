@@ -1,8 +1,8 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { test } from "vitest";
 
 import type {
   AuditRecord,
@@ -71,6 +71,20 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
   assert.deepEqual(
     auditRecord.changes.map((change: AuditRecord["changes"][number]) => change.path),
     ["CORE.md", "vault.json"],
+  );
+});
+
+test("initializeVault rejects roots that already contain a vault", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      initializeVault({
+        vaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_ALREADY_EXISTS",
   );
 });
 
@@ -291,6 +305,89 @@ test("createExperiment returns the existing experiment for idempotent retries", 
   );
 });
 
+test("ensureJournalDay rethrows non-file-exists write failures", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await fs.rm(path.join(vaultRoot, "journal"), {
+    recursive: true,
+    force: true,
+  });
+  await fs.writeFile(path.join(vaultRoot, "journal"), "not-a-directory", "utf8");
+
+  await assert.rejects(
+    () =>
+      ensureJournalDay({
+        vaultRoot,
+        date: "2026-03-10",
+      }),
+    /ENOTDIR|not a directory/i,
+  );
+});
+
+test("createExperiment rejects invalid or conflicting existing experiment documents", async () => {
+  const invalidVaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot: invalidVaultRoot });
+  const conflictingVaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot: conflictingVaultRoot });
+
+  await fs.writeFile(
+    path.join(invalidVaultRoot, "bank/experiments/glucose-baseline.md"),
+    [
+      "---",
+      "schemaVersion: hb.frontmatter.experiment.v1",
+      "docType: experiment",
+      "slug: glucose-baseline",
+      "---",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await fs.writeFile(
+    path.join(conflictingVaultRoot, "bank/experiments/glucose-baseline.md"),
+    [
+      "---",
+      "schemaVersion: hb.frontmatter.experiment.v1",
+      "docType: experiment",
+      "experimentId: exp_01JNV4458HYPP53JDQCBP1QJFM",
+      "slug: glucose-baseline",
+      "status: active",
+      "title: Existing experiment",
+      "startedOn: 2026-03-11",
+      "---",
+      "",
+      "# Existing experiment",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot: invalidVaultRoot,
+        slug: "Glucose Baseline",
+        title: "Glucose Baseline",
+        startedOn: "2026-03-11T08:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "HB_FRONTMATTER_INVALID",
+  );
+
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot: conflictingVaultRoot,
+        slug: "Glucose Baseline",
+        title: "Glucose Baseline",
+        startedOn: "2026-03-11T08:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_EXPERIMENT_CONFLICT",
+  );
+});
+
 test("append-only helpers block traversal and validateVault reports tampered core documents", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });
@@ -358,4 +455,201 @@ test("validateVault accumulates malformed journal and experiment frontmatter iss
       "journal/2026/2026-03-10.md",
     ],
   );
+});
+
+test("jsonl helpers reject non-object writes and surface invalid JSON line numbers", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      appendJsonlRecord({
+        vaultRoot,
+        relativePath: "audit/2026/invalid.jsonl",
+        record: ["not", "an", "object"] as unknown as Record<string, unknown>,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_RECORD",
+  );
+
+  const invalidJsonlPath = path.join(vaultRoot, "audit/2026/invalid.jsonl");
+  await fs.writeFile(
+    invalidJsonlPath,
+    ['{"ok":true}', '{"broken": ]}'].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      readJsonlRecords({
+        vaultRoot,
+        relativePath: "audit/2026/invalid.jsonl",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_JSONL" &&
+      error.details.lineNumber === 2,
+  );
+});
+
+test("validateVault reports invalid metadata before deeper validation", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await fs.writeFile(
+    path.join(vaultRoot, "vault.json"),
+    JSON.stringify({
+      schemaVersion: "hb.vault.v1",
+      title: "",
+    }),
+    "utf8",
+  );
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.equal(validation.metadata, null);
+  assert.equal(validation.issues.length, 1);
+  assert.equal(validation.issues[0]?.path, "vault.json");
+  assert.equal(validation.issues[0]?.code, "VAULT_INVALID_METADATA");
+});
+
+test("validateVault reports missing metadata files before walking the vault", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.equal(validation.metadata, null);
+  assert.equal(validation.issues.length, 1);
+  assert.equal(validation.issues[0]?.path, "vault.json");
+  assert.equal(validation.issues[0]?.code, "VAULT_FILE_MISSING");
+});
+
+test("validateVault accumulates missing directory and malformed event issues", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await fs.rm(path.join(vaultRoot, "bank/providers"), {
+    recursive: true,
+    force: true,
+  });
+  await fs.mkdir(path.join(vaultRoot, "ledger/events/2026"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+    `${JSON.stringify({ id: "evt_invalid" })}\n`,
+    "utf8",
+  );
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "VAULT_MISSING_DIRECTORY" &&
+        issue.path === "bank/providers",
+    ),
+  );
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_EVENT_INVALID" &&
+        issue.path === "ledger/events/2026/2026-03.jsonl",
+    ),
+  );
+});
+
+test("mutation helpers reject missing meal photos and invalid sample batches", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      addMeal({
+        vaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_MEAL_PHOTO_REQUIRED",
+  );
+
+  await assert.rejects(
+    () =>
+      importSamples({
+        vaultRoot,
+        stream: "unsupported-stream",
+        unit: "bpm",
+        samples: [
+          {
+            recordedAt: "2026-03-12T08:00:00.000Z",
+            value: 61,
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_UNSUPPORTED_SAMPLE_STREAM",
+  );
+
+  await assert.rejects(
+    () =>
+      importSamples({
+        vaultRoot,
+        stream: "heart_rate",
+        unit: "bpm",
+        samples: null as unknown as Array<Record<string, unknown>>,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLES",
+  );
+
+  await assert.rejects(
+    () =>
+      importSamples({
+        vaultRoot,
+        stream: "heart_rate",
+        unit: "bpm",
+        samples: [],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLES",
+  );
+
+  await assert.rejects(
+    () =>
+      importSamples({
+        vaultRoot,
+        stream: "glucose",
+        unit: "mg_dL",
+        samples: [
+          {
+            recordedAt: "2026-03-12T08:00:00.000Z",
+            value: "not-a-number",
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLE",
+  );
+
+  const sleepStageImport = await importSamples({
+    vaultRoot,
+    stream: "sleep_stage",
+    unit: "stage",
+    samples: [
+      {
+        recordedAt: "2026-03-12T01:45:00.000Z",
+        startAt: "2026-03-12T01:30:00.000Z",
+        endAt: "2026-03-12T01:45:00.000Z",
+        durationMinutes: 15,
+        stage: "rem",
+      },
+    ],
+  });
+
+  assert.equal(sleepStageImport.count, 1);
+  assert.equal(sleepStageImport.records[0]?.stream, "sleep_stage");
+  assert.equal(sleepStageImport.records[0]?.unit, "stage");
 });
