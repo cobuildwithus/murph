@@ -17,6 +17,20 @@ async function writeVaultFile(
   await writeFile(path.join(vaultRoot, relativePath), contents, "utf8");
 }
 
+async function appendVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  contents: string,
+) {
+  await mkdir(path.dirname(path.join(vaultRoot, relativePath)), {
+    recursive: true,
+  });
+  await writeFile(path.join(vaultRoot, relativePath), contents, {
+    encoding: "utf8",
+    flag: "a",
+  });
+}
+
 async function createHealthVault(options: {
   currentProfileSnapshotId?: string;
   includeAlternateRecords?: boolean;
@@ -332,9 +346,11 @@ test("buildExportPack preserves the five-file pack while embedding health contex
     assert.equal(narrowPack.health.currentProfile?.snapshotId, "psnap_health_01");
 
     const questionPackFile = pack.files.find((file) => file.path.endsWith("question-pack.json"));
+    const recordsFile = pack.files.find((file) => file.path.endsWith("records.json"));
     const assistantFile = pack.files.find((file) => file.path.endsWith("assistant-context.md"));
 
     assert.ok(questionPackFile);
+    assert.ok(recordsFile);
     assert.ok(assistantFile);
 
     const questionPackPayload = JSON.parse(questionPackFile.contents) as {
@@ -367,6 +383,10 @@ test("buildExportPack preserves the five-file pack while embedding health contex
         question.includes("intake-assessment answers"),
       ),
     );
+
+    const recordsPayload = JSON.parse(recordsFile.contents) as Array<{ id: string }>;
+    assert.ok(Array.isArray(recordsPayload));
+    assert.deepEqual(recordsPayload.map((entry) => entry.id), ["evt_health_01"]);
     assert.match(assistantFile.contents, /## Intake Assessments/);
     assert.match(assistantFile.contents, /## Current Profile/);
     assert.match(assistantFile.contents, /## Health History/);
@@ -383,6 +403,23 @@ test("buildExportPack keeps matching current-profile markdown and ignores malfor
   });
 
   try {
+    await appendVaultFile(
+      vaultRoot,
+      "ledger/assessments/2026/2026-03.jsonl",
+      "{this is not valid json}\n",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "bank/genetics/broken.md",
+      `---
+schemaVersion: hv/genetics@v1
+variantId: var_broken
+slug broken-frontmatter
+---
+# Broken
+`,
+    );
+
     const vault = await readVault(vaultRoot);
     const pack = buildExportPack(vault, {
       from: "2026-03-01",
@@ -395,6 +432,10 @@ test("buildExportPack keeps matching current-profile markdown and ignores malfor
     assert.equal(pack.health.profileSnapshots.length, 2);
     assert.equal(pack.health.historyEvents.length, 1);
     assert.equal(pack.health.goals.length, 1);
+    assert.deepEqual(
+      pack.health.geneticVariants.map((entry) => entry.id),
+      ["var_01"],
+    );
     assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
     assert.deepEqual(pack.health.profileSnapshots[1]?.sourceAssessmentIds, ["asmt_health_00"]);
     assert.match(pack.health.currentProfile?.markdown ?? "", /Snapshot ID: `psnap_health_01`/);
@@ -405,6 +446,38 @@ test("buildExportPack keeps matching current-profile markdown and ignores malfor
     assert.match(assistantFile.contents, /### Goals/);
     assert.match(assistantFile.contents, /Ignored note event/);
     assert.doesNotMatch(assistantFile.contents, /Missing id should be ignored/);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildExportPack falls back to the latest snapshot when current-profile markdown is malformed", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+  });
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/profile/current.md",
+      `---
+schemaVersion: hb.frontmatter.profile-current.v1
+snapshotId psnap_health_01
+---
+# Current Profile
+`,
+    );
+
+    const vault = await readVault(vaultRoot);
+    const pack = buildExportPack(vault, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      packId: "health-pack-malformed-current",
+      generatedAt: "2026-03-13T12:00:00.000Z",
+    });
+
+    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.equal(pack.health.currentProfile?.markdown, null);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

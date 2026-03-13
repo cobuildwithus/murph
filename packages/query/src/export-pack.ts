@@ -320,14 +320,7 @@ export function buildExportPack(
     {
       path: `${basePath}/records.json`,
       mediaType: "application/json",
-      contents: JSON.stringify(
-        {
-          records,
-          health,
-        },
-        null,
-        2,
-      ),
+      contents: JSON.stringify(records, null, 2),
     },
     {
       path: `${basePath}/daily-samples.json`,

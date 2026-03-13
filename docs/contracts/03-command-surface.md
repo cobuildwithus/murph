@@ -309,7 +309,7 @@ Field rules:
 ```
 
 Export packs are derived outputs and do not create canonical vault records.
-The five-file pack shape stays stable; health extensions enrich the payloads inside `manifest.json`, `question-pack.json`, `records.json`, and `assistant-context.md` with assessments, profile snapshots/current profile, health history, and registry context.
+The five-file pack shape stays stable; health extensions enrich `manifest.json`, `question-pack.json`, and `assistant-context.md` with assessments, profile snapshots/current profile, health history, and registry context while preserving `records.json` as the legacy records array.
 
 ## Boundary Rules
 

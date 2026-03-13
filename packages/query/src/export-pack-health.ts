@@ -136,26 +136,28 @@ export function readCurrentProfileRecord(
   const markdown = existsSync(absolutePath) ? readFileSync(absolutePath, "utf8") : null;
 
   if (markdown) {
-    const parsed = parseFrontmatterDocument(markdown);
-    const snapshotId =
-      firstString(parsed.attributes, ["snapshotId"]) ??
-      markdown.match(/Snapshot ID:\s+`([^`]+)`/u)?.[1] ??
-      null;
+    const parsed = tryParseFrontmatterDocument(markdown);
+    if (parsed) {
+      const snapshotId =
+        firstString(parsed.attributes, ["snapshotId"]) ??
+        markdown.match(/Snapshot ID:\s+`([^`]+)`/u)?.[1] ??
+        null;
 
-    if (snapshotId === latestSnapshot.id) {
-      return {
-        snapshotId,
-        updatedAt:
-          firstString(parsed.attributes, ["updatedAt"]) ??
-          markdown.match(/Recorded At:\s+([^\n]+)/u)?.[1]?.trim() ??
-          latestSnapshot.recordedAt,
-        sourceAssessmentIds: firstStringArray(parsed.attributes, ["sourceAssessmentIds"]),
-        sourceEventIds: firstStringArray(parsed.attributes, ["sourceEventIds"]),
-        topGoalIds: firstStringArray(parsed.attributes, ["topGoalIds"]),
-        relativePath,
-        markdown,
-        body: parsed.body,
-      };
+      if (snapshotId === latestSnapshot.id) {
+        return {
+          snapshotId,
+          updatedAt:
+            firstString(parsed.attributes, ["updatedAt"]) ??
+            markdown.match(/Recorded At:\s+([^\n]+)/u)?.[1]?.trim() ??
+            latestSnapshot.recordedAt,
+          sourceAssessmentIds: firstStringArray(parsed.attributes, ["sourceAssessmentIds"]),
+          sourceEventIds: firstStringArray(parsed.attributes, ["sourceEventIds"]),
+          topGoalIds: firstStringArray(parsed.attributes, ["topGoalIds"]),
+          relativePath,
+          markdown,
+          body: parsed.body,
+        };
+      }
     }
   }
 
@@ -179,7 +181,11 @@ export function readBankPages(
   return walkRelativeMarkdownFiles(vaultRoot, relativeRoot)
     .map((relativePath) => {
       const markdown = readFileSync(path.join(vaultRoot, relativePath), "utf8");
-      const parsed = parseFrontmatterDocument(markdown);
+      const parsed = tryParseFrontmatterDocument(markdown);
+      if (!parsed) {
+        return null;
+      }
+
       const id = firstString(parsed.attributes, idKeys);
       if (!id) {
         return null;
@@ -229,10 +235,12 @@ function readJsonlDirectory(
         continue;
       }
 
-      results.push({
-        relativePath,
-        value: JSON.parse(trimmed),
-      });
+      const value = tryParseJson(trimmed);
+      if (value === undefined) {
+        continue;
+      }
+
+      results.push({ relativePath, value });
     }
   }
 
@@ -346,4 +354,20 @@ function firstStringArray(
   }
 
   return [];
+}
+
+function tryParseFrontmatterDocument(markdown: string) {
+  try {
+    return parseFrontmatterDocument(markdown);
+  } catch {
+    return null;
+  }
+}
+
+function tryParseJson(value: string): unknown | undefined {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
 }
