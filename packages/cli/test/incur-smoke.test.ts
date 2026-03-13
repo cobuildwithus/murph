@@ -65,6 +65,20 @@ test('command schema reflects only domain-specific options', async () => {
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
+test('health command schema remains JSON-Schema-safe', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['profile', 'upsert', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('input' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault', 'input'])
+})
+
 test.sequential('verbose json exposes the native Incur success envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-incur-'))
 
@@ -110,6 +124,22 @@ test('compact llms json manifest remains available', async () => {
   assert.equal(manifest.commands.some((command) => command.name === 'init'), true)
   assert.equal(
     manifest.commands.some((command) => command.name === 'profile show'),
+    true,
+  )
+})
+
+test('full llms json manifest remains available for schema-rich commands', async () => {
+  const manifest = JSON.parse(
+    await runRawCli(['--llms-full', '--format', 'json']),
+  ) as {
+    commands: Array<{
+      name: string
+      options?: Record<string, unknown>
+    }>
+  }
+
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'profile upsert'),
     true,
   )
 })

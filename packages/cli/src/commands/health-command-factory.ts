@@ -6,8 +6,11 @@ export const healthPayloadSchema = z.record(z.string(), z.unknown())
 export const inputFileOptionSchema = z
   .string()
   .regex(/^@.+/u, 'Expected an @file.json payload reference.')
-  .transform((input) => input.slice(1))
   .describe('Payload file reference in @file.json form.')
+
+export function normalizeInputFileOption(input: string) {
+  return input.slice(1)
+}
 
 const cursorOptionSchema = z.string().min(1).optional()
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
@@ -249,7 +252,7 @@ export function registerHealthCrudCommands<
     output: config.outputs.upsert,
     async run(context) {
       const result = await config.services.upsert({
-        input: context.options.input,
+        input: normalizeInputFileOption(context.options.input),
         requestId: requestIdFromOptions(context.options),
         vault: context.options.vault,
       })

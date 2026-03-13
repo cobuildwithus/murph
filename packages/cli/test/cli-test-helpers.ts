@@ -65,7 +65,11 @@ export async function runCli<TData = Record<string, unknown>>(
   } catch (error) {
     const output = commandOutputFromError(error)
     if (output !== null) {
-      return JSON.parse(output) as CliEnvelope<TData>
+      try {
+        return JSON.parse(output) as CliEnvelope<TData>
+      } catch {
+        throw new Error(`CLI command failed before emitting JSON:\n${output}`)
+      }
     }
 
     throw error
