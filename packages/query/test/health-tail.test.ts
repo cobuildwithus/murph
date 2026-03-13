@@ -358,6 +358,7 @@ test("buildExportPack keeps matching current-profile markdown and ignores malfor
     assert.equal(pack.health.historyEvents.length, 1);
     assert.equal(pack.health.goals.length, 1);
     assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.deepEqual(pack.health.profileSnapshots[1]?.sourceAssessmentIds, ["asmt_health_00"]);
     assert.match(pack.health.currentProfile?.markdown ?? "", /Snapshot ID: `psnap_health_01`/);
 
     const assistantFile = pack.files.find((file) => file.path.endsWith("assistant-context.md"));
