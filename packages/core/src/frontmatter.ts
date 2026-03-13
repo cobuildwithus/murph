@@ -1,3 +1,8 @@
+import {
+  parseFrontmatterDocument as parseSharedFrontmatterDocument,
+  type FrontmatterParseProblem,
+} from "@healthybob/contracts";
+
 import { VaultError } from "./errors.js";
 
 import { isPlainRecord } from "./types.js";
@@ -8,25 +13,8 @@ import type {
   FrontmatterValue,
 } from "./types.js";
 
-interface MeaningfulLine {
-  index: number;
-  line: string;
-  indent: number;
-  text: string;
-}
-
-interface ParseResult<T> {
-  value: T;
-  index: number;
-}
-
 function isFrontmatterObject(value: unknown): value is FrontmatterObject {
   return isPlainRecord(value);
-}
-
-function countIndentation(line: string): number {
-  const match = line.match(/^ */);
-  return match ? match[0].length : 0;
 }
 
 function stringifyScalar(value: FrontmatterValue): string {
@@ -120,202 +108,11 @@ function serializeNode(value: FrontmatterValue, indent = 0): string {
   return `${padding}${stringifyScalar(value)}`;
 }
 
-function parseScalar(value: string): FrontmatterValue {
-  if (value === "null") {
-    return null;
-  }
-
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
-
-  if (value === "[]") {
-    return [];
-  }
-
-  if (value === "{}") {
-    return {};
-  }
-
-  if (/^-?\d+(\.\d+)?$/.test(value)) {
-    return Number(value);
-  }
-
-  if (value.startsWith("\"")) {
-    return JSON.parse(value) as string;
-  }
-
-  return value;
-}
-
-function nextMeaningfulLine(lines: string[], startIndex: number): MeaningfulLine | null {
-  for (let index = startIndex; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line?.trim()) {
-      return {
-        index,
-        line,
-        indent: countIndentation(line),
-        text: line.trimStart(),
-      };
-    }
-  }
-
-  return null;
-}
-
-function parseArray(lines: string[], startIndex: number, indent: number): ParseResult<FrontmatterValue[]> {
-  const value: FrontmatterValue[] = [];
-  let index = startIndex;
-
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-
-    const currentIndent = countIndentation(line);
-
-    if (currentIndent < indent) {
-      break;
-    }
-
-    if (currentIndent !== indent) {
-      throw new VaultError("VAULT_INVALID_FRONTMATTER", "Unexpected array indentation.", {
-        line,
-        index,
-      });
-    }
-
-    const trimmed = line.slice(indent);
-
-    if (!trimmed.startsWith("-")) {
-      break;
-    }
-
-    const remainder = trimmed.slice(1).trimStart();
-
-    if (remainder) {
-      value.push(parseScalar(remainder));
-      index += 1;
-      continue;
-    }
-
-    index += 1;
-
-    const nested = nextMeaningfulLine(lines, index);
-
-    if (!nested || nested.indent <= indent) {
-      value.push({});
-      continue;
-    }
-
-    if (nested.indent !== indent + 2) {
-      throw new VaultError("VAULT_INVALID_FRONTMATTER", "Unexpected nested array indentation.", {
-        line: nested.line,
-        index: nested.index,
-      });
-    }
-
-    if (nested.text.startsWith("-")) {
-      const result = parseArray(lines, nested.index, nested.indent);
-      value.push(result.value);
-      index = result.index;
-      continue;
-    }
-
-    const result = parseObject(lines, nested.index, nested.indent);
-    value.push(result.value);
-    index = result.index;
-  }
-
-  return { value, index };
-}
-
-function parseObject(lines: string[], startIndex: number, indent: number): ParseResult<FrontmatterObject> {
-  const value: FrontmatterObject = {};
-  let index = startIndex;
-
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-
-    const currentIndent = countIndentation(line);
-
-    if (currentIndent < indent) {
-      break;
-    }
-
-    if (currentIndent !== indent) {
-      throw new VaultError("VAULT_INVALID_FRONTMATTER", "Unexpected object indentation.", {
-        line,
-        index,
-      });
-    }
-
-    const trimmed = line.slice(indent);
-
-    if (trimmed.startsWith("-")) {
-      break;
-    }
-
-    const separatorIndex = trimmed.indexOf(":");
-
-    if (separatorIndex <= 0) {
-      throw new VaultError("VAULT_INVALID_FRONTMATTER", "Expected a \"key: value\" frontmatter line.", {
-        line,
-        index,
-      });
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const remainder = trimmed.slice(separatorIndex + 1).trim();
-
-    if (remainder) {
-      value[key] = parseScalar(remainder);
-      index += 1;
-      continue;
-    }
-
-    index += 1;
-
-    const nested = nextMeaningfulLine(lines, index);
-
-    if (!nested || nested.indent <= indent) {
-      value[key] = {};
-      continue;
-    }
-
-    if (nested.indent !== indent + 2) {
-      throw new VaultError("VAULT_INVALID_FRONTMATTER", "Unexpected nested object indentation.", {
-        line: nested.line,
-        index: nested.index,
-      });
-    }
-
-    if (nested.text.startsWith("-")) {
-      const result = parseArray(lines, nested.index, nested.indent);
-      value[key] = result.value;
-      index = result.index;
-      continue;
-    }
-
-    const result = parseObject(lines, nested.index, nested.indent);
-    value[key] = result.value;
-    index = result.index;
-  }
-
-  return { value, index };
+function toVaultError(problem: FrontmatterParseProblem): VaultError {
+  return new VaultError("VAULT_INVALID_FRONTMATTER", problem.message, {
+    ...(problem.line === undefined ? {} : { line: problem.line }),
+    ...(problem.index === undefined ? {} : { index: problem.index }),
+  });
 }
 
 export function stringifyFrontmatterDocument(
@@ -331,44 +128,14 @@ export function stringifyFrontmatterDocument(
 }
 
 export function parseFrontmatterDocument(documentText: string): FrontmatterDocument {
-  const normalizedText = String(documentText ?? "").replace(/\r\n/g, "\n");
-  const lines = normalizedText.split("\n");
-
-  if (lines[0] !== "---") {
-    return {
-      attributes: {},
-      body: normalizedText,
-    };
-  }
-
-  const closingIndex = lines.indexOf("---", 1);
-
-  if (closingIndex === -1) {
-    throw new VaultError("VAULT_INVALID_FRONTMATTER", "Frontmatter block is missing a closing delimiter.");
-  }
-
-  const frontmatterLines = lines.slice(1, closingIndex);
-  const body = lines.slice(closingIndex + 1).join("\n");
-
-  if (frontmatterLines.length === 0 || frontmatterLines.every((line) => !line.trim())) {
-    return {
-      attributes: {},
-      body,
-    };
-  }
-
-  const parsed = parseObject(frontmatterLines, 0, 0);
-  const remaining = nextMeaningfulLine(frontmatterLines, parsed.index);
-
-  if (remaining) {
-    throw new VaultError("VAULT_INVALID_FRONTMATTER", "Unexpected trailing frontmatter content.", {
-      line: remaining.line,
-      index: remaining.index,
-    });
-  }
+  const parsed = parseSharedFrontmatterDocument(documentText, {
+    mode: "strict",
+    bodyNormalization: "preserve",
+    createError: toVaultError,
+  });
 
   return {
-    attributes: parsed.value,
-    body,
+    attributes: parsed.attributes,
+    body: parsed.body,
   };
 }

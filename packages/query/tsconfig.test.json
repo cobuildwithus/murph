@@ -5,6 +5,11 @@
     "outDir": ".test-dist",
     "tsBuildInfoFile": ".test-dist/.tsbuildinfo"
   },
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    }
+  ],
   "include": [
     "src/**/*.ts",
     "test/**/*.ts"

@@ -27,7 +27,7 @@ test("parseMarkdownDocument keeps tolerant parsing explicit", () => {
 # comment
 title: 'Flexible Title'
 tags:
-  - alpha
+- alpha
 ---
 
 Body line
@@ -38,7 +38,7 @@ Body line
     tags: ["alpha"],
   });
   assert.equal(parsed.body, "Body line");
-  assert.equal(parsed.rawFrontmatter, "# comment\ntitle: 'Flexible Title'\ntags:\n  - alpha");
+  assert.equal(parsed.rawFrontmatter, "# comment\ntitle: 'Flexible Title'\ntags:\n- alpha");
 });
 
 test("parseMarkdownDocument falls back to body-only content when frontmatter is malformed", () => {
@@ -250,6 +250,25 @@ test("buildExportPack produces derived exports payloads without touching the vau
     assert.match(assistantFile.contents, /Healthy Bob Export Pack/);
     assert.match(assistantFile.contents, /## Questions/);
     assert.match(assistantFile.contents, /Low Carb Trial/);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildExportPack sanitizes explicit pack ids before deriving output paths", async () => {
+  const vaultRoot = await createFixtureVault();
+
+  try {
+    const vault = await readVault(vaultRoot);
+    const pack = buildExportPack(vault, {
+      packId: "../../unsafe pack",
+      generatedAt: "2026-03-12T15:00:00.000Z",
+    });
+
+    assert.equal(pack.packId, "unsafe-pack");
+    assert.equal(pack.basePath, "exports/packs/unsafe-pack");
+    assert.ok(pack.files.every((file) => file.path.startsWith("exports/packs/unsafe-pack/")));
+    assert.ok(pack.files.every((file) => !file.path.includes("..")));
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

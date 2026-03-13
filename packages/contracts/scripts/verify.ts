@@ -32,6 +32,7 @@ import {
   sampleRecordSchema,
   vaultMetadataSchema,
   parseFrontmatterMarkdown,
+  parseFrontmatterDocument,
 } from "@healthybob/contracts";
 import { schemaCatalog } from "@healthybob/contracts/schemas";
 
@@ -183,6 +184,50 @@ assertNoErrors("genetic-variant frontmatter object", exampleHealthFrontmatterObj
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.core), exampleFrontmatterObjects.core);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.journalDay), exampleFrontmatterObjects.journalDay);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.experiment), exampleFrontmatterObjects.experiment);
+assert.deepEqual(
+  parseFrontmatterDocument(`---
+title: Example
+details:
+  nested: true
+---
+
+Body line
+`),
+  {
+    attributes: {
+      title: "Example",
+      details: {
+        nested: true,
+      },
+    },
+    body: "\nBody line\n",
+    rawFrontmatter: "title: Example\ndetails:\n  nested: true",
+  },
+);
+assert.deepEqual(
+  parseFrontmatterDocument(`---
+title broken
+---
+
+Body line
+`, {
+    mode: "tolerant",
+    bodyNormalization: "trim",
+  }),
+  {
+    attributes: {},
+    body: "---\ntitle broken\n---\n\nBody line",
+    rawFrontmatter: null,
+  },
+);
+assert.throws(
+  () =>
+    parseFrontmatterDocument(`---
+title broken
+---
+`),
+  /Expected a "key: value" frontmatter line\./,
+);
 
 assertHasErrors(
   "core frontmatter rejects unexpected keys",

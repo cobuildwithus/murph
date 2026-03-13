@@ -17,10 +17,11 @@
   ],
   "scripts": {
     "build": "rimraf dist && tsc -b tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.test.json --noEmit --pretty false",
+    "typecheck": "pnpm --dir ../contracts build && tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.test.json --noEmit --pretty false",
     "test": "pnpm --dir ../.. exec vitest run packages/query/test/query.test.ts packages/query/test/health-tail.test.ts --no-coverage"
   },
   "dependencies": {
+    "@healthybob/contracts": "workspace:*",
     "zod": "^4.3.6"
   }
 }

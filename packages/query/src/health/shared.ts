@@ -1,4 +1,8 @@
 import path from "node:path";
+import {
+  parseFrontmatterDocument as parseSharedFrontmatterDocument,
+  type FrontmatterParseProblem,
+} from "@healthybob/contracts";
 import { z } from "zod";
 
 export type FrontmatterScalar = string | number | boolean | null;
@@ -23,18 +27,6 @@ export interface MarkdownDocumentRecord {
   attributes: FrontmatterObject;
 }
 
-interface MeaningfulLine {
-  index: number;
-  line: string;
-  indent: number;
-  text: string;
-}
-
-interface ParseResult<TValue> {
-  value: TValue;
-  index: number;
-}
-
 const plainObjectSchema: z.ZodType<Record<string, unknown>> = z.object({}).catchall(z.unknown());
 const trimmedNonEmptyStringSchema: z.ZodType<string> = z
   .string()
@@ -57,238 +49,39 @@ function parseNullable<TValue>(
   return parsed.success ? parsed.data : null;
 }
 
-function countIndentation(line: string): number {
-  const match = line.match(/^ */u);
-  return match ? match[0].length : 0;
-}
+function formatFrontmatterProblem(problem: FrontmatterParseProblem): Error {
+  const lineNumber = problem.index === undefined ? null : problem.index + 1;
 
-function parseScalar(value: string): FrontmatterValue {
-  if (value === "null") {
-    return null;
+  switch (problem.code) {
+    case "missing_closing_delimiter":
+      return new Error(problem.message);
+    case "unexpected_array_indentation":
+      return new Error(`Unexpected array indentation at line ${lineNumber}.`);
+    case "unexpected_nested_array_indentation":
+      return new Error(`Unexpected nested array indentation at line ${lineNumber}.`);
+    case "unexpected_object_indentation":
+      return new Error(`Unexpected object indentation at line ${lineNumber}.`);
+    case "expected_key_value":
+      return new Error(`Expected "key: value" frontmatter at line ${lineNumber}.`);
+    case "unexpected_nested_object_indentation":
+      return new Error(`Unexpected nested object indentation at line ${lineNumber}.`);
+    case "unexpected_trailing_content":
+      return new Error(`Unexpected trailing frontmatter content at line ${lineNumber}.`);
   }
-
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
-
-  if (value === "[]") {
-    return [];
-  }
-
-  if (value === "{}") {
-    return {};
-  }
-
-  if (/^-?\d+(\.\d+)?$/u.test(value)) {
-    return Number(value);
-  }
-
-  if (value.startsWith('"')) {
-    return JSON.parse(value) as string;
-  }
-
-  return value;
-}
-
-function nextMeaningfulLine(
-  lines: string[],
-  startIndex: number,
-): MeaningfulLine | null {
-  for (let index = startIndex; index < lines.length; index += 1) {
-    const line = lines[index];
-
-    if (!line?.trim()) {
-      continue;
-    }
-
-    return {
-      index,
-      line,
-      indent: countIndentation(line),
-      text: line.trimStart(),
-    };
-  }
-
-  return null;
-}
-
-function parseArray(
-  lines: string[],
-  startIndex: number,
-  indent: number,
-): ParseResult<FrontmatterValue[]> {
-  const value: FrontmatterValue[] = [];
-  let index = startIndex;
-
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-
-    const currentIndent = countIndentation(line);
-    if (currentIndent < indent) {
-      break;
-    }
-
-    if (currentIndent !== indent) {
-      throw new Error(`Unexpected array indentation at line ${index + 1}.`);
-    }
-
-    const trimmed = line.slice(indent);
-    if (!trimmed.startsWith("-")) {
-      break;
-    }
-
-    const remainder = trimmed.slice(1).trimStart();
-    if (remainder) {
-      value.push(parseScalar(remainder));
-      index += 1;
-      continue;
-    }
-
-    index += 1;
-
-    const nested = nextMeaningfulLine(lines, index);
-    if (!nested || nested.indent <= indent) {
-      value.push({});
-      continue;
-    }
-
-    if (nested.indent !== indent + 2) {
-      throw new Error(`Unexpected nested array indentation at line ${nested.index + 1}.`);
-    }
-
-    if (nested.text.startsWith("-")) {
-      const result = parseArray(lines, nested.index, nested.indent);
-      value.push(result.value);
-      index = result.index;
-      continue;
-    }
-
-    const result = parseObject(lines, nested.index, nested.indent);
-    value.push(result.value);
-    index = result.index;
-  }
-
-  return { value, index };
-}
-
-function parseObject(
-  lines: string[],
-  startIndex: number,
-  indent: number,
-): ParseResult<FrontmatterObject> {
-  const value: FrontmatterObject = {};
-  let index = startIndex;
-
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-
-    if (!line.trim()) {
-      index += 1;
-      continue;
-    }
-
-    const currentIndent = countIndentation(line);
-    if (currentIndent < indent) {
-      break;
-    }
-
-    if (currentIndent !== indent) {
-      throw new Error(`Unexpected object indentation at line ${index + 1}.`);
-    }
-
-    const trimmed = line.slice(indent);
-    if (trimmed.startsWith("-")) {
-      break;
-    }
-
-    const separatorIndex = trimmed.indexOf(":");
-    if (separatorIndex <= 0) {
-      throw new Error(`Expected "key: value" frontmatter at line ${index + 1}.`);
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const remainder = trimmed.slice(separatorIndex + 1).trim();
-
-    if (remainder) {
-      value[key] = parseScalar(remainder);
-      index += 1;
-      continue;
-    }
-
-    index += 1;
-
-    const nested = nextMeaningfulLine(lines, index);
-    if (!nested || nested.indent <= indent) {
-      value[key] = {};
-      continue;
-    }
-
-    if (nested.indent !== indent + 2) {
-      throw new Error(`Unexpected nested object indentation at line ${nested.index + 1}.`);
-    }
-
-    if (nested.text.startsWith("-")) {
-      const result = parseArray(lines, nested.index, nested.indent);
-      value[key] = result.value;
-      index = result.index;
-      continue;
-    }
-
-    const result = parseObject(lines, nested.index, nested.indent);
-    value[key] = result.value;
-    index = result.index;
-  }
-
-  return { value, index };
 }
 
 export function parseFrontmatterDocument(
   documentText: string,
 ): FrontmatterDocument {
-  const normalized = String(documentText ?? "").replace(/\r\n/g, "\n");
-  const lines = normalized.split("\n");
-
-  if (lines[0] !== "---") {
-    return {
-      attributes: {},
-      body: normalized.trim(),
-    };
-  }
-
-  const closingIndex = lines.indexOf("---", 1);
-  if (closingIndex === -1) {
-    throw new Error("Frontmatter block is missing a closing delimiter.");
-  }
-
-  const frontmatterLines = lines.slice(1, closingIndex);
-  const body = lines.slice(closingIndex + 1).join("\n").trim();
-
-  if (frontmatterLines.every((line) => !line.trim())) {
-    return {
-      attributes: {},
-      body,
-    };
-  }
-
-  const parsed = parseObject(frontmatterLines, 0, 0);
-  const trailing = nextMeaningfulLine(frontmatterLines, parsed.index);
-
-  if (trailing) {
-    throw new Error(`Unexpected trailing frontmatter content at line ${trailing.index + 1}.`);
-  }
+  const parsed = parseSharedFrontmatterDocument(documentText, {
+    mode: "strict",
+    bodyNormalization: "trim",
+    createError: formatFrontmatterProblem,
+  });
 
   return {
-    attributes: parsed.value,
-    body,
+    attributes: parsed.attributes,
+    body: parsed.body,
   };
 }
 
