@@ -232,6 +232,248 @@ function createFakeInboxRuntimeModule(input?: {
   }
 }
 
+function createFakeParsersRuntimeModule(input?: {
+  discoveredAt?: string
+  drainResults?: Array<{
+    attachmentId: string
+    captureId: string
+    errorCode?: string
+    errorMessage?: string
+    manifestPath?: string
+    providerId?: string
+    status: 'failed' | 'succeeded'
+  }>
+  onDrain?(payload: {
+    attachmentId?: string
+    captureId?: string
+    maxJobs?: number
+    vaultRoot: string
+  }): void
+  onWrite?(payload: {
+    tools?: Record<string, {
+      command?: string | null
+      modelPath?: string | null
+    }>
+    vaultRoot: string
+  }): void
+}) {
+  const discoveredAt = input?.discoveredAt ?? '2026-03-13T12:34:56.000Z'
+  const toolchainByVault = new Map<
+    string,
+    {
+      ffmpeg: {
+        available: boolean
+        command: string | null
+        reason: string
+        source: 'config' | 'env' | 'system' | 'missing'
+      }
+      pdftotext: {
+        available: boolean
+        command: string | null
+        reason: string
+        source: 'config' | 'env' | 'system' | 'missing'
+      }
+      whisper: {
+        available: boolean
+        command: string | null
+        modelPath: string | null
+        reason: string
+        source: 'config' | 'env' | 'system' | 'missing'
+      }
+      paddleocr: {
+        available: boolean
+        command: string | null
+        reason: string
+        source: 'config' | 'env' | 'system' | 'missing'
+      }
+    }
+  >()
+
+  function getDoctor(vaultRoot: string) {
+    const runtimePaths = resolveRuntimePaths(vaultRoot)
+    const tools =
+      toolchainByVault.get(vaultRoot) ?? {
+        ffmpeg: {
+          available: true,
+          command: '/usr/bin/ffmpeg',
+          reason: 'ffmpeg CLI available.',
+          source: 'system' as const,
+        },
+        pdftotext: {
+          available: false,
+          command: null,
+          reason: 'pdftotext CLI not found.',
+          source: 'missing' as const,
+        },
+        whisper: {
+          available: false,
+          command: null,
+          modelPath: null,
+          reason: 'Whisper model path is not configured.',
+          source: 'missing' as const,
+        },
+        paddleocr: {
+          available: false,
+          command: null,
+          reason: 'PaddleOCR CLI not found.',
+          source: 'missing' as const,
+        },
+      }
+
+    return {
+      configPath: path.join(runtimePaths.runtimeRoot, 'parsers', 'toolchain.json'),
+      discoveredAt,
+      tools,
+    }
+  }
+
+  return {
+    async createConfiguredParserRegistry(inputPayload: { vaultRoot: string }) {
+      return {
+        doctor: getDoctor(inputPayload.vaultRoot),
+        registry: {},
+        ffmpeg: {
+          commandCandidates: ['/usr/bin/ffmpeg'],
+        },
+      }
+    },
+    createInboxParserService(serviceInput: { vaultRoot: string }) {
+      return {
+        async drain(drainInput?: {
+          attachmentId?: string
+          captureId?: string
+          maxJobs?: number
+        }) {
+          input?.onDrain?.({
+            vaultRoot: serviceInput.vaultRoot,
+            ...(drainInput?.attachmentId
+              ? {
+                  attachmentId: drainInput.attachmentId,
+                }
+              : {}),
+            ...(drainInput?.captureId
+              ? {
+                  captureId: drainInput.captureId,
+                }
+              : {}),
+            ...(typeof drainInput?.maxJobs === 'number'
+              ? {
+                  maxJobs: drainInput.maxJobs,
+                }
+              : {}),
+          })
+
+          if (input?.drainResults) {
+            return input.drainResults.map((result) => ({
+              status: result.status,
+              job: {
+                attachmentId: result.attachmentId,
+                captureId: result.captureId,
+              },
+              providerId: result.providerId,
+              manifestPath:
+                result.manifestPath ??
+                path.join(
+                  serviceInput.vaultRoot,
+                  'derived',
+                  'inbox',
+                  result.captureId,
+                  'attachments',
+                  result.attachmentId,
+                  'manifest.json',
+                ),
+              errorCode: result.errorCode,
+              errorMessage: result.errorMessage,
+            }))
+          }
+
+          return []
+        },
+      }
+    },
+    async discoverParserToolchain(inputPayload: { vaultRoot: string }) {
+      return getDoctor(inputPayload.vaultRoot)
+    },
+    async writeParserToolchainConfig(inputPayload: {
+      tools?: Record<string, {
+        command?: string | null
+        modelPath?: string | null
+      }>
+      vaultRoot: string
+    }) {
+      input?.onWrite?.(inputPayload)
+      const current = getDoctor(inputPayload.vaultRoot).tools
+      const next = {
+        ...current,
+        ffmpeg: {
+          ...current.ffmpeg,
+          ...(inputPayload.tools?.ffmpeg?.command
+            ? {
+                available: true,
+                command: inputPayload.tools.ffmpeg.command,
+                reason: 'ffmpeg CLI available.',
+                source: 'config' as const,
+              }
+            : {}),
+        },
+        pdftotext: {
+          ...current.pdftotext,
+          ...(inputPayload.tools?.pdftotext?.command
+            ? {
+                available: true,
+                command: inputPayload.tools.pdftotext.command,
+                reason: 'pdftotext CLI available.',
+                source: 'config' as const,
+              }
+            : {}),
+        },
+        whisper: {
+          ...current.whisper,
+          ...(inputPayload.tools?.whisper?.command
+            ? {
+                command: inputPayload.tools.whisper.command,
+              }
+            : {}),
+          ...(inputPayload.tools?.whisper?.modelPath
+            ? {
+                modelPath: inputPayload.tools.whisper.modelPath,
+              }
+            : {}),
+        },
+        paddleocr: {
+          ...current.paddleocr,
+          ...(inputPayload.tools?.paddleocr?.command
+            ? {
+                available: true,
+                command: inputPayload.tools.paddleocr.command,
+                reason: 'PaddleOCR CLI available.',
+                source: 'config' as const,
+              }
+            : {}),
+        },
+      }
+
+      if (next.whisper.command && next.whisper.modelPath) {
+        next.whisper = {
+          ...next.whisper,
+          available: true,
+          reason: 'whisper.cpp CLI and model path configured.',
+          source: 'config',
+        }
+      }
+
+      toolchainByVault.set(inputPayload.vaultRoot, next)
+
+      return {
+        config: {
+          updatedAt: discoveredAt,
+        },
+        configPath: getDoctor(inputPayload.vaultRoot).configPath,
+      }
+    },
+  }
+}
+
 async function expectVaultCliError(
   action: Promise<unknown>,
   code: string,
@@ -1490,6 +1732,186 @@ test.sequential('backfill dedupes repeats, honors limits, and stores cursor unde
     } finally {
       runtime.close()
     }
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('inbox setup and doctor expose additive parser toolchain status', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-parser-setup')
+  const writes: Array<{
+    tools?: Record<string, {
+      command?: string | null
+      modelPath?: string | null
+    }>
+    vaultRoot: string
+  }> = []
+  const fakeParsers = createFakeParsersRuntimeModule({
+    onWrite(payload) {
+      writes.push(payload)
+    },
+  })
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadParsersModule: async () => fakeParsers,
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    const setupResult = await services.setup({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      whisperCommand: '/opt/whisper-cli',
+      whisperModelPath: './models/ggml-base.en.bin',
+      paddleocrCommand: 'paddleocr',
+    })
+
+    assert.equal(setupResult.configPath, '.runtime/parsers/toolchain.json')
+    assert.equal(setupResult.tools.whisper.available, true)
+    assert.equal(setupResult.tools.whisper.command, '/opt/whisper-cli')
+    assert.equal(
+      setupResult.tools.whisper.modelPath,
+      './models/ggml-base.en.bin',
+    )
+    assert.equal(writes.length, 1)
+    assert.equal(writes[0]?.vaultRoot, fixture.vaultRoot)
+
+    const doctorResult = await services.doctor({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    assert.equal(doctorResult.ok, true)
+    assert.equal(doctorResult.parserToolchain?.configPath, '.runtime/parsers/toolchain.json')
+    assert.equal(
+      doctorResult.parserToolchain?.tools.whisper.modelPath,
+      './models/ggml-base.en.bin',
+    )
+    assert.equal(
+      doctorResult.checks.some(
+        (check) => check.name === 'parser-whisper' && check.status === 'pass',
+      ),
+      true,
+    )
+    assert.equal(
+      doctorResult.checks.some(
+        (check) => check.name === 'parser-pdftotext' && check.status === 'warn',
+      ),
+      true,
+    )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('inbox parse and requeue drive parser queue controls without real tool binaries', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-parser-queue')
+  const drainCalls: Array<{
+    attachmentId?: string
+    captureId?: string
+    maxJobs?: number
+    vaultRoot: string
+  }> = []
+  const fakeParsers = createFakeParsersRuntimeModule({
+    drainResults: [
+      {
+        attachmentId: 'att-1',
+        captureId: 'cap-parser',
+        providerId: 'text-file',
+        status: 'succeeded',
+      },
+    ],
+    onDrain(payload) {
+      drainCalls.push(payload)
+    },
+  })
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+    loadParsersModule: async () => fakeParsers,
+  })
+
+  try {
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const backfillResult = await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+    assert.equal(backfillResult.importedCount, 1)
+
+    const captureId = await captureSingleCaptureId({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const inboxd = await loadBuiltInboxRuntime()
+    const runtime = await inboxd.openInboxRuntime({
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    try {
+      const [job] = runtime.listAttachmentParseJobs({
+        captureId,
+        limit: 1,
+      })
+      assert.ok(job)
+      runtime.claimNextAttachmentParseJob({
+        captureId,
+      })
+      runtime.failAttachmentParseJob({
+        jobId: job.jobId,
+        errorMessage: 'parser failed',
+      })
+    } finally {
+      runtime.close()
+    }
+
+    const requeueResult = await services.requeue({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    assert.equal(requeueResult.count, 1)
+    assert.equal(requeueResult.filters.state, 'failed')
+
+    const parseResult = await services.parse({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+      limit: 1,
+    })
+    assert.equal(parseResult.attempted, 1)
+    assert.equal(parseResult.succeeded, 1)
+    assert.equal(parseResult.results[0]?.providerId, 'text-file')
+    assert.equal(
+      parseResult.results[0]?.manifestPath,
+      'derived/inbox/cap-parser/attachments/att-1/manifest.json',
+    )
+    assert.deepEqual(drainCalls, [
+      {
+        captureId,
+        maxJobs: 1,
+        vaultRoot: fixture.vaultRoot,
+      },
+    ])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

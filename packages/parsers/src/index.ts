@@ -22,6 +22,28 @@ export type { ProviderRankingPolicy } from "./registry/policy.js";
 export { DEFAULT_PROVIDER_RANKING_POLICY, scoreProvider } from "./registry/policy.js";
 export type { ParserRegistry } from "./registry/registry.js";
 export { createParserRegistry } from "./registry/registry.js";
+export type {
+  ParserDoctorReport,
+  ParserToolDiscovery,
+  ParserToolDiscoverySource,
+} from "./toolchain/discover.js";
+export {
+  createConfiguredParserRegistry,
+  discoverParserToolchain,
+  ffmpegOptionsFromDoctor,
+} from "./toolchain/discover.js";
+export type {
+  ParserToolName,
+  ParserToolchainConfig,
+  ParserToolchainPaths,
+  ParserToolchainToolConfig,
+  WriteParserToolchainConfigInput,
+} from "./toolchain/config.js";
+export {
+  getParserToolchainPaths,
+  readParserToolchainConfig,
+  writeParserToolchainConfig,
+} from "./toolchain/config.js";
 export type { FfmpegToolOptions } from "./adapters/ffmpeg.js";
 export { prepareAudioInput, resolveFfmpegCommand } from "./adapters/ffmpeg.js";
 export type { WhisperCppProviderOptions } from "./adapters/whisper-cpp.js";

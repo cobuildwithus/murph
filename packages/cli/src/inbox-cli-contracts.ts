@@ -33,6 +33,27 @@ export const inboxDoctorCheckSchema = z.object({
   details: z.record(z.string(), z.unknown()).optional(),
 })
 
+export const inboxParserToolStatusSchema = z.object({
+  available: z.boolean(),
+  command: z.string().min(1).nullable(),
+  modelPath: z.string().min(1).nullable().optional(),
+  source: z.enum(['config', 'env', 'system', 'missing']),
+  reason: z.string().min(1),
+})
+
+export const inboxParserToolchainStatusSchema = z.object({
+  configPath: pathSchema,
+  discoveredAt: isoTimestampSchema,
+  tools: z.object({
+    ffmpeg: inboxParserToolStatusSchema,
+    pdftotext: inboxParserToolStatusSchema,
+    whisper: inboxParserToolStatusSchema.extend({
+      modelPath: z.string().min(1).nullable(),
+    }),
+    paddleocr: inboxParserToolStatusSchema,
+  }),
+})
+
 export const inboxPromotionEntrySchema = z.object({
   captureId: z.string().min(1),
   target: z.enum(inboxPromotionTargetValues),
@@ -146,6 +167,42 @@ export const inboxDoctorResultSchema = z.object({
   ok: z.boolean(),
   checks: z.array(inboxDoctorCheckSchema),
   connectors: z.array(inboxConnectorConfigSchema),
+  parserToolchain: inboxParserToolchainStatusSchema.nullable().optional(),
+})
+
+export const inboxSetupResultSchema = z.object({
+  vault: pathSchema,
+  configPath: pathSchema,
+  updatedAt: isoTimestampSchema,
+  tools: inboxParserToolchainStatusSchema.shape.tools,
+})
+
+export const inboxParseJobResultSchema = z.object({
+  captureId: z.string().min(1),
+  attachmentId: z.string().min(1),
+  status: z.enum(['failed', 'succeeded']),
+  providerId: z.string().min(1).nullable(),
+  manifestPath: pathSchema.nullable(),
+  errorCode: z.string().min(1).nullable(),
+  errorMessage: z.string().min(1).nullable(),
+})
+
+export const inboxParseResultSchema = z.object({
+  vault: pathSchema,
+  attempted: z.number().int().nonnegative(),
+  succeeded: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  results: z.array(inboxParseJobResultSchema),
+})
+
+export const inboxRequeueResultSchema = z.object({
+  vault: pathSchema,
+  count: z.number().int().nonnegative(),
+  filters: z.object({
+    captureId: z.string().min(1).optional(),
+    attachmentId: z.string().min(1).optional(),
+    state: z.enum(['failed', 'running']).optional(),
+  }),
 })
 
 export const inboxBackfillResultSchema = z.object({
@@ -273,6 +330,8 @@ export const inboxAttachmentReparseResultSchema = z.object({
 export type InboxConnectorConfig = z.infer<typeof inboxConnectorConfigSchema>
 export type InboxRuntimeConfig = z.infer<typeof inboxRuntimeConfigSchema>
 export type InboxDoctorCheck = z.infer<typeof inboxDoctorCheckSchema>
+export type InboxParserToolStatus = z.infer<typeof inboxParserToolStatusSchema>
+export type InboxParserToolchainStatus = z.infer<typeof inboxParserToolchainStatusSchema>
 export type InboxPromotionEntry = z.infer<typeof inboxPromotionEntrySchema>
 export type InboxPromotionStore = z.infer<typeof inboxPromotionStoreSchema>
 export type InboxInitResult = z.infer<typeof inboxInitResultSchema>
@@ -280,12 +339,16 @@ export type InboxSourceAddResult = z.infer<typeof inboxSourceAddResultSchema>
 export type InboxSourceRemoveResult = z.infer<typeof inboxSourceRemoveResultSchema>
 export type InboxSourceListResult = z.infer<typeof inboxSourceListResultSchema>
 export type InboxDoctorResult = z.infer<typeof inboxDoctorResultSchema>
+export type InboxSetupResult = z.infer<typeof inboxSetupResultSchema>
 export type InboxBackfillResult = z.infer<typeof inboxBackfillResultSchema>
 export type InboxDaemonState = z.infer<typeof inboxDaemonStateSchema>
 export type InboxRunResult = z.infer<typeof inboxRunResultSchema>
 export type InboxListResult = z.infer<typeof inboxListResultSchema>
 export type InboxShowResult = z.infer<typeof inboxShowResultSchema>
 export type InboxSearchResult = z.infer<typeof inboxSearchResultSchema>
+export type InboxParseJobResult = z.infer<typeof inboxParseJobResultSchema>
+export type InboxParseResult = z.infer<typeof inboxParseResultSchema>
+export type InboxRequeueResult = z.infer<typeof inboxRequeueResultSchema>
 export type InboxPromoteMealResult = z.infer<typeof inboxPromoteMealResultSchema>
 export type InboxPromoteJournalResult = z.infer<typeof inboxPromoteJournalResultSchema>
 export type InboxAttachmentListResult = z.infer<typeof inboxAttachmentListResultSchema>

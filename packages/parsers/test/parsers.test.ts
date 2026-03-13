@@ -8,6 +8,7 @@ import { initializeVault } from "@healthybob/core";
 import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@healthybob/inboxd";
 
 import {
+  createConfiguredParserRegistry,
   createInboxParserService,
   createParsedInboxPipeline,
   createPaddleOcrProvider,
@@ -15,8 +16,12 @@ import {
   createPdfToTextProvider,
   createTextFileProvider,
   createWhisperCppProvider,
+  discoverParserToolchain,
+  getParserToolchainPaths,
   prepareAudioInput,
+  readParserToolchainConfig,
   runAttachmentParseWorker,
+  writeParserToolchainConfig,
   type ParserProvider,
 } from "../src/index.js";
 import {
@@ -133,6 +138,69 @@ test("shared executable helpers preserve lazy resolution, availability, and miss
       process.env.HEALTHYBOB_TEST_COMMAND = previousCommand;
     }
   }
+});
+
+test("parser toolchain config writes, reads, and drives local discovery", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parser-toolchain");
+  const toolsDirectory = await makeTempDirectory("healthybob-parser-toolchain-bin");
+  const fakeToolPath = await writeExecutableFile(
+    toolsDirectory,
+    "fake-parser-tool",
+    "#!/usr/bin/env node\nprocess.exit(0);\n",
+  );
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  const written = await writeParserToolchainConfig({
+    vaultRoot,
+    now: new Date("2026-03-13T12:34:56.000Z"),
+    tools: {
+      ffmpeg: {
+        command: fakeToolPath,
+      },
+      whisper: {
+        command: fakeToolPath,
+        modelPath: "models/fake.bin",
+      },
+    },
+  });
+
+  assert.equal(written.config.updatedAt, "2026-03-13T12:34:56.000Z");
+  assert.equal(written.configPath, getParserToolchainPaths(vaultRoot).configPath);
+
+  const loaded = await readParserToolchainConfig(vaultRoot);
+  assert.ok(loaded);
+  assert.equal(loaded.config.tools.ffmpeg?.command, fakeToolPath);
+  assert.equal(loaded.config.tools.whisper?.modelPath, "models/fake.bin");
+
+  const doctor = await discoverParserToolchain({ vaultRoot });
+  assert.equal(doctor.configPath, getParserToolchainPaths(vaultRoot).configPath);
+  assert.deepEqual(doctor.tools.ffmpeg, {
+    available: true,
+    command: fakeToolPath,
+    source: "config",
+    reason: "ffmpeg CLI available.",
+  });
+  assert.deepEqual(doctor.tools.whisper, {
+    available: true,
+    command: fakeToolPath,
+    modelPath: "models/fake.bin",
+    source: "config",
+    reason: "whisper.cpp CLI and model path configured.",
+  });
+
+  const configured = await createConfiguredParserRegistry({ vaultRoot });
+  assert.equal(configured.doctor.tools.ffmpeg.command, fakeToolPath);
+  assert.deepEqual(configured.ffmpeg, {
+    commandCandidates: [fakeToolPath],
+    allowSystemLookup: false,
+  });
+
+  await fs.rm(vaultRoot, { recursive: true, force: true });
+  await fs.rm(toolsDirectory, { recursive: true, force: true });
 });
 
 test("pdftotext provider discovers explicit executables and parses PDF text output", async () => {

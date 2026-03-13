@@ -14,10 +14,13 @@ import {
   inboxDoctorResultSchema,
   inboxInitResultSchema,
   inboxListResultSchema,
+  inboxParseResultSchema,
   inboxPromoteMealResultSchema,
   inboxPromoteJournalResultSchema,
+  inboxRequeueResultSchema,
   inboxRunResultSchema,
   inboxSearchResultSchema,
+  inboxSetupResultSchema,
   inboxShowResultSchema,
   inboxSourceAddResultSchema,
   inboxSourceListResultSchema,
@@ -97,6 +100,67 @@ export function registerInboxCommands(
             },
           ],
         },
+      })
+    },
+  })
+
+  inbox.command('setup', {
+    args: emptyArgsSchema,
+    description:
+      'Write parser toolchain config under .runtime/parsers and report discovered local tool availability.',
+    examples: [
+      {
+        options: { vault: './vault' },
+        description: 'Create or refresh the local parser toolchain config.',
+      },
+      {
+        options: {
+          vault: './vault',
+          whisperCommand: '/usr/local/bin/whisper-cli',
+          whisperModelPath: './models/ggml-base.en.bin',
+        },
+        description: 'Persist explicit whisper.cpp command and model-path overrides.',
+      },
+    ],
+    hint:
+      'This config is local runtime state only; it does not write canonical health records.',
+    options: withBaseOptions({
+      ffmpegCommand: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional explicit ffmpeg command or path to persist.'),
+      pdftotextCommand: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional explicit pdftotext command or path to persist.'),
+      whisperCommand: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional explicit whisper.cpp command or path to persist.'),
+      whisperModelPath: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional explicit whisper model path to persist.'),
+      paddleocrCommand: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional explicit PaddleOCR command or path to persist.'),
+    }),
+    output: inboxSetupResultSchema,
+    async run(context) {
+      return services.setup({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        ffmpegCommand: context.options.ffmpegCommand,
+        pdftotextCommand: context.options.pdftotextCommand,
+        whisperCommand: context.options.whisperCommand,
+        whisperModelPath: context.options.whisperModelPath,
+        paddleocrCommand: context.options.paddleocrCommand,
       })
     },
   })
@@ -237,6 +301,67 @@ export function registerInboxCommands(
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
         sourceId: context.args.sourceId,
+      })
+    },
+  })
+
+  inbox.command('parse', {
+    args: emptyArgsSchema,
+    description:
+      'Drain queued attachment parse jobs with the local parser toolchain.',
+    options: withBaseOptions({
+      captureId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional inbox capture id to scope the drain to one capture.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .optional()
+        .describe('Optional maximum number of parse jobs to run in this drain.'),
+    }),
+    output: inboxParseResultSchema,
+    async run(context) {
+      return services.parse({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        captureId: context.options.captureId,
+        limit: context.options.limit,
+      })
+    },
+  })
+
+  inbox.command('requeue', {
+    args: emptyArgsSchema,
+    description:
+      'Reset failed or interrupted attachment parse jobs back to pending.',
+    options: withBaseOptions({
+      captureId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional inbox capture id to scope the requeue.'),
+      attachmentId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional inbox attachment id to scope the requeue.'),
+      state: z
+        .enum(['failed', 'running'])
+        .default('failed')
+        .describe('Runtime parse-job state to reset. Defaults to `failed`.'),
+    }),
+    output: inboxRequeueResultSchema,
+    async run(context) {
+      return services.requeue({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        captureId: context.options.captureId,
+        attachmentId: context.options.attachmentId,
+        state: context.options.state,
       })
     },
   })

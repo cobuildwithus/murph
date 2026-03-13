@@ -22,12 +22,17 @@ import {
   type InboxDoctorResult,
   type InboxInitResult,
   type InboxListResult,
+  type InboxParseResult,
+  type InboxParserToolStatus,
+  type InboxParserToolchainStatus,
   type InboxPromotionEntry,
   type InboxPromoteMealResult,
   type InboxPromoteJournalResult,
+  type InboxRequeueResult,
   type InboxRunResult,
   type InboxRuntimeConfig,
   type InboxSearchResult,
+  type InboxSetupResult,
   type InboxShowResult,
   type InboxSourceAddResult,
   type InboxSourceListResult,
@@ -234,6 +239,86 @@ interface InboxRuntimeModule {
   }): Promise<void>
 }
 
+interface ParserToolRuntimeStatus {
+  available: boolean
+  command: string | null
+  modelPath?: string | null
+  source: 'config' | 'env' | 'system' | 'missing'
+  reason: string
+}
+
+interface ParserDoctorRuntimeReport {
+  configPath: string
+  discoveredAt: string
+  tools: {
+    ffmpeg: ParserToolRuntimeStatus
+    pdftotext: ParserToolRuntimeStatus
+    whisper: ParserToolRuntimeStatus & {
+      modelPath: string | null
+    }
+    paddleocr: ParserToolRuntimeStatus
+  }
+}
+
+interface ConfiguredParserRegistryRuntime {
+  doctor: ParserDoctorRuntimeReport
+  registry: unknown
+  ffmpeg?: {
+    commandCandidates?: string[]
+    allowSystemLookup?: boolean
+  }
+}
+
+interface ParserRuntimeDrainResult {
+  status: 'failed' | 'succeeded'
+  job: {
+    attachmentId: string
+    captureId: string
+  }
+  providerId?: string
+  manifestPath?: string
+  errorCode?: string
+  errorMessage?: string
+}
+
+interface InboxParserServiceRuntime {
+  drain(input?: {
+    attachmentId?: string
+    captureId?: string
+    maxJobs?: number
+  }): Promise<ParserRuntimeDrainResult[]>
+}
+
+interface ParsersRuntimeModule {
+  createConfiguredParserRegistry(input: {
+    vaultRoot: string
+  }): Promise<ConfiguredParserRegistryRuntime>
+  createInboxParserService(input: {
+    vaultRoot: string
+    runtime: RuntimeStore
+    registry: unknown
+    ffmpeg?: {
+      commandCandidates?: string[]
+      allowSystemLookup?: boolean
+    }
+  }): InboxParserServiceRuntime
+  discoverParserToolchain(input: {
+    vaultRoot: string
+  }): Promise<ParserDoctorRuntimeReport>
+  writeParserToolchainConfig(input: {
+    vaultRoot: string
+    tools?: Record<string, {
+      command?: string | null
+      modelPath?: string | null
+    }>
+  }): Promise<{
+    config: {
+      updatedAt: string
+    }
+    configPath: string
+  }>
+}
+
 interface CoreRuntimeModule {
   addMeal(input: {
     vaultRoot: string
@@ -287,6 +372,7 @@ interface InboxServicesDependencies {
   enableJournalPromotion?: boolean
   loadCoreModule?: () => Promise<CoreRuntimeModule>
   loadInboxModule?: () => Promise<InboxRuntimeModule>
+  loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
 }
 
@@ -304,6 +390,25 @@ interface SourceRemoveInput extends CommandContext {
 
 interface DoctorInput extends CommandContext {
   sourceId?: string | null
+}
+
+interface SetupInput extends CommandContext {
+  ffmpegCommand?: string
+  paddleocrCommand?: string
+  pdftotextCommand?: string
+  whisperCommand?: string
+  whisperModelPath?: string
+}
+
+interface ParseInput extends CommandContext {
+  captureId?: string | null
+  limit?: number
+}
+
+interface RequeueInput extends CommandContext {
+  attachmentId?: string | null
+  captureId?: string | null
+  state?: 'failed' | 'running'
 }
 
 interface BackfillInput extends CommandContext {
@@ -330,6 +435,9 @@ export interface InboxCliServices {
   sourceList(input: CommandContext): Promise<InboxSourceListResult>
   sourceRemove(input: SourceRemoveInput): Promise<InboxSourceRemoveResult>
   doctor(input: DoctorInput): Promise<InboxDoctorResult>
+  setup(input: SetupInput): Promise<InboxSetupResult>
+  parse(input: ParseInput): Promise<InboxParseResult>
+  requeue(input: RequeueInput): Promise<InboxRequeueResult>
   backfill(input: BackfillInput): Promise<InboxBackfillResult>
   run(
     input: CommandContext,
@@ -370,6 +478,27 @@ const RAW_MEALS_DIRECTORY = path.posix.join('raw', 'meals')
 const JOURNAL_PROMOTION_SECTION_START = '<!-- inbox-promotions:start -->'
 const JOURNAL_PROMOTION_SECTION_END = '<!-- inbox-promotions:end -->'
 
+function createParserRuntimeUnavailableError(
+  operation: string,
+  cause: unknown,
+): VaultCliError {
+  const details =
+    cause instanceof Error
+      ? {
+          cause: cause.message,
+          packages: ['@healthybob/inboxd', '@healthybob/parsers'],
+        }
+      : {
+          packages: ['@healthybob/inboxd', '@healthybob/parsers'],
+        }
+
+  return new VaultCliError(
+    'runtime_unavailable',
+    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @healthybob/inboxd and @healthybob/parsers.`,
+    details,
+  )
+}
+
 export function createIntegratedInboxCliServices(
   dependencies: InboxServicesDependencies = {},
 ): InboxCliServices {
@@ -394,6 +523,19 @@ export function createIntegratedInboxCliServices(
   const loadInbox =
     dependencies.loadInboxModule ??
     (() => loadRuntimeModule<InboxRuntimeModule>('@healthybob/inboxd'))
+  const loadParsers =
+    dependencies.loadParsersModule ??
+    (() => loadRuntimeModule<ParsersRuntimeModule>('@healthybob/parsers'))
+
+  const requireParsers = async (
+    operation: string,
+  ): Promise<ParsersRuntimeModule> => {
+    try {
+      return await loadParsers()
+    } catch (error) {
+      throw createParserRuntimeUnavailableError(operation, error)
+    }
+  }
 
   const loadConfiguredImessageDriver = async (
     config: InboxConnectorConfig,
@@ -529,6 +671,7 @@ export function createIntegratedInboxCliServices(
       const checks: InboxDoctorCheck[] = []
       let config: InboxRuntimeConfig | null = null
       let databaseAvailable = false
+      let parserToolchain: InboxParserToolchainStatus | null = null
 
       try {
         await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
@@ -547,6 +690,7 @@ export function createIntegratedInboxCliServices(
           ok: false,
           checks,
           connectors: [],
+          parserToolchain: null,
         }
       }
 
@@ -576,6 +720,25 @@ export function createIntegratedInboxCliServices(
         )
       }
 
+      try {
+        const parsers = await loadParsers()
+        const doctor = await parsers.discoverParserToolchain({
+          vaultRoot: paths.absoluteVaultRoot,
+        })
+        parserToolchain = toCliParserToolchain(paths.absoluteVaultRoot, doctor)
+        checks.push(...toParserToolChecks(doctor.tools))
+      } catch (error) {
+        checks.push(
+          warnCheck(
+            'parser-runtime',
+            'Parser toolchain discovery is unavailable in this workspace.',
+            {
+              error: errorMessage(error),
+            },
+          ),
+        )
+      }
+
       if (!config) {
         return {
           vault: paths.absoluteVaultRoot,
@@ -589,6 +752,7 @@ export function createIntegratedInboxCliServices(
           ok: checks.every((check) => check.status !== 'fail'),
           checks,
           connectors: [],
+          parserToolchain,
         }
       }
 
@@ -615,6 +779,7 @@ export function createIntegratedInboxCliServices(
           ok: checks.every((check) => check.status !== 'fail'),
           checks,
           connectors: config.connectors,
+          parserToolchain,
         }
       }
 
@@ -636,6 +801,7 @@ export function createIntegratedInboxCliServices(
           ok: false,
           checks,
           connectors: config.connectors,
+          parserToolchain,
         }
       }
 
@@ -769,6 +935,143 @@ export function createIntegratedInboxCliServices(
         ok: checks.every((check) => check.status !== 'fail'),
         checks,
         connectors: config.connectors,
+        parserToolchain,
+      }
+    },
+
+    async setup(input) {
+      const paths = resolveRuntimePaths(input.vault)
+      const inboxd = await loadInbox()
+      const parsers = await requireParsers('inbox parser setup')
+
+      await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
+
+      const written = await parsers.writeParserToolchainConfig({
+        vaultRoot: paths.absoluteVaultRoot,
+        tools: {
+          ...(input.ffmpegCommand
+            ? {
+                ffmpeg: {
+                  command: input.ffmpegCommand,
+                },
+              }
+            : {}),
+          ...(input.pdftotextCommand
+            ? {
+                pdftotext: {
+                  command: input.pdftotextCommand,
+                },
+              }
+            : {}),
+          ...(input.whisperCommand || input.whisperModelPath
+            ? {
+                whisper: {
+                  ...(input.whisperCommand
+                    ? {
+                        command: input.whisperCommand,
+                      }
+                    : {}),
+                  ...(input.whisperModelPath
+                    ? {
+                        modelPath: input.whisperModelPath,
+                      }
+                    : {}),
+                },
+              }
+            : {}),
+          ...(input.paddleocrCommand
+            ? {
+                paddleocr: {
+                  command: input.paddleocrCommand,
+                },
+              }
+            : {}),
+        },
+      })
+      const doctor = await parsers.discoverParserToolchain({
+        vaultRoot: paths.absoluteVaultRoot,
+      })
+      const parserToolchain = toCliParserToolchain(paths.absoluteVaultRoot, doctor)
+
+      return {
+        vault: paths.absoluteVaultRoot,
+        configPath: relativeToVault(paths.absoluteVaultRoot, written.configPath),
+        updatedAt: written.config.updatedAt,
+        tools: parserToolchain.tools,
+      }
+    },
+
+    async parse(input) {
+      const paths = await ensureInitialized(loadInbox, input.vault)
+      const inboxd = await loadInbox()
+      const parsers = await requireParsers('inbox parser queue drains')
+      const runtime = await inboxd.openInboxRuntime({
+        vaultRoot: paths.absoluteVaultRoot,
+      })
+
+      try {
+        const configured = await parsers.createConfiguredParserRegistry({
+          vaultRoot: paths.absoluteVaultRoot,
+        })
+        const parserService = parsers.createInboxParserService({
+          vaultRoot: paths.absoluteVaultRoot,
+          runtime,
+          registry: configured.registry,
+          ffmpeg: configured.ffmpeg,
+        })
+        const results = await parserService.drain({
+          captureId: input.captureId ?? undefined,
+          maxJobs: normalizeOptionalCommandLimit(input.limit, 200),
+        })
+
+        return {
+          vault: paths.absoluteVaultRoot,
+          attempted: results.length,
+          succeeded: results.filter((result) => result.status === 'succeeded').length,
+          failed: results.filter((result) => result.status === 'failed').length,
+          results: results.map((result) => ({
+            captureId: result.job.captureId,
+            attachmentId: result.job.attachmentId,
+            status: result.status,
+            providerId: result.providerId ?? null,
+            manifestPath: result.manifestPath
+              ? normalizeVaultPathOutput(paths.absoluteVaultRoot, result.manifestPath)
+              : null,
+            errorCode: result.errorCode ?? null,
+            errorMessage: result.errorMessage ?? null,
+          })),
+        }
+      } finally {
+        runtime.close()
+      }
+    },
+
+    async requeue(input) {
+      const paths = await ensureInitialized(loadInbox, input.vault)
+      const inboxd = await loadInbox()
+      const runtime = await inboxd.openInboxRuntime({
+        vaultRoot: paths.absoluteVaultRoot,
+      })
+
+      try {
+        const state = input.state ?? 'failed'
+        const count = runtime.requeueAttachmentParseJobs?.({
+          attachmentId: input.attachmentId ?? undefined,
+          captureId: input.captureId ?? undefined,
+          state,
+        })
+
+        return {
+          vault: paths.absoluteVaultRoot,
+          count: count ?? 0,
+          filters: {
+            ...(input.captureId ? { captureId: input.captureId } : {}),
+            ...(input.attachmentId ? { attachmentId: input.attachmentId } : {}),
+            state,
+          },
+        }
+      } finally {
+        runtime.close()
       }
     },
 
@@ -2141,6 +2444,119 @@ function normalizeLimit(
 function relativeToVault(vaultRoot: string, absolutePath: string): string {
   const relativePath = path.relative(vaultRoot, absolutePath)
   return relativePath.length > 0 ? relativePath.replace(/\\/g, '/') : '.'
+}
+
+function normalizeOptionalCommandLimit(
+  value: number | undefined,
+  max: number,
+): number | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (!Number.isInteger(value) || value < 1 || value > max) {
+    throw new VaultCliError(
+      'INBOX_INVALID_LIMIT',
+      `Limit must be an integer between 1 and ${max}.`,
+    )
+  }
+
+  return value
+}
+
+function toCliParserToolchain(
+  vaultRoot: string,
+  doctor: ParserDoctorRuntimeReport,
+): InboxParserToolchainStatus {
+  return {
+    configPath: relativeToVault(vaultRoot, doctor.configPath),
+    discoveredAt: doctor.discoveredAt,
+    tools: {
+      ffmpeg: toCliParserToolStatus(doctor.tools.ffmpeg),
+      pdftotext: toCliParserToolStatus(doctor.tools.pdftotext),
+      whisper: {
+        ...toCliParserToolStatus(doctor.tools.whisper),
+        modelPath: redactSensitivePath(doctor.tools.whisper.modelPath),
+      },
+      paddleocr: toCliParserToolStatus(doctor.tools.paddleocr),
+    },
+  }
+}
+
+function toCliParserToolStatus(
+  tool: ParserToolRuntimeStatus,
+): InboxParserToolStatus {
+  return {
+    available: tool.available,
+    command: redactSensitivePath(tool.command),
+    modelPath:
+      tool.modelPath === undefined ? undefined : redactSensitivePath(tool.modelPath),
+    source: tool.source,
+    reason: tool.reason,
+  }
+}
+
+function toParserToolChecks(
+  tools: ParserDoctorRuntimeReport['tools'],
+): InboxDoctorCheck[] {
+  return [
+    toParserToolCheck('ffmpeg', tools.ffmpeg),
+    toParserToolCheck('pdftotext', tools.pdftotext),
+    toParserToolCheck('whisper', tools.whisper),
+    toParserToolCheck('paddleocr', tools.paddleocr),
+  ]
+}
+
+function toParserToolCheck(
+  name: keyof ParserDoctorRuntimeReport['tools'],
+  tool: ParserToolRuntimeStatus,
+): InboxDoctorCheck {
+  const details: Record<string, unknown> = {
+    source: tool.source,
+  }
+
+  const command = redactSensitivePath(tool.command)
+  if (command) {
+    details.command = command
+  }
+
+  if (tool.modelPath !== undefined) {
+    details.modelPath = redactSensitivePath(tool.modelPath)
+  }
+
+  return tool.available
+    ? passCheck(`parser-${name}`, tool.reason, details)
+    : warnCheck(`parser-${name}`, tool.reason, details)
+}
+
+function redactSensitivePath(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  if (
+    /^\/Users\/[^/]+/u.test(trimmed) ||
+    /^\/home\/[^/]+/u.test(trimmed) ||
+    /^[A-Za-z]:\\Users\\[^\\]+/u.test(trimmed)
+  ) {
+    return '<REDACTED_PATH>'
+  }
+
+  return trimmed
+}
+
+function normalizeVaultPathOutput(
+  vaultRoot: string,
+  filePath: string,
+): string {
+  return path.isAbsolute(filePath)
+    ? relativeToVault(vaultRoot, filePath)
+    : filePath.replace(/\\/g, '/')
 }
 
 function countRuntimeCaptures(runtime: RuntimeStore): number {
