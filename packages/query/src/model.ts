@@ -430,9 +430,7 @@ async function readJsonlRecordFamily(
   relativeDir: string,
   recordType: Exclude<JsonRecordType, "sample">,
 ): Promise<VaultRecord[]> {
-  const records: VaultRecord[] = [];
-
-  await forEachJsonlPayload(
+  return readSortedJsonlRecords(
     vaultRoot,
     relativeDir,
     (filePath, sourcePath, lineNumber, rawPayload) => {
@@ -458,7 +456,7 @@ async function readJsonlRecordFamily(
         ...normalizeStringArray(payload.eventIds),
       ]);
 
-      records.push({
+      return {
         displayId: identity.displayId,
         primaryLookupId: identity.primaryLookupId,
         id: identity.displayId,
@@ -481,17 +479,13 @@ async function readJsonlRecordFamily(
         }),
         body: pickString(payload, ["note", "summary"]),
         frontmatter: null,
-      });
+      };
     },
   );
-
-  return records.sort(compareRecords);
 }
 
 async function readSampleRecords(vaultRoot: string): Promise<VaultRecord[]> {
-  const records: VaultRecord[] = [];
-
-  await forEachJsonlPayload(
+  return readSortedJsonlRecords(
     vaultRoot,
     "ledger/samples",
     (filePath, sourcePath, lineNumber, rawPayload) => {
@@ -508,7 +502,7 @@ async function readSampleRecords(vaultRoot: string): Promise<VaultRecord[]> {
       ]);
       const stream = pickString(payload, ["stream"]) ?? streamFromPath;
 
-      records.push({
+      return {
         displayId: rawRecordId,
         primaryLookupId: rawRecordId,
         id: rawRecordId,
@@ -526,7 +520,28 @@ async function readSampleRecords(vaultRoot: string): Promise<VaultRecord[]> {
         data: payload,
         body: null,
         frontmatter: null,
-      });
+      };
+    },
+  );
+}
+
+async function readSortedJsonlRecords(
+  vaultRoot: string,
+  relativeDir: string,
+  buildRecord: (
+    filePath: string,
+    sourcePath: string,
+    lineNumber: number,
+    payload: QueryRecordData,
+  ) => VaultRecord,
+): Promise<VaultRecord[]> {
+  const records: VaultRecord[] = [];
+
+  await forEachJsonlPayload(
+    vaultRoot,
+    relativeDir,
+    (filePath, sourcePath, lineNumber, payload) => {
+      records.push(buildRecord(filePath, sourcePath, lineNumber, payload));
     },
   );
 

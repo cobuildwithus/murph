@@ -49,6 +49,16 @@ interface TolerantCollection<TRecord> {
   failures: ParseFailure[];
 }
 
+interface RegistryReadResult {
+  goals: ExportPackBankPage[];
+  conditions: ExportPackBankPage[];
+  allergies: ExportPackBankPage[];
+  regimens: ExportPackBankPage[];
+  familyMembers: ExportPackBankPage[];
+  geneticVariants: ExportPackBankPage[];
+  failures: ParseFailure[];
+}
+
 export interface ExportPackHealthReadResult {
   health: ExportPackHealthContext;
   failures: ParseFailure[];
@@ -317,6 +327,32 @@ function readRegistryPages<TRecord extends RegistryMarkdownRecord>(
   };
 }
 
+function readAllRegistryPages(vaultRoot: string): RegistryReadResult {
+  const goalsRead = readRegistryPages(vaultRoot, goalRegistryDefinition);
+  const conditionsRead = readRegistryPages(vaultRoot, conditionRegistryDefinition);
+  const allergiesRead = readRegistryPages(vaultRoot, allergyRegistryDefinition);
+  const regimensRead = readRegistryPages(vaultRoot, regimenRegistryDefinition);
+  const familyRead = readRegistryPages(vaultRoot, familyRegistryDefinition);
+  const geneticsRead = readRegistryPages(vaultRoot, geneticsRegistryDefinition);
+
+  return {
+    goals: goalsRead.records,
+    conditions: conditionsRead.records,
+    allergies: allergiesRead.records,
+    regimens: regimensRead.records,
+    familyMembers: familyRead.records,
+    geneticVariants: geneticsRead.records,
+    failures: [
+      ...goalsRead.failures,
+      ...conditionsRead.failures,
+      ...allergiesRead.failures,
+      ...regimensRead.failures,
+      ...familyRead.failures,
+      ...geneticsRead.failures,
+    ],
+  };
+}
+
 export function readHealthContext(
   vaultRoot: string,
   filters: ExportPackFilters,
@@ -325,12 +361,7 @@ export function readHealthContext(
   const allProfileSnapshotRead = readProfileSnapshotRecords(vaultRoot);
   const historyRead = readHistoryRecords(vaultRoot, filters);
   const currentProfileRead = readCurrentProfileRecord(vaultRoot, allProfileSnapshotRead.records);
-  const goalsRead = readRegistryPages(vaultRoot, goalRegistryDefinition);
-  const conditionsRead = readRegistryPages(vaultRoot, conditionRegistryDefinition);
-  const allergiesRead = readRegistryPages(vaultRoot, allergyRegistryDefinition);
-  const regimensRead = readRegistryPages(vaultRoot, regimenRegistryDefinition);
-  const familyRead = readRegistryPages(vaultRoot, familyRegistryDefinition);
-  const geneticsRead = readRegistryPages(vaultRoot, geneticsRegistryDefinition);
+  const registryRead = readAllRegistryPages(vaultRoot);
 
   return {
     health: {
@@ -340,24 +371,19 @@ export function readHealthContext(
       ),
       historyEvents: historyRead.records,
       currentProfile: currentProfileRead.record,
-      goals: goalsRead.records,
-      conditions: conditionsRead.records,
-      allergies: allergiesRead.records,
-      regimens: regimensRead.records,
-      familyMembers: familyRead.records,
-      geneticVariants: geneticsRead.records,
+      goals: registryRead.goals,
+      conditions: registryRead.conditions,
+      allergies: registryRead.allergies,
+      regimens: registryRead.regimens,
+      familyMembers: registryRead.familyMembers,
+      geneticVariants: registryRead.geneticVariants,
     },
     failures: [
       ...assessmentRead.failures,
       ...allProfileSnapshotRead.failures,
       ...historyRead.failures,
       ...currentProfileRead.failures,
-      ...goalsRead.failures,
-      ...conditionsRead.failures,
-      ...allergiesRead.failures,
-      ...regimensRead.failures,
-      ...familyRead.failures,
-      ...geneticsRead.failures,
+      ...registryRead.failures,
     ],
   };
 }

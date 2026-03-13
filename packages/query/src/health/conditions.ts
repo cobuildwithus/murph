@@ -1,29 +1,16 @@
 import {
   conditionRegistryDefinition,
-  listRegistryRecords,
-  readRegistryRecord,
-  showRegistryRecord,
+  createRegistryQueries,
 } from "./registries.js";
 
 import type { ConditionQueryRecord, RegistryListOptions } from "./registries.js";
 
-export function listConditions(
-  vaultRoot: string,
-  options: RegistryListOptions = {},
-): Promise<ConditionQueryRecord[]> {
-  return listRegistryRecords(vaultRoot, conditionRegistryDefinition, options);
-}
+const conditionQueries: {
+  list(vaultRoot: string, options?: RegistryListOptions): Promise<ConditionQueryRecord[]>;
+  read(vaultRoot: string, conditionId: string): Promise<ConditionQueryRecord | null>;
+  show(vaultRoot: string, lookup: string): Promise<ConditionQueryRecord | null>;
+} = createRegistryQueries(conditionRegistryDefinition);
 
-export function readCondition(
-  vaultRoot: string,
-  conditionId: string,
-): Promise<ConditionQueryRecord | null> {
-  return readRegistryRecord(vaultRoot, conditionRegistryDefinition, conditionId);
-}
-
-export function showCondition(
-  vaultRoot: string,
-  lookup: string,
-): Promise<ConditionQueryRecord | null> {
-  return showRegistryRecord(vaultRoot, conditionRegistryDefinition, lookup);
-}
+export const listConditions = conditionQueries.list;
+export const readCondition = conditionQueries.read;
+export const showCondition = conditionQueries.show;

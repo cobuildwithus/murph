@@ -1,29 +1,16 @@
 import {
+  createRegistryQueries,
   familyRegistryDefinition,
-  listRegistryRecords,
-  readRegistryRecord,
-  showRegistryRecord,
 } from "./registries.js";
 
 import type { FamilyQueryRecord, RegistryListOptions } from "./registries.js";
 
-export function listFamilyMembers(
-  vaultRoot: string,
-  options: RegistryListOptions = {},
-): Promise<FamilyQueryRecord[]> {
-  return listRegistryRecords(vaultRoot, familyRegistryDefinition, options);
-}
+const familyQueries: {
+  list(vaultRoot: string, options?: RegistryListOptions): Promise<FamilyQueryRecord[]>;
+  read(vaultRoot: string, familyMemberId: string): Promise<FamilyQueryRecord | null>;
+  show(vaultRoot: string, lookup: string): Promise<FamilyQueryRecord | null>;
+} = createRegistryQueries(familyRegistryDefinition);
 
-export function readFamilyMember(
-  vaultRoot: string,
-  familyMemberId: string,
-): Promise<FamilyQueryRecord | null> {
-  return readRegistryRecord(vaultRoot, familyRegistryDefinition, familyMemberId);
-}
-
-export function showFamilyMember(
-  vaultRoot: string,
-  lookup: string,
-): Promise<FamilyQueryRecord | null> {
-  return showRegistryRecord(vaultRoot, familyRegistryDefinition, lookup);
-}
+export const listFamilyMembers = familyQueries.list;
+export const readFamilyMember = familyQueries.read;
+export const showFamilyMember = familyQueries.show;

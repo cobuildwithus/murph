@@ -1,29 +1,16 @@
 import {
+  createRegistryQueries,
   goalRegistryDefinition,
-  listRegistryRecords,
-  readRegistryRecord,
-  showRegistryRecord,
 } from "./registries.js";
 
 import type { GoalQueryRecord, RegistryListOptions } from "./registries.js";
 
-export function listGoals(
-  vaultRoot: string,
-  options: RegistryListOptions = {},
-): Promise<GoalQueryRecord[]> {
-  return listRegistryRecords(vaultRoot, goalRegistryDefinition, options);
-}
+const goalQueries: {
+  list(vaultRoot: string, options?: RegistryListOptions): Promise<GoalQueryRecord[]>;
+  read(vaultRoot: string, goalId: string): Promise<GoalQueryRecord | null>;
+  show(vaultRoot: string, lookup: string): Promise<GoalQueryRecord | null>;
+} = createRegistryQueries(goalRegistryDefinition);
 
-export function readGoal(
-  vaultRoot: string,
-  goalId: string,
-): Promise<GoalQueryRecord | null> {
-  return readRegistryRecord(vaultRoot, goalRegistryDefinition, goalId);
-}
-
-export function showGoal(
-  vaultRoot: string,
-  lookup: string,
-): Promise<GoalQueryRecord | null> {
-  return showRegistryRecord(vaultRoot, goalRegistryDefinition, lookup);
-}
+export const listGoals = goalQueries.list;
+export const readGoal = goalQueries.read;
+export const showGoal = goalQueries.show;

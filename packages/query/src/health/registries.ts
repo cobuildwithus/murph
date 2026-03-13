@@ -181,6 +181,26 @@ export async function showRegistryRecord<TRecord extends RegistryMarkdownRecord>
   );
 }
 
+export function createRegistryQueries<TRecord extends RegistryMarkdownRecord>(
+  definition: RegistryDefinition<TRecord>,
+): {
+  list(vaultRoot: string, options?: RegistryListOptions): Promise<TRecord[]>;
+  read(vaultRoot: string, recordId: string): Promise<TRecord | null>;
+  show(vaultRoot: string, lookup: string): Promise<TRecord | null>;
+} {
+  return {
+    list(vaultRoot, options = {}) {
+      return listRegistryRecords(vaultRoot, definition, options);
+    },
+    read(vaultRoot, recordId) {
+      return readRegistryRecord(vaultRoot, definition, recordId);
+    },
+    show(vaultRoot, lookup) {
+      return showRegistryRecord(vaultRoot, definition, lookup);
+    },
+  };
+}
+
 export interface GoalQueryRecord extends RegistryMarkdownRecord {
   horizon: string | null;
   priority: number | null;

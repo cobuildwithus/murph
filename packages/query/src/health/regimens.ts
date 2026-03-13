@@ -1,29 +1,16 @@
 import {
-  listRegistryRecords,
-  readRegistryRecord,
+  createRegistryQueries,
   regimenRegistryDefinition,
-  showRegistryRecord,
 } from "./registries.js";
 
 import type { RegimenQueryRecord, RegistryListOptions } from "./registries.js";
 
-export function listRegimens(
-  vaultRoot: string,
-  options: RegistryListOptions = {},
-): Promise<RegimenQueryRecord[]> {
-  return listRegistryRecords(vaultRoot, regimenRegistryDefinition, options);
-}
+const regimenQueries: {
+  list(vaultRoot: string, options?: RegistryListOptions): Promise<RegimenQueryRecord[]>;
+  read(vaultRoot: string, regimenId: string): Promise<RegimenQueryRecord | null>;
+  show(vaultRoot: string, lookup: string): Promise<RegimenQueryRecord | null>;
+} = createRegistryQueries(regimenRegistryDefinition);
 
-export function readRegimen(
-  vaultRoot: string,
-  regimenId: string,
-): Promise<RegimenQueryRecord | null> {
-  return readRegistryRecord(vaultRoot, regimenRegistryDefinition, regimenId);
-}
-
-export function showRegimen(
-  vaultRoot: string,
-  lookup: string,
-): Promise<RegimenQueryRecord | null> {
-  return showRegistryRecord(vaultRoot, regimenRegistryDefinition, lookup);
-}
+export const listRegimens = regimenQueries.list;
+export const readRegimen = regimenQueries.read;
+export const showRegimen = regimenQueries.show;
