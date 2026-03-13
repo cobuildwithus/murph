@@ -6,9 +6,13 @@ export default defineConfig({
     fileParallelism: false,
     include: [
       "packages/core/test/core.test.ts",
+      "packages/core/test/profile.test.ts",
       "packages/core/test/health-history-family.test.ts",
       "packages/importers/test/importers.test.ts",
+      "packages/query/test/health-tail.test.ts",
       "packages/query/test/query.test.ts",
+      "packages/cli/test/health-tail.test.ts",
+      "packages/cli/test/root-middleware.test.ts",
       "packages/cli/test/runtime.test.ts",
     ],
     coverage: {

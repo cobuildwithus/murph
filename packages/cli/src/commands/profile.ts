@@ -67,7 +67,6 @@ interface ProfileServices extends VaultCliServices {
     listProfileSnapshots(input: {
       vault: string
       requestId: string | null
-      status?: string
       cursor?: string
       limit?: number
     }): Promise<z.infer<typeof profileListResultSchema>>
@@ -160,7 +159,6 @@ export function registerProfileCommands(cli: Cli.Cli, services: VaultCliServices
       description: 'List profile snapshots through the health read model.',
       args: z.object({}),
       options: withBaseOptions({
-        status: z.string().min(1).optional(),
         cursor: z.string().min(1).optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
@@ -169,7 +167,6 @@ export function registerProfileCommands(cli: Cli.Cli, services: VaultCliServices
         return healthServices.query.listProfileSnapshots({
           vault,
           requestId,
-          status: options.status,
           cursor: options.cursor,
           limit: options.limit,
         })

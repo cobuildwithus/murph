@@ -1,6 +1,6 @@
 {
   "id": "health-extensions-noun-list",
-  "command": "vault-cli <noun> list --vault <path> [--status <status>] [--cursor <cursor>] [--limit <n>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli <noun> list --vault <path> [--cursor <cursor>] [--limit <n>] [--format json|md] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/vault-overlay/ledger/profile-snapshots/2026/2026-03.jsonl",
@@ -13,5 +13,5 @@
     "fixtures/health-extensions/vault-overlay/bank/genetics/mthfr-c677t.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/list",
-  "purpose": "Documents list coverage for profile snapshots, history events, and the Markdown health registries behind the noun commands."
+  "purpose": "Documents list coverage for profile snapshots, history events, and the Markdown health registries behind the noun commands. Registry nouns may also expose status filters when their record family supports them."
 }

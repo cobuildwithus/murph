@@ -1,0 +1,10 @@
+{
+  "id": "health-extensions-intake-show",
+  "command": "vault-cli intake show <assessmentId> --vault <path> [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/vault-overlay/ledger/assessments/2026/2026-03.jsonl"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents noun-specific assessment reads through `intake show` without falling back to the generic top-level show surface."
+}

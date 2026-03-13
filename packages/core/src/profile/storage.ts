@@ -1,3 +1,5 @@
+import { unlink } from "node:fs/promises";
+
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { pathExists, readUtf8File, walkVaultFiles, writeVaultTextFile } from "../fs.js";
 import { generateRecordId } from "../ids.js";
@@ -296,21 +298,25 @@ export async function rebuildCurrentProfile({
 }: RebuildCurrentProfileInput): Promise<RebuiltCurrentProfile> {
   const snapshots = await listProfileSnapshots({ vaultRoot });
   const snapshot = findLatestAcceptedProfileSnapshot(snapshots);
+  const resolved = resolveVaultPath(vaultRoot, PROFILE_CURRENT_DOCUMENT_PATH);
+  const exists = await pathExists(resolved.absolutePath);
 
   if (!snapshot) {
+    if (exists) {
+      await unlink(resolved.absolutePath);
+    }
+
     return {
       relativePath: PROFILE_CURRENT_DOCUMENT_PATH,
       exists: false,
       markdown: null,
       snapshot: null,
       profile: null,
-      updated: false,
+      updated: exists,
     };
   }
 
   const markdown = buildCurrentProfileMarkdown(snapshot);
-  const resolved = resolveVaultPath(vaultRoot, PROFILE_CURRENT_DOCUMENT_PATH);
-  const exists = await pathExists(resolved.absolutePath);
   const previous = exists ? await readUtf8File(vaultRoot, PROFILE_CURRENT_DOCUMENT_PATH) : null;
   const updated = previous !== markdown;
 

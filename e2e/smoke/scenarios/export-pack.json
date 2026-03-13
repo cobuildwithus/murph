@@ -7,5 +7,5 @@
     "fixtures/minimal-vault/journal/2026/2026-03-10.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/export-pack",
-  "purpose": "Covers derived export-pack behavior: manifest, question-pack, records, daily-samples, and assistant-context files under exports/packs/ without canonical mutations."
+  "purpose": "Covers derived export-pack behavior: the stable five-file pack shape plus health-aware manifest/question-pack/records/assistant-context payloads under exports/packs/ without canonical mutations."
 }

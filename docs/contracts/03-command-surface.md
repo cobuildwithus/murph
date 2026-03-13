@@ -29,14 +29,18 @@ Health nouns use one payload-first grammar with only a few explicit exceptions:
 
 ```text
 vault-cli intake import <file> --vault <path> [--format json|md] [--request-id <id>]
+vault-cli intake show <assessmentId> --vault <path> [--format json|md] [--request-id <id>]
+vault-cli intake list --vault <path> [--date-from <date>] [--date-to <date>] [--cursor <cursor>] [--limit <n>] [--format json|md] [--request-id <id>]
 vault-cli intake project <assessmentId> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli <noun> scaffold --vault <path> [--format json|md] [--request-id <id>]
 vault-cli <noun> upsert --vault <path> --input @file.json [--format json|md] [--request-id <id>]
 vault-cli <noun> show <id|current> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli <noun> list --vault <path> [--status <status>] [--cursor <cursor>] [--limit <n>] [--format json|md] [--request-id <id>]
+vault-cli <noun> list --vault <path> [--cursor <cursor>] [--limit <n>] [--format json|md] [--request-id <id>]
 vault-cli profile current rebuild --vault <path> [--format json|md] [--request-id <id>]
 vault-cli regimen stop <regimenId> --vault <path> [--stopped-on <date>] [--format json|md] [--request-id <id>]
 ```
+
+Registry nouns may also expose `--status <status>` where the underlying record family has a meaningful status field. `profile list` intentionally does not.
 
 Frozen health nouns:
 
@@ -305,6 +309,7 @@ Field rules:
 ```
 
 Export packs are derived outputs and do not create canonical vault records.
+The five-file pack shape stays stable; health extensions enrich the payloads inside `manifest.json`, `question-pack.json`, `records.json`, and `assistant-context.md` with assessments, profile snapshots/current profile, health history, and registry context.
 
 ## Boundary Rules
 

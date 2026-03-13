@@ -9,7 +9,6 @@ import {
   firstStringArray,
   matchesDateRange,
   matchesLookup,
-  matchesStatus,
   matchesText,
   maybeString,
   parseFrontmatterDocument,
@@ -20,7 +19,7 @@ export interface ProfileSnapshotQueryRecord {
   id: string;
   capturedAt: string | null;
   recordedAt: string | null;
-  status: string | null;
+  status: string;
   summary: string | null;
   source: string | null;
   sourceAssessmentIds: string[];
@@ -44,9 +43,30 @@ export interface CurrentProfileQueryRecord {
 export interface ProfileSnapshotListOptions {
   from?: string;
   to?: string;
-  status?: string | string[];
   text?: string;
   limit?: number;
+}
+
+function buildCurrentProfileRecord(input: {
+  snapshotId: string;
+  updatedAt: string | null;
+  sourceAssessmentIds: string[];
+  sourceEventIds: string[];
+  topGoalIds: string[];
+  markdown: string | null;
+  body: string | null;
+}): CurrentProfileQueryRecord {
+  return {
+    id: "current",
+    snapshotId: input.snapshotId,
+    updatedAt: input.updatedAt,
+    sourceAssessmentIds: input.sourceAssessmentIds,
+    sourceEventIds: input.sourceEventIds,
+    topGoalIds: input.topGoalIds,
+    relativePath: "bank/profile/current.md",
+    markdown: input.markdown,
+    body: input.body,
+  };
 }
 
 async function readOptionalUtf8(absolutePath: string): Promise<string | null> {
@@ -78,21 +98,23 @@ function toProfileSnapshotRecord(
   }
 
   const sourceObject = firstObject(source, ["source"]);
+  const sourceAssessmentIds = firstStringArray(source, ["sourceAssessmentIds"]);
 
   return {
     id,
     capturedAt: firstString(source, ["capturedAt", "recordedAt"]),
     recordedAt: firstString(source, ["recordedAt", "capturedAt"]),
-    status: firstString(source, ["status"]),
+    status: firstString(source, ["status"]) ?? "accepted",
     summary: firstString(source, ["summary"]),
     source:
       firstString(source, ["source"]) ??
       firstString(sourceObject ?? {}, ["kind", "source", "importedFrom"]),
     sourceAssessmentIds:
-      firstStringArray(source, ["sourceAssessmentIds"]) ??
-      (firstString(sourceObject ?? {}, ["assessmentId"])
-        ? [firstString(sourceObject ?? {}, ["assessmentId"]) as string]
-        : []),
+      sourceAssessmentIds.length > 0
+        ? sourceAssessmentIds
+        : (firstString(sourceObject ?? {}, ["assessmentId"])
+            ? [firstString(sourceObject ?? {}, ["assessmentId"]) as string]
+            : []),
     sourceEventIds: firstStringArray(source, ["sourceEventIds"]),
     profile: firstObject(source, ["profile"]) ?? {},
     relativePath,
@@ -150,7 +172,6 @@ export async function listProfileSnapshots(
     .filter(
       (entry) =>
         matchesDateRange(entry.recordedAt ?? entry.capturedAt, options.from, options.to) &&
-        matchesStatus(entry.status, options.status) &&
         matchesText(
           [entry.id, entry.summary, entry.source, entry.profile, entry.sourceAssessmentIds, entry.sourceEventIds],
           options.text,
@@ -172,10 +193,42 @@ export async function readProfileSnapshot(
 export async function readCurrentProfile(
   vaultRoot: string,
 ): Promise<CurrentProfileQueryRecord | null> {
+  const snapshots = await listProfileSnapshots(vaultRoot);
+  const latestSnapshot = snapshots[0] ?? null;
+
+  if (!latestSnapshot) {
+    return null;
+  }
+
   const absolutePath = path.join(vaultRoot, "bank/profile/current.md");
   const markdown = await readOptionalUtf8(absolutePath);
 
-  return markdown ? parseCurrentProfileMarkdown(markdown) : null;
+  if (!markdown) {
+    return buildCurrentProfileRecord({
+      snapshotId: latestSnapshot.id,
+      updatedAt: latestSnapshot.recordedAt ?? latestSnapshot.capturedAt,
+      sourceAssessmentIds: latestSnapshot.sourceAssessmentIds,
+      sourceEventIds: latestSnapshot.sourceEventIds,
+      topGoalIds: firstStringArray(latestSnapshot.profile, ["topGoalIds"]),
+      markdown: null,
+      body: null,
+    });
+  }
+
+  const parsed = parseCurrentProfileMarkdown(markdown);
+  if (parsed.snapshotId === latestSnapshot.id) {
+    return parsed;
+  }
+
+  return buildCurrentProfileRecord({
+    snapshotId: latestSnapshot.id,
+    updatedAt: latestSnapshot.recordedAt ?? latestSnapshot.capturedAt,
+    sourceAssessmentIds: latestSnapshot.sourceAssessmentIds,
+    sourceEventIds: latestSnapshot.sourceEventIds,
+    topGoalIds: firstStringArray(latestSnapshot.profile, ["topGoalIds"]),
+    markdown: null,
+    body: null,
+  });
 }
 
 export async function showProfile(

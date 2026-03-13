@@ -1,0 +1,372 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { test } from "vitest";
+
+import { buildExportPack, readVault, showProfile } from "../src/index.js";
+
+async function writeVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  contents: string,
+) {
+  await mkdir(path.dirname(path.join(vaultRoot, relativePath)), {
+    recursive: true,
+  });
+  await writeFile(path.join(vaultRoot, relativePath), contents, "utf8");
+}
+
+async function createHealthVault(options: {
+  currentProfileSnapshotId?: string;
+  includeAlternateRecords?: boolean;
+} = {}): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-health-"));
+  const currentProfileSnapshotId = options.currentProfileSnapshotId ?? "psnap_stale";
+
+  await writeVaultFile(
+    vaultRoot,
+    "ledger/assessments/2026/2026-03.jsonl",
+    [
+      JSON.stringify({
+        schemaVersion: "hb.assessment-response.v1",
+        id: "asmt_health_01",
+        assessmentType: "full-intake",
+        recordedAt: "2026-03-12T13:00:00Z",
+        importedAt: "2026-03-12T13:05:00Z",
+        source: "import",
+        rawPath: "raw/assessments/2026/03/asmt_health_01/source.json",
+        title: "Comprehensive intake questionnaire",
+        questionnaireSlug: "health-history-intake",
+        responses: {
+          sleep: {
+            averageHours: 6.5,
+          },
+        },
+        relatedIds: ["goal_sleep_01"],
+      }),
+      options.includeAlternateRecords
+        ? JSON.stringify({
+            schemaVersion: "hb.assessment-response.v1",
+            id: "asmt_health_00",
+            assessmentType: "follow-up",
+            recordedAt: "2026-03-01T08:00:00Z",
+            source: "import",
+            response: {
+              energy: "improving",
+            },
+          })
+        : null,
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n") + "\n",
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "ledger/profile-snapshots/2026/2026-03.jsonl",
+    [
+      JSON.stringify({
+        schemaVersion: "hb.profile-snapshot.v1",
+        id: "psnap_health_01",
+        recordedAt: "2026-03-12T14:00:00Z",
+        source: "assessment_projection",
+        sourceAssessmentIds: ["asmt_health_01"],
+        profile: {
+          topGoalIds: ["goal_sleep_01"],
+          sleep: {
+            averageHours: 6.5,
+          },
+        },
+      }),
+      options.includeAlternateRecords
+        ? JSON.stringify({
+            schemaVersion: "hb.profile-snapshot.v1",
+            id: "psnap_health_00",
+            recordedAt: "2026-03-01T09:00:00Z",
+            source: {
+              kind: "projection",
+              assessmentId: "asmt_health_00",
+            },
+            profile: {
+              topGoalIds: ["goal_sleep_legacy"],
+            },
+          })
+        : null,
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n") + "\n",
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "ledger/events/2026/2026-03.jsonl",
+    [
+      JSON.stringify({
+        schemaVersion: "hb.event.v1",
+        id: "evt_health_01",
+        kind: "encounter",
+        occurredAt: "2026-03-12T12:45:00Z",
+        recordedAt: "2026-03-12T12:50:00Z",
+        source: "manual",
+        title: "Sleep medicine intake visit",
+        relatedIds: ["goal_sleep_01", "cond_sleep_01"],
+      }),
+      options.includeAlternateRecords
+        ? JSON.stringify({
+            schemaVersion: "hb.event.v1",
+            id: "evt_note_ignored",
+            kind: "note",
+            occurredAt: "2026-03-12T15:00:00Z",
+            title: "Ignored note event",
+          })
+        : null,
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n") + "\n",
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/profile/current.md",
+    `---
+schemaVersion: hb.frontmatter.profile-current.v1
+docType: profile_current
+snapshotId: ${currentProfileSnapshotId}
+updatedAt: 2026-03-01T00:00:00Z
+---
+# Current Profile
+
+Snapshot ID: \`${currentProfileSnapshotId}\`
+`,
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/goals/improve-sleep.md",
+    `---
+schemaVersion: hv/goal@v1
+goalId: goal_sleep_01
+slug: improve-sleep
+title: Improve sleep quality and duration
+status: active
+horizon: long_term
+priority: 1
+---
+# Improve sleep quality and duration
+`,
+  );
+
+  if (options.includeAlternateRecords) {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/goals/ignored.md",
+      `---
+schemaVersion: hv/goal@v1
+title: Missing id should be ignored
+---
+# Ignored
+`,
+    );
+  }
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/conditions/insomnia-symptoms.md",
+    `---
+schemaVersion: hv/condition@v1
+conditionId: cond_sleep_01
+slug: insomnia-symptoms
+title: Insomnia symptoms
+clinicalStatus: active
+---
+# Insomnia symptoms
+`,
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/allergies/penicillin.md",
+    `---
+schemaVersion: hv/allergy@v1
+allergyId: alg_01
+slug: penicillin
+title: Penicillin
+status: active
+---
+# Penicillin
+`,
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/regimens/supplements/magnesium-glycinate.md",
+    `---
+schemaVersion: hv/regimen@v1
+regimenId: reg_01
+slug: magnesium-glycinate
+title: Magnesium glycinate
+status: active
+kind: supplement
+---
+# Magnesium glycinate
+`,
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/family/mother.md",
+    `---
+schemaVersion: hv/family@v1
+familyMemberId: fam_01
+slug: mother
+title: Mother
+relationship: mother
+updatedAt: 2026-03-12
+---
+# Mother
+`,
+  );
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/genetics/mthfr-c677t.md",
+    `---
+schemaVersion: hv/genetics@v1
+variantId: var_01
+slug: mthfr-c677t
+title: MTHFR C677T
+significance: risk_factor
+updatedAt: 2026-03-12
+---
+# MTHFR C677T
+`,
+  );
+
+  return vaultRoot;
+}
+
+test("showProfile derives the current profile from the latest snapshot when the markdown page is stale", async () => {
+  const vaultRoot = await createHealthVault();
+
+  try {
+    const current = await showProfile(vaultRoot, "current");
+
+    assert.ok(current);
+    assert.equal(current.id, "current");
+    if (!("snapshotId" in current)) {
+      throw new Error("Expected the derived current-profile record.");
+    }
+    assert.equal(current.snapshotId, "psnap_health_01");
+    assert.deepEqual(current.topGoalIds, ["goal_sleep_01"]);
+    assert.equal(current.markdown, null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildExportPack preserves the five-file pack while embedding health context", async () => {
+  const vaultRoot = await createHealthVault();
+
+  try {
+    const vault = await readVault(vaultRoot);
+    const pack = buildExportPack(vault, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      packId: "health-pack",
+      generatedAt: "2026-03-13T12:00:00.000Z",
+    });
+    const narrowPack = buildExportPack(vault, {
+      from: "2026-03-01",
+      to: "2026-03-05",
+      packId: "health-pack-narrow",
+      generatedAt: "2026-03-13T12:00:00.000Z",
+    });
+
+    assert.equal(pack.files.length, 5);
+    assert.equal(pack.manifest.fileCount, 5);
+    assert.equal(pack.manifest.assessmentCount, 1);
+    assert.equal(pack.manifest.profileSnapshotCount, 1);
+    assert.equal(pack.manifest.historyEventCount, 1);
+    assert.equal(pack.manifest.bankPageCount, 6);
+    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.equal(narrowPack.health.profileSnapshots.length, 0);
+    assert.equal(narrowPack.health.currentProfile?.snapshotId, "psnap_health_01");
+
+    const questionPackFile = pack.files.find((file) => file.path.endsWith("question-pack.json"));
+    const assistantFile = pack.files.find((file) => file.path.endsWith("assistant-context.md"));
+
+    assert.ok(questionPackFile);
+    assert.ok(assistantFile);
+
+    const questionPackPayload = JSON.parse(questionPackFile.contents) as {
+      context: {
+        health: {
+          assessments: Array<{ id: string }>;
+          goals: Array<{ id: string }>;
+          historyEvents: Array<{ id: string }>;
+          currentProfile: { snapshotId: string | null } | null;
+        };
+      };
+      questions: string[];
+    };
+
+    assert.deepEqual(
+      questionPackPayload.context.health.assessments.map((entry) => entry.id),
+      ["asmt_health_01"],
+    );
+    assert.deepEqual(
+      questionPackPayload.context.health.goals.map((entry) => entry.id),
+      ["goal_sleep_01"],
+    );
+    assert.deepEqual(
+      questionPackPayload.context.health.historyEvents.map((entry) => entry.id),
+      ["evt_health_01"],
+    );
+    assert.equal(questionPackPayload.context.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.ok(
+      questionPackPayload.questions.some((question) =>
+        question.includes("intake-assessment answers"),
+      ),
+    );
+    assert.match(assistantFile.contents, /## Intake Assessments/);
+    assert.match(assistantFile.contents, /## Current Profile/);
+    assert.match(assistantFile.contents, /## Health History/);
+    assert.match(assistantFile.contents, /## Health Registries/);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildExportPack keeps matching current-profile markdown and ignores malformed health artifacts", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+    includeAlternateRecords: true,
+  });
+
+  try {
+    const vault = await readVault(vaultRoot);
+    const pack = buildExportPack(vault, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      packId: "health-pack-matching-current",
+      generatedAt: "2026-03-13T12:00:00.000Z",
+    });
+
+    assert.equal(pack.health.assessments.length, 2);
+    assert.equal(pack.health.profileSnapshots.length, 2);
+    assert.equal(pack.health.historyEvents.length, 1);
+    assert.equal(pack.health.goals.length, 1);
+    assert.equal(pack.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.match(pack.health.currentProfile?.markdown ?? "", /Snapshot ID: `psnap_health_01`/);
+
+    const assistantFile = pack.files.find((file) => file.path.endsWith("assistant-context.md"));
+
+    assert.ok(assistantFile);
+    assert.match(assistantFile.contents, /### Goals/);
+    assert.match(assistantFile.contents, /Ignored note event/);
+    assert.doesNotMatch(assistantFile.contents, /Missing id should be ignored/);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
