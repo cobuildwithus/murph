@@ -619,19 +619,9 @@ async function loadIntegratedRuntime() {
   if (!integratedRuntimePromise) {
     integratedRuntimePromise = (async () => {
       try {
-        const loadRuntimeModule = async (specifier: string, relativeDistPath: string) => {
-          try {
-            return await dynamicImport(specifier)
-          } catch {
-            return dynamicImport(new URL(relativeDistPath, import.meta.url).href)
-          }
-        }
-
-        const [coreModule, importersModule, queryModule] = await Promise.all([
-          loadRuntimeModule("@healthybob/core", "../../core/dist/index.js"),
-          loadRuntimeModule("@healthybob/importers", "../../importers/dist/index.js"),
-          loadRuntimeModule("@healthybob/query", "../../query/dist/index.js"),
-        ])
+        const coreModule = await dynamicImport("@healthybob/core")
+        const importersModule = await dynamicImport("@healthybob/importers")
+        const queryModule = await dynamicImport("@healthybob/query")
 
         return {
           core: coreModule as CoreRuntimeModule,
