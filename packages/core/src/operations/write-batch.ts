@@ -15,6 +15,7 @@ import {
 } from "../path-safety.js";
 import { toIsoTimestamp } from "../time.js";
 import { isErrnoException, isPlainRecord } from "../types.js";
+import { acquireCanonicalWriteLock } from "./canonical-write-lock.js";
 
 import type { DateInput } from "../types.js";
 
@@ -29,6 +30,10 @@ interface CreateWriteBatchInput {
   operationType: string;
   summary: string;
   occurredAt?: DateInput;
+}
+
+interface RunCanonicalWriteInput<TResult> extends CreateWriteBatchInput {
+  mutate: (context: { batch: WriteBatch; vaultRoot: string }) => Promise<TResult>;
 }
 
 interface StageWriteTargetOptions {
@@ -334,6 +339,36 @@ export async function readStoredWriteOperation(
   };
 }
 
+export async function runCanonicalWrite<TResult>({
+  vaultRoot,
+  operationType,
+  summary,
+  occurredAt = new Date(),
+  mutate,
+}: RunCanonicalWriteInput<TResult>): Promise<TResult> {
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType,
+    summary,
+    occurredAt,
+  });
+
+  let result: TResult;
+
+  try {
+    result = await mutate({
+      batch,
+      vaultRoot: batch.vaultRoot,
+    });
+  } catch (error) {
+    await batch.rollback();
+    throw error;
+  }
+
+  await batch.commit();
+  return result;
+}
+
 export class WriteBatch {
   readonly vaultRoot: string;
   readonly operationId: string;
@@ -497,12 +532,14 @@ export class WriteBatch {
 
   async commit(): Promise<void> {
     this.assertMutable();
-    this.record.status = "committing";
-    this.record.updatedAt = nowIso();
-    this.record.error = undefined;
-    await this.persist();
+    const lock = await acquireCanonicalWriteLock(this.vaultRoot);
 
     try {
+      this.record.status = "committing";
+      this.record.updatedAt = nowIso();
+      this.record.error = undefined;
+      await this.persist();
+
       for (const [index, action] of this.record.actions.entries()) {
         if (action.state === "applied" || action.state === "reused") {
           continue;
@@ -534,17 +571,25 @@ export class WriteBatch {
       }
 
       throw error;
+    } finally {
+      await lock.release();
     }
   }
 
   async rollback(): Promise<void> {
     this.assertMutable();
-    await this.rollbackAppliedActions();
-    this.record.status = "rolled_back";
-    this.record.updatedAt = nowIso();
-    this.record.error = undefined;
-    await this.persist();
-    await this.cleanupStageArtifacts();
+    const lock = await acquireCanonicalWriteLock(this.vaultRoot);
+
+    try {
+      await this.rollbackAppliedActions();
+      this.record.status = "rolled_back";
+      this.record.updatedAt = nowIso();
+      this.record.error = undefined;
+      await this.persist();
+      await this.cleanupStageArtifacts();
+    } finally {
+      await lock.release();
+    }
   }
 
   private assertMutable(): void {

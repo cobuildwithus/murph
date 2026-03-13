@@ -28,6 +28,7 @@ export default defineConfig({
       "packages/query/test/health-tail.test.ts",
       "packages/query/test/query.test.ts",
       "packages/cli/test/health-tail.test.ts",
+      "packages/cli/test/canonical-write-lock.test.ts",
       "packages/cli/test/incur-smoke.test.ts",
       "packages/cli/test/inbox-incur-smoke.test.ts",
       "packages/cli/test/inbox-cli.test.ts",

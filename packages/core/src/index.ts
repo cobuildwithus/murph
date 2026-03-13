@@ -8,18 +8,43 @@ export {
   VAULT_SCHEMA_VERSION,
 } from "./constants.js";
 export { VaultError, isVaultError } from "./errors.js";
-export { appendJsonlRecord, readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.js";
+export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.js";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
-export { copyRawArtifact } from "./raw.js";
-export { initializeVault, loadVault, validateVault } from "./vault.js";
-export { createExperiment, ensureJournalDay } from "./mutations.js";
+export { loadVault } from "./vault.js";
 export {
   addMeal,
+  appendHistoryEvent,
+  appendJsonlRecord,
+  appendProfileSnapshot,
+  copyRawArtifact,
+  createExperiment,
   importAssessmentResponse,
   importDocument,
   importMeal,
   importSamples,
-} from "./storage-spine.js";
+  initializeVault,
+  rebuildCurrentProfile,
+  upsertAllergy,
+  upsertCondition,
+  upsertFamilyMember,
+  upsertGeneticVariant,
+  upsertGoal,
+  upsertRegimenItem,
+  ensureJournalDay,
+  stopRegimenItem,
+  validateVault,
+} from "./public-mutations.js";
+export {
+  acquireCanonicalWriteLock,
+  CANONICAL_WRITE_LOCK_DIRECTORY,
+  CANONICAL_WRITE_LOCK_METADATA_PATH,
+  inspectCanonicalWriteLock,
+} from "./operations/index.js";
+export type {
+  CanonicalWriteLockHandle,
+  CanonicalWriteLockInspection,
+  CanonicalWriteLockMetadata,
+} from "./operations/index.js";
 export {
   listAssessmentResponses,
   projectAssessmentResponse,
