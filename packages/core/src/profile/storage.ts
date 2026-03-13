@@ -1,5 +1,7 @@
 import { unlink } from "node:fs/promises";
 
+import { profileSnapshotSchema, safeParseContract } from "@healthybob/contracts";
+
 import { emitAuditRecord } from "../audit.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { pathExists, readUtf8File, walkVaultFiles, writeVaultTextFile } from "../fs.js";
@@ -49,70 +51,15 @@ function isProfileSnapshotSource(value: unknown): value is ProfileSnapshotRecord
 }
 
 function toProfileSnapshotRecord(value: unknown): ProfileSnapshotRecord {
-  if (!isPlainRecord(value)) {
-    throw new VaultError("PROFILE_SNAPSHOT_INVALID", "Profile snapshot record must be an object.");
-  }
+  const result = safeParseContract(profileSnapshotSchema, value);
 
-  const {
-    schemaVersion,
-    id,
-    recordedAt,
-    source,
-    sourceAssessmentIds,
-    sourceEventIds,
-    profile,
-  } = value;
-
-  if (schemaVersion !== PROFILE_SNAPSHOT_SCHEMA_VERSION) {
-    throw new VaultError("PROFILE_SNAPSHOT_INVALID", "Profile snapshot schemaVersion is invalid.", {
-      schemaVersion,
+  if (!result.success) {
+    throw new VaultError("PROFILE_SNAPSHOT_INVALID", "Profile snapshot record failed contract validation.", {
+      errors: result.errors,
     });
   }
 
-  if (typeof id !== "string" || !id.startsWith("psnap_")) {
-    throw new VaultError("PROFILE_SNAPSHOT_INVALID", "Profile snapshot id is invalid.", {
-      id,
-    });
-  }
-
-  if (typeof recordedAt !== "string" || !isProfileSnapshotSource(source)) {
-    throw new VaultError("PROFILE_SNAPSHOT_INVALID", "Profile snapshot fields are invalid.", {
-      recordedAt,
-      source,
-    });
-  }
-
-  assertProfile(profile);
-
-  if (
-    sourceAssessmentIds !== undefined &&
-    (!Array.isArray(sourceAssessmentIds) || sourceAssessmentIds.some((entry) => typeof entry !== "string"))
-  ) {
-    throw new VaultError(
-      "PROFILE_SNAPSHOT_INVALID",
-      "Profile snapshot sourceAssessmentIds must be a string array when provided.",
-    );
-  }
-
-  if (
-    sourceEventIds !== undefined &&
-    (!Array.isArray(sourceEventIds) || sourceEventIds.some((entry) => typeof entry !== "string"))
-  ) {
-    throw new VaultError(
-      "PROFILE_SNAPSHOT_INVALID",
-      "Profile snapshot sourceEventIds must be a string array when provided.",
-    );
-  }
-
-  return {
-    schemaVersion: PROFILE_SNAPSHOT_SCHEMA_VERSION,
-    id,
-    recordedAt: recordedAt as string,
-    source: source as ProfileSnapshotRecord["source"],
-    sourceAssessmentIds: sourceAssessmentIds as string[] | undefined,
-    sourceEventIds: sourceEventIds as string[] | undefined,
-    profile,
-  };
+  return result.data;
 }
 
 function sortProfileSnapshots(records: readonly ProfileSnapshotRecord[]): ProfileSnapshotRecord[] {
@@ -224,7 +171,7 @@ export async function appendProfileSnapshot({
   assertProfile(profile);
 
   const recordedTimestamp = toIsoTimestamp(recordedAt, "recordedAt");
-  const snapshot: ProfileSnapshotRecord = {
+  const snapshot = toProfileSnapshotRecord({
     schemaVersion: PROFILE_SNAPSHOT_SCHEMA_VERSION,
     id: generateRecordId("psnap"),
     recordedAt: recordedTimestamp,
@@ -234,7 +181,7 @@ export async function appendProfileSnapshot({
     sourceEventIds:
       sourceEventIds && sourceEventIds.length > 0 ? [...new Set(sourceEventIds)] : undefined,
     profile,
-  };
+  });
 
   const ledgerPath = toMonthlyShardRelativePath(
     PROFILE_SNAPSHOT_LEDGER_DIRECTORY,
