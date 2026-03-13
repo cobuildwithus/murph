@@ -1,19 +1,21 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
     "rootDir": "src",
-    "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": [
-    "src/**/*.ts"
+  "references": [
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../importers"
+    },
+    {
+      "path": "../query"
+    }
   ],
-  "exclude": [
-    "dist"
-  ]
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist"]
 }

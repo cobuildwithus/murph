@@ -3,11 +3,24 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "typecheck": "node --check src/*.js test/*.test.js && node --input-type=module -e \"await import('./src/index.js')\"",
-    "test": "node --test ./test/*.test.js"
+    "build": "rimraf dist && tsc -b tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit --pretty false",
+    "test": "pnpm --dir ../contracts build && node --import=tsx --test ./test/*.test.ts"
+  },
+  "dependencies": {
+    "@healthybob/contracts": "workspace:*"
   }
 }

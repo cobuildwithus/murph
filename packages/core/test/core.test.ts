@@ -1,0 +1,361 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { promises as fs } from "node:fs";
+
+import type {
+  AuditRecord,
+  DocumentEventRecord,
+  ExperimentEventRecord,
+  MealEventRecord,
+  SampleRecord,
+} from "@healthybob/contracts";
+
+import {
+  addMeal,
+  appendJsonlRecord,
+  copyRawArtifact,
+  createExperiment,
+  ensureJournalDay,
+  importDocument,
+  importSamples,
+  initializeVault,
+  parseFrontmatterDocument,
+  readJsonlRecords,
+  validateVault,
+  VaultError,
+} from "../src/index.js";
+
+function expectRecord<T>(value: unknown): T {
+  return value as T;
+}
+
+async function makeTempDirectory(name: string): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
+}
+
+async function writeExternalFile(directory: string, fileName: string, content: string): Promise<string> {
+  const filePath = path.join(directory, fileName);
+  await fs.writeFile(filePath, content, "utf8");
+  return filePath;
+}
+
+test("initializeVault bootstraps the baseline contract layout and passes validation", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const initialized = await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-12T12:00:00.000Z",
+  });
+
+  assert.equal(initialized.metadata.schemaVersion, "hb.vault.v1");
+  assert.match(initialized.metadata.vaultId, /^vault_[0-9A-HJKMNP-TV-Z]{26}$/);
+
+  const coreContent = await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8");
+  const coreDocument = parseFrontmatterDocument(coreContent);
+  assert.equal(coreDocument.attributes.docType, "core");
+  assert.equal(coreDocument.attributes.schemaVersion, "hb.frontmatter.core.v1");
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: initialized.auditPath,
+  });
+  const auditRecord = expectRecord<AuditRecord>(auditRecords[0]);
+
+  assert.equal(auditRecords.length, 1);
+  assert.equal(auditRecord.action, "vault_init");
+  assert.deepEqual(
+    auditRecord.changes.map((change: AuditRecord["changes"][number]) => change.path),
+    ["CORE.md", "vault.json"],
+  );
+});
+
+test("copyRawArtifact enforces raw immutability and importDocument appends contract-shaped events", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const documentPath = await writeExternalFile(sourceRoot, "Lab Result.pdf", "document body");
+  await copyRawArtifact({
+    vaultRoot,
+    sourcePath: documentPath,
+    category: "documents",
+    targetName: "lab-result.pdf",
+    recordId: "fixed-record",
+  });
+
+  await assert.rejects(
+    () =>
+      copyRawArtifact({
+        vaultRoot,
+        sourcePath: documentPath,
+        category: "documents",
+        targetName: "lab-result.pdf",
+        recordId: "fixed-record",
+      }),
+    (error) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+
+  const imported = await importDocument({
+    vaultRoot,
+    sourcePath: documentPath,
+    note: "baseline import",
+  });
+
+  assert.match(imported.raw.relativePath, /^raw\/documents\/\d{4}\/\d{2}\/doc_[0-9A-HJKMNP-TV-Z]{26}\//);
+  assert.match(imported.documentId, /^doc_[0-9A-HJKMNP-TV-Z]{26}$/);
+
+  const eventRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.eventPath,
+  });
+  const documentEvent = expectRecord<DocumentEventRecord>(eventRecords[0]);
+
+  assert.equal(eventRecords.length, 1);
+  assert.equal(documentEvent.kind, "document");
+  assert.equal(documentEvent.documentId, imported.documentId);
+  assert.equal(documentEvent.documentPath, imported.raw.relativePath);
+  assert.equal(documentEvent.schemaVersion, "hb.event.v1");
+  assert.equal("sourcePath" in documentEvent, false);
+
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.auditPath,
+  });
+  const latestAuditRecord = expectRecord<AuditRecord | undefined>(auditRecords.at(-1));
+
+  assert.ok(latestAuditRecord);
+  assert.equal(latestAuditRecord.action, "document_import");
+});
+
+test("photo-only meals preserve an empty audioPaths array in the stored event", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    photoPath,
+    note: "dinner",
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+
+  assert.equal(mealEvents.length, 1);
+  assert.equal(mealEvent.kind, "meal");
+  assert.deepEqual(mealEvent.audioPaths, []);
+  assert.equal(meal.audio, null);
+});
+
+test("meal, journal, experiment, and samples mutations write expected contract data", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
+  const audioPath = await writeExternalFile(sourceRoot, "meal-note.m4a", "audio");
+  const csvPath = await writeExternalFile(sourceRoot, "heart-rate.csv", "recordedAt,value\n");
+
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    photoPath,
+    audioPath,
+    note: "dinner",
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+
+  assert.equal(meal.mealId, mealEvent.mealId);
+  assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.photoPaths.length, 1);
+  assert.equal(mealEvent.audioPaths.length, 1);
+
+  const firstJournal = await ensureJournalDay({
+    vaultRoot,
+    date: "2026-03-10",
+  });
+  const secondJournal = await ensureJournalDay({
+    vaultRoot,
+    date: "2026-03-10",
+  });
+
+  assert.equal(firstJournal.created, true);
+  assert.equal(secondJournal.created, false);
+
+  const journalContent = await fs.readFile(path.join(vaultRoot, firstJournal.relativePath), "utf8");
+  const journalDocument = parseFrontmatterDocument(journalContent);
+  assert.equal(journalDocument.attributes.docType, "journal_day");
+  assert.equal(journalDocument.attributes.dayKey, "2026-03-10");
+
+  const experiment = await createExperiment({
+    vaultRoot,
+    slug: "Glucose Baseline",
+    title: "Glucose Baseline",
+    startedOn: "2026-03-11T08:00:00.000Z",
+  });
+
+  const experimentContent = await fs.readFile(
+    path.join(vaultRoot, experiment.experiment.relativePath),
+    "utf8",
+  );
+  const experimentDocument = parseFrontmatterDocument(experimentContent);
+  assert.equal(experimentDocument.attributes.docType, "experiment");
+  assert.equal(experimentDocument.attributes.slug, "glucose-baseline");
+  assert.match(String(experimentDocument.attributes.experimentId), /^exp_[0-9A-HJKMNP-TV-Z]{26}$/);
+
+  const samples = await importSamples({
+    vaultRoot,
+    stream: "heart_rate",
+    unit: "bpm",
+    sourcePath: csvPath,
+    samples: [
+      {
+        recordedAt: "2026-01-15T10:00:00.000Z",
+        value: 62,
+      },
+      {
+        recordedAt: "2026-02-01T10:00:00.000Z",
+        value: 64,
+      },
+    ],
+  });
+
+  assert.equal(samples.count, 2);
+  assert.match(samples.transformId, /^xfm_[0-9A-HJKMNP-TV-Z]{26}$/);
+  assert.ok(samples.raw);
+  assert.ok(samples.raw.relativePath.includes(`/${samples.transformId}/`));
+  assert.equal(samples.shardPaths.length, 2);
+  assert.ok(samples.records.every((record: SampleRecord) => record.stream === "heart_rate"));
+  assert.ok(samples.records.every((record: SampleRecord) => !("transformId" in record)));
+
+  const sampleAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: samples.auditPath,
+  });
+  const latestSampleAuditRecord = expectRecord<AuditRecord | undefined>(sampleAuditRecords.at(-1));
+
+  assert.ok(latestSampleAuditRecord);
+  assert.equal("transformId" in latestSampleAuditRecord, false);
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+});
+
+test("createExperiment returns the existing experiment for idempotent retries", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const input = {
+    vaultRoot,
+    slug: "Glucose Baseline",
+    title: "Glucose Baseline",
+    startedOn: "2026-03-11T08:00:00.000Z",
+    hypothesis: "Hold meals steady for seven days.",
+  };
+
+  const first = await createExperiment(input);
+  const second = await createExperiment(input);
+
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  assert.equal(second.experiment.id, first.experiment.id);
+  assert.equal(second.experiment.relativePath, first.experiment.relativePath);
+  assert.equal(second.event, null);
+  assert.equal(second.auditPath, null);
+
+  const experimentEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-03.jsonl",
+  });
+
+  assert.equal(
+    experimentEvents.filter(
+      (record) => expectRecord<ExperimentEventRecord>(record).kind === "experiment_event",
+    ).length,
+    1,
+  );
+});
+
+test("append-only helpers block traversal and validateVault reports tampered core documents", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      appendJsonlRecord({
+        vaultRoot,
+        relativePath: "../escape.jsonl",
+        record: { ok: true },
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_PATH",
+  );
+
+  await fs.writeFile(path.join(vaultRoot, "CORE.md"), "---\ndocType: note\n---\n", "utf8");
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.match(
+    validation.issues.map((issue) => issue.code).join(","),
+    /HB_FRONTMATTER_INVALID/,
+  );
+});
+
+test("validateVault accumulates malformed journal and experiment frontmatter issues", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const journal = await ensureJournalDay({
+    vaultRoot,
+    date: "2026-03-10",
+  });
+  const experiment = await createExperiment({
+    vaultRoot,
+    slug: "Glucose Baseline",
+    title: "Glucose Baseline",
+    startedOn: "2026-03-11T08:00:00.000Z",
+  });
+
+  await fs.writeFile(
+    path.join(vaultRoot, journal.relativePath),
+    "---\nthis is not frontmatter\n---\n",
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(vaultRoot, experiment.experiment.relativePath),
+    "---\nslug: glucose-baseline\nbad-line\n---\n",
+    "utf8",
+  );
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.equal(
+    validation.issues.filter((issue) => issue.code === "HB_FRONTMATTER_INVALID").length,
+    2,
+  );
+  assert.deepEqual(
+    validation.issues
+      .filter((issue) => issue.code === "HB_FRONTMATTER_INVALID")
+      .map((issue) => issue.path)
+      .sort(),
+    [
+      "bank/experiments/glucose-baseline.md",
+      "journal/2026/2026-03-10.md",
+    ],
+  );
+});

@@ -1,15 +1,19 @@
 {
   "name": "healthybob",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@9.15.9+sha512.68046141893c66fad01c079231128e9afb89ef87e2691d69e4d40eee228988295fd4682181bae55b58418c3a253bde65a505ec7c5f9403ece5cc3cd37dcf2531",
   "scripts": {
-    "typecheck": "bash -n scripts/check-agent-docs-drift.sh scripts/doc-gardening.sh scripts/open-exec-plan.sh scripts/close-exec-plan.sh scripts/committer scripts/package-audit-context.sh scripts/repo-tools.config.sh && node --check e2e/smoke/verify-fixtures.mjs && pnpm typecheck:packages",
-    "typecheck:packages": "node packages/contracts/scripts/verify.mjs && node --check packages/core/src/*.js packages/core/test/*.test.js && node --input-type=module -e \"await import('./packages/core/src/index.js')\" && node --check packages/importers/src/*.js packages/importers/test/*.test.js && node --input-type=module -e \"await import('./packages/importers/src/index.js')\" && node --check packages/query/src/*.js packages/query/test/*.test.js && node --input-type=module -e \"await import('./packages/query/src/index.js')\" && pnpm verify:cli",
-    "test": "bash scripts/check-agent-docs-drift.sh && pnpm test:packages && node e2e/smoke/verify-fixtures.mjs",
-    "test:packages": "node packages/contracts/scripts/verify.mjs && pnpm verify:cli && node --test packages/core/test/core.test.js && node --test packages/importers/test/importers.test.js && node --test packages/query/test/query.test.js",
-    "test:coverage": "bash scripts/doc-gardening.sh --fail-on-issues && pnpm test:packages && node e2e/smoke/verify-fixtures.mjs --coverage",
-    "test:smoke": "node e2e/smoke/verify-fixtures.mjs",
-    "verify:cli": "pnpm --dir packages/cli typecheck && pnpm --dir packages/cli build && pnpm --dir packages/cli test",
+    "build": "tsc -b --pretty false",
+    "clean": "rimraf packages/*/dist packages/*/.test-dist packages/*/*.tsbuildinfo",
+    "typecheck": "bash -n scripts/check-agent-docs-drift.sh scripts/doc-gardening.sh scripts/open-exec-plan.sh scripts/close-exec-plan.sh scripts/committer scripts/package-audit-context.sh scripts/repo-tools.config.sh && tsc -p tsconfig.tools.json --pretty false && pnpm typecheck:packages && pnpm build",
+    "typecheck:packages": "pnpm --dir packages/contracts typecheck && pnpm --dir packages/core typecheck && pnpm --dir packages/importers typecheck && pnpm --dir packages/query typecheck && pnpm --dir packages/cli typecheck",
+    "test": "bash scripts/check-agent-docs-drift.sh && pnpm test:packages && node --import=tsx e2e/smoke/verify-fixtures.ts",
+    "test:packages": "pnpm --dir packages/contracts test && pnpm --dir packages/core test && pnpm --dir packages/importers test && pnpm --dir packages/query test && pnpm --dir packages/cli test",
+    "test:coverage": "bash scripts/doc-gardening.sh --fail-on-issues && pnpm test:packages && node --import=tsx e2e/smoke/verify-fixtures.ts --coverage && pnpm no-js",
+    "test:smoke": "node --import=tsx e2e/smoke/verify-fixtures.ts",
+    "verify:cli": "pnpm --dir packages/cli typecheck && pnpm --dir packages/cli test",
+    "no-js": "node --import=tsx scripts/check-no-js.ts",
     "docs:drift": "bash scripts/check-agent-docs-drift.sh",
     "docs:gardening": "bash scripts/doc-gardening.sh --fail-on-issues",
     "plan:open": "bash scripts/open-exec-plan.sh",
@@ -22,6 +26,8 @@
     "@cobuild/repo-tools": "^0.1.13",
     "@cobuild/review-gpt": "file:../review-gpt",
     "@types/node": "^25.5.0",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
 }

@@ -1,0 +1,56 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@healthybob/contracts": [
+        "packages/contracts/src/index.ts"
+      ],
+      "@healthybob/contracts/generated/*": [
+        "packages/contracts/generated/*"
+      ],
+      "@healthybob/contracts/*": [
+        "packages/contracts/src/*"
+      ],
+      "@healthybob/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@healthybob/core/*": [
+        "packages/core/src/*"
+      ],
+      "@healthybob/importers": [
+        "packages/importers/src/index.ts"
+      ],
+      "@healthybob/importers/*": [
+        "packages/importers/src/*"
+      ],
+      "@healthybob/query": [
+        "packages/query/src/index.ts"
+      ],
+      "@healthybob/query/*": [
+        "packages/query/src/*"
+      ],
+      "@healthybob/cli": [
+        "packages/cli/src/index.ts"
+      ],
+      "@healthybob/cli/*": [
+        "packages/cli/src/*"
+      ]
+    },
+    "types": [
+      "node"
+    ]
+  }
+}

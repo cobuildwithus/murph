@@ -1,0 +1,20 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/contracts"
+    },
+    {
+      "path": "./packages/core/tsconfig.build.json"
+    },
+    {
+      "path": "./packages/importers"
+    },
+    {
+      "path": "./packages/query"
+    },
+    {
+      "path": "./packages/cli"
+    }
+  ]
+}

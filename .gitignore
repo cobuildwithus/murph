@@ -4,6 +4,8 @@ coverage/
 .DS_Store
 .turbo/
 *.log
+*.tsbuildinfo
+.test-dist/
 .codex-runs/
 .codex-worker-prompts/
 audit-packages/

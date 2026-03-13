@@ -3,9 +3,21 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "typecheck": "node --check src/index.js && node --check src/markdown.js && node --check src/model.js && node --check src/summaries.js && node --check src/export-pack.js && node --check test/query.test.js",
-    "test": "node --test"
+    "build": "rimraf dist && tsc -b tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.test.json --noEmit --pretty false",
+    "test": "rimraf .test-dist && tsc -p tsconfig.test.json && node --test .test-dist/test/*.test.js && rimraf .test-dist"
   }
 }

@@ -38,8 +38,8 @@
     "./generated/*": "./generated/*"
   },
   "scripts": {
-    "build": "tsc -b",
-    "typecheck": "tsc -b --pretty false",
+    "build": "rimraf dist && tsc -b",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "generate": "pnpm build && node ./dist/scripts/generate-json-schema.js",
     "test": "pnpm build && node ./dist/scripts/verify.js",
     "verify": "pnpm test"

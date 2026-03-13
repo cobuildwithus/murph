@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "tsBuildInfoFile": ".tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    ".test-dist"
+  ],
+  "references": [
+    {
+      "path": "../contracts"
+    }
+  ]
+}

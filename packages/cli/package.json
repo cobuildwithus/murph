@@ -19,9 +19,9 @@
     "vault-cli": "dist/bin.js"
   },
   "scripts": {
-    "build": "node ./scripts/require-cli-toolchain.mjs build && tsc -p tsconfig.build.json",
-    "typecheck": "node ./scripts/require-cli-toolchain.mjs typecheck && tsc -p tsconfig.json --noEmit",
-    "test": "node ./scripts/verify-package-shape.mjs && node --test ./test/*.test.mjs"
+    "build": "node --import=tsx ./scripts/require-cli-toolchain.ts build && rimraf dist && tsc -b tsconfig.build.json",
+    "typecheck": "pnpm --dir ../core build && pnpm --dir ../importers build && pnpm --dir ../query build && node --import=tsx ./scripts/require-cli-toolchain.ts typecheck && tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm --dir ../contracts build && pnpm --dir ../core build && pnpm --dir ../importers build && pnpm --dir ../query build && pnpm build && node --import=tsx ./scripts/verify-package-shape.ts && node --import=tsx --test ./test/*.test.ts"
   },
   "dependencies": {
     "@healthybob/core": "workspace:*",
