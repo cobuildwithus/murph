@@ -22,6 +22,28 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, /--llms, --llms-full\s+Print LLM-readable manifest/u)
 })
 
+test('root help preserves simple health CRUD command ordering around bespoke groups', async () => {
+  const help = await runRawCli(['--help'])
+  const orderedCommands = [
+    'profile',
+    'goal',
+    'condition',
+    'allergy',
+    'regimen',
+    'history',
+    'family',
+    'genetics',
+  ]
+
+  const positions = orderedCommands.map((command) => {
+    const position = help.search(new RegExp(`^\\s+${command}\\s+`, 'mu'))
+    assert.notEqual(position, -1, `expected root help to list ${command}`)
+    return position
+  })
+
+  assert.deepEqual([...positions].sort((left, right) => left - right), positions)
+})
+
 test('search schema exposes retrieval-specific filters', async () => {
   const schema = JSON.parse(
     await runRawCli(['search', '--schema', '--format', 'json']),
