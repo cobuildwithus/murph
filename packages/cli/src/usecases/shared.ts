@@ -8,6 +8,7 @@ import {
   inferHealthEntityKind,
   isHealthQueryableRecordId,
 } from "../health-cli-descriptors.js"
+import { loadJsonInputObject } from "../json-input.js"
 
 import type {
   HealthEntityEnvelope,
@@ -57,7 +58,15 @@ export function inferEntityKind(id: string) {
     return "event"
   }
 
+  if (id.startsWith("event:")) {
+    return "event"
+  }
+
   if (id.startsWith("smp_")) {
+    return "sample"
+  }
+
+  if (id.startsWith("sample:")) {
     return "sample"
   }
 
@@ -65,8 +74,20 @@ export function inferEntityKind(id: string) {
     return "audit"
   }
 
+  if (id.startsWith("audit:")) {
+    return "audit"
+  }
+
   if (id.startsWith("exp_")) {
     return "experiment"
+  }
+
+  if (id.startsWith("experiment:")) {
+    return "experiment"
+  }
+
+  if (id.startsWith("journal:")) {
+    return "journal"
   }
 
   if (id.startsWith("meal_")) {
@@ -75,6 +96,10 @@ export function inferEntityKind(id: string) {
 
   if (id.startsWith("doc_")) {
     return "document"
+  }
+
+  if (id.startsWith("prov_")) {
+    return "provider"
   }
 
   return "entity"
@@ -135,15 +160,11 @@ const RESERVED_PAYLOAD_KEYS = new Set([
   "currentProfilePath",
 ])
 
-export async function readJsonPayload(filePath: string): Promise<JsonObject> {
-  const raw = await readFile(filePath, "utf8")
-  const parsed = JSON.parse(raw) as unknown
-
-  if (!isPlainObject(parsed)) {
-    throw new VaultCliError("invalid_payload", "Payload file must contain a JSON object.")
-  }
-
-  return parsed
+export async function readJsonPayload(
+  filePath: string,
+  label = "payload",
+): Promise<JsonObject> {
+  return loadJsonInputObject(filePath, label)
 }
 
 export function assertNoReservedPayloadKeys(payload: JsonObject) {
@@ -192,9 +213,9 @@ export function requirePayloadObjectField(payload: JsonObject, fieldName: string
   return value
 }
 
-export function asEntityEnvelope<TEntity extends JsonObject>(
+export function asEntityEnvelope(
   vault: string,
-  entity: TEntity | null,
+  entity: HealthEntityEnvelope["entity"] | null,
   notFoundMessage: string,
 ): HealthEntityEnvelope {
   if (!entity) {
@@ -207,14 +228,17 @@ export function asEntityEnvelope<TEntity extends JsonObject>(
   }
 }
 
-export function asListEnvelope<TEntity extends JsonObject>(
+export function asListEnvelope(
   vault: string,
-  items: TEntity[],
+  filters: HealthListEnvelope["filters"],
+  items: HealthListEnvelope["items"],
 ): HealthListEnvelope {
   return {
     vault,
+    filters,
     items,
     count: items.length,
+    nextCursor: null,
   }
 }
 
@@ -236,41 +260,64 @@ export function buildEntityLinks(record: {
   data: JsonObject
   relatedIds?: string[]
 }) {
-  const links: Array<{
-    id: string
-    kind: string
-    queryable: boolean
-  }> = []
+  const linkIds = new Set<string>()
 
-  const relatedIds = Array.isArray(record.relatedIds)
-    ? record.relatedIds
-    : Array.isArray(record.data.relatedIds)
-      ? record.data.relatedIds
-      : []
-  for (const relatedId of relatedIds) {
-    if (typeof relatedId === "string" && relatedId.trim()) {
-      links.push({
-        id: relatedId,
-        kind: inferEntityKind(relatedId),
-        queryable: isQueryableRecordId(relatedId),
-      })
+  const appendLinkId = (value: unknown) => {
+    if (typeof value !== "string") {
+      return
+    }
+
+    const normalized = value.trim()
+    if (normalized.length === 0) {
+      return
+    }
+
+    linkIds.add(normalized)
+  }
+
+  const appendLinkArray = (value: unknown) => {
+    if (!Array.isArray(value)) {
+      return
+    }
+
+    for (const entry of value) {
+      appendLinkId(entry)
     }
   }
 
-  const eventIds = Array.isArray(record.data.eventIds)
-    ? record.data.eventIds
-    : []
-  for (const eventId of eventIds) {
-    if (typeof eventId === "string" && eventId.trim()) {
-      links.push({
-        id: eventId,
-        kind: "event",
-        queryable: true,
-      })
-    }
+  appendLinkArray(record.relatedIds)
+
+  const arrayLinkKeys = [
+    "relatedIds",
+    "eventIds",
+    "sourceAssessmentIds",
+    "sourceEventIds",
+    "topGoalIds",
+    "relatedGoalIds",
+    "relatedConditionIds",
+    "relatedRegimenIds",
+    "relatedExperimentIds",
+    "sourceFamilyMemberIds",
+    "familyMemberIds",
+    "relatedVariantIds",
+  ] as const
+  for (const key of arrayLinkKeys) {
+    appendLinkArray(record.data[key])
   }
 
-  return links
+  const scalarLinkKeys = [
+    "snapshotId",
+    "parentGoalId",
+  ] as const
+  for (const key of scalarLinkKeys) {
+    appendLinkId(record.data[key])
+  }
+
+  return [...linkIds].map((id) => ({
+    id,
+    kind: inferEntityKind(id),
+    queryable: isQueryableRecordId(id),
+  }))
 }
 
 function normalizeGenericEntityKind(entity: QueryEntity) {
@@ -314,6 +361,12 @@ export function toGenericListItem(entity: QueryEntity) {
     title: entity.title ?? null,
     occurredAt: entity.occurredAt ?? null,
     path: entity.path ?? null,
+    markdown: entity.body ?? null,
+    data: entity.attributes,
+    links: buildEntityLinks({
+      data: entity.attributes,
+      relatedIds: entity.relatedIds,
+    }),
   }
 }
 

@@ -12,12 +12,6 @@ import {
   vaultValidateResultSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-import {
-  showVaultPaths,
-  showVaultStats,
-  showVaultSummary,
-  updateVaultSummary,
-} from './experiment-journal-vault-read-helpers.js'
 
 const unknownRecordSchema = z.record(z.string(), z.unknown())
 
@@ -119,7 +113,10 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) 
     options: withBaseOptions(),
     output: vaultShowResultSchema,
     async run({ options }) {
-      return showVaultSummary(options.vault)
+      return services.query.showVault({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+      })
     },
   })
 
@@ -129,7 +126,10 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) 
     options: withBaseOptions(),
     output: vaultPathsResultSchema,
     async run({ options }) {
-      return showVaultPaths(options.vault)
+      return services.query.showVaultPaths({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+      })
     },
   })
 
@@ -139,7 +139,10 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) 
     options: withBaseOptions(),
     output: vaultStatsResultSchema,
     async run({ options }) {
-      return showVaultStats(options.vault)
+      return services.query.showVaultStats({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+      })
     },
   })
 
@@ -152,8 +155,9 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) 
     }),
     output: vaultUpdateResultSchema,
     async run({ options }) {
-      return updateVaultSummary({
+      return services.core.updateVault({
         vault: options.vault,
+        requestId: requestIdFromOptions(options),
         title: options.title,
         timezone: options.timezone,
       })

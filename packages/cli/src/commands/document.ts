@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   emptyArgsSchema,
+  requestIdFromOptions,
   withBaseOptions,
 } from '../command-helpers.js'
 import {
@@ -11,47 +12,17 @@ import {
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import { loadRuntimeModule } from '../runtime-import.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
   documentLookupSchema,
-  listDocumentRecords,
   rawImportManifestResultSchema,
-  showDocumentManifest,
-  showDocumentRecord,
 } from './document-meal-read-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
-interface ImportersRuntimeModule {
-  createImporters(): {
-    importDocument(input: {
-      filePath: string
-      vaultRoot: string
-      title?: string
-      occurredAt?: string
-      note?: string
-      source?: string
-    }): Promise<{
-      raw: {
-        relativePath: string
-      }
-      manifestPath: string
-      documentId: string
-      event: {
-        id: string
-      }
-    }>
-  }
-}
-
-async function loadImportersRuntime() {
-  return loadRuntimeModule<ImportersRuntimeModule>('@healthybob/importers')
-}
-
 export function registerDocumentCommands(
   cli: Cli.Cli,
-  _services: VaultCliServices,
+  services: VaultCliServices,
 ) {
   const document = Cli.create('document', {
     description: 'Document ingestion commands routed through importers.',
@@ -80,25 +51,15 @@ export function registerDocumentCommands(
       }),
       output: documentImportResultSchema,
       async run({ args, options }) {
-        const importers = (await loadImportersRuntime()).createImporters()
-        const result = await importers.importDocument({
-          filePath: args.file,
-          vaultRoot: options.vault,
+        return services.importers.importDocument({
+          file: args.file,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           title: options.title,
           occurredAt: options.occurredAt,
           note: options.note,
           source: options.source,
         })
-
-        return {
-          vault: options.vault,
-          sourceFile: args.file,
-          rawFile: result.raw.relativePath,
-          manifestFile: result.manifestPath,
-          documentId: result.documentId,
-          eventId: result.event.id,
-          lookupId: result.event.id,
-        }
       },
     },
   )
@@ -113,7 +74,11 @@ export function registerDocumentCommands(
       options: withBaseOptions(),
       output: showResultSchema,
       async run({ args, options }) {
-        return showDocumentRecord(options.vault, args.id)
+        return services.query.showDocument({
+          id: args.id,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
+        })
       },
     },
   )
@@ -133,8 +98,9 @@ export function registerDocumentCommands(
       }),
       output: listResultSchema,
       async run({ options }) {
-        return listDocumentRecords({
+        return services.query.listDocuments({
           vault: options.vault,
+          requestId: requestIdFromOptions(options),
           from: options.from,
           to: options.to,
         })
@@ -152,7 +118,11 @@ export function registerDocumentCommands(
       options: withBaseOptions(),
       output: rawImportManifestResultSchema,
       async run({ args, options }) {
-        return showDocumentManifest(options.vault, args.id)
+        return services.query.showDocumentManifest({
+          id: args.id,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
+        })
       },
     },
   )

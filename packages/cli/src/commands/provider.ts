@@ -1,23 +1,14 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
+import {
+  requestIdFromOptions,
+} from '../command-helpers.js'
 import {
   listItemSchema,
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-import {
-  loadJsonInputFile,
-  listProviderRecords,
-  parseProviderPayload,
-  scaffoldProviderPayload,
-  showProviderRecord,
-  upsertProviderRecord,
-} from './provider-event-read-helpers.js'
-
-const inputFileOptionSchema = z
-  .string()
-  .regex(/^@.+/u, 'Expected an @file.json payload reference.')
+import { registerRegistryDocEntityGroup } from './health-command-factory.js'
 
 const providerStatusSchema = z.string().min(1)
 
@@ -42,78 +33,65 @@ const providerListResultSchema = z.object({
     limit: z.number().int().positive().max(200),
   }),
   items: z.array(listItemSchema),
+  count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 })
 
 export function registerProviderCommands(
   cli: Cli.Cli,
-  _services: VaultCliServices,
+  services: VaultCliServices,
 ) {
-  const provider = Cli.create('provider', {
+  registerRegistryDocEntityGroup(cli, {
+    commandName: 'provider',
     description: 'Provider registry commands for bank/providers Markdown records.',
-  })
-
-  provider.command('scaffold', {
-    description: 'Emit a provider payload template for `provider upsert`.',
-    args: emptyArgsSchema,
-    options: withBaseOptions(),
-    output: providerScaffoldResultSchema,
-    async run({ options }) {
-      return {
-        vault: options.vault,
-        noun: 'provider' as const,
-        payload: scaffoldProviderPayload(),
-      }
+    scaffold: {
+      name: 'scaffold',
+      args: z.object({}),
+      description: 'Emit a provider payload template for `provider upsert`.',
+      output: providerScaffoldResultSchema,
+      async run({ options, requestId }) {
+        return services.core.scaffoldProvider({
+          vault: String(options.vault ?? ''),
+          requestId,
+        })
+      },
+    },
+    upsert: {
+      description: 'Create or update one provider Markdown record from a JSON payload file or stdin.',
+      output: providerUpsertResultSchema,
+      async run(input) {
+        return services.core.upsertProvider({
+          vault: input.vault,
+          requestId: input.requestId,
+          inputFile: input.input,
+        })
+      },
+    },
+    show: {
+      description: 'Show one provider by canonical id or slug.',
+      argName: 'id',
+      argSchema: z.string().min(1).describe('Provider id or slug to show.'),
+      output: showResultSchema,
+      async run(input) {
+        return services.query.showProvider({
+          lookup: input.id,
+          vault: input.vault,
+          requestId: input.requestId,
+        })
+      },
+    },
+    list: {
+      description: 'List provider records with an optional status filter.',
+      output: providerListResultSchema,
+      statusOption: providerStatusSchema.optional(),
+      async run(input) {
+        return services.query.listProviders({
+          vault: input.vault,
+          requestId: input.requestId,
+          status: input.status as z.infer<typeof providerStatusSchema> | undefined,
+          limit: input.limit ?? 50,
+        })
+      },
     },
   })
-
-  provider.command('upsert', {
-    description: 'Create or update one provider Markdown record from an @file.json payload.',
-    args: emptyArgsSchema,
-    options: withBaseOptions({
-      input: inputFileOptionSchema,
-    }),
-    output: providerUpsertResultSchema,
-    async run({ options }) {
-      const payload = parseProviderPayload(
-        await loadJsonInputFile(options.input.slice(1), 'provider payload'),
-      )
-
-      return upsertProviderRecord({
-        vault: options.vault,
-        payload,
-      })
-    },
-  })
-
-  provider.command('show', {
-    description: 'Show one provider by canonical id or slug.',
-    args: z.object({
-      lookup: z.string().min(1).describe('Provider id or slug to show.'),
-    }),
-    options: withBaseOptions(),
-    output: showResultSchema,
-    async run({ args, options }) {
-      return showProviderRecord(options.vault, args.lookup)
-    },
-  })
-
-  provider.command('list', {
-    description: 'List provider records with an optional status filter.',
-    args: emptyArgsSchema,
-    options: withBaseOptions({
-      status: providerStatusSchema.optional(),
-      limit: z.number().int().positive().max(200).default(50),
-    }),
-    output: providerListResultSchema,
-    async run({ options }) {
-      return listProviderRecords({
-        vault: options.vault,
-        status: options.status as z.infer<typeof providerStatusSchema> | undefined,
-        limit: options.limit,
-      })
-    },
-  })
-
-  cli.command(provider)
 }

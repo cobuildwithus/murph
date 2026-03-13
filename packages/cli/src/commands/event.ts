@@ -1,5 +1,13 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
+import {
+  emptyArgsSchema,
+  requestIdFromOptions,
+  withBaseOptions,
+} from '../command-helpers.js'
+import {
+  inputFileOptionSchema,
+  normalizeInputFileOption,
+} from '../json-input.js'
 import {
   listItemSchema,
   localDateSchema,
@@ -10,16 +18,7 @@ import {
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
   eventScaffoldKindSchema,
-  listEventRecords,
-  loadJsonInputFile,
-  scaffoldEventPayload,
-  showEventRecord,
-  upsertEventRecord,
-} from './provider-event-read-helpers.js'
-
-const inputFileOptionSchema = z
-  .string()
-  .regex(/^@.+/u, 'Expected an @file.json payload reference.')
+} from './event-command-helpers.js'
 
 const eventIdSchema = z
   .string()
@@ -46,15 +45,16 @@ const eventListResultSchema = z.object({
     kind: z.string().min(1).nullable(),
     from: localDateSchema.nullable(),
     to: localDateSchema.nullable(),
-    tag: z.string().min(1).nullable(),
+    tag: z.array(z.string().min(1)),
     experiment: slugSchema.nullable(),
     limit: z.number().int().positive().max(200),
   }),
   items: z.array(listItemSchema),
+  count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 })
 
-export function registerEventCommands(cli: Cli.Cli, _services: VaultCliServices) {
+export function registerEventCommands(cli: Cli.Cli, services: VaultCliServices) {
   const event = Cli.create('event', {
     description: 'Generic canonical event commands for event kinds without specialized nouns.',
   })
@@ -67,31 +67,27 @@ export function registerEventCommands(cli: Cli.Cli, _services: VaultCliServices)
     }),
     output: eventScaffoldResultSchema,
     async run({ options }) {
-      return {
-        vault: options.vault,
-        noun: 'event' as const,
+      const result = await services.core.scaffoldEvent({
         kind: options.kind,
-        payload: scaffoldEventPayload(options.kind),
-      }
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+      })
+      return result as z.infer<typeof eventScaffoldResultSchema>
     },
   })
 
   event.command('upsert', {
-    description: 'Append one canonical event from an @file.json payload.',
+    description: 'Append one canonical event from a JSON payload file or stdin.',
     args: emptyArgsSchema,
     options: withBaseOptions({
       input: inputFileOptionSchema,
     }),
     output: eventUpsertResultSchema,
     async run({ options }) {
-      const payload = await loadJsonInputFile(
-        options.input.slice(1),
-        'event payload',
-      )
-
-      return upsertEventRecord({
+      return services.core.upsertEvent({
         vault: options.vault,
-        payload,
+        requestId: requestIdFromOptions(options),
+        inputFile: normalizeInputFileOption(options.input),
       })
     },
   })
@@ -99,12 +95,16 @@ export function registerEventCommands(cli: Cli.Cli, _services: VaultCliServices)
   event.command('show', {
     description: 'Show one canonical non-history event by event id.',
     args: z.object({
-      eventId: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
+      id: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
     }),
     options: withBaseOptions(),
     output: showResultSchema,
     async run({ args, options }) {
-      return showEventRecord(options.vault, args.eventId)
+      return services.query.showEvent({
+        eventId: args.id,
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+      })
     },
   })
 
@@ -115,14 +115,18 @@ export function registerEventCommands(cli: Cli.Cli, _services: VaultCliServices)
       kind: z.string().min(1).optional(),
       from: localDateSchema.optional(),
       to: localDateSchema.optional(),
-      tag: z.string().min(1).optional().describe('Optional comma-separated tag filter.'),
+      tag: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Optional tag filter. Repeat --tag for multiple values.'),
       experiment: slugSchema.optional(),
       limit: z.number().int().positive().max(200).default(50),
     }),
     output: eventListResultSchema,
     async run({ options }) {
-      return listEventRecords({
+      const result = await services.query.listEvents({
         vault: options.vault,
+        requestId: requestIdFromOptions(options),
         kind: options.kind,
         from: options.from,
         to: options.to,
@@ -130,6 +134,7 @@ export function registerEventCommands(cli: Cli.Cli, _services: VaultCliServices)
         experiment: options.experiment,
         limit: options.limit,
       })
+      return result as z.infer<typeof eventListResultSchema>
     },
   })
 

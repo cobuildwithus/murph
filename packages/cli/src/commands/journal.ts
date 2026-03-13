@@ -1,5 +1,8 @@
 import { Cli, z } from 'incur'
-import { withBaseOptions } from '../command-helpers.js'
+import {
+  requestIdFromOptions,
+  withBaseOptions,
+} from '../command-helpers.js'
 import {
   listResultSchema,
   journalEnsureResultSchema,
@@ -7,18 +10,8 @@ import {
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-import {
-  appendJournalText,
-  ensureJournalRecord,
-  linkJournalEventIds,
-  linkJournalStreams,
-  listJournalRecords,
-  showJournalRecord,
-  unlinkJournalEventIds,
-  unlinkJournalStreams,
-} from './experiment-journal-vault-read-helpers.js'
 
-const journalMutationResultSchema = z.object({
+export const journalMutationResultSchema = z.object({
   vault: z.string().min(1),
   date: localDateSchema,
   lookupId: z.string().min(1),
@@ -38,6 +31,22 @@ const journalLinkResultSchema = z.object({
   sampleStreams: z.array(z.string().min(1)),
 })
 
+const journalReferenceOptionsSchema = withBaseOptions({
+  eventId: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Optional event ids to mutate. Repeat --event-id for multiple values.'),
+  stream: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Optional sample streams to mutate. Repeat --stream for multiple values.'),
+}).refine(
+  (value) =>
+    (Array.isArray(value.eventId) && value.eventId.length > 0) ||
+    (Array.isArray(value.stream) && value.stream.length > 0),
+  'Expected at least one of --event-id or --stream.',
+)
+
 export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliServices) {
   const journal = Cli.create('journal', {
     description: 'Journal document commands routed through the core write API.',
@@ -53,15 +62,12 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliService
       options: withBaseOptions(),
       output: journalEnsureResultSchema,
       async run({ args, options }) {
-        const result = await ensureJournalRecord({
+        const result = await _services.core.ensureJournal({
           vault: options.vault,
+          requestId: requestIdFromOptions(options),
           date: args.date,
         })
-
-        return {
-          ...result,
-          date: args.date,
-        }
+        return result
       },
     },
   )
@@ -74,7 +80,11 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliService
     options: withBaseOptions(),
     output: showResultSchema,
     async run({ args, options }) {
-      return showJournalRecord(options.vault, args.date)
+      return _services.query.showJournal({
+        date: args.date,
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+      })
     },
   })
 
@@ -88,12 +98,14 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliService
     }),
     output: listResultSchema,
     async run({ options }) {
-      return listJournalRecords({
+      const result = await _services.query.listJournals({
         vault: options.vault,
+        requestId: requestIdFromOptions(options),
         from: options.from,
         to: options.to,
         limit: options.limit,
       })
+      return result as z.infer<typeof listResultSchema>
     },
   })
 
@@ -107,97 +119,141 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliService
     }),
     output: journalMutationResultSchema,
     async run({ args, options }) {
-      return appendJournalText({
+      return _services.core.appendJournal({
         vault: options.vault,
+        requestId: requestIdFromOptions(options),
         date: args.date,
         text: options.text,
       })
     },
   })
 
-  journal.command('link-event', {
-    description: 'Link one or more event ids into the journal day frontmatter.',
+  journal.command('link', {
+    description: 'Link event ids and/or sample streams into the journal day frontmatter.',
     args: z.object({
       date: localDateSchema.describe('Journal day to mutate.'),
     }),
-    options: withBaseOptions({
-      id: z
-        .array(z.string().min(1))
-        .min(1)
-        .describe('One or more event ids to link. Repeat --id for multiple values.'),
-    }),
+    options: journalReferenceOptionsSchema,
     output: journalLinkResultSchema,
     async run({ args, options }) {
-      return linkJournalEventIds({
+      return mutateJournalReferences(_services, {
+        operation: 'link',
         vault: options.vault,
+        requestId: requestIdFromOptions(options),
         date: args.date,
-        eventIds: options.id,
-      })
-    },
-  })
-
-  journal.command('unlink-event', {
-    description: 'Remove one or more event ids from the journal day frontmatter.',
-    args: z.object({
-      date: localDateSchema.describe('Journal day to mutate.'),
-    }),
-    options: withBaseOptions({
-      id: z
-        .array(z.string().min(1))
-        .min(1)
-        .describe('One or more event ids to unlink. Repeat --id for multiple values.'),
-    }),
-    output: journalLinkResultSchema,
-    async run({ args, options }) {
-      return unlinkJournalEventIds({
-        vault: options.vault,
-        date: args.date,
-        eventIds: options.id,
-      })
-    },
-  })
-
-  journal.command('link-stream', {
-    description: 'Link one or more sample streams into the journal day frontmatter.',
-    args: z.object({
-      date: localDateSchema.describe('Journal day to mutate.'),
-    }),
-    options: withBaseOptions({
-      stream: z
-        .array(z.string().min(1))
-        .min(1)
-        .describe('One or more sample streams to link. Repeat --stream for multiple values.'),
-    }),
-    output: journalLinkResultSchema,
-    async run({ args, options }) {
-      return linkJournalStreams({
-        vault: options.vault,
-        date: args.date,
+        eventIds: options.eventId,
         sampleStreams: options.stream,
       })
     },
   })
 
-  journal.command('unlink-stream', {
-    description: 'Remove one or more sample streams from the journal day frontmatter.',
+  journal.command('unlink', {
+    description: 'Remove event ids and/or sample streams from the journal day frontmatter.',
     args: z.object({
       date: localDateSchema.describe('Journal day to mutate.'),
     }),
-    options: withBaseOptions({
-      stream: z
-        .array(z.string().min(1))
-        .min(1)
-        .describe('One or more sample streams to unlink. Repeat --stream for multiple values.'),
-    }),
+    options: journalReferenceOptionsSchema,
     output: journalLinkResultSchema,
     async run({ args, options }) {
-      return unlinkJournalStreams({
+      return mutateJournalReferences(_services, {
+        operation: 'unlink',
         vault: options.vault,
+        requestId: requestIdFromOptions(options),
         date: args.date,
+        eventIds: options.eventId,
         sampleStreams: options.stream,
       })
     },
   })
 
   cli.command(journal)
+}
+
+async function mutateJournalReferences(
+  services: VaultCliServices,
+  input: {
+    operation: 'link' | 'unlink'
+    vault: string
+    requestId: string | null
+    date: string
+    eventIds?: string[]
+    sampleStreams?: string[]
+  },
+) {
+  const eventIds = normalizeRepeatedValues(input.eventIds)
+  const sampleStreams = normalizeRepeatedValues(input.sampleStreams)
+
+  let result:
+    | z.infer<typeof journalLinkResultSchema>
+    | null = null
+
+  if (eventIds) {
+    result =
+      input.operation === 'link'
+        ? await services.core.linkJournalEvents({
+            vault: input.vault,
+            requestId: input.requestId,
+            date: input.date,
+            eventIds,
+          })
+        : await services.core.unlinkJournalEvents({
+            vault: input.vault,
+            requestId: input.requestId,
+            date: input.date,
+            eventIds,
+          })
+  }
+
+  if (sampleStreams) {
+    const nextResult =
+      input.operation === 'link'
+        ? await services.core.linkJournalStreams({
+            vault: input.vault,
+            requestId: input.requestId,
+            date: input.date,
+            sampleStreams,
+          })
+        : await services.core.unlinkJournalStreams({
+            vault: input.vault,
+            requestId: input.requestId,
+            date: input.date,
+            sampleStreams,
+          })
+    result = mergeJournalLinkResults(result, nextResult)
+  }
+
+  return result as z.infer<typeof journalLinkResultSchema>
+}
+
+function mergeJournalLinkResults(
+  previous: z.infer<typeof journalLinkResultSchema> | null,
+  next: z.infer<typeof journalLinkResultSchema>,
+) {
+  if (!previous) {
+    return next
+  }
+
+  return {
+    ...next,
+    created: previous.created || next.created,
+    changed: previous.changed + next.changed,
+  }
+}
+
+function normalizeRepeatedValues(
+  values: string[] | undefined,
+): string[] | undefined {
+  if (!Array.isArray(values)) {
+    return undefined
+  }
+
+  const normalized = [
+    ...new Set(
+      values
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ]
+
+  return normalized.length > 0 ? normalized : undefined
 }

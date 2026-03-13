@@ -31,7 +31,6 @@ import {
   normalizeIssues,
   toGenericListItem,
   toGenericShowEntity,
-  toJournalLookupId,
 } from "./shared.js"
 import {
   listDocuments as listDocumentsUseCase,
@@ -40,6 +39,7 @@ import {
 } from "./document.js"
 import {
   addSampleRecordsFromInput,
+  eventScaffoldKindSchema,
   listEventRecords,
   listProviderRecords,
   scaffoldEventPayload,
@@ -201,11 +201,12 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async scaffoldEvent(input: CommandContext & {
       kind: string
     }) {
+      const kind = eventScaffoldKindSchema.parse(input.kind)
       return {
         vault: input.vault,
         noun: "event" as const,
-        kind: input.kind,
-        payload: scaffoldEventPayload(input.kind as never),
+        kind,
+        payload: scaffoldEventPayload(kind),
       }
     },
     async upsertEvent(input: CommandContext & {
@@ -498,6 +499,7 @@ function createIntegratedQueryServices(): QueryServices {
           limit,
         },
         items,
+        count: items.length,
         nextCursor: null,
       }
     },

@@ -1,6 +1,10 @@
 import { Cli, z } from 'incur'
 import { emptyArgsSchema, requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import {
+  inputFileOptionSchema,
+  normalizeInputFileOption,
+} from '../json-input.js'
+import {
   listItemSchema,
   localDateSchema,
   pathSchema,
@@ -9,16 +13,16 @@ import {
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
-  addSampleRecords,
-  loadJsonInputFile,
-} from './provider-event-read-helpers.js'
-import {
   importCsvSamples as importCsvSamplesWithArtifacts,
+} from './sample-import-command-helpers.js'
+import {
   listSampleBatches as listSampleBatchesWithArtifacts,
+  showSampleBatch as showSampleBatchWithArtifacts,
+} from './sample-batch-command-helpers.js'
+import {
   listSamples as listSamplesWithArtifacts,
   showSample as showSampleWithArtifacts,
-  showSampleBatch as showSampleBatchWithArtifacts,
-} from './samples-audit-read-helpers.js'
+} from './sample-query-command-helpers.js'
 
 const sampleIdSchema = z
   .string()
@@ -27,16 +31,6 @@ const sampleIdSchema = z
 const batchIdSchema = z
   .string()
   .regex(/^xfm_[0-9A-Za-z]+$/u, 'Expected a transform batch id in xfm_* form.')
-
-const csvOptionSchema = z
-  .string()
-  .optional()
-  .describe('Optional comma-separated values.')
-
-const inputFileOptionSchema = z
-  .string()
-  .regex(/^@.+/u, 'Expected an @file.json payload reference.')
-  .describe('Payload file reference in @file.json form.')
 
 const sampleListItemSchema = listItemSchema.extend({
   quality: z.string().min(1).nullable(),
@@ -63,6 +57,8 @@ const samplesListResultSchema = z.object({
     limit: z.number().int().positive().max(200),
   }),
   items: z.array(sampleListItemSchema),
+  count: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
 })
 
 const sampleBatchManifestSchema = z.object({}).catchall(z.unknown())
@@ -104,7 +100,7 @@ const sampleBatchListResultSchema = z.object({
 
 export function registerSamplesCommands(
   cli: Cli.Cli,
-  _services: VaultCliServices,
+  services: VaultCliServices,
 ) {
   const samples = Cli.create('samples', {
     description: 'Sample ingestion and inspection commands routed through importers and the query read model.',
@@ -113,17 +109,17 @@ export function registerSamplesCommands(
   samples.command(
     'add',
     {
-      description: 'Append one or more manually curated sample records from an @file.json payload.',
+      description: 'Append one or more manually curated sample records from a JSON payload file or stdin.',
       args: emptyArgsSchema,
       options: withBaseOptions({
         input: inputFileOptionSchema,
       }),
       output: samplesAddResultSchema,
       async run({ options }) {
-        const payload = await loadJsonInputFile(options.input.slice(1), 'samples payload')
-        return addSampleRecords({
+        return services.core.addSamples({
           vault: options.vault,
-          payload,
+          requestId: requestIdFromOptions(options),
+          inputFile: normalizeInputFileOption(options.input),
         })
       },
     },
@@ -167,9 +163,12 @@ export function registerSamplesCommands(
           .length(1)
           .optional()
           .describe('Optional single-character CSV delimiter override.'),
-        metadataColumns: csvOptionSchema.describe(
-          'Optional comma-separated metadata columns to copy into batch provenance rows.',
-        ),
+        metadataColumns: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Optional metadata columns to copy into batch provenance rows. Repeat --metadata-columns for multiple values.',
+          ),
         source: z
           .string()
           .min(1)
@@ -181,7 +180,7 @@ export function registerSamplesCommands(
         return importCsvSamplesWithArtifacts({
           delimiter: options.delimiter,
           file: args.file,
-          metadataColumns: parseCsvOption(options.metadataColumns),
+          metadataColumns: options.metadataColumns,
           presetId: options.preset,
           requestId: requestIdFromOptions(options),
           source: options.source,
@@ -198,14 +197,14 @@ export function registerSamplesCommands(
   samples.command('show', {
     description: 'Show one sample record by canonical sample id.',
     args: z.object({
-      sampleId: sampleIdSchema.describe('Sample id such as smp_<ULID>.'),
+      id: sampleIdSchema.describe('Sample id such as smp_<ULID>.'),
     }),
     options: withBaseOptions(),
     output: showResultSchema,
     async run({ args, options }) {
       return {
         vault: options.vault,
-        entity: await showSampleWithArtifacts(options.vault, args.sampleId),
+        entity: await showSampleWithArtifacts(options.vault, args.id),
       }
     },
   })
@@ -222,13 +221,20 @@ export function registerSamplesCommands(
     }),
     output: samplesListResultSchema,
     async run({ options }) {
-      const items = await listSamplesWithArtifacts(options.vault, {
-        from: options.from,
-        limit: options.limit,
-        quality: options.quality,
-        stream: options.stream,
-        to: options.to,
-      })
+      const items = (
+        await listSamplesWithArtifacts(options.vault, {
+          from: options.from,
+          limit: options.limit,
+          quality: options.quality,
+          stream: options.stream,
+          to: options.to,
+        })
+      ).map((item) => ({
+        ...item,
+        markdown: null,
+        data: {},
+        links: [],
+      }))
 
       return {
         vault: options.vault,
@@ -240,6 +246,8 @@ export function registerSamplesCommands(
           limit: options.limit,
         },
         items,
+        count: items.length,
+        nextCursor: null,
       }
     },
   })
@@ -251,12 +259,12 @@ export function registerSamplesCommands(
   batch.command('show', {
     description: 'Show one imported sample batch by transform id.',
     args: z.object({
-      batchId: batchIdSchema.describe('Transform batch id such as xfm_<ULID>.'),
+      id: batchIdSchema.describe('Transform batch id such as xfm_<ULID>.'),
     }),
     options: withBaseOptions(),
     output: sampleBatchShowResultSchema,
     async run({ args, options }) {
-      const batchDetails = await showSampleBatchWithArtifacts(options.vault, args.batchId)
+      const batchDetails = await showSampleBatchWithArtifacts(options.vault, args.id)
 
       return {
         vault: options.vault,
@@ -306,17 +314,4 @@ export function registerSamplesCommands(
   samples.command(batch)
 
   cli.command(samples)
-}
-
-function parseCsvOption(value: string | undefined): string[] | undefined {
-  if (!value) {
-    return undefined
-  }
-
-  const entries = value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-
-  return entries.length > 0 ? entries : undefined
 }
