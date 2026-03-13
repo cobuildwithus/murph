@@ -338,7 +338,9 @@ test("genetic variants are stored in markdown registries and can link to family 
   const updated = await upsertGeneticVariant({
     vaultRoot,
     variantId: created.record.variantId,
+    slug: "changed-slug-that-should-not-rename",
     gene: "APOE",
+    title: "APOE e4 allele updated",
     significance: "risk_factor",
     note: "Maintain aggressive cardiometabolic prevention.",
     sourceFamilyMemberIds: [familyMember.record.familyMemberId],
@@ -352,9 +354,12 @@ test("genetic variants are stored in markdown registries and can link to family 
 
   assert.equal(created.created, true);
   assert.equal(updated.created, false);
+  assert.equal(updated.record.slug, created.record.slug);
+  assert.equal(updated.record.relativePath, created.record.relativePath);
   assert.equal(listed.length, 1);
   assert.equal(read.variantId, created.record.variantId);
   assert.equal(read.gene, "APOE");
+  assert.equal(read.title, "APOE e4 allele updated");
   assert.equal(read.zygosity, "compound_heterozygous");
   assert.equal(read.inheritance, "maternal lineage");
   assert.deepEqual(read.sourceFamilyMemberIds, [familyMember.record.familyMemberId]);
@@ -366,9 +371,21 @@ test("genetic variants are stored in markdown registries and can link to family 
     relativePath: updated.auditPath,
   });
 
-  assert.equal(
-    auditRecords.filter((record) => (record as { action?: string }).action === "genetics_upsert").length,
-    2,
+  const geneticsAuditRecords = auditRecords.filter(
+    (record) =>
+      (record as { action?: string; targetIds?: string[] }).action === "genetics_upsert" &&
+      (record as { targetIds?: string[] }).targetIds?.includes(created.record.variantId),
+  ) as Array<{
+    changes?: Array<{ path?: string; op?: string }>;
+  }>;
+
+  assert.equal(geneticsAuditRecords.length, 2);
+  assert.deepEqual(
+    geneticsAuditRecords.map((record) => record.changes?.[0]),
+    [
+      { path: created.record.relativePath, op: "create" },
+      { path: created.record.relativePath, op: "update" },
+    ],
   );
 
   const geneticOperations = (
