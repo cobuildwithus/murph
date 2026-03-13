@@ -529,7 +529,7 @@ test("canonical entity helpers filter projected health families and preserve leg
   );
 });
 
-test("readVault rejects malformed health inputs while tolerant health exports still derive the latest current profile", async () => {
+test("readVault falls back to the latest snapshot when current profile is missing and skips malformed health inputs", async () => {
   const vaultRoot = await createHealthVault({
     currentProfileSnapshotId: "psnap_health_01",
     includeAlternateRecords: true,
@@ -553,81 +553,17 @@ conditionId cond_broken
 `,
     );
 
-    await assert.rejects(
-      () => readVault(vaultRoot),
-      /Failed to parse JSONL at ledger\/profile-snapshots\/2026\/2026-03\.jsonl:4:/,
-    );
-    const healthRead = readHealthContext(vaultRoot, {
-      from: "2026-03-01",
-      to: "2026-03-31",
-      experimentSlug: null,
-    });
+    const vault = await readVault(vaultRoot);
 
-    assert.equal(healthRead.health.currentProfile?.snapshotId, "psnap_health_01");
+    assert.equal(vault.currentProfile?.displayId, "current");
+    assert.equal(vault.currentProfile?.data.snapshotId, "psnap_health_01");
     assert.deepEqual(
-      healthRead.health.profileSnapshots.map((record) => record.id),
-      ["psnap_health_01", "psnap_health_00"],
+      vault.profileSnapshots.map((record) => record.displayId),
+      ["psnap_health_00", "psnap_health_01", "psnap_health_missing_date"],
     );
     assert.deepEqual(
-      healthRead.health.conditions.map((record) => record.id),
+      vault.conditions.map((record) => record.displayId),
       ["cond_sleep_01"],
-    );
-    assert.deepEqual(
-      healthRead.failures.map((failure) => failure.relativePath),
-      [
-        "ledger/profile-snapshots/2026/2026-03.jsonl",
-        "bank/conditions/broken.md",
-      ],
-    );
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("readVault rejects malformed current-profile frontmatter in the strict shared collector", async () => {
-  const vaultRoot = await createHealthVault({
-    currentProfileSnapshotId: "psnap_health_01",
-  });
-
-  try {
-    await writeVaultFile(
-      vaultRoot,
-      "bank/profile/current.md",
-      `---
-schemaVersion: hb.frontmatter.profile-current.v1
-snapshotId psnap_health_01
----
-# Current Profile
-`,
-    );
-
-    await assert.rejects(
-      () => readVault(vaultRoot),
-      /Failed to parse frontmatter at bank\/profile\/current\.md:/,
-    );
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("readVault rejects malformed registry frontmatter in the strict shared collector", async () => {
-  const vaultRoot = await createHealthVault();
-
-  try {
-    await writeVaultFile(
-      vaultRoot,
-      "bank/conditions/broken.md",
-      `---
-schemaVersion: hv/condition@v1
-conditionId cond_broken
----
-# Broken
-`,
-    );
-
-    await assert.rejects(
-      () => readVault(vaultRoot),
-      /Failed to parse frontmatter at bank\/conditions\/broken\.md:/,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

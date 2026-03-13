@@ -121,7 +121,7 @@ export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
   const metadata = await readOptionalJson(path.join(vaultRoot, "vault.json"));
   const [baseEntities, healthEntities] = await Promise.all([
     readBaseEntities(vaultRoot, metadata),
-    collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
+    collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
   ]);
   const entities = [...baseEntities, ...healthEntities.entities]
     .sort(compareCanonicalEntities);
