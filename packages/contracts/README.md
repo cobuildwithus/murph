@@ -7,6 +7,11 @@ Owns the frozen vault contracts for the Healthy Bob baseline:
 - example records and frontmatter documents
 - derived JSON Schema artifacts under `generated/`
 
+Surface split:
+
+- `@healthybob/contracts` exports the canonical Zod-first runtime surface.
+- `@healthybob/contracts/schemas` exports the derived JSON Schema objects for artifact consumers.
+
 Package-local commands:
 
 - `pnpm --dir packages/contracts build`

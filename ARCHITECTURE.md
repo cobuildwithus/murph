@@ -4,7 +4,7 @@ Last verified: 2026-03-12
 
 ## Module Map
 
-- `packages/contracts`: runtime schemas, TypeScript types, and generated JSON Schema artifacts
+- `packages/contracts`: canonical Zod contracts, parse helpers, TypeScript types, and generated JSON Schema artifacts
 - `packages/core`: the only package allowed to mutate canonical vault data
 - `packages/importers`: ingestion adapters that parse external files and delegate all writes to core
 - `packages/query`: read helpers and export-pack generation over canonical vault data
