@@ -26,6 +26,8 @@ interface WalkVaultFilesOptions {
   extension?: string | null;
 }
 
+type ResolvedVaultPath = ReturnType<typeof resolveVaultPath>;
+
 export async function pathExists(absolutePath: string): Promise<boolean> {
   try {
     await fs.access(absolutePath);
@@ -41,6 +43,33 @@ export async function pathExists(absolutePath: string): Promise<boolean> {
 
 export async function ensureDirectory(absolutePath: string): Promise<void> {
   await fs.mkdir(absolutePath, { recursive: true });
+}
+
+async function prepareVerifiedWriteTarget(
+  vaultRoot: string,
+  relativePath: string,
+  validateResolvedPath?: (resolved: ResolvedVaultPath) => void,
+): Promise<ResolvedVaultPath> {
+  const resolved = resolveVaultPath(vaultRoot, relativePath);
+  validateResolvedPath?.(resolved);
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+  await ensureDirectory(path.dirname(resolved.absolutePath));
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+  return resolved;
+}
+
+async function handleImmutableRawTargetExists(
+  resolved: ResolvedVaultPath,
+  options: ImmutableRawWriteOptions,
+  matchesExistingContent: () => Promise<boolean>,
+): Promise<string> {
+  if (options.allowExistingMatch && (await matchesExistingContent())) {
+    return resolved.relativePath;
+  }
+
+  throw new VaultError("VAULT_RAW_IMMUTABLE", "Raw target already exists and may not be overwritten.", {
+    relativePath: resolved.relativePath,
+  });
 }
 
 export async function ensureVaultDirectory(vaultRoot: string, relativePath: string): Promise<string> {
@@ -88,28 +117,24 @@ export async function writeVaultTextFile(
   content: string,
   options: WriteVaultTextFileOptions = {},
 ): Promise<string> {
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
   const overwrite = options.overwrite ?? true;
+  const resolved = await prepareVerifiedWriteTarget(vaultRoot, relativePath, (candidate) => {
+    if (isRawRelativePath(candidate.relativePath)) {
+      throw new VaultError("VAULT_RAW_IMMUTABLE", "Use copyRawArtifact for raw writes.", {
+        relativePath: candidate.relativePath,
+      });
+    }
 
-  if (isRawRelativePath(resolved.relativePath)) {
-    throw new VaultError("VAULT_RAW_IMMUTABLE", "Use copyRawArtifact for raw writes.", {
-      relativePath: resolved.relativePath,
-    });
-  }
-
-  if (isAppendOnlyRelativePath(resolved.relativePath) && resolved.relativePath.endsWith(".jsonl")) {
-    throw new VaultError(
-      "VAULT_APPEND_ONLY_PATH",
-      "Use appendJsonlRecord for ledger and audit shards.",
-      {
-        relativePath: resolved.relativePath,
-      },
-    );
-  }
-
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  await ensureDirectory(path.dirname(resolved.absolutePath));
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+    if (isAppendOnlyRelativePath(candidate.relativePath) && candidate.relativePath.endsWith(".jsonl")) {
+      throw new VaultError(
+        "VAULT_APPEND_ONLY_PATH",
+        "Use appendJsonlRecord for ledger and audit shards.",
+        {
+          relativePath: candidate.relativePath,
+        },
+      );
+    }
+  });
   try {
     await fs.writeFile(resolved.absolutePath, content, {
       encoding: "utf8",
@@ -143,27 +168,23 @@ export async function appendVaultTextFile(
   relativePath: string,
   content: string,
 ): Promise<string> {
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
+  const resolved = await prepareVerifiedWriteTarget(vaultRoot, relativePath, (candidate) => {
+    if (isRawRelativePath(candidate.relativePath)) {
+      throw new VaultError("VAULT_RAW_IMMUTABLE", "Raw files are immutable once written.", {
+        relativePath: candidate.relativePath,
+      });
+    }
 
-  if (isRawRelativePath(resolved.relativePath)) {
-    throw new VaultError("VAULT_RAW_IMMUTABLE", "Raw files are immutable once written.", {
-      relativePath: resolved.relativePath,
-    });
-  }
-
-  if (!resolved.relativePath.endsWith(".jsonl") || !isAppendOnlyRelativePath(resolved.relativePath)) {
-    throw new VaultError(
-      "VAULT_APPEND_ONLY_PATH",
-      "Append-only writes are restricted to JSONL ledger and audit shards.",
-      {
-        relativePath: resolved.relativePath,
-      },
-    );
-  }
-
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  await ensureDirectory(path.dirname(resolved.absolutePath));
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+    if (!candidate.relativePath.endsWith(".jsonl") || !isAppendOnlyRelativePath(candidate.relativePath)) {
+      throw new VaultError(
+        "VAULT_APPEND_ONLY_PATH",
+        "Append-only writes are restricted to JSONL ledger and audit shards.",
+        {
+          relativePath: candidate.relativePath,
+        },
+      );
+    }
+  });
   await fs.appendFile(resolved.absolutePath, content, "utf8");
 
   return resolved.relativePath;
@@ -187,35 +208,25 @@ export async function copyImmutableFileIntoVaultRaw(
     throw new VaultError("VAULT_SOURCE_INVALID", "Raw source path must point to a file.");
   }
 
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
-
-  if (!isRawRelativePath(resolved.relativePath)) {
-    throw new VaultError("VAULT_RAW_PATH_REQUIRED", "Raw copies must target the raw/ tree.", {
-      relativePath: resolved.relativePath,
-    });
-  }
-
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  await ensureDirectory(path.dirname(resolved.absolutePath));
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+  const resolved = await prepareVerifiedWriteTarget(vaultRoot, relativePath, (candidate) => {
+    if (!isRawRelativePath(candidate.relativePath)) {
+      throw new VaultError("VAULT_RAW_PATH_REQUIRED", "Raw copies must target the raw/ tree.", {
+        relativePath: candidate.relativePath,
+      });
+    }
+  });
 
   try {
     await fs.copyFile(sourceAbsolutePath, resolved.absolutePath, fsConstants.COPYFILE_EXCL);
   } catch (error) {
     if (isErrnoException(error) && error.code === "EEXIST") {
-      if (options.allowExistingMatch) {
+      return handleImmutableRawTargetExists(resolved, options, async () => {
         const [sourceContent, existingContent] = await Promise.all([
           fs.readFile(sourceAbsolutePath),
           fs.readFile(resolved.absolutePath),
         ]);
 
-        if (sourceContent.equals(existingContent)) {
-          return resolved.relativePath;
-        }
-      }
-
-      throw new VaultError("VAULT_RAW_IMMUTABLE", "Raw target already exists and may not be overwritten.", {
-        relativePath: resolved.relativePath,
+        return sourceContent.equals(existingContent);
       });
     }
 
@@ -231,18 +242,14 @@ export async function writeImmutableJsonFileIntoVaultRaw(
   value: unknown,
   options: ImmutableRawWriteOptions = {},
 ): Promise<string> {
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
   const content = `${JSON.stringify(value, null, 2)}\n`;
-
-  if (!isRawRelativePath(resolved.relativePath)) {
-    throw new VaultError("VAULT_RAW_PATH_REQUIRED", "Raw writes must target the raw/ tree.", {
-      relativePath: resolved.relativePath,
-    });
-  }
-
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  await ensureDirectory(path.dirname(resolved.absolutePath));
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+  const resolved = await prepareVerifiedWriteTarget(vaultRoot, relativePath, (candidate) => {
+    if (!isRawRelativePath(candidate.relativePath)) {
+      throw new VaultError("VAULT_RAW_PATH_REQUIRED", "Raw writes must target the raw/ tree.", {
+        relativePath: candidate.relativePath,
+      });
+    }
+  });
 
   try {
     await fs.writeFile(resolved.absolutePath, content, {
@@ -251,16 +258,9 @@ export async function writeImmutableJsonFileIntoVaultRaw(
     });
   } catch (error) {
     if (isErrnoException(error) && error.code === "EEXIST") {
-      if (options.allowExistingMatch) {
+      return handleImmutableRawTargetExists(resolved, options, async () => {
         const existingContent = await fs.readFile(resolved.absolutePath, "utf8");
-
-        if (existingContent === content) {
-          return resolved.relativePath;
-        }
-      }
-
-      throw new VaultError("VAULT_RAW_IMMUTABLE", "Raw target already exists and may not be overwritten.", {
-        relativePath: resolved.relativePath,
+        return existingContent === content;
       });
     }
 
