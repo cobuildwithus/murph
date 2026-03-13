@@ -695,8 +695,11 @@ function readAssessmentRecords(
   return readJsonlDirectory(vaultRoot, "ledger/assessments")
     .map(({ relativePath, value }) => {
       const source = asObject(value);
+      if (!source) {
+        return null;
+      }
       const id = firstString(source, ["id"]);
-      if (!source || !id?.startsWith("asmt_")) {
+      if (!id?.startsWith("asmt_")) {
         return null;
       }
 
@@ -729,12 +732,16 @@ function readProfileSnapshotRecords(
   return readJsonlDirectory(vaultRoot, "ledger/profile-snapshots")
     .map(({ relativePath, value }) => {
       const source = asObject(value);
+      if (!source) {
+        return null;
+      }
       const id = firstString(source, ["id"]);
-      if (!source || !id?.startsWith("psnap_")) {
+      if (!id?.startsWith("psnap_")) {
         return null;
       }
 
       const sourceObject = firstObject(source, ["source"]);
+      const sourceAssessmentIds = firstStringArray(source, ["sourceAssessmentIds"]);
       return {
         id,
         recordedAt: firstString(source, ["recordedAt", "capturedAt"]),
@@ -742,10 +749,11 @@ function readProfileSnapshotRecords(
           firstString(source, ["source"]) ??
           firstString(sourceObject, ["kind", "source", "importedFrom"]),
         sourceAssessmentIds:
-          firstStringArray(source, ["sourceAssessmentIds"]) ??
-          (firstString(sourceObject, ["assessmentId"])
-            ? [firstString(sourceObject, ["assessmentId"]) as string]
-            : []),
+          sourceAssessmentIds.length > 0
+            ? sourceAssessmentIds
+            : (firstString(sourceObject, ["assessmentId"])
+                ? [firstString(sourceObject, ["assessmentId"]) as string]
+                : []),
         sourceEventIds: firstStringArray(source, ["sourceEventIds"]),
         profile: firstObject(source, ["profile"]),
         relativePath,
@@ -767,11 +775,14 @@ function readHistoryRecords(
   return readJsonlDirectory(vaultRoot, "ledger/events")
     .map(({ relativePath, value }) => {
       const source = asObject(value);
+      if (!source) {
+        return null;
+      }
       const id = firstString(source, ["id"]);
       const kind = firstString(source, ["kind"]);
       const occurredAt = firstString(source, ["occurredAt"]);
       const title = firstString(source, ["title"]);
-      if (!source || !id?.startsWith("evt_") || !kind || !healthKinds.has(kind) || !occurredAt || !title) {
+      if (!id?.startsWith("evt_") || !kind || !healthKinds.has(kind) || !occurredAt || !title) {
         return null;
       }
 
@@ -992,13 +1003,9 @@ function asObject(value: unknown): Record<string, unknown> | null {
 }
 
 function firstObject(
-  value: Record<string, unknown> | null,
+  value: Record<string, unknown>,
   keys: readonly string[],
 ): Record<string, unknown> {
-  if (!value) {
-    return {};
-  }
-
   for (const key of keys) {
     const candidate = asObject(value[key]);
     if (candidate) {
@@ -1010,13 +1017,9 @@ function firstObject(
 }
 
 function firstString(
-  value: Record<string, unknown> | null,
+  value: Record<string, unknown>,
   keys: readonly string[],
 ): string | null {
-  if (!value) {
-    return null;
-  }
-
   for (const key of keys) {
     const candidate = value[key];
     if (typeof candidate === "string" && candidate.trim()) {
@@ -1028,13 +1031,9 @@ function firstString(
 }
 
 function firstStringArray(
-  value: Record<string, unknown> | null,
+  value: Record<string, unknown>,
   keys: readonly string[],
 ): string[] {
-  if (!value) {
-    return [];
-  }
-
   for (const key of keys) {
     const candidate = value[key];
     if (Array.isArray(candidate)) {
