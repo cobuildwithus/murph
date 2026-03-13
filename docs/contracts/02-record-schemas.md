@@ -2,7 +2,7 @@
 
 Status: frozen baseline plus health extension fence
 
-Schema sources live in `packages/contracts/src/`. Generated JSON Schema artifacts live in `packages/contracts/generated/`.
+Canonical Zod contract sources live in `packages/contracts/src/zod.ts`. The JSON Schema surface in `packages/contracts/src/schemas.ts` and the artifacts in `packages/contracts/generated/` are derived from those Zod definitions.
 
 ## ID Policy
 

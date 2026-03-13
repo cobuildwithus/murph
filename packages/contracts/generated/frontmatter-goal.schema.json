@@ -1,25 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-goal.schema.json",
-  "title": "Healthy Bob Goal Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "goalId",
-    "slug",
-    "title",
-    "status",
-    "horizon",
-    "priority",
-    "window"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.goal.v1"
     },
     "docType": {
+      "type": "string",
       "const": "goal"
     },
     "goalId": {
@@ -60,10 +48,6 @@
     },
     "window": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "startAt"
-      ],
       "properties": {
         "startAt": {
           "type": "string",
@@ -73,14 +57,22 @@
           "type": "string",
           "format": "date"
         }
-      }
+      },
+      "required": [
+        "startAt"
+      ],
+      "additionalProperties": false
     },
     "parentGoalId": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "relatedGoalIds": {
       "type": "array",
@@ -106,5 +98,19 @@
       },
       "uniqueItems": true
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "goalId",
+    "slug",
+    "title",
+    "status",
+    "horizon",
+    "priority",
+    "window"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-goal.schema.json",
+  "title": "Healthy Bob Goal Frontmatter"
 }

@@ -39,7 +39,7 @@ repo/
 
 ## Package Boundaries
 
-- `packages/contracts` defines the shared language: runtime schemas, TypeScript types, and generated JSON Schemas.
+- `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, and generated JSON Schema artifacts.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
 - `packages/importers` parses external inputs but delegates all canonical writes to core.
 - `packages/query` reads canonical vault state and builds derived export packs.

@@ -1,4 +1,5 @@
 import type {
+  ContractSchema,
   DocumentEventRecord,
   EventKind,
   EventRecord,
@@ -13,14 +14,12 @@ import type {
   SampleStream,
 } from "@healthybob/contracts";
 import {
-  eventRecordSchema,
   experimentFrontmatterSchema,
   journalDayFrontmatterSchema,
+  eventRecordSchema,
+  safeParseContract,
   sampleRecordSchema,
-} from "@healthybob/contracts/schemas";
-import { validateAgainstSchema } from "@healthybob/contracts/validate";
-
-import type { JsonSchema } from "@healthybob/contracts/schemas";
+} from "@healthybob/contracts";
 
 import {
   BASELINE_EVENT_KINDS,
@@ -215,15 +214,15 @@ function assertPlainObject<T extends LooseRecord>(
 }
 
 function assertContractShape<T>(
-  schema: JsonSchema,
+  schema: ContractSchema<T>,
   value: unknown,
   code: string,
   message: string,
 ): asserts value is T {
-  const errors = validateAgainstSchema(schema, value);
+  const result = safeParseContract(schema, value);
 
-  if (errors.length > 0) {
-    throw new VaultError(code, message, { errors });
+  if (!result.success) {
+    throw new VaultError(code, message, { errors: result.errors });
   }
 }
 
@@ -365,14 +364,14 @@ function buildEventRecord<K extends EventKind>({
     ...normalizedFields,
   });
 
-  assertContractShape<EventRecordByKind<K>>(
+  assertContractShape(
     eventRecordSchema,
     record,
     "HB_EVENT_INVALID",
     "Event record failed contract validation before write.",
   );
 
-  return record;
+  return record as EventRecordByKind<K>;
 }
 
 async function appendEventRecord<K extends EventKind>({
@@ -546,30 +545,22 @@ export async function createExperiment({
 
   try {
     const existingDocument = parseFrontmatterDocument(await readUtf8File(vaultRoot, relativePath));
-    const existingErrors = validateAgainstSchema(
+    const existingResult = safeParseContract(
       experimentFrontmatterSchema,
       existingDocument.attributes,
     );
 
-    if (existingErrors.length > 0) {
+    if (!existingResult.success) {
       throw new VaultError(
         "HB_FRONTMATTER_INVALID",
         `Existing experiment "${safeSlug}" failed contract validation.`,
         {
           relativePath,
-          errors: existingErrors,
+          errors: existingResult.errors,
         },
       );
     }
-
-    assertContractShape<ExperimentFrontmatter>(
-      experimentFrontmatterSchema,
-      existingDocument.attributes,
-      "HB_FRONTMATTER_INVALID",
-      `Existing experiment "${safeSlug}" failed contract validation.`,
-    );
-
-    const existingAttributes = existingDocument.attributes;
+    const existingAttributes = existingResult.data;
 
     if (
       JSON.stringify(toExperimentComparableAttributes(existingAttributes)) !==

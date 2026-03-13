@@ -43,5 +43,8 @@
     "generate": "pnpm build && node ./dist/scripts/generate-json-schema.js",
     "test": "pnpm build && node ./dist/scripts/verify.js",
     "verify": "pnpm test"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   }
 }

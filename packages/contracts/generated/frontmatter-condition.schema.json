@@ -1,22 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-condition.schema.json",
-  "title": "Healthy Bob Condition Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "conditionId",
-    "slug",
-    "title",
-    "clinicalStatus"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.condition.v1"
     },
     "docType": {
+      "type": "string",
       "const": "condition"
     },
     "conditionId": {
@@ -95,5 +86,16 @@
       "minLength": 1,
       "maxLength": 4000
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "conditionId",
+    "slug",
+    "title",
+    "clinicalStatus"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-condition.schema.json",
+  "title": "Healthy Bob Condition Frontmatter"
 }

@@ -1,22 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-core.schema.json",
-  "title": "Healthy Bob CORE Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "vaultId",
-    "title",
-    "timezone",
-    "updatedAt"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.core.v1"
     },
     "docType": {
+      "type": "string",
       "const": "core"
     },
     "vaultId": {
@@ -45,5 +36,16 @@
       },
       "uniqueItems": true
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "vaultId",
+    "title",
+    "timezone",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-core.schema.json",
+  "title": "Healthy Bob CORE Frontmatter"
 }

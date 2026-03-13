@@ -1,32 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/sample-record.schema.json",
-  "title": "Healthy Bob Sample Record",
   "oneOf": [
     {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schemaVersion",
-        "id",
-        "stream",
-        "recordedAt",
-        "dayKey",
-        "source",
-        "quality",
-        "value",
-        "unit"
-      ],
       "properties": {
         "schemaVersion": {
+          "type": "string",
           "const": "hb.sample.v1"
         },
         "id": {
           "type": "string",
           "pattern": "^smp_[0-9A-HJKMNP-TV-Z]{26}$"
-        },
-        "stream": {
-          "const": "heart_rate"
         },
         "recordedAt": {
           "type": "string",
@@ -52,40 +36,43 @@
             "normalized",
             "derived"
           ]
+        },
+        "stream": {
+          "type": "string",
+          "const": "heart_rate"
         },
         "value": {
           "type": "integer",
           "minimum": 0
         },
         "unit": {
+          "type": "string",
           "const": "bpm"
         }
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
         "schemaVersion",
         "id",
-        "stream",
         "recordedAt",
         "dayKey",
         "source",
         "quality",
+        "stream",
         "value",
         "unit"
       ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "properties": {
         "schemaVersion": {
+          "type": "string",
           "const": "hb.sample.v1"
         },
         "id": {
           "type": "string",
           "pattern": "^smp_[0-9A-HJKMNP-TV-Z]{26}$"
-        },
-        "stream": {
-          "const": "hrv"
         },
         "recordedAt": {
           "type": "string",
@@ -111,40 +98,43 @@
             "normalized",
             "derived"
           ]
+        },
+        "stream": {
+          "type": "string",
+          "const": "hrv"
         },
         "value": {
           "type": "number",
           "minimum": 0
         },
         "unit": {
+          "type": "string",
           "const": "ms"
         }
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
         "schemaVersion",
         "id",
-        "stream",
         "recordedAt",
         "dayKey",
         "source",
         "quality",
+        "stream",
         "value",
         "unit"
       ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "properties": {
         "schemaVersion": {
+          "type": "string",
           "const": "hb.sample.v1"
         },
         "id": {
           "type": "string",
           "pattern": "^smp_[0-9A-HJKMNP-TV-Z]{26}$"
-        },
-        "stream": {
-          "const": "steps"
         },
         "recordedAt": {
           "type": "string",
@@ -170,43 +160,43 @@
             "normalized",
             "derived"
           ]
+        },
+        "stream": {
+          "type": "string",
+          "const": "steps"
         },
         "value": {
           "type": "integer",
           "minimum": 0
         },
         "unit": {
+          "type": "string",
           "const": "count"
         }
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
         "schemaVersion",
         "id",
-        "stream",
         "recordedAt",
         "dayKey",
         "source",
         "quality",
-        "stage",
-        "startAt",
-        "endAt",
-        "durationMinutes",
+        "stream",
+        "value",
         "unit"
       ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "properties": {
         "schemaVersion": {
+          "type": "string",
           "const": "hb.sample.v1"
         },
         "id": {
           "type": "string",
           "pattern": "^smp_[0-9A-HJKMNP-TV-Z]{26}$"
-        },
-        "stream": {
-          "const": "sleep_stage"
         },
         "recordedAt": {
           "type": "string",
@@ -232,6 +222,10 @@
             "normalized",
             "derived"
           ]
+        },
+        "stream": {
+          "type": "string",
+          "const": "sleep_stage"
         },
         "stage": {
           "type": "string",
@@ -255,34 +249,36 @@
           "minimum": 1
         },
         "unit": {
+          "type": "string",
           "const": "stage"
         }
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
         "schemaVersion",
         "id",
-        "stream",
         "recordedAt",
         "dayKey",
         "source",
         "quality",
-        "value",
+        "stream",
+        "stage",
+        "startAt",
+        "endAt",
+        "durationMinutes",
         "unit"
       ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "properties": {
         "schemaVersion": {
+          "type": "string",
           "const": "hb.sample.v1"
         },
         "id": {
           "type": "string",
           "pattern": "^smp_[0-9A-HJKMNP-TV-Z]{26}$"
-        },
-        "stream": {
-          "const": "respiratory_rate"
         },
         "recordedAt": {
           "type": "string",
@@ -308,40 +304,43 @@
             "normalized",
             "derived"
           ]
+        },
+        "stream": {
+          "type": "string",
+          "const": "respiratory_rate"
         },
         "value": {
           "type": "number",
           "minimum": 0
         },
         "unit": {
+          "type": "string",
           "const": "breaths_per_minute"
         }
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
         "schemaVersion",
         "id",
-        "stream",
         "recordedAt",
         "dayKey",
         "source",
         "quality",
+        "stream",
         "value",
         "unit"
       ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "properties": {
         "schemaVersion": {
+          "type": "string",
           "const": "hb.sample.v1"
         },
         "id": {
           "type": "string",
           "pattern": "^smp_[0-9A-HJKMNP-TV-Z]{26}$"
-        },
-        "stream": {
-          "const": "temperature"
         },
         "recordedAt": {
           "type": "string",
@@ -367,39 +366,42 @@
             "normalized",
             "derived"
           ]
+        },
+        "stream": {
+          "type": "string",
+          "const": "temperature"
         },
         "value": {
           "type": "number"
         },
         "unit": {
+          "type": "string",
           "const": "celsius"
         }
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
         "schemaVersion",
         "id",
-        "stream",
         "recordedAt",
         "dayKey",
         "source",
         "quality",
+        "stream",
         "value",
         "unit"
       ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
       "properties": {
         "schemaVersion": {
+          "type": "string",
           "const": "hb.sample.v1"
         },
         "id": {
           "type": "string",
           "pattern": "^smp_[0-9A-HJKMNP-TV-Z]{26}$"
-        },
-        "stream": {
-          "const": "glucose"
         },
         "recordedAt": {
           "type": "string",
@@ -426,14 +428,33 @@
             "derived"
           ]
         },
+        "stream": {
+          "type": "string",
+          "const": "glucose"
+        },
         "value": {
           "type": "number",
           "minimum": 0
         },
         "unit": {
+          "type": "string",
           "const": "mg_dL"
         }
-      }
+      },
+      "required": [
+        "schemaVersion",
+        "id",
+        "recordedAt",
+        "dayKey",
+        "source",
+        "quality",
+        "stream",
+        "value",
+        "unit"
+      ],
+      "additionalProperties": false
     }
-  ]
+  ],
+  "$id": "@healthybob/contracts/sample-record.schema.json",
+  "title": "Healthy Bob Sample Record"
 }

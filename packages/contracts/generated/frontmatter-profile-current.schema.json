@@ -1,20 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-profile-current.schema.json",
-  "title": "Healthy Bob Profile Current Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "snapshotId",
-    "updatedAt"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.profile-current.v1"
     },
     "docType": {
+      "type": "string",
       "const": "profile_current"
     },
     "snapshotId": {
@@ -49,5 +42,14 @@
       },
       "uniqueItems": true
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "snapshotId",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-profile-current.schema.json",
+  "title": "Healthy Bob Profile Current Frontmatter"
 }

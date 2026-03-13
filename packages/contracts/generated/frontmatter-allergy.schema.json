@@ -1,23 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-allergy.schema.json",
-  "title": "Healthy Bob Allergy Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "allergyId",
-    "slug",
-    "title",
-    "substance",
-    "status"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.allergy.v1"
     },
     "docType": {
+      "type": "string",
       "const": "allergy"
     },
     "allergyId": {
@@ -76,5 +66,17 @@
       "minLength": 1,
       "maxLength": 4000
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "allergyId",
+    "slug",
+    "title",
+    "substance",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-allergy.schema.json",
+  "title": "Healthy Bob Allergy Frontmatter"
 }

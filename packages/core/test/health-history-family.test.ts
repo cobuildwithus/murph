@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { initializeVault, readJsonlRecords } from "../src/index.js";
+import { initializeVault, readJsonlRecords, VaultError } from "../src/index.js";
 import { appendHistoryEvent, listHistoryEvents, readHistoryEvent } from "../src/history/index.js";
 import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.js";
 import { listGeneticVariants, readGeneticVariant, upsertGeneticVariant } from "../src/genetics/index.js";
@@ -175,5 +175,56 @@ test("genetic variants are stored in markdown registries and can link to family 
   assert.equal(
     auditRecords.filter((record) => (record as { action?: string }).action === "genetics_upsert").length,
     2,
+  );
+});
+
+test("family and genetics registry writes enforce the frozen contract length boundaries", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-family-genetics-boundaries");
+  await initializeVault({ vaultRoot });
+
+  const familyAtLimit = await upsertFamilyMember({
+    vaultRoot,
+    title: "F".repeat(160),
+    relationship: "R".repeat(120),
+  });
+
+  assert.equal(familyAtLimit.record.title.length, 160);
+  assert.equal(familyAtLimit.record.relationship.length, 120);
+
+  await assert.rejects(
+    () =>
+      upsertFamilyMember({
+        vaultRoot,
+        title: "F".repeat(161),
+        relationship: "parent",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "title exceeds the maximum length.",
+  );
+
+  const variantAtLimit = await upsertGeneticVariant({
+    vaultRoot,
+    slug: "variant-at-limit",
+    gene: "G".repeat(40),
+    title: "T".repeat(160),
+  });
+
+  assert.equal(variantAtLimit.record.gene.length, 40);
+  assert.equal(variantAtLimit.record.title.length, 160);
+
+  await assert.rejects(
+    () =>
+      upsertGeneticVariant({
+        vaultRoot,
+        slug: "variant-too-long-gene",
+        gene: "G".repeat(41),
+        title: "Boundary check",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "gene exceeds the maximum length.",
   );
 });

@@ -1,4 +1,8 @@
-import { geneticVariantFrontmatterSchema } from "@healthybob/contracts/schemas";
+import {
+  contractIdMaxLength,
+  GENETIC_VARIANT_LIMITS,
+  ID_PREFIXES,
+} from "@healthybob/contracts";
 
 import { emitAuditRecord } from "../audit.js";
 import { VaultError } from "../errors.js";
@@ -32,38 +36,11 @@ import {
 } from "./types.js";
 
 const GENETICS_DIRECTORY = "bank/genetics";
-const GENETIC_TITLE_MAX_LENGTH = readMaxLength(geneticVariantFrontmatterSchema, "title");
-const GENETIC_GENE_MAX_LENGTH = readMaxLength(geneticVariantFrontmatterSchema, "gene");
-const GENETIC_INHERITANCE_MAX_LENGTH = readMaxLength(geneticVariantFrontmatterSchema, "inheritance");
-const GENETIC_NOTE_MAX_LENGTH = readMaxLength(geneticVariantFrontmatterSchema, "note");
-const GENETIC_FAMILY_ID_MAX_LENGTH = 80;
-
-function readSchemaProperty(
-  schema: unknown,
-  propertyName: string,
-): Record<string, unknown> {
-  const properties =
-    typeof schema === "object" && schema !== null && "properties" in schema
-      ? (schema.properties as Record<string, unknown>)
-      : null;
-  const property = properties?.[propertyName];
-
-  if (!property || typeof property !== "object") {
-    throw new Error(`Missing genetics contract property "${propertyName}".`);
-  }
-
-  return property as Record<string, unknown>;
-}
-
-function readMaxLength(schema: unknown, propertyName: string): number {
-  const candidate = readSchemaProperty(schema, propertyName).maxLength;
-
-  if (typeof candidate !== "number") {
-    throw new Error(`Missing maxLength for genetics contract property "${propertyName}".`);
-  }
-
-  return candidate;
-}
+const GENETIC_TITLE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.title;
+const GENETIC_GENE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.gene;
+const GENETIC_INHERITANCE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.inheritance;
+const GENETIC_NOTE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.note;
+const GENETIC_FAMILY_ID_MAX_LENGTH = contractIdMaxLength(ID_PREFIXES.family);
 
 function buildBody(record: {
   gene: string;

@@ -1,21 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/vault-metadata.schema.json",
-  "title": "Healthy Bob Vault Metadata",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "vaultId",
-    "createdAt",
-    "title",
-    "timezone",
-    "idPolicy",
-    "paths",
-    "shards"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.vault.v1"
     },
     "vaultId": {
@@ -38,18 +26,87 @@
     },
     "idPolicy": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "format",
-        "prefixes"
-      ],
       "properties": {
         "format": {
+          "type": "string",
           "const": "prefix_ulid"
         },
         "prefixes": {
           "type": "object",
-          "additionalProperties": false,
+          "properties": {
+            "allergy": {
+              "type": "string",
+              "const": "alg"
+            },
+            "assessment": {
+              "type": "string",
+              "const": "asmt"
+            },
+            "audit": {
+              "type": "string",
+              "const": "aud"
+            },
+            "condition": {
+              "type": "string",
+              "const": "cond"
+            },
+            "document": {
+              "type": "string",
+              "const": "doc"
+            },
+            "event": {
+              "type": "string",
+              "const": "evt"
+            },
+            "experiment": {
+              "type": "string",
+              "const": "exp"
+            },
+            "family": {
+              "type": "string",
+              "const": "fam"
+            },
+            "goal": {
+              "type": "string",
+              "const": "goal"
+            },
+            "meal": {
+              "type": "string",
+              "const": "meal"
+            },
+            "pack": {
+              "type": "string",
+              "const": "pack"
+            },
+            "profileSnapshot": {
+              "type": "string",
+              "const": "psnap"
+            },
+            "provider": {
+              "type": "string",
+              "const": "prov"
+            },
+            "regimen": {
+              "type": "string",
+              "const": "reg"
+            },
+            "sample": {
+              "type": "string",
+              "const": "smp"
+            },
+            "transform": {
+              "type": "string",
+              "const": "xfm"
+            },
+            "variant": {
+              "type": "string",
+              "const": "var"
+            },
+            "vault": {
+              "type": "string",
+              "const": "vault"
+            }
+          },
           "required": [
             "allergy",
             "assessment",
@@ -70,68 +127,99 @@
             "variant",
             "vault"
           ],
-          "properties": {
-            "allergy": {
-              "const": "alg"
-            },
-            "assessment": {
-              "const": "asmt"
-            },
-            "audit": {
-              "const": "aud"
-            },
-            "condition": {
-              "const": "cond"
-            },
-            "document": {
-              "const": "doc"
-            },
-            "event": {
-              "const": "evt"
-            },
-            "experiment": {
-              "const": "exp"
-            },
-            "family": {
-              "const": "fam"
-            },
-            "goal": {
-              "const": "goal"
-            },
-            "meal": {
-              "const": "meal"
-            },
-            "pack": {
-              "const": "pack"
-            },
-            "profileSnapshot": {
-              "const": "psnap"
-            },
-            "provider": {
-              "const": "prov"
-            },
-            "regimen": {
-              "const": "reg"
-            },
-            "sample": {
-              "const": "smp"
-            },
-            "transform": {
-              "const": "xfm"
-            },
-            "variant": {
-              "const": "var"
-            },
-            "vault": {
-              "const": "vault"
-            }
-          }
+          "additionalProperties": false
         }
-      }
+      },
+      "required": [
+        "format",
+        "prefixes"
+      ],
+      "additionalProperties": false
     },
     "paths": {
       "type": "object",
-      "additionalProperties": false,
+      "properties": {
+        "allergiesRoot": {
+          "type": "string",
+          "const": "bank/allergies"
+        },
+        "assessmentLedgerRoot": {
+          "type": "string",
+          "const": "ledger/assessments"
+        },
+        "conditionsRoot": {
+          "type": "string",
+          "const": "bank/conditions"
+        },
+        "coreDocument": {
+          "type": "string",
+          "const": "CORE.md"
+        },
+        "familyRoot": {
+          "type": "string",
+          "const": "bank/family"
+        },
+        "geneticsRoot": {
+          "type": "string",
+          "const": "bank/genetics"
+        },
+        "goalsRoot": {
+          "type": "string",
+          "const": "bank/goals"
+        },
+        "journalRoot": {
+          "type": "string",
+          "const": "journal"
+        },
+        "experimentsRoot": {
+          "type": "string",
+          "const": "bank/experiments"
+        },
+        "profileCurrentDocument": {
+          "type": "string",
+          "const": "bank/profile/current.md"
+        },
+        "profileRoot": {
+          "type": "string",
+          "const": "bank/profile"
+        },
+        "profileSnapshotsRoot": {
+          "type": "string",
+          "const": "ledger/profile-snapshots"
+        },
+        "providersRoot": {
+          "type": "string",
+          "const": "bank/providers"
+        },
+        "rawAssessmentsRoot": {
+          "type": "string",
+          "const": "raw/assessments"
+        },
+        "rawRoot": {
+          "type": "string",
+          "const": "raw"
+        },
+        "eventsRoot": {
+          "type": "string",
+          "const": "ledger/events"
+        },
+        "regimensRoot": {
+          "type": "string",
+          "const": "bank/regimens"
+        },
+        "samplesRoot": {
+          "type": "string",
+          "const": "ledger/samples"
+        },
+        "auditRoot": {
+          "type": "string",
+          "const": "audit"
+        },
+        "exportsRoot": {
+          "type": "string",
+          "const": "exports"
+        }
+      },
       "required": [
         "allergiesRoot",
         "assessmentLedgerRoot",
@@ -154,72 +242,32 @@
         "auditRoot",
         "exportsRoot"
       ],
-      "properties": {
-        "allergiesRoot": {
-          "const": "bank/allergies"
-        },
-        "assessmentLedgerRoot": {
-          "const": "ledger/assessments"
-        },
-        "conditionsRoot": {
-          "const": "bank/conditions"
-        },
-        "coreDocument": {
-          "const": "CORE.md"
-        },
-        "familyRoot": {
-          "const": "bank/family"
-        },
-        "geneticsRoot": {
-          "const": "bank/genetics"
-        },
-        "goalsRoot": {
-          "const": "bank/goals"
-        },
-        "journalRoot": {
-          "const": "journal"
-        },
-        "experimentsRoot": {
-          "const": "bank/experiments"
-        },
-        "profileCurrentDocument": {
-          "const": "bank/profile/current.md"
-        },
-        "profileRoot": {
-          "const": "bank/profile"
-        },
-        "profileSnapshotsRoot": {
-          "const": "ledger/profile-snapshots"
-        },
-        "providersRoot": {
-          "const": "bank/providers"
-        },
-        "rawAssessmentsRoot": {
-          "const": "raw/assessments"
-        },
-        "rawRoot": {
-          "const": "raw"
-        },
-        "eventsRoot": {
-          "const": "ledger/events"
-        },
-        "regimensRoot": {
-          "const": "bank/regimens"
-        },
-        "samplesRoot": {
-          "const": "ledger/samples"
-        },
-        "auditRoot": {
-          "const": "audit"
-        },
-        "exportsRoot": {
-          "const": "exports"
-        }
-      }
+      "additionalProperties": false
     },
     "shards": {
       "type": "object",
-      "additionalProperties": false,
+      "properties": {
+        "assessments": {
+          "type": "string",
+          "const": "ledger/assessments/YYYY/YYYY-MM.jsonl"
+        },
+        "events": {
+          "type": "string",
+          "const": "ledger/events/YYYY/YYYY-MM.jsonl"
+        },
+        "profileSnapshots": {
+          "type": "string",
+          "const": "ledger/profile-snapshots/YYYY/YYYY-MM.jsonl"
+        },
+        "samples": {
+          "type": "string",
+          "const": "ledger/samples/<stream>/YYYY/YYYY-MM.jsonl"
+        },
+        "audit": {
+          "type": "string",
+          "const": "audit/YYYY/YYYY-MM.jsonl"
+        }
+      },
       "required": [
         "assessments",
         "events",
@@ -227,23 +275,20 @@
         "samples",
         "audit"
       ],
-      "properties": {
-        "assessments": {
-          "const": "ledger/assessments/YYYY/YYYY-MM.jsonl"
-        },
-        "events": {
-          "const": "ledger/events/YYYY/YYYY-MM.jsonl"
-        },
-        "profileSnapshots": {
-          "const": "ledger/profile-snapshots/YYYY/YYYY-MM.jsonl"
-        },
-        "samples": {
-          "const": "ledger/samples/<stream>/YYYY/YYYY-MM.jsonl"
-        },
-        "audit": {
-          "const": "audit/YYYY/YYYY-MM.jsonl"
-        }
-      }
+      "additionalProperties": false
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "vaultId",
+    "createdAt",
+    "title",
+    "timezone",
+    "idPolicy",
+    "paths",
+    "shards"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/vault-metadata.schema.json",
+  "title": "Healthy Bob Vault Metadata"
 }

@@ -1,21 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-journal-day.schema.json",
-  "title": "Healthy Bob Journal Day Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "dayKey",
-    "eventIds",
-    "sampleStreams"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.journal-day.v1"
     },
     "docType": {
+      "type": "string",
       "const": "journal_day"
     },
     "dayKey": {
@@ -46,5 +38,15 @@
       },
       "uniqueItems": true
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "dayKey",
+    "eventIds",
+    "sampleStreams"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-journal-day.schema.json",
+  "title": "Healthy Bob Journal Day Frontmatter"
 }

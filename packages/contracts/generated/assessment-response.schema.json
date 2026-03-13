@@ -1,20 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/assessment-response.schema.json",
-  "title": "Healthy Bob Assessment Response",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "id",
-    "assessmentType",
-    "recordedAt",
-    "source",
-    "rawPath",
-    "responses"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.assessment-response.v1"
     },
     "id": {
@@ -39,7 +28,7 @@
     },
     "rawPath": {
       "type": "string",
-      "pattern": "^raw/assessments/[A-Za-z0-9._/-]+/source\\.json$"
+      "pattern": "^raw\\/assessments\\/[A-Za-z0-9._/-]+\\/source\\.json$"
     },
     "title": {
       "type": "string",
@@ -52,7 +41,10 @@
     },
     "responses": {
       "type": "object",
-      "additionalProperties": true
+      "properties": {},
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
     },
     "relatedIds": {
       "type": "array",
@@ -61,6 +53,49 @@
         "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "assessmentType",
+    "recordedAt",
+    "source",
+    "rawPath",
+    "responses"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/assessment-response.schema.json",
+  "title": "Healthy Bob Assessment Response",
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
     }
   }
 }

@@ -1,4 +1,8 @@
-import { familyMemberFrontmatterSchema } from "@healthybob/contracts/schemas";
+import {
+  contractIdMaxLength,
+  FAMILY_MEMBER_LIMITS,
+  ID_PREFIXES,
+} from "@healthybob/contracts";
 
 import { emitAuditRecord } from "../audit.js";
 import { VaultError } from "../errors.js";
@@ -27,48 +31,11 @@ import type {
 import { FAMILY_MEMBER_DOC_TYPE, FAMILY_MEMBER_SCHEMA_VERSION } from "./types.js";
 
 const FAMILY_DIRECTORY = "bank/family";
-const FAMILY_TITLE_MAX_LENGTH = readMaxLength(familyMemberFrontmatterSchema, "title");
-const FAMILY_RELATIONSHIP_MAX_LENGTH = readMaxLength(familyMemberFrontmatterSchema, "relationship");
-const FAMILY_NOTE_MAX_LENGTH = readMaxLength(familyMemberFrontmatterSchema, "note");
-const FAMILY_CONDITION_MAX_LENGTH = readArrayItemMaxLength(familyMemberFrontmatterSchema, "conditions");
-const FAMILY_VARIANT_ID_MAX_LENGTH = 80;
-
-function readSchemaProperty(
-  schema: unknown,
-  propertyName: string,
-): Record<string, unknown> {
-  const properties =
-    typeof schema === "object" && schema !== null && "properties" in schema
-      ? (schema.properties as Record<string, unknown>)
-      : null;
-  const property = properties?.[propertyName];
-
-  if (!property || typeof property !== "object") {
-    throw new Error(`Missing family contract property "${propertyName}".`);
-  }
-
-  return property as Record<string, unknown>;
-}
-
-function readMaxLength(schema: unknown, propertyName: string): number {
-  const candidate = readSchemaProperty(schema, propertyName).maxLength;
-
-  if (typeof candidate !== "number") {
-    throw new Error(`Missing maxLength for family contract property "${propertyName}".`);
-  }
-
-  return candidate;
-}
-
-function readArrayItemMaxLength(schema: unknown, propertyName: string): number {
-  const items = readSchemaProperty(schema, propertyName).items;
-
-  if (!items || typeof items !== "object" || typeof (items as Record<string, unknown>).maxLength !== "number") {
-    throw new Error(`Missing item maxLength for family contract property "${propertyName}".`);
-  }
-
-  return (items as Record<string, unknown>).maxLength as number;
-}
+const FAMILY_TITLE_MAX_LENGTH = FAMILY_MEMBER_LIMITS.title;
+const FAMILY_RELATIONSHIP_MAX_LENGTH = FAMILY_MEMBER_LIMITS.relationship;
+const FAMILY_NOTE_MAX_LENGTH = FAMILY_MEMBER_LIMITS.note;
+const FAMILY_CONDITION_MAX_LENGTH = FAMILY_MEMBER_LIMITS.condition;
+const FAMILY_VARIANT_ID_MAX_LENGTH = contractIdMaxLength(ID_PREFIXES.variant);
 
 function buildBody(record: {
   title: string;

@@ -3,6 +3,7 @@ import {
   assessmentResponseSchema,
   conditionFrontmatterSchema,
   auditRecordSchema,
+  type ContractSchema,
   coreFrontmatterSchema,
   eventRecordSchema,
   experimentFrontmatterSchema,
@@ -13,12 +14,10 @@ import {
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   regimenFrontmatterSchema,
+  safeParseContract,
   sampleRecordSchema,
   vaultMetadataSchema,
-} from "@healthybob/contracts/schemas";
-import { validateAgainstSchema } from "@healthybob/contracts/validate";
-
-import type { JsonSchema } from "@healthybob/contracts/schemas";
+} from "@healthybob/contracts";
 
 import {
   DEFAULT_TIMEZONE,
@@ -78,21 +77,21 @@ interface LoadVaultInput {
 interface ValidateFrontmatterFileInput {
   vaultRoot: string;
   relativePath: string;
-  schema: JsonSchema;
+  schema: ContractSchema;
   code: string;
 }
 
 interface ValidateFrontmatterDirectoryInput {
   vaultRoot: string;
   relativeDirectory: string;
-  schema: JsonSchema;
+  schema: ContractSchema;
   code: string;
 }
 
 interface ValidateJsonlFamilyInput {
   vaultRoot: string;
   relativeDirectory: string;
-  schema: JsonSchema;
+  schema: ContractSchema;
   code: string;
 }
 
@@ -128,15 +127,15 @@ interface ValidateVaultResult {
 }
 
 function assertContractShape<T>(
-  schema: JsonSchema,
+  schema: ContractSchema<T>,
   value: unknown,
   code: string,
   message: string,
 ): asserts value is T {
-  const errors = validateAgainstSchema(schema, value);
+  const result = safeParseContract(schema, value);
 
-  if (errors.length > 0) {
-    throw new VaultError(code, message, { errors });
+  if (!result.success) {
+    throw new VaultError(code, message, { errors: result.errors });
   }
 }
 
@@ -282,10 +281,10 @@ async function validateFrontmatterFile({
   try {
     const content = await readUtf8File(vaultRoot, relativePath);
     const parsed = parseFrontmatterDocument(content);
-    const errors = validateAgainstSchema(schema, parsed.attributes);
+    const result = safeParseContract(schema, parsed.attributes);
 
-    if (errors.length > 0) {
-      return [validationIssue(code, errors.join("; "), relativePath)];
+    if (!result.success) {
+      return [validationIssue(code, result.errors.join("; "), relativePath)];
     }
   } catch (error) {
     return [
@@ -343,10 +342,10 @@ async function validateJsonlFamily({
     });
 
     records.forEach((record: UnknownRecord, index: number) => {
-      const errors = validateAgainstSchema(schema, record);
+      const result = safeParseContract(schema, record);
 
-      if (errors.length > 0) {
-        issues.push(validationIssue(code, `record ${index + 1}: ${errors.join("; ")}`, relativePath));
+      if (!result.success) {
+        issues.push(validationIssue(code, `record ${index + 1}: ${result.errors.join("; ")}`, relativePath));
       }
     });
   }

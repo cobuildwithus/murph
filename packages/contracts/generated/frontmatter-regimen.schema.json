@@ -1,24 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-regimen.schema.json",
-  "title": "Healthy Bob Regimen Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "regimenId",
-    "slug",
-    "title",
-    "kind",
-    "status",
-    "startedOn"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.regimen.v1"
     },
     "docType": {
+      "type": "string",
       "const": "regimen"
     },
     "regimenId": {
@@ -94,5 +83,18 @@
       },
       "uniqueItems": true
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "regimenId",
+    "slug",
+    "title",
+    "kind",
+    "status",
+    "startedOn"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-regimen.schema.json",
+  "title": "Healthy Bob Regimen Frontmatter"
 }

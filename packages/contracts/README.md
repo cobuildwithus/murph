@@ -2,10 +2,10 @@
 
 Owns the frozen vault contracts for the Healthy Bob baseline:
 
-- runtime schema objects
+- canonical Zod schemas and parse helpers
 - TypeScript declarations
 - example records and frontmatter documents
-- generated JSON Schema artifacts under `generated/`
+- derived JSON Schema artifacts under `generated/`
 
 Package-local commands:
 

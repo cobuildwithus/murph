@@ -1,22 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/audit-record.schema.json",
-  "title": "Healthy Bob Audit Record",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "id",
-    "action",
-    "status",
-    "occurredAt",
-    "actor",
-    "commandName",
-    "summary",
-    "changes"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.audit.v1"
     },
     "id": {
@@ -108,15 +95,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "path",
-          "op"
-        ],
         "properties": {
           "path": {
             "type": "string",
-            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+            "pattern": "^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$))[A-Za-z0-9._/-]+$"
           },
           "op": {
             "type": "string",
@@ -127,8 +109,27 @@
               "copy"
             ]
           }
-        }
+        },
+        "required": [
+          "path",
+          "op"
+        ],
+        "additionalProperties": false
       }
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "action",
+    "status",
+    "occurredAt",
+    "actor",
+    "commandName",
+    "summary",
+    "changes"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/audit-record.schema.json",
+  "title": "Healthy Bob Audit Record"
 }

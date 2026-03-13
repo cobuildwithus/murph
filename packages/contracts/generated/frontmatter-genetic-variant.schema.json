@@ -1,22 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-genetic-variant.schema.json",
-  "title": "Healthy Bob Genetic Variant Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "variantId",
-    "slug",
-    "title",
-    "gene"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.genetic-variant.v1"
     },
     "docType": {
+      "type": "string",
       "const": "genetic_variant"
     },
     "variantId": {
@@ -75,5 +66,16 @@
       "minLength": 1,
       "maxLength": 4000
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "variantId",
+    "slug",
+    "title",
+    "gene"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-genetic-variant.schema.json",
+  "title": "Healthy Bob Genetic Variant Frontmatter"
 }

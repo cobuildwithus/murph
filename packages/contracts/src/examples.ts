@@ -15,7 +15,7 @@ import type {
   RegimenFrontmatter,
   SampleRecord,
   VaultMetadata,
-} from "./types.js";
+} from "./zod.js";
 
 type FrontmatterExamples = {
   core: CoreFrontmatter;

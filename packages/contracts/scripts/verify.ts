@@ -4,39 +4,36 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  allergyFrontmatterSchema,
+  assessmentResponseSchema,
+  auditRecordSchema,
+  conditionFrontmatterSchema,
+  coreFrontmatterSchema,
+  type ContractSchema,
   exampleAssessmentResponses,
   exampleAuditRecords,
   exampleEventRecords,
   exampleFrontmatterMarkdown,
   exampleFrontmatterObjects,
   exampleHealthFrontmatterObjects,
-  exampleProfileSnapshots,
-  exampleSampleRecords,
-  exampleVaultMetadata,
-} from "@healthybob/contracts";
-import {
-  allergyFrontmatterSchema,
-  assessmentResponseSchema,
-  auditRecordSchema,
-  conditionFrontmatterSchema,
-  coreFrontmatterSchema,
   eventRecordSchema,
   experimentFrontmatterSchema,
   familyMemberFrontmatterSchema,
   geneticVariantFrontmatterSchema,
   goalFrontmatterSchema,
   journalDayFrontmatterSchema,
+  exampleProfileSnapshots,
+  exampleSampleRecords,
+  exampleVaultMetadata,
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   regimenFrontmatterSchema,
+  safeParseContract,
   sampleRecordSchema,
-  schemaCatalog,
   vaultMetadataSchema,
-} from "@healthybob/contracts/schemas";
-import {
   parseFrontmatterMarkdown,
-  validateAgainstSchema,
-} from "@healthybob/contracts/validate";
+} from "@healthybob/contracts";
+import { schemaCatalog } from "@healthybob/contracts/schemas";
 
 interface PackageJsonShape {
   main?: string;
@@ -55,11 +52,24 @@ const packageDir = path.resolve(__dirname, "../..");
 const generatedDir = path.resolve(__dirname, "../../generated");
 const distDir = path.join(packageDir, "dist");
 
-function assertNoErrors(label: string, schema: Record<string, unknown>, value: unknown): void {
-  const errors = validateAgainstSchema(schema, value);
-  if (errors.length > 0) {
-    throw new Error(`${label} failed validation:\n${errors.join("\n")}`);
+function assertNoErrors(label: string, value: unknown, schema: ContractSchema): void {
+  const result = safeParseContract(schema, value);
+  if (!result.success) {
+    throw new Error(`${label} failed validation:\n${result.errors.join("\n")}`);
   }
+}
+
+function assertHasErrors(
+  label: string,
+  value: unknown,
+  schema: ContractSchema,
+  patterns: RegExp[],
+): void {
+  const result = safeParseContract(schema, value);
+  assert.equal(result.success, false, `${label} unexpectedly passed validation`);
+
+  const joinedErrors = result.errors.join("\n");
+  patterns.forEach((pattern) => assert.match(joinedErrors, pattern, label));
 }
 
 const packageJson = JSON.parse(
@@ -80,6 +90,7 @@ assert.deepEqual(packageJson.exports?.["./schemas"], {
 await assertPathExists(path.join(distDir, "index.js"));
 await assertPathExists(path.join(distDir, "index.d.ts"));
 await assertPathExists(path.join(distDir, "schemas.js"));
+await assertPathExists(path.join(distDir, "zod.js"));
 await assertPathExists(path.join(distDir, "scripts", "generate-json-schema.js"));
 await assertPathExists(path.join(distDir, "scripts", "verify.js"));
 await assertPathMissing(path.join(distDir, "src"));
@@ -94,31 +105,115 @@ for (const [name, sourceSchema] of Object.entries(schemaCatalog)) {
   );
 }
 
-assertNoErrors("vault metadata example", vaultMetadataSchema, exampleVaultMetadata);
-exampleAssessmentResponses.forEach((record, index) =>
-  assertNoErrors(`assessment response example ${index + 1}`, assessmentResponseSchema, record),
+assert.deepEqual(Object.keys(schemaCatalog).sort(), [
+  "assessment-response",
+  "audit-record",
+  "event-record",
+  "frontmatter-allergy",
+  "frontmatter-condition",
+  "frontmatter-core",
+  "frontmatter-experiment",
+  "frontmatter-family-member",
+  "frontmatter-genetic-variant",
+  "frontmatter-goal",
+  "frontmatter-journal-day",
+  "frontmatter-profile-current",
+  "frontmatter-regimen",
+  "profile-snapshot",
+  "sample-record",
+  "vault-metadata",
+]);
+assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 15);
+assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 7);
+assert.equal(
+  (schemaCatalog["frontmatter-core"] as { additionalProperties?: unknown }).additionalProperties,
+  false,
 );
-exampleEventRecords.forEach((record, index) => assertNoErrors(`event example ${index + 1}`, eventRecordSchema, record));
-exampleProfileSnapshots.forEach((record, index) =>
-  assertNoErrors(`profile snapshot example ${index + 1}`, profileSnapshotSchema, record),
+assert.equal(
+  (
+    (schemaCatalog["frontmatter-goal"] as { properties?: Record<string, { type?: unknown }> }).properties
+      ?.priority
+  )?.type,
+  "integer",
 );
-exampleSampleRecords.forEach((record, index) => assertNoErrors(`sample example ${index + 1}`, sampleRecordSchema, record));
-exampleAuditRecords.forEach((record, index) => assertNoErrors(`audit example ${index + 1}`, auditRecordSchema, record));
+assert.equal(
+  (
+    (schemaCatalog["frontmatter-profile-current"] as { properties?: Record<string, { format?: unknown }> }).properties
+      ?.updatedAt
+  )?.format,
+  "date-time",
+);
+assert.equal(
+  (
+    (schemaCatalog["frontmatter-family-member"] as { properties?: Record<string, { maxLength?: unknown }> }).properties
+      ?.title
+  )?.maxLength,
+  160,
+);
+assert.equal(
+  (
+    (schemaCatalog["frontmatter-genetic-variant"] as { properties?: Record<string, { maxLength?: unknown }> }).properties
+      ?.gene
+  )?.maxLength,
+  40,
+);
 
-assertNoErrors("core frontmatter object", coreFrontmatterSchema, exampleFrontmatterObjects.core);
-assertNoErrors("journal day frontmatter object", journalDayFrontmatterSchema, exampleFrontmatterObjects.journalDay);
-assertNoErrors("experiment frontmatter object", experimentFrontmatterSchema, exampleFrontmatterObjects.experiment);
-assertNoErrors("profile current frontmatter object", profileCurrentFrontmatterSchema, exampleHealthFrontmatterObjects.profileCurrent);
-assertNoErrors("goal frontmatter object", goalFrontmatterSchema, exampleHealthFrontmatterObjects.goal);
-assertNoErrors("condition frontmatter object", conditionFrontmatterSchema, exampleHealthFrontmatterObjects.condition);
-assertNoErrors("allergy frontmatter object", allergyFrontmatterSchema, exampleHealthFrontmatterObjects.allergy);
-assertNoErrors("regimen frontmatter object", regimenFrontmatterSchema, exampleHealthFrontmatterObjects.regimen);
-assertNoErrors("family-member frontmatter object", familyMemberFrontmatterSchema, exampleHealthFrontmatterObjects.familyMember);
-assertNoErrors("genetic-variant frontmatter object", geneticVariantFrontmatterSchema, exampleHealthFrontmatterObjects.geneticVariant);
+assertNoErrors("vault metadata example", exampleVaultMetadata, vaultMetadataSchema);
+exampleAssessmentResponses.forEach((record, index) =>
+  assertNoErrors(`assessment response example ${index + 1}`, record, assessmentResponseSchema),
+);
+exampleEventRecords.forEach((record, index) => assertNoErrors(`event example ${index + 1}`, record, eventRecordSchema));
+exampleProfileSnapshots.forEach((record, index) =>
+  assertNoErrors(`profile snapshot example ${index + 1}`, record, profileSnapshotSchema),
+);
+exampleSampleRecords.forEach((record, index) => assertNoErrors(`sample example ${index + 1}`, record, sampleRecordSchema));
+exampleAuditRecords.forEach((record, index) => assertNoErrors(`audit example ${index + 1}`, record, auditRecordSchema));
+
+assertNoErrors("core frontmatter object", exampleFrontmatterObjects.core, coreFrontmatterSchema);
+assertNoErrors("journal day frontmatter object", exampleFrontmatterObjects.journalDay, journalDayFrontmatterSchema);
+assertNoErrors("experiment frontmatter object", exampleFrontmatterObjects.experiment, experimentFrontmatterSchema);
+assertNoErrors("profile current frontmatter object", exampleHealthFrontmatterObjects.profileCurrent, profileCurrentFrontmatterSchema);
+assertNoErrors("goal frontmatter object", exampleHealthFrontmatterObjects.goal, goalFrontmatterSchema);
+assertNoErrors("condition frontmatter object", exampleHealthFrontmatterObjects.condition, conditionFrontmatterSchema);
+assertNoErrors("allergy frontmatter object", exampleHealthFrontmatterObjects.allergy, allergyFrontmatterSchema);
+assertNoErrors("regimen frontmatter object", exampleHealthFrontmatterObjects.regimen, regimenFrontmatterSchema);
+assertNoErrors("family-member frontmatter object", exampleHealthFrontmatterObjects.familyMember, familyMemberFrontmatterSchema);
+assertNoErrors("genetic-variant frontmatter object", exampleHealthFrontmatterObjects.geneticVariant, geneticVariantFrontmatterSchema);
 
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.core), exampleFrontmatterObjects.core);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.journalDay), exampleFrontmatterObjects.journalDay);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.experiment), exampleFrontmatterObjects.experiment);
+
+assertHasErrors(
+  "core frontmatter rejects unexpected keys",
+  {
+    ...exampleFrontmatterObjects.core,
+    unexpected: true,
+  },
+  coreFrontmatterSchema,
+  [/^\$: Unrecognized key/i],
+);
+assertHasErrors(
+  "event validation keeps field paths for discriminated unions",
+  {
+    ...exampleEventRecords[0],
+    kind: "note",
+    note: undefined,
+  },
+  eventRecordSchema,
+  [/^\$\.note:/m],
+);
+assertHasErrors(
+  "event validation rejects duplicate tag arrays",
+  {
+    ...exampleEventRecords[0],
+    kind: "encounter",
+    encounterType: "follow_up",
+    tags: ["repeat", "repeat"],
+  },
+  eventRecordSchema,
+  [/unique array items/i],
+);
 
 console.log(
   [

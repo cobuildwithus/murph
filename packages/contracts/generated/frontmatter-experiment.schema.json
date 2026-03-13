@@ -1,23 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "@healthybob/contracts/frontmatter-experiment.schema.json",
-  "title": "Healthy Bob Experiment Frontmatter",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "docType",
-    "experimentId",
-    "slug",
-    "status",
-    "title",
-    "startedOn"
-  ],
   "properties": {
     "schemaVersion": {
+      "type": "string",
       "const": "hb.frontmatter.experiment.v1"
     },
     "docType": {
+      "type": "string",
       "const": "experiment"
     },
     "experimentId": {
@@ -64,5 +54,17 @@
       },
       "uniqueItems": true
     }
-  }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "experimentId",
+    "slug",
+    "status",
+    "title",
+    "startedOn"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-experiment.schema.json",
+  "title": "Healthy Bob Experiment Frontmatter"
 }

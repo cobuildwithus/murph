@@ -1,5 +1,6 @@
 import { CONTRACT_ID_FORMAT, ID_PREFIXES } from "./constants.js";
 
+export const ULID_BODY_LENGTH = 26 as const;
 export const ULID_BODY_PATTERN = "[0-9A-HJKMNP-TV-Z]{26}" as const;
 export const ULID_BODY_REGEX = new RegExp(`^${ULID_BODY_PATTERN}$`);
 export const GENERIC_CONTRACT_ID_PATTERN = `^(?:${Object.values(ID_PREFIXES).join("|")})_${ULID_BODY_PATTERN}$`;
@@ -7,6 +8,10 @@ export const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN)
 
 export function idPattern(prefix: string): string {
   return `^${prefix}_${ULID_BODY_PATTERN}$`;
+}
+
+export function contractIdMaxLength(prefix: string): number {
+  return prefix.length + 1 + ULID_BODY_LENGTH;
 }
 
 export function isContractId(value: unknown, prefix?: string): boolean {
