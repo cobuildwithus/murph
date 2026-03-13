@@ -562,7 +562,14 @@ export async function createExperiment({
       );
     }
 
-    const existingAttributes = existingDocument.attributes as unknown as ExperimentFrontmatter;
+    assertContractShape<ExperimentFrontmatter>(
+      experimentFrontmatterSchema,
+      existingDocument.attributes,
+      "HB_FRONTMATTER_INVALID",
+      `Existing experiment "${safeSlug}" failed contract validation.`,
+    );
+
+    const existingAttributes = existingDocument.attributes;
 
     if (
       JSON.stringify(toExperimentComparableAttributes(existingAttributes)) !==

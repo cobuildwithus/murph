@@ -183,7 +183,7 @@ export const exportPackResultSchema = z.object({
 
 export const commandNotesSchema = z.array(z.string().min(1)).optional()
 
-export function successEnvelopeSchema<TData extends z.ZodTypeAny>(data: TData) {
+export function successEnvelopeSchema<TData extends z.ZodType<unknown>>(data: TData) {
   return successEnvelopeMetaSchema.extend({
     data,
     notes: commandNotesSchema,

@@ -21,7 +21,7 @@ export function withBaseOptions<TShape extends z.ZodRawShape>(
 export function defineCommand<
   TArgsSchema extends ObjectSchema,
   TOptionsSchema extends ObjectSchema,
-  TDataSchema extends z.ZodTypeAny,
+  TDataSchema extends z.ZodType<unknown>,
 >(
   spec: WrappedCommandSpec<TArgsSchema, TOptionsSchema, TDataSchema>,
 ) {

@@ -117,7 +117,15 @@ function recordFromParts(attributes: FrontmatterObject, relativePath: string, ma
 }
 
 function buildAttributes(record: GoalRecord): FrontmatterObject {
-  return stripUndefined({
+  const windowAttributes: FrontmatterObject = {
+    startAt: record.window.startAt,
+  };
+
+  if (record.window.targetAt !== undefined) {
+    windowAttributes.targetAt = record.window.targetAt;
+  }
+
+  const attributes: FrontmatterObject = {
     schemaVersion: GOAL_SCHEMA_VERSION,
     docType: GOAL_DOC_TYPE,
     goalId: record.goalId,
@@ -126,15 +134,26 @@ function buildAttributes(record: GoalRecord): FrontmatterObject {
     status: record.status,
     horizon: record.horizon,
     priority: record.priority,
-    window: stripUndefined({
-      startAt: record.window.startAt,
-      targetAt: record.window.targetAt,
-    }) as unknown as FrontmatterObject,
-    parentGoalId: record.parentGoalId,
-    relatedGoalIds: record.relatedGoalIds,
-    relatedExperimentIds: record.relatedExperimentIds,
-    domains: record.domains,
-  }) as FrontmatterObject;
+    window: windowAttributes,
+  };
+
+  if (record.parentGoalId !== undefined) {
+    attributes.parentGoalId = record.parentGoalId;
+  }
+
+  if (record.relatedGoalIds !== undefined) {
+    attributes.relatedGoalIds = record.relatedGoalIds;
+  }
+
+  if (record.relatedExperimentIds !== undefined) {
+    attributes.relatedExperimentIds = record.relatedExperimentIds;
+  }
+
+  if (record.domains !== undefined) {
+    attributes.domains = record.domains;
+  }
+
+  return attributes;
 }
 
 async function loadGoals(vaultRoot: string): Promise<GoalRecord[]> {
@@ -176,31 +195,53 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
     "VAULT_GOAL_CONFLICT",
   );
   const goalId = existingRecord?.goalId ?? normalizedGoalId ?? generateRecordId("goal");
-  const record = ensureGoalLinks(
-    stripUndefined({
-      schemaVersion: GOAL_SCHEMA_VERSION,
-      docType: GOAL_DOC_TYPE,
-      goalId,
-      slug: existingRecord?.slug ?? slug,
-      title,
-      status: optionalEnum(input.status ?? "active", GOAL_STATUSES, "status") ?? "active",
-      horizon: optionalEnum(input.horizon ?? "ongoing", GOAL_HORIZONS, "horizon") ?? "ongoing",
-      priority: normalizePriority(input.priority),
-      window: normalizeGoalWindow(
-        {
-          startAt: input.window?.startAt ?? new Date(),
-          targetAt: input.window?.targetAt,
-        },
-        "window",
-      ),
-      parentGoalId:
-        input.parentGoalId === null ? null : normalizeId(input.parentGoalId, "parentGoalId", "goal"),
-      relatedGoalIds: normalizeRecordIdList(input.relatedGoalIds, "relatedGoalIds", "goal"),
-      relatedExperimentIds: normalizeRecordIdList(input.relatedExperimentIds, "relatedExperimentIds", "exp"),
-      domains: normalizeDomainList(input.domains, "domains"),
-      relativePath: existingRecord?.relativePath ?? `${GOALS_DIRECTORY}/${slug}.md`,
-    }) as GoalRecord,
+  const record: GoalRecord = {
+    schemaVersion: GOAL_SCHEMA_VERSION,
+    docType: GOAL_DOC_TYPE,
+    goalId,
+    slug: existingRecord?.slug ?? slug,
+    title,
+    status: optionalEnum(input.status ?? "active", GOAL_STATUSES, "status") ?? "active",
+    horizon: optionalEnum(input.horizon ?? "ongoing", GOAL_HORIZONS, "horizon") ?? "ongoing",
+    priority: normalizePriority(input.priority),
+    window: normalizeGoalWindow(
+      {
+        startAt: input.window?.startAt ?? new Date(),
+        targetAt: input.window?.targetAt,
+      },
+      "window",
+    ),
+    relativePath: existingRecord?.relativePath ?? `${GOALS_DIRECTORY}/${slug}.md`,
+    markdown: existingRecord?.markdown ?? "",
+  };
+
+  if (input.parentGoalId !== undefined) {
+    record.parentGoalId =
+      input.parentGoalId === null
+        ? null
+        : normalizeId(input.parentGoalId, "parentGoalId", "goal");
+  }
+
+  const relatedGoalIds = normalizeRecordIdList(input.relatedGoalIds, "relatedGoalIds", "goal");
+  if (relatedGoalIds !== undefined) {
+    record.relatedGoalIds = relatedGoalIds;
+  }
+
+  const relatedExperimentIds = normalizeRecordIdList(
+    input.relatedExperimentIds,
+    "relatedExperimentIds",
+    "exp",
   );
+  if (relatedExperimentIds !== undefined) {
+    record.relatedExperimentIds = relatedExperimentIds;
+  }
+
+  const domains = normalizeDomainList(input.domains, "domains");
+  if (domains !== undefined) {
+    record.domains = domains;
+  }
+
+  ensureGoalLinks(record);
   const markdown = stringifyFrontmatterDocument({
     attributes: buildAttributes(record),
     body: buildBody(record),

@@ -1,10 +1,10 @@
 import { z } from 'incur'
 import type {
-  BaseCommandOptions,
   FailureEnvelope,
   OutputFormat,
 } from './vault-cli-contracts.js'
 import {
+  baseCommandOptionsSchema,
   failureEnvelopeSchema,
   successEnvelopeSchema,
 } from './vault-cli-contracts.js'
@@ -33,7 +33,7 @@ export interface SuccessEnvelopeBase<TData> {
 export interface WrappedCommandSpec<
   TArgsSchema extends ObjectSchema,
   TOptionsSchema extends ObjectSchema,
-  TDataSchema extends z.ZodTypeAny,
+  TDataSchema extends z.ZodType<unknown>,
 > {
   command: string
   description: string
@@ -56,12 +56,12 @@ export interface WrappedCommandSpec<
 export interface WrappedCommandDefinition<
   TArgsSchema extends ObjectSchema,
   TOptionsSchema extends ObjectSchema,
-  TDataSchema extends z.ZodTypeAny,
+  TDataSchema extends z.ZodType<unknown>,
 > {
   description: string
   args?: TArgsSchema
   options: TOptionsSchema
-  output: z.ZodTypeAny
+  output: z.ZodType<unknown>
   examples?: WrappedCommandSpec<TArgsSchema, TOptionsSchema, TDataSchema>['examples']
   run(
     context: {
@@ -74,7 +74,7 @@ export interface WrappedCommandDefinition<
 export function wrapCommand<
   TArgsSchema extends ObjectSchema,
   TOptionsSchema extends ObjectSchema,
-  TDataSchema extends z.ZodTypeAny,
+  TDataSchema extends z.ZodType<unknown>,
 >(
   spec: WrappedCommandSpec<TArgsSchema, TOptionsSchema, TDataSchema>,
 ): WrappedCommandDefinition<TArgsSchema, TOptionsSchema, TDataSchema> {
@@ -94,14 +94,13 @@ export function wrapCommand<
       SuccessEnvelopeBase<z.infer<TDataSchema>> | FailureEnvelope
     > {
       const parsedOptions = spec.options.parse(options)
-      const typedOptions = parsedOptions as z.infer<TOptionsSchema> &
-        BaseCommandOptions
+      const baseOptions = baseCommandOptionsSchema.parse(parsedOptions)
       const requestId =
-        typeof typedOptions.requestId === 'string'
-          ? typedOptions.requestId
+        typeof baseOptions.requestId === 'string'
+          ? baseOptions.requestId
           : null
       const format: OutputFormat =
-        typedOptions.format === 'md' ? 'md' : 'json'
+        baseOptions.format === 'md' ? 'md' : 'json'
 
       try {
         const envelope = {
@@ -111,9 +110,9 @@ export function wrapCommand<
           requestId,
           data: await spec.run({
             args,
-            options: typedOptions,
+            options: parsedOptions,
             requestId,
-            vault: typedOptions.vault,
+            vault: baseOptions.vault,
             format,
           }),
         }

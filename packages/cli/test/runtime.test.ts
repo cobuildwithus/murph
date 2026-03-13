@@ -33,6 +33,11 @@ interface FixtureVault {
   }
 }
 
+interface EmptyVaultFixture {
+  vaultRoot: string
+  csvPath: string
+}
+
 const execFileAsync = promisify(execFile)
 const packageDir = fileURLToPath(new URL('../', import.meta.url))
 const repoRoot = path.resolve(packageDir, '../..')
@@ -149,6 +154,86 @@ async function makeFixtureVault(): Promise<FixtureVault> {
     samples,
   }
 }
+
+async function makeEmptyVaultFixture(): Promise<EmptyVaultFixture> {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-test-'))
+  const csvPath = path.join(vaultRoot, 'samples.csv')
+
+  await writeFile(
+    csvPath,
+    [
+      'timestamp,bpm',
+      '2026-03-12T08:00:00Z,61',
+      '2026-03-12T08:01:00Z,63',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+
+  const initResult = await runCli<{
+    created: boolean
+  }>(['init', '--vault', vaultRoot, '--format', 'json'])
+  assert.equal(initResult.ok, true)
+  assert.equal(requireData(initResult).created, true)
+
+  return {
+    vaultRoot,
+    csvPath,
+  }
+}
+
+test.sequential(
+  'importer-backed CLI commands return direct runtime payloads',
+  async () => {
+    const fixture = await makeEmptyVaultFixture()
+
+    try {
+      const document = await runCli<{
+        documentId: string
+        lookupId: string
+        rawFile: string
+      }>([
+        'document',
+        'import',
+        sampleDocumentPath,
+        '--vault',
+        fixture.vaultRoot,
+        '--format',
+        'json',
+      ])
+      assert.equal(document.ok, true)
+      assert.match(requireData(document).documentId, /^doc_/u)
+      assert.match(requireData(document).lookupId, /^evt_/u)
+      assert.equal(requireData(document).rawFile.length > 0, true)
+
+      const samples = await runCli<{
+        lookupIds: string[]
+        ledgerFiles: string[]
+      }>([
+        'samples',
+        'import-csv',
+        fixture.csvPath,
+        '--stream',
+        'heart_rate',
+        '--ts-column',
+        'timestamp',
+        '--value-column',
+        'bpm',
+        '--unit',
+        'bpm',
+        '--vault',
+        fixture.vaultRoot,
+        '--format',
+        'json',
+      ])
+      assert.equal(samples.ok, true)
+      assert.equal(requireData(samples).lookupIds.length, 2)
+      assert.equal(requireData(samples).ledgerFiles.length > 0, true)
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
 
 test.sequential(
   'show enforces non-queryable related ids and accepts returned lookup ids',

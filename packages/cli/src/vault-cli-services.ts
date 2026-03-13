@@ -474,29 +474,29 @@ interface QueryRuntimeModule {
     vaultRoot: string,
     options?: Record<string, unknown>,
   ): Promise<JsonObject[]>
-  showProfile(vaultRoot: string, lookup: string): Promise<object | null>
+  showProfile(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   listProfileSnapshots(
     vaultRoot: string,
     options?: Record<string, unknown>,
-  ): Promise<object[]>
-  showGoal(vaultRoot: string, lookup: string): Promise<object | null>
-  listGoals(vaultRoot: string, options?: Record<string, unknown>): Promise<object[]>
-  showCondition(vaultRoot: string, lookup: string): Promise<object | null>
+  ): Promise<JsonObject[]>
+  showGoal(vaultRoot: string, lookup: string): Promise<JsonObject | null>
+  listGoals(vaultRoot: string, options?: Record<string, unknown>): Promise<JsonObject[]>
+  showCondition(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   listConditions(
     vaultRoot: string,
     options?: Record<string, unknown>,
-  ): Promise<object[]>
-  showAllergy(vaultRoot: string, lookup: string): Promise<object | null>
+  ): Promise<JsonObject[]>
+  showAllergy(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   listAllergies(
     vaultRoot: string,
     options?: Record<string, unknown>,
-  ): Promise<object[]>
-  showRegimen(vaultRoot: string, lookup: string): Promise<object | null>
+  ): Promise<JsonObject[]>
+  showRegimen(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   listRegimens(
     vaultRoot: string,
     options?: Record<string, unknown>,
-  ): Promise<object[]>
-  showHistoryEvent(vaultRoot: string, lookup: string): Promise<object | null>
+  ): Promise<JsonObject[]>
+  showHistoryEvent(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   listHistoryEvents(
     vaultRoot: string,
     options?: {
@@ -506,17 +506,17 @@ interface QueryRuntimeModule {
       limit?: number
       status?: string
     },
-  ): Promise<object[]>
-  showFamilyMember(vaultRoot: string, lookup: string): Promise<object | null>
+  ): Promise<JsonObject[]>
+  showFamilyMember(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   listFamilyMembers(
     vaultRoot: string,
     options?: Record<string, unknown>,
-  ): Promise<object[]>
-  showGeneticVariant(vaultRoot: string, lookup: string): Promise<object | null>
+  ): Promise<JsonObject[]>
+  showGeneticVariant(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   listGeneticVariants(
     vaultRoot: string,
     options?: Record<string, unknown>,
-  ): Promise<object[]>
+  ): Promise<JsonObject[]>
 }
 
 interface IntegratedRuntime {
@@ -689,7 +689,7 @@ function optionalStringArray(value: unknown): string[] | undefined {
   return items.length > 0 ? items : undefined
 }
 
-function asEntityEnvelope<TEntity extends object>(
+function asEntityEnvelope<TEntity extends JsonObject>(
   vault: string,
   entity: TEntity | null,
   notFoundMessage: string,
@@ -700,17 +700,17 @@ function asEntityEnvelope<TEntity extends object>(
 
   return {
     vault,
-    entity: entity as JsonObject,
+    entity,
   }
 }
 
-function asListEnvelope<TEntity extends object>(
+function asListEnvelope<TEntity extends JsonObject>(
   vault: string,
   items: TEntity[],
 ): HealthListEnvelope {
   return {
     vault,
-    items: items.map((item) => item as JsonObject),
+    items,
     count: items.length,
   }
 }
@@ -825,7 +825,11 @@ function buildScaffoldPayload(noun: string) {
 function buildEntityLinks(record: {
   data: JsonObject
 }) {
-  const links = []
+  const links: Array<{
+    id: string
+    kind: string
+    queryable: boolean
+  }> = []
 
   const relatedIds = Array.isArray(record.data.relatedIds)
     ? record.data.relatedIds
@@ -888,12 +892,86 @@ function createRuntimeUnavailableError(
   )
 }
 
+function hasCallableMembers(
+  value: JsonObject,
+  members: string[],
+) {
+  return members.every((member) => typeof value[member] === "function")
+}
+
+function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
+  return (
+    isPlainObject(value) &&
+    Array.isArray(value.REQUIRED_DIRECTORIES) &&
+    hasCallableMembers(value, [
+      "initializeVault",
+      "validateVault",
+      "addMeal",
+      "createExperiment",
+      "ensureJournalDay",
+      "readAssessmentResponse",
+      "projectAssessmentResponse",
+      "appendProfileSnapshot",
+      "rebuildCurrentProfile",
+      "upsertGoal",
+      "upsertCondition",
+      "upsertAllergy",
+      "upsertRegimenItem",
+      "stopRegimenItem",
+      "appendHistoryEvent",
+      "upsertFamilyMember",
+      "upsertGeneticVariant",
+    ])
+  )
+}
+
+function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
+  return (
+    isPlainObject(value) &&
+    hasCallableMembers(value, [
+      "readVault",
+      "lookupRecordById",
+      "listRecords",
+      "buildExportPack",
+      "showAssessment",
+      "listAssessments",
+      "showProfile",
+      "listProfileSnapshots",
+      "showGoal",
+      "listGoals",
+      "showCondition",
+      "listConditions",
+      "showAllergy",
+      "listAllergies",
+      "showRegimen",
+      "listRegimens",
+      "showHistoryEvent",
+      "listHistoryEvents",
+      "showFamilyMember",
+      "listFamilyMembers",
+      "showGeneticVariant",
+      "listGeneticVariants",
+    ])
+  )
+}
+
+function isImportersRuntimeModule(value: unknown): value is ImportersRuntimeModule {
+  return isPlainObject(value) && typeof value.createImporters === "function"
+}
+
 async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
-  if (!integratedRuntimePromise) {
-    integratedRuntimePromise = (async () => {
+  const runtimePromise =
+    integratedRuntimePromise ??
+    (integratedRuntimePromise = (async () => {
       try {
-        const coreModule = await dynamicImport("@healthybob/core") as CoreRuntimeModule
-        const queryModule = await dynamicImport("@healthybob/query") as QueryRuntimeModule
+        const [coreModule, queryModule] = await Promise.all([
+          dynamicImport("@healthybob/core"),
+          dynamicImport("@healthybob/query"),
+        ])
+
+        if (!isCoreRuntimeModule(coreModule) || !isQueryRuntimeModule(queryModule)) {
+          throw new TypeError("Integrated runtime packages did not match the expected module shape.")
+        }
 
         return {
           core: coreModule,
@@ -906,10 +984,9 @@ async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
           error,
         )
       }
-    })()
-  }
+    })())
 
-  return integratedRuntimePromise as Promise<IntegratedRuntime>
+  return runtimePromise
 }
 
 async function loadImporterRuntime(): Promise<ImportersRuntime> {
@@ -918,7 +995,14 @@ async function loadImporterRuntime(): Promise<ImportersRuntime> {
     dynamicImport("@healthybob/importers"),
   ])
 
-  return (importersModule as ImportersRuntimeModule).createImporters({
+  if (!isImportersRuntimeModule(importersModule)) {
+    throw createRuntimeUnavailableError(
+      "importer-backed vault-cli services",
+      new TypeError("Importer runtime package did not match the expected module shape."),
+    )
+  }
+
+  return importersModule.createImporters({
     corePort: core,
   })
 }
@@ -1098,7 +1182,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           vault,
           goalId: String(result.record.goalId),
           lookupId: String(result.record.goalId),
-          path: recordPath({ ...result.record }),
+          path: recordPath(result.record),
           created: Boolean(result.created),
         }
       },
@@ -1123,7 +1207,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           vault,
           conditionId: String(result.record.conditionId),
           lookupId: String(result.record.conditionId),
-          path: recordPath({ ...result.record }),
+          path: recordPath(result.record),
           created: Boolean(result.created),
         }
       },
@@ -1148,7 +1232,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           vault,
           allergyId: String(result.record.allergyId),
           lookupId: String(result.record.allergyId),
-          path: recordPath({ ...result.record }),
+          path: recordPath(result.record),
           created: Boolean(result.created),
         }
       },
@@ -1173,7 +1257,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           vault,
           regimenId: String(result.record.regimenId),
           lookupId: String(result.record.regimenId),
-          path: recordPath({ ...result.record }),
+          path: recordPath(result.record),
           created: Boolean(result.created),
         }
       },
@@ -1240,7 +1324,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           vault,
           familyMemberId: String(result.record.familyMemberId),
           lookupId: String(result.record.familyMemberId),
-          path: recordPath({ ...result.record }),
+          path: recordPath(result.record),
           created: Boolean(result.created),
         }
       },
@@ -1265,7 +1349,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           vault,
           variantId: String(result.record.variantId),
           lookupId: String(result.record.variantId),
-          path: recordPath({ ...result.record }),
+          path: recordPath(result.record),
           created: Boolean(result.created),
         }
       },
@@ -1346,7 +1430,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No profile found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "profile") }
+          return { vault, entity: toHealthShowEntity(entity, "profile") }
         }
 
         if (id.startsWith("asmt_")) {
@@ -1354,7 +1438,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No assessment found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "assessment") }
+          return { vault, entity: toHealthShowEntity(entity, "assessment") }
         }
 
         if (id.startsWith("goal_")) {
@@ -1362,7 +1446,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No goal found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "goal") }
+          return { vault, entity: toHealthShowEntity(entity, "goal") }
         }
 
         if (id.startsWith("cond_")) {
@@ -1370,7 +1454,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No condition found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "condition") }
+          return { vault, entity: toHealthShowEntity(entity, "condition") }
         }
 
         if (id.startsWith("alg_")) {
@@ -1378,7 +1462,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No allergy found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "allergy") }
+          return { vault, entity: toHealthShowEntity(entity, "allergy") }
         }
 
         if (id.startsWith("reg_")) {
@@ -1386,7 +1470,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No regimen found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "regimen") }
+          return { vault, entity: toHealthShowEntity(entity, "regimen") }
         }
 
         if (id.startsWith("fam_")) {
@@ -1394,7 +1478,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No family member found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "family") }
+          return { vault, entity: toHealthShowEntity(entity, "family") }
         }
 
         if (id.startsWith("var_")) {
@@ -1402,7 +1486,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           if (!entity) {
             throw new VaultCliError("not_found", `No genetic variant found for "${id}".`)
           }
-          return { vault, entity: toHealthShowEntity({ ...entity }, "genetics") }
+          return { vault, entity: toHealthShowEntity(entity, "genetics") }
         }
 
         const readModel = await query.readVault(vault)
@@ -1432,7 +1516,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "assessment") {
           const items = (await query.listAssessments(vault, { from: dateFrom, to: dateTo, limit }))
-            .map((record) => toHealthListItem({ ...record }, "assessment"))
+            .map((record) => toHealthListItem(record, "assessment"))
 
           return {
             vault,
@@ -1444,7 +1528,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "profile") {
           const items = (await query.listProfileSnapshots(vault, { from: dateFrom, to: dateTo, limit }))
-            .map((record) => toHealthListItem({ ...record }, "profile"))
+            .map((record) => toHealthListItem(record, "profile"))
 
           return {
             vault,
@@ -1456,7 +1540,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "goal") {
           const items = (await query.listGoals(vault, { limit }))
-            .map((record) => toHealthListItem({ ...record }, "goal"))
+            .map((record) => toHealthListItem(record, "goal"))
 
           return {
             vault,
@@ -1468,7 +1552,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "condition") {
           const items = (await query.listConditions(vault, { limit }))
-            .map((record) => toHealthListItem({ ...record }, "condition"))
+            .map((record) => toHealthListItem(record, "condition"))
 
           return {
             vault,
@@ -1480,7 +1564,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "allergy") {
           const items = (await query.listAllergies(vault, { limit }))
-            .map((record) => toHealthListItem({ ...record }, "allergy"))
+            .map((record) => toHealthListItem(record, "allergy"))
 
           return {
             vault,
@@ -1492,7 +1576,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "regimen") {
           const items = (await query.listRegimens(vault, { limit }))
-            .map((record) => toHealthListItem({ ...record }, "regimen"))
+            .map((record) => toHealthListItem(record, "regimen"))
 
           return {
             vault,
@@ -1504,7 +1588,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "family") {
           const items = (await query.listFamilyMembers(vault, { limit }))
-            .map((record) => toHealthListItem({ ...record }, "family"))
+            .map((record) => toHealthListItem(record, "family"))
 
           return {
             vault,
@@ -1516,7 +1600,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind === "genetics") {
           const items = (await query.listGeneticVariants(vault, { limit }))
-            .map((record) => toHealthListItem({ ...record }, "genetics"))
+            .map((record) => toHealthListItem(record, "genetics"))
 
           return {
             vault,
@@ -1528,7 +1612,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
 
         if (kind && ["encounter", "procedure", "test", "adverse_effect", "exposure"].includes(kind)) {
           const items = (await query.listHistoryEvents(vault, { kind, from: dateFrom, to: dateTo, limit }))
-            .map((record) => toHealthListItem({ ...record }, "history"))
+            .map((record) => toHealthListItem(record, "history"))
 
           return {
             vault,
