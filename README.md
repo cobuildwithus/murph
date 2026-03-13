@@ -2,7 +2,7 @@
 
 Healthy Bob is a file-native health vault. It keeps human-reviewable truth in Markdown, machine-readable truth in append-only JSONL ledgers, and exposes a typed `vault-cli` surface over a shared TypeScript workspace.
 
-This repo is not just a docs scaffold anymore. The workspace packages build, the core write paths execute, the query layer reads real vault data, the CLI runs through the built package, and repo checks verify the current command surface plus deterministic fixtures.
+The workspace includes buildable packages for contracts, core mutations, importer adapters, query and export helpers, and the CLI, along with deterministic fixtures and repo-level verification.
 
 ## What Healthy Bob Is
 
@@ -237,7 +237,7 @@ These are derived outputs. They summarize a date range and optional experiment s
 
 ## Fixtures And Smoke Coverage
 
-The repo uses deterministic fixtures instead of hand-wavy examples:
+The repo uses deterministic fixtures rather than informal examples:
 
 - `fixtures/minimal-vault/`
   smallest human-reviewable vault scaffold for smoke expectations
