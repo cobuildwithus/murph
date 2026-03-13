@@ -1,5 +1,8 @@
 import {
+  commandNounCapabilityByNoun,
   healthEntityDefinitions,
+  type CommandCapability,
+  type CommandCapabilityBundleId,
   type HealthEntityDefinition,
   type HealthEntityKind,
 } from "@healthybob/contracts";
@@ -8,13 +11,18 @@ import type {
   HealthCoreRuntimeMethodName,
   HealthCoreScaffoldServiceMethodName,
   HealthCoreUpsertServiceMethodName,
+  HealthListFilters,
   HealthQueryListServiceMethodName,
   HealthQueryRuntimeListMethodName,
   HealthQueryRuntimeShowMethodName,
   HealthQueryShowServiceMethodName,
   JsonObject,
 } from "./health-cli-method-types.js";
-import { pathSchema } from "./vault-cli-contracts.js";
+import {
+  listItemSchema,
+  pathSchema,
+  showResultSchema,
+} from "./vault-cli-contracts.js";
 
 export type { JsonObject } from "./health-cli-method-types.js";
 
@@ -48,6 +56,8 @@ export interface HealthQueryDescriptor {
 }
 
 export interface HealthEntityCommandDescriptor {
+  additionalCapabilities?: readonly CommandCapability[];
+  capabilityBundles: readonly CommandCapabilityBundleId[];
   commandName: string;
   description: string;
   descriptions: {
@@ -78,6 +88,11 @@ export interface HealthEntityCommandDescriptor {
   };
 }
 
+type HealthEntityCommandDescriptorExtension = Omit<
+  HealthEntityCommandDescriptor,
+  "additionalCapabilities" | "capabilityBundles"
+>;
+
 export interface HealthEntityDescriptor extends HealthEntityDefinition {
   command?: HealthEntityCommandDescriptor;
   core?: HealthCoreDescriptor;
@@ -85,7 +100,7 @@ export interface HealthEntityDescriptor extends HealthEntityDefinition {
 }
 
 interface HealthEntityDescriptorExtension {
-  command?: HealthEntityCommandDescriptor;
+  command?: HealthEntityCommandDescriptorExtension;
   core?: Omit<HealthCoreDescriptor, "payloadTemplate">;
   query?: Omit<
     HealthQueryDescriptor,
@@ -103,15 +118,22 @@ export function createHealthScaffoldResultSchema<TNoun extends string>(noun: TNo
   });
 }
 
-export const healthShowResultSchema = z.object({
-  vault: pathSchema,
-  entity: healthPayloadSchema,
+export const healthShowResultSchema = showResultSchema;
+
+export const healthListFiltersSchema: z.ZodType<HealthListFilters> = z.object({
+  from: z.string().min(1).optional(),
+  to: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  status: z.string().min(1).optional(),
+  limit: z.number().int().positive().max(200).default(50),
 });
 
 export const healthListResultSchema = z.object({
   vault: pathSchema,
-  items: z.array(healthPayloadSchema),
+  filters: healthListFiltersSchema,
+  items: z.array(listItemSchema),
   count: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
 });
 
 const checkedHealthEntityDescriptorExtensions = {
@@ -479,10 +501,17 @@ function buildHealthEntityDescriptor(
   const extension = checkedHealthEntityDescriptorExtensions[
     definition.kind
   ] as HealthEntityDescriptorExtension;
+  const commandCapabilityDefinition = commandNounCapabilityByNoun.get(definition.kind);
 
   return {
     ...definition,
-    command: extension.command,
+    command: extension.command
+      ? {
+          ...extension.command,
+          additionalCapabilities: commandCapabilityDefinition?.additionalCapabilities,
+          capabilityBundles: commandCapabilityDefinition?.bundles ?? [],
+        }
+      : undefined,
     core: extension.core
       ? {
           ...extension.core,

@@ -190,10 +190,12 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 
 The repo also includes local-first inbox parser controls:
 
-- `vault-cli inbox bootstrap --vault <path>` initializes `.runtime/inboxd`, optionally rebuilds from raw inbox envelopes, and writes parser toolchain config in one step
+- `vault-cli inbox bootstrap --vault <path> [--strict]` initializes `.runtime/inboxd`, writes parser toolchain config, runs doctor, and can fail when explicitly configured parser tools are still unavailable
 - `vault-cli inbox setup --vault <path>` writes parser toolchain config under `.runtime/parsers/toolchain.json`
 - `vault-cli inbox doctor --vault <path>` reports connector readiness plus discovered parser-toolchain availability
 - `vault-cli inbox parse --vault <path> [--captureId <captureId>] [--limit <n>]` drains queued attachment parse jobs
+- `vault-cli inbox backfill --vault <path> --source <id> [--parse]` stays queue-first by default and only drains parser work during historical imports when you opt in
+- `vault-cli inbox run --vault <path>` runs the foreground daemon and auto-drains parser jobs for new captures
 - `vault-cli inbox requeue --vault <path> [--captureId <captureId>] [--attachmentId <attachmentId>] [--state failed|running]` resets failed or interrupted jobs back to pending
 - `vault-cli inbox attachment list|show|show-status|parse|reparse` exposes attachment-level inspection plus single-attachment parser control
 - `vault-cli inbox promote meal|journal|experiment-note` exposes implemented promotion flows for deterministic meal, journal, and experiment-note follow-ups
@@ -216,14 +218,33 @@ The repo also includes a larger health-record surface:
 - `vault-cli genetics scaffold|upsert|show|list`
 - `vault-cli history scaffold|upsert|show|list`
 
-The noun-oriented commands follow one payload-first grammar:
+The noun-oriented surface is organized around capability bundles:
 
-- `scaffold` emits a template payload
-- `upsert --input @file.json` writes one canonical record from a JSON payload
-- `show` and `list` read through the query layer
-- `history list` also exposes `--kind`, `--from`, and `--to`; `profile list` exposes `--from` and `--to`
-- `profile current rebuild` derives `bank/profile/current.md` from the latest accepted snapshot
-- `regimen stop` updates a regimen while preserving its canonical id
+- `readable`: `show | list`
+- `payloadCrud`: `scaffold | upsert | show | list`
+- `artifactImport`: `import | show | list | manifest`
+- `batchInspection`: `batch show | batch list`
+- `lifecycle`: `create | show | list | update | checkpoint | stop`
+- `dateAddressedDoc`: `ensure | show | list | append | link | unlink`
+- `derivedAdmin`: `stats | paths | rebuild | materialize | prune | validate`
+- `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote`
+
+Nouns are compositions of those bundles rather than a shared grammar plus exceptions:
+
+- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `provider`, and `event` are payload-CRUD nouns
+- `profile` is payload CRUD plus `rebuild`
+- `regimen` is payload CRUD plus `stop`
+- `document` and `meal` are artifact-import nouns
+- `intake` is artifact import plus `raw` and `project`
+- `samples` is artifact import plus batch inspection
+- `experiment` is lifecycle
+- `journal` is date-addressed doc
+- `vault` is readable plus derived/admin, with `update` as metadata mutation
+- `export` is readable plus derived/admin
+- `audit` is readable plus `tail`
+- `inbox` is runtime control
+
+Noun-specific filters still exist where the underlying records justify them: `history list` adds `--kind`, `--from`, and `--to`; `profile list` exposes `--from` and `--to`; registry-backed nouns may also expose `--status`.
 
 ## Local Inbox Parser Bootstrap
 
@@ -233,9 +254,9 @@ For a local-first parser setup, the repo exposes one bootstrap command:
 pnpm setup:inbox -- --vault ./vault
 ```
 
-That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime and parser toolchain config are created without hand-editing runtime files. External tools such as `ffmpeg`, `pdftotext`, `whisper.cpp`, and PaddleOCR still need to be installed through your OS or environment.
+That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. External tools such as `ffmpeg`, `pdftotext`, `whisper.cpp`, and PaddleOCR still need to be installed through your OS or environment.
 
-For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so new captures automatically drain their attachment parse jobs without a separate manual worker step.
+For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so pending parser jobs drain once on startup and new captures continue auto-draining without a separate manual worker step.
 
 ## Lookup Rules That Matter
 

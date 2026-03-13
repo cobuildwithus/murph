@@ -76,7 +76,7 @@ vault-cli intake raw <assessmentId> --vault <path> [--format json|md] [--request
 vault-cli intake project <assessmentId> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli profile current rebuild --vault <path> [--format json|md] [--request-id <id>]
 vault-cli regimen stop <regimenId> --vault <path> [--stopped-on <date>] [--format json|md] [--request-id <id>]
-vault-cli inbox bootstrap --vault <path> [--rebuild] [--ffmpegCommand <command>] [--pdftotextCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--paddleocrCommand <command>] [--format json|md] [--request-id <id>]
+vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--pdftotextCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--paddleocrCommand <command>] [--format json|md] [--request-id <id>]
 vault-cli inbox attachment list <captureId> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli inbox attachment show <attachmentId> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli inbox attachment show-status <attachmentId> --vault <path> [--format json|md] [--request-id <id>]
@@ -87,30 +87,39 @@ vault-cli inbox promote journal <captureId> --vault <path> [--format json|md] [-
 vault-cli inbox promote experiment-note <captureId> --vault <path> [--format json|md] [--request-id <id>]
 ```
 
-## Health Noun Grammar
+## Capability Bundles
 
-Health nouns use one payload-first grammar with only a few explicit exceptions:
+The command surface is described by reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared noun-to-capability map lives in `packages/contracts/src/command-capabilities.ts`.
 
-```text
-vault-cli <noun> scaffold --vault <path> [--format json|md] [--request-id <id>]
-vault-cli <noun> upsert --vault <path> --input @file.json [--format json|md] [--request-id <id>]
-vault-cli <noun> show <id|current> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli <noun> list --vault <path> [--limit <n>] [--format json|md] [--request-id <id>]
-```
+- `readable`: `show | list`
+- `payloadCrud`: `scaffold | upsert | show | list`
+- `artifactImport`: `import | show | list | manifest`
+- `batchInspection`: `batch show | batch list`
+- `lifecycle`: `create | show | list | update | checkpoint | stop`
+- `dateAddressedDoc`: `ensure | show | list | append | link | unlink`
+- `derivedAdmin`: `stats | paths | rebuild | materialize | prune | validate`
+- `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote`
 
-- `scaffold` emits a template payload.
-- `upsert --input @file.json` writes one canonical record from a JSON payload.
-- `show` and `list` read through the query layer or noun-specific read helpers.
-- `profile current rebuild` derives `bank/profile/current.md` from the latest accepted snapshot.
-- `regimen stop` updates a regimen while preserving its canonical id.
-- `provider` mirrors the registry-noun grammar explicitly because providers live in `bank/providers/` and support follow-up reads by `prov_*` id or slug.
-- `event` is the generic write/read surface for the non-specialized event kinds only, with `event scaffold` taking `--kind <kind>` and `event show` resolving `evt_*`.
-- `inbox attachment list`, `inbox attachment show`, `inbox attachment show-status`, `inbox attachment parse`, and `inbox attachment reparse` form the attachment-level inspection and parser-control surface for `.runtime` plus `derived/inbox/**`.
-- `inbox promote meal`, `inbox promote journal`, and `inbox promote experiment-note` are implemented promotion flows. `experiment-note` appends an idempotent note block when the vault state yields one deterministic target experiment and otherwise returns an explicit target-selection error.
+## Noun Composition
 
-Registry nouns may also expose `--status <status>` where the underlying record family has a meaningful status field. `profile list` exposes `--from` and `--to` instead. `history list` adds `--kind`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity.
+- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `provider`, and `event` are payload-CRUD nouns.
+- `profile` is primarily payload CRUD and also exposes `rebuild` for the derived current-profile view.
+- `regimen` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
+- `document` and `meal` are artifact-import nouns.
+- `intake` is an artifact-import noun that also exposes `raw` and `project`.
+- `samples` composes artifact import with batch inspection.
+- `experiment` is a lifecycle noun.
+- `journal` is a date-addressed document noun.
+- `vault` composes readable and derived/admin capabilities, plus `update` for metadata mutation.
+- `export` composes readable and derived/admin capabilities.
+- `audit` is a readable noun with `tail` as its stream-style follow-up.
+- `inbox` is a runtime-control noun, including attachment inspection and deterministic promotion flows.
 
-Frozen health nouns:
+These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
+
+Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, and similar registry nouns may expose `--status <status>`. `profile list` exposes `--from` and `--to`. `history list` adds `--kind`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity.
+
+Frozen health nouns remain:
 
 - `profile`
 - `goal`
