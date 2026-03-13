@@ -13,6 +13,7 @@ export default defineConfig({
       "packages/query/test/query.test.ts",
       "packages/cli/test/health-tail.test.ts",
       "packages/cli/test/incur-smoke.test.ts",
+      "packages/cli/test/list-cursor-compat.test.ts",
       "packages/cli/test/runtime.test.ts",
       "packages/cli/test/search-runtime.test.ts",
       "packages/cli/test/release-script-coverage-audit.test.ts",

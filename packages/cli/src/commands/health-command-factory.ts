@@ -1,7 +1,6 @@
 import { Cli, z } from 'incur'
 import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
-
-export const healthPayloadSchema = z.record(z.string(), z.unknown())
+export { healthPayloadSchema } from '../health-cli-descriptors.js'
 
 export const inputFileOptionSchema = z
   .string()
@@ -12,7 +11,11 @@ export function normalizeInputFileOption(input: string) {
   return input.slice(1)
 }
 
-const cursorOptionSchema = z.string().min(1).optional()
+const cursorOptionSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe('Reserved for future pagination support. Accepted for compatibility but ignored today.')
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const statusOptionSchema = z.string().min(1).optional()
 
@@ -172,7 +175,7 @@ function upsertHint(config: HealthCrudConfig<any, any, any, any>) {
 function listHint(config: HealthCrudConfig<any, any, any, any>) {
   return (
     config.hints?.list ??
-    'Use --cursor with the previous next-page token and --limit to control pagination.'
+    'Use --limit to cap results. --cursor is accepted for compatibility but ignored until pagination is implemented.'
   )
 }
 
@@ -301,7 +304,6 @@ export function registerHealthCrudCommands<
     output: config.outputs.list,
     async run(context) {
       const listInput: ListCommandContext = {
-        cursor: context.options.cursor,
         limit: context.options.limit,
         requestId: requestIdFromOptions(context.options),
         vault: context.options.vault,
