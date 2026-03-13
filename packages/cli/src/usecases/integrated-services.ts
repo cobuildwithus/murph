@@ -33,6 +33,42 @@ import {
   toGenericShowEntity,
   toJournalLookupId,
 } from "./shared.js"
+import {
+  listDocuments as listDocumentsUseCase,
+  showDocument as showDocumentUseCase,
+  showDocumentImportManifest as showDocumentImportManifestUseCase,
+} from "./document.js"
+import {
+  addSampleRecordsFromInput,
+  listEventRecords,
+  listProviderRecords,
+  scaffoldEventPayload,
+  scaffoldProviderPayload,
+  showEventRecord,
+  showProviderRecord,
+  upsertEventRecordFromInput,
+  upsertProviderRecordFromInput,
+} from "./provider-event.js"
+import {
+  appendJournalText,
+  checkpointExperimentRecordFromInput,
+  listExperimentRecords,
+  listJournalRecords,
+  showExperimentRecord,
+  showJournalRecord,
+  showVaultPaths as showVaultPathsUseCase,
+  showVaultStats as showVaultStatsUseCase,
+  showVaultSummary as showVaultSummaryUseCase,
+  stopExperimentRecord,
+  updateExperimentRecordFromInput,
+  updateVaultSummary,
+  createExperimentRecord,
+  ensureJournalRecord,
+  linkJournalEventIds,
+  linkJournalStreams,
+  unlinkJournalEventIds,
+  unlinkJournalStreams,
+} from "./experiment-journal-vault.js"
 
 function createIntegratedCoreServices(): CoreWriteServices {
   return {
@@ -87,41 +123,106 @@ function createIntegratedCoreServices(): CoreWriteServices {
     },
     async createExperiment(input: CommandContext & {
       slug: string
+      title?: string
+      hypothesis?: string
+      startedOn?: string
+      status?: string
     }) {
-      const { vault, slug } = input
-      const { core } = await loadIntegratedRuntime()
-      const result = await core.createExperiment({
-        vaultRoot: vault,
-        slug,
-        title: slug,
-      })
-
-      return {
-        vault,
-        experimentId: result.experiment.id,
-        lookupId: result.experiment.id,
-        slug: result.experiment.slug,
-        experimentPath: result.experiment.relativePath,
-        created: result.created ?? true,
-      }
+      return createExperimentRecord(input)
+    },
+    async updateExperiment(input: CommandContext & {
+      inputFile: string
+    }) {
+      return updateExperimentRecordFromInput(input)
+    },
+    async checkpointExperiment(input: CommandContext & {
+      inputFile: string
+    }) {
+      return checkpointExperimentRecordFromInput(input)
+    },
+    async stopExperiment(input: CommandContext & {
+      lookup: string
+      occurredAt?: string
+      note?: string
+    }) {
+      return stopExperimentRecord(input)
     },
     async ensureJournal(input: CommandContext & {
       date: string
     }) {
-      const { vault, date } = input
-      const { core } = await loadIntegratedRuntime()
-      const result = await core.ensureJournalDay({
-        vaultRoot: vault,
-        date,
-      })
-
+      const result = await ensureJournalRecord(input)
       return {
-        vault,
-        date,
-        lookupId: toJournalLookupId(date),
-        journalPath: result.relativePath,
-        created: result.created,
+        ...result,
+        date: input.date,
       }
+    },
+    async appendJournal(input: CommandContext & {
+      date: string
+      text: string
+    }) {
+      return appendJournalText(input)
+    },
+    async linkJournalEvents(input: CommandContext & {
+      date: string
+      eventIds: string[]
+    }) {
+      return linkJournalEventIds(input)
+    },
+    async unlinkJournalEvents(input: CommandContext & {
+      date: string
+      eventIds: string[]
+    }) {
+      return unlinkJournalEventIds(input)
+    },
+    async linkJournalStreams(input: CommandContext & {
+      date: string
+      sampleStreams: string[]
+    }) {
+      return linkJournalStreams(input)
+    },
+    async unlinkJournalStreams(input: CommandContext & {
+      date: string
+      sampleStreams: string[]
+    }) {
+      return unlinkJournalStreams(input)
+    },
+    async scaffoldProvider(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: "provider" as const,
+        payload: scaffoldProviderPayload(),
+      }
+    },
+    async upsertProvider(input: CommandContext & {
+      inputFile: string
+    }) {
+      return upsertProviderRecordFromInput(input)
+    },
+    async scaffoldEvent(input: CommandContext & {
+      kind: string
+    }) {
+      return {
+        vault: input.vault,
+        noun: "event" as const,
+        kind: input.kind,
+        payload: scaffoldEventPayload(input.kind as never),
+      }
+    },
+    async upsertEvent(input: CommandContext & {
+      inputFile: string
+    }) {
+      return upsertEventRecordFromInput(input)
+    },
+    async addSamples(input: CommandContext & {
+      inputFile: string
+    }) {
+      return addSampleRecordsFromInput(input)
+    },
+    async updateVault(input: CommandContext & {
+      title?: string
+      timezone?: string
+    }) {
+      return updateVaultSummary(input)
     },
     async projectAssessment(input: ProjectAssessmentInput) {
       const { vault, assessmentId } = input
@@ -181,11 +282,15 @@ function createIntegratedCoreServices(): CoreWriteServices {
 function createIntegratedImporterServices(): ImporterServices {
   return {
     async importDocument(input) {
-      const { vault, file } = input
+      const { vault, file, title, occurredAt, note, source } = input
       const importers = await loadImporterRuntime()
       const result = await importers.importDocument({
         filePath: file,
         vaultRoot: vault,
+        title,
+        occurredAt,
+        note,
+        source,
       })
 
       return {
@@ -248,6 +353,80 @@ function createIntegratedQueryServices(): QueryServices {
       const { query } = await loadIntegratedRuntime()
       return { query }
     }),
+    async showDocument(input: CommandContext & {
+      id: string
+    }) {
+      return showDocumentUseCase(input)
+    },
+    async listDocuments(input: CommandContext & {
+      from?: string
+      to?: string
+    }) {
+      return listDocumentsUseCase(input)
+    },
+    async showDocumentManifest(input: CommandContext & {
+      id: string
+    }) {
+      return showDocumentImportManifestUseCase(input)
+    },
+    async showProvider(input: CommandContext & {
+      lookup: string
+    }) {
+      return showProviderRecord(input.vault, input.lookup)
+    },
+    async listProviders(input: CommandContext & {
+      status?: string
+      limit: number
+    }) {
+      return listProviderRecords(input)
+    },
+    async showEvent(input: CommandContext & {
+      eventId: string
+    }) {
+      return showEventRecord(input.vault, input.eventId)
+    },
+    async listEvents(input: CommandContext & {
+      kind?: string
+      from?: string
+      to?: string
+      tag?: string
+      experiment?: string
+      limit: number
+    }) {
+      return listEventRecords(input)
+    },
+    async showExperiment(input: CommandContext & {
+      lookup: string
+    }) {
+      return showExperimentRecord(input.vault, input.lookup)
+    },
+    async listExperiments(input: CommandContext & {
+      status?: string
+      limit: number
+    }) {
+      return listExperimentRecords(input)
+    },
+    async showJournal(input: CommandContext & {
+      date: string
+    }) {
+      return showJournalRecord(input.vault, input.date)
+    },
+    async listJournals(input: CommandContext & {
+      from?: string
+      to?: string
+      limit: number
+    }) {
+      return listJournalRecords(input)
+    },
+    async showVault(input: CommandContext) {
+      return showVaultSummaryUseCase(input.vault)
+    },
+    async showVaultPaths(input: CommandContext) {
+      return showVaultPathsUseCase(input.vault)
+    },
+    async showVaultStats(input: CommandContext) {
+      return showVaultStatsUseCase(input.vault)
+    },
     async show(input: CommandContext & {
       id: string
     }) {
@@ -281,25 +460,25 @@ function createIntegratedQueryServices(): QueryServices {
         status,
         stream,
         experiment,
-        dateFrom,
-        dateTo,
+        from,
+        to,
         tag,
         limit,
       } = input
       const { query } = await loadIntegratedRuntime()
       const readModel = await query.readVault(vault)
-      const recordTypes = parseCsvOption(recordType)
-      const streams = parseCsvOption(stream)
-      const tags = parseCsvOption(tag)
+      const recordTypes = normalizeRepeatedOption(recordType)
+      const streams = normalizeRepeatedOption(stream)
+      const tags = normalizeRepeatedOption(tag)
       const items = query
         .listEntities(readModel, {
           families: recordTypes.length > 0 ? recordTypes : undefined,
           statuses: status ? [status] : undefined,
           streams: streams.length > 0 ? streams : undefined,
           experimentSlug: experiment,
-          from: dateFrom,
+          from,
           tags: tags.length > 0 ? tags : undefined,
-          to: dateTo,
+          to,
         })
         .filter((entity) => matchesGenericKindFilter(entity, kind))
         .slice(0, limit)
@@ -308,14 +487,14 @@ function createIntegratedQueryServices(): QueryServices {
       return {
         vault,
         filters: {
-          recordType,
+          recordType: recordTypes,
           kind,
           status,
-          stream,
+          stream: streams,
           experiment,
-          dateFrom,
-          dateTo,
-          tag,
+          from,
+          to,
+          tag: tags,
           limit,
         },
         items,
@@ -337,6 +516,8 @@ function createIntegratedQueryServices(): QueryServices {
         experimentSlug: experiment,
       })
 
+      await materializeExportPack(vault, pack.files)
+
       if (out) {
         await materializeExportPack(out, pack.files)
       }
@@ -354,15 +535,14 @@ function createIntegratedQueryServices(): QueryServices {
   } satisfies QueryServices
 }
 
-function parseCsvOption(value: string | undefined): string[] {
-  if (typeof value !== 'string') {
+function normalizeRepeatedOption(value: string[] | undefined): string[] {
+  if (!Array.isArray(value)) {
     return []
   }
 
   return [
     ...new Set(
       value
-        .split(',')
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0),
     ),
@@ -384,7 +564,21 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
       validate: createUnwiredMethod("core.validate"),
       addMeal: createUnwiredMethod("core.addMeal"),
       createExperiment: createUnwiredMethod("core.createExperiment"),
+      updateExperiment: createUnwiredMethod("core.updateExperiment"),
+      checkpointExperiment: createUnwiredMethod("core.checkpointExperiment"),
+      stopExperiment: createUnwiredMethod("core.stopExperiment"),
       ensureJournal: createUnwiredMethod("core.ensureJournal"),
+      appendJournal: createUnwiredMethod("core.appendJournal"),
+      linkJournalEvents: createUnwiredMethod("core.linkJournalEvents"),
+      unlinkJournalEvents: createUnwiredMethod("core.unlinkJournalEvents"),
+      linkJournalStreams: createUnwiredMethod("core.linkJournalStreams"),
+      unlinkJournalStreams: createUnwiredMethod("core.unlinkJournalStreams"),
+      scaffoldProvider: createUnwiredMethod("core.scaffoldProvider"),
+      upsertProvider: createUnwiredMethod("core.upsertProvider"),
+      scaffoldEvent: createUnwiredMethod("core.scaffoldEvent"),
+      upsertEvent: createUnwiredMethod("core.upsertEvent"),
+      addSamples: createUnwiredMethod("core.addSamples"),
+      updateVault: createUnwiredMethod("core.updateVault"),
       projectAssessment: createUnwiredMethod("core.projectAssessment"),
       ...createUnwiredHealthMethodSet(healthCoreServiceMethodNames, "core"),
       rebuildCurrentProfile: createUnwiredMethod("core.rebuildCurrentProfile"),
@@ -396,6 +590,20 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
       importAssessmentResponse: createUnwiredMethod("importers.importAssessmentResponse"),
     } satisfies ImporterServices,
     query: {
+      showDocument: createUnwiredMethod("query.showDocument"),
+      listDocuments: createUnwiredMethod("query.listDocuments"),
+      showDocumentManifest: createUnwiredMethod("query.showDocumentManifest"),
+      showProvider: createUnwiredMethod("query.showProvider"),
+      listProviders: createUnwiredMethod("query.listProviders"),
+      showEvent: createUnwiredMethod("query.showEvent"),
+      listEvents: createUnwiredMethod("query.listEvents"),
+      showExperiment: createUnwiredMethod("query.showExperiment"),
+      listExperiments: createUnwiredMethod("query.listExperiments"),
+      showJournal: createUnwiredMethod("query.showJournal"),
+      listJournals: createUnwiredMethod("query.listJournals"),
+      showVault: createUnwiredMethod("query.showVault"),
+      showVaultPaths: createUnwiredMethod("query.showVaultPaths"),
+      showVaultStats: createUnwiredMethod("query.showVaultStats"),
       show: createUnwiredMethod("query.show"),
       list: createUnwiredMethod("query.list"),
       exportPack: createUnwiredMethod("query.exportPack"),

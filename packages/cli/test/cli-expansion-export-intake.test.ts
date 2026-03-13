@@ -7,9 +7,13 @@ import { buildExportPack, readVault } from '@healthybob/query'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerExportCommands } from '../src/commands/export.js'
+import { showStoredExportPack } from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
 import { materializeExportPack } from '../src/usecases/shared.js'
-import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
+import {
+  createIntegratedVaultCliServices,
+  createUnwiredVaultCliServices,
+} from '../src/vault-cli-services.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -198,7 +202,85 @@ test.sequential(
 )
 
 test.sequential(
-  'export show/list/materialize/prune operate on stored pack manifests under exports/packs',
+  'export pack create stores the pack under the vault even without --out',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-vault-'))
+
+    try {
+      await initializeVault({ vaultRoot })
+
+      const services = createIntegratedVaultCliServices()
+      const packResult = await services.query.exportPack({
+        vault: vaultRoot,
+        requestId: 'test-export-pack-vault-only',
+        from: '2026-03-10',
+        to: '2026-03-12',
+      })
+
+      assert.equal(packResult.outDir, null)
+      assert.ok(packResult.packId.length > 0)
+      assert.equal(packResult.files.length, 5)
+
+      for (const relativePath of packResult.files) {
+        await access(path.join(vaultRoot, relativePath))
+      }
+
+      const showResult = await showStoredExportPack(vaultRoot, packResult.packId)
+
+      assert.equal(showResult.packId, packResult.packId)
+      assert.equal(
+        showResult.manifestFile,
+        `exports/packs/${packResult.packId}/manifest.json`,
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'export pack create stores the pack under the vault and treats --out as an additional copy target',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-out-'))
+
+    try {
+      await initializeVault({ vaultRoot })
+
+      const services = createIntegratedVaultCliServices()
+      const packResult = await services.query.exportPack({
+        vault: vaultRoot,
+        requestId: 'test-export-pack',
+        from: '2026-03-10',
+        to: '2026-03-12',
+        out: outRoot,
+      })
+
+      assert.equal(packResult.outDir, outRoot)
+      assert.ok(packResult.packId.length > 0)
+      assert.equal(packResult.files.length, 5)
+
+      for (const relativePath of packResult.files) {
+        await access(path.join(vaultRoot, relativePath))
+        await access(path.join(outRoot, relativePath))
+      }
+
+      const showResult = await showStoredExportPack(vaultRoot, packResult.packId)
+
+      assert.equal(showResult.packId, packResult.packId)
+      assert.equal(
+        showResult.manifestFile,
+        `exports/packs/${packResult.packId}/manifest.json`,
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+      await rm(outRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'export pack show/list/materialize/prune operate on stored pack manifests under exports/packs',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-'))
     const outRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-out-'))
@@ -236,6 +318,7 @@ test.sequential(
         }
       }>([
         'export',
+        'pack',
         'show',
         'focus-pack',
         '--vault',
@@ -256,6 +339,7 @@ test.sequential(
         }>
       }>([
         'export',
+        'pack',
         'list',
         '--vault',
         vaultRoot,
@@ -272,6 +356,7 @@ test.sequential(
         files: string[]
       }>([
         'export',
+        'pack',
         'materialize',
         'focus-pack',
         '--vault',
@@ -286,6 +371,7 @@ test.sequential(
         pruned: boolean
       }>([
         'export',
+        'pack',
         'prune',
         'focus-pack',
         '--vault',
@@ -293,7 +379,7 @@ test.sequential(
       ])
 
       assert.equal(showResult.ok, true)
-      assert.equal(showResult.meta?.command, 'export show')
+      assert.equal(showResult.meta?.command, 'export pack show')
       assert.equal(requireData(showResult).packId, 'focus-pack')
       assert.equal(requireData(showResult).basePath, 'exports/packs/focus-pack')
       assert.equal(
@@ -326,7 +412,7 @@ test.sequential(
       assert.equal(requireData(listResult).items[0]?.fileCount, pack.files.length)
 
       assert.equal(materializeResult.ok, true)
-      assert.equal(materializeResult.meta?.command, 'export materialize')
+      assert.equal(materializeResult.meta?.command, 'export pack materialize')
       assert.equal(requireData(materializeResult).packId, 'focus-pack')
       assert.equal(requireData(materializeResult).outDir, outRoot)
       assert.equal(requireData(materializeResult).rebuilt, false)
@@ -340,7 +426,7 @@ test.sequential(
       assert.equal(copiedManifest.packId, 'focus-pack')
 
       assert.equal(pruneResult.ok, true)
-      assert.equal(pruneResult.meta?.command, 'export prune')
+      assert.equal(pruneResult.meta?.command, 'export pack prune')
       assert.equal(requireData(pruneResult).packId, 'focus-pack')
       assert.equal(requireData(pruneResult).packDirectory, 'exports/packs/focus-pack')
       assert.equal(requireData(pruneResult).fileCount, pack.files.length)
