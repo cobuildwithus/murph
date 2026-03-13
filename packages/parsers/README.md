@@ -23,3 +23,17 @@ and remote APIs nowhere in the default stack.
 - provider discovery stays explicit and local-first
 - adapters remain thin wrappers around mature open-source tools
 - all modalities normalize into one parse result shape (`text`, `markdown`, `chunks`, `tables`, metadata)
+
+## Integration seams
+
+- `createInboxParserService(...)` wraps scoped drain and requeue flows for an inbox runtime
+- `createParsedInboxPipeline(...)` processes a capture and immediately drains any newly enqueued attachment jobs
+- `runInboxDaemonWithParsers(...)` backfills parser jobs on startup and keeps future captures auto-drained
+
+These helpers keep parsing additive to `@healthybob/inboxd`: raw inbox evidence remains canonical, while parser outputs stay rebuildable under `derived/inbox/**`.
+
+## Toolchain config and discovery
+
+- `writeParserToolchainConfig(...)` persists local command and model-path overrides under `<vault>/.runtime/parsers/toolchain.json`
+- `discoverParserToolchain(...)` reports which local tools are currently available plus where each setting came from
+- `createConfiguredParserRegistry(...)` builds a default registry from the discovered toolchain state

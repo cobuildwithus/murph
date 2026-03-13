@@ -2,7 +2,7 @@
 
 Healthy Bob is a file-native health vault. It keeps human-reviewable truth in Markdown, machine-readable truth in append-only JSONL ledgers, and exposes a typed `vault-cli` surface over a shared TypeScript workspace.
 
-The workspace includes buildable packages for contracts, core mutations, importer adapters, query and export helpers, and the CLI, along with deterministic fixtures and repo-level verification.
+The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, and the CLI, along with deterministic fixtures and repo-level verification.
 
 ## What Healthy Bob Is
 
@@ -23,8 +23,11 @@ The result is a vault that stays inspectable with normal filesystem tools while 
 The current repo implements:
 
 - the frozen baseline vault contracts under `packages/contracts`
+- shared `.runtime` path and SQLite helpers under `packages/runtime-state`
 - canonical write flows in `packages/core`
 - importer adapters for documents, meals, CSV samples, and intake assessments in `packages/importers`
+- source-agnostic inbox ingestion plus runtime indexing in `packages/inboxd`
+- local-first multimedia parsing and derived artifact publication in `packages/parsers`
 - a read model and export-pack builder in `packages/query`
 - a typed `vault-cli` command surface in `packages/cli`
 - deterministic fixtures and smoke manifests under `fixtures/` and `e2e/`
@@ -33,15 +36,19 @@ The repo does not define a deployment target yet. It is currently a local TypeSc
 
 ## Mental Model
 
-Healthy Bob splits the vault into four kinds of state:
+Healthy Bob splits the vault into six kinds of state:
 
 1. Human-readable canonical docs
    `CORE.md`, journal pages, experiments, current profile, goals, conditions, allergies, regimens, family records, and genetics records.
 2. Append-only machine ledgers
    `ledger/events`, `ledger/samples`, `ledger/assessments`, `ledger/profile-snapshots`, and `audit`.
 3. Immutable imported artifacts
-   copied originals under `raw/documents`, `raw/meals`, `raw/samples`, and `raw/assessments`.
-4. Derived exports
+   copied originals under `raw/documents`, `raw/meals`, `raw/samples`, `raw/assessments`, and `raw/inbox`.
+4. Rebuildable parser artifacts
+   normalized outputs under `derived/inbox`.
+5. Local runtime state
+   rebuildable machine-local indexes and config under `.runtime`.
+6. Derived exports
    read-only packs under `exports/packs`.
 
 That means a typical record is not hidden in a database. You can inspect the vault directly, and the package boundaries are designed to keep writes disciplined.
@@ -52,9 +59,10 @@ Every CLI command follows the same shape:
 
 1. `vault-cli` validates arguments and shared options using Incur.
 2. Root middleware normalizes `vault`, `format`, and optional `requestId`.
-3. The handler delegates exactly one boundary call into `core`, `importers`, or `query`.
-4. Write commands copy any raw artifacts first, then create or update canonical Markdown/JSONL state through `core`.
-5. For `--format json`, successful commands return the command-specific payload directly and failures return a direct error object.
+3. The handler delegates exactly one boundary call into `core`, `importers`, `inboxd`, or `query`, with parser-toolchain queue control layered through the inbox CLI services.
+4. Write commands copy raw artifacts first; inbox ingestion flows persist capture evidence under `raw/inbox/...` and enqueue attachment parse jobs in `.runtime/`.
+5. Parser-capable product flows may use `@healthybob/parsers` to drain those jobs and publish only derived artifacts under `derived/inbox/...`.
+6. For `--format json`, successful commands return the command-specific payload directly and failures return a direct error object.
 
 Shared options:
 
@@ -107,11 +115,16 @@ vault/
   raw/meals/YYYY/MM/<mealId>/manifest.json
   raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv
   raw/samples/<stream>/YYYY/MM/<transformId>/manifest.json
+  raw/inbox/<source>/...
+  derived/inbox/<captureId>/attachments/<attachmentId>/...
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
   ledger/profile-snapshots/YYYY/YYYY-MM.jsonl
   ledger/samples/<stream>/YYYY/YYYY-MM.jsonl
   audit/YYYY/YYYY-MM.jsonl
+  .runtime/inboxd.sqlite
+  .runtime/inboxd/
+  .runtime/search.sqlite
   exports/packs/<packId>/
 ```
 
@@ -122,6 +135,8 @@ Important storage rules:
 - each raw import directory gets an immutable `manifest.json` sidecar with checksums and import provenance
 - JSONL ledgers are append-only
 - `bank/profile/current.md` is derived from profile snapshots
+- inbox parser outputs under `derived/inbox/**` are rebuildable and non-canonical
+- `.runtime/**` is local runtime state and may be rebuilt from durable vault files
 - export packs are derived outputs, not canonical records
 
 Schema version policy:
@@ -138,8 +153,11 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | Package | Responsibility |
 | --- | --- |
 | `packages/contracts` | Runtime schemas, TypeScript types, examples, and generated JSON Schema artifacts. |
+| `packages/runtime-state` | Canonical `.runtime` path resolution and shared SQLite defaults for rebuildable local state. |
 | `packages/core` | Canonical vault initialization, filesystem rules, audit emission, raw-copy rules, and all write mutations. |
 | `packages/importers` | Adapters that normalize external inputs and then call `core`. |
+| `packages/inboxd` | Source-agnostic inbox capture, raw evidence persistence, runtime indexing, and attachment parse-job orchestration. |
+| `packages/parsers` | Local-first attachment parsing, provider selection, and derived artifact publication under `derived/inbox/**`. |
 | `packages/query` | Read model assembly, lookups, list filters, summaries, and export-pack generation. |
 | `packages/cli` | The `vault-cli` operator surface, input validation, middleware, and output envelopes. |
 
@@ -164,6 +182,15 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | `vault-cli show <id>` | Resolves one queryable record or document view. |
 | `vault-cli list` | Lists records through the read model with filters. |
 | `vault-cli export pack` | Builds a derived export pack for a date range and optional experiment scope. |
+
+### Inbox + Parser Commands
+
+The repo also includes local-first inbox parser controls:
+
+- `vault-cli inbox setup --vault <path>` writes parser toolchain config under `.runtime/parsers/toolchain.json`
+- `vault-cli inbox doctor --vault <path>` reports connector readiness plus discovered parser-toolchain availability
+- `vault-cli inbox parse --vault <path> [--captureId <captureId>] [--limit <n>]` drains queued attachment parse jobs
+- `vault-cli inbox requeue --vault <path> [--captureId <captureId>] [--attachmentId <attachmentId>] [--state failed|running]` resets failed or interrupted jobs back to pending
 
 ### Health Extension Commands
 
@@ -191,6 +218,18 @@ The noun-oriented commands follow one payload-first grammar:
 - `show` and `list` read through the query layer
 - `profile current rebuild` derives `bank/profile/current.md` from the latest accepted snapshot
 - `regimen stop` updates a regimen while preserving its canonical id
+
+## Local Inbox Parser Bootstrap
+
+For a local-first parser setup, the repo exposes one bootstrap command:
+
+```bash
+pnpm setup:inbox -- --vault ./vault
+```
+
+That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox setup` against the target vault so the parser toolchain config is created without hand-editing runtime files. External tools such as `ffmpeg`, `pdftotext`, `whisper.cpp`, and PaddleOCR still need to be installed through your OS or environment.
+
+For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so new captures automatically drain their attachment parse jobs without a separate manual worker step.
 
 ## Lookup Rules That Matter
 

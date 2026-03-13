@@ -34,6 +34,19 @@ tables, and attachment job state.
 - runtime list, show, and search helpers for future CLI/agent surfaces
 - `vault-cli inbox ...` is the intended human/operator surface layered on top of this package
 
+## Parser-facing runtime operations
+
+The inbox runtime exposes attachment-job primitives that stay safely outside canonical storage:
+
+- `claimNextAttachmentParseJob(...)`
+- `completeAttachmentParseJob(...)`
+- `failAttachmentParseJob(...)`
+- `requeueAttachmentParseJobs(...)`
+
+These methods mutate only inbox-local runtime state such as `.runtime/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
+
+When combined with `@healthybob/parsers`, operators can drive those queues through `vault-cli inbox setup|doctor|parse|requeue` without mixing parser state into canonical health records.
+
 ## iMessage adapter contract
 
 The iMessage connector is optional and macOS-only. `@healthybob/inboxd` keeps
