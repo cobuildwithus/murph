@@ -17,6 +17,9 @@
       "path": "./packages/inboxd"
     },
     {
+      "path": "./packages/parsers"
+    },
+    {
       "path": "./packages/cli"
     }
   ]

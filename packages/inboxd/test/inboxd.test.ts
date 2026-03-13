@@ -27,7 +27,7 @@ async function writeExternalFile(directory: string, fileName: string, content: s
   return filePath;
 }
 
-test("processCapture stores redacted raw evidence, note events, and audit records", async () => {
+test("processCapture stores redacted raw evidence, note events, audit records, and attachment jobs", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-vault");
   const sourceRoot = await makeTempDirectory("healthybob-inbox-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -95,12 +95,20 @@ test("processCapture stores redacted raw evidence, note events, and audit record
   assert.equal(capture.accountId, "self");
   assert.equal(capture.text, "Eggs and toast");
   assert.equal(capture.attachments.length, 1);
+  assert.match(capture.attachments[0]?.attachmentId ?? "", /^att_/u);
+  assert.equal(capture.attachments[0]?.parseState, "pending");
   assert.equal(capture.attachments[0]?.originalPath, null);
   assert.equal(capture.attachments[0]?.storedPath?.startsWith("raw/inbox/imessage/self/"), true);
   assert.equal(capture.raw.localPath, "<REDACTED_PATH>");
   assert.deepEqual(capture.raw.nested, {
     attachmentPath: "<REDACTED_PATH>",
   });
+
+  const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.captureId, first.captureId);
+  assert.equal(jobs[0]?.attachmentId, capture.attachments[0]?.attachmentId);
+  assert.equal(jobs[0]?.state, "pending");
 
   const envelopePath = path.join(vaultRoot, capture.envelopePath);
   const envelope = JSON.parse(await fs.readFile(envelopePath, "utf8")) as {
@@ -111,12 +119,14 @@ test("processCapture stores redacted raw evidence, note events, and audit record
     };
     stored: {
       eventId: string;
+      attachments: Array<{ attachmentId: string }>;
     };
   };
   assert.equal(envelope.eventId, first.eventId);
   assert.equal(envelope.stored.eventId, first.eventId);
   assert.equal(envelope.input.attachments[0]?.originalPath, null);
   assert.equal(envelope.input.raw.localPath, "<REDACTED_PATH>");
+  assert.match(envelope.stored.attachments[0]?.attachmentId ?? "", /^att_/u);
 
   const eventRecords = await readJsonlRecords({
     vaultRoot,
@@ -195,9 +205,72 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.ok(rebuilt);
   assert.equal(rebuilt.text, "Toast with avocado");
   assert.equal(rebuilt.attachments[0]?.fileName, "toast-photo.jpg");
+  assert.equal(
+    rebuilt.attachments[0]?.attachmentId,
+    runtime.getCapture(capture.captureId)?.attachments[0]?.attachmentId,
+  );
 
   pipeline.close();
   rebuiltRuntime.close();
+});
+
+test("completed attachment parse jobs refresh capture search text and attachment metadata", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-parse-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-inbox-parse-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const imagePath = await writeExternalFile(sourceRoot, "lab-result.png", "image");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const capture = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "lab-1",
+    thread: {
+      id: "chat-lab",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T10:00:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: imagePath,
+        fileName: "lab-result.png",
+      },
+    ],
+    raw: {},
+  });
+
+  const pendingJob = runtime.claimNextAttachmentParseJob();
+  assert.ok(pendingJob);
+  assert.equal(runtime.getCapture(capture.captureId)?.attachments[0]?.parseState, "running");
+  runtime.completeAttachmentParseJob({
+    jobId: pendingJob.jobId,
+    providerId: "fake-image-parser",
+    resultPath: "derived/inbox/manifest.json",
+    extractedText: "Glucose 88 mg/dL",
+  });
+
+  const refreshed = runtime.getCapture(capture.captureId);
+  assert.ok(refreshed);
+  assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
+  assert.equal(refreshed.attachments[0]?.parserProviderId, "fake-image-parser");
+  assert.equal(refreshed.attachments[0]?.derivedPath, "derived/inbox/manifest.json");
+  assert.equal(refreshed.attachments[0]?.extractedText, "Glucose 88 mg/dL");
+
+  const hits = runtime.searchCaptures({
+    text: "glucose",
+    limit: 10,
+  });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0]?.captureId, capture.captureId);
+  assert.match(hits[0]?.snippet ?? "", /Glucose 88 mg\/dL/);
+
+  pipeline.close();
 });
 
 test("runtime list and search filters stay scoped across both search branches", async () => {

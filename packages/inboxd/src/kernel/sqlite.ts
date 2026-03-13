@@ -2,9 +2,37 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 
+import type {
+  AttachmentParseJobFilters,
+  AttachmentParseJobRecord,
+  CompleteAttachmentParseJobInput,
+  FailAttachmentParseJobInput,
+} from "../contracts/derived.js";
 import type { InboxCaptureRecord, InboxListFilters, InboxSearchFilters, InboxSearchHit } from "../contracts/search.js";
-import type { InboundCapture, PersistedCapture, StoredAttachment, StoredCapture } from "../contracts/capture.js";
-import { buildFtsQuery, buildSnippet, normalizeAccountKey, redactSensitivePaths } from "../shared.js";
+import type {
+  IndexedAttachment,
+  InboundCapture,
+  PersistedCapture,
+  StoredAttachment,
+  StoredCapture,
+} from "../contracts/capture.js";
+import {
+  buildFtsQuery,
+  buildLegacyAttachmentId,
+  buildSnippet,
+  generatePrefixedId,
+  normalizeAccountKey,
+  normalizeStoredAttachments,
+  redactSensitivePaths,
+} from "../shared.js";
+
+const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
+const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
+  "audio",
+  "document",
+  "image",
+  "video",
+]);
 
 export interface InboxRuntimeStore {
   readonly databasePath: string;
@@ -23,6 +51,10 @@ export interface InboxRuntimeStore {
     stored: StoredCapture;
   }): string;
   enqueueDerivedJobs(input: { captureId: string; stored: StoredCapture }): void;
+  listAttachmentParseJobs(filters?: AttachmentParseJobFilters): AttachmentParseJobRecord[];
+  claimNextAttachmentParseJob(): AttachmentParseJobRecord | null;
+  completeAttachmentParseJob(input: CompleteAttachmentParseJobInput): AttachmentParseJobRecord;
+  failAttachmentParseJob(input: FailAttachmentParseJobInput): AttachmentParseJobRecord;
   listCaptures(filters?: InboxListFilters): InboxCaptureRecord[];
   searchCaptures(filters: InboxSearchFilters): InboxSearchHit[];
   getCapture(captureId: string): InboxCaptureRecord | null;
@@ -80,6 +112,7 @@ export async function openInboxRuntime({
     create table if not exists capture_attachment (
       id integer primary key autoincrement,
       capture_id text not null references capture(capture_id) on delete cascade,
+      attachment_id text,
       ordinal integer not null,
       external_id text,
       kind text not null,
@@ -91,6 +124,10 @@ export async function openInboxRuntime({
       size_bytes integer,
       extracted_text text,
       transcript_text text,
+      derived_path text,
+      parser_provider_id text,
+      parser_state text,
+      parse_updated_at text,
       created_at text not null
     );
 
@@ -114,6 +151,46 @@ export async function openInboxRuntime({
       attachment_text,
       tags
     );
+  `);
+
+  ensureColumn(database, "capture_attachment", "attachment_id", "text");
+  ensureColumn(database, "capture_attachment", "derived_path", "text");
+  ensureColumn(database, "capture_attachment", "parser_provider_id", "text");
+  ensureColumn(database, "capture_attachment", "parser_state", "text");
+  ensureColumn(database, "capture_attachment", "parse_updated_at", "text");
+
+  database.exec(`
+    update capture_attachment
+    set attachment_id = ('att_' || capture_id || '_' || printf('%02d', ordinal))
+    where attachment_id is null or attachment_id = '';
+  `);
+  database.exec(`
+    create unique index if not exists capture_attachment_attachment_id_idx
+    on capture_attachment (attachment_id);
+  `);
+  database.exec(`
+    create table if not exists attachment_parse_job (
+      job_id text primary key,
+      capture_id text not null references capture(capture_id) on delete cascade,
+      attachment_id text not null references capture_attachment(attachment_id) on delete cascade,
+      pipeline text not null,
+      state text not null,
+      attempts integer not null default 0,
+      provider_id text,
+      result_path text,
+      error_code text,
+      error_message text,
+      created_at text not null,
+      started_at text,
+      finished_at text,
+      unique (attachment_id, pipeline)
+    );
+
+    create index if not exists attachment_parse_job_state_idx
+    on attachment_parse_job (state, created_at asc, job_id asc);
+
+    create index if not exists attachment_parse_job_capture_idx
+    on attachment_parse_job (capture_id, attachment_id);
   `);
 
   return createInboxRuntimeStore(database, databasePath);
@@ -197,13 +274,11 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         created_at = excluded.created_at
     `,
   );
-  const deleteCaptureAttachmentsStatement = database.prepare(
-    "delete from capture_attachment where capture_id = ?",
-  );
   const insertAttachmentStatement = database.prepare(
     `
       insert into capture_attachment (
         capture_id,
+        attachment_id,
         ordinal,
         external_id,
         kind,
@@ -213,30 +288,33 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         file_name,
         sha256,
         size_bytes,
-        extracted_text,
-        transcript_text,
         created_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict (attachment_id) do update set
+        capture_id = excluded.capture_id,
+        ordinal = excluded.ordinal,
+        external_id = excluded.external_id,
+        kind = excluded.kind,
+        mime = excluded.mime,
+        original_path = excluded.original_path,
+        stored_path = excluded.stored_path,
+        file_name = excluded.file_name,
+        sha256 = excluded.sha256,
+        size_bytes = excluded.size_bytes
     `,
   );
-  const deleteCaptureFtsStatement = database.prepare("delete from capture_fts where capture_id = ?");
-  const insertCaptureFtsStatement = database.prepare(
+  const insertAttachmentParseJobStatement = database.prepare(
     `
-      insert into capture_fts (
+      insert into attachment_parse_job (
+        job_id,
         capture_id,
-        source,
-        thread_id,
-        text_content,
-        attachment_text,
-        tags
-      ) values (?, ?, ?, ?, ?, ?)
-    `,
-  );
-  const insertDerivedJobStatement = database.prepare(
-    `
-      insert into derived_job (capture_id, kind, state, created_at)
-      values (?, ?, ?, ?)
-      on conflict (capture_id, kind) do nothing
+        attachment_id,
+        pipeline,
+        state,
+        attempts,
+        created_at
+      ) values (?, ?, ?, ?, ?, ?, ?)
+      on conflict (attachment_id, pipeline) do nothing
     `,
   );
   const listCapturesStatement = database.prepare(
@@ -336,6 +414,7 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         input.externalId,
       ) as { capture_id: string } | undefined;
       const effectiveCaptureId = existing?.capture_id ?? captureId;
+      const normalizedAttachments = normalizeStoredAttachments(effectiveCaptureId, stored.attachments);
 
       withTransaction(database, () => {
         upsertCaptureStatement.run(
@@ -358,11 +437,10 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
           stored.storedAt,
         );
 
-        deleteCaptureAttachmentsStatement.run(effectiveCaptureId);
-
-        for (const attachment of stored.attachments) {
+        for (const attachment of normalizedAttachments) {
           insertAttachmentStatement.run(
             effectiveCaptureId,
+            attachment.attachmentId,
             attachment.ordinal,
             normalizeNullable(attachment.externalId),
             attachment.kind,
@@ -372,36 +450,238 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
             normalizeNullable(attachment.fileName),
             normalizeNullable(attachment.sha256),
             attachment.byteSize ?? null,
-            null,
-            null,
             stored.storedAt,
           );
         }
 
-        const attachmentText = stored.attachments
-          .map((attachment) => joinTextValues(attachment.fileName, attachment.mime))
-          .join(" ")
-          .trim();
+        if (normalizedAttachments.length === 0) {
+          database.prepare("delete from capture_attachment where capture_id = ?").run(effectiveCaptureId);
+        } else {
+          const seenIds = normalizedAttachments.map((attachment) => attachment.attachmentId);
+          database
+            .prepare(
+              `
+                delete from capture_attachment
+                where capture_id = ?
+                  and attachment_id not in (${seenIds.map(() => "?").join(", ")})
+              `,
+            )
+            .run(effectiveCaptureId, ...seenIds);
+        }
 
-        deleteCaptureFtsStatement.run(effectiveCaptureId);
-        insertCaptureFtsStatement.run(
-          effectiveCaptureId,
-          input.source,
-          input.thread.id,
-          normalizeNullable(input.text),
-          normalizeNullable(attachmentText),
-          `inbox source-${input.source}`,
-        );
+        refreshCaptureSearchIndex(database, effectiveCaptureId);
       });
 
       return effectiveCaptureId;
     },
     enqueueDerivedJobs({ captureId, stored }) {
-      if (stored.attachments.length === 0) {
+      const normalizedAttachments = normalizeStoredAttachments(captureId, stored.attachments);
+
+      if (normalizedAttachments.length === 0) {
         return;
       }
 
-      insertDerivedJobStatement.run(captureId, "attachment_text", "pending", stored.storedAt);
+      withTransaction(database, () => {
+        for (const attachment of normalizedAttachments) {
+          if (!shouldEnqueueParseJob(attachment)) {
+            continue;
+          }
+
+          const insertResult = insertAttachmentParseJobStatement.run(
+            generatePrefixedId("job"),
+            captureId,
+            attachment.attachmentId,
+            ATTACHMENT_PARSE_PIPELINE,
+            "pending",
+            0,
+            stored.storedAt,
+          );
+
+          if (insertResult.changes > 0) {
+            database
+              .prepare(
+                `
+                  update capture_attachment
+                  set parser_state = 'pending',
+                      parse_updated_at = ?
+                  where attachment_id = ?
+                `,
+              )
+              .run(stored.storedAt, attachment.attachmentId);
+          }
+        }
+      });
+    },
+    listAttachmentParseJobs(filters = {}) {
+      const normalizedCaptureId = normalizeNullable(filters.captureId);
+      const normalizedAttachmentId = normalizeNullable(filters.attachmentId);
+      const normalizedState = normalizeNullable(filters.state);
+      const limit = normalizeLimit(filters.limit, 50);
+
+      const rows = database
+        .prepare(
+          `
+            select *
+            from attachment_parse_job
+            where (? is null or capture_id = ?)
+              and (? is null or attachment_id = ?)
+              and (? is null or state = ?)
+            order by created_at asc, job_id asc
+            limit ?
+          `,
+        )
+        .all(
+          normalizedCaptureId,
+          normalizedCaptureId,
+          normalizedAttachmentId,
+          normalizedAttachmentId,
+          normalizedState,
+          normalizedState,
+          limit,
+        ) as Array<Record<string, unknown>>;
+
+      return decodeAttachmentParseJobRows(rows);
+    },
+    claimNextAttachmentParseJob() {
+      const jobId = withTransaction(database, () => {
+        const row = database
+          .prepare(
+            `
+              select job_id, attachment_id
+              from attachment_parse_job
+              where state = 'pending'
+              order by created_at asc, job_id asc
+              limit 1
+            `,
+          )
+          .get() as { attachment_id?: string; job_id?: string } | undefined;
+
+        if (!row?.job_id || !row.attachment_id) {
+          return null;
+        }
+
+        const startedAt = new Date().toISOString();
+        const updateResult = database
+          .prepare(
+            `
+              update attachment_parse_job
+              set state = 'running',
+                  attempts = attempts + 1,
+                  started_at = ?
+              where job_id = ? and state = 'pending'
+            `,
+          )
+          .run(startedAt, row.job_id);
+
+        if (updateResult.changes === 0) {
+          return null;
+        }
+
+        database
+          .prepare(
+            `
+              update capture_attachment
+              set parser_state = 'running',
+                  parse_updated_at = ?
+              where attachment_id = ?
+            `,
+          )
+          .run(startedAt, row.attachment_id);
+
+        return row.job_id;
+      });
+
+      if (!jobId) {
+        return null;
+      }
+
+      return readAttachmentParseJob(database, jobId);
+    },
+    completeAttachmentParseJob(input) {
+      return withTransaction(database, () => {
+        const job = readAttachmentParseJob(database, input.jobId);
+        const finishedAt = input.finishedAt ?? new Date().toISOString();
+
+        database
+          .prepare(
+            `
+              update attachment_parse_job
+              set state = 'succeeded',
+                  provider_id = ?,
+                  result_path = ?,
+                  error_code = null,
+                  error_message = null,
+                  finished_at = ?
+              where job_id = ?
+            `,
+          )
+          .run(input.providerId, input.resultPath, finishedAt, input.jobId);
+
+        database
+          .prepare(
+            `
+              update capture_attachment
+              set extracted_text = ?,
+                  transcript_text = ?,
+                  derived_path = ?,
+                  parser_provider_id = ?,
+                  parser_state = 'succeeded',
+                  parse_updated_at = ?
+              where attachment_id = ?
+            `,
+          )
+          .run(
+            normalizeNullable(input.extractedText),
+            normalizeNullable(input.transcriptText),
+            input.resultPath,
+            input.providerId,
+            finishedAt,
+            job.attachmentId,
+          );
+
+        refreshCaptureSearchIndex(database, job.captureId);
+        return readAttachmentParseJob(database, input.jobId);
+      });
+    },
+    failAttachmentParseJob(input) {
+      return withTransaction(database, () => {
+        const job = readAttachmentParseJob(database, input.jobId);
+        const finishedAt = input.finishedAt ?? new Date().toISOString();
+
+        database
+          .prepare(
+            `
+              update attachment_parse_job
+              set state = 'failed',
+                  provider_id = ?,
+                  error_code = ?,
+                  error_message = ?,
+                  finished_at = ?
+              where job_id = ?
+            `,
+          )
+          .run(
+            normalizeNullable(input.providerId),
+            normalizeNullable(input.errorCode),
+            input.errorMessage,
+            finishedAt,
+            input.jobId,
+          );
+
+        database
+          .prepare(
+            `
+              update capture_attachment
+              set parser_provider_id = coalesce(?, parser_provider_id),
+                  parser_state = 'failed',
+                  parse_updated_at = ?
+              where attachment_id = ?
+            `,
+          )
+          .run(normalizeNullable(input.providerId), finishedAt, job.attachmentId);
+
+        return readAttachmentParseJob(database, input.jobId);
+      });
     },
     listCaptures(filters = {}) {
       const normalizedFilters = normalizeCaptureFilters(filters);
@@ -467,8 +747,149 @@ interface CaptureRow {
   created_at: string;
 }
 
+interface AttachmentRow {
+  capture_id: string;
+  attachment_id: string | null;
+  ordinal: number;
+  external_id: string | null;
+  kind: StoredAttachment["kind"];
+  mime: string | null;
+  original_path: string | null;
+  stored_path: string | null;
+  file_name: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  extracted_text: string | null;
+  transcript_text: string | null;
+  derived_path: string | null;
+  parser_provider_id: string | null;
+  parser_state: string | null;
+}
+
+interface AttachmentParseJobRow {
+  job_id: string;
+  capture_id: string;
+  attachment_id: string;
+  pipeline: string;
+  state: string;
+  attempts: number;
+  provider_id: string | null;
+  result_path: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+interface SearchRow {
+  capture_id: string;
+  source: string;
+  account_id: string | null;
+  thread_id: string;
+  thread_title: string | null;
+  occurred_at: string;
+  text_content: string | null;
+  envelope_path: string;
+  indexed_text: string | null;
+  indexed_attachment_text: string | null;
+  score: number;
+}
+
 function decodeCaptureRows(rows: ReadonlyArray<Record<string, unknown>>): CaptureRow[] {
   return rows.map(decodeCaptureRow);
+}
+
+function decodeCaptureRow(row: Record<string, unknown>): CaptureRow {
+  return {
+    capture_id: expectString(row.capture_id, "capture.capture_id"),
+    source: expectString(row.source, "capture.source"),
+    account_id: expectNullableString(row.account_id, "capture.account_id"),
+    external_id: expectString(row.external_id, "capture.external_id"),
+    thread_id: expectString(row.thread_id, "capture.thread_id"),
+    thread_title: expectNullableString(row.thread_title, "capture.thread_title"),
+    thread_is_direct: expectNumber(row.thread_is_direct, "capture.thread_is_direct"),
+    actor_id: expectNullableString(row.actor_id, "capture.actor_id"),
+    actor_name: expectNullableString(row.actor_name, "capture.actor_name"),
+    actor_is_self: expectNumber(row.actor_is_self, "capture.actor_is_self"),
+    occurred_at: expectString(row.occurred_at, "capture.occurred_at"),
+    received_at: expectNullableString(row.received_at, "capture.received_at"),
+    text_content: expectNullableString(row.text_content, "capture.text_content"),
+    raw_json: expectString(row.raw_json, "capture.raw_json"),
+    vault_event_id: expectString(row.vault_event_id, "capture.vault_event_id"),
+    envelope_path: expectString(row.envelope_path, "capture.envelope_path"),
+    created_at: expectString(row.created_at, "capture.created_at"),
+  };
+}
+
+function decodeAttachmentRows(rows: ReadonlyArray<Record<string, unknown>>): AttachmentRow[] {
+  return rows.map(decodeAttachmentRow);
+}
+
+function decodeAttachmentRow(row: Record<string, unknown>): AttachmentRow {
+  return {
+    capture_id: expectString(row.capture_id, "capture_attachment.capture_id"),
+    attachment_id: expectNullableString(row.attachment_id, "capture_attachment.attachment_id"),
+    ordinal: expectNumber(row.ordinal, "capture_attachment.ordinal"),
+    external_id: expectNullableString(row.external_id, "capture_attachment.external_id"),
+    kind: expectString(row.kind, "capture_attachment.kind") as StoredAttachment["kind"],
+    mime: expectNullableString(row.mime, "capture_attachment.mime"),
+    original_path: expectNullableString(row.original_path, "capture_attachment.original_path"),
+    stored_path: expectNullableString(row.stored_path, "capture_attachment.stored_path"),
+    file_name: expectNullableString(row.file_name, "capture_attachment.file_name"),
+    size_bytes: expectNullableNumber(row.size_bytes, "capture_attachment.size_bytes"),
+    sha256: expectNullableString(row.sha256, "capture_attachment.sha256"),
+    extracted_text: expectNullableString(row.extracted_text, "capture_attachment.extracted_text"),
+    transcript_text: expectNullableString(row.transcript_text, "capture_attachment.transcript_text"),
+    derived_path: expectNullableString(row.derived_path, "capture_attachment.derived_path"),
+    parser_provider_id: expectNullableString(row.parser_provider_id, "capture_attachment.parser_provider_id"),
+    parser_state: expectNullableString(row.parser_state, "capture_attachment.parser_state"),
+  };
+}
+
+function decodeAttachmentParseJobRows(rows: ReadonlyArray<Record<string, unknown>>): AttachmentParseJobRecord[] {
+  return rows.map(decodeAttachmentParseJobRow);
+}
+
+function decodeAttachmentParseJobRow(row: Record<string, unknown>): AttachmentParseJobRecord {
+  return {
+    jobId: expectString(row.job_id, "attachment_parse_job.job_id"),
+    captureId: expectString(row.capture_id, "attachment_parse_job.capture_id"),
+    attachmentId: expectString(row.attachment_id, "attachment_parse_job.attachment_id"),
+    pipeline: expectString(row.pipeline, "attachment_parse_job.pipeline") as AttachmentParseJobRecord["pipeline"],
+    state: expectString(row.state, "attachment_parse_job.state") as AttachmentParseJobRecord["state"],
+    attempts: expectNumber(row.attempts, "attachment_parse_job.attempts"),
+    providerId: expectNullableString(row.provider_id, "attachment_parse_job.provider_id"),
+    resultPath: expectNullableString(row.result_path, "attachment_parse_job.result_path"),
+    errorCode: expectNullableString(row.error_code, "attachment_parse_job.error_code"),
+    errorMessage: expectNullableString(row.error_message, "attachment_parse_job.error_message"),
+    createdAt: expectString(row.created_at, "attachment_parse_job.created_at"),
+    startedAt: expectNullableString(row.started_at, "attachment_parse_job.started_at"),
+    finishedAt: expectNullableString(row.finished_at, "attachment_parse_job.finished_at"),
+  };
+}
+
+function decodeSearchRows(rows: ReadonlyArray<Record<string, unknown>>): SearchRow[] {
+  return rows.map(decodeSearchRow);
+}
+
+function decodeSearchRow(row: Record<string, unknown>): SearchRow {
+  return {
+    capture_id: expectString(row.capture_id, "capture_search.capture_id"),
+    source: expectString(row.source, "capture_search.source"),
+    account_id: expectNullableString(row.account_id, "capture_search.account_id"),
+    thread_id: expectString(row.thread_id, "capture_search.thread_id"),
+    thread_title: expectNullableString(row.thread_title, "capture_search.thread_title"),
+    occurred_at: expectString(row.occurred_at, "capture_search.occurred_at"),
+    text_content: expectNullableString(row.text_content, "capture_search.text_content"),
+    envelope_path: expectString(row.envelope_path, "capture_search.envelope_path"),
+    indexed_text: expectNullableString(row.indexed_text, "capture_search.indexed_text"),
+    indexed_attachment_text: expectNullableString(
+      row.indexed_attachment_text,
+      "capture_search.indexed_attachment_text",
+    ),
+    score: expectNumber(row.score, "capture_search.score"),
+  };
 }
 
 function hydrateCaptureRows(database: DatabaseSync, rows: CaptureRow[]): InboxCaptureRecord[] {
@@ -480,6 +901,250 @@ function hydrateCaptureRows(database: DatabaseSync, rows: CaptureRow[]): InboxCa
     loadAttachmentRows(database, rows.map((row) => row.capture_id)),
   );
   return rows.map((row) => hydrateCaptureRow(row, attachmentsByCapture));
+}
+
+function loadAttachmentRows(database: DatabaseSync, captureIds: string[]): AttachmentRow[] {
+  if (captureIds.length === 0) {
+    return [];
+  }
+
+  const rows = database
+    .prepare(
+      `
+        select *
+        from capture_attachment
+        where capture_id in (${captureIds.map(() => "?").join(", ")})
+        order by capture_id asc, ordinal asc
+      `,
+    )
+    .all(...captureIds);
+
+  return decodeAttachmentRows(rows);
+}
+
+function hydrateCaptureAttachments(rows: AttachmentRow[]): Map<string, IndexedAttachment[]> {
+  const attachmentsByCapture = new Map<string, IndexedAttachment[]>();
+
+  for (const row of rows) {
+    const attachments = attachmentsByCapture.get(row.capture_id) ?? [];
+    attachments.push({
+      attachmentId:
+        typeof row.attachment_id === "string" && row.attachment_id.length > 0
+          ? row.attachment_id
+          : buildLegacyAttachmentId(row.capture_id, row.ordinal),
+      ordinal: row.ordinal,
+      externalId: row.external_id,
+      kind: row.kind,
+      mime: row.mime,
+      originalPath: row.original_path,
+      storedPath: row.stored_path,
+      fileName: row.file_name,
+      byteSize: row.size_bytes,
+      sha256: row.sha256,
+      extractedText: row.extracted_text,
+      transcriptText: row.transcript_text,
+      derivedPath: row.derived_path,
+      parserProviderId: row.parser_provider_id,
+      parseState: row.parser_state,
+    });
+    attachmentsByCapture.set(row.capture_id, attachments);
+  }
+
+  return attachmentsByCapture;
+}
+
+function hydrateCaptureRow(
+  row: CaptureRow,
+  attachmentsByCapture: ReadonlyMap<string, IndexedAttachment[]>,
+): InboxCaptureRecord {
+  return {
+    captureId: row.capture_id,
+    eventId: row.vault_event_id,
+    source: row.source,
+    externalId: row.external_id,
+    accountId: row.account_id || null,
+    thread: {
+      id: row.thread_id,
+      title: row.thread_title,
+      isDirect: row.thread_is_direct === 1,
+    },
+    actor: {
+      id: row.actor_id,
+      displayName: row.actor_name,
+      isSelf: row.actor_is_self === 1,
+    },
+    occurredAt: row.occurred_at,
+    receivedAt: row.received_at,
+    text: row.text_content,
+    attachments: attachmentsByCapture.get(row.capture_id) ?? [],
+    raw: JSON.parse(row.raw_json) as Record<string, unknown>,
+    envelopePath: row.envelope_path,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeCaptureFilters(
+  filters: InboxListFilters,
+  fallbackLimit = 50,
+): { source: string | null; accountId: string | null; limit: number } {
+  return {
+    source: normalizeNullable(filters.source),
+    accountId: normalizeNullable(filters.accountId),
+    limit: normalizeLimit(filters.limit, fallbackLimit),
+  };
+}
+
+function createSearchHitFromCapture(capture: InboxCaptureRecord): InboxSearchHit {
+  return {
+    captureId: capture.captureId,
+    source: capture.source,
+    accountId: capture.accountId ?? null,
+    threadId: capture.thread.id,
+    threadTitle: capture.thread.title ?? null,
+    occurredAt: capture.occurredAt,
+    text: capture.text,
+    snippet: buildSnippet(
+      capture.text,
+      capture.attachments.map((item) => item.fileName).join(" "),
+      capture.attachments.map((item) => item.extractedText).join(" "),
+      capture.attachments.map((item) => item.transcriptText).join(" "),
+    ),
+    score: 0,
+    envelopePath: capture.envelopePath,
+  };
+}
+
+function createSearchHitFromRow(row: SearchRow): InboxSearchHit {
+  return {
+    captureId: row.capture_id,
+    source: row.source,
+    accountId: row.account_id || null,
+    threadId: row.thread_id,
+    threadTitle: row.thread_title,
+    occurredAt: row.occurred_at,
+    text: row.text_content,
+    snippet: buildSnippet(row.indexed_text, row.indexed_attachment_text, row.text_content),
+    score: Number(row.score.toFixed(6)),
+    envelopePath: row.envelope_path,
+  };
+}
+
+function refreshCaptureSearchIndex(database: DatabaseSync, captureId: string): void {
+  const captureRow = database
+    .prepare(
+      `
+        select
+          capture_id,
+          source,
+          thread_id,
+          text_content
+        from capture
+        where capture_id = ?
+      `,
+    )
+    .get(captureId) as
+    | {
+        capture_id: string;
+        source: string;
+        thread_id: string;
+        text_content: string | null;
+      }
+    | undefined;
+
+  if (!captureRow) {
+    return;
+  }
+
+  const attachmentRows = database
+    .prepare(
+      `
+        select
+          file_name,
+          mime,
+          extracted_text,
+          transcript_text
+        from capture_attachment
+        where capture_id = ?
+        order by ordinal asc
+      `,
+    )
+    .all(captureId) as Array<{
+      file_name: string | null;
+      mime: string | null;
+      extracted_text: string | null;
+      transcript_text: string | null;
+    }>;
+
+  const attachmentText = attachmentRows
+    .map((attachment) =>
+      [
+        attachment.file_name,
+        attachment.mime,
+        attachment.extracted_text,
+        attachment.transcript_text,
+      ]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .join(" "),
+    )
+    .join(" ")
+    .trim();
+
+  database.prepare("delete from capture_fts where capture_id = ?").run(captureId);
+  database
+    .prepare(
+      `
+        insert into capture_fts (
+          capture_id,
+          source,
+          thread_id,
+          text_content,
+          attachment_text,
+          tags
+        ) values (?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .run(
+      captureId,
+      captureRow.source,
+      captureRow.thread_id,
+      normalizeNullable(captureRow.text_content),
+      normalizeNullable(attachmentText),
+      `inbox source-${captureRow.source}`,
+    );
+}
+
+function shouldEnqueueParseJob(attachment: StoredAttachment): boolean {
+  return (
+    PARSEABLE_ATTACHMENT_KINDS.has(attachment.kind) &&
+    typeof attachment.storedPath === "string" &&
+    attachment.storedPath.length > 0
+  );
+}
+
+function readAttachmentParseJob(database: DatabaseSync, jobId: string): AttachmentParseJobRecord {
+  const row = database
+    .prepare("select * from attachment_parse_job where job_id = ?")
+    .get(jobId) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    throw new TypeError(`Unknown attachment parse job: ${jobId}`);
+  }
+
+  return decodeAttachmentParseJobRow(row);
+}
+
+function ensureColumn(
+  database: DatabaseSync,
+  table: string,
+  column: string,
+  columnDefinition: string,
+): void {
+  const rows = database.prepare(`pragma table_info(${table})`).all() as Array<{ name?: string }>;
+  if (rows.some((row) => row.name === column)) {
+    return;
+  }
+
+  database.exec(`alter table ${table} add column ${column} ${columnDefinition}`);
 }
 
 function withTransaction<T>(database: DatabaseSync, operation: () => T): T {
@@ -537,209 +1202,4 @@ function expectNullableNumber(value: unknown, label: string): number | null {
   }
 
   return expectNumber(value, label);
-}
-
-interface AttachmentRow {
-  capture_id: string;
-  ordinal: number;
-  external_id: string | null;
-  kind: StoredAttachment["kind"];
-  mime: string | null;
-  original_path: string | null;
-  stored_path: string | null;
-  file_name: string | null;
-  size_bytes: number | null;
-  sha256: string | null;
-}
-
-interface SearchRow {
-  capture_id: string;
-  source: string;
-  account_id: string | null;
-  thread_id: string;
-  thread_title: string | null;
-  occurred_at: string;
-  text_content: string | null;
-  envelope_path: string;
-  indexed_text: string | null;
-  indexed_attachment_text: string | null;
-  score: number;
-}
-
-function decodeCaptureRow(row: Record<string, unknown>): CaptureRow {
-  return {
-    capture_id: expectString(row.capture_id, "capture.capture_id"),
-    source: expectString(row.source, "capture.source"),
-    account_id: expectNullableString(row.account_id, "capture.account_id"),
-    external_id: expectString(row.external_id, "capture.external_id"),
-    thread_id: expectString(row.thread_id, "capture.thread_id"),
-    thread_title: expectNullableString(row.thread_title, "capture.thread_title"),
-    thread_is_direct: expectNumber(row.thread_is_direct, "capture.thread_is_direct"),
-    actor_id: expectNullableString(row.actor_id, "capture.actor_id"),
-    actor_name: expectNullableString(row.actor_name, "capture.actor_name"),
-    actor_is_self: expectNumber(row.actor_is_self, "capture.actor_is_self"),
-    occurred_at: expectString(row.occurred_at, "capture.occurred_at"),
-    received_at: expectNullableString(row.received_at, "capture.received_at"),
-    text_content: expectNullableString(row.text_content, "capture.text_content"),
-    raw_json: expectString(row.raw_json, "capture.raw_json"),
-    vault_event_id: expectString(row.vault_event_id, "capture.vault_event_id"),
-    envelope_path: expectString(row.envelope_path, "capture.envelope_path"),
-    created_at: expectString(row.created_at, "capture.created_at"),
-  };
-}
-
-function loadAttachmentRows(database: DatabaseSync, captureIds: string[]): AttachmentRow[] {
-  const rows = database
-    .prepare(
-      `
-        select *
-        from capture_attachment
-        where capture_id in (${captureIds.map(() => "?").join(", ")})
-        order by capture_id asc, ordinal asc
-      `,
-    )
-    .all(...captureIds);
-
-  return decodeAttachmentRows(rows);
-}
-
-function hydrateCaptureAttachments(
-  rows: AttachmentRow[],
-): Map<string, StoredAttachment[]> {
-  const attachmentsByCapture = new Map<string, StoredAttachment[]>();
-
-  for (const row of rows) {
-    const attachments = attachmentsByCapture.get(row.capture_id) ?? [];
-    attachments.push({
-      ordinal: row.ordinal,
-      externalId: row.external_id,
-      kind: row.kind,
-      mime: row.mime,
-      originalPath: row.original_path,
-      storedPath: row.stored_path,
-      fileName: row.file_name,
-      byteSize: row.size_bytes,
-      sha256: row.sha256,
-    });
-    attachmentsByCapture.set(row.capture_id, attachments);
-  }
-
-  return attachmentsByCapture;
-}
-
-function hydrateCaptureRow(
-  row: CaptureRow,
-  attachmentsByCapture: ReadonlyMap<string, StoredAttachment[]>,
-): InboxCaptureRecord {
-  return {
-    captureId: row.capture_id,
-    eventId: row.vault_event_id,
-    source: row.source,
-    externalId: row.external_id,
-    accountId: row.account_id || null,
-    thread: {
-      id: row.thread_id,
-      title: row.thread_title,
-      isDirect: row.thread_is_direct === 1,
-    },
-    actor: {
-      id: row.actor_id,
-      displayName: row.actor_name,
-      isSelf: row.actor_is_self === 1,
-    },
-    occurredAt: row.occurred_at,
-    receivedAt: row.received_at,
-    text: row.text_content,
-    attachments: attachmentsByCapture.get(row.capture_id) ?? [],
-    raw: JSON.parse(row.raw_json) as Record<string, unknown>,
-    envelopePath: row.envelope_path,
-    createdAt: row.created_at,
-  };
-}
-
-function normalizeCaptureFilters(
-  filters: InboxListFilters,
-  fallbackLimit = 50,
-): { source: string | null; accountId: string | null; limit: number } {
-  return {
-    source: normalizeNullable(filters.source),
-    accountId: normalizeNullable(filters.accountId),
-    limit: normalizeLimit(filters.limit, fallbackLimit),
-  };
-}
-
-function createSearchHitFromCapture(capture: InboxCaptureRecord): InboxSearchHit {
-  return {
-    captureId: capture.captureId,
-    source: capture.source,
-    accountId: capture.accountId ?? null,
-    threadId: capture.thread.id,
-    threadTitle: capture.thread.title ?? null,
-    occurredAt: capture.occurredAt,
-    text: capture.text,
-    snippet: buildSnippet(capture.text, joinTextValues(...capture.attachments.map((item) => item.fileName))),
-    score: 0,
-    envelopePath: capture.envelopePath,
-  };
-}
-
-function createSearchHitFromRow(row: SearchRow): InboxSearchHit {
-  return {
-    captureId: row.capture_id,
-    source: row.source,
-    accountId: row.account_id || null,
-    threadId: row.thread_id,
-    threadTitle: row.thread_title,
-    occurredAt: row.occurred_at,
-    text: row.text_content,
-    snippet: buildSnippet(row.indexed_text, row.indexed_attachment_text, row.text_content),
-    score: Number(row.score.toFixed(6)),
-    envelopePath: row.envelope_path,
-  };
-}
-
-function joinTextValues(...values: Array<string | null | undefined>): string {
-  return values.filter((value): value is string => typeof value === "string" && value.length > 0).join(" ");
-}
-
-function decodeSearchRows(rows: ReadonlyArray<Record<string, unknown>>): SearchRow[] {
-  return rows.map(decodeSearchRow);
-}
-
-function decodeAttachmentRows(rows: ReadonlyArray<Record<string, unknown>>): AttachmentRow[] {
-  return rows.map(decodeAttachmentRow);
-}
-
-function decodeSearchRow(row: Record<string, unknown>): SearchRow {
-  return {
-    capture_id: expectString(row.capture_id, "capture_search.capture_id"),
-    source: expectString(row.source, "capture_search.source"),
-    account_id: expectNullableString(row.account_id, "capture_search.account_id"),
-    thread_id: expectString(row.thread_id, "capture_search.thread_id"),
-    thread_title: expectNullableString(row.thread_title, "capture_search.thread_title"),
-    occurred_at: expectString(row.occurred_at, "capture_search.occurred_at"),
-    text_content: expectNullableString(row.text_content, "capture_search.text_content"),
-    envelope_path: expectString(row.envelope_path, "capture_search.envelope_path"),
-    indexed_text: expectNullableString(row.indexed_text, "capture_search.indexed_text"),
-    indexed_attachment_text: expectNullableString(
-      row.indexed_attachment_text,
-      "capture_search.indexed_attachment_text",
-    ),
-    score: expectNumber(row.score, "capture_search.score"),
-  };
-}
-
-function decodeAttachmentRow(row: Record<string, unknown>): AttachmentRow {
-  return {
-    capture_id: expectString(row.capture_id, "capture_attachment.capture_id"),
-    ordinal: expectNumber(row.ordinal, "capture_attachment.ordinal"),
-    external_id: expectNullableString(row.external_id, "capture_attachment.external_id"),
-    kind: expectString(row.kind, "capture_attachment.kind") as StoredAttachment["kind"],
-    mime: expectNullableString(row.mime, "capture_attachment.mime"),
-    original_path: expectNullableString(row.original_path, "capture_attachment.original_path"),
-    stored_path: expectNullableString(row.stored_path, "capture_attachment.stored_path"),
-    file_name: expectNullableString(row.file_name, "capture_attachment.file_name"),
-    size_bytes: expectNullableNumber(row.size_bytes, "capture_attachment.size_bytes"),
-    sha256: expectNullableString(row.sha256, "capture_attachment.sha256"),
-  };
 }

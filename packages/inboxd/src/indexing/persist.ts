@@ -18,9 +18,11 @@ import {
 
 import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.js";
 import {
+  buildLegacyAttachmentId,
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
   ensureParentDirectory,
+  normalizeStoredAttachments,
   normalizeAccountKey,
   normalizeRelativePath,
   redactSensitivePaths,
@@ -71,10 +73,12 @@ export async function persistRawCapture({
 
   for (const [index, attachment] of input.attachments.entries()) {
     const ordinal = index + 1;
+    const attachmentId = buildLegacyAttachmentId(captureId, ordinal);
 
     if (!attachment.originalPath) {
       storedAttachments.push({
         ...attachment,
+        attachmentId,
         ordinal,
         storedPath: null,
         sha256: null,
@@ -102,6 +106,7 @@ export async function persistRawCapture({
 
     storedAttachments.push({
       ...attachment,
+      attachmentId,
       ordinal,
       storedPath: relativePath,
       fileName: attachment.fileName ?? safeName,
@@ -370,7 +375,9 @@ async function walkInboxEnvelopeFiles(directory: string): Promise<string[]> {
 
 async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCaptureEnvelope | null> {
   try {
-    return JSON.parse(await readFile(absolutePath, "utf8")) as StoredCaptureEnvelope;
+    return normalizeStoredCaptureEnvelope(
+      JSON.parse(await readFile(absolutePath, "utf8")) as StoredCaptureEnvelope,
+    );
   } catch (error) {
     if (isMissingFileError(error)) {
       return null;
@@ -378,6 +385,16 @@ async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCa
 
     throw error;
   }
+}
+
+function normalizeStoredCaptureEnvelope(envelope: StoredCaptureEnvelope): StoredCaptureEnvelope {
+  return {
+    ...envelope,
+    stored: {
+      ...envelope.stored,
+      attachments: normalizeStoredAttachments(envelope.captureId, envelope.stored.attachments),
+    },
+  };
 }
 
 function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): number {

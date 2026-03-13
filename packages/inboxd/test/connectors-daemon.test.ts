@@ -281,6 +281,18 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
         },
         upsertCaptureIndex() {},
         enqueueDerivedJobs() {},
+        listAttachmentParseJobs() {
+          return [];
+        },
+        claimNextAttachmentParseJob() {
+          return null;
+        },
+        completeAttachmentParseJob() {
+          throw new Error("completeAttachmentParseJob should not be called");
+        },
+        failAttachmentParseJob() {
+          throw new Error("failAttachmentParseJob should not be called");
+        },
         listCaptures() {
           return [];
         },
@@ -356,6 +368,18 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
             },
             upsertCaptureIndex() {},
             enqueueDerivedJobs() {},
+            listAttachmentParseJobs() {
+              return [];
+            },
+            claimNextAttachmentParseJob() {
+              return null;
+            },
+            completeAttachmentParseJob() {
+              throw new Error("completeAttachmentParseJob should not be called");
+            },
+            failAttachmentParseJob() {
+              throw new Error("failAttachmentParseJob should not be called");
+            },
             listCaptures() {
               return [];
             },
@@ -414,6 +438,18 @@ test("runInboxDaemon aggregates wrapped connector failures when multiple connect
             },
             upsertCaptureIndex() {},
             enqueueDerivedJobs() {},
+            listAttachmentParseJobs() {
+              return [];
+            },
+            claimNextAttachmentParseJob() {
+              return null;
+            },
+            completeAttachmentParseJob() {
+              throw new Error("completeAttachmentParseJob should not be called");
+            },
+            failAttachmentParseJob() {
+              throw new Error("failAttachmentParseJob should not be called");
+            },
             listCaptures() {
               return [];
             },

@@ -1,11 +1,11 @@
-import type { InboundCapture, StoredAttachment } from "./capture.js";
+import type { IndexedAttachment, InboundCapture } from "./capture.js";
 
 export interface InboxCaptureRecord extends InboundCapture {
   captureId: string;
   eventId: string;
   envelopePath: string;
   createdAt: string;
-  attachments: StoredAttachment[];
+  attachments: IndexedAttachment[];
 }
 
 export interface InboxListFilters {

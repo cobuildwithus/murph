@@ -23,6 +23,8 @@ repo/
     core/
     cli/
     importers/
+    inboxd/
+    parsers/
     query/
 
   fixtures/
@@ -42,6 +44,8 @@ repo/
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, and generated JSON Schema artifacts.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
 - `packages/importers` parses external inputs but delegates all canonical writes to core.
+- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, runtime cursors/dedupe/search, and attachment-level derived-job orchestration.
+- `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state and builds derived export packs.
 - `packages/cli` exposes the `vault-cli` command surface and must not bypass core for writes.
 
@@ -57,6 +61,10 @@ repo/
   - `audit/*.jsonl`
 - Immutable imported raw artifacts:
   - `raw/**`
+- Rebuildable parser artifacts:
+  - `derived/inbox/**`
+- Local runtime state:
+  - `.runtime/**`
 - Out-of-vault assistant/session state:
   - `assistant-state/`
 
@@ -75,8 +83,8 @@ repo/
 
 ## Explicit Non-Goals
 
-- SQLite or any other canonical database
-- vector indexes or semantic search
-- OCR-heavy or lab-value extraction in baseline
-- chat-log memory extraction
-- audio transcription or image understanding in baseline
+- SQLite or any other canonical database of record
+- vector indexes or semantic search in the canonical layer
+- OCR-heavy or lab-value extraction inside `packages/core` or baseline importer flows
+- chat-log memory extraction into canonical state without an explicit promotion layer
+- automatic audio/image/document understanding that writes canonical health facts directly

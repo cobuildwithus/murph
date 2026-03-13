@@ -1,0 +1,30 @@
+{
+  "name": "@healthybob/parsers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -b tsconfig.json",
+    "typecheck": "pnpm --dir ../core build && pnpm --dir ../inboxd build && tsc -p tsconfig.json --noEmit --pretty false",
+    "test": "pnpm --dir ../.. exec vitest run --config packages/parsers/vitest.config.ts --no-coverage"
+  },
+  "dependencies": {
+    "@healthybob/core": "workspace:*",
+    "@healthybob/inboxd": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

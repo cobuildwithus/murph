@@ -8,6 +8,7 @@ export default defineConfig({
       "@healthybob/core": path.resolve("packages/core/src/index.ts"),
       "@healthybob/importers": path.resolve("packages/importers/src/index.ts"),
       "@healthybob/inboxd": path.resolve("packages/inboxd/src/index.ts"),
+      "@healthybob/parsers": path.resolve("packages/parsers/src/index.ts"),
       "@healthybob/query": path.resolve("packages/query/src/index.ts"),
     },
   },
@@ -19,6 +20,10 @@ export default defineConfig({
       "packages/core/test/profile.test.ts",
       "packages/core/test/health-history-family.test.ts",
       "packages/importers/test/importers.test.ts",
+      "packages/inboxd/test/connectors-daemon.test.ts",
+      "packages/inboxd/test/idempotency-rebuild.test.ts",
+      "packages/inboxd/test/inboxd.test.ts",
+      "packages/parsers/test/parsers.test.ts",
       "packages/query/test/health-tail.test.ts",
       "packages/query/test/query.test.ts",
       "packages/cli/test/health-tail.test.ts",
@@ -55,6 +60,8 @@ export default defineConfig({
       exclude: [
         "coverage/**",
         "dist/**",
+        "packages/inboxd/src/**",
+        "packages/parsers/src/**",
         "**/*.d.ts",
       ],
       thresholds: {

@@ -2,6 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+import type { StoredAttachment } from "./contracts/capture.js";
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 export function toIsoTimestamp(value: Date | string | number): string {
@@ -47,6 +49,24 @@ function generateUlid(now = Date.now()): string {
 
 export function generatePrefixedId(prefix: string, now = Date.now()): string {
   return `${sanitizeObjectKey(prefix, "rec")}_${generateUlid(now)}`;
+}
+
+export function buildLegacyAttachmentId(captureId: string, ordinal: number): string {
+  return `att_${captureId}_${String(ordinal).padStart(2, "0")}`;
+}
+
+export function normalizeStoredAttachments(
+  captureId: string,
+  attachments: ReadonlyArray<StoredAttachment>,
+): StoredAttachment[] {
+  return attachments.map((attachment, index) => ({
+    ...attachment,
+    attachmentId:
+      typeof attachment.attachmentId === "string" && attachment.attachmentId.length > 0
+        ? attachment.attachmentId
+        : buildLegacyAttachmentId(captureId, attachment.ordinal ?? index + 1),
+    ordinal: attachment.ordinal ?? index + 1,
+  }));
 }
 
 export function sanitizeObjectKey(value: unknown, fallback = "field"): string {

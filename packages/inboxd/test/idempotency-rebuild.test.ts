@@ -15,7 +15,7 @@ import {
   persistRawCapture,
   rebuildRuntimeFromVault,
 } from "../src/index.js";
-import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.js";
+import { buildLegacyAttachmentId, createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.js";
 import type { InboundCapture } from "../src/contracts/capture.js";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -48,7 +48,7 @@ function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture 
   };
 }
 
-function countRows(databasePath: string, table: "capture" | "derived_job"): number {
+function countRows(databasePath: string, table: "attachment_parse_job" | "capture"): number {
   const database = new DatabaseSync(databasePath);
 
   try {
@@ -115,7 +115,7 @@ test("processCapture recovers from a crash after vault persistence without dupli
   assert.equal(replayed.captureId, captureId);
   assert.equal(replayed.eventId, eventId);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "derived_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
 
   const envelopeFiles = await walkNamedFiles(path.join(vaultRoot, "raw", "inbox"), "envelope.json", {
     skipDirectories: ["attachments"],
@@ -176,7 +176,68 @@ test("rebuildRuntimeFromVault is idempotent across repeated runs", async () => {
   assert.equal(capture.text, "Rebuild me once");
   assert.equal(capture.attachments.length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "derived_job"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+  runtime.close();
+});
+
+test("rebuildRuntimeFromVault backfills legacy attachment ids and keeps parse jobs idempotent", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-legacy-envelope-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-inbox-legacy-envelope-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const attachmentPath = await writeExternalFile(sourceRoot, "voice-note.wav", "audio");
+  const inbound = createCapture({
+    externalId: "msg-legacy-envelope-1",
+    occurredAt: "2026-03-13T11:30:00.000Z",
+    attachments: [
+      {
+        externalId: "att-legacy",
+        kind: "audio",
+        mime: "audio/wav",
+        originalPath: attachmentPath,
+        fileName: "voice-note.wav",
+      },
+    ],
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const stored = await persistRawCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W5",
+    input: inbound,
+    storedAt: "2026-03-13T11:31:00.000Z",
+  });
+  const envelopePath = path.join(vaultRoot, stored.envelopePath);
+  const envelope = JSON.parse(await fs.readFile(envelopePath, "utf8")) as {
+    stored: {
+      attachments: Array<Record<string, unknown>>;
+    };
+  };
+  delete envelope.stored.attachments[0]?.attachmentId;
+  delete envelope.stored.attachments[0]?.ordinal;
+  await fs.writeFile(envelopePath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+
+  const expectedAttachmentId = buildLegacyAttachmentId(captureId, 1);
+  const rebuilt = runtime.getCapture(captureId);
+  assert.ok(rebuilt);
+  assert.equal(rebuilt.attachments.length, 1);
+  assert.equal(rebuilt.attachments[0]?.attachmentId, expectedAttachmentId);
+
+  const firstJobs = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
+  assert.equal(firstJobs.length, 1);
+  assert.equal(firstJobs[0]?.attachmentId, expectedAttachmentId);
+  assert.equal(firstJobs[0]?.state, "pending");
+
+  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+
+  const secondJobs = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
+  assert.equal(secondJobs.length, 1);
+  assert.equal(secondJobs[0]?.attachmentId, expectedAttachmentId);
+  assert.equal(runtime.getCapture(captureId)?.attachments[0]?.attachmentId, expectedAttachmentId);
 
   runtime.close();
 });
@@ -219,7 +280,7 @@ test("rebuildRuntimeFromVault chooses one canonical envelope for duplicate exter
   assert.equal(captures[0]?.captureId, createDeterministicInboxCaptureId(canonicalInput));
   assert.equal(captures[0]?.text, "canonical envelope");
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
-  assert.equal(countRows(runtime.databasePath, "derived_job"), 0);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
 
   runtime.close();
 });

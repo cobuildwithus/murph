@@ -48,6 +48,12 @@
       "@healthybob/inboxd/*": [
         "packages/inboxd/src/*"
       ],
+      "@healthybob/parsers": [
+        "packages/parsers/src/index.ts"
+      ],
+      "@healthybob/parsers/*": [
+        "packages/parsers/src/*"
+      ],
       "@healthybob/cli": [
         "packages/cli/src/index.ts"
       ],

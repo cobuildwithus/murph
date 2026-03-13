@@ -1,6 +1,7 @@
 export type {
   InboundAttachment,
   InboundCapture,
+  IndexedAttachment,
   PersistedCapture,
   StoredAttachment,
   StoredCapture,
@@ -11,6 +12,14 @@ export type {
   InboxSearchFilters,
   InboxSearchHit,
 } from "./contracts/search.js";
+export type {
+  AttachmentParseJobFilters,
+  AttachmentParseJobRecord,
+  AttachmentParsePipeline,
+  AttachmentParseState,
+  CompleteAttachmentParseJobInput,
+  FailAttachmentParseJobInput,
+} from "./contracts/derived.js";
 export type {
   BaseConnector,
   Cursor,

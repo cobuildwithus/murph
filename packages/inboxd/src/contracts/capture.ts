@@ -29,9 +29,18 @@ export interface InboundCapture {
 }
 
 export interface StoredAttachment extends InboundAttachment {
+  attachmentId: string;
   ordinal: number;
   storedPath?: string | null;
   sha256?: string | null;
+}
+
+export interface IndexedAttachment extends StoredAttachment {
+  extractedText?: string | null;
+  transcriptText?: string | null;
+  derivedPath?: string | null;
+  parserProviderId?: string | null;
+  parseState?: string | null;
 }
 
 export interface StoredCapture {
