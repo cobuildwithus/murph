@@ -229,7 +229,7 @@ The noun-oriented surface is organized around capability bundles:
 - `derivedAdmin`: `stats | paths | rebuild | materialize | prune | validate`
 - `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote`
 
-Nouns are compositions of those bundles rather than a shared grammar plus exceptions:
+Nouns are grouped by those bundles rather than a shared grammar plus exceptions:
 
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `provider`, and `event` are payload-CRUD nouns
 - `profile` is payload CRUD plus `rebuild`

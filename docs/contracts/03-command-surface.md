@@ -28,7 +28,7 @@ vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] 
 vault-cli event scaffold --vault <path> --kind <kind> [--format json|md] [--request-id <id>]
 vault-cli event upsert --vault <path> --input @file.json [--format json|md] [--request-id <id>]
 vault-cli event show <evt_*> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag>] [--experiment <slug>] [--limit <n>] [--format json|md] [--request-id <id>]
+vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--format json|md] [--request-id <id>]
 vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--format json|md] [--request-id <id>]
 vault-cli document show <doc_*|evt_*> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--format json|md] [--request-id <id>]
@@ -38,7 +38,7 @@ vault-cli meal show <meal_*|evt_*> --vault <path> [--format json|md] [--request-
 vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--format json|md] [--request-id <id>]
 vault-cli meal manifest <meal_*|evt_*> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli samples add --vault <path> --input @file.json [--format json|md] [--request-id <id>]
-vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <csv>] [--source <source>] [--format json|md] [--request-id <id>]
+vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--format json|md] [--request-id <id>]
 vault-cli samples show <sampleId> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--format json|md] [--request-id <id>]
 vault-cli samples batch show <batchId> --vault <path> [--format json|md] [--request-id <id>]
@@ -58,16 +58,16 @@ vault-cli journal unlink-event <date> --vault <path> --id <evt_*> [--id <evt_*> 
 vault-cli journal link-stream <date> --vault <path> --stream <stream> [--stream <stream> ...] [--format json|md] [--request-id <id>]
 vault-cli journal unlink-stream <date> --vault <path> --stream <stream> [--stream <stream> ...] [--format json|md] [--request-id <id>]
 vault-cli show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli list --vault <path> [--record-type <type>] [--kind <kind>] [--status <status>] [--stream <stream>] [--tag <tag>] [--experiment <slug>] [--date-from <date>] [--date-to <date>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli search --vault <path> --text <query> [--backend auto|scan|sqlite] [--record-type <csv>] [--kind <csv>] [--stream <csv>] [--experiment <slug>] [--date-from <date>] [--date-to <date>] [--tag <csv>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli search index-status --vault <path> [--format json|md] [--request-id <id>]
-vault-cli search index-rebuild --vault <path> [--format json|md] [--request-id <id>]
-vault-cli timeline --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--kind <csv>] [--stream <csv>] [--entry-type <csv>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli export pack --vault <path> --from <date> --to <date> [--experiment <slug>] [--out <dir>] [--format json|md] [--request-id <id>]
-vault-cli export show <packId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli export list --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli export materialize <packId> --vault <path> [--out <dir>] [--format json|md] [--request-id <id>]
-vault-cli export prune <packId> --vault <path> [--format json|md] [--request-id <id>]
+vault-cli list --vault <path> [--record-type <type> ...] [--kind <kind>] [--status <status>] [--stream <stream> ...] [--tag <tag> ...] [--experiment <slug>] [--date-from <date>] [--date-to <date>] [--limit <n>] [--format json|md] [--request-id <id>]
+vault-cli search --vault <path> --text <query> [--backend auto|scan|sqlite] [--record-type <type> ...] [--kind <kind> ...] [--stream <stream> ...] [--experiment <slug>] [--date-from <date>] [--date-to <date>] [--tag <tag> ...] [--limit <n>] [--format json|md] [--request-id <id>]
+vault-cli search index status --vault <path> [--format json|md] [--request-id <id>]
+vault-cli search index rebuild --vault <path> [--format json|md] [--request-id <id>]
+vault-cli timeline --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--kind <kind> ...] [--stream <stream> ...] [--entry-type <type> ...] [--limit <n>] [--format json|md] [--request-id <id>]
+vault-cli export pack create --vault <path> --from <date> --to <date> [--experiment <slug>] [--out <dir>] [--format json|md] [--request-id <id>]
+vault-cli export pack show <packId> --vault <path> [--format json|md] [--request-id <id>]
+vault-cli export pack list --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--limit <n>] [--format json|md] [--request-id <id>]
+vault-cli export pack materialize <packId> --vault <path> [--out <dir>] [--format json|md] [--request-id <id>]
+vault-cli export pack prune <packId> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli intake import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--imported-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]
 vault-cli intake show <assessmentId> --vault <path> [--format json|md] [--request-id <id>]
 vault-cli intake list --vault <path> [--date-from <date>] [--date-to <date>] [--limit <n>] [--format json|md] [--request-id <id>]
@@ -89,7 +89,7 @@ vault-cli inbox promote experiment-note <captureId> --vault <path> [--format jso
 
 ## Capability Bundles
 
-The command surface is described by reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared noun-to-capability map lives in `packages/contracts/src/command-capabilities.ts`.
+The command surface is organized around reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared capability taxonomy lives in `packages/contracts/src/command-capabilities.ts`.
 
 - `readable`: `show | list`
 - `payloadCrud`: `scaffold | upsert | show | list`
@@ -148,7 +148,7 @@ Every command now uses native `incur` command definitions directly:
 - `--request-id` is optional, forwarded to package service calls, and reserved for audit correlation.
 - `json` is the canonical machine format.
 - `md` is a human-oriented rendering mode handled by `incur`; it is not a second machine-stable envelope.
-- Retrieval filters that accept multiple values use comma-separated strings such as `--kind meal,note` or `--entry-type event,sample_summary`.
+- Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`.
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
 - Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use a queryable id rather than a related or batch id.
@@ -314,8 +314,8 @@ The examples below are the full successful `--format json` response bodies.
 ### Follow-up Read Commands
 
 - `provider show`, `event show`, `document show`, `meal show`, `samples show`, `experiment show`, `journal show`, `intake show`, `audit show`, and `vault show` all return the same direct `entity`-style payload shape used by generic `show`, with command-local lookup behavior where documented.
-- `provider list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
-- `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, `intake raw`, and `export show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
+- `provider list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export pack list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
+- `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, `intake raw`, and `export pack show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
 - `inbox attachment list|show|show-status|parse|reparse` expose runtime attachment inspection and parser queue control over `.runtime` plus `derived/inbox/**`; they do not mutate canonical vault records.
 
 ### `show`
@@ -422,7 +422,7 @@ The examples below are the full successful `--format json` response bodies.
 }
 ```
 
-### `search index-status`
+### `search index status`
 
 ```json
 {
@@ -439,7 +439,7 @@ The examples below are the full successful `--format json` response bodies.
 During the compatibility window, `dbPath` may report `.runtime/inboxd.sqlite` if
 legacy search tables have not been rebuilt into `.runtime/search.sqlite` yet.
 
-### `search index-rebuild`
+### `search index rebuild`
 
 ```json
 {
@@ -491,7 +491,7 @@ legacy search tables have not been rebuilt into `.runtime/search.sqlite` yet.
 }
 ```
 
-### `export pack`
+### `export pack create`
 
 ```json
 {
