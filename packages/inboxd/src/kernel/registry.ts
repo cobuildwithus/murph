@@ -23,21 +23,36 @@ export function createConnectorRegistry(connectors: Iterable<BaseConnector> = []
       return registry.get(source) ?? null;
     },
     requirePoll(source) {
-      const connector = registry.get(source);
-      if (!connector || connector.kind !== "poll") {
-        throw new TypeError(`Poll connector not registered for source: ${source}`);
-      }
-      return connector as PollConnector;
+      return requireConnectorKind(registry.get(source), source, "poll");
     },
     requireWebhook(source) {
-      const connector = registry.get(source);
-      if (!connector || connector.kind !== "webhook") {
-        throw new TypeError(`Webhook connector not registered for source: ${source}`);
-      }
-      return connector as WebhookConnector;
+      return requireConnectorKind(registry.get(source), source, "webhook");
     },
     list() {
-      return [...registry.values()];
+      return Array.from(registry.values());
     },
   };
+}
+
+function requireConnectorKind(
+  connector: BaseConnector | undefined,
+  source: string,
+  kind: "poll",
+): PollConnector;
+function requireConnectorKind(
+  connector: BaseConnector | undefined,
+  source: string,
+  kind: "webhook",
+): WebhookConnector;
+function requireConnectorKind(
+  connector: BaseConnector | undefined,
+  source: string,
+  kind: BaseConnector["kind"],
+): PollConnector | WebhookConnector {
+  if (!connector || connector.kind !== kind) {
+    const label = kind === "poll" ? "Poll" : "Webhook";
+    throw new TypeError(`${label} connector not registered for source: ${source}`);
+  }
+
+  return connector as PollConnector | WebhookConnector;
 }

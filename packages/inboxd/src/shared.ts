@@ -46,8 +46,11 @@ function generateUlid(now = Date.now()): string {
 }
 
 export function generatePrefixedId(prefix: string, now = Date.now()): string {
-  const safePrefix = sanitizeSegment(prefix, "rec").replace(/-/g, "_");
-  return `${safePrefix}_${generateUlid(now)}`;
+  return `${sanitizeObjectKey(prefix, "rec")}_${generateUlid(now)}`;
+}
+
+export function sanitizeObjectKey(value: unknown, fallback = "field"): string {
+  return sanitizeSegment(value, fallback).replace(/-/g, "_");
 }
 
 export function sanitizeSegment(value: unknown, fallback = "item"): string {
@@ -145,9 +148,14 @@ export function buildFtsQuery(text: string): string {
   return tokens.map((token) => `"${token.replace(/"/g, "\"\"")}"*`).join(" AND ");
 }
 
+export function normalizeTextValue(value: unknown): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized ? normalized : null;
+}
+
 export function buildSnippet(...sources: Array<string | null | undefined>): string {
   for (const source of sources) {
-    const value = String(source ?? "").trim();
+    const value = normalizeTextValue(source);
     if (value) {
       return value.length > 180 ? `${value.slice(0, 177)}...` : value;
     }

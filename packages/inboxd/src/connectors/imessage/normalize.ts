@@ -1,5 +1,5 @@
 import type { InboundAttachment, InboundCapture } from "../../contracts/capture.js";
-import { sanitizeSegment, toIsoTimestamp } from "../../shared.js";
+import { normalizeTextValue, sanitizeObjectKey, toIsoTimestamp } from "../../shared.js";
 
 export interface ImessageKitAttachmentLike {
   guid?: string | null;
@@ -93,7 +93,7 @@ export function normalizeImessageMessage({
   const actorId = message.handleId ?? message.sender ?? message.from ?? null;
   const actorName = message.displayName ?? message.senderName ?? null;
   const attachments = (message.attachments ?? []).map(normalizeImessageAttachment);
-  const text = normalizeMessageText(message);
+  const text = normalizeTextValue(message.text ?? message.message ?? message.attributedBody ?? null);
   const isSelf = message.isFromMe ?? message.fromMe ?? false;
 
   return {
@@ -116,12 +116,6 @@ export function normalizeImessageMessage({
     attachments,
     raw: sanitizeRawMessage(message),
   };
-}
-
-function normalizeMessageText(message: ImessageKitMessageLike): string | null {
-  const text = message.text ?? message.message ?? message.attributedBody ?? null;
-  const normalized = typeof text === "string" ? text.trim() : "";
-  return normalized || null;
 }
 
 function inferDirectChat(chat: ImessageKitChatLike | null): boolean {
@@ -176,12 +170,7 @@ function sanitizeRawMessage(message: ImessageKitMessageLike): Record<string, unk
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(message)) {
-    if (typeof key !== "string") {
-      continue;
-    }
-
-    const safeKey = sanitizeSegment(key, "field").replace(/-/g, "_");
-    result[safeKey] = coerceRawValue(value);
+    result[sanitizeObjectKey(key)] = coerceRawValue(value);
   }
 
   return result;
@@ -208,7 +197,7 @@ function coerceRawValue(value: unknown): unknown {
   if (typeof value === "object") {
     const record: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
-      record[sanitizeSegment(key, "field").replace(/-/g, "_")] = coerceRawValue(child);
+      record[sanitizeObjectKey(key)] = coerceRawValue(child);
     }
     return record;
   }

@@ -307,11 +307,7 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         }
 
         const attachmentText = stored.attachments
-          .map((attachment) =>
-            [attachment.fileName, attachment.mime]
-              .filter((value): value is string => typeof value === "string" && value.length > 0)
-              .join(" "),
-          )
+          .map((attachment) => joinTextValues(attachment.fileName, attachment.mime))
           .join(" ")
           .trim();
 
@@ -355,7 +351,7 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         .run(captureId, "attachment_text", "pending", stored.storedAt);
     },
     listCaptures(filters = {}) {
-      const limit = normalizeLimit(filters.limit, 50);
+      const normalizedFilters = normalizeCaptureFilters(filters);
       const rows = database
         .prepare(
           `
@@ -368,11 +364,11 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
           `,
         )
         .all(
-          normalizeNullable(filters.source),
-          normalizeNullable(filters.source),
-          normalizeNullable(filters.accountId),
-          normalizeNullable(filters.accountId),
-          limit,
+          normalizedFilters.source,
+          normalizedFilters.source,
+          normalizedFilters.accountId,
+          normalizedFilters.accountId,
+          normalizedFilters.limit,
         );
 
       return hydrateCaptureRows(database, decodeCaptureRows(rows));
@@ -380,21 +376,10 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
     searchCaptures(filters) {
       const query = buildFtsQuery(filters.text);
       if (!query) {
-        return this.listCaptures(filters).map((capture) => ({
-          captureId: capture.captureId,
-          source: capture.source,
-          accountId: capture.accountId ?? null,
-          threadId: capture.thread.id,
-          threadTitle: capture.thread.title ?? null,
-          occurredAt: capture.occurredAt,
-          text: capture.text,
-          snippet: buildSnippet(capture.text, capture.attachments.map((item) => item.fileName).join(" ")),
-          score: 0,
-          envelopePath: capture.envelopePath,
-        }));
+        return this.listCaptures(filters).map(createSearchHitFromCapture);
       }
 
-      const limit = normalizeLimit(filters.limit, 50);
+      const normalizedFilters = normalizeCaptureFilters(filters);
       const rows = database
         .prepare(
           `
@@ -421,48 +406,25 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         )
         .all(
           query,
-          normalizeNullable(filters.source),
-          normalizeNullable(filters.source),
-          normalizeNullable(filters.accountId),
-          normalizeNullable(filters.accountId),
-          limit,
-        ) as Array<{
-          capture_id: string;
-          source: string;
-          account_id: string | null;
-          thread_id: string;
-          thread_title: string | null;
-          occurred_at: string;
-          text_content: string | null;
-          envelope_path: string;
-          indexed_text: string | null;
-          indexed_attachment_text: string | null;
-          score: number;
-        }>;
+          normalizedFilters.source,
+          normalizedFilters.source,
+          normalizedFilters.accountId,
+          normalizedFilters.accountId,
+          normalizedFilters.limit,
+        ) as unknown as SearchRow[];
 
-        return rows.map((row) => ({
-          captureId: row.capture_id,
-          source: row.source,
-          accountId: row.account_id || null,
-          threadId: row.thread_id,
-          threadTitle: row.thread_title,
-        occurredAt: row.occurred_at,
-        text: row.text_content,
-        snippet: buildSnippet(row.indexed_text, row.indexed_attachment_text, row.text_content),
-        score: Number(row.score.toFixed(6)),
-        envelopePath: row.envelope_path,
-      }));
+      return rows.map(createSearchHitFromRow);
     },
     getCapture(captureId) {
       const row = database
         .prepare("select * from capture where capture_id = ?")
-        .get(captureId) as CaptureRow | undefined;
+        .get(captureId) as Record<string, unknown> | undefined;
 
       if (!row) {
         return null;
       }
 
-      return hydrateCaptureRows(database, [row])[0] ?? null;
+      return hydrateCaptureRows(database, [decodeCaptureRow(row)])[0] ?? null;
     },
   };
 }
@@ -488,25 +450,7 @@ interface CaptureRow {
 }
 
 function decodeCaptureRows(rows: ReadonlyArray<Record<string, unknown>>): CaptureRow[] {
-  return rows.map((row) => ({
-    capture_id: expectString(row.capture_id, "capture.capture_id"),
-    source: expectString(row.source, "capture.source"),
-    account_id: expectNullableString(row.account_id, "capture.account_id"),
-    external_id: expectString(row.external_id, "capture.external_id"),
-    thread_id: expectString(row.thread_id, "capture.thread_id"),
-    thread_title: expectNullableString(row.thread_title, "capture.thread_title"),
-    thread_is_direct: expectNumber(row.thread_is_direct, "capture.thread_is_direct"),
-    actor_id: expectNullableString(row.actor_id, "capture.actor_id"),
-    actor_name: expectNullableString(row.actor_name, "capture.actor_name"),
-    actor_is_self: expectNumber(row.actor_is_self, "capture.actor_is_self"),
-    occurred_at: expectString(row.occurred_at, "capture.occurred_at"),
-    received_at: expectNullableString(row.received_at, "capture.received_at"),
-    text_content: expectNullableString(row.text_content, "capture.text_content"),
-    raw_json: expectString(row.raw_json, "capture.raw_json"),
-    vault_event_id: expectString(row.vault_event_id, "capture.vault_event_id"),
-    envelope_path: expectString(row.envelope_path, "capture.envelope_path"),
-    created_at: expectString(row.created_at, "capture.created_at"),
-  }));
+  return rows.map(decodeCaptureRow);
 }
 
 function hydrateCaptureRows(database: DatabaseSync, rows: CaptureRow[]): InboxCaptureRecord[] {
@@ -514,77 +458,19 @@ function hydrateCaptureRows(database: DatabaseSync, rows: CaptureRow[]): InboxCa
     return [];
   }
 
-  const attachmentRows = database
-    .prepare(
-      `
-        select *
-        from capture_attachment
-        where capture_id in (${rows.map(() => "?").join(", ")})
-        order by capture_id asc, ordinal asc
-      `,
-    )
-    .all(...rows.map((row) => row.capture_id)) as Array<{
-      capture_id: string;
-      ordinal: number;
-      external_id: string | null;
-      kind: StoredAttachment["kind"];
-      mime: string | null;
-      original_path: string | null;
-      stored_path: string | null;
-      file_name: string | null;
-      size_bytes: number | null;
-      sha256: string | null;
-    }>;
-  const attachmentsByCapture = new Map<string, StoredAttachment[]>();
-
-  for (const row of attachmentRows) {
-    const attachments = attachmentsByCapture.get(row.capture_id) ?? [];
-    attachments.push({
-      ordinal: row.ordinal,
-      externalId: row.external_id,
-      kind: row.kind,
-      mime: row.mime,
-      originalPath: row.original_path,
-      storedPath: row.stored_path,
-      fileName: row.file_name,
-      byteSize: row.size_bytes,
-      sha256: row.sha256,
-    });
-    attachmentsByCapture.set(row.capture_id, attachments);
-  }
-
-  return rows.map((row) => ({
-    captureId: row.capture_id,
-    eventId: row.vault_event_id,
-    source: row.source,
-    externalId: row.external_id,
-    accountId: row.account_id || null,
-    thread: {
-      id: row.thread_id,
-      title: row.thread_title,
-      isDirect: row.thread_is_direct === 1,
-    },
-    actor: {
-      id: row.actor_id,
-      displayName: row.actor_name,
-      isSelf: row.actor_is_self === 1,
-    },
-    occurredAt: row.occurred_at,
-    receivedAt: row.received_at,
-    text: row.text_content,
-    attachments: attachmentsByCapture.get(row.capture_id) ?? [],
-    raw: JSON.parse(row.raw_json) as Record<string, unknown>,
-    envelopePath: row.envelope_path,
-    createdAt: row.created_at,
-  }));
+  const attachmentsByCapture = hydrateCaptureAttachments(
+    loadAttachmentRows(database, rows.map((row) => row.capture_id)),
+  );
+  return rows.map((row) => hydrateCaptureRow(row, attachmentsByCapture));
 }
 
-function withTransaction(database: DatabaseSync, operation: () => void): void {
+function withTransaction<T>(database: DatabaseSync, operation: () => T): T {
   database.exec("begin immediate transaction");
 
   try {
-    operation();
+    const result = operation();
     database.exec("commit");
+    return result;
   } catch (error) {
     database.exec("rollback");
     throw error;
@@ -625,4 +511,165 @@ function expectNumber(value: unknown, label: string): number {
   }
 
   return value;
+}
+
+interface AttachmentRow {
+  capture_id: string;
+  ordinal: number;
+  external_id: string | null;
+  kind: StoredAttachment["kind"];
+  mime: string | null;
+  original_path: string | null;
+  stored_path: string | null;
+  file_name: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+}
+
+interface SearchRow {
+  capture_id: string;
+  source: string;
+  account_id: string | null;
+  thread_id: string;
+  thread_title: string | null;
+  occurred_at: string;
+  text_content: string | null;
+  envelope_path: string;
+  indexed_text: string | null;
+  indexed_attachment_text: string | null;
+  score: number;
+}
+
+function decodeCaptureRow(row: Record<string, unknown>): CaptureRow {
+  return {
+    capture_id: expectString(row.capture_id, "capture.capture_id"),
+    source: expectString(row.source, "capture.source"),
+    account_id: expectNullableString(row.account_id, "capture.account_id"),
+    external_id: expectString(row.external_id, "capture.external_id"),
+    thread_id: expectString(row.thread_id, "capture.thread_id"),
+    thread_title: expectNullableString(row.thread_title, "capture.thread_title"),
+    thread_is_direct: expectNumber(row.thread_is_direct, "capture.thread_is_direct"),
+    actor_id: expectNullableString(row.actor_id, "capture.actor_id"),
+    actor_name: expectNullableString(row.actor_name, "capture.actor_name"),
+    actor_is_self: expectNumber(row.actor_is_self, "capture.actor_is_self"),
+    occurred_at: expectString(row.occurred_at, "capture.occurred_at"),
+    received_at: expectNullableString(row.received_at, "capture.received_at"),
+    text_content: expectNullableString(row.text_content, "capture.text_content"),
+    raw_json: expectString(row.raw_json, "capture.raw_json"),
+    vault_event_id: expectString(row.vault_event_id, "capture.vault_event_id"),
+    envelope_path: expectString(row.envelope_path, "capture.envelope_path"),
+    created_at: expectString(row.created_at, "capture.created_at"),
+  };
+}
+
+function loadAttachmentRows(database: DatabaseSync, captureIds: string[]): AttachmentRow[] {
+  return database
+    .prepare(
+      `
+        select *
+        from capture_attachment
+        where capture_id in (${captureIds.map(() => "?").join(", ")})
+        order by capture_id asc, ordinal asc
+      `,
+    )
+    .all(...captureIds) as unknown as AttachmentRow[];
+}
+
+function hydrateCaptureAttachments(
+  rows: AttachmentRow[],
+): Map<string, StoredAttachment[]> {
+  const attachmentsByCapture = new Map<string, StoredAttachment[]>();
+
+  for (const row of rows) {
+    const attachments = attachmentsByCapture.get(row.capture_id) ?? [];
+    attachments.push({
+      ordinal: row.ordinal,
+      externalId: row.external_id,
+      kind: row.kind,
+      mime: row.mime,
+      originalPath: row.original_path,
+      storedPath: row.stored_path,
+      fileName: row.file_name,
+      byteSize: row.size_bytes,
+      sha256: row.sha256,
+    });
+    attachmentsByCapture.set(row.capture_id, attachments);
+  }
+
+  return attachmentsByCapture;
+}
+
+function hydrateCaptureRow(
+  row: CaptureRow,
+  attachmentsByCapture: ReadonlyMap<string, StoredAttachment[]>,
+): InboxCaptureRecord {
+  return {
+    captureId: row.capture_id,
+    eventId: row.vault_event_id,
+    source: row.source,
+    externalId: row.external_id,
+    accountId: row.account_id || null,
+    thread: {
+      id: row.thread_id,
+      title: row.thread_title,
+      isDirect: row.thread_is_direct === 1,
+    },
+    actor: {
+      id: row.actor_id,
+      displayName: row.actor_name,
+      isSelf: row.actor_is_self === 1,
+    },
+    occurredAt: row.occurred_at,
+    receivedAt: row.received_at,
+    text: row.text_content,
+    attachments: attachmentsByCapture.get(row.capture_id) ?? [],
+    raw: JSON.parse(row.raw_json) as Record<string, unknown>,
+    envelopePath: row.envelope_path,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeCaptureFilters(
+  filters: InboxListFilters,
+  fallbackLimit = 50,
+): { source: string | null; accountId: string | null; limit: number } {
+  return {
+    source: normalizeNullable(filters.source),
+    accountId: normalizeNullable(filters.accountId),
+    limit: normalizeLimit(filters.limit, fallbackLimit),
+  };
+}
+
+function createSearchHitFromCapture(capture: InboxCaptureRecord): InboxSearchHit {
+  return {
+    captureId: capture.captureId,
+    source: capture.source,
+    accountId: capture.accountId ?? null,
+    threadId: capture.thread.id,
+    threadTitle: capture.thread.title ?? null,
+    occurredAt: capture.occurredAt,
+    text: capture.text,
+    snippet: buildSnippet(capture.text, joinTextValues(...capture.attachments.map((item) => item.fileName))),
+    score: 0,
+    envelopePath: capture.envelopePath,
+  };
+}
+
+function createSearchHitFromRow(row: SearchRow): InboxSearchHit {
+  return {
+    captureId: row.capture_id,
+    source: row.source,
+    accountId: row.account_id || null,
+    threadId: row.thread_id,
+    threadTitle: row.thread_title,
+    occurredAt: row.occurred_at,
+    text: row.text_content,
+    snippet: buildSnippet(row.indexed_text, row.indexed_attachment_text, row.text_content),
+    score: Number(row.score.toFixed(6)),
+    envelopePath: row.envelope_path,
+  };
+}
+
+function joinTextValues(...values: Array<string | null | undefined>): string {
+  return values.filter((value): value is string => typeof value === "string" && value.length > 0).join(" ");
 }

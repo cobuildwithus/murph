@@ -1,5 +1,4 @@
-import type { PersistedCapture } from "../contracts/capture.js";
-import type { InboundCapture } from "../contracts/capture.js";
+import type { InboundCapture, PersistedCapture } from "../contracts/capture.js";
 import type { InboxRuntimeStore } from "./sqlite.js";
 import {
   appendImportAudit,
@@ -41,12 +40,8 @@ export async function createInboxPipeline({
 
   return {
     runtime,
-    processCapture(input) {
-      return processCapture(input, context);
-    },
-    close() {
-      runtime.close();
-    },
+    processCapture: (input) => processCapture(input, context),
+    close: () => runtime.close(),
   };
 }
 
@@ -54,44 +49,45 @@ export async function processCapture(
   input: InboundCapture,
   context: PipelineContext,
 ): Promise<PersistedCapture> {
-  const dedupe = context.runtime.findByExternalId(input.source, input.accountId, input.externalId);
+  const { ids, runtime, vaultRoot } = context;
+  const dedupe = runtime.findByExternalId(input.source, input.accountId, input.externalId);
 
   if (dedupe) {
     return dedupe;
   }
 
-  const captureId = context.ids.capture();
-  const eventId = context.ids.event();
-  const auditId = context.ids.audit();
+  const captureId = ids.capture();
+  const eventId = ids.event();
+  const auditId = ids.audit();
 
   const stored = await persistRawCapture({
-    vaultRoot: context.vaultRoot,
+    vaultRoot,
     captureId,
     eventId,
     input,
   });
   const event = await appendInboxCaptureEvent({
-    vaultRoot: context.vaultRoot,
+    vaultRoot,
     eventId,
     occurredAt: input.occurredAt,
     inbound: input,
     stored,
   });
   await appendImportAudit({
-    vaultRoot: context.vaultRoot,
+    vaultRoot,
     auditId,
     eventId,
     inbound: input,
     stored,
     eventPath: event.relativePath,
   });
-  context.runtime.upsertCaptureIndex({
+  runtime.upsertCaptureIndex({
     captureId,
     eventId,
     input,
     stored,
   });
-  context.runtime.enqueueDerivedJobs({
+  runtime.enqueueDerivedJobs({
     captureId,
     stored,
   });

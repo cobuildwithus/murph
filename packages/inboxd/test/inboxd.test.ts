@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
 import { initializeVault, readJsonlRecords } from "@healthybob/core";
 
 import {
+  createConnectorRegistry,
   createInboxPipeline,
   createImessageConnector,
+  normalizeImessageMessage,
   openInboxRuntime,
   rebuildRuntimeFromVault,
   runPollConnector,
@@ -175,6 +178,14 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.equal(hits[0]?.captureId, capture.captureId);
   assert.match(hits[0]?.snippet ?? "", /Toast with avocado/);
 
+  const fallbackHits = runtime.searchCaptures({
+    text: "   ",
+    limit: 10,
+  });
+  assert.equal(fallbackHits.length, 1);
+  assert.equal(fallbackHits[0]?.captureId, capture.captureId);
+  assert.match(fallbackHits[0]?.snippet ?? "", /Toast with avocado/);
+
   const rebuiltRuntime = await openInboxRuntime({ vaultRoot });
   await rebuildRuntimeFromVault({
     vaultRoot,
@@ -187,6 +198,150 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
 
   pipeline.close();
   rebuiltRuntime.close();
+});
+
+test("runtime list and search filters stay scoped across both search branches", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-filter-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const selfCapture = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "filter-imessage-self",
+    accountId: "self",
+    thread: {
+      id: "chat-filter",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T09:00:00.000Z",
+    text: "toast for self",
+    attachments: [],
+    raw: {},
+  });
+  await pipeline.processCapture({
+    source: "imessage",
+    externalId: "filter-imessage-other",
+    accountId: "other",
+    thread: {
+      id: "chat-filter",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T09:05:00.000Z",
+    text: "toast for other",
+    attachments: [],
+    raw: {},
+  });
+  await pipeline.processCapture({
+    source: "mail",
+    externalId: "filter-mail-self",
+    accountId: "self",
+    thread: {
+      id: "chat-filter",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T09:10:00.000Z",
+    text: "toast from mail",
+    attachments: [],
+    raw: {},
+  });
+
+  assert.deepEqual(
+    runtime.listCaptures({
+      source: "imessage",
+      accountId: "self",
+      limit: 10,
+    }).map((capture) => capture.captureId),
+    [selfCapture.captureId],
+  );
+  assert.deepEqual(
+    runtime.searchCaptures({
+      text: "toast",
+      source: "imessage",
+      accountId: "self",
+      limit: 10,
+    }).map((capture) => capture.captureId),
+    [selfCapture.captureId],
+  );
+  assert.deepEqual(
+    runtime.searchCaptures({
+      text: "   ",
+      source: "imessage",
+      accountId: "self",
+      limit: 10,
+    }).map((capture) => capture.captureId),
+    [selfCapture.captureId],
+  );
+
+  pipeline.close();
+});
+
+test("runtime decoding rejects malformed sqlite rows with clear column errors", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-malformed-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const database = new DatabaseSync(runtime.databasePath);
+
+  database
+    .prepare(
+      `
+        insert into capture (
+          capture_id,
+          source,
+          account_id,
+          external_id,
+          thread_id,
+          thread_title,
+          thread_is_direct,
+          actor_id,
+          actor_name,
+          actor_is_self,
+          occurred_at,
+          received_at,
+          text_content,
+          raw_json,
+          vault_event_id,
+          envelope_path,
+          created_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .run(
+      "cap-malformed",
+      "imessage",
+      "",
+      "malformed-1",
+      "chat-malformed",
+      null,
+      "nope",
+      null,
+      null,
+      0,
+      "2026-03-13T10:00:00.000Z",
+      null,
+      "toast",
+      "{}",
+      "evt-malformed",
+      "raw/inbox/imessage/self/2026/03/13/cap-malformed.json",
+      "2026-03-13T10:00:00.000Z",
+    );
+
+  database.close();
+
+  assert.throws(
+    () => runtime.getCapture("cap-malformed"),
+    /Expected capture.thread_is_direct to be a number/,
+  );
+
+  runtime.close();
 });
 
 test("runPollConnector backfills and watches iMessage messages while advancing the cursor", async () => {
@@ -258,4 +413,68 @@ test("runPollConnector backfills and watches iMessage messages while advancing t
   assert.equal(closeCount, 1);
 
   pipeline.close();
+});
+
+test("normalizeImessageMessage trims text, sanitizes raw keys, and registry kind checks stay explicit", () => {
+  const capture = normalizeImessageMessage({
+    message: {
+      guid: "im-raw-1",
+      chatGuid: "chat-raw-1",
+      text: "  hello from raw  ",
+      date: new Date("2026-03-13T10:00:00.000Z"),
+      attachments: null,
+      ["display-name"]: "Friend",
+      nested: {
+        ["child-key"]: new Date("2026-03-13T10:00:01.000Z"),
+      },
+    },
+    chat: {
+      participantCount: 3,
+    },
+  });
+
+  assert.equal(capture.text, "hello from raw");
+  assert.equal(capture.thread.isDirect, false);
+  assert.equal(capture.raw.display_name, "Friend");
+  assert.deepEqual(capture.raw.nested, {
+    child_key: "2026-03-13T10:00:01.000Z",
+  });
+
+  const registry = createConnectorRegistry([
+    {
+      source: "imessage",
+      kind: "poll",
+      capabilities: {
+        backfill: false,
+        watch: false,
+        webhooks: false,
+        attachments: true,
+      },
+      async backfill(_cursor, _emit) {
+        return null;
+      },
+      async watch(_cursor, _emit, _signal) {},
+    },
+  ]);
+
+  assert.equal(registry.requirePoll("imessage").source, "imessage");
+  assert.throws(
+    () => registry.requireWebhook("imessage"),
+    /Webhook connector not registered for source: imessage/,
+  );
+});
+
+test("normalizeImessageMessage treats non-string text payloads as null", () => {
+  const malformedMessage = {
+    guid: "im-raw-2",
+    chatGuid: "chat-raw-2",
+    text: 42,
+    date: "2026-03-13T10:02:00.000Z",
+  } as unknown as Parameters<typeof normalizeImessageMessage>[0]["message"];
+
+  const capture = normalizeImessageMessage({
+    message: malformedMessage,
+  });
+
+  assert.equal(capture.text, null);
 });
