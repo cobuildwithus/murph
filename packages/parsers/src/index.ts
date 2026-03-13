@@ -34,6 +34,18 @@ export { createTextFileProvider } from "./adapters/text-file.js";
 export type { PublishedParserArtifacts } from "./publish/writer.js";
 export { writeParserArtifacts } from "./publish/writer.js";
 export { resolveInboxAttachmentArtifact } from "./inboxd/bridge.js";
+export type {
+  CreateInboxParserServiceInput,
+  InboxParserService,
+  InboxParserServiceDrainInput,
+} from "./service.js";
+export { createInboxParserService } from "./service.js";
+export type {
+  CreateParsedInboxPipelineInput,
+  ParsedInboxPipeline,
+  RunInboxDaemonWithParsersInput,
+} from "./inboxd/pipeline.js";
+export { createParsedInboxPipeline, runInboxDaemonWithParsers } from "./inboxd/pipeline.js";
 export type { ParseAttachmentInput, ParseAttachmentResult } from "./pipelines/parse-attachment.js";
 export { parseAttachment } from "./pipelines/parse-attachment.js";
 export type { RunAttachmentParseJobResult, RunAttachmentParseWorkerInput } from "./pipelines/worker.js";

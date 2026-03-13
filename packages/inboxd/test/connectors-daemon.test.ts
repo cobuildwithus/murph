@@ -287,6 +287,9 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
         claimNextAttachmentParseJob() {
           return null;
         },
+        requeueAttachmentParseJobs() {
+          return 0;
+        },
         completeAttachmentParseJob() {
           throw new Error("completeAttachmentParseJob should not be called");
         },
@@ -374,6 +377,9 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
             claimNextAttachmentParseJob() {
               return null;
             },
+            requeueAttachmentParseJobs() {
+              return 0;
+            },
             completeAttachmentParseJob() {
               throw new Error("completeAttachmentParseJob should not be called");
             },
@@ -443,6 +449,9 @@ test("runInboxDaemon aggregates wrapped connector failures when multiple connect
             },
             claimNextAttachmentParseJob() {
               return null;
+            },
+            requeueAttachmentParseJobs() {
+              return 0;
             },
             completeAttachmentParseJob() {
               throw new Error("completeAttachmentParseJob should not be called");

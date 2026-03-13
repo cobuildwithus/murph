@@ -275,6 +275,186 @@ test("completed attachment parse jobs refresh capture search text and attachment
   pipeline.close();
 });
 
+test("attachment parse job filters and requeue reset runtime-only parser state", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-requeue-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-inbox-requeue-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const firstPath = await writeExternalFile(sourceRoot, "first.png", "image-one");
+  const secondPath = await writeExternalFile(sourceRoot, "second.png", "image-two");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const first = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "requeue-first",
+    thread: {
+      id: "chat-requeue",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T10:30:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: firstPath,
+        fileName: "first.png",
+      },
+    ],
+    raw: {},
+  });
+  const second = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "requeue-second",
+    thread: {
+      id: "chat-requeue",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T10:31:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: secondPath,
+        fileName: "second.png",
+      },
+    ],
+    raw: {},
+  });
+
+  const secondJob = runtime.claimNextAttachmentParseJob({ captureId: second.captureId });
+  assert.ok(secondJob);
+  assert.equal(secondJob.captureId, second.captureId);
+
+  const firstAttachmentId = runtime.getCapture(first.captureId)?.attachments[0]?.attachmentId;
+  assert.ok(firstAttachmentId);
+  const firstJob = runtime.claimNextAttachmentParseJob({ attachmentId: firstAttachmentId });
+  assert.ok(firstJob);
+  assert.equal(firstJob.captureId, first.captureId);
+  assert.equal(firstJob.attachmentId, firstAttachmentId);
+
+  runtime.completeAttachmentParseJob({
+    jobId: firstJob.jobId,
+    providerId: "fake-image-parser",
+    resultPath: "derived/inbox/first.json",
+    extractedText: "Glucose 88 mg/dL",
+  });
+  runtime.completeAttachmentParseJob({
+    jobId: secondJob.jobId,
+    providerId: "fake-image-parser",
+    resultPath: "derived/inbox/second.json",
+    extractedText: "Unrelated text",
+  });
+
+  assert.equal(
+    runtime.searchCaptures({
+      text: "glucose",
+      limit: 10,
+    })[0]?.captureId,
+    first.captureId,
+  );
+
+  const requeued = runtime.requeueAttachmentParseJobs({
+    attachmentId: firstAttachmentId,
+    state: "succeeded",
+  });
+  assert.equal(requeued, 1);
+
+  const requeuedJob = runtime.listAttachmentParseJobs({
+    captureId: first.captureId,
+    limit: 10,
+  })[0];
+  assert.equal(requeuedJob?.state, "pending");
+  assert.equal(requeuedJob?.providerId ?? null, null);
+  assert.equal(requeuedJob?.resultPath ?? null, null);
+  assert.equal(requeuedJob?.errorCode ?? null, null);
+  assert.equal(requeuedJob?.errorMessage ?? null, null);
+  assert.equal(requeuedJob?.startedAt ?? null, null);
+  assert.equal(requeuedJob?.finishedAt ?? null, null);
+
+  const refreshed = runtime.getCapture(first.captureId);
+  assert.ok(refreshed);
+  assert.equal(refreshed.attachments[0]?.parseState, "pending");
+  assert.equal(refreshed.attachments[0]?.parserProviderId ?? null, null);
+  assert.equal(refreshed.attachments[0]?.derivedPath ?? null, null);
+  assert.equal(refreshed.attachments[0]?.extractedText ?? null, null);
+  assert.equal(refreshed.attachments[0]?.transcriptText ?? null, null);
+  assert.equal(
+    runtime.searchCaptures({
+      text: "glucose",
+      limit: 10,
+    }).length,
+    0,
+  );
+  assert.equal(
+    runtime.getCapture(second.captureId)?.attachments[0]?.parseState,
+    "succeeded",
+  );
+
+  pipeline.close();
+});
+
+test("requeue leaves running attachment parse jobs untouched", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-requeue-running-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-inbox-requeue-running-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const imagePath = await writeExternalFile(sourceRoot, "running.png", "image");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const capture = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "requeue-running",
+    thread: {
+      id: "chat-requeue-running",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T10:32:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: imagePath,
+        fileName: "running.png",
+      },
+    ],
+    raw: {},
+  });
+
+  const job = runtime.claimNextAttachmentParseJob({
+    captureId: capture.captureId,
+  });
+  assert.ok(job);
+  assert.equal(job.state, "running");
+
+  assert.equal(
+    runtime.requeueAttachmentParseJobs({
+      captureId: capture.captureId,
+    }),
+    0,
+  );
+  assert.equal(
+    runtime.listAttachmentParseJobs({
+      captureId: capture.captureId,
+      limit: 10,
+    })[0]?.state,
+    "running",
+  );
+  assert.equal(runtime.getCapture(capture.captureId)?.attachments[0]?.parseState, "running");
+
+  pipeline.close();
+});
+
 test("runtime list and search filters stay scoped across both search branches", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-filter-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

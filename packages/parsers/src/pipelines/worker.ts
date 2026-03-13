@@ -1,6 +1,10 @@
 import path from "node:path";
 
-import type { AttachmentParseJobRecord, InboxRuntimeStore } from "@healthybob/inboxd";
+import type {
+  AttachmentParseJobClaimFilters,
+  AttachmentParseJobRecord,
+  InboxRuntimeStore,
+} from "@healthybob/inboxd";
 
 import type { ParserArtifactKind } from "../contracts/artifact.js";
 import type { ParserRegistry } from "../registry/registry.js";
@@ -26,10 +30,11 @@ export interface RunAttachmentParseWorkerInput {
   scratchRoot?: string;
   ffmpeg?: FfmpegToolOptions;
   maxJobs?: number;
+  jobFilters?: AttachmentParseJobClaimFilters;
 }
 
 export async function runAttachmentParseJobOnce(input: RunAttachmentParseWorkerInput): Promise<RunAttachmentParseJobResult | null> {
-  const job = input.runtime.claimNextAttachmentParseJob();
+  const job = input.runtime.claimNextAttachmentParseJob(input.jobFilters);
   if (!job) {
     return null;
   }
@@ -51,17 +56,18 @@ export async function runAttachmentParseJobOnce(input: RunAttachmentParseWorkerI
       vaultRoot: input.vaultRoot,
       output: parsed.output,
     });
-    input.runtime.completeAttachmentParseJob({
+    const transcriptOnly = isTranscriptOnlyArtifact(artifact.kind);
+    const completedJob = input.runtime.completeAttachmentParseJob({
       jobId: job.jobId,
       providerId: parsed.providerId,
       resultPath: published.manifestPath,
-      extractedText: isTranscriptOnlyArtifact(artifact.kind) ? null : parsed.output.text,
-      transcriptText: isTranscriptOnlyArtifact(artifact.kind) ? parsed.output.text : null,
+      extractedText: transcriptOnly ? null : parsed.output.text,
+      transcriptText: transcriptOnly ? parsed.output.text : null,
     });
 
     return {
       status: "succeeded",
-      job,
+      job: completedJob,
       providerId: parsed.providerId,
       manifestPath: published.manifestPath,
     };

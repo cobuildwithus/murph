@@ -6,10 +6,12 @@ import {
 } from "@healthybob/runtime-state";
 
 import type {
+  AttachmentParseJobClaimFilters,
   AttachmentParseJobFilters,
   AttachmentParseJobRecord,
   CompleteAttachmentParseJobInput,
   FailAttachmentParseJobInput,
+  RequeueAttachmentParseJobsInput,
 } from "../contracts/derived.js";
 import type { InboxCaptureRecord, InboxListFilters, InboxSearchFilters, InboxSearchHit } from "../contracts/search.js";
 import type {
@@ -55,7 +57,8 @@ export interface InboxRuntimeStore {
   }): string;
   enqueueDerivedJobs(input: { captureId: string; stored: StoredCapture }): void;
   listAttachmentParseJobs(filters?: AttachmentParseJobFilters): AttachmentParseJobRecord[];
-  claimNextAttachmentParseJob(): AttachmentParseJobRecord | null;
+  claimNextAttachmentParseJob(filters?: AttachmentParseJobClaimFilters): AttachmentParseJobRecord | null;
+  requeueAttachmentParseJobs(filters?: RequeueAttachmentParseJobsInput): number;
   completeAttachmentParseJob(input: CompleteAttachmentParseJobInput): AttachmentParseJobRecord;
   failAttachmentParseJob(input: FailAttachmentParseJobInput): AttachmentParseJobRecord;
   listCaptures(filters?: InboxListFilters): InboxCaptureRecord[];
@@ -540,7 +543,7 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
 
       return decodeAttachmentParseJobRows(rows);
     },
-    claimNextAttachmentParseJob() {
+    claimNextAttachmentParseJob(filters = {}) {
       const jobId = withTransaction(database, () => {
         const row = database
           .prepare(
@@ -548,11 +551,18 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
               select job_id, attachment_id
               from attachment_parse_job
               where state = 'pending'
+                and (? is null or capture_id = ?)
+                and (? is null or attachment_id = ?)
               order by created_at asc, job_id asc
               limit 1
             `,
           )
-          .get() as { attachment_id?: string; job_id?: string } | undefined;
+          .get(
+            normalizeNullable(filters.captureId),
+            normalizeNullable(filters.captureId),
+            normalizeNullable(filters.attachmentId),
+            normalizeNullable(filters.attachmentId),
+          ) as { attachment_id?: string; job_id?: string } | undefined;
 
         if (!row?.job_id || !row.attachment_id) {
           return null;
@@ -594,6 +604,83 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
       }
 
       return readAttachmentParseJob(database, jobId);
+    },
+    requeueAttachmentParseJobs(filters = {}) {
+      return withTransaction(database, () => {
+        const rows = database
+          .prepare(
+            `
+              select attachment_id, capture_id
+              from attachment_parse_job
+              where (? is null or capture_id = ?)
+                and (? is null or attachment_id = ?)
+                and (? is null or state = ?)
+                and state in ('failed', 'succeeded')
+            `,
+          )
+          .all(
+            normalizeNullable(filters.captureId),
+            normalizeNullable(filters.captureId),
+            normalizeNullable(filters.attachmentId),
+            normalizeNullable(filters.attachmentId),
+            normalizeNullable(filters.state),
+            normalizeNullable(filters.state),
+          ) as Array<{ attachment_id?: string; capture_id?: string }>;
+
+        const attachmentIds = rows
+          .map((row) => row.attachment_id)
+          .filter((value): value is string => typeof value === "string" && value.length > 0);
+        if (attachmentIds.length === 0) {
+          return 0;
+        }
+
+        const captureIds = Array.from(
+          new Set(
+            rows
+              .map((row) => row.capture_id)
+              .filter((value): value is string => typeof value === "string" && value.length > 0),
+          ),
+        );
+        const placeholders = attachmentIds.map(() => "?").join(", ");
+
+        const result = database
+          .prepare(
+            `
+              update attachment_parse_job
+              set state = 'pending',
+                  provider_id = null,
+                  result_path = null,
+                  error_code = null,
+                  error_message = null,
+                  started_at = null,
+                  finished_at = null
+              where attachment_id in (${placeholders})
+            `,
+          )
+          .run(...attachmentIds);
+
+        const now = new Date().toISOString();
+        database
+          .prepare(
+            `
+              update capture_attachment
+              set extracted_text = null,
+                  transcript_text = null,
+                  derived_path = null,
+                  parser_provider_id = null,
+                  parser_state = 'pending',
+                  parse_updated_at = ?
+              where attachment_id in (${placeholders})
+            `,
+          )
+          .run(now, ...attachmentIds);
+
+        for (const captureId of captureIds) {
+          refreshCaptureSearchIndex(database, captureId);
+        }
+
+        return Number(result.changes ?? attachmentIds.length);
+      });
     },
     completeAttachmentParseJob(input) {
       return withTransaction(database, () => {

@@ -24,6 +24,11 @@ export interface AttachmentParseJobFilters {
   limit?: number;
 }
 
+export interface AttachmentParseJobClaimFilters {
+  captureId?: string;
+  attachmentId?: string;
+}
+
 export interface CompleteAttachmentParseJobInput {
   jobId: string;
   providerId: string;
@@ -39,4 +44,10 @@ export interface FailAttachmentParseJobInput {
   errorCode?: string | null;
   errorMessage: string;
   finishedAt?: string;
+}
+
+export interface RequeueAttachmentParseJobsInput {
+  captureId?: string;
+  attachmentId?: string;
+  state?: AttachmentParseState;
 }

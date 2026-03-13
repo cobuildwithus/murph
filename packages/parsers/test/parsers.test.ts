@@ -8,6 +8,8 @@ import { initializeVault } from "@healthybob/core";
 import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@healthybob/inboxd";
 
 import {
+  createInboxParserService,
+  createParsedInboxPipeline,
   createPaddleOcrProvider,
   createParserRegistry,
   createPdfToTextProvider,
@@ -527,6 +529,9 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   assert.equal(results[0]?.status, "succeeded");
   assert.equal(results[0]?.providerId, "fake-image-parser");
   assert.ok(results[0]?.manifestPath);
+  assert.equal(results[0]?.job.state, "succeeded");
+  assert.equal(results[0]?.job.resultPath, results[0]?.manifestPath);
+  assert.equal(results[0]?.job.providerId, "fake-image-parser");
 
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
@@ -560,6 +565,67 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   assert.match(chunks, /Omelet with spinach and feta/);
 
   pipeline.close();
+});
+
+test("parser service forwards scoped drain and requeue filters to the runtime", async () => {
+  const claimFilters: Array<Record<string, unknown> | undefined> = [];
+  const requeueFilters: Array<Record<string, unknown> | undefined> = [];
+  const runtime = {
+    claimNextAttachmentParseJob(filters) {
+      claimFilters.push(filters);
+      return null;
+    },
+    requeueAttachmentParseJobs(filters) {
+      requeueFilters.push(filters);
+      return 2;
+    },
+  } as Pick<
+    Awaited<ReturnType<typeof openInboxRuntime>>,
+    "claimNextAttachmentParseJob" | "requeueAttachmentParseJobs"
+  > as Awaited<ReturnType<typeof openInboxRuntime>>;
+
+  const service = createInboxParserService({
+    vaultRoot: "/tmp/ignored",
+    runtime,
+    registry: createParserRegistry([]),
+  });
+
+  assert.deepEqual(
+    await service.drain({
+      captureId: "cap_1",
+      attachmentId: "att_1",
+      maxJobs: 3,
+    }),
+    [],
+  );
+  assert.equal(
+    await service.drainOnce({
+      captureId: "cap_2",
+    }),
+    null,
+  );
+  assert.equal(
+    service.requeue({
+      attachmentId: "att_3",
+      state: "failed",
+    }),
+    2,
+  );
+  assert.deepEqual(claimFilters, [
+    {
+      captureId: "cap_1",
+      attachmentId: "att_1",
+    },
+    {
+      captureId: "cap_2",
+    },
+  ]);
+  assert.deepEqual(requeueFilters, [
+    {
+      attachmentId: "att_3",
+      state: "failed",
+    },
+  ]);
 });
 
 test("attachment parse worker marks jobs failed when no provider is available", async () => {
@@ -611,6 +677,232 @@ test("attachment parse worker marks jobs failed when no provider is available", 
   assert.equal(refreshed.attachments[0]?.parseState, "failed");
   assert.equal(
     runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]?.state,
+    "failed",
+  );
+
+  pipeline.close();
+});
+
+test("attachment parse worker can drain jobs scoped to a single capture", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-scoped-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-scoped-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const firstPath = await writeExternalFile(sourceRoot, "first.png", "first-image");
+  const secondPath = await writeExternalFile(sourceRoot, "second.png", "second-image");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const first = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "scoped-first",
+    thread: {
+      id: "chat-scoped",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T11:20:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: firstPath,
+        fileName: "first.png",
+      },
+    ],
+    raw: {},
+  });
+  const second = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "scoped-second",
+    thread: {
+      id: "chat-scoped",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T11:21:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: secondPath,
+        fileName: "second.png",
+      },
+    ],
+    raw: {},
+  });
+
+  const registry = createParserRegistry([
+    {
+      id: "fake-image-parser",
+      locality: "local",
+      openness: "open_source",
+      runtime: "node",
+      priority: 500,
+      async discover() {
+        return {
+          available: true,
+          reason: "available for scoped worker test",
+        };
+      },
+      supports(request) {
+        return (request.preparedKind ?? request.artifact.kind) === "image";
+      },
+      async run() {
+        return {
+          text: "Scoped OCR text",
+        };
+      },
+    },
+  ]);
+
+  const results = await runAttachmentParseWorker({
+    vaultRoot,
+    runtime,
+    registry,
+    maxJobs: 10,
+    jobFilters: {
+      captureId: first.captureId,
+    },
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.status, "succeeded");
+  assert.equal(results[0]?.job.captureId, first.captureId);
+  assert.equal(runtime.getCapture(first.captureId)?.attachments[0]?.parseState, "succeeded");
+  assert.equal(runtime.getCapture(second.captureId)?.attachments[0]?.parseState, "pending");
+
+  pipeline.close();
+});
+
+test("parsed inbox pipeline auto-drains parser jobs for each processed capture", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parsed-pipeline-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-parsed-pipeline-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const imagePath = await writeExternalFile(sourceRoot, "auto-parse.png", "image-bytes-placeholder");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createParsedInboxPipeline({
+    vaultRoot,
+    runtime,
+    registry: createParserRegistry([
+      {
+        id: "auto-image-parser",
+        locality: "local",
+        openness: "open_source",
+        runtime: "node",
+        priority: 500,
+        async discover() {
+          return {
+            available: true,
+            reason: "available for parsed pipeline test",
+          };
+        },
+        supports(request) {
+          return (request.preparedKind ?? request.artifact.kind) === "image";
+        },
+        async run() {
+          return {
+            text: "Auto-drained OCR text",
+          };
+        },
+      },
+    ]),
+  });
+
+  const capture = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "auto-drain-1",
+    thread: {
+      id: "chat-auto-drain",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T11:30:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: imagePath,
+        fileName: "auto-parse.png",
+      },
+    ],
+    raw: {},
+  });
+
+  const refreshed = runtime.getCapture(capture.captureId);
+  assert.ok(refreshed);
+  assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
+  assert.equal(refreshed.attachments[0]?.extractedText, "Auto-drained OCR text");
+  assert.equal(
+    runtime.listAttachmentParseJobs({
+      captureId: capture.captureId,
+      limit: 10,
+    })[0]?.state,
+    "succeeded",
+  );
+
+  pipeline.close();
+});
+
+test("parsed inbox pipeline stores captures even when auto-drain parsing fails", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parsed-pipeline-failure-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-parsed-pipeline-failure-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const imagePath = await writeExternalFile(sourceRoot, "auto-fail.png", "image-bytes-placeholder");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createParsedInboxPipeline({
+    vaultRoot,
+    runtime,
+    registry: createParserRegistry([]),
+  });
+
+  const capture = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "auto-drain-fail-1",
+    thread: {
+      id: "chat-auto-fail",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T11:31:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "image",
+        mime: "image/png",
+        originalPath: imagePath,
+        fileName: "auto-fail.png",
+      },
+    ],
+    raw: {},
+  });
+
+  const refreshed = runtime.getCapture(capture.captureId);
+  assert.ok(refreshed);
+  assert.equal(refreshed.attachments[0]?.parseState, "failed");
+  assert.equal(refreshed.attachments[0]?.derivedPath ?? null, null);
+  assert.equal(refreshed.attachments[0]?.extractedText ?? null, null);
+  assert.equal(
+    runtime.searchCaptures({
+      text: "auto-drained",
+      limit: 10,
+    }).length,
+    0,
+  );
+  assert.equal(
+    runtime.listAttachmentParseJobs({
+      captureId: capture.captureId,
+      limit: 10,
+    })[0]?.state,
     "failed",
   );
 

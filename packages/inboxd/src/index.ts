@@ -13,12 +13,14 @@ export type {
   InboxSearchHit,
 } from "./contracts/search.js";
 export type {
+  AttachmentParseJobClaimFilters,
   AttachmentParseJobFilters,
   AttachmentParseJobRecord,
   AttachmentParsePipeline,
   AttachmentParseState,
   CompleteAttachmentParseJobInput,
   FailAttachmentParseJobInput,
+  RequeueAttachmentParseJobsInput,
 } from "./contracts/derived.js";
 export type {
   BaseConnector,
