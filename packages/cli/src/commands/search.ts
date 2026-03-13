@@ -124,23 +124,19 @@ const searchIndexRebuildSchema = searchIndexStatusSchema.extend({
   rebuilt: z.literal(true),
 })
 
-const searchActionValues = ['index-status', 'index-rebuild'] as const
-const searchCommandOutputSchema = z.union([
-  searchResultSchema,
-  searchIndexStatusSchema,
-  searchIndexRebuildSchema,
-])
-
 export function registerSearchCommands(
   cli: Cli.Cli,
   _services: VaultCliServices,
 ) {
-  cli.command('search', {
+  const search = Cli.create('search', {
+    description:
+      'Search commands for the local read model and the optional SQLite lexical index.',
+  })
+
+  search.command('query', {
     description:
       'Search the local read model with lexical scoring and optional SQLite-backed candidate retrieval.',
-    args: z.object({
-      action: z.enum(searchActionValues).optional(),
-    }),
+    args: emptyArgsSchema,
     options: withBaseOptions({
       text: z
         .string()
@@ -184,32 +180,15 @@ export function registerSearchCommands(
         .default(20)
         .describe('Maximum number of hits to return.'),
     }),
-    output: searchCommandOutputSchema,
-    async run({ args, options }) {
+    output: searchResultSchema,
+    async run({ options }) {
       const query = await loadQueryRuntime()
-
-      if (args.action === 'index-status') {
-        const status = query.getSqliteSearchStatus(options.vault)
-        return {
-          vault: options.vault,
-          ...status,
-        }
-      }
-
-      if (args.action === 'index-rebuild') {
-        const rebuilt = await query.rebuildSqliteSearchIndex(options.vault)
-        return {
-          vault: options.vault,
-          ...rebuilt,
-        }
-      }
-
       const text = options.text?.trim()
 
       if (!text) {
         throw new VaultCliError(
           'invalid_query',
-          'Search text is required for `search`.',
+          'Search text is required for `search query`.',
         )
       }
 
@@ -254,6 +233,45 @@ export function registerSearchCommands(
       }
     },
   })
+
+  const index = Cli.create('index', {
+    description: 'Inspect and rebuild the optional SQLite lexical search index.',
+  })
+
+  index.command('status', {
+    description: 'Show the current SQLite lexical search index status.',
+    args: emptyArgsSchema,
+    options: withBaseOptions(),
+    output: searchIndexStatusSchema,
+    async run({ options }) {
+      const query = await loadQueryRuntime()
+      const status = query.getSqliteSearchStatus(options.vault)
+
+      return {
+        vault: options.vault,
+        ...status,
+      }
+    },
+  })
+
+  index.command('rebuild', {
+    description: 'Rebuild the SQLite lexical search index from the current read model.',
+    args: emptyArgsSchema,
+    options: withBaseOptions(),
+    output: searchIndexRebuildSchema,
+    async run({ options }) {
+      const query = await loadQueryRuntime()
+      const rebuilt = await query.rebuildSqliteSearchIndex(options.vault)
+
+      return {
+        vault: options.vault,
+        ...rebuilt,
+      }
+    },
+  })
+
+  search.command(index)
+  cli.command(search)
 
   cli.command(
     'timeline',

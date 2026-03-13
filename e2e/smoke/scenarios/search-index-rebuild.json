@@ -1,6 +1,6 @@
 {
   "id": "search-index-rebuild",
-  "command": "vault-cli search index rebuild --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli search index rebuild --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md",

@@ -1,21 +1,66 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { promisify } from 'node:util'
 import { test } from 'vitest'
-import { repoRoot, requireData, runCli } from './cli-test-helpers.js'
+import {
+  type CliEnvelope,
+  commandOutputFromError,
+  repoRoot,
+  requireData,
+  runCli,
+} from './cli-test-helpers.js'
 
 const sampleDocumentPath = path.join(
   repoRoot,
   'fixtures/sample-imports/README.md',
 )
+const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
+const execFileAsync = promisify(execFile)
 
 interface RetrievalFixture {
   journalPath: string
   mealId: string
   vaultRoot: string
+}
+
+async function runSourceCli<TData = Record<string, unknown>>(
+  args: string[],
+): Promise<CliEnvelope<TData>> {
+  try {
+    const { stdout } = await execFileAsync(
+      'pnpm',
+      ['exec', 'tsx', sourceBinPath, ...withMachineOutput(args)],
+      { cwd: repoRoot },
+    )
+
+    return JSON.parse(stdout) as CliEnvelope<TData>
+  } catch (error) {
+    const output = commandOutputFromError(error)
+    if (output !== null) {
+      return JSON.parse(output) as CliEnvelope<TData>
+    }
+
+    throw error
+  }
+}
+
+function withMachineOutput(args: string[]): string[] {
+  const nextArgs = [...args]
+
+  if (!nextArgs.includes('--verbose')) {
+    nextArgs.push('--verbose')
+  }
+
+  if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
+    nextArgs.push('--format', 'json')
+  }
+
+  return nextArgs
 }
 
 async function makeCanonicalHealthFixture(): Promise<string> {
@@ -178,6 +223,92 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
   }
 }
 
+async function makeSourceRetrievalFixture(): Promise<RetrievalFixture> {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-retrieval-'))
+  const csvPath = path.join(vaultRoot, 'heart-rate.csv')
+
+  await writeFile(
+    csvPath,
+    [
+      'timestamp,bpm',
+      '2026-03-12T18:00:00Z,61',
+      '2026-03-12T20:00:00Z,77',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+
+  const initResult = await runSourceCli<{ created: boolean }>([
+    'init',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(initResult.ok, true)
+  assert.equal(requireData(initResult).created, true)
+
+  const journalResult = await runSourceCli<{ journalPath: string }>([
+    'journal',
+    'ensure',
+    '2026-03-12',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(journalResult.ok, true)
+
+  await writeFile(
+    path.join(vaultRoot, requireData(journalResult).journalPath),
+    `---
+dayKey: 2026-03-12
+title: March 12
+tags:
+  - focus
+---
+# March 12
+
+Steady energy. Afternoon crash after pasta lunch and coffee.
+`,
+    'utf8',
+  )
+
+  const mealResult = await runSourceCli<{ mealId: string }>([
+    'meal',
+    'add',
+    '--photo',
+    sampleDocumentPath,
+    '--note',
+    'Pasta lunch and coffee. Afternoon crash afterward.',
+    '--occurred-at',
+    '2026-03-12T12:15:00Z',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(mealResult.ok, true)
+
+  const samplesResult = await runSourceCli<{ lookupIds: string[] }>([
+    'samples',
+    'import-csv',
+    csvPath,
+    '--stream',
+    'heart_rate',
+    '--ts-column',
+    'timestamp',
+    '--value-column',
+    'bpm',
+    '--unit',
+    'bpm',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(samplesResult.ok, true)
+  assert.equal(requireData(samplesResult).lookupIds.length, 2)
+
+  return {
+    journalPath: requireData(journalResult).journalPath,
+    mealId: requireData(mealResult).mealId,
+    vaultRoot,
+  }
+}
+
 async function writeVaultFile(
   vaultRoot: string,
   relativePath: string,
@@ -203,6 +334,7 @@ test.sequential('search returns lexical hits and excludes raw sample rows by def
       total: number
     }>([
       'search',
+      'query',
       '--text',
       'afternoon crash pasta',
       '--limit',
@@ -212,7 +344,7 @@ test.sequential('search returns lexical hits and excludes raw sample rows by def
     ])
 
     assert.equal(result.ok, true)
-    assert.equal(result.meta?.command, 'search')
+    assert.equal(result.meta?.command, 'search query')
     assert.equal(requireData(result).query, 'afternoon crash pasta')
     assert.equal(requireData(result).total, 2)
     assert.deepEqual(
@@ -223,6 +355,89 @@ test.sequential('search returns lexical hits and excludes raw sample rows by def
     assert.equal(
       requireData(result).hits.some((hit) => hit.recordType === 'sample'),
       false,
+    )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('search applies date bounds and echoes renamed filter keys', async () => {
+  const fixture = await makeSourceRetrievalFixture()
+
+  try {
+    const priorJournal = await runSourceCli<{ journalPath: string }>([
+      'journal',
+      'ensure',
+      '2026-03-10',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+    assert.equal(priorJournal.ok, true)
+
+    await writeFile(
+      path.join(fixture.vaultRoot, requireData(priorJournal).journalPath),
+      `---
+dayKey: 2026-03-10
+title: March 10
+tags:
+  - focus
+---
+# March 10
+
+Afternoon crash after pasta lunch returned.
+`,
+      'utf8',
+    )
+
+    const bounded = await runSourceCli<{
+      filters: Record<string, unknown>
+      hits: Array<{
+        recordId: string
+      }>
+      total: number
+    }>([
+      'search',
+      'query',
+      '--text',
+      'afternoon crash pasta',
+      '--from',
+      '2026-03-12',
+      '--to',
+      '2026-03-12',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+    const unbounded = await runSourceCli<{
+      hits: Array<{
+        recordId: string
+      }>
+      total: number
+    }>([
+      'search',
+      'query',
+      '--text',
+      'afternoon crash pasta',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(bounded.ok, true)
+    assert.equal(requireData(bounded).filters.from, '2026-03-12')
+    assert.equal(requireData(bounded).filters.to, '2026-03-12')
+    assert.equal('dateFrom' in requireData(bounded).filters, false)
+    assert.equal('dateTo' in requireData(bounded).filters, false)
+    assert.equal(requireData(bounded).total, 2)
+    assert.deepEqual(
+      new Set(requireData(bounded).hits.map((hit) => hit.recordId)),
+      new Set(['journal:2026-03-12', fixture.mealId]),
+    )
+    assert.equal(unbounded.ok, true)
+    assert.equal(requireData(unbounded).total, 3)
+    assert.equal(
+      requireData(unbounded).hits.some(
+        (hit) => hit.recordId === 'journal:2026-03-10',
+      ),
+      true,
     )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
@@ -241,6 +456,7 @@ test.sequential('search includes sample rows when the caller scopes by stream', 
       }>
     }>([
       'search',
+      'query',
       '--text',
       'heart_rate',
       '--stream',
@@ -350,6 +566,7 @@ test.sequential('search index status and rebuild expose the shared sqlite runtim
       hits: Array<{ recordId: string; recordType: string; stream: string | null }>
     }>([
       'search',
+      'query',
       '--text',
       'heart_rate',
       '--backend',
@@ -419,6 +636,7 @@ test.sequential('search index status ignores a copied inbox search db until inde
       hits: Array<{ recordId: string }>
     }>([
       'search',
+      'query',
       '--text',
       'heart_rate',
       '--backend',
@@ -489,6 +707,7 @@ test.sequential('search index status treats a pre-existing inbox runtime db as u
 
     const sqliteSearch = await runCli([
       'search',
+      'query',
       '--text',
       'pasta',
       '--backend',
@@ -531,6 +750,7 @@ Steady energy after electrolyte drink.
       hits: Array<{ recordId: string }>
     }>([
       'search',
+      'query',
       '--text',
       'electrolyte',
       '--backend',
@@ -576,6 +796,7 @@ Steady energy after saffron tea.
       hits: Array<{ recordId: string }>
     }>([
       'search',
+      'query',
       '--text',
       'saffron',
       '--backend',
@@ -587,6 +808,7 @@ Steady energy after saffron tea.
       hits: Array<{ recordId: string }>
     }>([
       'search',
+      'query',
       '--text',
       'saffron',
       '--backend',
@@ -624,6 +846,7 @@ test.sequential('search accepts projected health record families', async () => {
       total: number
     }>([
       'search',
+      'query',
       '--text',
       'sleep',
       '--record-type',
@@ -700,6 +923,7 @@ test.sequential('search rejects comma-delimited record-type tokens', async () =>
   try {
     const result = await runCli([
       'search',
+      'query',
       '--text',
       'sleep',
       '--record-type',
@@ -711,7 +935,7 @@ test.sequential('search rejects comma-delimited record-type tokens', async () =>
     assert.equal(result.ok, false)
     assert.match(
       result.error.message ?? '',
-      /repeat the flag instead|comma-delimited values are not supported/u,
+      /repeat the flag instead|comma-delimited values are not supported/iu,
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -737,7 +961,7 @@ test.sequential('timeline rejects comma-delimited entry-type tokens', async () =
     assert.equal(result.ok, false)
     assert.match(
       result.error.message ?? '',
-      /repeat the flag instead|comma-delimited values are not supported/u,
+      /repeat the flag instead|comma-delimited values are not supported/iu,
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

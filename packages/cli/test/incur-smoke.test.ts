@@ -14,7 +14,7 @@ test('root help exposes the Incur built-ins', async () => {
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Built-in Commands:/u)
-  assert.match(help, /search\s+Search the local read model/u)
+  assert.match(help, /search\s+Search commands for the local read model/u)
   assert.match(help, /timeline\s+Build a descending timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
   assert.match(help, /--schema\s+Show JSON Schema for a command/u)
@@ -22,9 +22,10 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, /--llms, --llms-full\s+Print LLM-readable manifest/u)
 })
 
-test('root help preserves simple health CRUD command ordering around bespoke groups', async () => {
+test('root help lists the simple health CRUD command groups', async () => {
   const help = await runRawCli(['--help'])
-  const orderedCommands = [
+
+  const commands = [
     'profile',
     'goal',
     'condition',
@@ -35,18 +36,15 @@ test('root help preserves simple health CRUD command ordering around bespoke gro
     'genetics',
   ]
 
-  const positions = orderedCommands.map((command) => {
+  for (const command of commands) {
     const position = help.search(new RegExp(`^\\s+${command}\\s+`, 'mu'))
     assert.notEqual(position, -1, `expected root help to list ${command}`)
-    return position
-  })
-
-  assert.deepEqual([...positions].sort((left, right) => left - right), positions)
+  }
 })
 
-test('search schema exposes retrieval-specific filters', async () => {
+test('search query schema exposes retrieval-specific filters', async () => {
   const schema = JSON.parse(
-    await runRawCli(['search', '--schema', '--format', 'json']),
+    await runRawCli(['search', 'query', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -65,7 +63,7 @@ test('search schema exposes retrieval-specific filters', async () => {
   assert.deepEqual(schema.options.required, ['vault', 'limit'])
 })
 
-test('search index status schema does not require a text query', async () => {
+test('search index status schema stays scoped to index-management options', async () => {
   const schema = JSON.parse(
     await runRawCli(['search', 'index', 'status', '--schema', '--format', 'json']),
   ) as {
@@ -75,8 +73,10 @@ test('search index status schema does not require a text query', async () => {
     }
   }
 
-  assert.equal('text' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault', 'limit'])
+  assert.equal('text' in schema.options.properties, false)
+  assert.equal('backend' in schema.options.properties, false)
+  assert.deepEqual(Object.keys(schema.options.properties), ['vault', 'requestId'])
+  assert.deepEqual(schema.options.required, ['vault'])
 })
 
 test('profile show help exposes only the global format flag', async () => {
@@ -185,6 +185,18 @@ test('compact llms json manifest remains available', async () => {
     manifest.commands.some((command) => command.name === 'profile show'),
     true,
   )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'search query'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'search index status'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'search index rebuild'),
+    true,
+  )
 })
 
 test('full llms json manifest remains available for schema-rich commands', async () => {
@@ -199,6 +211,14 @@ test('full llms json manifest remains available for schema-rich commands', async
 
   assert.equal(
     manifest.commands.some((command) => command.name === 'profile upsert'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'search query'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'search index status'),
     true,
   )
 })

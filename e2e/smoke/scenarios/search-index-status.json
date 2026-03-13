@@ -1,6 +1,6 @@
 {
   "id": "search-index-status",
-  "command": "vault-cli search index status --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli search index status --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md",
