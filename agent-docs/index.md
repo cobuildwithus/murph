@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-13 (retrieval-layer query/CLI commands added; verification docs and coverage map updated for search/timeline modules)
+Last verified: 2026-03-13 (retrieval/search docs updated earlier today; active execution-plan inventory refreshed for current simplification and integration work)
 
 ## Purpose
 

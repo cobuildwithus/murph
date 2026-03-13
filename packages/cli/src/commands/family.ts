@@ -1,7 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  registerHealthCrudGroup,
 } from './health-command-factory.js'
 import {
   createHealthScaffoldResultSchema,
@@ -22,19 +22,15 @@ const upsertResultSchema = z.object({
 })
 
 export function registerFamilyCommands(cli: Cli.Cli, services: VaultCliServices) {
-  const family = Cli.create('family', {
+  registerHealthCrudGroup(cli, {
+    commandName: 'family',
     description: 'Family registry commands for the health extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List family members through the health read model.',
       scaffold: 'Emit a payload template for family member upserts.',
       show: 'Show one family member by canonical id or slug.',
       upsert: 'Upsert one family member from an @file.json payload.',
     },
-    group: family,
-    groupName: 'family',
     listStatusDescription: 'Optional family-member status to filter by.',
     noun: 'family member',
     outputs: {
@@ -59,6 +55,4 @@ export function registerFamilyCommands(cli: Cli.Cli, services: VaultCliServices)
       },
     },
   })
-
-  cli.command(family)
 }

@@ -1,7 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  registerHealthCrudGroup,
 } from './health-command-factory.js'
 import {
   createHealthScaffoldResultSchema,
@@ -25,19 +25,15 @@ export function registerGeneticsCommands(
   cli: Cli.Cli,
   services: VaultCliServices,
 ) {
-  const genetics = Cli.create('genetics', {
+  registerHealthCrudGroup(cli, {
+    commandName: 'genetics',
     description: 'Genetic variant commands for the health extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List genetic variants through the health read model.',
       scaffold: 'Emit a payload template for genetic variant upserts.',
       show: 'Show one genetic variant by canonical id or slug.',
       upsert: 'Upsert one genetic variant from an @file.json payload.',
     },
-    group: genetics,
-    groupName: 'genetics',
     listStatusDescription: 'Optional genetic-variant status to filter by.',
     noun: 'genetic variant',
     outputs: {
@@ -62,6 +58,4 @@ export function registerGeneticsCommands(
       },
     },
   })
-
-  cli.command(genetics)
 }

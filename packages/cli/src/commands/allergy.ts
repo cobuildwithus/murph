@@ -1,7 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  registerHealthCrudGroup,
 } from './health-command-factory.js'
 import {
   createHealthScaffoldResultSchema,
@@ -22,19 +22,15 @@ const upsertResultSchema = z.object({
 })
 
 export function registerAllergyCommands(cli: Cli.Cli, services: VaultCliServices) {
-  const allergy = Cli.create('allergy', {
+  registerHealthCrudGroup(cli, {
+    commandName: 'allergy',
     description: 'Allergy registry commands for the health extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List allergies through the health read model.',
       scaffold: 'Emit a payload template for allergy upserts.',
       show: 'Show one allergy by canonical id or slug.',
       upsert: 'Upsert one allergy from an @file.json payload.',
     },
-    group: allergy,
-    groupName: 'allergy',
     listStatusDescription: 'Optional allergy status to filter by.',
     noun: 'allergy',
     outputs: {
@@ -59,6 +55,4 @@ export function registerAllergyCommands(cli: Cli.Cli, services: VaultCliServices
       },
     },
   })
-
-  cli.command(allergy)
 }

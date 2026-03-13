@@ -1,7 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  registerHealthCrudGroup,
 } from './health-command-factory.js'
 import {
   createHealthScaffoldResultSchema,
@@ -25,19 +25,15 @@ export function registerConditionCommands(
   cli: Cli.Cli,
   services: VaultCliServices,
 ) {
-  const condition = Cli.create('condition', {
+  registerHealthCrudGroup(cli, {
+    commandName: 'condition',
     description: 'Condition registry commands for the health extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List conditions through the health read model.',
       scaffold: 'Emit a payload template for condition upserts.',
       show: 'Show one condition by canonical id or slug.',
       upsert: 'Upsert one condition from an @file.json payload.',
     },
-    group: condition,
-    groupName: 'condition',
     listStatusDescription: 'Optional condition status to filter by.',
     noun: 'condition',
     outputs: {
@@ -62,6 +58,4 @@ export function registerConditionCommands(
       },
     },
   })
-
-  cli.command(condition)
 }

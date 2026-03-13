@@ -10,7 +10,7 @@ import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  createHealthCrudGroup,
   suggestedCommandsCta,
 } from './health-command-factory.js'
 
@@ -37,11 +37,9 @@ export function registerProfileCommands(
   cli: Cli.Cli,
   services: VaultCliServices,
 ) {
-  const profile = Cli.create('profile', {
+  const profile = createHealthCrudGroup({
+    commandName: 'profile',
     description: 'Profile snapshot commands for the health extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List profile snapshots through the health read model.',
       scaffold: 'Emit a payload template for a profile snapshot upsert.',
@@ -79,8 +77,6 @@ export function registerProfileCommands(
         },
       ],
     },
-    group: profile,
-    groupName: 'profile',
     hints: {
       show: 'Use `current` to read the derived profile or pass a snapshot id to inspect one saved payload.',
     },
@@ -107,7 +103,6 @@ export function registerProfileCommands(
       },
     },
   })
-
   const current = Cli.create('current', {
     description: 'Derived current-profile commands.',
   })

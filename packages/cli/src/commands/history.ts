@@ -1,7 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  registerHealthCrudGroup,
 } from './health-command-factory.js'
 import {
   createHealthScaffoldResultSchema,
@@ -25,19 +25,15 @@ export function registerHistoryCommands(
   cli: Cli.Cli,
   services: VaultCliServices,
 ) {
-  const history = Cli.create('history', {
+  registerHealthCrudGroup(cli, {
+    commandName: 'history',
     description: 'Timed health history commands for the extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List timed history events through the health read model.',
       scaffold: 'Emit a payload template for timed history events.',
       show: 'Show one timed history event.',
       upsert: 'Append one timed history event from an @file.json payload.',
     },
-    group: history,
-    groupName: 'history',
     listStatusDescription: 'Optional health-event status to filter by.',
     noun: 'history event',
     outputs: {
@@ -62,6 +58,4 @@ export function registerHistoryCommands(
       },
     },
   })
-
-  cli.command(history)
 }

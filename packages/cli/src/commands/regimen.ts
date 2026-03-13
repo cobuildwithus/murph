@@ -9,7 +9,7 @@ import { localDateSchema, pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  createHealthCrudGroup,
   suggestedCommandsCta,
 } from './health-command-factory.js'
 
@@ -35,19 +35,15 @@ export function registerRegimenCommands(
   cli: Cli.Cli,
   services: VaultCliServices,
 ) {
-  const regimen = Cli.create('regimen', {
+  const regimen = createHealthCrudGroup({
+    commandName: 'regimen',
     description: 'Regimen registry commands for the health extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List regimens through the health read model.',
       scaffold: 'Emit a payload template for regimen upserts.',
       show: 'Show one regimen by canonical id or slug.',
       upsert: 'Upsert one regimen from an @file.json payload.',
     },
-    group: regimen,
-    groupName: 'regimen',
     listStatusDescription: 'Optional regimen status to filter by.',
     noun: 'regimen',
     outputs: {
@@ -72,7 +68,6 @@ export function registerRegimenCommands(
       },
     },
   })
-
   regimen.command('stop', {
     args: z.object({
       regimenId: z.string().min(1),

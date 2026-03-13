@@ -111,6 +111,16 @@ interface HealthCrudConfig<
   }
 }
 
+interface HealthCrudGroupConfig<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+> extends Omit<HealthCrudConfig<TScaffold, TUpsert, TShow, TList>, 'group' | 'groupName'> {
+  commandName: string
+  description: string
+}
+
 type HealthCrudConfigAny = HealthCrudConfig<any, any, any, any>
 
 type MethodName<TService, TInput> = {
@@ -269,6 +279,41 @@ export function bindHealthCrudServices<
     show: bindServiceMethod(services.query, methodNames.show),
     upsert: bindServiceMethod(services.core, methodNames.upsert),
   }
+}
+
+export function createHealthCrudGroup<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(
+  config: HealthCrudGroupConfig<TScaffold, TUpsert, TShow, TList>,
+) {
+  const group = Cli.create(config.commandName, {
+    description: config.description,
+  })
+
+  registerHealthCrudCommands({
+    ...config,
+    group,
+    groupName: config.commandName,
+  })
+
+  return group
+}
+
+export function registerHealthCrudGroup<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(
+  cli: Cli.Cli,
+  config: HealthCrudGroupConfig<TScaffold, TUpsert, TShow, TList>,
+) {
+  const group = createHealthCrudGroup(config)
+  cli.command(group)
+  return group
 }
 
 export function suggestedCommandsCta(commands: SuggestedCommand[]) {

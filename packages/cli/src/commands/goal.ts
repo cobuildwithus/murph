@@ -1,7 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   bindHealthCrudServices,
-  registerHealthCrudCommands,
+  registerHealthCrudGroup,
 } from './health-command-factory.js'
 import {
   createHealthScaffoldResultSchema,
@@ -22,19 +22,15 @@ const upsertResultSchema = z.object({
 })
 
 export function registerGoalCommands(cli: Cli.Cli, services: VaultCliServices) {
-  const goal = Cli.create('goal', {
+  registerHealthCrudGroup(cli, {
+    commandName: 'goal',
     description: 'Goal registry commands for the health extension surface.',
-  })
-
-  registerHealthCrudCommands({
     descriptions: {
       list: 'List goals through the health read model.',
       scaffold: 'Emit a payload template for goal upserts.',
       show: 'Show one goal by canonical id or slug.',
       upsert: 'Upsert one goal from an @file.json payload.',
     },
-    group: goal,
-    groupName: 'goal',
     listStatusDescription: 'Optional goal status to filter by.',
     noun: 'goal',
     outputs: {
@@ -59,6 +55,4 @@ export function registerGoalCommands(cli: Cli.Cli, services: VaultCliServices) {
       },
     },
   })
-
-  cli.command(goal)
 }
