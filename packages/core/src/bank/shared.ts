@@ -189,6 +189,13 @@ export function normalizeSelectorSlug(value: string | undefined): string | undef
   return value ? normalizeSlug(value, "slug") : undefined;
 }
 
+export function normalizeUpsertSelectorSlug(
+  rawSlug: string | undefined,
+  rawTitle: string | undefined,
+): string | undefined {
+  return normalizeSelectorSlug(rawSlug) ?? (rawTitle ? normalizeSlug(undefined, "slug", rawTitle) : undefined);
+}
+
 export function normalizeGroupPath(value: string | undefined, fallback: string): string {
   const rawValue = optionalString(value, "group", 160) ?? fallback;
   const segments = rawValue
@@ -219,16 +226,41 @@ export function section(title: string, body: string): string {
   return `${heading(title)}\n\n${body}`;
 }
 
+export function listSection(title: string, values: readonly string[] | undefined): string {
+  return section(title, bulletList(values));
+}
+
+export function buildMarkdownBody(title: string, summary: string, sections: readonly string[]): string {
+  return [`# ${title}`, summary, ...sections, ""].join("\n\n");
+}
+
 export function detailList(entries: Array<[string, string | number | undefined | null]>): string {
-  const lines = entries.map(([label, value]) => {
-    if (value === undefined || value === null || value === "") {
-      return `- ${label}: none`;
-    }
+  return bulletList(
+    entries.map(([label, value]) => {
+      if (value === undefined || value === null || value === "") {
+        return `${label}: none`;
+      }
 
-    return `- ${label}: ${value}`;
-  });
+      return `${label}: ${value}`;
+    }),
+  );
+}
 
-  return bulletList(lines.map((line) => line.slice(2)));
+export function resolveOptionalUpsertValue<TRawValue, TPersistedValue>(
+  rawInputValue: TRawValue | undefined,
+  persistedValue: TPersistedValue | undefined,
+  normalize: (value: TRawValue) => TPersistedValue | undefined,
+): TPersistedValue | undefined {
+  return rawInputValue === undefined ? persistedValue : normalize(rawInputValue);
+}
+
+export function resolveRequiredUpsertValue<TRawValue, TPersistedValue>(
+  rawInputValue: TRawValue | undefined,
+  persistedValue: TPersistedValue | undefined,
+  defaultValue: TPersistedValue,
+  normalize: (value: TRawValue) => TPersistedValue,
+): TPersistedValue {
+  return rawInputValue === undefined ? persistedValue ?? defaultValue : normalize(rawInputValue);
 }
 
 export {

@@ -13,14 +13,19 @@ import {
   CONDITION_VERIFICATION_STATUSES,
 } from "./types.js";
 import {
+  buildMarkdownBody,
   detailList,
   findRecordByIdOrSlug,
+  listSection,
   loadMarkdownRegistry,
   normalizeRecordIdList,
   normalizeSelectorSlug,
+  normalizeUpsertSelectorSlug,
   optionalDateOnly,
   optionalEnum,
   optionalString,
+  resolveOptionalUpsertValue,
+  resolveRequiredUpsertValue,
   requireMatchingDocType,
   requireString,
   section,
@@ -40,9 +45,8 @@ import type {
 } from "./types.js";
 
 function buildBody(record: ConditionRecord): string {
-  return [
-    `# ${record.title}`,
-    "",
+  return buildMarkdownBody(
+    record.title,
     detailList([
       ["Clinical status", record.clinicalStatus],
       ["Verification status", record.verificationStatus],
@@ -50,22 +54,20 @@ function buildBody(record: ConditionRecord): string {
       ["Asserted on", record.assertedOn],
       ["Resolved on", record.resolvedOn],
     ]),
-    "",
-    section("Body Sites", record.bodySites ? record.bodySites.map((value) => `- ${value}`).join("\n") : "- none"),
-    "",
-    section("Related Goals", record.relatedGoalIds ? record.relatedGoalIds.map((value) => `- ${value}`).join("\n") : "- none"),
-    "",
-    section(
-      "Related Regimens",
-      record.relatedRegimenIds ? record.relatedRegimenIds.map((value) => `- ${value}`).join("\n") : "- none",
-    ),
-    "",
-    section("Note", record.note ?? "- none"),
-    "",
-  ].join("\n");
+    [
+      listSection("Body Sites", record.bodySites),
+      listSection("Related Goals", record.relatedGoalIds),
+      listSection("Related Regimens", record.relatedRegimenIds),
+      section("Note", record.note ?? "- none"),
+    ],
+  );
 }
 
-function recordFromParts(attributes: FrontmatterObject, relativePath: string, markdown: string): ConditionRecord {
+function parseConditionRecord(
+  attributes: FrontmatterObject,
+  relativePath: string,
+  markdown: string,
+): ConditionRecord {
   requireMatchingDocType(
     attributes,
     CONDITION_SCHEMA_VERSION,
@@ -134,7 +136,7 @@ async function loadConditions(vaultRoot: string): Promise<ConditionRecord[]> {
   return loadMarkdownRegistry(
     vaultRoot,
     CONDITIONS_DIRECTORY,
-    recordFromParts,
+    parseConditionRecord,
     (left, right) => left.title.localeCompare(right.title) || left.conditionId.localeCompare(right.conditionId),
   );
 }
@@ -144,19 +146,17 @@ export async function upsertCondition(
 ): Promise<UpsertConditionResult> {
   const normalizedConditionId = normalizeId(input.conditionId, "conditionId", "cond");
   const existingRecords = await loadConditions(input.vaultRoot);
-  const selectorSlug =
-    normalizeSelectorSlug(input.slug) ??
-    (input.title ? normalizeSlug(undefined, "slug", input.title) : undefined);
+  const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const existingRecord = selectRecordByIdOrSlug(
     existingRecords,
     normalizedConditionId,
-    selectorSlug,
+    requestedSlug,
     (record) => record.conditionId,
     "Condition",
     "VAULT_CONDITION_CONFLICT",
   );
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const slug = existingRecord?.slug ?? selectorSlug ?? normalizeSlug(undefined, "slug", title);
+  const slug = existingRecord?.slug ?? requestedSlug ?? normalizeSlug(undefined, "slug", title);
   const conditionId = existingRecord?.conditionId ?? normalizedConditionId ?? generateRecordId("cond");
   const record = validateConditionTimeline(
     stripUndefined({
@@ -165,46 +165,42 @@ export async function upsertCondition(
       conditionId,
       slug: existingRecord?.slug ?? slug,
       title,
-      clinicalStatus:
-        input.clinicalStatus === undefined
-          ? existingRecord?.clinicalStatus ?? "active"
-          : optionalEnum(input.clinicalStatus, CONDITION_CLINICAL_STATUSES, "clinicalStatus") ?? "active",
-      verificationStatus:
-        input.verificationStatus === undefined
-          ? existingRecord?.verificationStatus
-          : optionalEnum(
-              input.verificationStatus,
-              CONDITION_VERIFICATION_STATUSES,
-              "verificationStatus",
-            ),
-      assertedOn:
-        input.assertedOn === undefined
-          ? existingRecord?.assertedOn
-          : optionalDateOnly(input.assertedOn, "assertedOn"),
-      resolvedOn:
-        input.resolvedOn === undefined
-          ? existingRecord?.resolvedOn
-          : optionalDateOnly(input.resolvedOn, "resolvedOn"),
-      severity:
-        input.severity === undefined
-          ? existingRecord?.severity
-          : optionalEnum(input.severity, CONDITION_SEVERITIES, "severity"),
-      bodySites:
-        input.bodySites === undefined
-          ? existingRecord?.bodySites
-          : normalizeStringList(input.bodySites, "bodySites", "bodySite", 16, 120),
-      relatedGoalIds:
-        input.relatedGoalIds === undefined
-          ? existingRecord?.relatedGoalIds
-          : normalizeRecordIdList(input.relatedGoalIds, "relatedGoalIds", "goal"),
-      relatedRegimenIds:
-        input.relatedRegimenIds === undefined
-          ? existingRecord?.relatedRegimenIds
-          : normalizeRecordIdList(input.relatedRegimenIds, "relatedRegimenIds", "reg"),
-      note:
-        input.note === undefined
-          ? existingRecord?.note
-          : optionalString(input.note, "note", 4000),
+      clinicalStatus: resolveRequiredUpsertValue(
+        input.clinicalStatus,
+        existingRecord?.clinicalStatus,
+        "active",
+        (value) => optionalEnum(value, CONDITION_CLINICAL_STATUSES, "clinicalStatus") ?? "active",
+      ),
+      verificationStatus: resolveOptionalUpsertValue(
+        input.verificationStatus,
+        existingRecord?.verificationStatus,
+        (value) => optionalEnum(value, CONDITION_VERIFICATION_STATUSES, "verificationStatus"),
+      ),
+      assertedOn: resolveOptionalUpsertValue(input.assertedOn, existingRecord?.assertedOn, (value) =>
+        optionalDateOnly(value, "assertedOn"),
+      ),
+      resolvedOn: resolveOptionalUpsertValue(input.resolvedOn, existingRecord?.resolvedOn, (value) =>
+        optionalDateOnly(value, "resolvedOn"),
+      ),
+      severity: resolveOptionalUpsertValue(input.severity, existingRecord?.severity, (value) =>
+        optionalEnum(value, CONDITION_SEVERITIES, "severity"),
+      ),
+      bodySites: resolveOptionalUpsertValue(input.bodySites, existingRecord?.bodySites, (value) =>
+        normalizeStringList(value, "bodySites", "bodySite", 16, 120),
+      ),
+      relatedGoalIds: resolveOptionalUpsertValue(
+        input.relatedGoalIds,
+        existingRecord?.relatedGoalIds,
+        (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+      ),
+      relatedRegimenIds: resolveOptionalUpsertValue(
+        input.relatedRegimenIds,
+        existingRecord?.relatedRegimenIds,
+        (value) => normalizeRecordIdList(value, "relatedRegimenIds", "reg"),
+      ),
+      note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
+        optionalString(value, "note", 4000),
+      ),
       relativePath: existingRecord?.relativePath ?? `${CONDITIONS_DIRECTORY}/${slug}.md`,
     }) as ConditionRecord,
   );

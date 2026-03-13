@@ -12,14 +12,19 @@ import {
   ALLERGY_STATUSES,
 } from "./types.js";
 import {
+  buildMarkdownBody,
   detailList,
   findRecordByIdOrSlug,
+  listSection,
   loadMarkdownRegistry,
   normalizeRecordIdList,
   normalizeSelectorSlug,
+  normalizeUpsertSelectorSlug,
   optionalDateOnly,
   optionalEnum,
   optionalString,
+  resolveOptionalUpsertValue,
+  resolveRequiredUpsertValue,
   requireMatchingDocType,
   requireString,
   section,
@@ -33,9 +38,8 @@ import type { FrontmatterObject } from "../types.js";
 import type { AllergyRecord, ReadAllergyInput, UpsertAllergyInput, UpsertAllergyResult } from "./types.js";
 
 function buildBody(record: AllergyRecord): string {
-  return [
-    `# ${record.title}`,
-    "",
+  return buildMarkdownBody(
+    record.title,
     detailList([
       ["Substance", record.substance],
       ["Status", record.status],
@@ -43,18 +47,18 @@ function buildBody(record: AllergyRecord): string {
       ["Reaction", record.reaction],
       ["Recorded on", record.recordedOn],
     ]),
-    "",
-    section(
-      "Related Conditions",
-      record.relatedConditionIds ? record.relatedConditionIds.map((value) => `- ${value}`).join("\n") : "- none",
-    ),
-    "",
-    section("Note", record.note ?? "- none"),
-    "",
-  ].join("\n");
+    [
+      listSection("Related Conditions", record.relatedConditionIds),
+      section("Note", record.note ?? "- none"),
+    ],
+  );
 }
 
-function recordFromParts(attributes: FrontmatterObject, relativePath: string, markdown: string): AllergyRecord {
+function parseAllergyRecord(
+  attributes: FrontmatterObject,
+  relativePath: string,
+  markdown: string,
+): AllergyRecord {
   requireMatchingDocType(
     attributes,
     ALLERGY_SCHEMA_VERSION,
@@ -102,7 +106,7 @@ async function loadAllergies(vaultRoot: string): Promise<AllergyRecord[]> {
   return loadMarkdownRegistry(
     vaultRoot,
     ALLERGIES_DIRECTORY,
-    recordFromParts,
+    parseAllergyRecord,
     (left, right) => left.title.localeCompare(right.title) || left.allergyId.localeCompare(right.allergyId),
   );
 }
@@ -110,19 +114,17 @@ async function loadAllergies(vaultRoot: string): Promise<AllergyRecord[]> {
 export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAllergyResult> {
   const normalizedAllergyId = normalizeId(input.allergyId, "allergyId", "alg");
   const existingRecords = await loadAllergies(input.vaultRoot);
-  const selectorSlug =
-    normalizeSelectorSlug(input.slug) ??
-    (input.title ? normalizeSlug(undefined, "slug", input.title) : undefined);
+  const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const existingRecord = selectRecordByIdOrSlug(
     existingRecords,
     normalizedAllergyId,
-    selectorSlug,
+    requestedSlug,
     (record) => record.allergyId,
     "Allergy",
     "VAULT_ALLERGY_CONFLICT",
   );
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const slug = existingRecord?.slug ?? selectorSlug ?? normalizeSlug(undefined, "slug", title);
+  const slug = existingRecord?.slug ?? requestedSlug ?? normalizeSlug(undefined, "slug", title);
   const allergyId = existingRecord?.allergyId ?? normalizedAllergyId ?? generateRecordId("alg");
   const record = stripUndefined({
     schemaVersion: ALLERGY_SCHEMA_VERSION,
@@ -131,30 +133,26 @@ export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAl
     slug: existingRecord?.slug ?? slug,
     title,
     substance: requireString(input.substance ?? existingRecord?.substance, "substance", 160),
-    status:
-      input.status === undefined
-        ? existingRecord?.status ?? "active"
-        : optionalEnum(input.status, ALLERGY_STATUSES, "status") ?? "active",
-    criticality:
-      input.criticality === undefined
-        ? existingRecord?.criticality
-        : optionalEnum(input.criticality, ALLERGY_CRITICALITIES, "criticality"),
-    reaction:
-      input.reaction === undefined
-        ? existingRecord?.reaction
-        : optionalString(input.reaction, "reaction", 160),
-    recordedOn:
-      input.recordedOn === undefined
-        ? existingRecord?.recordedOn
-        : optionalDateOnly(input.recordedOn, "recordedOn"),
-    relatedConditionIds:
-      input.relatedConditionIds === undefined
-        ? existingRecord?.relatedConditionIds
-        : normalizeRecordIdList(input.relatedConditionIds, "relatedConditionIds", "cond"),
-    note:
-      input.note === undefined
-        ? existingRecord?.note
-        : optionalString(input.note, "note", 4000),
+    status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
+      optionalEnum(value, ALLERGY_STATUSES, "status") ?? "active",
+    ),
+    criticality: resolveOptionalUpsertValue(input.criticality, existingRecord?.criticality, (value) =>
+      optionalEnum(value, ALLERGY_CRITICALITIES, "criticality"),
+    ),
+    reaction: resolveOptionalUpsertValue(input.reaction, existingRecord?.reaction, (value) =>
+      optionalString(value, "reaction", 160),
+    ),
+    recordedOn: resolveOptionalUpsertValue(input.recordedOn, existingRecord?.recordedOn, (value) =>
+      optionalDateOnly(value, "recordedOn"),
+    ),
+    relatedConditionIds: resolveOptionalUpsertValue(
+      input.relatedConditionIds,
+      existingRecord?.relatedConditionIds,
+      (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
+    ),
+    note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
+      optionalString(value, "note", 4000),
+    ),
     relativePath: existingRecord?.relativePath ?? `${ALLERGIES_DIRECTORY}/${slug}.md`,
   }) as AllergyRecord;
   const markdown = stringifyFrontmatterDocument({

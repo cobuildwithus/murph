@@ -12,16 +12,21 @@ import {
   REGIMEN_STATUSES,
 } from "./types.js";
 import {
+  buildMarkdownBody,
   detailList,
   groupFromRegimenPath,
+  listSection,
   loadMarkdownRegistry,
   normalizeGroupPath,
   normalizeRecordIdList,
   normalizeSelectorSlug,
+  normalizeUpsertSelectorSlug,
   optionalDateOnly,
   optionalEnum,
   optionalFiniteNumber,
   optionalString,
+  resolveOptionalUpsertValue,
+  resolveRequiredUpsertValue,
   requireMatchingDocType,
   requireString,
   section,
@@ -41,9 +46,8 @@ import type {
 } from "./types.js";
 
 function buildBody(record: RegimenItemRecord): string {
-  return [
-    `# ${record.title}`,
-    "",
+  return buildMarkdownBody(
+    record.title,
     detailList([
       ["Kind", record.kind],
       ["Status", record.status],
@@ -52,26 +56,25 @@ function buildBody(record: RegimenItemRecord): string {
       ["Stopped on", record.stoppedOn],
       ["Schedule", record.schedule],
     ]),
-    "",
-    section(
-      "Substance",
-      detailList([
-        ["Name", record.substance],
-        ["Dose", record.dose !== undefined ? `${record.dose}${record.unit ? ` ${record.unit}` : ""}` : undefined],
-      ]),
-    ),
-    "",
-    section("Related Goals", record.relatedGoalIds ? record.relatedGoalIds.map((value) => `- ${value}`).join("\n") : "- none"),
-    "",
-    section(
-      "Related Conditions",
-      record.relatedConditionIds ? record.relatedConditionIds.map((value) => `- ${value}`).join("\n") : "- none",
-    ),
-    "",
-  ].join("\n");
+    [
+      section(
+        "Substance",
+        detailList([
+          ["Name", record.substance],
+          ["Dose", record.dose !== undefined ? `${record.dose}${record.unit ? ` ${record.unit}` : ""}` : undefined],
+        ]),
+      ),
+      listSection("Related Goals", record.relatedGoalIds),
+      listSection("Related Conditions", record.relatedConditionIds),
+    ],
+  );
 }
 
-function recordFromParts(attributes: FrontmatterObject, relativePath: string, markdown: string): RegimenItemRecord {
+function parseRegimenItemRecord(
+  attributes: FrontmatterObject,
+  relativePath: string,
+  markdown: string,
+): RegimenItemRecord {
   requireMatchingDocType(
     attributes,
     REGIMEN_SCHEMA_VERSION,
@@ -151,7 +154,7 @@ async function loadRegimenItems(vaultRoot: string): Promise<RegimenItemRecord[]>
   return loadMarkdownRegistry(
     vaultRoot,
     REGIMENS_DIRECTORY,
-    recordFromParts,
+    parseRegimenItemRecord,
     (left, right) =>
       left.group.localeCompare(right.group) ||
       left.title.localeCompare(right.title) ||
@@ -222,17 +225,14 @@ export async function upsertRegimenItem(
 ): Promise<UpsertRegimenItemResult> {
   const normalizedRegimenId = normalizeId(input.regimenId, "regimenId", "reg");
   const existingRecords = await loadRegimenItems(input.vaultRoot);
-  const selectorSlug =
-    normalizeSelectorSlug(input.slug) ??
-    (input.title ? normalizeSlug(undefined, "slug", input.title) : undefined);
+  const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "regimen") : undefined;
-  const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, selectorSlug, requestedGroup);
+  const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const slug = existingRecord?.slug ?? selectorSlug ?? normalizeSlug(undefined, "slug", title);
-  const kind =
-    input.kind === undefined
-      ? existingRecord?.kind ?? "medication"
-      : optionalEnum(input.kind, REGIMEN_KINDS, "kind") ?? "medication";
+  const slug = existingRecord?.slug ?? requestedSlug ?? normalizeSlug(undefined, "slug", title);
+  const kind = resolveRequiredUpsertValue(input.kind, existingRecord?.kind, "medication", (value) =>
+    optionalEnum(value, REGIMEN_KINDS, "kind") ?? "medication",
+  );
   const regimenId = existingRecord?.regimenId ?? normalizedRegimenId ?? generateRecordId("reg");
   const group = existingRecord?.group ?? requestedGroup ?? normalizeGroupPath(undefined, kind);
   const record = validateRegimenTiming(
@@ -243,40 +243,36 @@ export async function upsertRegimenItem(
       slug: existingRecord?.slug ?? slug,
       title,
       kind,
-      status:
-        input.status === undefined
-          ? existingRecord?.status ?? "active"
-          : optionalEnum(input.status, REGIMEN_STATUSES, "status") ?? "active",
+      status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
+        optionalEnum(value, REGIMEN_STATUSES, "status") ?? "active",
+      ),
       startedOn:
         optionalDateOnly(input.startedOn ?? existingRecord?.startedOn ?? new Date(), "startedOn") ?? "",
-      stoppedOn:
-        input.stoppedOn === undefined
-          ? existingRecord?.stoppedOn
-          : optionalDateOnly(input.stoppedOn, "stoppedOn"),
-      substance:
-        input.substance === undefined
-          ? existingRecord?.substance
-          : optionalString(input.substance, "substance", 160),
-      dose:
-        input.dose === undefined
-          ? existingRecord?.dose
-          : optionalFiniteNumber(input.dose, "dose", 0),
-      unit:
-        input.unit === undefined
-          ? existingRecord?.unit
-          : optionalString(input.unit, "unit", 40),
-      schedule:
-        input.schedule === undefined
-          ? existingRecord?.schedule
-          : optionalString(input.schedule, "schedule", 160),
-      relatedGoalIds:
-        input.relatedGoalIds === undefined
-          ? existingRecord?.relatedGoalIds
-          : normalizeRecordIdList(input.relatedGoalIds, "relatedGoalIds", "goal"),
-      relatedConditionIds:
-        input.relatedConditionIds === undefined
-          ? existingRecord?.relatedConditionIds
-          : normalizeRecordIdList(input.relatedConditionIds, "relatedConditionIds", "cond"),
+      stoppedOn: resolveOptionalUpsertValue(input.stoppedOn, existingRecord?.stoppedOn, (value) =>
+        optionalDateOnly(value, "stoppedOn"),
+      ),
+      substance: resolveOptionalUpsertValue(input.substance, existingRecord?.substance, (value) =>
+        optionalString(value, "substance", 160),
+      ),
+      dose: resolveOptionalUpsertValue(input.dose, existingRecord?.dose, (value) =>
+        optionalFiniteNumber(value, "dose", 0),
+      ),
+      unit: resolveOptionalUpsertValue(input.unit, existingRecord?.unit, (value) =>
+        optionalString(value, "unit", 40),
+      ),
+      schedule: resolveOptionalUpsertValue(input.schedule, existingRecord?.schedule, (value) =>
+        optionalString(value, "schedule", 160),
+      ),
+      relatedGoalIds: resolveOptionalUpsertValue(
+        input.relatedGoalIds,
+        existingRecord?.relatedGoalIds,
+        (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+      ),
+      relatedConditionIds: resolveOptionalUpsertValue(
+        input.relatedConditionIds,
+        existingRecord?.relatedConditionIds,
+        (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
+      ),
       group,
       relativePath: existingRecord?.relativePath ?? `${REGIMENS_DIRECTORY}/${group}/${slug}.md`,
     }) as RegimenItemRecord,

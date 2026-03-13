@@ -12,16 +12,21 @@ import {
   GOAL_STATUSES,
 } from "./types.js";
 import {
+  buildMarkdownBody,
   detailList,
   findRecordByIdOrSlug,
+  listSection,
   loadMarkdownRegistry,
   normalizeDateOnly,
   normalizeDomainList,
   normalizePriority,
   normalizeRecordIdList,
   normalizeSelectorSlug,
+  normalizeUpsertSelectorSlug,
   optionalDateOnly,
   optionalEnum,
+  resolveOptionalUpsertValue,
+  resolveRequiredUpsertValue,
   requireMatchingDocType,
   requireObject,
   requireString,
@@ -51,43 +56,35 @@ function normalizeGoalWindow(value: unknown, fieldName: string): GoalWindow {
 }
 
 function buildBody(record: GoalRecord): string {
-  return [
-    `# ${record.title}`,
-    "",
+  return buildMarkdownBody(
+    record.title,
     detailList([
       ["Status", record.status],
       ["Horizon", record.horizon],
       ["Priority", record.priority],
     ]),
-    "",
-    section(
-      "Window",
-      detailList([
-        ["Start", record.window.startAt],
-        ["Target", record.window.targetAt],
-      ]),
-    ),
-    "",
-    section(
-      "Relationships",
-      detailList([
-        ["Parent goal", record.parentGoalId],
-      ]),
-    ),
-    "",
-    section("Related Goals", record.relatedGoalIds ? record.relatedGoalIds.map((value) => `- ${value}`).join("\n") : "- none"),
-    "",
-    section(
-      "Related Experiments",
-      record.relatedExperimentIds ? record.relatedExperimentIds.map((value) => `- ${value}`).join("\n") : "- none",
-    ),
-    "",
-    section("Domains", record.domains ? record.domains.map((value) => `- ${value}`).join("\n") : "- none"),
-    "",
-  ].join("\n");
+    [
+      section(
+        "Window",
+        detailList([
+          ["Start", record.window.startAt],
+          ["Target", record.window.targetAt],
+        ]),
+      ),
+      section(
+        "Relationships",
+        detailList([
+          ["Parent goal", record.parentGoalId],
+        ]),
+      ),
+      listSection("Related Goals", record.relatedGoalIds),
+      listSection("Related Experiments", record.relatedExperimentIds),
+      listSection("Domains", record.domains),
+    ],
+  );
 }
 
-function recordFromParts(attributes: FrontmatterObject, relativePath: string, markdown: string): GoalRecord {
+function parseGoalRecord(attributes: FrontmatterObject, relativePath: string, markdown: string): GoalRecord {
   requireMatchingDocType(
     attributes,
     GOAL_SCHEMA_VERSION,
@@ -119,15 +116,7 @@ function recordFromParts(attributes: FrontmatterObject, relativePath: string, ma
 }
 
 function buildAttributes(record: GoalRecord): FrontmatterObject {
-  const windowAttributes: FrontmatterObject = {
-    startAt: record.window.startAt,
-  };
-
-  if (record.window.targetAt !== undefined) {
-    windowAttributes.targetAt = record.window.targetAt;
-  }
-
-  const attributes: FrontmatterObject = {
+  return stripUndefined({
     schemaVersion: GOAL_SCHEMA_VERSION,
     docType: GOAL_DOC_TYPE,
     goalId: record.goalId,
@@ -136,33 +125,22 @@ function buildAttributes(record: GoalRecord): FrontmatterObject {
     status: record.status,
     horizon: record.horizon,
     priority: record.priority,
-    window: windowAttributes,
-  };
-
-  if (record.parentGoalId !== undefined) {
-    attributes.parentGoalId = record.parentGoalId;
-  }
-
-  if (record.relatedGoalIds !== undefined) {
-    attributes.relatedGoalIds = record.relatedGoalIds;
-  }
-
-  if (record.relatedExperimentIds !== undefined) {
-    attributes.relatedExperimentIds = record.relatedExperimentIds;
-  }
-
-  if (record.domains !== undefined) {
-    attributes.domains = record.domains;
-  }
-
-  return attributes;
+    window: stripUndefined({
+      startAt: record.window.startAt,
+      targetAt: record.window.targetAt,
+    }) as FrontmatterObject,
+    parentGoalId: record.parentGoalId,
+    relatedGoalIds: record.relatedGoalIds,
+    relatedExperimentIds: record.relatedExperimentIds,
+    domains: record.domains,
+  }) as FrontmatterObject;
 }
 
 async function loadGoals(vaultRoot: string): Promise<GoalRecord[]> {
   return loadMarkdownRegistry(
     vaultRoot,
     GOALS_DIRECTORY,
-    recordFromParts,
+    parseGoalRecord,
     (left, right) =>
       right.priority - left.priority ||
       left.window.startAt.localeCompare(right.window.startAt) ||
@@ -186,83 +164,63 @@ function ensureGoalLinks(record: GoalRecord): GoalRecord {
 export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResult> {
   const normalizedGoalId = normalizeId(input.goalId, "goalId", "goal");
   const existingRecords = await loadGoals(input.vaultRoot);
-  const selectorSlug =
-    normalizeSelectorSlug(input.slug) ??
-    (input.title ? normalizeSlug(undefined, "slug", input.title) : undefined);
+  const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const existingRecord = selectRecordByIdOrSlug(
     existingRecords,
     normalizedGoalId,
-    selectorSlug,
+    requestedSlug,
     (record) => record.goalId,
     "Goal",
     "VAULT_GOAL_CONFLICT",
   );
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const slug = existingRecord?.slug ?? selectorSlug ?? normalizeSlug(undefined, "slug", title);
+  const slug = existingRecord?.slug ?? requestedSlug ?? normalizeSlug(undefined, "slug", title);
   const goalId = existingRecord?.goalId ?? normalizedGoalId ?? generateRecordId("goal");
   const existingWindow = existingRecord?.window;
-  const record: GoalRecord = {
-    schemaVersion: GOAL_SCHEMA_VERSION,
-    docType: GOAL_DOC_TYPE,
-    goalId,
-    slug: existingRecord?.slug ?? slug,
-    title,
-    status:
-      input.status === undefined
-        ? existingRecord?.status ?? "active"
-        : optionalEnum(input.status, GOAL_STATUSES, "status") ?? "active",
-    horizon:
-      input.horizon === undefined
-        ? existingRecord?.horizon ?? "ongoing"
-        : optionalEnum(input.horizon, GOAL_HORIZONS, "horizon") ?? "ongoing",
-    priority: input.priority === undefined ? existingRecord?.priority ?? 5 : normalizePriority(input.priority),
-    window: normalizeGoalWindow(
-      {
-        startAt: input.window?.startAt ?? existingWindow?.startAt ?? new Date(),
-        targetAt:
-          input.window?.targetAt === undefined ? existingWindow?.targetAt : input.window.targetAt,
-      },
-      "window",
-    ),
-    relativePath: existingRecord?.relativePath ?? `${GOALS_DIRECTORY}/${slug}.md`,
-    markdown: existingRecord?.markdown ?? "",
-  };
-
-  const parentGoalId =
-    input.parentGoalId === undefined
-      ? existingRecord?.parentGoalId
-      : input.parentGoalId === null
-        ? null
-        : normalizeId(input.parentGoalId, "parentGoalId", "goal");
-  if (parentGoalId !== undefined) {
-    record.parentGoalId = parentGoalId;
-  }
-
-  const relatedGoalIds =
-    input.relatedGoalIds === undefined
-      ? existingRecord?.relatedGoalIds
-      : normalizeRecordIdList(input.relatedGoalIds, "relatedGoalIds", "goal");
-  if (relatedGoalIds !== undefined) {
-    record.relatedGoalIds = relatedGoalIds;
-  }
-
-  const relatedExperimentIds =
-    input.relatedExperimentIds === undefined
-      ? existingRecord?.relatedExperimentIds
-      : normalizeRecordIdList(input.relatedExperimentIds, "relatedExperimentIds", "exp");
-  if (relatedExperimentIds !== undefined) {
-    record.relatedExperimentIds = relatedExperimentIds;
-  }
-
-  const domains =
-    input.domains === undefined
-      ? existingRecord?.domains
-      : normalizeDomainList(input.domains, "domains");
-  if (domains !== undefined) {
-    record.domains = domains;
-  }
-
-  ensureGoalLinks(record);
+  const record = ensureGoalLinks(
+    stripUndefined({
+      schemaVersion: GOAL_SCHEMA_VERSION,
+      docType: GOAL_DOC_TYPE,
+      goalId,
+      slug: existingRecord?.slug ?? slug,
+      title,
+      status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
+        optionalEnum(value, GOAL_STATUSES, "status") ?? "active",
+      ),
+      horizon: resolveRequiredUpsertValue(input.horizon, existingRecord?.horizon, "ongoing", (value) =>
+        optionalEnum(value, GOAL_HORIZONS, "horizon") ?? "ongoing",
+      ),
+      priority: resolveRequiredUpsertValue(input.priority, existingRecord?.priority, 5, normalizePriority),
+      window: normalizeGoalWindow(
+        {
+          startAt: input.window?.startAt ?? existingWindow?.startAt ?? new Date(),
+          targetAt:
+            input.window?.targetAt === undefined ? existingWindow?.targetAt : input.window.targetAt,
+        },
+        "window",
+      ),
+      parentGoalId: resolveOptionalUpsertValue(
+        input.parentGoalId,
+        existingRecord?.parentGoalId,
+        (value) => (value === null ? null : normalizeId(value, "parentGoalId", "goal")),
+      ),
+      relatedGoalIds: resolveOptionalUpsertValue(
+        input.relatedGoalIds,
+        existingRecord?.relatedGoalIds,
+        (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+      ),
+      relatedExperimentIds: resolveOptionalUpsertValue(
+        input.relatedExperimentIds,
+        existingRecord?.relatedExperimentIds,
+        (value) => normalizeRecordIdList(value, "relatedExperimentIds", "exp"),
+      ),
+      domains: resolveOptionalUpsertValue(input.domains, existingRecord?.domains, (value) =>
+        normalizeDomainList(value, "domains"),
+      ),
+      relativePath: existingRecord?.relativePath ?? `${GOALS_DIRECTORY}/${slug}.md`,
+      markdown: existingRecord?.markdown ?? "",
+    }) as GoalRecord,
+  );
   const markdown = stringifyFrontmatterDocument({
     attributes: buildAttributes(record),
     body: buildBody(record),
