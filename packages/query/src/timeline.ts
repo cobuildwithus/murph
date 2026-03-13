@@ -64,11 +64,11 @@ export function buildTimeline(
       }
 
       entries.push({
-        id: journal.id,
+        id: journal.displayId,
         entryType: "journal",
         occurredAt: journal.occurredAt ?? `${date}T12:00:00`,
         date,
-        title: journal.title ?? journal.id,
+        title: journal.title ?? journal.displayId,
         kind: journalKind,
         stream: null,
         experimentSlug: journal.experimentSlug,
@@ -103,7 +103,7 @@ export function buildTimeline(
       }
 
       entries.push({
-        id: event.id,
+        id: event.displayId,
         entryType: "event",
         occurredAt,
         date,

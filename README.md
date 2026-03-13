@@ -189,14 +189,14 @@ The noun-oriented commands follow one payload-first grammar:
 
 ## Lookup Rules That Matter
 
-The query layer distinguishes between canonical lookup ids and related ids embedded inside records.
+The query layer distinguishes between the primary lookup id used for follow-on reads and the display id surfaced on the record itself.
 
 - `show` accepts query-layer ids such as `journal:2026-03-12`, `evt_*`, `smp_*`, `exp_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
-- `meal_*` and `doc_*` are stable related ids carried inside events, but follow-on reads should use the returned `lookupId`, usually an `evt_*`.
+- `meal_*` and `doc_*` are stable display/related ids carried inside events, but follow-on reads should use the returned `lookupId`, usually an `evt_*`.
 - `xfm_*` is a sample import batch id, not a showable record id.
 - export-pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 
-If you chain commands together, prefer the `lookupId` or `lookupIds` returned by the write command rather than guessing which related id is queryable.
+If you chain commands together, prefer the `lookupId` or `lookupIds` returned by the write command rather than guessing which surfaced id is queryable.
 
 ## What Each Write Path Actually Produces
 

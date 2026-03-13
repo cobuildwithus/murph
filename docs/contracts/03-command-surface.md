@@ -84,11 +84,11 @@ Every command now uses native `incur` command definitions directly:
 
 - `show` accepts query-layer ids such as `core`, `journal:<YYYY-MM-DD>`, `exp_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
 - `profile show current` and `profile current rebuild` target the derived `bank/profile/current.md` view rather than a standalone canonical record id.
-- `meal_*` and `doc_*` ids are stable related ids carried in event payloads, but the CLI read path expects the returned `lookupId`/`eventId` instead.
+- `meal_*` and `doc_*` ids are stable display/related ids carried in event payloads, but the CLI read path expects the returned `lookupId`/`eventId` instead.
 - `xfm_*` identifies an import batch, not a query-layer record.
 - Export pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
-- A successful `show` response may surface a stable related id such as `meal_*` or `doc_*` in `entity.id` even when the lookup key was a queryable event id.
+- A successful `show` response may surface a stable display id such as `meal_*` or `doc_*` in `entity.id` even when the lookup key was a queryable event id such as `evt_*`.
 
 ## Success Output
 
@@ -234,6 +234,8 @@ The examples below are the full successful `--format json` response bodies.
 
 ### `show`
 
+`entity.id` is the surfaced display identity for the record. For meal/document events, that can differ from the lookup id accepted by `show`.
+
 ```json
 {
   "vault": "<path>",
@@ -257,6 +259,8 @@ The examples below are the full successful `--format json` response bodies.
 ```
 
 ### `list`
+
+`items[].id` follows the same surfaced display-identity rule as `show`.
 
 ```json
 {
@@ -283,6 +287,8 @@ The examples below are the full successful `--format json` response bodies.
 ```
 
 ### `search`
+
+`recordId` is the surfaced display identity; `aliasIds` includes the queryable lookup id when that differs.
 
 ```json
 {

@@ -563,7 +563,7 @@ function buildPromptQuestions(input: {
 
 function summarizeExperiment(record: VaultRecord): QuestionPackContextExperiment {
   return {
-    id: record.id,
+    id: record.displayId,
     slug: record.experimentSlug,
     title: record.title,
     startedOn: record.date,
@@ -575,7 +575,7 @@ function summarizeExperiment(record: VaultRecord): QuestionPackContextExperiment
 
 function summarizeJournalEntry(record: VaultRecord): QuestionPackContextJournal {
   return {
-    id: record.id,
+    id: record.displayId,
     date: record.date,
     title: record.title,
     summary: record.body,
@@ -588,7 +588,7 @@ function summarizeJournalEntry(record: VaultRecord): QuestionPackContextJournal 
 
 function summarizeTimelineRecord(record: VaultRecord): QuestionPackTimelineRecord {
   return {
-    id: record.id,
+    id: record.displayId,
     when: record.occurredAt ?? record.date ?? "unknown-date",
     kind: record.kind ?? record.recordType,
     recordType: record.recordType,

@@ -19,6 +19,61 @@ import {
   searchVault,
   summarizeDailySamples,
 } from "../src/index.js";
+import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.js";
+import { parseMarkdownDocument } from "../src/markdown.js";
+
+test("parseMarkdownDocument keeps tolerant parsing explicit", () => {
+  const parsed = parseMarkdownDocument(`---
+# comment
+title: 'Flexible Title'
+tags:
+  - alpha
+---
+
+Body line
+`);
+
+  assert.deepEqual(parsed.attributes, {
+    title: "Flexible Title",
+    tags: ["alpha"],
+  });
+  assert.equal(parsed.body, "Body line");
+  assert.equal(parsed.rawFrontmatter, "# comment\ntitle: 'Flexible Title'\ntags:\n  - alpha");
+});
+
+test("parseMarkdownDocument falls back to body-only content when frontmatter is malformed", () => {
+  const parsed = parseMarkdownDocument(`---
+title broken
+---
+
+Body line
+`);
+
+  assert.deepEqual(parsed.attributes, {});
+  assert.equal(parsed.rawFrontmatter, null);
+  assert.equal(parsed.body, "---\ntitle broken\n---\n\nBody line");
+});
+
+test("health frontmatter parsing keeps strict errors and trimmed bodies", () => {
+  const parsed = parseHealthFrontmatterDocument(`---
+title: Example
+---
+
+Body line
+`);
+
+  assert.equal(parsed.body, "Body line");
+  assert.deepEqual(parsed.attributes, { title: "Example" });
+
+  assert.throws(
+    () =>
+      parseHealthFrontmatterDocument(`---
+title broken
+---
+`),
+    /Expected "key: value" frontmatter at line 1\./,
+  );
+});
 
 test(
   "readVault assembles a stable read model from contract-shaped markdown and jsonl sources",
@@ -46,14 +101,18 @@ test(
 
       const mealRecord = lookupRecordById(vault, "meal_01JNV4MEAL00000000000001");
       assert.equal(mealRecord?.recordType, "event");
-      assert.equal(mealRecord?.id, "meal_01JNV4MEAL00000000000001");
+      assert.equal(mealRecord?.displayId, "meal_01JNV4MEAL00000000000001");
+      assert.equal(mealRecord?.primaryLookupId, "evt_01JNV4MEAL000000000000001");
       assert.equal(mealRecord?.data.kind, "meal");
       assert.deepEqual(mealRecord?.data.eventIds, ["evt_01JNV4MEAL000000000000001"]);
 
       const mealEventAlias = lookupRecordById(vault, "evt_01JNV4MEAL000000000000001");
-      assert.equal(mealEventAlias?.id, "meal_01JNV4MEAL00000000000001");
+      assert.equal(mealEventAlias?.displayId, "meal_01JNV4MEAL00000000000001");
+      assert.equal(mealEventAlias?.primaryLookupId, "evt_01JNV4MEAL000000000000001");
 
       const documentRecord = lookupRecordById(vault, "doc_01JNV4DOC0000000000000001");
+      assert.equal(documentRecord?.displayId, "doc_01JNV4DOC0000000000000001");
+      assert.equal(documentRecord?.primaryLookupId, "evt_01JNV4DOC000000000000001");
       assert.equal(documentRecord?.data.documentId, "doc_01JNV4DOC0000000000000001");
       assert.equal(
         documentRecord?.data.documentPath,
@@ -81,7 +140,7 @@ test("list helpers apply date, tag, text, and kind filters against contract data
       to: "2026-03-10",
     });
     assert.deepEqual(
-      marchRecords.map((record) => record.id),
+      marchRecords.map((record) => record.displayId),
       [
         "journal:2026-03-10",
         "smp_01JNV4GLU000000000000001",
@@ -94,13 +153,13 @@ test("list helpers apply date, tag, text, and kind filters against contract data
 
     const mealRecords = listRecords(vault, { kinds: ["meal"] });
     assert.deepEqual(
-      mealRecords.map((record) => record.id),
+      mealRecords.map((record) => record.displayId),
       ["meal_01JNV4MEAL00000000000001"],
     );
 
     const documentRecords = listRecords(vault, { ids: ["evt_01JNV4DOC000000000000001"] });
     assert.deepEqual(
-      documentRecords.map((record) => record.id),
+      documentRecords.map((record) => record.displayId),
       ["doc_01JNV4DOC0000000000000001"],
     );
 
@@ -1583,6 +1642,8 @@ function createSampleRecord(overrides: {
   const occurredAt = overrides.occurredAt ?? "2026-03-10T00:00:00Z";
 
   return {
+    displayId: overrides.id,
+    primaryLookupId: overrides.id,
     id: overrides.id,
     lookupIds: [overrides.id],
     recordType: "sample",
@@ -1608,9 +1669,23 @@ function createRecord(
     sourcePath: string;
   },
 ): Awaited<ReturnType<typeof readVault>>["records"][number] {
+  const displayId = overrides.displayId ?? overrides.id;
+  const lookupIds = Array.from(
+    new Set(
+      overrides.lookupIds ??
+        [overrides.primaryLookupId ?? displayId, displayId],
+    ),
+  );
+  const primaryLookupId =
+    overrides.primaryLookupId ??
+    lookupIds.find((lookupId) => lookupId !== displayId) ??
+    displayId;
+
   return {
-    id: overrides.id,
-    lookupIds: overrides.lookupIds ?? [overrides.id],
+    displayId,
+    primaryLookupId,
+    id: displayId,
+    lookupIds,
     recordType: overrides.recordType,
     sourcePath: overrides.sourcePath,
     sourceFile: overrides.sourceFile ?? path.join("/tmp", overrides.id),

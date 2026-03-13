@@ -150,7 +150,7 @@ function buildSearchableRecord(record: VaultRecord): SearchableRecord {
   const bodyText = compactStrings([record.body]).join("\n").trim();
   const tagsText = compactStrings(record.tags).join(" ");
   const structuredText = compactStrings([
-    record.id,
+    record.displayId,
     record.sourcePath,
     record.sourceFile,
     ...record.lookupIds,
@@ -222,7 +222,7 @@ function scoreCandidate(
   }
 
   return {
-    recordId: candidate.record.id,
+    recordId: candidate.record.displayId,
     aliasIds: candidate.record.lookupIds,
     recordType: candidate.record.recordType,
     kind: candidate.record.kind,
@@ -238,7 +238,7 @@ function scoreCandidate(
     matchedTerms: [...matchedTerms].sort(),
     citation: {
       path: candidate.record.sourcePath,
-      recordId: candidate.record.id,
+      recordId: candidate.record.displayId,
       aliasIds: candidate.record.lookupIds,
     },
   };
@@ -257,7 +257,7 @@ function buildSnippet(candidate: SearchableRecord, terms: string[]): string {
     }
   }
 
-  return candidate.titleText || candidate.record.id;
+  return candidate.titleText || candidate.record.displayId;
 }
 
 function findSnippet(text: string, terms: string[]): string | null {

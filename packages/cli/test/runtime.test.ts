@@ -224,6 +224,7 @@ test.sequential(
     try {
       const showDocument = await runCli<{
         entity: {
+          id: string
           kind: string
         }
       }>([
@@ -234,10 +235,12 @@ test.sequential(
       ])
       assert.equal(showDocument.ok, true)
       assert.equal(showDocument.meta?.command, 'show')
+      assert.equal(requireData(showDocument).entity.id, fixture.document.documentId)
       assert.equal(requireData(showDocument).entity.kind, 'document')
 
       const showJournal = await runCli<{
         entity: {
+          id: string
           kind: string
         }
       }>([
@@ -247,10 +250,12 @@ test.sequential(
         fixture.vaultRoot,
       ])
       assert.equal(showJournal.ok, true)
+      assert.equal(requireData(showJournal).entity.id, fixture.journal.lookupId)
       assert.equal(requireData(showJournal).entity.kind, 'journal_day')
 
       const showSample = await runCli<{
         entity: {
+          id: string
           kind: string
         }
       }>([
@@ -260,6 +265,7 @@ test.sequential(
         fixture.vaultRoot,
       ])
       assert.equal(showSample.ok, true)
+      assert.equal(requireData(showSample).entity.id, fixture.samples.lookupIds[0])
       assert.equal(requireData(showSample).entity.kind, 'sample')
 
       for (const invalidId of [

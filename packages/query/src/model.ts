@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import { deriveVaultRecordIdentity } from "./id-families.js";
 import { parseMarkdownDocument } from "./markdown.js";
 
 type QueryRecordData = Record<string, unknown>;
@@ -16,6 +17,9 @@ export type VaultRecordType =
   | "sample";
 
 export interface VaultRecord {
+  displayId: string;
+  primaryLookupId: string;
+  /** @deprecated Use `displayId` instead. */
   id: string;
   lookupIds: string[];
   recordType: VaultRecordType;
@@ -116,7 +120,7 @@ export function lookupRecordById(
   const normalizedId = recordId.trim();
 
   return (
-    vault.records.find((record) => record.id === normalizedId) ??
+    vault.records.find((record) => record.displayId === normalizedId) ??
     vault.records.find((record) => record.lookupIds.includes(normalizedId)) ??
     null
   );
@@ -188,7 +192,7 @@ export function listRecords(
     }
 
     const haystacks = [
-      record.id,
+      record.displayId,
       ...record.lookupIds,
       record.kind,
       record.stream,
@@ -317,6 +321,8 @@ async function readOptionalCoreDocument(
       "core";
 
     return {
+      displayId: id,
+      primaryLookupId: id,
       id,
       lookupIds: uniqueStrings([id]),
       recordType: "core",
@@ -369,6 +375,8 @@ async function readExperimentPages(vaultRoot: string): Promise<VaultRecord[]> {
         const id = pickString(attributes, ["experimentId", "id"]) ?? `experiment:${slug}`;
 
         return {
+          displayId: id,
+          primaryLookupId: id,
           id,
           lookupIds: uniqueStrings([id, slug]),
           recordType: "experiment",
@@ -419,6 +427,8 @@ async function readJournalPages(vaultRoot: string): Promise<VaultRecord[]> {
       const id = pickString(attributes, ["id"]) ?? `journal:${date}`;
 
       pages.push({
+        displayId: id,
+        primaryLookupId: id,
         id,
         lookupIds: uniqueStrings([id, date]),
         recordType: "journal",
@@ -477,16 +487,19 @@ async function readJsonlRecordFamily(
         "timestamp",
       ]);
       const kind = pickString(payload, ["kind"]) ?? (recordType === "audit" ? "audit" : recordType);
-      const recordId = deriveQueryableRecordId(recordType, payload, rawRecordId);
+      const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
       const lookupIds = uniqueStrings([
-        recordId,
+        identity.displayId,
+        identity.primaryLookupId,
         rawRecordId,
         ...normalizeStringArray(payload.relatedIds),
         ...normalizeStringArray(payload.eventIds),
       ]);
 
       records.push({
-        id: recordId,
+        displayId: identity.displayId,
+        primaryLookupId: identity.primaryLookupId,
+        id: identity.displayId,
         lookupIds,
         recordType,
         sourcePath,
@@ -500,7 +513,8 @@ async function readJsonlRecordFamily(
         tags: normalizeTags(payload.tags),
         data: normalizeRecordData(payload, {
           recordType,
-          recordId,
+          displayId: identity.displayId,
+          primaryLookupId: identity.primaryLookupId,
           rawRecordId,
         }),
         body: pickString(payload, ["note", "summary"]),
@@ -545,6 +559,8 @@ async function readSampleRecords(vaultRoot: string): Promise<VaultRecord[]> {
       const stream = pickString(payload, ["stream"]) ?? streamFromPath;
 
       records.push({
+        displayId: rawRecordId,
+        primaryLookupId: rawRecordId,
         id: rawRecordId,
         lookupIds: uniqueStrings([rawRecordId]),
         recordType: "sample",
@@ -609,8 +625,8 @@ async function walkFiles(directoryPath: string): Promise<string[]> {
 }
 
 function compareRecords(left: VaultRecord, right: VaultRecord): number {
-  const leftSortKey = left.occurredAt ?? left.date ?? left.id;
-  const rightSortKey = right.occurredAt ?? right.date ?? right.id;
+  const leftSortKey = left.occurredAt ?? left.date ?? left.displayId;
+  const rightSortKey = right.occurredAt ?? right.date ?? right.displayId;
 
   if (leftSortKey < rightSortKey) {
     return -1;
@@ -620,7 +636,7 @@ function compareRecords(left: VaultRecord, right: VaultRecord): number {
     return 1;
   }
 
-  return left.id.localeCompare(right.id);
+  return left.displayId.localeCompare(right.displayId);
 }
 
 function compareDateStrings(
@@ -815,41 +831,27 @@ function normalizeJsonRecordPayload(
   return normalized;
 }
 
-function deriveQueryableRecordId(
-  recordType: VaultRecordType,
-  payload: QueryRecordData,
-  fallbackId: string,
-): string {
-  if (recordType !== "event") {
-    return fallbackId;
-  }
-
-  const kind = pickString(payload, ["kind"]);
-
-  if (kind === "document") {
-    return pickString(payload, ["documentId", "document_id"]) ?? fallbackId;
-  }
-
-  if (kind === "meal") {
-    return pickString(payload, ["mealId", "meal_id"]) ?? fallbackId;
-  }
-
-  return fallbackId;
-}
-
 function normalizeRecordData(
   payload: QueryRecordData,
-  meta: { recordType: VaultRecordType; recordId: string; rawRecordId: string },
+  meta: {
+    recordType: VaultRecordType;
+    displayId: string;
+    primaryLookupId: string;
+    rawRecordId: string;
+  },
 ): QueryRecordData {
-  const { recordType, recordId, rawRecordId } = meta;
+  const { recordType, displayId, primaryLookupId, rawRecordId } = meta;
   const data: QueryRecordData =
     payload && typeof payload === "object" ? { ...payload } : {};
 
-  if (recordType === "event" && recordId !== rawRecordId) {
-    data.entityId = recordId;
-    data.eventIds = uniqueStrings([...normalizeStringArray(data.eventIds), rawRecordId]);
+  if (recordType === "event" && displayId !== rawRecordId) {
+    data.entityId = displayId;
+    data.eventIds = uniqueStrings([
+      ...normalizeStringArray(data.eventIds),
+      primaryLookupId,
+    ]);
     data.relatedIds = uniqueStrings(normalizeStringArray(data.relatedIds)).filter(
-      (relatedId) => relatedId !== recordId,
+      (relatedId) => relatedId !== displayId,
     );
   }
 

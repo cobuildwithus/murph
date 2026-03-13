@@ -14,6 +14,23 @@ import type {
   SamplesImportCsvResult,
 } from "./vault-cli-contracts.js"
 import { VaultCliError } from "./vault-cli-errors.js"
+import {
+  type HealthCoreDescriptorEntry,
+  type HealthQueryDescriptorEntry,
+  type JsonObject,
+  findHealthDescriptorForListKind,
+  findHealthDescriptorForLookup,
+  hasHealthCoreDescriptor,
+  hasHealthQueryDescriptor,
+  healthCoreServiceMethodNames,
+  healthCoreRuntimeMethodNames,
+  healthEntityDescriptorByNoun,
+  healthEntityDescriptors,
+  healthQueryRuntimeMethodNames,
+  healthQueryServiceMethodNames,
+  inferHealthEntityKind,
+  isHealthQueryableRecordId,
+} from "./health-cli-descriptors.js"
 import { loadRuntimeModule } from "./runtime-import.js"
 
 const RUNTIME_PACKAGES = Object.freeze([
@@ -27,8 +44,6 @@ export interface CommandContext {
   vault: string
   requestId: string | null
 }
-
-type JsonObject = Record<string, unknown>
 
 interface JsonFileInput extends CommandContext {
   input: string
@@ -241,6 +256,8 @@ export interface QueryServices {
       out?: string
     },
   ): Promise<ExportPackResult>
+  showAssessment(input: EntityLookupInput): Promise<HealthEntityEnvelope>
+  listAssessments(input: HealthListInput): Promise<HealthListEnvelope>
   showProfile(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   listProfileSnapshots(input: HealthListInput): Promise<HealthListEnvelope>
   showGoal(input: EntityLookupInput): Promise<HealthEntityEnvelope>
@@ -557,40 +574,13 @@ function normalizeIssues(
 }
 
 function inferEntityKind(id: string) {
+  const healthKind = inferHealthEntityKind(id)
+  if (healthKind) {
+    return healthKind
+  }
+
   if (id === "core") {
     return "core"
-  }
-
-  if (id.startsWith("asmt_")) {
-    return "assessment"
-  }
-
-  if (id.startsWith("psnap_")) {
-    return "profile"
-  }
-
-  if (id.startsWith("goal_")) {
-    return "goal"
-  }
-
-  if (id.startsWith("cond_")) {
-    return "condition"
-  }
-
-  if (id.startsWith("alg_")) {
-    return "allergy"
-  }
-
-  if (id.startsWith("reg_")) {
-    return "regimen"
-  }
-
-  if (id.startsWith("fam_")) {
-    return "family"
-  }
-
-  if (id.startsWith("var_")) {
-    return "genetics"
   }
 
   if (id.startsWith("evt_")) {
@@ -624,14 +614,7 @@ function isQueryableRecordId(id: string) {
   return (
     id === "core" ||
     id === "current" ||
-    id.startsWith("asmt_") ||
-    id.startsWith("psnap_") ||
-    id.startsWith("goal_") ||
-    id.startsWith("cond_") ||
-    id.startsWith("alg_") ||
-    id.startsWith("reg_") ||
-    id.startsWith("fam_") ||
-    id.startsWith("var_") ||
+    isHealthQueryableRecordId(id) ||
     id.startsWith("aud_") ||
     id.startsWith("evt_") ||
     id.startsWith("exp_") ||
@@ -735,7 +718,7 @@ function firstStringField(record: JsonObject, keys: string[]) {
 
 function toHealthListItem(record: JsonObject, fallbackKind: string) {
   return {
-    id: String(record.id ?? ""),
+    id: String(record.displayId ?? record.id ?? ""),
     kind: firstStringField(record, ["kind"]) ?? fallbackKind,
     title: firstStringField(record, ["title", "summary"]) ?? null,
     occurredAt: firstStringField(record, ["occurredAt", "recordedAt", "updatedAt"]) ?? null,
@@ -745,7 +728,7 @@ function toHealthListItem(record: JsonObject, fallbackKind: string) {
 
 function toHealthShowEntity(record: JsonObject, fallbackKind: string) {
   return {
-    id: String(record.id ?? ""),
+    id: String(record.displayId ?? record.id ?? ""),
     kind: firstStringField(record, ["kind"]) ?? fallbackKind,
     title: firstStringField(record, ["title", "summary"]) ?? null,
     occurredAt: firstStringField(record, ["occurredAt", "recordedAt", "updatedAt"]) ?? null,
@@ -757,71 +740,12 @@ function toHealthShowEntity(record: JsonObject, fallbackKind: string) {
 }
 
 function buildScaffoldPayload(noun: string) {
-  switch (noun) {
-    case "profile":
-      return {
-        source: "manual",
-        profile: {
-          domains: [],
-          topGoalIds: [],
-        },
-      }
-    case "goal":
-      return {
-        title: "Improve sleep quality and duration",
-        status: "active",
-        horizon: "long_term",
-        priority: 1,
-        window: {
-          startAt: "2026-03-12",
-          targetAt: "2026-06-01",
-        },
-        domains: ["sleep"],
-      }
-    case "condition":
-      return {
-        title: "Insomnia symptoms",
-        clinicalStatus: "active",
-        verificationStatus: "provisional",
-        assertedOn: "2026-03-12",
-      }
-    case "allergy":
-      return {
-        title: "Penicillin intolerance",
-        substance: "Penicillin",
-        status: "active",
-      }
-    case "regimen":
-      return {
-        title: "Magnesium glycinate",
-        kind: "supplement",
-        status: "active",
-        startedOn: "2026-03-12",
-        group: "sleep",
-      }
-    case "history":
-      return {
-        kind: "encounter",
-        occurredAt: "2026-03-12T09:00:00.000Z",
-        title: "Primary care visit",
-        encounterType: "office_visit",
-        location: "Primary care clinic",
-      }
-    case "family":
-      return {
-        title: "Mother",
-        relationship: "mother",
-        conditions: ["hypertension"],
-      }
-    case "genetics":
-      return {
-        title: "MTHFR C677T",
-        gene: "MTHFR",
-        significance: "risk_factor",
-      }
-    default:
-      throw new VaultCliError("invalid_payload", `No scaffold template is defined for ${noun}.`)
+  const descriptor = healthEntityDescriptorByNoun.get(noun)
+  if (!descriptor?.core) {
+    throw new VaultCliError("invalid_payload", `No scaffold template is defined for ${noun}.`)
   }
+
+  return descriptor.core.payloadTemplate
 }
 
 function buildEntityLinks(record: {
@@ -860,6 +784,197 @@ function buildEntityLinks(record: {
   }
 
   return links
+}
+
+function buildHealthCoreRuntimeInput(
+  descriptor: HealthCoreDescriptorEntry,
+  vault: string,
+  payload: JsonObject,
+) {
+  if (descriptor.core.upsertMode === "profile-snapshot") {
+    const recordedAtValue = payload.recordedAt
+    const sourceValue = payload.source
+    const profileValue = payload.profile
+
+    return {
+      vaultRoot: vault,
+      recordedAt:
+        typeof recordedAtValue === "string" ||
+        typeof recordedAtValue === "number" ||
+        recordedAtValue instanceof Date
+          ? recordedAtValue
+          : undefined,
+      source: typeof sourceValue === "string" ? sourceValue : undefined,
+      sourceAssessmentIds: optionalStringArray(payload.sourceAssessmentIds),
+      sourceEventIds: optionalStringArray(payload.sourceEventIds),
+      profile: isPlainObject(profileValue) ? profileValue : {},
+    }
+  }
+
+  return {
+    vaultRoot: vault,
+    ...payload,
+  }
+}
+
+function buildHealthCoreUpsertResult(
+  descriptor: HealthCoreDescriptorEntry,
+  vault: string,
+  result: unknown,
+) {
+  if (descriptor.core.resultMode === "profile-snapshot") {
+    const profileResult = result as Awaited<ReturnType<CoreRuntimeModule["appendProfileSnapshot"]>>
+    return {
+      vault,
+      snapshotId: String(profileResult.snapshot.id),
+      lookupId: String(profileResult.snapshot.id),
+      ledgerFile: profileResult.ledgerPath,
+      currentProfilePath: profileResult.currentProfile.relativePath,
+      created: true,
+      profile: profileResult.snapshot.profile,
+    }
+  }
+
+  if (descriptor.core.resultMode === "history-ledger") {
+    const historyResult = result as Awaited<ReturnType<CoreRuntimeModule["appendHistoryEvent"]>>
+    return {
+      vault,
+      eventId: String(historyResult.record.id),
+      lookupId: String(historyResult.record.id),
+      ledgerFile: historyResult.relativePath,
+      created: true,
+    }
+  }
+
+  const recordResult = result as {
+    record: JsonObject
+    created?: boolean
+  }
+  const identifier = String(recordResult.record[descriptor.core.resultIdField] ?? "")
+
+  return {
+    vault,
+    [descriptor.core.resultIdField]: identifier,
+    lookupId: identifier,
+    path: recordPath(recordResult.record),
+    created: Boolean(recordResult.created),
+  }
+}
+
+function buildHealthServiceListOptions(
+  descriptor: HealthQueryDescriptorEntry,
+  input: HealthListInput,
+) {
+  if (descriptor.query.serviceListMode === "status-limit") {
+    return {
+      status: input.status,
+      limit: input.limit,
+    }
+  }
+
+  return {}
+}
+
+function buildHealthGenericListOptions(
+  descriptor: HealthQueryDescriptorEntry,
+  input: CommandContext & ListFilters,
+) {
+  switch (descriptor.query.genericListMode) {
+    case "date-range-limit":
+      return {
+        from: input.dateFrom,
+        to: input.dateTo,
+        limit: input.limit,
+      }
+    case "history-kind-date-range-limit":
+      return {
+        kind: input.kind,
+        from: input.dateFrom,
+        to: input.dateTo,
+        limit: input.limit,
+      }
+    case "limit-only":
+      return {
+        limit: input.limit,
+      }
+    default:
+      return {}
+  }
+}
+
+function getQueryShowMethod(
+  query: QueryRuntimeModule,
+  descriptor: HealthQueryDescriptorEntry,
+) {
+  return query[descriptor.query.runtimeShowMethod as keyof QueryRuntimeModule] as (
+    vaultRoot: string,
+    lookup: string,
+  ) => Promise<JsonObject | null>
+}
+
+function getQueryListMethod(
+  query: QueryRuntimeModule,
+  descriptor: HealthQueryDescriptorEntry,
+) {
+  return query[descriptor.query.runtimeListMethod as keyof QueryRuntimeModule] as (
+    vaultRoot: string,
+    options?: Record<string, unknown>,
+  ) => Promise<JsonObject[]>
+}
+
+function createHealthCoreServices() {
+  const services: Record<string, unknown> = {}
+
+  for (const descriptor of healthEntityDescriptors.filter(hasHealthCoreDescriptor)) {
+    services[descriptor.core.scaffoldServiceMethod] = async (input: CommandContext) => ({
+      vault: input.vault,
+      noun: descriptor.core.scaffoldNoun,
+      payload: buildScaffoldPayload(descriptor.noun),
+    })
+
+    services[descriptor.core.upsertServiceMethod] = async (args: JsonFileInput) => {
+      const { core } = await loadIntegratedRuntime()
+      const payload = await readJsonPayload(args.input)
+      const runtimeMethod = core[descriptor.core.runtimeMethod as keyof CoreRuntimeModule] as (
+        input: Record<string, unknown>,
+      ) => Promise<unknown>
+      const result = await runtimeMethod(
+        buildHealthCoreRuntimeInput(descriptor, args.vault, payload),
+      )
+
+      return buildHealthCoreUpsertResult(descriptor, args.vault, result)
+    }
+  }
+
+  return services as Record<typeof healthCoreServiceMethodNames[number], unknown>
+}
+
+function createHealthQueryServices() {
+  const services: Record<string, unknown> = {}
+
+  for (const descriptor of healthEntityDescriptors.filter(hasHealthQueryDescriptor)) {
+    services[descriptor.query.showServiceMethod] = async (input: EntityLookupInput) => {
+      const { query } = await loadIntegratedRuntime()
+      return asEntityEnvelope(
+        input.vault,
+        await getQueryShowMethod(query, descriptor)(input.vault, input.id),
+        `No ${descriptor.query.notFoundLabel} found for "${input.id}".`,
+      )
+    }
+
+    services[descriptor.query.listServiceMethod] = async (input: HealthListInput) => {
+      const { query } = await loadIntegratedRuntime()
+      return asListEnvelope(
+        input.vault,
+        await getQueryListMethod(query, descriptor)(
+          input.vault,
+          buildHealthServiceListOptions(descriptor, input),
+        ),
+      )
+    }
+  }
+
+  return services as Record<typeof healthQueryServiceMethodNames[number], unknown>
 }
 
 async function materializeExportPack(
@@ -913,16 +1028,9 @@ function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
       "ensureJournalDay",
       "readAssessmentResponse",
       "projectAssessmentResponse",
-      "appendProfileSnapshot",
       "rebuildCurrentProfile",
-      "upsertGoal",
-      "upsertCondition",
-      "upsertAllergy",
-      "upsertRegimenItem",
       "stopRegimenItem",
-      "appendHistoryEvent",
-      "upsertFamilyMember",
-      "upsertGeneticVariant",
+      ...healthCoreRuntimeMethodNames,
     ])
   )
 }
@@ -935,24 +1043,7 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
       "lookupRecordById",
       "listRecords",
       "buildExportPack",
-      "showAssessment",
-      "listAssessments",
-      "showProfile",
-      "listProfileSnapshots",
-      "showGoal",
-      "listGoals",
-      "showCondition",
-      "listConditions",
-      "showAllergy",
-      "listAllergies",
-      "showRegimen",
-      "listRegimens",
-      "showHistoryEvent",
-      "listHistoryEvents",
-      "showFamilyMember",
-      "listFamilyMembers",
-      "showGeneticVariant",
-      "listGeneticVariants",
+      ...healthQueryRuntimeMethodNames,
     ])
   )
 }
@@ -1016,7 +1107,7 @@ function toJournalLookupId(date: string) {
 export function createIntegratedVaultCliServices(): VaultCliServices {
   const services: VaultCliServices = {
     core: {
-      async init(input) {
+      async init(input: CommandContext) {
         const { vault } = input
         const { core } = await loadIntegratedRuntime()
         await core.initializeVault({ vaultRoot: vault })
@@ -1027,7 +1118,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           files: ["vault.json", "CORE.md"],
         }
       },
-      async validate(input) {
+      async validate(input: CommandContext) {
         const { vault } = input
         const { core } = await loadIntegratedRuntime()
         const result = await core.validateVault({ vaultRoot: vault })
@@ -1037,7 +1128,12 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           issues: normalizeIssues(result.issues),
         }
       },
-      async addMeal(input) {
+      async addMeal(input: CommandContext & {
+        photo: string
+        audio?: string
+        note?: string
+        occurredAt?: string
+      }) {
         const { vault, photo, audio, note, occurredAt } = input
         const { core } = await loadIntegratedRuntime()
         const result = await core.addMeal({
@@ -1060,7 +1156,9 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           note: result.event.note ?? note ?? null,
         }
       },
-      async createExperiment(input) {
+      async createExperiment(input: CommandContext & {
+        slug: string
+      }) {
         const { vault, slug } = input
         const { core } = await loadIntegratedRuntime()
         const result = await core.createExperiment({
@@ -1078,7 +1176,9 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           created: result.created ?? true,
         }
       },
-      async ensureJournal(input) {
+      async ensureJournal(input: CommandContext & {
+        date: string
+      }) {
         const { vault, date } = input
         const { core } = await loadIntegratedRuntime()
         const result = await core.ensureJournalDay({
@@ -1094,7 +1194,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           created: result.created,
         }
       },
-      async projectAssessment(input) {
+      async projectAssessment(input: ProjectAssessmentInput) {
         const { vault, assessmentId } = input
         const { core } = await loadIntegratedRuntime()
         const assessment = await core.readAssessmentResponse({
@@ -1111,46 +1211,8 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           proposal,
         }
       },
-      async scaffoldProfileSnapshot(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "profile",
-          payload: buildScaffoldPayload("profile"),
-        }
-      },
-      async upsertProfileSnapshot(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const recordedAtValue = payload.recordedAt
-        const sourceValue = payload.source
-        const profileValue = payload.profile
-        const result = await core.appendProfileSnapshot({
-          vaultRoot: vault,
-          recordedAt:
-            typeof recordedAtValue === "string" ||
-            typeof recordedAtValue === "number" ||
-            recordedAtValue instanceof Date
-              ? recordedAtValue
-              : undefined,
-          source: typeof sourceValue === "string" ? sourceValue : undefined,
-          sourceAssessmentIds: optionalStringArray(payload.sourceAssessmentIds),
-          sourceEventIds: optionalStringArray(payload.sourceEventIds),
-          profile: isPlainObject(profileValue) ? profileValue : {},
-        })
-
-        return {
-          vault,
-          snapshotId: String(result.snapshot.id),
-          lookupId: String(result.snapshot.id),
-          ledgerFile: result.ledgerPath,
-          currentProfilePath: result.currentProfile.relativePath,
-          created: true,
-          profile: result.snapshot.profile,
-        }
-      },
-      async rebuildCurrentProfile(input) {
+      ...createHealthCoreServices(),
+      async rebuildCurrentProfile(input: CommandContext) {
         const { vault } = input
         const { core } = await loadIntegratedRuntime()
         const result = await core.rebuildCurrentProfile({
@@ -1164,107 +1226,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           updated: result.updated,
         }
       },
-      async scaffoldGoal(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "goal",
-          payload: buildScaffoldPayload("goal"),
-        }
-      },
-      async upsertGoal(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const result = await core.upsertGoal({
-          vaultRoot: vault,
-          ...payload,
-        })
-
-        return {
-          vault,
-          goalId: String(result.record.goalId),
-          lookupId: String(result.record.goalId),
-          path: recordPath(result.record),
-          created: Boolean(result.created),
-        }
-      },
-      async scaffoldCondition(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "condition",
-          payload: buildScaffoldPayload("condition"),
-        }
-      },
-      async upsertCondition(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const result = await core.upsertCondition({
-          vaultRoot: vault,
-          ...payload,
-        })
-
-        return {
-          vault,
-          conditionId: String(result.record.conditionId),
-          lookupId: String(result.record.conditionId),
-          path: recordPath(result.record),
-          created: Boolean(result.created),
-        }
-      },
-      async scaffoldAllergy(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "allergy",
-          payload: buildScaffoldPayload("allergy"),
-        }
-      },
-      async upsertAllergy(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const result = await core.upsertAllergy({
-          vaultRoot: vault,
-          ...payload,
-        })
-
-        return {
-          vault,
-          allergyId: String(result.record.allergyId),
-          lookupId: String(result.record.allergyId),
-          path: recordPath(result.record),
-          created: Boolean(result.created),
-        }
-      },
-      async scaffoldRegimen(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "regimen",
-          payload: buildScaffoldPayload("regimen"),
-        }
-      },
-      async upsertRegimen(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const result = await core.upsertRegimenItem({
-          vaultRoot: vault,
-          ...payload,
-        })
-
-        return {
-          vault,
-          regimenId: String(result.record.regimenId),
-          lookupId: String(result.record.regimenId),
-          path: recordPath(result.record),
-          created: Boolean(result.created),
-        }
-      },
-      async stopRegimen(input) {
+      async stopRegimen(input: StopRegimenInput) {
         const { vault, regimenId, stoppedOn } = input
         const { core } = await loadIntegratedRuntime()
         const result = await core.stopRegimenItem({
@@ -1281,82 +1243,7 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           status: String(result.record.status),
         }
       },
-      async scaffoldHistoryEvent(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "history",
-          payload: buildScaffoldPayload("history"),
-        }
-      },
-      async upsertHistoryEvent(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const result = await core.appendHistoryEvent({
-          vaultRoot: vault,
-          ...payload,
-        })
-
-        return {
-          vault,
-          eventId: String(result.record.id),
-          lookupId: String(result.record.id),
-          ledgerFile: result.relativePath,
-          created: true,
-        }
-      },
-      async scaffoldFamilyMember(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "family",
-          payload: buildScaffoldPayload("family"),
-        }
-      },
-      async upsertFamilyMember(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const result = await core.upsertFamilyMember({
-          vaultRoot: vault,
-          ...payload,
-        })
-
-        return {
-          vault,
-          familyMemberId: String(result.record.familyMemberId),
-          lookupId: String(result.record.familyMemberId),
-          path: recordPath(result.record),
-          created: Boolean(result.created),
-        }
-      },
-      async scaffoldGeneticVariant(input) {
-        const { vault } = input
-        return {
-          vault,
-          noun: "genetics",
-          payload: buildScaffoldPayload("genetics"),
-        }
-      },
-      async upsertGeneticVariant(args) {
-        const { vault, input } = args
-        const { core } = await loadIntegratedRuntime()
-        const payload = await readJsonPayload(input)
-        const result = await core.upsertGeneticVariant({
-          vaultRoot: vault,
-          ...payload,
-        })
-
-        return {
-          vault,
-          variantId: String(result.record.variantId),
-          lookupId: String(result.record.variantId),
-          path: recordPath(result.record),
-          created: Boolean(result.created),
-        }
-      },
-    },
+    } as unknown as CoreWriteServices,
     importers: {
       async importDocument(input) {
         const { vault, file } = input
@@ -1419,7 +1306,10 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
       },
     },
     query: {
-      async show(input) {
+      ...createHealthQueryServices(),
+      async show(input: CommandContext & {
+        id: string
+      }) {
         const { vault, id } = input
         const constraint = describeLookupConstraint(id)
 
@@ -1430,69 +1320,20 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
         }
 
         const { query } = await loadIntegratedRuntime()
-
-        if (id === "current" || id.startsWith("psnap_")) {
-          const entity = await query.showProfile(vault, id)
+        const descriptor = findHealthDescriptorForLookup(id)
+        if (descriptor) {
+          const entity = await getQueryShowMethod(query, descriptor)(vault, id)
           if (!entity) {
-            throw new VaultCliError("not_found", `No profile found for "${id}".`)
+            throw new VaultCliError(
+              "not_found",
+              `No ${descriptor.query.notFoundLabel} found for "${id}".`,
+            )
           }
-          return { vault, entity: toHealthShowEntity(entity, "profile") }
-        }
 
-        if (id.startsWith("asmt_")) {
-          const entity = await query.showAssessment(vault, id)
-          if (!entity) {
-            throw new VaultCliError("not_found", `No assessment found for "${id}".`)
+          return {
+            vault,
+            entity: toHealthShowEntity(entity, descriptor.kind),
           }
-          return { vault, entity: toHealthShowEntity(entity, "assessment") }
-        }
-
-        if (id.startsWith("goal_")) {
-          const entity = await query.showGoal(vault, id)
-          if (!entity) {
-            throw new VaultCliError("not_found", `No goal found for "${id}".`)
-          }
-          return { vault, entity: toHealthShowEntity(entity, "goal") }
-        }
-
-        if (id.startsWith("cond_")) {
-          const entity = await query.showCondition(vault, id)
-          if (!entity) {
-            throw new VaultCliError("not_found", `No condition found for "${id}".`)
-          }
-          return { vault, entity: toHealthShowEntity(entity, "condition") }
-        }
-
-        if (id.startsWith("alg_")) {
-          const entity = await query.showAllergy(vault, id)
-          if (!entity) {
-            throw new VaultCliError("not_found", `No allergy found for "${id}".`)
-          }
-          return { vault, entity: toHealthShowEntity(entity, "allergy") }
-        }
-
-        if (id.startsWith("reg_")) {
-          const entity = await query.showRegimen(vault, id)
-          if (!entity) {
-            throw new VaultCliError("not_found", `No regimen found for "${id}".`)
-          }
-          return { vault, entity: toHealthShowEntity(entity, "regimen") }
-        }
-
-        if (id.startsWith("fam_")) {
-          const entity = await query.showFamilyMember(vault, id)
-          if (!entity) {
-            throw new VaultCliError("not_found", `No family member found for "${id}".`)
-          }
-          return { vault, entity: toHealthShowEntity(entity, "family") }
-        }
-
-        if (id.startsWith("var_")) {
-          const entity = await query.showGeneticVariant(vault, id)
-          if (!entity) {
-            throw new VaultCliError("not_found", `No genetic variant found for "${id}".`)
-          }
-          return { vault, entity: toHealthShowEntity(entity, "genetics") }
         }
 
         const readModel = await query.readVault(vault)
@@ -1516,109 +1357,17 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           },
         }
       },
-      async list(input) {
+      async list(input: CommandContext & ListFilters) {
         const { vault, kind, experiment, dateFrom, dateTo, cursor, limit } = input
         const { query } = await loadIntegratedRuntime()
-
-        if (kind === "assessment") {
-          const items = (await query.listAssessments(vault, { from: dateFrom, to: dateTo, limit }))
-            .map((record) => toHealthListItem(record, "assessment"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind === "profile") {
-          const items = (await query.listProfileSnapshots(vault, { from: dateFrom, to: dateTo, limit }))
-            .map((record) => toHealthListItem(record, "profile"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind === "goal") {
-          const items = (await query.listGoals(vault, { limit }))
-            .map((record) => toHealthListItem(record, "goal"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind === "condition") {
-          const items = (await query.listConditions(vault, { limit }))
-            .map((record) => toHealthListItem(record, "condition"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind === "allergy") {
-          const items = (await query.listAllergies(vault, { limit }))
-            .map((record) => toHealthListItem(record, "allergy"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind === "regimen") {
-          const items = (await query.listRegimens(vault, { limit }))
-            .map((record) => toHealthListItem(record, "regimen"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind === "family") {
-          const items = (await query.listFamilyMembers(vault, { limit }))
-            .map((record) => toHealthListItem(record, "family"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind === "genetics") {
-          const items = (await query.listGeneticVariants(vault, { limit }))
-            .map((record) => toHealthListItem(record, "genetics"))
-
-          return {
-            vault,
-            filters: { kind, experiment, dateFrom, dateTo, cursor, limit },
-            items,
-            nextCursor: null,
-          }
-        }
-
-        if (kind && ["encounter", "procedure", "test", "adverse_effect", "exposure"].includes(kind)) {
-          const items = (await query.listHistoryEvents(vault, { kind, from: dateFrom, to: dateTo, limit }))
-            .map((record) => toHealthListItem(record, "history"))
+        const descriptor = findHealthDescriptorForListKind(kind)
+        if (descriptor) {
+          const items = (
+            await getQueryListMethod(query, descriptor)(
+              vault,
+              buildHealthGenericListOptions(descriptor, input),
+            )
+          ).map((record) => toHealthListItem(record, descriptor.kind))
 
           return {
             vault,
@@ -1659,7 +1408,12 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           nextCursor: null,
         }
       },
-      async exportPack(input) {
+      async exportPack(input: CommandContext & {
+        from: string
+        to: string
+        experiment?: string
+        out?: string
+      }) {
         const { vault, from, to, experiment, out } = input
         const { query } = await loadIntegratedRuntime()
         const readModel = await query.readVault(vault)
@@ -1683,90 +1437,19 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
           files: pack.files.map((file) => file.path),
         }
       },
-      async showProfile(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showProfile(vault, id), `No profile found for "${id}".`)
-      },
-      async listProfileSnapshots(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listProfileSnapshots(vault, { status, limit }))
-      },
-      async showGoal(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showGoal(vault, id), `No goal found for "${id}".`)
-      },
-      async listGoals(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listGoals(vault, { status, limit }))
-      },
-      async showCondition(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showCondition(vault, id), `No condition found for "${id}".`)
-      },
-      async listConditions(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listConditions(vault, { status, limit }))
-      },
-      async showAllergy(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showAllergy(vault, id), `No allergy found for "${id}".`)
-      },
-      async listAllergies(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listAllergies(vault, { status, limit }))
-      },
-      async showRegimen(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showRegimen(vault, id), `No regimen found for "${id}".`)
-      },
-      async listRegimens(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listRegimens(vault, { status, limit }))
-      },
-      async showHistoryEvent(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showHistoryEvent(vault, id), `No history event found for "${id}".`)
-      },
-      async listHistoryEvents(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listHistoryEvents(vault, { status, limit }))
-      },
-      async showFamilyMember(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showFamilyMember(vault, id), `No family member found for "${id}".`)
-      },
-      async listFamilyMembers(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listFamilyMembers(vault, { status, limit }))
-      },
-      async showGeneticVariant(input) {
-        const { vault, id } = input
-        const { query } = await loadIntegratedRuntime()
-        return asEntityEnvelope(vault, await query.showGeneticVariant(vault, id), `No genetic variant found for "${id}".`)
-      },
-      async listGeneticVariants(input) {
-        const { vault, status, limit } = input
-        const { query } = await loadIntegratedRuntime()
-        return asListEnvelope(vault, await query.listGeneticVariants(vault, { status, limit }))
-      },
-    },
+    } as unknown as QueryServices,
   }
 
   return services
+}
+
+function createUnwiredHealthMethodSet<TMethods extends string>(
+  names: readonly TMethods[],
+  group: "core" | "query",
+) {
+  return Object.fromEntries(
+    names.map((name) => [name, createUnwiredMethod(`${group}.${name}`)]),
+  ) as Record<TMethods, () => Promise<never>>
 }
 
 export function createUnwiredVaultCliServices(): VaultCliServices {
@@ -1778,25 +1461,10 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
       createExperiment: createUnwiredMethod("core.createExperiment"),
       ensureJournal: createUnwiredMethod("core.ensureJournal"),
       projectAssessment: createUnwiredMethod("core.projectAssessment"),
-      scaffoldProfileSnapshot: createUnwiredMethod("core.scaffoldProfileSnapshot"),
-      upsertProfileSnapshot: createUnwiredMethod("core.upsertProfileSnapshot"),
+      ...createUnwiredHealthMethodSet(healthCoreServiceMethodNames, "core"),
       rebuildCurrentProfile: createUnwiredMethod("core.rebuildCurrentProfile"),
-      scaffoldGoal: createUnwiredMethod("core.scaffoldGoal"),
-      upsertGoal: createUnwiredMethod("core.upsertGoal"),
-      scaffoldCondition: createUnwiredMethod("core.scaffoldCondition"),
-      upsertCondition: createUnwiredMethod("core.upsertCondition"),
-      scaffoldAllergy: createUnwiredMethod("core.scaffoldAllergy"),
-      upsertAllergy: createUnwiredMethod("core.upsertAllergy"),
-      scaffoldRegimen: createUnwiredMethod("core.scaffoldRegimen"),
-      upsertRegimen: createUnwiredMethod("core.upsertRegimen"),
       stopRegimen: createUnwiredMethod("core.stopRegimen"),
-      scaffoldHistoryEvent: createUnwiredMethod("core.scaffoldHistoryEvent"),
-      upsertHistoryEvent: createUnwiredMethod("core.upsertHistoryEvent"),
-      scaffoldFamilyMember: createUnwiredMethod("core.scaffoldFamilyMember"),
-      upsertFamilyMember: createUnwiredMethod("core.upsertFamilyMember"),
-      scaffoldGeneticVariant: createUnwiredMethod("core.scaffoldGeneticVariant"),
-      upsertGeneticVariant: createUnwiredMethod("core.upsertGeneticVariant"),
-    },
+    } as unknown as CoreWriteServices,
     importers: {
       importDocument: createUnwiredMethod("importers.importDocument"),
       importSamplesCsv: createUnwiredMethod("importers.importSamplesCsv"),
@@ -1806,23 +1474,8 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
       show: createUnwiredMethod("query.show"),
       list: createUnwiredMethod("query.list"),
       exportPack: createUnwiredMethod("query.exportPack"),
-      showProfile: createUnwiredMethod("query.showProfile"),
-      listProfileSnapshots: createUnwiredMethod("query.listProfileSnapshots"),
-      showGoal: createUnwiredMethod("query.showGoal"),
-      listGoals: createUnwiredMethod("query.listGoals"),
-      showCondition: createUnwiredMethod("query.showCondition"),
-      listConditions: createUnwiredMethod("query.listConditions"),
-      showAllergy: createUnwiredMethod("query.showAllergy"),
-      listAllergies: createUnwiredMethod("query.listAllergies"),
-      showRegimen: createUnwiredMethod("query.showRegimen"),
-      listRegimens: createUnwiredMethod("query.listRegimens"),
-      showHistoryEvent: createUnwiredMethod("query.showHistoryEvent"),
-      listHistoryEvents: createUnwiredMethod("query.listHistoryEvents"),
-      showFamilyMember: createUnwiredMethod("query.showFamilyMember"),
-      listFamilyMembers: createUnwiredMethod("query.listFamilyMembers"),
-      showGeneticVariant: createUnwiredMethod("query.showGeneticVariant"),
-      listGeneticVariants: createUnwiredMethod("query.listGeneticVariants"),
-    },
+      ...createUnwiredHealthMethodSet(healthQueryServiceMethodNames, "query"),
+    } as unknown as QueryServices,
   }
 
   return services
