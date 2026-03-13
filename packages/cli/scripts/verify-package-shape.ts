@@ -68,8 +68,18 @@ assert(
   'package.json must define build, typecheck, and test scripts.',
 )
 assert(
+  !Object.values(packageJson.scripts ?? {}).some((script) =>
+    script?.includes('node --import=tsx'),
+  ),
+  'package.json package-local scripts must call tsx or vitest directly instead of node --import=tsx.',
+)
+assert(
   !Object.values(packageJson.scripts ?? {}).some((script) => script?.includes('.mjs')),
   'package.json package-local scripts must not point at legacy .mjs files.',
+)
+assert(
+  !packageLocalTsFiles.some((filePath) => path.basename(filePath) === 'require-cli-toolchain.ts'),
+  'packages/cli/scripts/require-cli-toolchain.ts should not exist once the package scripts rely on the workspace toolchain directly.',
 )
 assert(
   tsconfig.extends === '../../tsconfig.base.json',
