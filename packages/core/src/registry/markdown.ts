@@ -1,5 +1,6 @@
 import { VaultError } from "../errors.js";
 import { parseFrontmatterDocument } from "../frontmatter.js";
+import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { readUtf8File, walkVaultFiles } from "../fs.js";
 import { emitAuditRecord } from "../audit.js";
 import { runCanonicalWrite } from "../operations/index.js";
@@ -17,6 +18,10 @@ interface MarkdownRegistryLoadOptions<TRecord> {
 
 interface RegistryRecord {
   slug: string;
+}
+
+interface ExistingMarkdownRegistryRecord extends RegistryRecord {
+  relativePath: string;
 }
 
 interface RegistrySelectionOptions<TRecord extends RegistryRecord> {
@@ -49,6 +54,34 @@ interface UpsertMarkdownRegistryDocumentInput {
   relativePath: string;
   markdown: string;
   created: boolean;
+  audit: MarkdownRegistryUpsertAuditInput;
+}
+
+interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord extends ExistingMarkdownRegistryRecord> {
+  existingRecord: TRecord | null;
+  recordId?: string;
+  requestedSlug?: string;
+  defaultSlug: string;
+  directory: string;
+  getRecordId: (record: TRecord) => string;
+  createRecordId: () => string;
+}
+
+export interface MarkdownRegistryUpsertTarget {
+  recordId: string;
+  slug: string;
+  relativePath: string;
+  created: boolean;
+}
+
+interface WriteMarkdownRegistryRecordOptions<TRecord> {
+  vaultRoot: string;
+  target: MarkdownRegistryUpsertTarget;
+  attributes: FrontmatterObject;
+  body: string;
+  recordFromParts: (attributes: FrontmatterObject, relativePath: string, markdown: string) => TRecord;
+  operationType: string;
+  summary: string;
   audit: MarkdownRegistryUpsertAuditInput;
 }
 
@@ -115,6 +148,24 @@ export function readRegistryRecord<TRecord extends RegistryRecord>({
   return match;
 }
 
+export function resolveMarkdownRegistryUpsertTarget<TRecord extends ExistingMarkdownRegistryRecord>({
+  existingRecord,
+  recordId,
+  requestedSlug,
+  defaultSlug,
+  directory,
+  getRecordId,
+  createRecordId,
+}: ResolveMarkdownRegistryUpsertTargetOptions<TRecord>): MarkdownRegistryUpsertTarget {
+  const slug = existingRecord?.slug ?? requestedSlug ?? defaultSlug;
+  return {
+    recordId: existingRecord ? getRecordId(existingRecord) : (recordId ?? createRecordId()),
+    slug,
+    relativePath: existingRecord?.relativePath ?? `${directory}/${slug}.md`,
+    created: !existingRecord,
+  };
+}
+
 export async function upsertMarkdownRegistryDocument({
   vaultRoot,
   operationType,
@@ -151,4 +202,34 @@ export async function upsertMarkdownRegistryDocument({
   });
 
   return stagedAudit.relativePath;
+}
+
+export async function writeMarkdownRegistryRecord<TRecord>({
+  vaultRoot,
+  target,
+  attributes,
+  body,
+  recordFromParts,
+  operationType,
+  summary,
+  audit,
+}: WriteMarkdownRegistryRecordOptions<TRecord>): Promise<{
+  auditPath: string;
+  record: TRecord;
+}> {
+  const markdown = stringifyFrontmatterDocument({ attributes, body });
+  const auditPath = await upsertMarkdownRegistryDocument({
+    vaultRoot,
+    operationType,
+    summary,
+    relativePath: target.relativePath,
+    markdown,
+    created: target.created,
+    audit,
+  });
+
+  return {
+    auditPath,
+    record: recordFromParts(attributes, target.relativePath, markdown),
+  };
 }

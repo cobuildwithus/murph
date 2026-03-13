@@ -4,13 +4,13 @@ import {
   ID_PREFIXES,
 } from "@healthybob/contracts";
 
-import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { generateRecordId } from "../ids.js";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
+  resolveMarkdownRegistryUpsertTarget,
   selectExistingRegistryRecord,
-  upsertMarkdownRegistryDocument,
+  writeMarkdownRegistryRecord,
 } from "../registry/markdown.js";
 
 import {
@@ -171,9 +171,15 @@ export async function upsertFamilyMember(
     "relationship",
     FAMILY_RELATIONSHIP_MAX_LENGTH,
   );
-  const slug = existingRecord?.slug ?? selectorSlug ?? normalizeSlug(undefined, "slug", title);
-  const familyMemberId = existingRecord?.familyMemberId ?? normalizedFamilyMemberId ?? generateRecordId("fam");
-  const relativePath = existingRecord?.relativePath ?? `${FAMILY_DIRECTORY}/${slug}.md`;
+  const target = resolveMarkdownRegistryUpsertTarget({
+    existingRecord,
+    recordId: normalizedFamilyMemberId,
+    requestedSlug: selectorSlug,
+    defaultSlug: normalizeSlug(undefined, "slug", title),
+    directory: FAMILY_DIRECTORY,
+    getRecordId: (record) => record.familyMemberId,
+    createRecordId: () => generateRecordId("fam"),
+  });
   const conditions =
     input.conditions === undefined
       ? existingRecord?.conditions
@@ -192,10 +198,9 @@ export async function upsertFamilyMember(
           24,
           FAMILY_VARIANT_ID_MAX_LENGTH,
         );
-  const created = !existingRecord;
   const attributes = buildAttributes({
-    familyMemberId,
-    slug: existingRecord?.slug ?? slug,
+    familyMemberId: target.recordId,
+    slug: target.slug,
     title,
     relationship,
     conditions,
@@ -204,7 +209,9 @@ export async function upsertFamilyMember(
     note,
     relatedVariantIds,
   });
-  const markdown = stringifyFrontmatterDocument({
+  const { auditPath, record } = await writeMarkdownRegistryRecord({
+    vaultRoot: input.vaultRoot,
+    target,
     attributes,
     body: buildBody({
       title,
@@ -213,26 +220,21 @@ export async function upsertFamilyMember(
       note,
       relatedVariantIds,
     }),
-  });
-  const auditPath = await upsertMarkdownRegistryDocument({
-    vaultRoot: input.vaultRoot,
+    recordFromParts,
     operationType: "family_upsert",
-    summary: `Upsert family member ${familyMemberId}`,
-    relativePath,
-    markdown,
-    created,
+    summary: `Upsert family member ${target.recordId}`,
     audit: {
       action: "family_upsert",
       commandName: "core.upsertFamilyMember",
-      summary: `${created ? "Created" : "Updated"} family member registry record.`,
-      targetIds: [familyMemberId],
+      summary: `${target.created ? "Created" : "Updated"} family member registry record.`,
+      targetIds: [target.recordId],
     },
   });
 
   return {
-    created,
+    created: target.created,
     auditPath,
-    record: recordFromParts(attributes, relativePath, markdown),
+    record,
   };
 }
 

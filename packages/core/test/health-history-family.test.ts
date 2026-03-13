@@ -492,6 +492,36 @@ test("family and genetics registry writes enforce the frozen contract length bou
   );
 });
 
+test("family and genetics registry creation preserves caller-provided ids and explicit slugs", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-family-genetics-explicit-ids");
+  await initializeVault({ vaultRoot });
+
+  const familyMemberId = "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8";
+  const variantId = "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8";
+
+  const familyMember = await upsertFamilyMember({
+    vaultRoot,
+    familyMemberId,
+    slug: "maternal-uncle",
+    title: "Maternal Uncle",
+    relationship: "uncle",
+  });
+  const variant = await upsertGeneticVariant({
+    vaultRoot,
+    variantId,
+    slug: "apoe-e3",
+    gene: "APOE",
+    title: "APOE e3 allele",
+  });
+
+  assert.equal(familyMember.record.familyMemberId, familyMemberId);
+  assert.equal(familyMember.record.slug, "maternal-uncle");
+  assert.equal(familyMember.record.relativePath, "bank/family/maternal-uncle.md");
+  assert.equal(variant.record.variantId, variantId);
+  assert.equal(variant.record.slug, "apoe-e3");
+  assert.equal(variant.record.relativePath, "bank/genetics/apoe-e3.md");
+});
+
 test("family and genetics registry id-or-slug resolution preserves conflict and missing errors", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-family-genetics-resolution");
   await initializeVault({ vaultRoot });

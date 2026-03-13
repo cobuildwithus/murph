@@ -4,13 +4,13 @@ import {
   ID_PREFIXES,
 } from "@healthybob/contracts";
 
-import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { generateRecordId } from "../ids.js";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
+  resolveMarkdownRegistryUpsertTarget,
   selectExistingRegistryRecord,
-  upsertMarkdownRegistryDocument,
+  writeMarkdownRegistryRecord,
 } from "../registry/markdown.js";
 
 import {
@@ -166,9 +166,15 @@ export async function upsertGeneticVariant(
   const existingRecord = selectExistingRecord(existingRecords, normalizedVariantId, selectorSlug);
   const title = requireString(input.title ?? input.label ?? existingRecord?.title, "title", GENETIC_TITLE_MAX_LENGTH);
   const gene = requireString(input.gene ?? existingRecord?.gene, "gene", GENETIC_GENE_MAX_LENGTH);
-  const slug = existingRecord?.slug ?? selectorSlug ?? normalizeSlug(undefined, "slug", `${gene}-${title}`);
-  const variantId = existingRecord?.variantId ?? normalizedVariantId ?? generateRecordId("var");
-  const relativePath = existingRecord?.relativePath ?? `${GENETICS_DIRECTORY}/${slug}.md`;
+  const target = resolveMarkdownRegistryUpsertTarget({
+    existingRecord,
+    recordId: normalizedVariantId,
+    requestedSlug: selectorSlug,
+    defaultSlug: normalizeSlug(undefined, "slug", `${gene}-${title}`),
+    directory: GENETICS_DIRECTORY,
+    getRecordId: (record) => record.variantId,
+    createRecordId: () => generateRecordId("var"),
+  });
   const sourceIdsInput = input.sourceFamilyMemberIds ?? input.familyMemberIds;
   const sourceFamilyMemberIds =
     sourceIdsInput === undefined
@@ -184,10 +190,9 @@ export async function upsertGeneticVariant(
     input.note === undefined && input.summary === undefined
       ? existingRecord?.note
       : optionalString(input.note ?? input.summary, "note", GENETIC_NOTE_MAX_LENGTH);
-  const created = !existingRecord;
   const attributes = buildAttributes({
-    variantId,
-    slug: existingRecord?.slug ?? slug,
+    variantId: target.recordId,
+    slug: target.slug,
     title,
     gene,
     zygosity:
@@ -205,7 +210,9 @@ export async function upsertGeneticVariant(
     sourceFamilyMemberIds,
     note,
   });
-  const markdown = stringifyFrontmatterDocument({
+  const { auditPath, record } = await writeMarkdownRegistryRecord({
+    vaultRoot: input.vaultRoot,
+    target,
     attributes,
     body: buildBody({
       gene,
@@ -213,26 +220,21 @@ export async function upsertGeneticVariant(
       sourceFamilyMemberIds,
       note,
     }),
-  });
-  const auditPath = await upsertMarkdownRegistryDocument({
-    vaultRoot: input.vaultRoot,
+    recordFromParts,
     operationType: "genetics_upsert",
-    summary: `Upsert genetic variant ${variantId}`,
-    relativePath,
-    markdown,
-    created,
+    summary: `Upsert genetic variant ${target.recordId}`,
     audit: {
       action: "genetics_upsert",
       commandName: "core.upsertGeneticVariant",
-      summary: `${created ? "Created" : "Updated"} genetic variant registry record.`,
-      targetIds: [variantId],
+      summary: `${target.created ? "Created" : "Updated"} genetic variant registry record.`,
+      targetIds: [target.recordId],
     },
   });
 
   return {
-    created,
+    created: target.created,
     auditPath,
-    record: recordFromParts(attributes, relativePath, markdown),
+    record,
   };
 }
 
