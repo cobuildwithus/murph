@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -73,71 +73,61 @@ export function registerAllergyCommands(cli: Cli.Cli, services: VaultCliServices
 
   allergy.command(
     'scaffold',
-    defineCommand({
-      command: 'allergy scaffold',
+    {
       description: 'Emit a payload template for allergy upserts.',
       args: z.object({}),
       options: withBaseOptions(),
-      data: scaffoldResultSchema,
-      async run({ vault, requestId }) {
-        return healthServices.core.scaffoldAllergy({ vault, requestId })
+      output: scaffoldResultSchema,
+      async run({ options }) {
+        return healthServices.core.scaffoldAllergy({
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
+        })
       },
-      renderMarkdown({ data }) {
-        return `# Allergy Scaffold\n\n- payloadKeys: ${Object.keys(data.payload).length}`
-      },
-    }),
+    },
   )
 
   allergy.command(
     'upsert',
-    defineCommand({
-      command: 'allergy upsert',
+    {
       description: 'Upsert one allergy from an @file.json payload.',
       args: z.object({}),
       options: withBaseOptions({
         input: inputFileSchema,
       }),
-      data: upsertResultSchema,
-      async run({ options, vault, requestId }) {
+      output: upsertResultSchema,
+      async run({ options }) {
         return healthServices.core.upsertAllergy({
           input: stripAtPrefix(options.input),
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Allergy Upserted\n\n- allergyId: ${data.allergyId}\n- lookupId: ${data.lookupId}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   allergy.command(
     'show',
-    defineCommand({
-      command: 'allergy show',
+    {
       description: 'Show one allergy by canonical id or slug.',
       args: z.object({
         id: z.string().min(1),
       }),
       options: withBaseOptions(),
-      data: showResultSchema,
-      async run({ args, vault, requestId }) {
+      output: showResultSchema,
+      async run({ args, options }) {
         return healthServices.query.showAllergy({
           id: args.id,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Allergy\n\n- keys: ${Object.keys(data.entity).length}`
-      },
-    }),
+    },
   )
 
   allergy.command(
     'list',
-    defineCommand({
-      command: 'allergy list',
+    {
       description: 'List allergies through the health read model.',
       args: z.object({}),
       options: withBaseOptions({
@@ -145,20 +135,17 @@ export function registerAllergyCommands(cli: Cli.Cli, services: VaultCliServices
         cursor: z.string().min(1).optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
-      data: listResultSchema,
-      async run({ options, vault, requestId }) {
+      output: listResultSchema,
+      async run({ options }) {
         return healthServices.query.listAllergies({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           status: options.status,
           cursor: options.cursor,
           limit: options.limit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Allergies\n\n- count: ${data.count}`
-      },
-    }),
+    },
   )
 
   cli.command(allergy)

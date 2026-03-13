@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import {
   pathSchema,
   samplesImportCsvResultSchema,
@@ -16,8 +16,7 @@ export function registerSamplesCommands(
 
   samples.command(
     'import-csv',
-    defineCommand({
-      command: 'samples import-csv',
+    {
       description: 'Import timestamped numeric samples from a CSV file.',
       args: z.object({
         file: pathSchema.describe('Source CSV file to import.'),
@@ -34,22 +33,19 @@ export function registerSamplesCommands(
           .describe('CSV column containing the numeric value.'),
         unit: z.string().min(1).describe('Unit label for the imported values.'),
       }),
-      data: samplesImportCsvResultSchema,
-      async run({ args, options, vault, requestId }) {
+      output: samplesImportCsvResultSchema,
+      async run({ args, options }) {
         return services.importers.importSamplesCsv({
           file: args.file,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           stream: options.stream,
           tsColumn: options.tsColumn,
           valueColumn: options.valueColumn,
           unit: options.unit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Samples Imported\n\n- stream: ${data.stream}\n- imported: ${data.importedCount}\n- lookupIds: ${data.lookupIds.length}\n- transformId: ${data.transformId}\n- ledgers: ${data.ledgerFiles.length}`
-      },
-    }),
+    },
   )
 
   cli.command(samples)

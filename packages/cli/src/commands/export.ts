@@ -1,5 +1,9 @@
 import { Cli, z } from 'incur'
-import { defineCommand, emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
+import {
+  emptyArgsSchema,
+  requestIdFromOptions,
+  withBaseOptions,
+} from '../command-helpers.js'
 import {
   exportPackResultSchema,
   localDateSchema,
@@ -15,8 +19,7 @@ export function registerExportCommands(cli: Cli.Cli, services: VaultCliServices)
 
   exportCli.command(
     'pack',
-    defineCommand({
-      command: 'export pack',
+    {
       description: 'Build a date-bounded export pack from the read model.',
       args: emptyArgsSchema,
       options: withBaseOptions({
@@ -29,21 +32,18 @@ export function registerExportCommands(cli: Cli.Cli, services: VaultCliServices)
           .optional()
           .describe('Optional directory for materialized pack output.'),
       }),
-      data: exportPackResultSchema,
-      async run({ options, vault, requestId }) {
+      output: exportPackResultSchema,
+      async run({ options }) {
         return services.query.exportPack({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           from: options.from,
           to: options.to,
           experiment: options.experiment,
           out: options.out,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Export Pack\n\n- pack: ${data.packId}\n- files: ${data.files.length}\n- range: ${data.from} to ${data.to}`
-      },
-    }),
+    },
   )
 
   cli.command(exportCli)

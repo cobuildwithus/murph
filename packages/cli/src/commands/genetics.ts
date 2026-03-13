@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -73,71 +73,61 @@ export function registerGeneticsCommands(cli: Cli.Cli, services: VaultCliService
 
   genetics.command(
     'scaffold',
-    defineCommand({
-      command: 'genetics scaffold',
+    {
       description: 'Emit a payload template for genetic variant upserts.',
       args: z.object({}),
       options: withBaseOptions(),
-      data: scaffoldResultSchema,
-      async run({ vault, requestId }) {
-        return healthServices.core.scaffoldGeneticVariant({ vault, requestId })
+      output: scaffoldResultSchema,
+      async run({ options }) {
+        return healthServices.core.scaffoldGeneticVariant({
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
+        })
       },
-      renderMarkdown({ data }) {
-        return `# Genetics Scaffold\n\n- payloadKeys: ${Object.keys(data.payload).length}`
-      },
-    }),
+    },
   )
 
   genetics.command(
     'upsert',
-    defineCommand({
-      command: 'genetics upsert',
+    {
       description: 'Upsert one genetic variant from an @file.json payload.',
       args: z.object({}),
       options: withBaseOptions({
         input: inputFileSchema,
       }),
-      data: upsertResultSchema,
-      async run({ options, vault, requestId }) {
+      output: upsertResultSchema,
+      async run({ options }) {
         return healthServices.core.upsertGeneticVariant({
           input: stripAtPrefix(options.input),
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Genetic Variant Upserted\n\n- variantId: ${data.variantId}\n- lookupId: ${data.lookupId}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   genetics.command(
     'show',
-    defineCommand({
-      command: 'genetics show',
+    {
       description: 'Show one genetic variant by canonical id or slug.',
       args: z.object({
         id: z.string().min(1),
       }),
       options: withBaseOptions(),
-      data: showResultSchema,
-      async run({ args, vault, requestId }) {
+      output: showResultSchema,
+      async run({ args, options }) {
         return healthServices.query.showGeneticVariant({
           id: args.id,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Genetic Variant\n\n- keys: ${Object.keys(data.entity).length}`
-      },
-    }),
+    },
   )
 
   genetics.command(
     'list',
-    defineCommand({
-      command: 'genetics list',
+    {
       description: 'List genetic variants through the health read model.',
       args: z.object({}),
       options: withBaseOptions({
@@ -145,20 +135,17 @@ export function registerGeneticsCommands(cli: Cli.Cli, services: VaultCliService
         cursor: z.string().min(1).optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
-      data: listResultSchema,
-      async run({ options, vault, requestId }) {
+      output: listResultSchema,
+      async run({ options }) {
         return healthServices.query.listGeneticVariants({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           status: options.status,
           cursor: options.cursor,
           limit: options.limit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Genetics\n\n- count: ${data.count}`
-      },
-    }),
+    },
   )
 
   cli.command(genetics)

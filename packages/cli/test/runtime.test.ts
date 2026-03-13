@@ -12,6 +12,7 @@ interface CliResult<TData = Record<string, unknown>> {
   data?: TData
   error?: {
     code?: string
+    message?: string
   }
 }
 
@@ -50,11 +51,52 @@ const sampleDocumentPath = path.join(
 async function runCli<TData = Record<string, unknown>>(
   args: string[],
 ): Promise<CliResult<TData>> {
-  const { stdout } = await execFileAsync(process.execPath, [binPath, ...args], {
-    cwd: repoRoot,
-  })
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [binPath, ...args], {
+      cwd: repoRoot,
+    })
 
-  return JSON.parse(stdout) as CliResult<TData>
+    return {
+      ok: true,
+      data: JSON.parse(stdout) as TData,
+    }
+  } catch (error) {
+    const output = commandOutputFromError(error)
+    if (output !== null) {
+      return {
+        ok: false,
+        error: JSON.parse(output) as CliResult<TData>['error'],
+      }
+    }
+
+    throw error
+  }
+}
+
+function commandOutputFromError(error: unknown): string | null {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const maybeOutput = error as {
+    stdout?: Buffer | string
+    stderr?: Buffer | string
+  }
+
+  return decodeCommandOutput(maybeOutput.stdout) ?? decodeCommandOutput(maybeOutput.stderr)
+}
+
+function decodeCommandOutput(output: Buffer | string | undefined): string | null {
+  if (typeof output === 'string') {
+    return output.trim().length > 0 ? output : null
+  }
+
+  if (Buffer.isBuffer(output)) {
+    const text = output.toString('utf8').trim()
+    return text.length > 0 ? text : null
+  }
+
+  return null
 }
 
 function requireData<TData>(result: CliResult<TData>): TData {

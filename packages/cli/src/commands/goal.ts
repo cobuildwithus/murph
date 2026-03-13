@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -73,71 +73,61 @@ export function registerGoalCommands(cli: Cli.Cli, services: VaultCliServices) {
 
   goal.command(
     'scaffold',
-    defineCommand({
-      command: 'goal scaffold',
+    {
       description: 'Emit a payload template for goal upserts.',
       args: z.object({}),
       options: withBaseOptions(),
-      data: scaffoldResultSchema,
-      async run({ vault, requestId }) {
-        return healthServices.core.scaffoldGoal({ vault, requestId })
+      output: scaffoldResultSchema,
+      async run({ options }) {
+        return healthServices.core.scaffoldGoal({
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
+        })
       },
-      renderMarkdown({ data }) {
-        return `# Goal Scaffold\n\n- payloadKeys: ${Object.keys(data.payload).length}`
-      },
-    }),
+    },
   )
 
   goal.command(
     'upsert',
-    defineCommand({
-      command: 'goal upsert',
+    {
       description: 'Upsert one goal from an @file.json payload.',
       args: z.object({}),
       options: withBaseOptions({
         input: inputFileSchema,
       }),
-      data: upsertResultSchema,
-      async run({ options, vault, requestId }) {
+      output: upsertResultSchema,
+      async run({ options }) {
         return healthServices.core.upsertGoal({
           input: stripAtPrefix(options.input),
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Goal Upserted\n\n- goalId: ${data.goalId}\n- lookupId: ${data.lookupId}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   goal.command(
     'show',
-    defineCommand({
-      command: 'goal show',
+    {
       description: 'Show one goal by canonical id or slug.',
       args: z.object({
         id: z.string().min(1),
       }),
       options: withBaseOptions(),
-      data: showResultSchema,
-      async run({ args, vault, requestId }) {
+      output: showResultSchema,
+      async run({ args, options }) {
         return healthServices.query.showGoal({
           id: args.id,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Goal\n\n- keys: ${Object.keys(data.entity).length}`
-      },
-    }),
+    },
   )
 
   goal.command(
     'list',
-    defineCommand({
-      command: 'goal list',
+    {
       description: 'List goals through the health read model.',
       args: z.object({}),
       options: withBaseOptions({
@@ -145,20 +135,17 @@ export function registerGoalCommands(cli: Cli.Cli, services: VaultCliServices) {
         cursor: z.string().min(1).optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
-      data: listResultSchema,
-      async run({ options, vault, requestId }) {
+      output: listResultSchema,
+      async run({ options }) {
         return healthServices.query.listGoals({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           status: options.status,
           cursor: options.cursor,
           limit: options.limit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Goals\n\n- count: ${data.count}`
-      },
-    }),
+    },
   )
 
   cli.command(goal)

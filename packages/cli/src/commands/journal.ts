@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import {
   journalEnsureResultSchema,
   localDateSchema,
@@ -13,25 +13,21 @@ export function registerJournalCommands(cli: Cli.Cli, services: VaultCliServices
 
   journal.command(
     'ensure',
-    defineCommand({
-      command: 'journal ensure',
+    {
       description: 'Create or confirm the daily journal document for a date.',
       args: z.object({
         date: localDateSchema,
       }),
       options: withBaseOptions(),
-      data: journalEnsureResultSchema,
-      async run({ args, vault, requestId }) {
+      output: journalEnsureResultSchema,
+      async run({ args, options }) {
         return services.core.ensureJournal({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           date: args.date,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Journal Ready\n\n- date: ${data.date}\n- lookupId: ${data.lookupId}\n- path: ${data.journalPath}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   cli.command(journal)

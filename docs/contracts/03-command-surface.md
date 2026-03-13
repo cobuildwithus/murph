@@ -5,7 +5,8 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 ## Namespace
 
 - The only public baseline namespace is `vault-cli`.
-- `packages/cli` owns argument validation, output validation, formatting hints, and error normalization.
+- `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
+- Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 
 ## Command Groups
@@ -53,26 +54,24 @@ Frozen health nouns:
 - `genetics`
 - `history`
 
-## Root Middleware Contract
+## Native Incur Contract
 
-Every command passes through one shared middleware layer before any package call:
+Every command now uses native `incur` command definitions directly:
 
-1. Incur validates positional arguments and named options against the command schema.
-2. The middleware injects a normalized execution context:
-   - `vault: string`
-   - `format: "json" | "md"`
-   - `requestId: string | null`
-3. The handler delegates exactly one boundary call to `core`, `importers`, or `query`.
-4. The middleware wraps the command result in a stable success envelope.
-5. Thrown errors normalize to a stable failure envelope with a string `code`.
+1. `incur` validates positional arguments and named options against the command schema.
+2. The handler receives parsed `args` and `options` and delegates exactly one boundary call to `core`, `importers`, or `query`.
+3. The handler returns the command-specific payload directly.
+4. For `--format json`, `incur` writes that payload directly to stdout as JSON.
+5. For `--format md`, `incur` renders the returned payload in its native human-oriented format.
+6. Thrown `IncurError` instances surface as direct JSON error objects for `--format json` and exit non-zero.
 
 ## Shared Option Rules
 
 - `--vault <path>` is required for every baseline command so the target vault is explicit.
 - `--format` accepts only `json` or `md`; default is `json`.
-- `--request-id` is optional and reserved for audit correlation.
+- `--request-id` is optional, forwarded to package service calls, and reserved for audit correlation.
 - `json` is the canonical machine format.
-- `md` is a human-oriented rendering hint; the structured envelope remains the source of truth.
+- `md` is a human-oriented rendering mode handled by `incur`; it is not a second machine-stable envelope.
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
 - Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use a queryable id rather than a related or batch id.
@@ -87,47 +86,33 @@ Every command passes through one shared middleware layer before any package call
 - Export pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 - A successful `show` response may surface a stable related id such as `meal_*` or `doc_*` in `entity.id` even when the lookup key was a queryable event id.
 
-## Success Envelope
+## Success Output
 
-All successful commands resolve to this shape:
+For `--format json`, successful commands write the command payload directly:
 
 ```json
 {
-  "command": "show",
-  "ok": true,
-  "format": "json",
-  "requestId": "req-123",
-  "data": {},
-  "notes": ["optional"],
-  "rendered": "optional markdown when format=md"
+  "vault": "<path>",
+  "created": true,
+  "directories": ["journal/2026"],
+  "files": ["CORE.md"]
 }
 ```
 
 Field rules:
 
-- `command`: stable command identifier using the mounted command path.
-- `ok`: always `true` for success envelopes.
-- `format`: echoes the requested output mode.
-- `requestId`: caller value or `null`.
-- `data`: command-specific payload described below.
-- `notes`: optional non-fatal operator notes.
-- `rendered`: optional markdown summary. Present only when markdown formatting is requested and the command supplies one.
+- Success output is the command-specific payload described below, with no extra wrapper fields.
+- Exit code `0` indicates success.
 
-## Failure Envelope
+## Failure Output
 
-All failed commands resolve to this shape:
+For `--format json`, failed commands write a direct error object and exit non-zero:
 
 ```json
 {
-  "command": "document import",
-  "ok": false,
-  "format": "json",
-  "requestId": null,
-  "error": {
-    "code": "command_failed",
-    "message": "Document import failed.",
-    "details": {}
-  }
+  "code": "command_failed",
+  "message": "Document import failed.",
+  "retryable": false
 }
 ```
 
@@ -135,9 +120,11 @@ Field rules:
 
 - `code` is a stable string suitable for machine branching.
 - `message` is operator-facing and actionable.
-- `details` is optional structured context.
+- `retryable` follows native `incur` semantics.
 
 ## Command Payloads
+
+The examples below are the full successful `--format json` response bodies.
 
 ### `init`
 

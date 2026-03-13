@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -73,71 +73,61 @@ export function registerConditionCommands(cli: Cli.Cli, services: VaultCliServic
 
   condition.command(
     'scaffold',
-    defineCommand({
-      command: 'condition scaffold',
+    {
       description: 'Emit a payload template for condition upserts.',
       args: z.object({}),
       options: withBaseOptions(),
-      data: scaffoldResultSchema,
-      async run({ vault, requestId }) {
-        return healthServices.core.scaffoldCondition({ vault, requestId })
+      output: scaffoldResultSchema,
+      async run({ options }) {
+        return healthServices.core.scaffoldCondition({
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
+        })
       },
-      renderMarkdown({ data }) {
-        return `# Condition Scaffold\n\n- payloadKeys: ${Object.keys(data.payload).length}`
-      },
-    }),
+    },
   )
 
   condition.command(
     'upsert',
-    defineCommand({
-      command: 'condition upsert',
+    {
       description: 'Upsert one condition from an @file.json payload.',
       args: z.object({}),
       options: withBaseOptions({
         input: inputFileSchema,
       }),
-      data: upsertResultSchema,
-      async run({ options, vault, requestId }) {
+      output: upsertResultSchema,
+      async run({ options }) {
         return healthServices.core.upsertCondition({
           input: stripAtPrefix(options.input),
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Condition Upserted\n\n- conditionId: ${data.conditionId}\n- lookupId: ${data.lookupId}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   condition.command(
     'show',
-    defineCommand({
-      command: 'condition show',
+    {
       description: 'Show one condition by canonical id or slug.',
       args: z.object({
         id: z.string().min(1),
       }),
       options: withBaseOptions(),
-      data: showResultSchema,
-      async run({ args, vault, requestId }) {
+      output: showResultSchema,
+      async run({ args, options }) {
         return healthServices.query.showCondition({
           id: args.id,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Condition\n\n- keys: ${Object.keys(data.entity).length}`
-      },
-    }),
+    },
   )
 
   condition.command(
     'list',
-    defineCommand({
-      command: 'condition list',
+    {
       description: 'List conditions through the health read model.',
       args: z.object({}),
       options: withBaseOptions({
@@ -145,20 +135,17 @@ export function registerConditionCommands(cli: Cli.Cli, services: VaultCliServic
         cursor: z.string().min(1).optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
-      data: listResultSchema,
-      async run({ options, vault, requestId }) {
+      output: listResultSchema,
+      async run({ options }) {
         return healthServices.query.listConditions({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           status: options.status,
           cursor: options.cursor,
           limit: options.limit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Conditions\n\n- count: ${data.count}`
-      },
-    }),
+    },
   )
 
   cli.command(condition)

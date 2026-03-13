@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import {
   experimentCreateResultSchema,
   slugSchema,
@@ -16,25 +16,21 @@ export function registerExperimentCommands(
 
   experiment.command(
     'create',
-    defineCommand({
-      command: 'experiment create',
+    {
       description: 'Create a baseline experiment document.',
       args: z.object({
         slug: slugSchema,
       }),
       options: withBaseOptions(),
-      data: experimentCreateResultSchema,
-      async run({ args, vault, requestId }) {
+      output: experimentCreateResultSchema,
+      async run({ args, options }) {
         return services.core.createExperiment({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           slug: args.slug,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Experiment Created\n\n- experimentId: ${data.experimentId}\n- lookupId: ${data.lookupId}\n- slug: ${data.slug}\n- path: ${data.experimentPath}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   cli.command(experiment)

@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import {
   listFilterSchema,
   listResultSchema,
@@ -10,8 +10,7 @@ import type { VaultCliServices } from '../vault-cli-services.js'
 export function registerReadCommands(cli: Cli.Cli, services: VaultCliServices) {
   cli.command(
     'show',
-    defineCommand({
-      command: 'show',
+    {
       description: 'Read one canonical vault record through the query layer.',
       args: z.object({
         id: z
@@ -20,32 +19,28 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultCliServices) {
           .describe('Queryable record identifier to resolve with `show`.'),
       }),
       options: withBaseOptions(),
-      data: showResultSchema,
-      async run({ args, vault, requestId }) {
+      output: showResultSchema,
+      async run({ args, options }) {
         return services.query.show({
           id: args.id,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Entity\n\n- id: ${data.entity.id}\n- kind: ${data.entity.kind}\n- title: ${data.entity.title ?? 'untitled'}`
-      },
-    }),
+    },
   )
 
   cli.command(
     'list',
-    defineCommand({
-      command: 'list',
+    {
       description: 'List canonical vault records through the query layer.',
       args: z.object({}),
       options: withBaseOptions(listFilterSchema.shape),
-      data: listResultSchema,
-      async run({ options, vault, requestId }) {
+      output: listResultSchema,
+      async run({ options }) {
         return services.query.list({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           kind: options.kind,
           experiment: options.experiment,
           dateFrom: options.dateFrom,
@@ -54,9 +49,6 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultCliServices) {
           limit: options.limit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Entities\n\n- count: ${data.items.length}\n- nextCursor: ${data.nextCursor ?? 'none'}`
-      },
-    }),
+    },
   )
 }

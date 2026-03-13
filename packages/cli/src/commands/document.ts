@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import { documentImportResultSchema, pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -13,25 +13,21 @@ export function registerDocumentCommands(
 
   document.command(
     'import',
-    defineCommand({
-      command: 'document import',
+    {
       description: 'Copy a source document into the vault raw area and register it.',
       args: z.object({
         file: pathSchema.describe('Path to the source document to ingest.'),
       }),
       options: withBaseOptions(),
-      data: documentImportResultSchema,
-      async run({ args, vault, requestId }) {
+      output: documentImportResultSchema,
+      async run({ args, options }) {
         return services.importers.importDocument({
           file: args.file,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Document Imported\n\n- documentId: ${data.documentId}\n- lookupId: ${data.lookupId}\n- source: ${data.sourceFile}\n- raw: ${data.rawFile}\n- event: ${data.eventId}`
-      },
-    }),
+    },
   )
 
   cli.command(document)

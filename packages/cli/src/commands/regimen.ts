@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import { localDateSchema, pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -87,71 +87,61 @@ export function registerRegimenCommands(cli: Cli.Cli, services: VaultCliServices
 
   regimen.command(
     'scaffold',
-    defineCommand({
-      command: 'regimen scaffold',
+    {
       description: 'Emit a payload template for regimen upserts.',
       args: z.object({}),
       options: withBaseOptions(),
-      data: scaffoldResultSchema,
-      async run({ vault, requestId }) {
-        return healthServices.core.scaffoldRegimen({ vault, requestId })
+      output: scaffoldResultSchema,
+      async run({ options }) {
+        return healthServices.core.scaffoldRegimen({
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
+        })
       },
-      renderMarkdown({ data }) {
-        return `# Regimen Scaffold\n\n- payloadKeys: ${Object.keys(data.payload).length}`
-      },
-    }),
+    },
   )
 
   regimen.command(
     'upsert',
-    defineCommand({
-      command: 'regimen upsert',
+    {
       description: 'Upsert one regimen from an @file.json payload.',
       args: z.object({}),
       options: withBaseOptions({
         input: inputFileSchema,
       }),
-      data: upsertResultSchema,
-      async run({ options, vault, requestId }) {
+      output: upsertResultSchema,
+      async run({ options }) {
         return healthServices.core.upsertRegimen({
           input: stripAtPrefix(options.input),
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Regimen Upserted\n\n- regimenId: ${data.regimenId}\n- lookupId: ${data.lookupId}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   regimen.command(
     'show',
-    defineCommand({
-      command: 'regimen show',
+    {
       description: 'Show one regimen by canonical id or slug.',
       args: z.object({
         id: z.string().min(1),
       }),
       options: withBaseOptions(),
-      data: showResultSchema,
-      async run({ args, vault, requestId }) {
+      output: showResultSchema,
+      async run({ args, options }) {
         return healthServices.query.showRegimen({
           id: args.id,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Regimen\n\n- keys: ${Object.keys(data.entity).length}`
-      },
-    }),
+    },
   )
 
   regimen.command(
     'list',
-    defineCommand({
-      command: 'regimen list',
+    {
       description: 'List regimens through the health read model.',
       args: z.object({}),
       options: withBaseOptions({
@@ -159,26 +149,22 @@ export function registerRegimenCommands(cli: Cli.Cli, services: VaultCliServices
         cursor: z.string().min(1).optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
-      data: listResultSchema,
-      async run({ options, vault, requestId }) {
+      output: listResultSchema,
+      async run({ options }) {
         return healthServices.query.listRegimens({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           status: options.status,
           cursor: options.cursor,
           limit: options.limit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Regimens\n\n- count: ${data.count}`
-      },
-    }),
+    },
   )
 
   regimen.command(
     'stop',
-    defineCommand({
-      command: 'regimen stop',
+    {
       description: 'Stop one regimen while preserving its canonical id.',
       args: z.object({
         regimenId: z.string().min(1),
@@ -186,19 +172,16 @@ export function registerRegimenCommands(cli: Cli.Cli, services: VaultCliServices
       options: withBaseOptions({
         stoppedOn: localDateSchema.optional(),
       }),
-      data: stopResultSchema,
-      async run({ args, options, vault, requestId }) {
+      output: stopResultSchema,
+      async run({ args, options }) {
         return healthServices.core.stopRegimen({
           regimenId: args.regimenId,
           stoppedOn: options.stoppedOn,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Regimen Stopped\n\n- regimenId: ${data.regimenId}\n- stoppedOn: ${data.stoppedOn ?? 'none'}\n- status: ${data.status}`
-      },
-    }),
+    },
   )
 
   cli.command(regimen)

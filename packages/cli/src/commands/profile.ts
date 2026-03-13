@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { defineCommand, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -85,51 +85,42 @@ export function registerProfileCommands(cli: Cli.Cli, services: VaultCliServices
 
   profile.command(
     'scaffold',
-    defineCommand({
-      command: 'profile scaffold',
+    {
       description: 'Emit a payload template for a profile snapshot upsert.',
       args: z.object({}),
       options: withBaseOptions(),
-      data: scaffoldResultSchema,
-      async run({ vault, requestId }) {
+      output: scaffoldResultSchema,
+      async run({ options }) {
         return healthServices.core.scaffoldProfileSnapshot({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Profile Scaffold\n\n- payloadKeys: ${Object.keys(data.payload).length}`
-      },
-    }),
+    },
   )
 
   profile.command(
     'upsert',
-    defineCommand({
-      command: 'profile upsert',
+    {
       description: 'Upsert one profile snapshot from an @file.json payload.',
       args: z.object({}),
       options: withBaseOptions({
         input: inputFileSchema.describe('Payload file reference in @file.json form.'),
       }),
-      data: upsertResultSchema,
-      async run({ options, vault, requestId }) {
+      output: upsertResultSchema,
+      async run({ options }) {
         return healthServices.core.upsertProfileSnapshot({
           input: stripAtPrefix(options.input),
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Profile Upserted\n\n- snapshotId: ${data.snapshotId}\n- lookupId: ${data.lookupId}\n- created: ${data.created}`
-      },
-    }),
+    },
   )
 
   profile.command(
     'show',
-    defineCommand({
-      command: 'profile show',
+    {
       description: 'Show one profile snapshot or the derived current profile.',
       args: z.object({
         id: z
@@ -138,43 +129,36 @@ export function registerProfileCommands(cli: Cli.Cli, services: VaultCliServices
           .describe('Snapshot id or `current`.'),
       }),
       options: withBaseOptions(),
-      data: profileShowResultSchema,
-      async run({ args, vault, requestId }) {
+      output: profileShowResultSchema,
+      async run({ args, options }) {
         return healthServices.query.showProfile({
           id: args.id,
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Profile\n\n- keys: ${Object.keys(data.entity).length}`
-      },
-    }),
+    },
   )
 
   profile.command(
     'list',
-    defineCommand({
-      command: 'profile list',
+    {
       description: 'List profile snapshots through the health read model.',
       args: z.object({}),
       options: withBaseOptions({
         cursor: z.string().min(1).optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
-      data: profileListResultSchema,
-      async run({ options, vault, requestId }) {
+      output: profileListResultSchema,
+      async run({ options }) {
         return healthServices.query.listProfileSnapshots({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           cursor: options.cursor,
           limit: options.limit,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Profiles\n\n- count: ${data.count}`
-      },
-    }),
+    },
   )
 
   const current = Cli.create('current', {
@@ -183,22 +167,18 @@ export function registerProfileCommands(cli: Cli.Cli, services: VaultCliServices
 
   current.command(
     'rebuild',
-    defineCommand({
-      command: 'profile current rebuild',
+    {
       description: 'Rebuild bank/profile/current.md from the latest accepted profile snapshot.',
       args: z.object({}),
       options: withBaseOptions(),
-      data: rebuildResultSchema,
-      async run({ vault, requestId }) {
+      output: rebuildResultSchema,
+      async run({ options }) {
         return healthServices.core.rebuildCurrentProfile({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
         })
       },
-      renderMarkdown({ data }) {
-        return `# Current Profile Rebuilt\n\n- path: ${data.profilePath}\n- snapshotId: ${data.snapshotId ?? 'none'}\n- updated: ${data.updated}`
-      },
-    }),
+    },
   )
 
   profile.command(current)

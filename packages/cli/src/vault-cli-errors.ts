@@ -1,25 +1,13 @@
+import { Errors } from 'incur'
+
 export type VaultCliErrorDetails = Record<string, unknown> | undefined
 
-export class VaultCliError extends Error {
-  readonly code: string
-  readonly details: VaultCliErrorDetails
+export class VaultCliError extends Errors.IncurError {
+  readonly context: VaultCliErrorDetails
 
   constructor(code: string, message: string, details?: VaultCliErrorDetails) {
-    super(message)
+    super({ code, message })
     this.name = 'VaultCliError'
-    this.code = code
-    this.details = details
+    this.context = details
   }
-}
-
-export function toVaultCliError(error: unknown) {
-  if (error instanceof VaultCliError) {
-    return error
-  }
-
-  if (error instanceof Error) {
-    return new VaultCliError('command_failed', error.message)
-  }
-
-  return new VaultCliError('command_failed', 'Command failed.')
 }

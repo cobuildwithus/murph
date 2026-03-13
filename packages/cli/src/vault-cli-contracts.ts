@@ -41,25 +41,6 @@ export const baseCommandOptionsSchema = z.object({
   requestId: requestIdSchema,
 })
 
-export const successEnvelopeMetaSchema = z.object({
-  command: z.string().min(1),
-  ok: z.literal(true),
-  format: outputFormatSchema,
-  requestId: z.string().min(1).nullable(),
-})
-
-export const failureEnvelopeSchema = z.object({
-  command: z.string().min(1),
-  ok: z.literal(false),
-  format: outputFormatSchema,
-  requestId: z.string().min(1).nullable(),
-  error: z.object({
-    code: z.string().min(1),
-    message: z.string().min(1),
-    details: z.record(z.string(), z.unknown()).optional(),
-  }),
-})
-
 export const vaultInitResultSchema = z.object({
   vault: pathSchema,
   created: z.boolean(),
@@ -181,19 +162,8 @@ export const exportPackResultSchema = z.object({
   files: z.array(pathSchema),
 })
 
-export const commandNotesSchema = z.array(z.string().min(1)).optional()
-
-export function successEnvelopeSchema<TData extends z.ZodType<unknown>>(data: TData) {
-  return successEnvelopeMetaSchema.extend({
-    data,
-    notes: commandNotesSchema,
-    rendered: z.string().min(1).optional(),
-  })
-}
-
 export type OutputFormat = z.infer<typeof outputFormatSchema>
 export type BaseCommandOptions = z.infer<typeof baseCommandOptionsSchema>
-export type FailureEnvelope = z.infer<typeof failureEnvelopeSchema>
 export type VaultInitResult = z.infer<typeof vaultInitResultSchema>
 export type VaultValidateResult = z.infer<typeof vaultValidateResultSchema>
 export type DocumentImportResult = z.infer<typeof documentImportResultSchema>

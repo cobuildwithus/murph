@@ -1,5 +1,9 @@
 import { Cli, z } from 'incur'
-import { defineCommand, emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
+import {
+  emptyArgsSchema,
+  requestIdFromOptions,
+  withBaseOptions,
+} from '../command-helpers.js'
 import {
   isoTimestampSchema,
   mealAddResultSchema,
@@ -14,8 +18,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultCliServices) {
 
   meal.command(
     'add',
-    defineCommand({
-      command: 'meal add',
+    {
       description: 'Record a meal event using media references plus optional notes.',
       args: emptyArgsSchema,
       options: withBaseOptions({
@@ -28,21 +31,18 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultCliServices) {
           .optional()
           .describe('Optional occurrence timestamp in ISO 8601 form.'),
       }),
-      data: mealAddResultSchema,
-      async run({ options, vault, requestId }) {
+      output: mealAddResultSchema,
+      async run({ options }) {
         return services.core.addMeal({
-          vault,
-          requestId,
+          vault: options.vault,
+          requestId: requestIdFromOptions(options),
           photo: options.photo,
           audio: options.audio,
           note: options.note,
           occurredAt: options.occurredAt,
         })
       },
-      renderMarkdown({ data }) {
-        return `# Meal Added\n\n- mealId: ${data.mealId}\n- lookupId: ${data.lookupId}\n- event: ${data.eventId}\n- photo: ${data.photoPath}\n- occurredAt: ${data.occurredAt ?? 'unknown'}`
-      },
-    }),
+    },
   )
 
   cli.command(meal)
