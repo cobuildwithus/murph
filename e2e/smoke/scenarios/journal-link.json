@@ -1,0 +1,12 @@
+{
+  "id": "journal-link",
+  "command": "vault-cli journal link <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/journal/2026/2026-03-10.md",
+    "fixtures/minimal-vault/ledger/events/README.md",
+    "fixtures/minimal-vault/ledger/samples/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/journal-ensure",
+  "purpose": "Documents linking one or more canonical event ids and/or sample streams into a journal day frontmatter collection."
+}

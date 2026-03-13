@@ -1,0 +1,12 @@
+{
+  "id": "journal-unlink",
+  "command": "vault-cli journal unlink <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/journal/2026/2026-03-10.md",
+    "fixtures/minimal-vault/ledger/events/README.md",
+    "fixtures/minimal-vault/ledger/samples/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/journal-ensure",
+  "purpose": "Documents removing one or more linked event ids and/or sample streams from a journal day."
+}

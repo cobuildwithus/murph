@@ -196,7 +196,7 @@ test.sequential(
 )
 
 test.sequential(
-  'journal append plus link and unlink helpers mutate body and frontmatter collections',
+  'journal append plus typed link and unlink flags mutate body and frontmatter collections',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-journal-phase2-'))
     const firstEventId = 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1'
@@ -217,16 +217,18 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const linkedEvents = await runSliceCli<{
+      const linked = await runSliceCli<{
         changed: number
         eventIds: string[]
       }>([
         'journal',
-        'link-event',
+        'link',
         '2026-03-12',
-        '--id',
+        '--event-id',
+        '   ',
+        '--event-id',
         firstEventId,
-        '--id',
+        '--event-id',
         secondEventId,
         '--vault',
         vaultRoot,
@@ -236,8 +238,10 @@ test.sequential(
         sampleStreams: string[]
       }>([
         'journal',
-        'link-stream',
+        'link',
         '2026-03-12',
+        '--stream',
+        ' glucose ',
         '--stream',
         'glucose',
         '--stream',
@@ -245,15 +249,43 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
+      const mixedLink = await runSliceCli([
+        'journal',
+        'link',
+        '2026-03-12',
+        '--event-id',
+        secondEventId,
+        '--stream',
+        'heart_rate',
+        '--vault',
+        vaultRoot,
+      ])
+      const commaDelimitedEventLink = await runSliceCli([
+        'journal',
+        'link',
+        '2026-03-12',
+        '--event-id',
+        `${firstEventId},${secondEventId}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const commaDelimitedStreamLink = await runSliceCli([
+        'journal',
+        'link',
+        '2026-03-12',
+        '--stream',
+        'glucose,heart_rate',
+        '--vault',
+        vaultRoot,
+      ])
       const unlinked = await runSliceCli<{
         changed: number
         eventIds: string[]
-        sampleStreams: string[]
       }>([
         'journal',
-        'unlink-event',
+        'unlink',
         '2026-03-12',
-        '--id',
+        '--event-id',
         secondEventId,
         '--vault',
         vaultRoot,
@@ -263,10 +295,37 @@ test.sequential(
         sampleStreams: string[]
       }>([
         'journal',
-        'unlink-stream',
+        'unlink',
         '2026-03-12',
         '--stream',
         'heart_rate',
+        '--vault',
+        vaultRoot,
+      ])
+      const mixedUnlink = await runSliceCli([
+        'journal',
+        'unlink',
+        '2026-03-12',
+        '--event-id',
+        firstEventId,
+        '--stream',
+        'glucose',
+        '--vault',
+        vaultRoot,
+      ])
+      const invalidLink = await runSliceCli([
+        'journal',
+        'link',
+        '2026-03-12',
+        '--vault',
+        vaultRoot,
+      ])
+      const whitespaceOnlyStreamLink = await runSliceCli([
+        'journal',
+        'link',
+        '2026-03-12',
+        '--stream',
+        '   ',
         '--vault',
         vaultRoot,
       ])
@@ -286,18 +345,48 @@ test.sequential(
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
       assert.equal(requireData(appended).updated, true)
-      assert.equal(linkedEvents.ok, true)
+      assert.equal(linked.ok, true)
+      assert.equal(requireData(linked).changed, 2)
+      assert.deepEqual(requireData(linked).eventIds, [firstEventId, secondEventId])
       assert.equal(linkedStreams.ok, true)
-      assert.equal(requireData(linkedEvents).changed, 2)
-      assert.deepEqual(requireData(linkedEvents).eventIds, [firstEventId, secondEventId])
       assert.equal(requireData(linkedStreams).changed, 2)
       assert.deepEqual(requireData(linkedStreams).sampleStreams, ['glucose', 'heart_rate'])
+      assert.equal(mixedLink.ok, false)
+      assert.match(
+        mixedLink.error?.message ?? '',
+        /Pass either --event-id or --stream in one command/u,
+      )
+      assert.equal(commaDelimitedEventLink.ok, false)
+      assert.match(
+        commaDelimitedEventLink.error?.message ?? '',
+        /repeat the flag instead|comma-delimited values are not supported/iu,
+      )
+      assert.equal(commaDelimitedStreamLink.ok, false)
+      assert.match(
+        commaDelimitedStreamLink.error?.message ?? '',
+        /repeat the flag instead|comma-delimited values are not supported/iu,
+      )
       assert.equal(unlinked.ok, true)
       assert.equal(requireData(unlinked).changed, 1)
       assert.deepEqual(requireData(unlinked).eventIds, [firstEventId])
       assert.equal(unlinkedStream.ok, true)
       assert.equal(requireData(unlinkedStream).changed, 1)
       assert.deepEqual(requireData(unlinkedStream).sampleStreams, ['glucose'])
+      assert.equal(mixedUnlink.ok, false)
+      assert.match(
+        mixedUnlink.error?.message ?? '',
+        /Pass either --event-id or --stream in one command/u,
+      )
+      assert.equal(invalidLink.ok, false)
+      assert.match(
+        invalidLink.error?.message ?? '',
+        /Expected at least one of --event-id or --stream/u,
+      )
+      assert.equal(whitespaceOnlyStreamLink.ok, false)
+      assert.match(
+        whitespaceOnlyStreamLink.error?.message ?? '',
+        /Expected at least one of --event-id or --stream/u,
+      )
 
       assert.equal(shown.ok, true)
       assert.match(requireData(shown).entity.markdown ?? '', /Evening note from the CLI append helper\./u)
@@ -379,7 +468,7 @@ test.sequential(
 )
 
 test.sequential(
-  'journal unlink commands return a stable not_found error when the journal day does not exist',
+  'journal unlink returns a stable not_found error when the journal day does not exist',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-journal-missing-'))
 
@@ -388,16 +477,16 @@ test.sequential(
 
       const unlinkEvent = await runSliceCli([
         'journal',
-        'unlink-event',
+        'unlink',
         '2026-03-12',
-        '--id',
+        '--event-id',
         'evt_01JNV422Y2M5ZBV64ZP4N1DRB1',
         '--vault',
         vaultRoot,
       ])
       const unlinkStream = await runSliceCli([
         'journal',
-        'unlink-stream',
+        'unlink',
         '2026-03-12',
         '--stream',
         'heart_rate',

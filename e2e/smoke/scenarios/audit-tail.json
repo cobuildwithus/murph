@@ -7,5 +7,5 @@
     "fixtures/minimal-vault/ledger/events/README.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/list",
-  "purpose": "Covers recency-oriented audit inspection for operators who need the latest audit actions without crafting explicit filters."
+  "purpose": "Covers the recency-oriented audit alias for operators who need the latest audit actions without spelling out the equivalent descending list flags."
 }

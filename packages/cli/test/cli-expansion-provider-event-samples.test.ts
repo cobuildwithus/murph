@@ -288,6 +288,8 @@ test.sequential(
         '--tag',
         'symptom',
         '--tag',
+        ' morning ',
+        '--tag',
         'morning',
         '--vault',
         vaultRoot,

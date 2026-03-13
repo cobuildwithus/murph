@@ -114,7 +114,11 @@ test.sequential('samples commands support richer import options plus show/list/b
       '--metadata-columns',
       'device',
       '--metadata-columns',
+      ' device ',
+      '--metadata-columns',
       'context',
+      '--metadata-columns',
+      'device',
       '--source',
       'device',
     ])
@@ -292,6 +296,17 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
           summary: 'Missing lookup id.',
           changes: [],
         }),
+        JSON.stringify({
+          schemaVersion: 'hb.audit.v1',
+          id: 'aud_01JNW00000000000000000003',
+          action: 'validate',
+          status: 'success',
+          occurredAt: '2026-03-12T10:45:00Z',
+          actor: 'cli',
+          commandName: 'vault-cli validate',
+          summary: 'Validated vault.',
+          changes: [],
+        }),
       ].join('\n') + '\n',
       'utf8',
     )
@@ -387,8 +402,39 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       ['aud_01JNW00000000000000000001', 'aud_01JNW00000000000000000002'],
     )
 
+    const descendingListResult = await runSliceCli<{
+      count: number
+      filters: {
+        sort: 'asc' | 'desc'
+        limit: number
+      }
+      items: Array<{
+        id: string
+      }>
+    }>([
+      'audit',
+      'list',
+      '--vault',
+      vaultRoot,
+      '--sort',
+      'desc',
+      '--limit',
+      '2',
+    ])
+    assert.equal(descendingListResult.ok, true)
+    assert.equal(requireData(descendingListResult).filters.sort, 'desc')
+    assert.equal(requireData(descendingListResult).filters.limit, 2)
+    assert.deepEqual(
+      requireData(descendingListResult).items.map((item) => item.id),
+      ['aud_01JNW00000000000000000003', 'aud_01JNW00000000000000000002'],
+    )
+
     const tailResult = await runSliceCli<{
       count: number
+      filters: {
+        sort: 'asc' | 'desc'
+        limit: number
+      }
       items: Array<{
         id: string
       }>
@@ -398,13 +444,16 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       '--vault',
       vaultRoot,
       '--limit',
-      '1',
+      '2',
     ])
     assert.equal(tailResult.ok, true)
-    assert.equal(requireData(tailResult).count, 1)
+    assert.equal(tailResult.meta?.command, 'audit tail')
+    assert.equal(requireData(tailResult).count, 2)
+    assert.equal(requireData(tailResult).filters.sort, 'desc')
+    assert.equal(requireData(tailResult).filters.limit, 2)
     assert.deepEqual(
       requireData(tailResult).items.map((item) => item.id),
-      ['aud_01JNW00000000000000000002'],
+      requireData(descendingListResult).items.map((item) => item.id),
     )
 
     const invalidAuditShow = await runSliceCli([

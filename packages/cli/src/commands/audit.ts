@@ -5,16 +5,16 @@ import {
 } from '../command-helpers.js'
 import {
   listItemSchema,
+  localDateSchema,
   pathSchema,
   showResultSchema,
-  localDateSchema,
 } from '../vault-cli-contracts.js'
 import {
+  type AuditSortOrder,
   type AuditCommandListItem,
   listAudits,
   showAudit,
-  tailAudits,
-} from './samples-audit-read-helpers.js'
+} from './audit-command-helpers.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
 const auditIdSchema = z
@@ -37,9 +37,12 @@ const auditListResultSchema = z.object({
     status: z.string().min(1).nullable(),
     from: localDateSchema.nullable(),
     to: localDateSchema.nullable(),
+    sort: z.enum(['asc', 'desc']),
     limit: z.number().int().positive().max(200),
   }),
   items: z.array(auditListItemSchema),
+  count: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
 })
 
 export function registerAuditCommands(
@@ -53,14 +56,14 @@ export function registerAuditCommands(
   audit.command('show', {
     description: 'Show one audit record by canonical audit id.',
     args: z.object({
-      auditId: auditIdSchema.describe('Audit record id such as aud_<ULID>.'),
+      id: auditIdSchema.describe('Audit record id such as aud_<ULID>.'),
     }),
     options: withBaseOptions(),
     output: showResultSchema,
     async run({ args, options }) {
       return {
         vault: options.vault,
-        entity: await showAudit(options.vault, args.auditId),
+        entity: await showAudit(options.vault, args.id),
       }
     },
   })
@@ -74,31 +77,20 @@ export function registerAuditCommands(
       status: z.string().min(1).optional(),
       from: localDateSchema.optional(),
       to: localDateSchema.optional(),
+      sort: z.enum(['asc', 'desc']).default('desc'),
       limit: z.number().int().positive().max(200).default(50),
     }),
     output: auditListResultSchema,
     async run({ options }) {
-      const items = await listAudits(options.vault, {
+      return listAuditRecords(options.vault, {
         action: options.action,
         actor: options.actor,
         from: options.from,
         limit: options.limit,
+        sort: options.sort as AuditSortOrder,
         status: options.status,
         to: options.to,
       })
-
-      return {
-        vault: options.vault,
-        filters: {
-          action: options.action ?? null,
-          actor: options.actor ?? null,
-          status: options.status ?? null,
-          from: options.from ?? null,
-          to: options.to ?? null,
-          limit: options.limit,
-        },
-        items: items satisfies AuditCommandListItem[],
-      }
     },
   })
 
@@ -110,22 +102,43 @@ export function registerAuditCommands(
     }),
     output: auditListResultSchema,
     async run({ options }) {
-      const items = await tailAudits(options.vault, options.limit)
-
-      return {
-        vault: options.vault,
-        filters: {
-          action: null,
-          actor: null,
-          status: null,
-          from: null,
-          to: null,
-          limit: options.limit,
-        },
-        items: items satisfies AuditCommandListItem[],
-      }
+      return listAuditRecords(options.vault, {
+        limit: options.limit,
+        sort: 'desc',
+      })
     },
   })
 
   cli.command(audit)
+}
+
+async function listAuditRecords(
+  vaultRoot: string,
+  filters: {
+    action?: string
+    actor?: string
+    from?: string
+    limit: number
+    sort: AuditSortOrder
+    status?: string
+    to?: string
+  },
+) {
+  const items = await listAudits(vaultRoot, filters)
+
+  return {
+    vault: vaultRoot,
+    filters: {
+      action: filters.action ?? null,
+      actor: filters.actor ?? null,
+      status: filters.status ?? null,
+      from: filters.from ?? null,
+      to: filters.to ?? null,
+      sort: filters.sort,
+      limit: filters.limit,
+    },
+    items: items satisfies AuditCommandListItem[],
+    count: items.length,
+    nextCursor: null,
+  }
 }

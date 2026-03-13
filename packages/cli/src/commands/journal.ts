@@ -9,7 +9,9 @@ import {
   localDateSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
+import { normalizeRepeatableFlagOption } from '../option-utils.js'
 
 export const journalMutationResultSchema = z.object({
   vault: z.string().min(1),
@@ -40,12 +42,7 @@ const journalReferenceOptionsSchema = withBaseOptions({
     .array(z.string().min(1))
     .optional()
     .describe('Optional sample streams to mutate. Repeat --stream for multiple values.'),
-}).refine(
-  (value) =>
-    (Array.isArray(value.eventId) && value.eventId.length > 0) ||
-    (Array.isArray(value.stream) && value.stream.length > 0),
-  'Expected at least one of --event-id or --stream.',
-)
+})
 
 export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliServices) {
   const journal = Cli.create('journal', {
@@ -180,80 +177,57 @@ async function mutateJournalReferences(
     sampleStreams?: string[]
   },
 ) {
-  const eventIds = normalizeRepeatedValues(input.eventIds)
-  const sampleStreams = normalizeRepeatedValues(input.sampleStreams)
+  const eventIds = normalizeRepeatableFlagOption(input.eventIds, 'event-id')
+  const sampleStreams = normalizeRepeatableFlagOption(input.sampleStreams, 'stream')
 
-  let result:
-    | z.infer<typeof journalLinkResultSchema>
-    | null = null
+  if (!eventIds && !sampleStreams) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Expected at least one of --event-id or --stream.',
+    )
+  }
+
+  if (eventIds && sampleStreams) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Pass either --event-id or --stream in one command.',
+    )
+  }
 
   if (eventIds) {
-    result =
-      input.operation === 'link'
-        ? await services.core.linkJournalEvents({
-            vault: input.vault,
-            requestId: input.requestId,
-            date: input.date,
-            eventIds,
-          })
-        : await services.core.unlinkJournalEvents({
-            vault: input.vault,
-            requestId: input.requestId,
-            date: input.date,
-            eventIds,
-          })
+    return input.operation === 'link'
+      ? services.core.linkJournalEvents({
+          vault: input.vault,
+          requestId: input.requestId,
+          date: input.date,
+          eventIds,
+        })
+      : services.core.unlinkJournalEvents({
+          vault: input.vault,
+          requestId: input.requestId,
+          date: input.date,
+          eventIds,
+        })
   }
 
   if (sampleStreams) {
-    const nextResult =
-      input.operation === 'link'
-        ? await services.core.linkJournalStreams({
-            vault: input.vault,
-            requestId: input.requestId,
-            date: input.date,
-            sampleStreams,
-          })
-        : await services.core.unlinkJournalStreams({
-            vault: input.vault,
-            requestId: input.requestId,
-            date: input.date,
-            sampleStreams,
-          })
-    result = mergeJournalLinkResults(result, nextResult)
+    return input.operation === 'link'
+      ? services.core.linkJournalStreams({
+          vault: input.vault,
+          requestId: input.requestId,
+          date: input.date,
+          sampleStreams,
+        })
+      : services.core.unlinkJournalStreams({
+          vault: input.vault,
+          requestId: input.requestId,
+          date: input.date,
+          sampleStreams,
+        })
   }
 
-  return result as z.infer<typeof journalLinkResultSchema>
-}
-
-function mergeJournalLinkResults(
-  previous: z.infer<typeof journalLinkResultSchema> | null,
-  next: z.infer<typeof journalLinkResultSchema>,
-) {
-  if (!previous) {
-    return next
-  }
-
-  return {
-    ...next,
-    created: previous.created || next.created,
-    changed: previous.changed + next.changed,
-  }
-}
-
-function normalizeRepeatedValues(
-  values: string[] | undefined,
-): string[] | undefined {
-  if (!Array.isArray(values)) {
-    return undefined
-  }
-
-  const normalized = [
-    ...new Set(
-      values
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0),
-    ),
-  ]
-
-  return normalized.length > 0 ? normalized : undefined
+  throw new VaultCliError(
+    'command_failed',
+    'Journal reference mutation requires normalized event ids or streams.',
+  )
 }

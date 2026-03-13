@@ -12,78 +12,80 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 ## Command Groups
 
 ```text
-vault-cli init --vault <path> [--format json|md] [--request-id <id>]
-vault-cli validate --vault <path> [--format json|md] [--request-id <id>]
-vault-cli vault show --vault <path> [--format json|md] [--request-id <id>]
-vault-cli vault paths --vault <path> [--format json|md] [--request-id <id>]
-vault-cli vault stats --vault <path> [--format json|md] [--request-id <id>]
-vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--format json|md] [--request-id <id>]
-vault-cli audit show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli audit tail --vault <path> [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli provider scaffold --vault <path> [--format json|md] [--request-id <id>]
-vault-cli provider upsert --vault <path> --input @file.json [--format json|md] [--request-id <id>]
-vault-cli provider show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli event scaffold --vault <path> --kind <kind> [--format json|md] [--request-id <id>]
-vault-cli event upsert --vault <path> --input @file.json [--format json|md] [--request-id <id>]
-vault-cli event show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--format json|md] [--request-id <id>]
-vault-cli document show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli document list --vault <path> [--from <date>] [--to <date>] [--format json|md] [--request-id <id>]
-vault-cli document manifest <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli meal add --vault <path> --photo <path> [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]
-vault-cli meal show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--format json|md] [--request-id <id>]
-vault-cli meal manifest <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli samples add --vault <path> --input @file.json [--format json|md] [--request-id <id>]
-vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--format json|md] [--request-id <id>]
-vault-cli samples show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli samples batch show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli samples batch list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli experiment create <slug> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--format json|md] [--request-id <id>]
-vault-cli experiment show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli experiment list --vault <path> [--status <status>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli experiment update --vault <path> --input @file.json [--format json|md] [--request-id <id>]
-vault-cli experiment checkpoint --vault <path> --input @file.json [--format json|md] [--request-id <id>]
-vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note "..."] [--format json|md] [--request-id <id>]
-vault-cli journal ensure <date> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli journal show <date> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli journal list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli journal append <date> --vault <path> --text "..." [--format json|md] [--request-id <id>]
-vault-cli journal link <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--format json|md] [--request-id <id>]
-vault-cli journal unlink <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--format json|md] [--request-id <id>]
-vault-cli show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli list --vault <path> [--record-type <type> ...] [--kind <kind>] [--status <status>] [--stream <stream> ...] [--tag <tag> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli search --vault <path> --text <query> [--backend auto|scan|sqlite] [--record-type <type> ...] [--kind <kind> ...] [--stream <stream> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--tag <tag> ...] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli search index status --vault <path> [--format json|md] [--request-id <id>]
-vault-cli search index rebuild --vault <path> [--format json|md] [--request-id <id>]
-vault-cli timeline --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--kind <kind> ...] [--stream <stream> ...] [--entry-type <type> ...] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli export pack create --vault <path> --from <date> --to <date> [--experiment <slug>] [--out <dir>] [--format json|md] [--request-id <id>]
-vault-cli export pack show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli export pack list --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli export pack materialize <id> --vault <path> [--out <dir>] [--format json|md] [--request-id <id>]
-vault-cli export pack prune <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli intake import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--imported-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]
-vault-cli intake show <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli intake list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--format json|md] [--request-id <id>]
-vault-cli intake manifest <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli intake raw <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli intake project <id> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli profile current rebuild --vault <path> [--format json|md] [--request-id <id>]
-vault-cli regimen stop <regimenId> --vault <path> [--stopped-on <date>] [--format json|md] [--request-id <id>]
-vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--pdftotextCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--paddleocrCommand <command>] [--format json|md] [--request-id <id>]
-vault-cli inbox attachment list <captureId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli inbox attachment show <attachmentId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli inbox attachment show-status <attachmentId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli inbox attachment parse <attachmentId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli inbox attachment reparse <attachmentId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli inbox promote meal <captureId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli inbox promote journal <captureId> --vault <path> [--format json|md] [--request-id <id>]
-vault-cli inbox promote experiment-note <captureId> --vault <path> [--format json|md] [--request-id <id>]
+vault-cli init --vault <path> [--request-id <id>]
+vault-cli validate --vault <path> [--request-id <id>]
+vault-cli vault show --vault <path> [--request-id <id>]
+vault-cli vault paths --vault <path> [--request-id <id>]
+vault-cli vault stats --vault <path> [--request-id <id>]
+vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]
+vault-cli audit show <id> --vault <path> [--request-id <id>]
+vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
+vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]
+vault-cli provider scaffold --vault <path> [--request-id <id>]
+vault-cli provider upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli provider show <id> --vault <path> [--request-id <id>]
+vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] [--request-id <id>]
+vault-cli event scaffold --vault <path> --kind <kind> [--request-id <id>]
+vault-cli event upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli event show <id> --vault <path> [--request-id <id>]
+vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--request-id <id>]
+vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--request-id <id>]
+vault-cli document show <id> --vault <path> [--request-id <id>]
+vault-cli document list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
+vault-cli document manifest <id> --vault <path> [--request-id <id>]
+vault-cli meal add --vault <path> --photo <path> [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli meal show <id> --vault <path> [--request-id <id>]
+vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
+vault-cli meal manifest <id> --vault <path> [--request-id <id>]
+vault-cli samples add --vault <path> --input @file.json [--request-id <id>]
+vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
+vault-cli samples show <id> --vault <path> [--request-id <id>]
+vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--request-id <id>]
+vault-cli samples batch show <id> --vault <path> [--request-id <id>]
+vault-cli samples batch list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
+vault-cli experiment create <slug> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--request-id <id>]
+vault-cli experiment show <id> --vault <path> [--request-id <id>]
+vault-cli experiment list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
+vault-cli experiment update --vault <path> --input @file.json [--request-id <id>]
+vault-cli experiment checkpoint --vault <path> --input @file.json [--request-id <id>]
+vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note "..."] [--request-id <id>]
+vault-cli journal ensure <date> --vault <path> [--request-id <id>]
+vault-cli journal show <date> --vault <path> [--request-id <id>]
+vault-cli journal list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
+vault-cli journal append <date> --vault <path> --text "..." [--request-id <id>]
+vault-cli journal link <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--request-id <id>]
+vault-cli journal unlink <date> --vault <path> [--event-id <evt_*> ...] [--stream <stream> ...] [--request-id <id>]
+vault-cli show <id> --vault <path> [--request-id <id>]
+vault-cli list --vault <path> [--record-type <type> ...] [--kind <kind>] [--status <status>] [--stream <stream> ...] [--tag <tag> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
+vault-cli search query --vault <path> --text <query> [--backend auto|scan|sqlite] [--record-type <type> ...] [--kind <kind> ...] [--stream <stream> ...] [--experiment <slug>] [--from <date>] [--to <date>] [--tag <tag> ...] [--limit <n>] [--request-id <id>]
+vault-cli search index status --vault <path> [--request-id <id>]
+vault-cli search index rebuild --vault <path> [--request-id <id>]
+vault-cli timeline --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--kind <kind> ...] [--stream <stream> ...] [--entry-type <type> ...] [--limit <n>] [--request-id <id>]
+vault-cli export pack create --vault <path> --from <date> --to <date> [--experiment <slug>] [--out <dir>] [--request-id <id>]
+vault-cli export pack show <id> --vault <path> [--request-id <id>]
+vault-cli export pack list --vault <path> [--from <date>] [--to <date>] [--experiment <slug>] [--limit <n>] [--request-id <id>]
+vault-cli export pack materialize <id> --vault <path> [--out <dir>] [--request-id <id>]
+vault-cli export pack prune <id> --vault <path> [--request-id <id>]
+vault-cli intake import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--imported-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli intake show <id> --vault <path> [--request-id <id>]
+vault-cli intake list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
+vault-cli intake manifest <id> --vault <path> [--request-id <id>]
+vault-cli intake raw <id> --vault <path> [--request-id <id>]
+vault-cli intake project <id> --vault <path> [--request-id <id>]
+vault-cli profile current rebuild --vault <path> [--request-id <id>]
+vault-cli regimen stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]
+vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--pdftotextCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--paddleocrCommand <command>] [--request-id <id>]
+vault-cli inbox attachment list <captureId> --vault <path> [--request-id <id>]
+vault-cli inbox attachment show <attachmentId> --vault <path> [--request-id <id>]
+vault-cli inbox attachment show-status <attachmentId> --vault <path> [--request-id <id>]
+vault-cli inbox attachment parse <attachmentId> --vault <path> [--request-id <id>]
+vault-cli inbox attachment reparse <attachmentId> --vault <path> [--request-id <id>]
+vault-cli inbox promote meal <captureId> --vault <path> [--request-id <id>]
+vault-cli inbox promote journal <captureId> --vault <path> [--request-id <id>]
+vault-cli inbox promote experiment-note <captureId> --vault <path> [--request-id <id>]
 ```
+
+The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Those surfaces are provided by incur and are not re-frozen command-by-command in this contract.
 
 ## Capability Bundles
 
@@ -135,17 +137,16 @@ Every command now uses native `incur` command definitions directly:
 1. `incur` validates positional arguments and named options against the command schema.
 2. The handler receives parsed `args` and `options` and delegates exactly one boundary call to `core`, `importers`, or `query`.
 3. The handler returns the command-specific payload directly.
-4. For `--format json`, `incur` writes that payload directly to stdout as JSON.
-5. For `--format md`, `incur` renders the returned payload in its native human-oriented format.
-6. Thrown `IncurError` instances surface as direct JSON error objects for `--format json` and exit non-zero.
+4. Non-verbose `--format json` writes that payload body directly to stdout.
+5. `--verbose --format json` wraps the same payload in incur's success/error envelope, including metadata and CTAs when present.
+6. Human-oriented rendering, alternate formats, completions, `--llms`, skills, and MCP surfaces are incur-owned and are not redefined here.
 
 ## Shared Option Rules
 
 - `--vault <path>` is required for every baseline command so the target vault is explicit.
-- `--format` accepts only `json` or `md`; default is `json`.
 - `--request-id` is optional, forwarded to package service calls, and reserved for audit correlation.
-- `json` is the canonical machine format.
-- `md` is a human-oriented rendering mode handled by `incur`; it is not a second machine-stable envelope.
+- Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
+- Machine-stable callers that need metadata or CTA suggestions should prefer `--verbose --format json`. The payload examples below describe the `data` body emitted by non-verbose JSON mode.
 - Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`. Comma-delimited tokens such as `--kind meal,note` are invalid and should be rewritten as repeated flags.
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
@@ -168,7 +169,7 @@ Every command now uses native `incur` command definitions directly:
 
 ## Success Output
 
-For `--format json`, successful commands write the command payload directly:
+For non-verbose `--format json`, successful commands write the command payload directly:
 
 ```json
 {
@@ -182,12 +183,13 @@ For `--format json`, successful commands write the command payload directly:
 Field rules:
 
 - Success output is the command-specific payload described below, with no extra wrapper fields.
+- With `--verbose --format json`, the same payload appears under `data` in incur's success envelope.
 - Exit code `0` indicates success.
 - The payload examples below are representative rather than exhaustive. Newer noun and mutation commands follow the same direct-payload rule and are covered by the runtime schemas in `packages/cli/src/**/*.ts`.
 
 ## Failure Output
 
-For `--format json`, failed commands write a direct error object and exit non-zero:
+For non-verbose `--format json`, failed commands write a direct error object and exit non-zero:
 
 ```json
 {
@@ -202,10 +204,11 @@ Field rules:
 - `code` is a stable string suitable for machine branching.
 - `message` is operator-facing and actionable.
 - `retryable` follows native `incur` semantics.
+- With `--verbose --format json`, the same error shape appears under `error` in incur's envelope.
 
 ## Command Payloads
 
-The examples below are the full successful `--format json` response bodies.
+The examples below are the full successful non-verbose `--format json` response bodies.
 
 ### `init`
 
@@ -374,7 +377,7 @@ The examples below are the full successful `--format json` response bodies.
 }
 ```
 
-### `search`
+### `search query`
 
 `recordId` is the surfaced display identity; `aliasIds` includes the queryable lookup id when that differs.
 
@@ -517,7 +520,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
 - `provider upsert`, `event upsert`, `samples add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, and `regimen stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives and canonical write locks.
-- `show`, `list`, `search`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
+- `show`, `list`, `search query`, `search index status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.
 - The default CLI service layer is expected to delegate to the real `core`, `importers`, and `query` package exports. If the local TypeScript or `incur` toolchain is unavailable, that is an environment blocker, not a contract excuse to return placeholder payloads.
