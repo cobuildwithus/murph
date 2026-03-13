@@ -40,44 +40,36 @@ export type CommandCapability =
 
 export interface CommandCapabilityBundleDefinition {
   capabilities: readonly CommandCapability[];
-  id: string;
   summary: string;
 }
 
 const checkedCommandCapabilityBundles = {
   readable: {
     capabilities: ["show", "list"],
-    id: "readable",
     summary: "Readable follow-up surface for direct noun lookups and filtered listing.",
   },
   payloadCrud: {
     capabilities: ["scaffold", "upsert", "show", "list"],
-    id: "payloadCrud",
     summary: "Payload-driven CRUD surface for canonical noun records.",
   },
   artifactImport: {
     capabilities: ["import", "show", "list", "manifest"],
-    id: "artifactImport",
     summary: "Artifact-ingest surface for immutable raw evidence plus readable follow-up commands.",
   },
   batchInspection: {
     capabilities: ["batch-show", "batch-list"],
-    id: "batchInspection",
     summary: "Import-batch inspection surface for transform or ingest runs.",
   },
   lifecycle: {
     capabilities: ["create", "show", "list", "update", "checkpoint", "stop"],
-    id: "lifecycle",
     summary: "Lifecycle-oriented noun flow with explicit phase mutations and follow-up reads.",
   },
   dateAddressedDoc: {
     capabilities: ["ensure", "show", "list", "append", "link", "unlink"],
-    id: "dateAddressedDoc",
     summary: "Date-addressed document flow for day pages with append and link maintenance.",
   },
   derivedAdmin: {
     capabilities: ["stats", "paths", "rebuild", "materialize", "prune", "validate"],
-    id: "derivedAdmin",
     summary: "Derived-output and admin-maintenance surface for rebuildable or operator-facing commands.",
   },
   runtimeControl: {
@@ -94,7 +86,6 @@ const checkedCommandCapabilityBundles = {
       "attachment-reparse",
       "promote",
     ],
-    id: "runtimeControl",
     summary: "Runtime-oriented operator controls for local services, queues, and attachment workflows.",
   },
 } as const satisfies Record<string, CommandCapabilityBundleDefinition>;
@@ -125,11 +116,6 @@ export interface CommandNounCapabilityDefinition {
 }
 
 const checkedCommandNounCapabilities = [
-  {
-    bundles: ["artifactImport"],
-    noun: "assessment",
-    additionalCapabilities: ["raw", "project"],
-  },
   {
     bundles: ["payloadCrud"],
     noun: "profile",
