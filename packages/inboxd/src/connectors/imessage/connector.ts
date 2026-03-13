@@ -31,6 +31,7 @@ export interface ImessagePollDriver {
 
 export interface ImessageConnectorOptions {
   driver: ImessagePollDriver;
+  id?: string;
   source?: string;
   accountId?: string | null;
   includeOwnMessages?: boolean;
@@ -39,16 +40,21 @@ export interface ImessageConnectorOptions {
 
 export function createImessageConnector({
   driver,
+  id,
   source = "imessage",
-  accountId = "self",
+  accountId,
   includeOwnMessages = true,
   backfillLimit = 500,
 }: ImessageConnectorOptions): PollConnector {
-  const chatsPromise = driver.listChats?.() ?? Promise.resolve([]);
+  const normalizedAccountId = normalizeImessageAccountId(accountId);
+  const connectorId = id ?? `${source}:${normalizedAccountId ?? "default"}`;
+  let chats: Map<string, ImessageKitChatLike> | null = null;
   let activeWatcher: ImessageWatcherHandle | (() => Promise<void> | void) | void;
 
   return {
+    id: connectorId,
     source,
+    accountId: normalizedAccountId,
     kind: "poll",
     capabilities: {
       backfill: true,
@@ -58,7 +64,8 @@ export function createImessageConnector({
       ownMessages: includeOwnMessages,
     },
     async backfill(cursor, emit) {
-      const chats = await indexChats(await chatsPromise);
+      const indexedChats = await loadChats(driver);
+      chats = indexedChats;
       const messages = await driver.getMessages({
         cursor,
         limit: backfillLimit,
@@ -69,8 +76,8 @@ export function createImessageConnector({
           normalizeImessageMessage({
             message,
             source,
-            accountId,
-            chat: resolveChat(chats, message),
+            accountId: normalizedAccountId,
+            chat: resolveChat(indexedChats, message),
           }),
         )
         .sort(compareCaptures);
@@ -87,7 +94,6 @@ export function createImessageConnector({
     async watch(cursor, emit, signal) {
       void cursor;
 
-      const chats = await indexChats(await chatsPromise);
       activeWatcher = await driver.startWatching({
         includeOwnMessages,
         onMessage: async (message) => {
@@ -95,11 +101,14 @@ export function createImessageConnector({
             return;
           }
 
+          const resolved = await resolveChatWithRefresh(chats, driver, message);
+          chats = resolved.chats;
+
           const capture = normalizeImessageMessage({
             message,
             source,
-            accountId,
-            chat: resolveChat(chats, message),
+            accountId: normalizedAccountId,
+            chat: resolved.chat,
           });
 
           await emit(capture);
@@ -160,7 +169,36 @@ function resolveChat(
   return key ? (chats.get(key) ?? null) : null;
 }
 
-async function indexChats(chats: ImessageKitChatLike[]): Promise<Map<string, ImessageKitChatLike>> {
+async function resolveChatWithRefresh(
+  chats: Map<string, ImessageKitChatLike> | null,
+  driver: ImessagePollDriver,
+  message: ImessageKitMessageLike,
+): Promise<{ chat: ImessageKitChatLike | null; chats: Map<string, ImessageKitChatLike> | null }> {
+  const existing = chats ? resolveChat(chats, message) : null;
+
+  if (existing || !driver.listChats) {
+    return {
+      chat: existing,
+      chats,
+    };
+  }
+
+  const refreshedChats = await loadChats(driver);
+  return {
+    chat: resolveChat(refreshedChats, message),
+    chats: refreshedChats,
+  };
+}
+
+async function loadChats(driver: ImessagePollDriver): Promise<Map<string, ImessageKitChatLike>> {
+  if (!driver.listChats) {
+    return new Map();
+  }
+
+  return indexChats(await driver.listChats());
+}
+
+function indexChats(chats: ImessageKitChatLike[]): Map<string, ImessageKitChatLike> {
   return new Map(
     chats.flatMap((chat) => {
       const keys = [chat.guid, chat.chatGuid, chat.id].filter(
@@ -169,6 +207,19 @@ async function indexChats(chats: ImessageKitChatLike[]): Promise<Map<string, Ime
       return keys.map((key) => [key, chat] as const);
     }),
   );
+}
+
+function normalizeImessageAccountId(accountId: string | null | undefined): string | null {
+  if (accountId === undefined) {
+    return "self";
+  }
+
+  if (accountId === null) {
+    return null;
+  }
+
+  const normalized = accountId.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function stopWatcher(

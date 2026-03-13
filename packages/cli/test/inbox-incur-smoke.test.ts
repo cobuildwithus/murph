@@ -31,8 +31,12 @@ test('inbox help surfaces the first-pass operator commands', async () => {
   const help = await runRawCli(['inbox', '--help'])
 
   assert.match(help, /init\s+Initialize local inbox runtime state/u)
+  assert.match(help, /source\s+Manage machine-local inbox connector configuration/u)
   assert.match(help, /doctor\s+Verify inbox runtime configuration/u)
   assert.match(help, /backfill\s+Backfill one configured inbox connector/u)
   assert.match(help, /run\s+Run all enabled inbox connectors/u)
+  assert.match(help, /list\s+List captured inbox items/u)
+  assert.match(help, /show\s+Show one captured inbox item/u)
+  assert.match(help, /search\s+Search captured inbox items/u)
   assert.match(help, /promote\s+Promote captured inbox items/u)
 })

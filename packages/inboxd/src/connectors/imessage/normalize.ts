@@ -23,6 +23,8 @@ export interface ImessageKitMessageLike {
   message?: string | null;
   attributedBody?: string | null;
   date?: string | number | Date | null;
+  dateDelivered?: string | number | Date | null;
+  dateReceived?: string | number | Date | null;
   dateRead?: string | number | Date | null;
   chatGuid?: string | null;
   chatId?: string | null;
@@ -111,7 +113,7 @@ export function normalizeImessageMessage({
       isSelf: Boolean(isSelf),
     },
     occurredAt,
-    receivedAt: message.dateRead ? toIsoTimestamp(message.dateRead) : null,
+    receivedAt: firstTimestamp(message.dateReceived, message.dateDelivered),
     text,
     attachments,
     raw: sanitizeRawMessage(message),
@@ -132,6 +134,26 @@ function inferDirectChat(chat: ImessageKitChatLike | null): boolean {
   }
 
   return true;
+}
+
+function firstTimestamp(...values: Array<Date | string | number | null | undefined>): string | null {
+  for (const value of values) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    if (typeof value === "string" && value.trim().length === 0) {
+      continue;
+    }
+
+    try {
+      return toIsoTimestamp(value);
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 function inferAttachmentKind(

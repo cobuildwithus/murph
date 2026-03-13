@@ -12,6 +12,6 @@ export default defineConfig({
   test: {
     environment: "node",
     fileParallelism: false,
-    include: ["packages/inboxd/test/inboxd.test.ts"],
+    include: ["packages/inboxd/test/**/*.test.ts"],
   },
 });

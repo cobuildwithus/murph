@@ -18,6 +18,8 @@ import {
 
 import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.js";
 import {
+  createDeterministicInboxCaptureId,
+  createInboxCaptureIdentityKey,
   ensureParentDirectory,
   normalizeAccountKey,
   normalizeRelativePath,
@@ -26,7 +28,7 @@ import {
   sanitizeFileName,
   sanitizeSegment,
   sha256File,
-  walkFiles,
+  walkNamedFiles,
 } from "../shared.js";
 import type { InboxRuntimeStore } from "../kernel/sqlite.js";
 
@@ -38,13 +40,18 @@ export interface PersistRawCaptureInput {
   storedAt?: string;
 }
 
-interface StoredCaptureEnvelope {
+export interface StoredCaptureEnvelope {
   schema: "healthybob.inbox-envelope.v1";
   captureId: string;
   eventId: string;
   storedAt: string;
   input: InboundCapture;
   stored: StoredCapture;
+}
+
+interface EnvelopeEntry {
+  absolutePath: string;
+  envelope: StoredCaptureEnvelope;
 }
 
 export async function ensureInboxVault(vaultRoot: string): Promise<void> {
@@ -58,21 +65,7 @@ export async function persistRawCapture({
   input,
   storedAt = new Date().toISOString(),
 }: PersistRawCaptureInput): Promise<StoredCapture> {
-  const accountSegment = sanitizeSegment(normalizeAccountKey(input.accountId) || "default", "default");
-  const sourceSegment = sanitizeSegment(input.source, "source");
-  const year = input.occurredAt.slice(0, 4);
-  const month = input.occurredAt.slice(5, 7);
-  const sourceDirectory = normalizeRelativePath(
-    path.posix.join(
-      VAULT_LAYOUT.rawDirectory,
-      "inbox",
-      sourceSegment,
-      accountSegment,
-      year,
-      month,
-      captureId,
-    ),
-  );
+  const sourceDirectory = buildInboxCaptureDirectory(input, captureId);
   const attachmentDirectory = path.posix.join(sourceDirectory, "attachments");
   const storedAttachments: StoredAttachment[] = [];
 
@@ -98,7 +91,13 @@ export async function persistRawCapture({
     );
     const absolutePath = resolveVaultPath(vaultRoot, relativePath);
     await ensureParentDirectory(absolutePath);
-    await copyFile(path.resolve(attachment.originalPath), absolutePath, fsConstants.COPYFILE_EXCL);
+    try {
+      await copyFile(path.resolve(attachment.originalPath), absolutePath, fsConstants.COPYFILE_EXCL);
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) {
+        throw error;
+      }
+    }
     const fileStats = await stat(absolutePath);
 
     storedAttachments.push({
@@ -153,6 +152,43 @@ export async function persistRawCapture({
   );
 
   return storedCapture;
+}
+
+export async function findStoredCaptureEnvelope(input: {
+  vaultRoot: string;
+  inbound: InboundCapture;
+  captureId?: string;
+}): Promise<StoredCaptureEnvelope | null> {
+  const captureId = input.captureId ?? createDeterministicInboxCaptureId(input.inbound);
+  const expectedPath = resolveVaultPath(
+    input.vaultRoot,
+    buildInboxEnvelopePath(input.inbound, captureId),
+  );
+  const expectedEnvelope = await readStoredCaptureEnvelope(expectedPath);
+
+  if (expectedEnvelope) {
+    return expectedEnvelope;
+  }
+
+  const accountRoot = resolveVaultPath(input.vaultRoot, buildInboxAccountDirectory(input.inbound));
+  const envelopeFiles = await walkInboxEnvelopeFiles(accountRoot);
+  let selected: EnvelopeEntry | null = null;
+  const identityKey = createInboxCaptureIdentityKey(input.inbound);
+
+  for (const envelopePath of envelopeFiles) {
+    const envelope = await readStoredCaptureEnvelope(envelopePath);
+
+    if (!envelope || createInboxCaptureIdentityKey(envelope.input) !== identityKey) {
+      continue;
+    }
+
+    const entry = { absolutePath: envelopePath, envelope };
+    if (!selected || compareEnvelopeEntries(entry, selected) < 0) {
+      selected = entry;
+    }
+  }
+
+  return selected?.envelope ?? null;
 }
 
 export async function appendInboxCaptureEvent(input: {
@@ -251,20 +287,34 @@ export async function rebuildRuntimeFromVault(input: {
     return;
   }
 
-  const files = await walkFiles(inboxRoot);
-  const envelopeFiles = files.filter((filePath) => filePath.endsWith("envelope.json")).sort();
+  const envelopeFiles = await walkInboxEnvelopeFiles(inboxRoot);
+  const canonicalEntries = new Map<string, EnvelopeEntry>();
 
   for (const envelopePath of envelopeFiles) {
-    const parsed = JSON.parse(await readFile(envelopePath, "utf8")) as StoredCaptureEnvelope;
-    input.runtime.upsertCaptureIndex({
-      captureId: parsed.captureId,
-      eventId: parsed.eventId,
-      input: parsed.input,
-      stored: parsed.stored,
+    const envelope = await readStoredCaptureEnvelope(envelopePath);
+    if (!envelope) {
+      continue;
+    }
+
+    const identityKey = createInboxCaptureIdentityKey(envelope.input);
+    const entry = { absolutePath: envelopePath, envelope };
+    const current = canonicalEntries.get(identityKey);
+
+    if (!current || compareEnvelopeEntries(entry, current) < 0) {
+      canonicalEntries.set(identityKey, entry);
+    }
+  }
+
+  for (const entry of [...canonicalEntries.values()].sort(compareEnvelopeEntries)) {
+    const captureId = input.runtime.upsertCaptureIndex({
+      captureId: entry.envelope.captureId,
+      eventId: entry.envelope.eventId,
+      input: entry.envelope.input,
+      stored: entry.envelope.stored,
     });
     input.runtime.enqueueDerivedJobs({
-      captureId: parsed.captureId,
-      stored: parsed.stored,
+      captureId,
+      stored: entry.envelope.stored,
     });
   }
 }
@@ -281,4 +331,82 @@ function buildEventNote(capture: InboundCapture): string {
   }
 
   return `Inbox capture from ${capture.source}.`;
+}
+
+function buildInboxAccountDirectory(input: InboundCapture): string {
+  const accountSegment = sanitizeSegment(normalizeAccountKey(input.accountId) || "default", "default");
+  const sourceSegment = sanitizeSegment(input.source, "source");
+  return normalizeRelativePath(
+    path.posix.join(VAULT_LAYOUT.rawDirectory, "inbox", sourceSegment, accountSegment),
+  );
+}
+
+function buildInboxCaptureDirectory(input: InboundCapture, captureId: string): string {
+  return normalizeRelativePath(
+    path.posix.join(
+      buildInboxAccountDirectory(input),
+      input.occurredAt.slice(0, 4),
+      input.occurredAt.slice(5, 7),
+      captureId,
+    ),
+  );
+}
+
+function buildInboxEnvelopePath(input: InboundCapture, captureId: string): string {
+  return normalizeRelativePath(path.posix.join(buildInboxCaptureDirectory(input, captureId), "envelope.json"));
+}
+
+async function walkInboxEnvelopeFiles(directory: string): Promise<string[]> {
+  try {
+    return (await walkNamedFiles(directory, "envelope.json", { skipDirectories: ["attachments"] })).sort();
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
+async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCaptureEnvelope | null> {
+  try {
+    return JSON.parse(await readFile(absolutePath, "utf8")) as StoredCaptureEnvelope;
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): number {
+  const idComparison = comparePreferenceScore(left) - comparePreferenceScore(right);
+  if (idComparison !== 0) {
+    return idComparison;
+  }
+
+  const storedAtComparison = left.envelope.stored.storedAt.localeCompare(right.envelope.stored.storedAt);
+  if (storedAtComparison !== 0) {
+    return storedAtComparison;
+  }
+
+  const captureComparison = left.envelope.captureId.localeCompare(right.envelope.captureId);
+  if (captureComparison !== 0) {
+    return captureComparison;
+  }
+
+  return left.absolutePath.localeCompare(right.absolutePath);
+}
+
+function comparePreferenceScore(entry: EnvelopeEntry): number {
+  return entry.envelope.captureId === createDeterministicInboxCaptureId(entry.envelope.input) ? 0 : 1;
+}
+
+function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function isAlreadyExistsError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
 }

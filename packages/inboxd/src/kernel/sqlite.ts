@@ -21,7 +21,7 @@ export interface InboxRuntimeStore {
     eventId: string;
     input: InboundCapture;
     stored: StoredCapture;
-  }): void;
+  }): string;
   enqueueDerivedJobs(input: { captureId: string; stored: StoredCapture }): void;
   listCaptures(filters?: InboxListFilters): InboxCaptureRecord[];
   searchCaptures(filters: InboxSearchFilters): InboxSearchHit[];
@@ -146,6 +146,13 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         vault_event_id,
         envelope_path,
         created_at
+      from capture
+      where source = ? and account_id = ? and external_id = ?
+    `,
+  );
+  const findCaptureIdByExternalIdStatement = database.prepare(
+    `
+      select capture_id
       from capture
       where source = ? and account_id = ? and external_id = ?
     `,
@@ -322,11 +329,19 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
       };
     },
     upsertCaptureIndex({ captureId, eventId, input, stored }) {
+      const normalizedAccountId = normalizeAccountKey(input.accountId);
+      const existing = findCaptureIdByExternalIdStatement.get(
+        input.source,
+        normalizedAccountId,
+        input.externalId,
+      ) as { capture_id: string } | undefined;
+      const effectiveCaptureId = existing?.capture_id ?? captureId;
+
       withTransaction(database, () => {
         upsertCaptureStatement.run(
-          captureId,
+          effectiveCaptureId,
           input.source,
-          normalizeAccountKey(input.accountId),
+          normalizedAccountId,
           input.externalId,
           input.thread.id,
           normalizeNullable(input.thread.title),
@@ -343,11 +358,11 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
           stored.storedAt,
         );
 
-        deleteCaptureAttachmentsStatement.run(captureId);
+        deleteCaptureAttachmentsStatement.run(effectiveCaptureId);
 
         for (const attachment of stored.attachments) {
           insertAttachmentStatement.run(
-            captureId,
+            effectiveCaptureId,
             attachment.ordinal,
             normalizeNullable(attachment.externalId),
             attachment.kind,
@@ -368,9 +383,9 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
           .join(" ")
           .trim();
 
-        deleteCaptureFtsStatement.run(captureId);
+        deleteCaptureFtsStatement.run(effectiveCaptureId);
         insertCaptureFtsStatement.run(
-          captureId,
+          effectiveCaptureId,
           input.source,
           input.thread.id,
           normalizeNullable(input.text),
@@ -378,6 +393,8 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
           `inbox source-${input.source}`,
         );
       });
+
+      return effectiveCaptureId;
     },
     enqueueDerivedJobs({ captureId, stored }) {
       if (stored.attachments.length === 0) {

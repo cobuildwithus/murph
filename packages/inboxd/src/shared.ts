@@ -184,6 +184,26 @@ export function normalizeAccountKey(value: string | null | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
+export function createInboxCaptureIdentityKey(input: {
+  source: string;
+  accountId?: string | null;
+  externalId: string;
+}): string {
+  return [
+    input.source,
+    normalizeAccountKey(input.accountId),
+    input.externalId,
+  ].join("\u0000");
+}
+
+export function createDeterministicInboxCaptureId(input: {
+  source: string;
+  accountId?: string | null;
+  externalId: string;
+}): string {
+  return `cap_${createHash("sha256").update(createInboxCaptureIdentityKey(input)).digest("hex").slice(0, 26)}`;
+}
+
 export function redactSensitivePaths(value: unknown): unknown {
   if (value instanceof Date) {
     return value.toISOString();
@@ -206,19 +226,30 @@ export function redactSensitivePaths(value: unknown): unknown {
   return value;
 }
 
-export async function walkFiles(directory: string): Promise<string[]> {
+export async function walkNamedFiles(
+  directory: string,
+  fileName: string,
+  options?: {
+    skipDirectories?: ReadonlyArray<string>;
+  },
+): Promise<string[]> {
   const entries = await fs.readdir(directory, { withFileTypes: true });
   const files: string[] = [];
+  const skipDirectories = new Set(options?.skipDirectories ?? []);
 
   for (const entry of entries) {
     const absolutePath = path.join(directory, entry.name);
 
     if (entry.isDirectory()) {
-      files.push(...(await walkFiles(absolutePath)));
+      if (skipDirectories.has(entry.name)) {
+        continue;
+      }
+
+      files.push(...(await walkNamedFiles(absolutePath, fileName, options)));
       continue;
     }
 
-    if (entry.isFile()) {
+    if (entry.isFile() && entry.name === fileName) {
       files.push(absolutePath);
     }
   }

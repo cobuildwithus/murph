@@ -4,9 +4,10 @@ import {
   appendImportAudit,
   appendInboxCaptureEvent,
   ensureInboxVault,
+  findStoredCaptureEnvelope,
   persistRawCapture,
 } from "../indexing/persist.js";
-import { generatePrefixedId } from "../shared.js";
+import { createDeterministicInboxCaptureId, generatePrefixedId } from "../shared.js";
 
 export interface PipelineContext {
   vaultRoot: string;
@@ -56,7 +57,34 @@ export async function processCapture(
     return dedupe;
   }
 
-  const captureId = ids.capture();
+  const captureId = createDeterministicInboxCaptureId(input);
+  const storedEnvelope = await findStoredCaptureEnvelope({
+    vaultRoot,
+    inbound: input,
+    captureId,
+  });
+
+  if (storedEnvelope) {
+    const runtimeCaptureId = runtime.upsertCaptureIndex({
+      captureId: storedEnvelope.captureId,
+      eventId: storedEnvelope.eventId,
+      input: storedEnvelope.input,
+      stored: storedEnvelope.stored,
+    });
+    runtime.enqueueDerivedJobs({
+      captureId: runtimeCaptureId,
+      stored: storedEnvelope.stored,
+    });
+
+    return {
+      captureId: runtimeCaptureId,
+      eventId: storedEnvelope.eventId,
+      envelopePath: storedEnvelope.stored.envelopePath,
+      createdAt: storedEnvelope.stored.storedAt,
+      deduped: true,
+    };
+  }
+
   const eventId = ids.event();
   const auditId = ids.audit();
 
@@ -81,19 +109,19 @@ export async function processCapture(
     stored,
     eventPath: event.relativePath,
   });
-  runtime.upsertCaptureIndex({
+  const runtimeCaptureId = runtime.upsertCaptureIndex({
     captureId,
     eventId,
     input,
     stored,
   });
   runtime.enqueueDerivedJobs({
-    captureId,
+    captureId: runtimeCaptureId,
     stored,
   });
 
   return {
-    captureId,
+    captureId: runtimeCaptureId,
     eventId,
     auditId,
     envelopePath: stored.envelopePath,

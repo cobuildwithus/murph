@@ -5,7 +5,9 @@ export type Cursor = Record<string, unknown>;
 export type EmitCapture = (capture: InboundCapture) => Promise<PersistedCapture>;
 
 export interface BaseConnector {
+  readonly id: string;
   readonly source: string;
+  readonly accountId?: string | null;
   readonly kind: ConnectorKind;
   readonly capabilities: {
     backfill: boolean;

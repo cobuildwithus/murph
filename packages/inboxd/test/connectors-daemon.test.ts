@@ -1,0 +1,496 @@
+import assert from "node:assert/strict";
+import { test } from "vitest";
+
+import type { InboundCapture, PersistedCapture } from "../src/contracts/capture.js";
+import { createImessageConnector } from "../src/connectors/imessage/connector.js";
+import { normalizeImessageMessage } from "../src/connectors/imessage/normalize.js";
+import type { PollConnector } from "../src/connectors/types.js";
+import { runInboxDaemon, runPollConnector } from "../src/kernel/daemon.js";
+import { createConnectorRegistry } from "../src/kernel/registry.js";
+
+test("connector registry keeps distinct runtime ids under the same source family", () => {
+  const left = createStubPollConnector({
+    id: "imessage:self",
+    source: "imessage",
+    accountId: "self",
+  });
+  const right = createStubPollConnector({
+    id: "imessage:work",
+    source: "imessage",
+    accountId: "work",
+  });
+  const registry = createConnectorRegistry([left, right]);
+
+  assert.equal(registry.get("imessage:self")?.id, "imessage:self");
+  assert.equal(registry.requirePoll("imessage:work").accountId, "work");
+  assert.deepEqual(
+    registry.listBySource("imessage").map((connector) => connector.id),
+    ["imessage:self", "imessage:work"],
+  );
+  assert.equal(registry.get("imessage"), null);
+  assert.throws(
+    () => registry.requirePoll("imessage"),
+    /Multiple connectors registered for source: imessage\. Use a connector id\./,
+  );
+  assert.throws(
+    () => registry.requireWebhook("imessage:self"),
+    /Webhook connector not registered for id: imessage:self/,
+  );
+  assert.throws(
+    () =>
+      createConnectorRegistry([
+        createStubPollConnector({
+          id: "   ",
+          source: "imessage",
+        }),
+        createStubPollConnector({
+          id: "   ",
+          source: "imessage",
+        }),
+      ]),
+    /Connector id is required when multiple connectors share source: imessage/,
+  );
+});
+
+test("normalizeImessageMessage does not treat dateRead as receivedAt", () => {
+  const capture = normalizeImessageMessage({
+    message: {
+      guid: "im-read-only",
+      chatGuid: "chat-read-only",
+      date: "2026-03-13T10:00:00.000Z",
+      dateRead: "2026-03-13T10:05:00.000Z",
+    },
+  });
+
+  assert.equal(capture.receivedAt, null);
+});
+
+test("normalizeImessageMessage prefers delivery timestamps over read timestamps with a stable precedence order", () => {
+  const fromReceived = normalizeImessageMessage({
+    message: {
+      guid: "im-received",
+      chatGuid: "chat-received",
+      date: "2026-03-13T10:00:00.000Z",
+      dateReceived: "2026-03-13T10:01:00.000Z",
+      dateDelivered: "2026-03-13T10:02:00.000Z",
+      dateRead: "2026-03-13T10:03:00.000Z",
+    },
+  });
+  const fromDelivered = normalizeImessageMessage({
+    message: {
+      guid: "im-delivered",
+      chatGuid: "chat-delivered",
+      date: "2026-03-13T10:00:00.000Z",
+      dateDelivered: "2026-03-13T10:02:00.000Z",
+      dateRead: "2026-03-13T10:03:00.000Z",
+    },
+  });
+  const fallbackAfterInvalid = normalizeImessageMessage({
+    message: {
+      guid: "im-fallback",
+      chatGuid: "chat-fallback",
+      date: "2026-03-13T10:00:00.000Z",
+      dateReceived: "",
+      dateDelivered: "2026-03-13T10:04:00.000Z",
+    },
+  });
+
+  assert.equal(fromReceived.receivedAt, "2026-03-13T10:01:00.000Z");
+  assert.equal(fromDelivered.receivedAt, "2026-03-13T10:02:00.000Z");
+  assert.equal(fallbackAfterInvalid.receivedAt, "2026-03-13T10:04:00.000Z");
+});
+
+test("createImessageConnector loads chats lazily and refreshes metadata when a watch message misses cache", async () => {
+  const emitted: InboundCapture[] = [];
+  let listChatsCalls = 0;
+  let watcher:
+    | ((message: {
+        guid: string;
+        chatGuid: string;
+        date: string;
+        text: string;
+      }) => Promise<void>)
+    | null = null;
+  let closeCount = 0;
+  const connector = createImessageConnector({
+    driver: {
+      async getMessages() {
+        return [
+          {
+            guid: "im-backfill-1",
+            chatGuid: "chat-known",
+            date: "2026-03-13T08:00:00.000Z",
+            text: "First capture",
+          },
+        ];
+      },
+      async listChats() {
+        listChatsCalls += 1;
+
+        if (listChatsCalls === 1) {
+          return [
+            {
+              guid: "chat-known",
+              displayName: "Known Chat",
+            },
+          ];
+        }
+
+        return [
+          {
+            guid: "chat-known",
+            displayName: "Known Chat",
+          },
+          {
+            guid: "chat-refreshed",
+            displayName: "Refreshed Chat",
+          },
+        ];
+      },
+      async startWatching(options) {
+        watcher = options.onMessage as typeof watcher;
+        return {
+          close() {
+            closeCount += 1;
+          },
+        };
+      },
+    },
+    accountId: "self",
+  });
+
+  assert.equal(listChatsCalls, 0);
+
+  await connector.backfill(null, async (capture) => {
+    emitted.push(capture);
+    return createPersistedCapture(capture);
+  });
+
+  assert.equal(listChatsCalls, 1);
+  assert.equal(emitted[0]?.thread.title, "Known Chat");
+
+  const controller = new AbortController();
+  const running = connector.watch(
+    null,
+    async (capture) => {
+      emitted.push(capture);
+      return createPersistedCapture(capture);
+    },
+    controller.signal,
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await watcher?.({
+    guid: "im-watch-1",
+    chatGuid: "chat-refreshed",
+    date: "2026-03-13T08:05:00.000Z",
+    text: "Second capture",
+  });
+  controller.abort();
+  await running;
+
+  assert.equal(listChatsCalls, 2);
+  assert.equal(emitted[1]?.thread.title, "Refreshed Chat");
+  assert.equal(closeCount, 1);
+});
+
+test("createImessageConnector preserves an explicit null account scope while defaulting only omitted accounts", async () => {
+  const captures: InboundCapture[] = [];
+  const explicitNull = createImessageConnector({
+    driver: {
+      async getMessages() {
+        return [
+          {
+            guid: "im-null-account",
+            chatGuid: "chat-null-account",
+            date: "2026-03-13T08:00:00.000Z",
+          },
+        ];
+      },
+      async startWatching() {},
+    },
+    accountId: null,
+  });
+  const defaulted = createImessageConnector({
+    driver: {
+      async getMessages() {
+        return [];
+      },
+      async startWatching() {},
+    },
+  });
+
+  await explicitNull.backfill(null, async (capture) => {
+    captures.push(capture);
+    return createPersistedCapture(capture);
+  });
+
+  assert.equal(explicitNull.id, "imessage:default");
+  assert.equal(explicitNull.accountId, null);
+  assert.equal(captures[0]?.accountId, null);
+  assert.equal(defaulted.id, "imessage:self");
+  assert.equal(defaulted.accountId, "self");
+});
+
+test("runPollConnector keeps cursor writes scoped to the connector account id", async () => {
+  const cursorWrites: Array<string | null | undefined> = [];
+
+  await runPollConnector({
+    connector: createStubPollConnector({
+      id: "imessage:self",
+      source: "imessage",
+      accountId: "self",
+      async backfill(cursor, emit) {
+        assert.equal(cursor, null);
+
+        await emit({
+          source: "imessage",
+          externalId: "im-account-scope",
+          accountId: "other",
+          thread: {
+            id: "chat-account-scope",
+          },
+          actor: {
+            isSelf: false,
+          },
+          occurredAt: "2026-03-13T09:00:00.000Z",
+          text: "Scoped cursor write",
+          attachments: [],
+          raw: {},
+        });
+
+        return {
+          occurredAt: "2026-03-13T09:00:00.000Z",
+          externalId: "im-account-scope",
+          receivedAt: null,
+        };
+      },
+    }),
+    pipeline: {
+      runtime: {
+        databasePath: ":memory:",
+        close() {},
+        getCursor() {
+          return null;
+        },
+        setCursor(_source, accountId) {
+          cursorWrites.push(accountId);
+        },
+        findByExternalId() {
+          return null;
+        },
+        upsertCaptureIndex() {},
+        enqueueDerivedJobs() {},
+        listCaptures() {
+          return [];
+        },
+        searchCaptures() {
+          return [];
+        },
+        getCapture() {
+          return null;
+        },
+      },
+      async processCapture(input) {
+        return createPersistedCapture(input);
+      },
+      close() {},
+    },
+    signal: new AbortController().signal,
+  });
+
+  assert.deepEqual(cursorWrites, ["self", "self"]);
+});
+
+test("runInboxDaemon aborts sibling connectors and waits for their cleanup when one fails", async () => {
+  let runningConnectorAborted = false;
+  let runningConnectorClosed = 0;
+  const runningConnector = createStubPollConnector({
+    id: "imessage:self",
+    source: "imessage",
+    accountId: "self",
+    async watch(_cursor, _emit, signal) {
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          runningConnectorAborted = true;
+          resolve();
+          return;
+        }
+
+        signal.addEventListener(
+          "abort",
+          () => {
+            runningConnectorAborted = true;
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    },
+    async close() {
+      runningConnectorClosed += 1;
+    },
+  });
+  const failingConnector = createStubPollConnector({
+    id: "imessage:work",
+    source: "imessage",
+    accountId: "work",
+    async watch() {
+      throw new Error("watch exploded");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      runInboxDaemon({
+        pipeline: {
+          runtime: {
+            databasePath: ":memory:",
+            close() {},
+            getCursor() {
+              return null;
+            },
+            setCursor() {},
+            findByExternalId() {
+              return null;
+            },
+            upsertCaptureIndex() {},
+            enqueueDerivedJobs() {},
+            listCaptures() {
+              return [];
+            },
+            searchCaptures() {
+              return [];
+            },
+            getCapture() {
+              return null;
+            },
+          },
+          async processCapture(_input) {
+            throw new Error("processCapture should not be called");
+          },
+        },
+        connectors: [runningConnector, failingConnector],
+        signal: new AbortController().signal,
+      }),
+    /Connector "imessage:work" \(imessage\) failed: watch exploded/,
+  );
+
+  assert.equal(runningConnectorAborted, true);
+  assert.equal(runningConnectorClosed, 1);
+});
+
+test("runInboxDaemon aggregates wrapped connector failures when multiple connectors throw", async () => {
+  const left = createStubPollConnector({
+    id: "imessage:self",
+    source: "imessage",
+    accountId: "self",
+    async watch() {
+      throw new Error("left exploded");
+    },
+  });
+  const right = createStubPollConnector({
+    id: "imessage:work",
+    source: "imessage",
+    accountId: "work",
+    async watch() {
+      throw new Error("right exploded");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      runInboxDaemon({
+        pipeline: {
+          runtime: {
+            databasePath: ":memory:",
+            close() {},
+            getCursor() {
+              return null;
+            },
+            setCursor() {},
+            findByExternalId() {
+              return null;
+            },
+            upsertCaptureIndex() {},
+            enqueueDerivedJobs() {},
+            listCaptures() {
+              return [];
+            },
+            searchCaptures() {
+              return [];
+            },
+            getCapture() {
+              return null;
+            },
+          },
+          async processCapture(_input) {
+            throw new Error("processCapture should not be called");
+          },
+          close() {},
+        },
+        connectors: [left, right],
+        signal: new AbortController().signal,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.message, "Inbox daemon stopped after connector failures.");
+      const messages = error.errors.map((entry) =>
+        entry instanceof Error ? entry.message : String(entry),
+      );
+      assert.deepEqual(messages.sort(), [
+        'Connector "imessage:self" (imessage) failed: left exploded',
+        'Connector "imessage:work" (imessage) failed: right exploded',
+      ]);
+      return true;
+    },
+  );
+});
+
+function createStubPollConnector(input: {
+  id: string;
+  source: string;
+  accountId?: string | null;
+  backfill?: PollConnector["backfill"];
+  watch?: PollConnector["watch"];
+  close?: PollConnector["close"];
+}): PollConnector {
+  return {
+    id: input.id,
+    source: input.source,
+    accountId: input.accountId ?? null,
+    kind: "poll",
+    capabilities: {
+      backfill: input.backfill !== undefined,
+      watch: input.watch !== undefined,
+      webhooks: false,
+      attachments: true,
+    },
+    async backfill(cursor, emit) {
+      if (!input.backfill) {
+        return cursor;
+      }
+
+      return input.backfill(cursor, emit);
+    },
+    async watch(cursor, emit, signal) {
+      if (!input.watch) {
+        return;
+      }
+
+      await input.watch(cursor, emit, signal);
+    },
+    close: input.close,
+  };
+}
+
+function createPersistedCapture(capture: InboundCapture): PersistedCapture {
+  return {
+    captureId: `cap-${capture.externalId}`,
+    eventId: `evt-${capture.externalId}`,
+    auditId: `aud-${capture.externalId}`,
+    envelopePath: `raw/inbox/${capture.source}/${capture.externalId}.json`,
+    createdAt: capture.occurredAt,
+    deduped: false,
+  };
+}

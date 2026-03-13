@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { createVaultCli } from '../src/vault-cli.js'
+import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
+import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href
 const builtInboxRuntimeUrl = new URL('../../inboxd/dist/index.js', import.meta.url).href
@@ -119,6 +122,24 @@ async function captureSingleCaptureId(input: {
 
 async function readJsonFile<T>(absolutePath: string): Promise<T> {
   return JSON.parse(await readFile(absolutePath, 'utf8')) as T
+}
+
+async function runInProcessInboxCli<TData>(
+  args: string[],
+  inboxServices: ReturnType<typeof createIntegratedInboxCliServices>,
+): Promise<CliEnvelope<TData>> {
+  const cli = createVaultCli(createUnwiredVaultCliServices(), inboxServices)
+  const output: string[] = []
+
+  await cli.serve([...args, '--verbose', '--format', 'json'], {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
 function createFakeImessageDriver(input: {
@@ -310,6 +331,252 @@ test.sequential(
       })
       assert.equal(promotedShow.capture.promotions.length, 1)
       assert.equal(promotedShow.capture.promotions[0]?.target, 'meal')
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true })
+      await rm(fixture.homeRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault-cli inbox init/source/doctor/remove emit contract-shaped envelopes',
+  async () => {
+    const fixture = await makeVaultFixture('healthybob-inbox-command-envelope')
+    const services = createIntegratedInboxCliServices({
+      getHomeDirectory: () => fixture.homeRoot,
+      getPlatform: () => 'darwin',
+      loadCoreModule: loadBuiltCoreRuntime,
+      loadInboxModule: loadBuiltInboxRuntime,
+    })
+
+    try {
+      const initResult = requireData(
+        await runInProcessInboxCli<{
+          runtimeDirectory: string
+          databasePath: string
+          configPath: string
+          createdPaths: string[]
+          rebuiltCaptures: number
+        }>(['inbox', 'init', '--vault', fixture.vaultRoot], services),
+      )
+      assert.equal(initResult.runtimeDirectory, '.runtime/inboxd')
+      assert.equal(initResult.databasePath, '.runtime/inboxd.sqlite')
+      assert.equal(initResult.configPath, '.runtime/inboxd/config.json')
+      assert.equal(initResult.createdPaths.includes('.runtime/inboxd.sqlite'), true)
+      assert.equal(initResult.createdPaths.includes('.runtime/inboxd/config.json'), true)
+      assert.equal(initResult.rebuiltCaptures, 0)
+
+      const added = requireData(
+        await runInProcessInboxCli<{
+          connector: {
+            id: string
+            source: string
+            enabled: boolean
+            accountId: string | null
+            options: {
+              backfillLimit?: number
+            }
+          }
+          connectorCount: number
+          configPath: string
+        }>([
+          'inbox',
+          'source',
+          'add',
+          'imessage',
+          '--vault',
+          fixture.vaultRoot,
+          '--id',
+          'imessage:self',
+          '--backfillLimit',
+          '25',
+        ], services),
+      )
+      assert.equal(added.configPath, '.runtime/inboxd/config.json')
+      assert.equal(added.connector.id, 'imessage:self')
+      assert.equal(added.connector.source, 'imessage')
+      assert.equal(added.connector.enabled, true)
+      assert.equal(added.connector.accountId, 'self')
+      assert.equal(added.connector.options.backfillLimit, 25)
+      assert.equal(added.connectorCount, 1)
+
+      const listed = requireData(
+        await runInProcessInboxCli<{
+          configPath: string
+          connectors: Array<{
+            id: string
+            source: string
+            accountId: string | null
+          }>
+        }>(['inbox', 'source', 'list', '--vault', fixture.vaultRoot], services),
+      )
+      assert.equal(listed.configPath, '.runtime/inboxd/config.json')
+      assert.equal(listed.connectors.length, 1)
+      assert.equal(listed.connectors[0]?.id, 'imessage:self')
+
+      const doctor = requireData(
+        await runInProcessInboxCli<{
+          ok: boolean
+          target: string | null
+          configPath: string | null
+          databasePath: string | null
+          checks: Array<{
+            name: string
+            status: string
+          }>
+          connectors: Array<{
+            id: string
+          }>
+        }>(['inbox', 'doctor', '--vault', fixture.vaultRoot], services),
+      )
+      assert.equal(doctor.ok, true)
+      assert.equal(doctor.target, null)
+      assert.equal(doctor.configPath, '.runtime/inboxd/config.json')
+      assert.equal(doctor.databasePath, '.runtime/inboxd.sqlite')
+      assert.equal(
+        doctor.checks.some(
+          (check) => check.name === 'connectors' && check.status === 'pass',
+        ),
+        true,
+      )
+      assert.equal(doctor.connectors[0]?.id, 'imessage:self')
+
+      const removed = requireData(
+        await runInProcessInboxCli<{
+          removed: boolean
+          connectorId: string
+          connectorCount: number
+          configPath: string
+        }>([
+          'inbox',
+          'source',
+          'remove',
+          'imessage:self',
+          '--vault',
+          fixture.vaultRoot,
+        ], services),
+      )
+      assert.equal(removed.removed, true)
+      assert.equal(removed.connectorId, 'imessage:self')
+      assert.equal(removed.connectorCount, 0)
+      assert.equal(removed.configPath, '.runtime/inboxd/config.json')
+
+      const config = await readJsonFile<{
+        version: number
+        connectors: unknown[]
+      }>(inboxPaths(fixture.vaultRoot).configPath)
+      assert.equal(config.version, 1)
+      assert.deepEqual(config.connectors, [])
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true })
+      await rm(fixture.homeRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault-cli inbox list/show/search emit contract-shaped envelopes from runtime data',
+  async () => {
+    const fixture = await makeVaultFixture('healthybob-inbox-runtime-envelope')
+    const services = createIntegratedInboxCliServices({
+      getHomeDirectory: () => fixture.homeRoot,
+      getPlatform: () => 'darwin',
+      loadCoreModule: loadBuiltCoreRuntime,
+      loadInboxModule: loadBuiltInboxRuntime,
+      loadImessageDriver: async () =>
+        createFakeImessageDriver({ photoPath: fixture.photoPath }),
+    })
+
+    try {
+      await initializeImessageSource({
+        services,
+        vaultRoot: fixture.vaultRoot,
+      })
+      await services.backfill({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        sourceId: 'imessage:self',
+      })
+      const captureId = await captureSingleCaptureId({
+        services,
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      const listed = requireData(
+        await runInProcessInboxCli<{
+          filters: {
+            sourceId: string | null
+            limit: number
+          }
+          items: Array<{
+            captureId: string
+            source: string
+            text: string | null
+            attachmentCount: number
+          }>
+        }>([
+          'inbox',
+          'list',
+          '--vault',
+          fixture.vaultRoot,
+          '--limit',
+          '10',
+        ], services),
+      )
+      assert.equal(listed.filters.sourceId, null)
+      assert.equal(listed.filters.limit, 10)
+      assert.equal(listed.items.length, 1)
+      assert.equal(listed.items[0]?.captureId, captureId)
+      assert.equal(listed.items[0]?.source, 'imessage')
+      assert.equal(listed.items[0]?.text, 'Toast and eggs')
+      assert.equal(listed.items[0]?.attachmentCount, 1)
+
+      const shown = requireData(
+        await runInProcessInboxCli<{
+          capture: {
+            captureId: string
+            text: string | null
+            attachments: Array<{
+              storedPath?: string | null
+            }>
+          }
+        }>(['inbox', 'show', captureId, '--vault', fixture.vaultRoot], services),
+      )
+      assert.equal(shown.capture.captureId, captureId)
+      assert.equal(shown.capture.text, 'Toast and eggs')
+      assert.equal(
+        shown.capture.attachments[0]?.storedPath?.includes('raw/inbox/'),
+        true,
+      )
+
+      const searched = requireData(
+        await runInProcessInboxCli<{
+          filters: {
+            text: string
+            sourceId: string | null
+            limit: number
+          }
+          hits: Array<{
+            captureId: string
+            snippet: string
+          }>
+        }>([
+          'inbox',
+          'search',
+          '--vault',
+          fixture.vaultRoot,
+          '--text',
+          'toast',
+          '--limit',
+          '5',
+        ], services),
+      )
+      assert.equal(searched.filters.text, 'toast')
+      assert.equal(searched.filters.sourceId, null)
+      assert.equal(searched.filters.limit, 5)
+      assert.equal(searched.hits.length, 1)
+      assert.equal(searched.hits[0]?.captureId, captureId)
+      assert.match(searched.hits[0]?.snippet ?? '', /toast/iu)
     } finally {
       await rm(fixture.vaultRoot, { recursive: true, force: true })
       await rm(fixture.homeRoot, { recursive: true, force: true })
