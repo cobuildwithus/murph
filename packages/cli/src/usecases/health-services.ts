@@ -1,4 +1,7 @@
 import {
+  healthCoreHasInputCapability,
+  healthCoreHasResultCapability,
+  healthQueryHasListFilterCapability,
   type HealthCoreDescriptorEntry,
   type HealthQueryDescriptorEntry,
   hasHealthCoreDescriptor,
@@ -30,6 +33,7 @@ import {
   asEntityEnvelope,
   asListEnvelope,
   assertNoReservedPayloadKeys,
+  buildEntityLinks,
   buildScaffoldPayload,
   optionalStringArray,
   readJsonPayload,
@@ -44,7 +48,7 @@ export function buildHealthCoreRuntimeInput(
 ): HealthCoreRuntimeInput {
   assertNoReservedPayloadKeys(payload)
 
-  if (descriptor.core.upsertMode === "profile-snapshot") {
+  if (healthCoreHasInputCapability(descriptor, "profile-snapshot-envelope")) {
     const recordedAtValue = payload.recordedAt
     const sourceValue = payload.source
     const profileValue = requirePayloadObjectField(payload, "profile")
@@ -75,7 +79,7 @@ export function buildHealthCoreUpsertResult(
   vault: string,
   result: HealthCoreRuntimeResult,
 ) {
-  if (descriptor.core.resultMode === "profile-snapshot") {
+  if (hasProfileSnapshotResultShape(descriptor)) {
     const profileResult = result as ProfileSnapshotRuntimeResult
     return {
       vault,
@@ -88,7 +92,7 @@ export function buildHealthCoreUpsertResult(
     }
   }
 
-  if (descriptor.core.resultMode === "history-ledger") {
+  if (healthCoreHasResultCapability(descriptor, "ledger-file")) {
     const historyResult = result as Awaited<
       ReturnType<HealthCoreRuntimeMethods["appendHistoryEvent"]>
     >
@@ -111,8 +115,40 @@ export function buildHealthCoreUpsertResult(
     vault,
     [descriptor.core.resultIdField]: identifier,
     lookupId: identifier,
-    path: recordPath(recordResult.record),
+    path: healthCoreHasResultCapability(descriptor, "path")
+      ? recordPath(recordResult.record)
+      : undefined,
     created: Boolean(recordResult.created),
+  }
+}
+
+function hasProfileSnapshotResultShape(
+  descriptor: HealthCoreDescriptorEntry,
+) {
+  return (
+    healthCoreHasResultCapability(descriptor, "ledger-file") &&
+    healthCoreHasResultCapability(descriptor, "current-profile-path") &&
+    healthCoreHasResultCapability(descriptor, "profile-payload")
+  )
+}
+
+function projectHealthListFilterFields(
+  descriptor: HealthQueryDescriptorEntry,
+  input: HealthListInput,
+) {
+  return {
+    from: healthQueryHasListFilterCapability(descriptor, "date-range")
+      ? input.from
+      : undefined,
+    kind: healthQueryHasListFilterCapability(descriptor, "kind")
+      ? input.kind
+      : undefined,
+    status: healthQueryHasListFilterCapability(descriptor, "status")
+      ? input.status
+      : undefined,
+    to: healthQueryHasListFilterCapability(descriptor, "date-range")
+      ? input.to
+      : undefined,
   }
 }
 
@@ -120,34 +156,106 @@ function buildHealthServiceListOptions(
   descriptor: HealthQueryDescriptorEntry,
   input: HealthListInput,
 ) {
-  if (descriptor.query.genericListMode === 'history-kind-date-range-limit') {
-    return {
-      kind: input.kind,
-      from: input.from,
-      to: input.to,
-      limit: input.limit,
-      status: input.status,
+  return {
+    ...projectHealthListFilterFields(descriptor, input),
+    limit: input.limit,
+  }
+}
+
+const HEALTH_ENTITY_DATA_OMIT_KEYS = new Set([
+  "id",
+  "kind",
+  "relativePath",
+  "path",
+  "markdown",
+  "body",
+])
+
+function firstString(
+  record: JsonObject,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim()
     }
   }
 
-  if (descriptor.query.genericListMode === 'date-range-limit') {
-    return {
-      from: input.from,
-      to: input.to,
-      limit: input.limit,
-      status: input.status,
+  return null
+}
+
+function firstRawString(
+  record: JsonObject,
+  keys: readonly string[],
+) {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value
     }
   }
 
-  if (descriptor.query.serviceListMode === "status-limit") {
-    return {
-      status: input.status,
-      limit: input.limit,
-    }
+  return null
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : []
+}
+
+function normalizeHealthEntityKind(
+  descriptor: HealthQueryDescriptorEntry,
+  record: JsonObject,
+) {
+  if (descriptor.kind === "history") {
+    return firstString(record, ["kind"]) ?? descriptor.query.genericListKinds?.[0] ?? descriptor.kind
   }
+
+  if (descriptor.query.genericListKinds?.length === 1) {
+    return descriptor.query.genericListKinds[0]
+  }
+
+  return descriptor.kind
+}
+
+function toHealthEntityData(record: JsonObject) {
+  return Object.fromEntries(
+    Object.entries(record).filter(
+      ([key, value]) => !HEALTH_ENTITY_DATA_OMIT_KEYS.has(key) && value !== undefined,
+    ),
+  )
+}
+
+function toHealthReadEntity(
+  descriptor: HealthQueryDescriptorEntry,
+  record: JsonObject,
+) {
+  const data = toHealthEntityData(record)
 
   return {
-    limit: input.limit,
+    id: firstString(record, ["id"]) ?? "",
+    kind: normalizeHealthEntityKind(descriptor, record),
+    title: firstString(record, ["title", "summary", "name", "label"]),
+    occurredAt: firstString(record, ["occurredAt", "recordedAt", "capturedAt", "updatedAt", "importedAt"]),
+    path: firstString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(record.relatedIds),
+    }),
+  }
+}
+
+function buildHealthListFilters(
+  descriptor: HealthQueryDescriptorEntry,
+  input: HealthListInput,
+) {
+  return {
+    ...projectHealthListFilterFields(descriptor, input),
+    limit: input.limit ?? 50,
   }
 }
 
@@ -212,21 +320,24 @@ export function createHealthQueryServices(
   for (const descriptor of healthEntityDescriptors.filter(hasHealthQueryDescriptor)) {
     services[descriptor.query.showServiceMethod] = async (input: EntityLookupInput) => {
       const { query } = await loadRuntime()
+      const record = await getQueryShowMethod(query, descriptor)(input.vault, input.id)
       return asEntityEnvelope(
         input.vault,
-        await getQueryShowMethod(query, descriptor)(input.vault, input.id),
+        record ? toHealthReadEntity(descriptor, record) : null,
         `No ${descriptor.query.notFoundLabel} found for "${input.id}".`,
       )
     }
 
     services[descriptor.query.listServiceMethod] = async (input: HealthListInput) => {
       const { query } = await loadRuntime()
+      const records = await getQueryListMethod(query, descriptor)(
+        input.vault,
+        buildHealthServiceListOptions(descriptor, input),
+      )
       return asListEnvelope(
         input.vault,
-        await getQueryListMethod(query, descriptor)(
-          input.vault,
-          buildHealthServiceListOptions(descriptor, input),
-        ),
+        buildHealthListFilters(descriptor, input),
+        records.map((record) => toHealthReadEntity(descriptor, record)),
       )
     }
   }

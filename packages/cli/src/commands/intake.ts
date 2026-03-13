@@ -150,7 +150,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
     {
       description: 'Show one assessment response through the query layer.',
       args: z.object({
-        assessmentId: z
+        id: z
           .string()
           .min(1)
           .describe('Assessment response id to show.'),
@@ -159,7 +159,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
       output: showResultSchema,
       async run({ args, options }) {
         return healthServices.query.show({
-          id: args.assessmentId,
+          id: args.id,
           vault: options.vault,
           requestId: requestIdFromOptions(options),
         })
@@ -173,16 +173,16 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
       description: 'List assessment responses through the query layer.',
       args: z.object({}),
       options: withBaseOptions({
-        dateFrom: localDateSchema.optional(),
-        dateTo: localDateSchema.optional(),
+        from: localDateSchema.optional(),
+        to: localDateSchema.optional(),
         limit: z.number().int().positive().max(200).default(50),
       }),
       output: listResultSchema,
       async run({ options }) {
         return healthServices.query.list({
           kind: 'assessment',
-          dateFrom: options.dateFrom,
-          dateTo: options.dateTo,
+          from: options.from,
+          to: options.to,
           limit: options.limit,
           vault: options.vault,
           requestId: requestIdFromOptions(options),
@@ -194,7 +194,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
   intake.command('manifest', {
     description: 'Show the immutable raw import manifest for one assessment.',
     args: z.object({
-      assessmentId: z
+      id: z
         .string()
         .min(1)
         .describe('Assessment response id to inspect.'),
@@ -202,14 +202,14 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
     options: withBaseOptions(),
     output: intakeManifestResultSchema,
     async run({ args, options }) {
-      return showAssessmentManifest(options.vault, args.assessmentId)
+      return showAssessmentManifest(options.vault, args.id)
     },
   })
 
   intake.command('raw', {
     description: 'Show the immutable raw assessment payload captured during intake import.',
     args: z.object({
-      assessmentId: z
+      id: z
         .string()
         .min(1)
         .describe('Assessment response id to inspect.'),
@@ -217,7 +217,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
     options: withBaseOptions(),
     output: intakeRawResultSchema,
     async run({ args, options }) {
-      return showAssessmentRaw(options.vault, args.assessmentId)
+      return showAssessmentRaw(options.vault, args.id)
     },
   })
 
@@ -226,16 +226,16 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
     {
       description: 'Project one assessment into noun-specific proposal payloads.',
       args: z.object({
-        assessmentId: z
+        id: z
           .string()
           .min(1)
           .describe('Assessment response id to project.'),
-      }),
+      },
       options: withBaseOptions(),
       output: intakeProjectResultSchema,
       async run({ args, options }) {
         return healthServices.core.projectAssessment({
-          assessmentId: args.assessmentId,
+          assessmentId: args.id,
           vault: options.vault,
           requestId: requestIdFromOptions(options),
         })

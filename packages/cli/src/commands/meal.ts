@@ -1,12 +1,7 @@
 import { Cli, z } from 'incur'
 import {
-  emptyArgsSchema,
-  withBaseOptions,
-} from '../command-helpers.js'
-import {
   isoTimestampSchema,
   listResultSchema,
-  localDateSchema,
   mealAddResultSchema,
   pathSchema,
   showResultSchema,
@@ -20,6 +15,7 @@ import {
   showMealManifest,
   showMealRecord,
 } from './document-meal-read-helpers.js'
+import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
@@ -55,16 +51,14 @@ async function loadImportersRuntime() {
 }
 
 export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) {
-  const meal = Cli.create('meal', {
+  registerArtifactBackedEntityGroup(cli, {
+    commandName: 'meal',
     description: 'Meal capture commands routed through the core write API.',
-  })
-
-  meal.command(
-    'add',
-    {
+    primaryAction: {
+      name: 'add',
       description: 'Record a meal event using media references plus optional notes.',
-      args: emptyArgsSchema,
-      options: withBaseOptions({
+      args: z.object({}),
+      options: {
         photo: pathSchema.describe('Required meal photo path.'),
         audio: pathSchema
           .optional()
@@ -76,21 +70,21 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
         source: eventSourceSchema
           .optional()
           .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
-      }),
+      },
       output: mealAddResultSchema,
       async run({ options }) {
         const importers = (await loadImportersRuntime()).createImporters()
         const result = await importers.importMeal({
-          photoPath: options.photo,
-          audioPath: options.audio,
-          vaultRoot: options.vault,
-          note: options.note,
-          occurredAt: options.occurredAt,
-          source: options.source,
+          photoPath: String(options.photo ?? ''),
+          audioPath: typeof options.audio === 'string' ? options.audio : undefined,
+          vaultRoot: String(options.vault ?? ''),
+          note: typeof options.note === 'string' ? options.note : undefined,
+          occurredAt: typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+          source: typeof options.source === 'string' ? options.source : undefined,
         })
 
         return {
-          vault: options.vault,
+          vault: String(options.vault ?? ''),
           mealId: result.mealId,
           eventId: result.event.id,
           lookupId: result.event.id,
@@ -98,65 +92,40 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
           photoPath: result.photo.relativePath,
           audioPath: result.audio?.relativePath ?? null,
           manifestFile: result.manifestPath,
-          note: result.event.note ?? options.note ?? null,
+          note:
+            result.event.note ??
+            (typeof options.note === 'string' ? options.note : null),
         }
       },
     },
-  )
-
-  meal.command(
-    'show',
-    {
+    show: {
       description: 'Show one meal event by meal id or event id.',
-      args: z.object({
-        id: mealLookupSchema,
-      }),
-      options: withBaseOptions(),
+      argName: 'id',
+      argSchema: mealLookupSchema,
       output: showResultSchema,
-      async run({ args, options }) {
-        return showMealRecord(options.vault, args.id)
+      async run(input) {
+        return showMealRecord(input.vault, input.id)
       },
     },
-  )
-
-  meal.command(
-    'list',
-    {
+    list: {
       description: 'List meal events with optional date bounds.',
-      args: emptyArgsSchema,
-      options: withBaseOptions({
-        from: localDateSchema
-          .optional()
-          .describe('Optional inclusive start date in YYYY-MM-DD form.'),
-        to: localDateSchema
-          .optional()
-          .describe('Optional inclusive end date in YYYY-MM-DD form.'),
-      }),
       output: listResultSchema,
-      async run({ options }) {
+      async run(input) {
         return listMealRecords({
-          vault: options.vault,
-          from: options.from,
-          to: options.to,
+          vault: input.vault,
+          from: input.from,
+          to: input.to,
         })
       },
     },
-  )
-
-  meal.command(
-    'manifest',
-    {
+    manifest: {
       description: 'Show the immutable raw import manifest for a meal event.',
-      args: z.object({
-        id: mealLookupSchema,
-      }),
-      options: withBaseOptions(),
+      argName: 'id',
+      argSchema: mealLookupSchema,
       output: rawImportManifestResultSchema,
-      async run({ args, options }) {
-        return showMealManifest(options.vault, args.id)
+      async run(input) {
+        return showMealManifest(input.vault, input.id)
       },
     },
-  )
-
-  cli.command(meal)
+  })
 }
