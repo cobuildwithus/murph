@@ -185,6 +185,49 @@ assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.core), exam
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.journalDay), exampleFrontmatterObjects.journalDay);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.experiment), exampleFrontmatterObjects.experiment);
 assert.deepEqual(
+  parseFrontmatterMarkdown(`---
+flag: true
+count: 42
+tags:
+  - true
+  - 42
+---
+`),
+  {
+    flag: "true",
+    count: "42",
+    tags: ["true", "42"],
+  },
+);
+assert.throws(
+  () =>
+    parseFrontmatterMarkdown(`---
+details:
+  nested: true
+---
+`),
+  /Unsupported frontmatter line:   nested: true/,
+);
+assert.throws(
+  () =>
+    parseFrontmatterMarkdown(`---
+schema-version: hb.frontmatter.core.v1
+---
+`),
+  /Unsupported frontmatter line: schema-version: hb\.frontmatter\.core\.v1/,
+);
+assert.throws(
+  () =>
+    parseFrontmatterMarkdown(`---
+title: Example
+`),
+  /Frontmatter terminator --- not found/,
+);
+assert.throws(
+  () => parseFrontmatterMarkdown("title: Example"),
+  /Frontmatter must start with ---/,
+);
+assert.deepEqual(
   parseFrontmatterDocument(`---
 title: Example
 details:
