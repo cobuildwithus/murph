@@ -13,7 +13,7 @@ and remote APIs nowhere in the default stack.
 - text-like documents: built-in Node text reader
 - native-text PDFs: `pdftotext` when available
 - audio and extracted video audio: `whisper.cpp`
-- images and OCR/layout PDFs: PaddleOCR CLI
+- images and PDFs that need OCR/layout recovery: PaddleOCR CLI
 - media normalization: `ffmpeg`
 
 ## Design rules

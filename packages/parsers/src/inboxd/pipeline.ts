@@ -48,15 +48,41 @@ export async function runInboxDaemonWithParsers(
   input: RunInboxDaemonWithParsersInput,
 ): Promise<void> {
   const { connectors, signal, ...pipelineInput } = input;
-  const pipeline = await createParsedInboxPipeline(pipelineInput);
+  let pipeline: ParsedInboxPipeline | null = null;
 
   try {
+    pipeline = await createParsedInboxPipeline(pipelineInput);
+  } catch (error) {
+    input.runtime.close();
+    throw error;
+  }
+
+  try {
+    if (signal.aborted) {
+      await closeConnectors(connectors);
+      return;
+    }
+
+    await pipeline.parserService.drain({
+      signal,
+    });
+    if (signal.aborted) {
+      await closeConnectors(connectors);
+      return;
+    }
     await runInboxDaemon({
       pipeline,
       connectors,
       signal,
     });
+  } catch (error) {
+    await closeConnectors(connectors);
+    throw error;
   } finally {
     pipeline.close();
   }
+}
+
+async function closeConnectors(connectors: PollConnector[]): Promise<void> {
+  await Promise.allSettled(connectors.map((connector) => connector.close?.()));
 }

@@ -1,3 +1,6 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+
 import type { FfmpegToolOptions } from "../adapters/ffmpeg.js";
 import { createPaddleOcrProvider } from "../adapters/paddleocr.js";
 import { createPdfToTextProvider } from "../adapters/pdftotext.js";
@@ -57,7 +60,7 @@ export async function discoverParserToolchain(input: {
         availableReason: "pdftotext CLI available.",
         missingReason: "pdftotext CLI not found.",
       }),
-      whisper: await discoverWhisperTool(config),
+      whisper: await discoverWhisperTool(config, input.vaultRoot),
       paddleocr: await discoverCommandTool({
         config: config?.tools.paddleocr,
         envValue: process.env.HEALTHYBOB_PADDLEOCR_COMMAND,
@@ -79,6 +82,10 @@ export async function createConfiguredParserRegistry(input: {
   const loadedConfig = await readParserToolchainConfig(input.vaultRoot);
   const config = loadedConfig?.config ?? null;
   const doctor = await discoverParserToolchain(input);
+  const whisperModelResolution = resolveModelPath(
+    config?.tools.whisper?.modelPath,
+    process.env.HEALTHYBOB_WHISPER_MODEL_PATH,
+  );
 
   return {
     doctor,
@@ -86,8 +93,9 @@ export async function createConfiguredParserRegistry(input: {
       createTextFileProvider(),
       createWhisperCppProvider({
         commandCandidates: toCommandCandidates(config?.tools.whisper?.command),
-        modelPath:
-          normalizeNullableString(config?.tools.whisper?.modelPath) ?? undefined,
+        modelPath: whisperModelResolution.modelPath
+          ? resolveModelPathAbsolute(input.vaultRoot, whisperModelResolution)
+          : undefined,
       }),
       createPdfToTextProvider({
         commandCandidates: toCommandCandidates(config?.tools.pdftotext?.command),
@@ -116,6 +124,7 @@ export function ffmpegOptionsFromDoctor(
 
 async function discoverWhisperTool(
   config: ParserToolchainConfig | null,
+  vaultRoot: string,
 ): Promise<ParserToolDiscovery> {
   const toolConfig = config?.tools.whisper;
   const commandResolution = await resolveCommand({
@@ -146,6 +155,16 @@ async function discoverWhisperTool(
       modelPath: null,
       source,
       reason: "Whisper model path is not configured.",
+    };
+  }
+
+  if (!(await fileExists(resolveModelPathAbsolute(vaultRoot, modelResolution)))) {
+    return {
+      available: false,
+      command: commandResolution.command,
+      modelPath: modelResolution.modelPath,
+      source,
+      reason: "Whisper model path does not exist.",
     };
   }
 
@@ -291,4 +310,30 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolveModelPathAbsolute(
+  vaultRoot: string,
+  modelResolution: {
+    modelPath: string | null;
+    source: ParserToolDiscoverySource;
+  },
+): string {
+  const modelPath = modelResolution.modelPath ?? "";
+  if (path.isAbsolute(modelPath)) {
+    return modelPath;
+  }
+
+  return modelResolution.source === "config"
+    ? path.resolve(vaultRoot, modelPath)
+    : path.resolve(modelPath);
+}
+
+async function fileExists(absolutePath: string): Promise<boolean> {
+  try {
+    await fs.access(absolutePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -46,13 +46,21 @@ export function createPaddleOcrProvider(
     },
     supports(request: ParseRequest) {
       const kind = request.preparedKind ?? request.artifact.kind;
-      return kind === "document" || kind === "image";
+      if (kind === "image") {
+        return true;
+      }
+
+      if (kind !== "document") {
+        return false;
+      }
+
+      return isPdfArtifact(request);
     },
     async run(request): Promise<ProviderRunResult> {
       const command = requireExecutable(await resolveCommand(), "PaddleOCR CLI not found.");
 
       const outputDirectory = path.join(request.scratchDirectory, "paddleocr-output");
-      const isPdf = request.artifact.fileName?.toLowerCase().endsWith(".pdf") ?? false;
+      const isPdf = isPdfArtifact(request);
       const isPaddlex = path.basename(command).toLowerCase().startsWith("paddlex");
       const args = isPaddlex
         ? buildPaddlexArgs(request.inputPath, outputDirectory)
@@ -84,6 +92,12 @@ export function createPaddleOcrProvider(
       };
     },
   };
+}
+
+function isPdfArtifact(request: ParseRequest): boolean {
+  const fileName = request.artifact.fileName?.toLowerCase() ?? "";
+  const mime = request.artifact.mime?.toLowerCase() ?? "";
+  return fileName.endsWith(".pdf") || mime === "application/pdf";
 }
 
 function buildPaddleOcrArgs(input: {

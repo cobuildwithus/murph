@@ -38,10 +38,23 @@ test('inbox bootstrap schema exposes init and setup option families together', a
   }
 
   assert.equal('rebuild' in schema.options.properties, true)
+  assert.equal('strict' in schema.options.properties, true)
   assert.equal('whisperCommand' in schema.options.properties, true)
   assert.equal('whisperModelPath' in schema.options.properties, true)
   assert.equal('paddleocrCommand' in schema.options.properties, true)
   assert.equal(schema.options.required?.includes('vault') ?? false, true)
+})
+
+test('inbox backfill schema exposes optional parser draining', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['inbox', 'backfill', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+    }
+  }
+
+  assert.equal('parse' in schema.options.properties, true)
 })
 
 test('inbox help surfaces the first-pass operator commands', async () => {

@@ -1101,42 +1101,25 @@ export function createIntegratedInboxCliServices(
     async parse(input) {
       const paths = await ensureInitialized(loadInbox, input.vault)
       const inboxd = await loadInbox()
-      const parsers = await requireParsers('inbox parser queue drains')
       const runtime = await inboxd.openInboxRuntime({
         vaultRoot: paths.absoluteVaultRoot,
       })
 
       try {
-        const configured = await parsers.createConfiguredParserRegistry({
-          vaultRoot: paths.absoluteVaultRoot,
-        })
-        const parserService = parsers.createInboxParserService({
-          vaultRoot: paths.absoluteVaultRoot,
+        const parserService = await createParserServiceContext(
+          paths.absoluteVaultRoot,
           runtime,
-          registry: configured.registry,
-          ffmpeg: configured.ffmpeg,
-        })
+          await requireParsers('inbox parser queue drains'),
+        )
         const results = await parserService.drain({
           captureId: input.captureId ?? undefined,
           maxJobs: normalizeOptionalCommandLimit(input.limit, 200),
         })
+        const summary = summarizeParserDrain(paths.absoluteVaultRoot, results)
 
         return {
           vault: paths.absoluteVaultRoot,
-          attempted: results.length,
-          succeeded: results.filter((result) => result.status === 'succeeded').length,
-          failed: results.filter((result) => result.status === 'failed').length,
-          results: results.map((result) => ({
-            captureId: result.job.captureId,
-            attachmentId: result.job.attachmentId,
-            status: result.status,
-            providerId: result.providerId ?? null,
-            manifestPath: result.manifestPath
-              ? normalizeVaultPathOutput(paths.absoluteVaultRoot, result.manifestPath)
-              : null,
-            errorCode: result.errorCode ?? null,
-            errorMessage: result.errorMessage ?? null,
-          })),
+          ...summary,
         }
       } finally {
         runtime.close()
@@ -1529,7 +1512,6 @@ export function createIntegratedInboxCliServices(
     async parseAttachment(input) {
       const paths = await ensureInitialized(loadInbox, input.vault)
       const inboxd = await loadInbox()
-      const parsers = await requireParsers('attachment-level inbox parser drains')
       const runtime = await inboxd.openInboxRuntime({
         vaultRoot: paths.absoluteVaultRoot,
       })
@@ -1546,19 +1528,16 @@ export function createIntegratedInboxCliServices(
           )
         }
 
-        const configured = await parsers.createConfiguredParserRegistry({
-          vaultRoot: paths.absoluteVaultRoot,
-        })
-        const parserService = parsers.createInboxParserService({
-          vaultRoot: paths.absoluteVaultRoot,
+        const parserService = await createParserServiceContext(
+          paths.absoluteVaultRoot,
           runtime,
-          registry: configured.registry,
-          ffmpeg: configured.ffmpeg,
-        })
+          await requireParsers('attachment-level inbox parser drains'),
+        )
         const results = await parserService.drain({
           attachmentId: input.attachmentId,
           maxJobs: 1,
         })
+        const summary = summarizeParserDrain(paths.absoluteVaultRoot, results)
         const refreshedCapture = runtime.getCapture(match.capture.captureId)
         const refreshedAttachment =
           refreshedCapture?.attachments.find(
@@ -1574,22 +1553,12 @@ export function createIntegratedInboxCliServices(
           captureId: match.capture.captureId,
           attachmentId: input.attachmentId,
           parseable: true,
-          attempted: results.length,
-          succeeded: results.filter((result) => result.status === 'succeeded').length,
-          failed: results.filter((result) => result.status === 'failed').length,
+          attempted: summary.attempted,
+          succeeded: summary.succeeded,
+          failed: summary.failed,
           currentState: resolveAttachmentParseState(refreshedAttachment, jobs),
           jobs: jobs.map(toCliAttachmentParseJob),
-          results: results.map((result) => ({
-            captureId: result.job.captureId,
-            attachmentId: result.job.attachmentId,
-            status: result.status,
-            providerId: result.providerId ?? null,
-            manifestPath: result.manifestPath
-              ? normalizeVaultPathOutput(paths.absoluteVaultRoot, result.manifestPath)
-              : null,
-            errorCode: result.errorCode ?? null,
-            errorMessage: result.errorMessage ?? null,
-          })),
+          results: summary.results,
         }
       } finally {
         runtime.close()

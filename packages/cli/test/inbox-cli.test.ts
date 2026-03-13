@@ -578,6 +578,17 @@ async function readJsonFile<T>(absolutePath: string): Promise<T> {
   return JSON.parse(await readFile(absolutePath, 'utf8')) as T
 }
 
+async function writeExecutableFile(
+  directory: string,
+  fileName: string,
+  content: string,
+): Promise<string> {
+  const filePath = path.join(directory, fileName)
+  await writeFile(filePath, content, 'utf8')
+  await chmod(filePath, 0o755)
+  return filePath
+}
+
 async function runInProcessInboxCli<TData>(
   args: string[],
   inboxServices: ReturnType<typeof createIntegratedInboxCliServices>,
