@@ -14,6 +14,7 @@ import type {
   SamplesImportCsvResult,
 } from "./vault-cli-contracts.js"
 import { VaultCliError } from "./vault-cli-errors.js"
+import { loadRuntimeModule } from "./runtime-import.js"
 
 const RUNTIME_PACKAGES = Object.freeze([
   "@healthybob/core",
@@ -21,11 +22,6 @@ const RUNTIME_PACKAGES = Object.freeze([
   "@healthybob/query",
   "incur",
 ])
-
-const dynamicImport = new Function(
-  "specifier",
-  "return import(specifier)",
-) as (specifier: string) => Promise<unknown>
 
 export interface CommandContext {
   vault: string
@@ -971,8 +967,8 @@ async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
     (integratedRuntimePromise = (async () => {
       try {
         const [coreModule, queryModule] = await Promise.all([
-          dynamicImport("@healthybob/core"),
-          dynamicImport("@healthybob/query"),
+          loadRuntimeModule("@healthybob/core"),
+          loadRuntimeModule("@healthybob/query"),
         ])
 
         if (!isCoreRuntimeModule(coreModule) || !isQueryRuntimeModule(queryModule)) {
@@ -998,7 +994,7 @@ async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
 async function loadImporterRuntime(): Promise<ImportersRuntime> {
   const [{ core }, importersModule] = await Promise.all([
     loadIntegratedRuntime(),
-    dynamicImport("@healthybob/importers"),
+    loadRuntimeModule("@healthybob/importers"),
   ])
 
   if (!isImportersRuntimeModule(importersModule)) {

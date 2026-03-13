@@ -1,5 +1,7 @@
+import type { ErrorCodeValue, JsonValue } from "./zod.js";
+
 export interface ErrorCodeEntry {
-  code: import("./zod.js").ErrorCodeValue;
+  code: ErrorCodeValue;
   retryable: boolean;
   summary: string;
 }
@@ -18,8 +20,8 @@ export interface JsonSchema {
   $id?: string;
   $defs?: Record<string, JsonSchema>;
   title?: string;
-  const?: import("./zod.js").JsonValue;
-  enum?: readonly import("./zod.js").JsonValue[];
+  const?: JsonValue;
+  enum?: readonly JsonValue[];
   type?: JsonSchemaTypeName | readonly JsonSchemaTypeName[];
   format?: string;
   pattern?: string;

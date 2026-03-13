@@ -10,18 +10,11 @@ export interface CreateImportersOptions {
   presetRegistry?: SamplePresetRegistry;
 }
 
-const dynamicImport = new Function(
-  "specifier",
-  "return import(specifier)",
-) as (specifier: string) => Promise<unknown>
-
 let defaultCorePortPromise: Promise<unknown> | null = null
 
 async function loadDefaultCorePort() {
   if (!defaultCorePortPromise) {
-    defaultCorePortPromise = dynamicImport("@healthybob/core").catch(() =>
-      dynamicImport(new URL("../../core/dist/index.js", import.meta.url).href),
-    )
+    defaultCorePortPromise = import("@healthybob/core")
   }
 
   return defaultCorePortPromise

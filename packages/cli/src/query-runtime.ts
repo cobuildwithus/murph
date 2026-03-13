@@ -1,7 +1,4 @@
-const dynamicImport = new Function(
-  'specifier',
-  'return import(specifier)',
-) as (specifier: string) => Promise<unknown>
+import { loadRuntimeModule } from './runtime-import.js'
 
 export interface QueryRuntimeModule {
   readVault(vaultRoot: string): Promise<unknown>
@@ -40,5 +37,5 @@ export interface QueryRuntimeModule {
 }
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
-  return dynamicImport('@healthybob/query') as Promise<QueryRuntimeModule>
+  return loadRuntimeModule<QueryRuntimeModule>('@healthybob/query')
 }
