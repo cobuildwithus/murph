@@ -134,13 +134,13 @@ export async function loadMarkdownRegistry<TRecord>(
 export function selectRecordByIdOrSlug<TRecord extends RegistryRecordBase>(
   records: TRecord[],
   idValue: string | undefined,
-  slug: string,
+  slug: string | undefined,
   getId: (record: TRecord) => string,
   entityLabel: string,
   conflictCode: string,
 ): TRecord | null {
   const byId = idValue ? records.find((record) => getId(record) === idValue) ?? null : null;
-  const bySlug = records.find((record) => record.slug === slug) ?? null;
+  const bySlug = slug ? records.find((record) => record.slug === slug) ?? null : null;
 
   if (byId && bySlug && getId(byId) !== getId(bySlug)) {
     throw new VaultError(conflictCode, `${entityLabel} id and slug resolve to different records.`);
