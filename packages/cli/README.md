@@ -16,6 +16,19 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - Top-level retrieval commands now include `search` for lexical read-model search, `search index status` / `search index rebuild` for the optional SQLite FTS index stored in `.runtime/search.sqlite`, and `timeline` for descending journal/event/sample-summary context, with the query package boundary isolated in `src/query-runtime.ts`.
 - The inbox CLI runtime now resolves `.runtime` paths through `@healthybob/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
 - The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion via `src/inbox-services.ts`.
+- The published package now exposes both `vault-cli` and a setup-focused `healthybob` alias from the same entrypoint; `healthybob setup` provisions the macOS local parser/runtime toolchain before handing off to the existing inbox bootstrap flow.
+
+## macOS setup
+
+For an installed CLI package, the fastest onboarding path is:
+
+```bash
+healthybob setup --vault ./vault
+```
+
+That command installs or reuses the Homebrew-based local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.healthybob/toolchain/models/whisper/`, optionally installs PaddleX OCR on Apple Silicon, initializes the target vault, and then runs inbox bootstrap so the machine is ready for local ingestion out of the box.
+
+Useful flags include `--dryRun`, `--whisperModel small.en`, and `--skipOcr`. When working from a fresh repository checkout instead of an installed package, use the root `scripts/setup-macos.sh` wrapper first so Node, pnpm, dependencies, and the workspace build are present before the setup command runs.
 
 ## Release Flow
 

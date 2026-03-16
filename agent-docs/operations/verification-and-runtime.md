@@ -38,4 +38,7 @@ Last verified: 2026-03-16
 - `vault-cli inbox model bundle|route` can materialize capture-scoped audit artifacts under `derived/inbox/**/assistant/*.json`; those files are rebuildable and non-canonical.
 - `vault-cli inbox model route` may call either the AI Gateway or an operator-supplied OpenAI-compatible endpoint. Automated repo checks do not execute live network model calls.
 - The built `vault-cli` binary can be exercised locally with `node packages/cli/dist/bin.js ...` when a change requires an end-to-end runtime check beyond the standard repo scripts.
+- A setup-specific entrypoint also exists at `node packages/cli/dist/bin.js setup ...`; it is routed from `packages/cli/src/bin.ts` instead of the main `vault-cli` manifest so installer-style macOS provisioning can happen without reshaping the data-plane command graph.
+- The published CLI package now exposes a `healthybob` bin alias that targets the same built entrypoint as `vault-cli`; the alias is intended for setup and onboarding flows, while the main operator surface remains `vault-cli`.
+- Repo-local macOS bootstrap is handled by `scripts/setup-macos.sh`, which ensures Homebrew, Node 22+, and pnpm are ready before delegating to the built setup entrypoint.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

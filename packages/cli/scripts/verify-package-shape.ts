@@ -76,6 +76,10 @@ assert(
   'package.json must expose vault-cli from dist/bin.js.',
 )
 assert(
+  packageJson.bin?.healthybob === 'dist/bin.js',
+  'package.json must expose healthybob from dist/bin.js as the setup alias.',
+)
+assert(
   packageJson.exports?.['.']?.default === './dist/index.js',
   'package.json exports must target dist/index.js.',
 )

@@ -248,6 +248,41 @@ Nouns are grouped by those bundles rather than a shared grammar plus exceptions:
 
 Noun-specific filters still exist where the underlying records justify them: `history list` adds `--kind`, `--from`, and `--to`; `profile list` exposes `--from` and `--to`; registry-backed nouns may also expose `--status`.
 
+## One-Command macOS Setup
+
+Healthy Bob now ships a dedicated macOS setup path for the local parser/runtime stack:
+
+```bash
+healthybob setup
+```
+
+That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. On macOS it will:
+
+- install or reuse Homebrew
+- install or reuse `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`
+- download a local whisper.cpp model into `~/.healthybob/toolchain/models/whisper/`
+- install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon unless you pass `--skipOcr`
+- initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
+
+Common options:
+
+- `--vault <path>` defaults to `./vault`
+- `--whisperModel <tiny|tiny.en|base|base.en|small|small.en|medium|medium.en|large-v3-turbo>` picks the downloaded whisper.cpp model
+- `--dryRun` shows the plan without mutating the machine or vault
+- `--skipOcr` disables the PaddleX OCR step even on Apple Silicon
+
+The published CLI package exposes `healthybob` as a setup-focused alias. The existing operator/data-plane surface remains under `vault-cli`.
+
+### Repo-local macOS bootstrap
+
+If you are starting from a fresh checkout and the workspace itself still needs Node, pnpm, dependencies, and a build, use the repo-local wrapper instead:
+
+```bash
+./scripts/setup-macos.sh --vault ./vault
+```
+
+That wrapper ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js setup ...` so the same installer logic is reused for both published-package and local-checkout flows.
+
 ## Local Inbox Parser Bootstrap
 
 For a local-first parser setup, the repo exposes one bootstrap command:
@@ -256,7 +291,7 @@ For a local-first parser setup, the repo exposes one bootstrap command:
 pnpm setup:inbox -- --vault ./vault
 ```
 
-That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. External tools such as `ffmpeg`, `pdftotext`, `whisper.cpp`, and PaddleOCR still need to be installed through your OS or environment.
+That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. Use this lower-level wrapper when you already manage the external parser tools yourself; use `healthybob setup` or `./scripts/setup-macos.sh` when you also want the macOS dependency/toolchain provisioning step.
 
 For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so pending parser jobs drain once on startup and new captures continue auto-draining without a separate manual worker step.
 
