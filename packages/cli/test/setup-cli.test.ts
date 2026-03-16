@@ -156,7 +156,7 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
     const data = requireData(result)
 
     assert.equal(data.dryRun, true)
-    assert.equal(data.vault, vaultRoot)
+    assert.equal(data.vault, '~/vault')
     assert.equal(coreInitCalls, 0)
     assert.equal(bootstrapCalls, 0)
     assert.equal(
@@ -184,6 +184,14 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-real-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
+  const expectedWhisperModelPath = path.join(
+    homeRoot,
+    '.healthybob',
+    'toolchain',
+    'models',
+    'whisper',
+    'ggml-base.en.bin',
+  )
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
@@ -319,11 +327,20 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(
       bootstrapCalls[0]?.whisperModelPath,
-      path.join(homeRoot, '.healthybob', 'toolchain', 'models', 'whisper', 'ggml-base.en.bin'),
+      expectedWhisperModelPath,
+    )
+    assert.equal(
+      result.tools.whisperModelPath,
+      '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
     )
     assert.match(
       String(bootstrapCalls[0]?.paddleocrCommand),
       /paddlex-ocr\/bin\/paddlex$/u,
+    )
+    assert.equal(result.toolchainRoot, '~/.healthybob/toolchain')
+    assert.equal(
+      result.tools.paddleocrCommand,
+      '~/.healthybob/toolchain/venvs/paddlex-ocr/bin/paddlex',
     )
     assert.equal(installedFormulas.has('ffmpeg'), true)
     assert.equal(installedFormulas.has('poppler'), true)
@@ -334,7 +351,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       true,
     )
 
-    const modelText = await readFile(result.tools.whisperModelPath, 'utf8')
+    const modelText = await readFile(expectedWhisperModelPath, 'utf8')
     assert.equal(modelText, 'model')
     assert.equal(
       runCalls.some(

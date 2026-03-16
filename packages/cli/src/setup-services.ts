@@ -134,14 +134,17 @@ export function createSetupServices(
     const vault = path.resolve(getCwd(), input.vault)
     const requestId = input.requestId ?? null
     const whisperModel = input.whisperModel ?? 'base.en'
+    const homeDirectory = path.resolve(getHomeDirectory())
     const toolchainRoot = path.resolve(
       getCwd(),
-      input.toolchainRoot ?? path.join(getHomeDirectory(), DEFAULT_TOOLCHAIN_DIRECTORY),
+      input.toolchainRoot ?? path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY),
     )
     const notes: string[] = []
     const steps: SetupStepResult[] = []
 
-    log(`Healthy Bob setup targeting ${vault} on macOS (${arch}).`)
+    log(
+      `Healthy Bob setup targeting ${redactHomePathInText(vault, homeDirectory)} on macOS (${arch}).`,
+    )
 
     let state = await ensureHomebrew({
       arch,
@@ -371,14 +374,29 @@ export function createSetupServices(
 
     return {
       arch,
-      bootstrap,
+      bootstrap:
+        bootstrap === null
+          ? null
+          : {
+              ...bootstrap,
+              vault: redactHomePath(bootstrap.vault, homeDirectory),
+            },
       dryRun,
-      notes,
+      notes: notes.map((note) => redactHomePathInText(note, homeDirectory)),
       platform,
-      steps,
-      toolchainRoot,
-      tools,
-      vault,
+      steps: steps.map((step) => ({
+        ...step,
+        detail: redactHomePathInText(step.detail, homeDirectory),
+      })),
+      toolchainRoot: redactHomePath(toolchainRoot, homeDirectory),
+      tools: {
+        ffmpegCommand: redactNullableHomePath(tools.ffmpegCommand, homeDirectory),
+        pdftotextCommand: redactNullableHomePath(tools.pdftotextCommand, homeDirectory),
+        whisperCommand: redactNullableHomePath(tools.whisperCommand, homeDirectory),
+        whisperModelPath: redactHomePath(tools.whisperModelPath, homeDirectory),
+        paddleocrCommand: redactNullableHomePath(tools.paddleocrCommand, homeDirectory),
+      },
+      vault: redactHomePath(vault, homeDirectory),
       whisperModel,
     }
   }
@@ -901,6 +919,38 @@ function preferredBrewCommandPaths(arch: string): string[] {
   return arch === 'arm64'
     ? ['/opt/homebrew/bin/brew', '/usr/local/bin/brew']
     : ['/usr/local/bin/brew', '/opt/homebrew/bin/brew']
+}
+
+function redactNullableHomePath(
+  value: string | null,
+  homeDirectory: string,
+): string | null {
+  return value === null ? null : redactHomePath(value, homeDirectory)
+}
+
+function redactHomePath(value: string, homeDirectory: string): string {
+  const normalizedValue = path.resolve(value)
+  const normalizedHome = path.resolve(homeDirectory)
+
+  if (normalizedValue === normalizedHome) {
+    return '~'
+  }
+
+  if (normalizedValue.startsWith(`${normalizedHome}${path.sep}`)) {
+    return `~${normalizedValue.slice(normalizedHome.length)}`
+  }
+
+  return value
+}
+
+function redactHomePathInText(text: string, homeDirectory: string): string {
+  const normalizedHome = path.resolve(homeDirectory)
+  const escapedHome = escapeRegExp(normalizedHome)
+  return text.replace(new RegExp(escapedHome, 'g'), '~')
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function listPathSegments(pathValue: string | undefined): string[] {
