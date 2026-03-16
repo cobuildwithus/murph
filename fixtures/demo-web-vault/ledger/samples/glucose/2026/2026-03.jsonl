@@ -1,0 +1,4 @@
+{"schemaVersion":"hb.sample.v1","id":"smp_glucose_demo_01","stream":"glucose","occurredAt":"2026-03-12T07:00:00Z","recordedAt":"2026-03-12T07:00:00Z","value":94,"unit":"mg_dL","source":"manual"}
+{"schemaVersion":"hb.sample.v1","id":"smp_glucose_demo_02","stream":"glucose","occurredAt":"2026-03-12T19:20:00Z","recordedAt":"2026-03-12T19:20:00Z","value":103,"unit":"mg_dL","source":"manual"}
+{"schemaVersion":"hb.sample.v1","id":"smp_glucose_demo_03","stream":"glucose","occurredAt":"2026-03-13T07:10:00Z","recordedAt":"2026-03-13T07:10:00Z","value":92,"unit":"mg_dL","source":"manual"}
+{"schemaVersion":"hb.sample.v1","id":"smp_glucose_demo_04","stream":"glucose","occurredAt":"2026-03-13T20:05:00Z","recordedAt":"2026-03-13T20:05:00Z","value":99,"unit":"mg_dL","source":"manual"}

@@ -6,6 +6,7 @@ interface FixtureCorpusEntry {
   id?: unknown;
   path?: unknown;
   requiredPaths?: unknown;
+  requireSmokeScenarioReference?: unknown;
 }
 
 interface FixtureCorpus {
@@ -137,6 +138,7 @@ async function main(): Promise<void> {
   const goldenOutputPaths = new Set<string>();
   const sampleImportPaths = new Set<string>();
   const vaultFixturePaths = new Set<string>();
+  const smokeRequiredVaultFixturePaths = new Set<string>();
 
   for (const fixture of corpus.vaultFixtures ?? []) {
     if (!expectString(errors, fixture.id, "vault fixture id", corpusPath)) {
@@ -148,6 +150,9 @@ async function main(): Promise<void> {
     }
 
     vaultFixturePaths.add(fixture.path);
+    if (fixture.requireSmokeScenarioReference !== false) {
+      smokeRequiredVaultFixturePaths.add(fixture.path);
+    }
 
     if (!(await pathExists(fixture.path))) {
       pushMissing(errors, "vault fixture directory", fixture.path);
@@ -320,7 +325,7 @@ async function main(): Promise<void> {
       }
     }
 
-    for (const fixturePath of vaultFixturePaths) {
+    for (const fixturePath of smokeRequiredVaultFixturePaths) {
       if (!referencedVaultFixtures.has(fixturePath)) {
         errors.push(`Unreferenced vault fixture: ${fixturePath}`);
       }

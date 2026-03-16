@@ -182,7 +182,7 @@ Example local run:
 
 ```bash
 cd packages/web
-HEALTHYBOB_VAULT=../../fixtures/minimal-vault pnpm dev
+HEALTHYBOB_VAULT=../../fixtures/demo-web-vault pnpm dev
 ```
 
 ## Implemented Command Surface

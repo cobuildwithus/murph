@@ -17,6 +17,32 @@
         "audit/README.md",
         "exports/README.md"
       ]
+    },
+    {
+      "id": "demo-web-vault",
+      "path": "fixtures/demo-web-vault",
+      "purpose": "Small but populated demo vault intended for the local web observatory run path.",
+      "requireSmokeScenarioReference": false,
+      "requiredPaths": [
+        "README.md",
+        "vault.json",
+        "CORE.md",
+        "bank/experiments/sleep-reset.md",
+        "bank/goals/protect-sleep.md",
+        "bank/goals/steady-glucose.md",
+        "bank/profile/current.md",
+        "bank/providers/README.md",
+        "journal/2026/2026-03-12.md",
+        "journal/2026/2026-03-13.md",
+        "ledger/events/2026/2026-03.jsonl",
+        "ledger/samples/glucose/2026/2026-03.jsonl",
+        "ledger/samples/heart-rate/2026/2026-03.jsonl",
+        "ledger/assessments/2026/2026-03.jsonl",
+        "ledger/profile-snapshots/2026/2026-03.jsonl",
+        "raw/README.md",
+        "audit/README.md",
+        "exports/README.md"
+      ]
     }
   ],
   "sampleImports": [
