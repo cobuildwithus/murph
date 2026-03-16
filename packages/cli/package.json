@@ -46,15 +46,15 @@
     "release:major": "bash scripts/release.sh major"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.35",
     "@healthybob/contracts": "workspace:*",
     "@healthybob/core": "workspace:*",
-    "@healthybob/inboxd": "workspace:*",
     "@healthybob/importers": "workspace:*",
+    "@healthybob/inboxd": "workspace:*",
     "@healthybob/parsers": "workspace:*",
     "@healthybob/query": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
-    "@ai-sdk/openai-compatible": "^1.0.34",
-    "ai": "^5.0.36",
+    "ai": "^6.0.116",
     "incur": "0.3.3",
     "zod": "^4.1.8"
   }
