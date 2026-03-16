@@ -19,6 +19,7 @@ import {
   inboxParseResultSchema,
   inboxPromoteExperimentNoteResultSchema,
   inboxPromoteMealResultSchema,
+  inboxPromoteDocumentResultSchema,
   inboxPromoteJournalResultSchema,
   inboxRequeueResultSchema,
   inboxRunResultSchema,
@@ -30,7 +31,17 @@ import {
   inboxSourceRemoveResultSchema,
   inboxSourceValues,
 } from '../inbox-cli-contracts.js'
+import {
+  inboxModelBundleResultSchema,
+  inboxModelRouteResultSchema,
+} from '../inbox-model-contracts.js'
+import {
+  materializeInboxModelBundle,
+  routeInboxCaptureWithModel,
+} from '../inbox-model-harness.js'
 import type { InboxCliServices } from '../inbox-services.js'
+import type { VaultCliServices } from '../vault-cli-services.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 
 const inboxInitOptionFields = {
   rebuild: z
@@ -70,6 +81,7 @@ const inboxSetupOptionFields = {
 export function registerInboxCommands(
   cli: Cli.Cli,
   services: InboxCliServices,
+  vaultServices?: VaultCliServices,
 ) {
   const inbox = Cli.create('inbox', {
     description:
@@ -280,7 +292,7 @@ export function registerInboxCommands(
         backfillLimit: context.options.backfillLimit,
       })
 
-      return context.ok(result, {
+      const sourceAddCta = {
         cta: {
           description: 'Suggested commands:',
           commands: [
@@ -297,7 +309,9 @@ export function registerInboxCommands(
             },
           ],
         },
-      })
+      }
+
+      return context.ok(result, sourceAddCta)
     },
   })
 
@@ -679,6 +693,23 @@ export function registerInboxCommands(
     },
   })
 
+  promote.command('document', {
+    args: z.object({
+      captureId: z.string().min(1).describe('Inbox capture id to promote.'),
+    }),
+    description:
+      'Promote one inbox capture with a stored document attachment into a canonical document import.',
+    options: withBaseOptions(),
+    output: inboxPromoteDocumentResultSchema,
+    async run(context) {
+      return services.promoteDocument({
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        captureId: context.args.captureId,
+      })
+    },
+  })
+
   promote.command('journal', {
     args: z.object({
       captureId: z.string().min(1).describe('Inbox capture id to promote.'),
@@ -715,5 +746,135 @@ export function registerInboxCommands(
 
   inbox.command(promote)
 
+  const model = Cli.create('model', {
+    description:
+      'Build a text-only inbox bundle and ask a Vercel AI SDK-backed model to choose canonical CLI actions.',
+  })
+
+  model.command('bundle', {
+    args: z.object({
+      captureId: z.string().min(1).describe('Inbox capture id to bundle.'),
+    }),
+    description:
+      'Materialize the normalized text-only routing bundle for one inbox capture.',
+    options: withBaseOptions(),
+    output: inboxModelBundleResultSchema,
+    async run(context) {
+      return materializeInboxModelBundle({
+        inboxServices: services,
+        requestId: requestIdFromOptions(context.options),
+        captureId: context.args.captureId,
+        vault: context.options.vault,
+        vaultServices,
+      })
+    },
+  })
+
+  model.command('route', {
+    args: z.object({
+      captureId: z.string().min(1).describe('Inbox capture id to route.'),
+    }),
+    description:
+      'Use the shared assistant model harness to generate a CLI action plan for one inbox capture.',
+    hint:
+      'Pass --baseUrl to target a local or other OpenAI-compatible endpoint; omit it to use the AI Gateway model string.',
+    options: withBaseOptions({
+      model: z
+        .string()
+        .min(1)
+        .describe('Model id to use, such as anthropic/claude-sonnet-4.5 or a local model id.'),
+      baseUrl: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional OpenAI-compatible base URL for local or custom model endpoints.'),
+      apiKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional explicit API key for OpenAI-compatible model endpoints.'),
+      apiKeyEnv: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional environment variable name that stores the API key.'),
+      providerName: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional stable provider label for OpenAI-compatible endpoints.'),
+      headersJson: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional JSON object of extra HTTP headers for OpenAI-compatible endpoints.'),
+      apply: z
+        .boolean()
+        .optional()
+        .describe('Execute the planned tool calls instead of previewing them.'),
+    }),
+    output: inboxModelRouteResultSchema,
+    async run(context) {
+      return routeInboxCaptureWithModel({
+        inboxServices: services,
+        requestId: requestIdFromOptions(context.options),
+        captureId: context.args.captureId,
+        vault: context.options.vault,
+        vaultServices,
+        apply: context.options.apply,
+        modelSpec: {
+          model: context.options.model,
+          baseUrl: context.options.baseUrl,
+          apiKey: context.options.apiKey,
+          apiKeyEnv: context.options.apiKeyEnv,
+          providerName: context.options.providerName,
+          headers: parseHeadersJsonOption(context.options.headersJson),
+        },
+      })
+    },
+  })
+
+  inbox.command(model)
+
   cli.command(inbox)
+}
+
+function parseHeadersJsonOption(value?: string) {
+  if (!value) {
+    return undefined
+  }
+
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(value)
+  } catch (error) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'headersJson must be a valid JSON object.',
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'headersJson must be a JSON object with string values.',
+    )
+  }
+
+  const headers: Record<string, string> = {}
+  for (const [key, candidate] of Object.entries(parsed)) {
+    if (typeof candidate !== 'string') {
+      throw new VaultCliError(
+        'invalid_payload',
+        'headersJson must be a JSON object with string values.',
+      )
+    }
+    headers[key] = candidate
+  }
+
+  return headers
 }

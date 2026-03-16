@@ -55,6 +55,10 @@
       "path": "fixtures/golden-outputs/inbox-bootstrap"
     },
     {
+      "id": "inbox-model",
+      "path": "fixtures/golden-outputs/inbox-model"
+    },
+    {
       "id": "validate",
       "path": "fixtures/golden-outputs/validate"
     },

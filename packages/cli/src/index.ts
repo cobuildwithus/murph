@@ -21,3 +21,7 @@ export {
 export * from './vault-cli-contracts.js'
 export * from './inbox-cli-contracts.js'
 export * from './vault-cli-errors.js'
+export * from './assistant-harness.js'
+export * from './assistant-cli-tools.js'
+export * from './inbox-model-contracts.js'
+export * from './inbox-model-harness.js'

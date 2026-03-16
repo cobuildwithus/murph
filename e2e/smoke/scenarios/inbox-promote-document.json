@@ -1,0 +1,10 @@
+{
+  "id": "inbox-promote-document",
+  "command": "vault-cli inbox promote document <captureId> --vault <path> [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/document-import",
+  "purpose": "Documents canonical document promotion from one inbox capture with a stored document attachment."
+}

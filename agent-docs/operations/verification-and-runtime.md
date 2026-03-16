@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-03-13
+Last verified: 2026-03-16
 
 ## Verification Matrix
 
@@ -9,7 +9,7 @@ Last verified: 2026-03-13
 | Docs/process-only | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Includes package-runtime checks, built CLI verification, and fixture/scenario scaffolding because those are part of repo truth now. |
 | Fixture/e2e/package-doc changes | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Verifies fixture corpus integrity, smoke-manifest wiring, package-runtime health, built CLI checks, command-surface coverage, and the source-artifact guard for handwritten JS-like files plus tracked build residue under `packages/` and `e2e/`. |
 | Changes under `packages/contracts`, `packages/runtime-state`, `packages/core`, `packages/importers`, `packages/inboxd`, `packages/parsers`, or `packages/query` | `pnpm typecheck`, `pnpm test:packages`, `pnpm test:smoke` | `pnpm test` remains required for full repo acceptance, but `pnpm test:packages` is the clean runtime signal when the doc-drift wrapper is blocked by an in-progress dirty worktree. `pnpm test:packages:coverage` is the matching Vitest/V8 signal when the change should hold the CLI-style per-file thresholds for the currently included `core`/`importers`/`query` surface; inbox/parser tests still execute under coverage, but their source files are not yet in the thresholded include list. |
-| Changes under `packages/cli` | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Repo checks now run `packages/cli` typecheck plus package-local verification through `pnpm verify:cli`, and package tests build any required workspace dependencies, including `@healthybob/inboxd`, before exercising the CLI. CLI runtime tests still execute through the built package path, so source coverage remains focused on the in-process `core`/`importers`/`query` runtime modules. |
+| Changes under `packages/cli` | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Repo checks now run `packages/cli` typecheck plus package-local verification through `pnpm verify:cli`, and package tests build any required workspace dependencies, including `@healthybob/inboxd`, before exercising the CLI. CLI runtime tests still execute through the built package path, so source coverage remains focused on the in-process `core`/`importers`/`query` runtime modules. Live external model calls are not exercised in repo automation. |
 | User explicitly says to skip checks | Skip checks for that turn only. | User instruction takes precedence. |
 
 ## Current Command Meaning
@@ -35,5 +35,7 @@ Last verified: 2026-03-13
 - Repo-level checks execute canonical write/read paths in `core`, `importers`, `inboxd`, `parsers`, and `query`, build the shared `runtime-state` package, and build the CLI package through the same TypeScript workspace toolchain used for local development.
 - Shared runtime-state helpers now own `.runtime` path resolution plus SQLite open defaults for query search, inboxd, and the CLI inbox layer.
 - Query-owned lexical search state lives only at `.runtime/search.sqlite`; inbox-owned local state remains at `.runtime/inboxd.sqlite` plus `.runtime/inboxd/*.json`.
+- `vault-cli inbox model bundle|route` can materialize capture-scoped audit artifacts under `derived/inbox/**/assistant/*.json`; those files are rebuildable and non-canonical.
+- `vault-cli inbox model route` may call either the AI Gateway or an operator-supplied OpenAI-compatible endpoint. Automated repo checks do not execute live network model calls.
 - The built `vault-cli` binary can be exercised locally with `node packages/cli/dist/bin.js ...` when a change requires an end-to-end runtime check beyond the standard repo scripts.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

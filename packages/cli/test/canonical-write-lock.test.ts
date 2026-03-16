@@ -8,16 +8,14 @@ import { once } from "node:events";
 import { test } from "vitest";
 
 import {
+  acquireCanonicalWriteLock,
+  CANONICAL_WRITE_LOCK_DIRECTORY,
+  CANONICAL_WRITE_LOCK_METADATA_PATH,
   ensureJournalDay,
   initializeVault,
   validateVault,
   VaultError,
-} from "../../core/src/index.js";
-import {
-  acquireCanonicalWriteLock,
-  CANONICAL_WRITE_LOCK_DIRECTORY,
-  CANONICAL_WRITE_LOCK_METADATA_PATH,
-} from "../../core/src/operations/index.js";
+} from "@healthybob/core";
 import { repoRoot } from "./cli-test-helpers.js";
 
 async function makeVaultRoot(): Promise<string> {

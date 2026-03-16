@@ -5,7 +5,7 @@ import {
 } from './vault-cli-contracts.js'
 
 export const inboxSourceValues = ['imessage'] as const
-export const inboxPromotionTargetValues = ['meal', 'journal', 'experiment-note'] as const
+export const inboxPromotionTargetValues = ['meal', 'document', 'journal', 'experiment-note'] as const
 export const inboxCheckStatusValues = ['pass', 'warn', 'fail'] as const
 
 export const inboxConnectorOptionsSchema = z.object({
@@ -301,6 +301,15 @@ export const inboxPromoteMealResultSchema = z.object({
   created: z.boolean(),
 })
 
+export const inboxPromoteDocumentResultSchema = z.object({
+  vault: pathSchema,
+  captureId: z.string().min(1),
+  target: z.literal('document'),
+  lookupId: z.string().min(1),
+  relatedId: z.string().min(1),
+  created: z.boolean(),
+})
+
 export const inboxPromoteJournalResultSchema = z.object({
   vault: pathSchema,
   captureId: z.string().min(1),
@@ -393,6 +402,7 @@ export type InboxParseJobResult = z.infer<typeof inboxParseJobResultSchema>
 export type InboxParseResult = z.infer<typeof inboxParseResultSchema>
 export type InboxRequeueResult = z.infer<typeof inboxRequeueResultSchema>
 export type InboxPromoteMealResult = z.infer<typeof inboxPromoteMealResultSchema>
+export type InboxPromoteDocumentResult = z.infer<typeof inboxPromoteDocumentResultSchema>
 export type InboxPromoteJournalResult = z.infer<typeof inboxPromoteJournalResultSchema>
 export type InboxPromoteExperimentNoteResult = z.infer<
   typeof inboxPromoteExperimentNoteResultSchema

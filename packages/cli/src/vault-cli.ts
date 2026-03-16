@@ -64,7 +64,7 @@ export function createVaultCli(
   registerSearchCommands(cli, services)
   registerExportCommands(cli, services)
   registerIntakeCommands(cli, services)
-  registerInboxCommands(cli, inboxServices)
+  registerInboxCommands(cli, inboxServices, services)
   registerProfileCommands(cli, services)
   registerHealthEntityCrudGroup(cli, services, 'goal')
   registerHealthEntityCrudGroup(cli, services, 'condition')

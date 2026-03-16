@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-03-13
+Last verified: 2026-03-16
 
 ## Current Repo Checks
 
@@ -17,6 +17,7 @@ Last verified: 2026-03-13
 
 - Repo-level automation still does not run full end-to-end CLI scenario flows; it typechecks/builds the CLI package, now includes inbox service/runtime tests plus parser-worker/runtime tests, and the smoke verifier still covers fixture/scenario integrity separately.
 - Fixture smoke still validates manifests and command-surface coverage, not end-to-end package orchestration.
+- No automated check hits a live AI Gateway or OpenAI-compatible endpoint; inbox model routing is currently verified through type/build/test coverage around the CLI surface and static smoke-manifest coverage only.
 - No CI workflow files exist yet.
 
 ## Update Rule

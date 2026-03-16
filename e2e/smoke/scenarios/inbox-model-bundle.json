@@ -1,0 +1,10 @@
+{
+  "id": "inbox-model-bundle",
+  "command": "vault-cli inbox model bundle <captureId> --vault <path> [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/inbox-model",
+  "purpose": "Documents the normalized text-only routing bundle emitted for one inbox capture."
+}

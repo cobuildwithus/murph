@@ -76,4 +76,39 @@ test('inbox help surfaces the first-pass operator commands', async () => {
   assert.match(help, /show\s+Show one captured inbox item/u)
   assert.match(help, /search\s+Search captured inbox items/u)
   assert.match(help, /promote\s+Promote captured inbox items/u)
+  assert.match(help, /model\s+Build a text-only inbox bundle/u)
+})
+
+test('inbox promote help includes document promotion', async () => {
+  const help = await runRawCli(['inbox', 'promote', '--help'])
+
+  assert.match(
+    help,
+    /document\s+Promote one inbox capture with a stored document attachment/u,
+  )
+})
+
+test('inbox model route schema exposes backend and apply options', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['inbox', 'model', 'route', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('captureId' in schema.args.properties, true)
+  assert.equal('model' in schema.options.properties, true)
+  assert.equal('baseUrl' in schema.options.properties, true)
+  assert.equal('apiKey' in schema.options.properties, true)
+  assert.equal('apiKeyEnv' in schema.options.properties, true)
+  assert.equal('providerName' in schema.options.properties, true)
+  assert.equal('headersJson' in schema.options.properties, true)
+  assert.equal('apply' in schema.options.properties, true)
+  assert.equal(schema.options.required?.includes('vault') ?? false, true)
+  assert.equal(schema.options.required?.includes('model') ?? false, true)
 })

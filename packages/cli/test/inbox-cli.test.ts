@@ -2034,7 +2034,7 @@ test.sequential('backfill can opt into parser drains while remaining queue-first
     })
     assert.equal(queueOnly.importedCount, 1)
     assert.equal(queueOnly.parse, undefined)
-    assert.deepEqual(drainCalls, [])
+    assert.equal(drainCalls.length, 0)
 
     const reparsed = await services.backfill({
       vault: fixture.vaultRoot,
@@ -2045,7 +2045,7 @@ test.sequential('backfill can opt into parser drains while remaining queue-first
     assert.equal(reparsed.importedCount, 0)
     assert.equal(reparsed.dedupedCount, 1)
     assert.equal(reparsed.parse?.attempted, 0)
-    assert.deepEqual(drainCalls, [])
+    assert.equal(drainCalls.length, 0)
 
     const freshFixture = await makeVaultFixture('healthybob-inbox-backfill-parse-fresh')
     const freshServices = createIntegratedInboxCliServices({

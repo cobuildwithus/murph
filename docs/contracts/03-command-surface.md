@@ -81,8 +81,11 @@ vault-cli inbox attachment show-status <attachmentId> --vault <path> [--request-
 vault-cli inbox attachment parse <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment reparse <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox promote meal <captureId> --vault <path> [--request-id <id>]
+vault-cli inbox promote document <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox promote journal <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox promote experiment-note <captureId> --vault <path> [--request-id <id>]
+vault-cli inbox model bundle <captureId> --vault <path> [--request-id <id>]
+vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--apply] [--request-id <id>]
 ```
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Those surfaces are provided by incur and are not re-frozen command-by-command in this contract.
@@ -98,7 +101,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `lifecycle`: `create | show | list | update | checkpoint | stop`
 - `dateAddressedDoc`: `ensure | show | list | append | link | unlink`
 - `derivedAdmin`: `stats | paths | rebuild | materialize | prune | validate`
-- `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote`
+- `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote | model bundle/route`
 
 ## Noun Composition
 
@@ -113,7 +116,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `vault` composes readable and derived/admin capabilities, plus `update` for metadata mutation.
 - `export` composes readable and derived/admin capabilities.
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
-- `inbox` is a runtime-control noun, including attachment inspection and deterministic promotion flows.
+- `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
 
 These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 

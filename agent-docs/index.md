@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-13 (runtime-state cutover docs, softer coordination-ledger semantics, and incur-specific CLI guardrails are aligned across process docs)
+Last verified: 2026-03-16 (inbox model-routing trust boundaries, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 
@@ -11,21 +11,21 @@ This index is the table of contents for durable, repository-local context that a
 | Path | Purpose | Source of truth | Owner | Review cadence | Criticality | Last verified |
 | --- | --- | --- | --- | --- | --- | --- |
 | `README.md` | Repo bootstrap summary, runtime-package status, and verification entrypoint for humans. | Repository bootstrap decisions | Healthy Bob Maintainer | Per bootstrap/process change | Medium | 2026-03-12 |
-| `ARCHITECTURE.md` | Top-level module map and trust-boundary summary. | Product/runtime code plus repo decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-13 |
+| `ARCHITECTURE.md` | Top-level module map and trust-boundary summary. | Product/runtime code plus repo decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-16 |
 | `docs/architecture.md` | One-page architecture summary and target repo shape for the baseline vault plus adjunct inbox/parser layers. | Baseline vault architecture decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-13 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, command surface, and invariants. | Baseline vault interface decisions | Healthy Bob Maintainer | Per contract change | High | 2026-03-13 |
 | `agent-docs/PLANS.md` | Execution-plan workflow and storage conventions. | `agent-docs/exec-plans/**` | Healthy Bob Maintainer | Per process change | Medium | 2026-03-12 |
 | `agent-docs/PRODUCT_SENSE.md` | Product-behavior guardrails for future implementation work. | Product specs + user-facing behavior | Healthy Bob Maintainer | Monthly | Medium | 2026-03-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Docs, checks, audits, test posture | Healthy Bob Maintainer | Bi-weekly | Medium | 2026-03-12 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime behavior + recovery strategy | Healthy Bob Maintainer | Per reliability-affecting change | High | 2026-03-12 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules. | Auth/secrets/data boundaries/process | Healthy Bob Maintainer | Per security-affecting change | High | 2026-03-12 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules. | Auth/secrets/data boundaries/process | Healthy Bob Maintainer | Per security-affecting change | High | 2026-03-16 |
 | `agent-docs/product-specs/index.md` | Index for product-spec documents. | `agent-docs/product-specs/**` | Healthy Bob Maintainer | Per behavior change | High | 2026-03-12 |
 | `agent-docs/product-specs/repo-bootstrap.md` | Current repository state and bootstrap success criteria. | Repository bootstrap decisions | Healthy Bob Maintainer | Until first product feature lands | High | 2026-03-12 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | `agent-docs/references/**` | Healthy Bob Maintainer | Monthly | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Repo scope, ownership boundary, and unknowns. | Workspace routing + local decisions | Healthy Bob Maintainer | Per scope change | High | 2026-03-12 |
 | `packages/parsers/README.md` | Package-local overview for local-first attachment parsing, provider ranking, and derived artifact publication. | `packages/parsers/**` | Healthy Bob Maintainer | Per parser-layer change | Medium | 2026-03-13 |
-| `agent-docs/references/testing-ci-map.md` | Current verification map for contracts/runtime packages, built CLI checks, the smoke harness, the targeted Vitest/V8 package coverage surface, and the source-artifact guard. | `package.json`, `scripts/**`, `fixtures/**`, `e2e/**`, future CI | Healthy Bob Maintainer | Per verification change | High | 2026-03-13 |
-| `agent-docs/operations/verification-and-runtime.md` | Required checks, runtime-package verification matrix, built CLI behavior coverage, package-local no-emit typecheck semantics, and current runtime assumptions for the TypeScript-first workspace. | `AGENTS.md`, `package.json`, `fixtures/**`, `e2e/**`, `scripts/**` | Healthy Bob Maintainer | Per process/runtime change | High | 2026-03-13 |
+| `agent-docs/references/testing-ci-map.md` | Current verification map for contracts/runtime packages, built CLI checks, the smoke harness, the targeted Vitest/V8 package coverage surface, and the source-artifact guard. | `package.json`, `scripts/**`, `fixtures/**`, `e2e/**`, future CI | Healthy Bob Maintainer | Per verification change | High | 2026-03-16 |
+| `agent-docs/operations/verification-and-runtime.md` | Required checks, runtime-package verification matrix, built CLI behavior coverage, package-local no-emit typecheck semantics, and current runtime assumptions for the TypeScript-first workspace. | `AGENTS.md`, `package.json`, `fixtures/**`, `e2e/**`, `scripts/**` | Healthy Bob Maintainer | Per process/runtime change | High | 2026-03-16 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit workflow. | Prompts + completion process | Healthy Bob Maintainer | Per process change | High | 2026-03-13 |
 | `agent-docs/prompts/simplify.md` | Reusable simplification pass prompt with parallel-agent handoff output. | Completion workflow | Healthy Bob Maintainer | Per process change | Medium | 2026-03-13 |
 | `agent-docs/prompts/test-coverage-audit.md` | Reusable coverage-audit prompt with parallel-agent handoff output. | Completion workflow | Healthy Bob Maintainer | Per process change | High | 2026-03-13 |
