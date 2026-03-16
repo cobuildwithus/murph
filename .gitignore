@@ -3,6 +3,13 @@ dist/
 coverage/
 .DS_Store
 .turbo/
+.next/
+.agents/
+.claude/
+.windsurf/
+/skills/
+/skills-lock.json
+/packages/web/skills-lock.json
 *.log
 *.tsbuildinfo
 .test-dist/

@@ -1,0 +1,132 @@
+import assert from "node:assert/strict";
+
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, test, vi } from "vitest";
+
+vi.mock("../src/lib/overview", async () => {
+  const actual = await vi.importActual<typeof import("../src/lib/overview")>(
+    "../src/lib/overview",
+  );
+
+  return {
+    ...actual,
+    loadVaultOverviewFromEnv: vi.fn(),
+  };
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+test("HomePage normalizes search params and renders the ready state", async () => {
+  const { default: HomePage } = await import("../app/page");
+  const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+
+  mockedLoadVaultOverviewFromEnv.mockResolvedValue({
+    currentProfile: {
+      id: "profile_01",
+      recordedAt: "2026-03-12T14:00:00Z",
+      summary: "Sleep steadier and energy improving.",
+      title: "Current Profile",
+      topGoalIds: ["goal_sleep_01"],
+    },
+    generatedAt: "2026-03-12T15:00:00Z",
+    metrics: [
+      {
+        label: "records",
+        note: "Canonical read model rows",
+        value: 10,
+      },
+    ],
+    sampleSummaries: [
+      {
+        averageValue: 97.5,
+        date: "2026-03-12",
+        sampleCount: 2,
+        stream: "glucose",
+        unit: "mg_dL",
+      },
+    ],
+    search: {
+      hits: [
+        {
+          date: "2026-03-12",
+          kind: "encounter",
+          recordId: "evt_web_01",
+          recordType: "event",
+          snippet: "Sleep consult follow-up",
+          title: "Sleep consult follow-up",
+        },
+      ],
+      query: "sleep",
+      total: 1,
+    },
+    status: "ready",
+    timeline: [
+      {
+        entryType: "event",
+        id: "evt_web_01",
+        kind: "encounter",
+        occurredAt: "2026-03-12T09:30:00Z",
+        stream: null,
+        title: "Sleep consult follow-up",
+      },
+    ],
+  });
+
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        q: [" sleep ", "ignored"],
+      }),
+    }),
+  );
+
+  assert.equal(mockedLoadVaultOverviewFromEnv.mock.calls.length, 1);
+  assert.deepEqual(mockedLoadVaultOverviewFromEnv.mock.calls[0]?.[0], {
+    query: "sleep",
+    sampleLimit: 6,
+    timelineLimit: 8,
+  });
+  assert.match(markup, /Healthy Bob Observatory/);
+  assert.match(markup, /Matches for/);
+  assert.match(markup, /goal_sleep_01/);
+});
+
+test("HomePage renders the setup state when no vault is configured", async () => {
+  const { default: HomePage } = await import("../app/page");
+  const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+
+  mockedLoadVaultOverviewFromEnv.mockResolvedValue({
+    envVar: "HEALTHYBOB_VAULT",
+    exampleVaultPath: "../../fixtures/minimal-vault",
+    status: "missing-config",
+    suggestedCommand: "HEALTHYBOB_VAULT=../../fixtures/minimal-vault pnpm dev",
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({}));
+
+  assert.match(markup, /No vault is configured yet/);
+  assert.match(markup, /HEALTHYBOB_VAULT/);
+});
+
+test("HomePage renders the unreadable-vault error state", async () => {
+  const { default: HomePage } = await import("../app/page");
+  const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+
+  mockedLoadVaultOverviewFromEnv.mockResolvedValue({
+    envVar: "HEALTHYBOB_VAULT",
+    hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
+    message: "The configured vault could not be read.",
+    recoveryCommand: "HEALTHYBOB_VAULT=../../fixtures/minimal-vault pnpm dev",
+    status: "error",
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({}));
+
+  assert.match(markup, /The configured vault could not be read\./);
+  assert.match(markup, /Confirm the configured vault path points at a Healthy Bob vault root/);
+});

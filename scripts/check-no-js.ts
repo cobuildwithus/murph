@@ -1,15 +1,29 @@
 import { execFile } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = ["packages", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
 const execFileAsync = promisify(execFile);
+export const allowedDeclarationArtifacts = new Map<string, string>([
+  [
+    "packages/web/next-env.d.ts",
+    [
+      '/// <reference types="next" />',
+      '/// <reference types="next/image-types/global" />',
+      'import "./.next/types/routes.d.ts";',
+      "",
+      "// NOTE: This file should not be edited",
+      "// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.",
+      "",
+    ].join("\n"),
+  ],
+]);
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const sourceArtifactOffenders: string[] = [];
 
   for (const root of scanRoots) {
@@ -39,7 +53,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files, and no tracked dist/.test-dist/*.tsbuildinfo artifacts, found under packages/ or e2e/.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stub, and no tracked dist/.next/.test-dist/*.tsbuildinfo artifacts, found under packages/ or e2e/.",
   );
 }
 
@@ -51,7 +65,11 @@ async function scanPath(relativePath: string, offenders: string[]): Promise<void
     const entryRelativePath = path.posix.join(relativePath, entry.name);
 
     if (entry.isDirectory()) {
-      if (entry.name === "dist" || entry.name === "node_modules") {
+      if (
+        entry.name === "dist" ||
+        entry.name === "node_modules" ||
+        entry.name === ".next"
+      ) {
         continue;
       }
 
@@ -67,9 +85,27 @@ async function scanPath(relativePath: string, offenders: string[]): Promise<void
     const hasBlockedDeclarationSuffix = entry.name.endsWith(".d.ts");
 
     if (blockedExtensions.has(extension) || hasBlockedDeclarationSuffix) {
+      if (await isAllowedDeclarationArtifact(entryRelativePath)) {
+        continue;
+      }
+
       offenders.push(entryRelativePath);
     }
   }
+}
+
+async function isAllowedDeclarationArtifact(relativePath: string): Promise<boolean> {
+  const absolutePath = path.join(repoRoot, relativePath);
+  const contents = await readFile(absolutePath, "utf8");
+  return isAllowedDeclarationArtifactContents(relativePath, contents);
+}
+
+export function isAllowedDeclarationArtifactContents(
+  relativePath: string,
+  contents: string,
+): boolean {
+  const expectedContents = allowedDeclarationArtifacts.get(relativePath);
+  return expectedContents === contents;
 }
 
 async function findTrackedBuildArtifacts(): Promise<string[]> {
@@ -84,13 +120,16 @@ async function findTrackedBuildArtifacts(): Promise<string[]> {
   return trackedFiles.filter(
     (filePath) =>
       filePath.endsWith(".tsbuildinfo") ||
+      filePath.includes("/.next/") ||
       filePath.includes("/.test-dist/") ||
       filePath.includes("/dist/"),
   );
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exitCode = 1;
+  });
+}

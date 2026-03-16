@@ -2,7 +2,7 @@
 
 Healthy Bob is a file-native health vault. It keeps human-reviewable truth in Markdown, machine-readable truth in append-only JSONL ledgers, and exposes a typed `vault-cli` surface over a shared TypeScript workspace.
 
-The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, and the CLI, along with deterministic fixtures and repo-level verification.
+The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, a local-only Next.js web surface, and the CLI, along with deterministic fixtures and repo-level verification.
 
 ## What Healthy Bob Is
 
@@ -29,6 +29,7 @@ The current repo implements:
 - source-agnostic inbox ingestion plus runtime indexing in `packages/inboxd`
 - local-first multimedia parsing and derived artifact publication in `packages/parsers`
 - a read model and export-pack builder in `packages/query`
+- a local-only Next.js observability app in `packages/web`
 - a typed `vault-cli` command surface in `packages/cli`
 - deterministic fixtures and smoke manifests under `fixtures/` and `e2e/`
 
@@ -159,7 +160,30 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | `packages/inboxd` | Source-agnostic inbox capture, raw evidence persistence, runtime indexing, and attachment parse-job orchestration. |
 | `packages/parsers` | Local-first attachment parsing, provider selection, and derived artifact publication under `derived/inbox/**`. |
 | `packages/query` | Read model assembly, lookups, list filters, summaries, and export-pack generation. |
+| `packages/web` | Local-only Next.js app that reads the vault on the server through `packages/query` and exposes a read-only observability surface. |
 | `packages/cli` | The `vault-cli` operator surface, input validation, middleware, and output envelopes. |
+
+## Local Web Observatory
+
+The repo now includes a local-only web app under `packages/web`.
+
+- It is read-only and uses the query layer on the server.
+- It requires an explicit `HEALTHYBOB_VAULT` environment variable.
+- Its wrapper scripts bind to `127.0.0.1` and block framework `.env*` reads.
+- Its search surface only indexes safe record fields and does not expose path-derived matches.
+
+Convenience scripts:
+
+- `pnpm web:dev`
+- `pnpm web:build`
+- `pnpm web:start`
+
+Example local run:
+
+```bash
+cd packages/web
+HEALTHYBOB_VAULT=../../fixtures/minimal-vault pnpm dev
+```
 
 ## Implemented Command Surface
 
