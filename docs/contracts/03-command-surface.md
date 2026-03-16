@@ -90,6 +90,17 @@ vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUr
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Those surfaces are provided by incur and are not re-frozen command-by-command in this contract.
 
+## Health Noun Grammar
+
+```text
+vault-cli <noun> scaffold --vault <path> [--request-id <id>]
+vault-cli <noun> upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli <noun> show <id|current> --vault <path> [--request-id <id>]
+vault-cli <noun> list --vault <path> [--limit <n>] [--request-id <id>]
+```
+
+The placeholder grammar above applies to the frozen health nouns listed below when they expose the shared scaffold/upsert/show/list capability bundle.
+
 ## Capability Bundles
 
 The command surface is organized around reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared capability taxonomy lives in `packages/contracts/src/command-capabilities.ts`.

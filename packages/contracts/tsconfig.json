@@ -4,7 +4,15 @@
     "noEmit": true,
     "rootDir": ".",
     "composite": false,
-    "incremental": false
+    "incremental": false,
+    "paths": {
+      "@healthybob/contracts": [
+        "packages/contracts/src/index.ts"
+      ],
+      "@healthybob/contracts/*": [
+        "packages/contracts/src/*"
+      ]
+    }
   },
   "include": [
     "src/**/*.ts",

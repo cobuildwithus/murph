@@ -69,6 +69,15 @@ function extractDocumentedCommands(commandSurface: string): string[] {
     .filter((line) => line.startsWith("vault-cli "));
 }
 
+function normalizeDocumentedCommand(command: string): string {
+  return command
+    .replace(/\s+\[--format json\|md\]/g, "")
+    .replace(/\s+\[--json\]/g, "")
+    .replace(/\s+\[--verbose\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function expectString(
   errors: string[],
   value: unknown,
@@ -282,16 +291,19 @@ async function main(): Promise<void> {
   }
 
   if (coverageMode) {
-    const documentedCommandSet = new Set(documentedCommands);
+    const documentedCommandSet = new Set(documentedCommands.map(normalizeDocumentedCommand));
+    const normalizedScenarioCommands = new Set(
+      [...seenScenarioCommands].map(normalizeDocumentedCommand),
+    );
 
     for (const command of documentedCommands) {
-      if (!seenScenarioCommands.has(command)) {
+      if (!normalizedScenarioCommands.has(normalizeDocumentedCommand(command))) {
         errors.push(`Missing smoke scenario for documented command: ${command}`);
       }
     }
 
     for (const command of seenScenarioCommands) {
-      if (!documentedCommandSet.has(command)) {
+      if (!documentedCommandSet.has(normalizeDocumentedCommand(command))) {
         errors.push(`Smoke scenario command is not in the documented baseline surface: ${command}`);
       }
     }

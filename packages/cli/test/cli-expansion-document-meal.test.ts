@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { test } from 'vitest'
-import { repoRoot } from './cli-test-helpers.js'
+import { ensureCliRuntimeArtifacts, repoRoot } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
 const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
@@ -115,6 +115,8 @@ type CliEnvelope<TData = Record<string, unknown>> =
 async function runSourceCli<TData = Record<string, unknown>>(
   args: string[],
 ): Promise<CliEnvelope<TData>> {
+  await ensureCliRuntimeArtifacts()
+
   const { stdout } = await execFileAsync(
     'pnpm',
     ['exec', 'tsx', sourceBinPath, ...withMachineOutput(args)],
@@ -125,6 +127,8 @@ async function runSourceCli<TData = Record<string, unknown>>(
 }
 
 async function runRawSourceCli(args: string[]): Promise<string> {
+  await ensureCliRuntimeArtifacts()
+
   const { stdout } = await execFileAsync(
     'pnpm',
     ['exec', 'tsx', sourceBinPath, ...args],

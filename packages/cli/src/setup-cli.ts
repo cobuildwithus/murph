@@ -69,16 +69,18 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         return context.ok(result)
       }
 
+      const vaultArgument = formatCliPathArgument(result.vault)
+
       return context.ok(result, {
         cta: {
           description: 'Suggested next commands:',
           commands: [
             {
-              command: `inbox doctor --vault "${result.vault}"`,
+              command: `inbox doctor --vault ${vaultArgument}`,
               description: 'Verify the local runtime after setup.',
             },
             {
-              command: `inbox source add imessage --id imessage:self --account self --includeOwn --vault "${result.vault}"`,
+              command: `inbox source add imessage --id imessage:self --account self --includeOwn --vault ${vaultArgument}`,
               description:
                 'Add a local iMessage connector when you are ready to ingest captures.',
             },
@@ -89,6 +91,22 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   })
 
   return cli
+}
+
+function formatCliPathArgument(value: string): string {
+  if (value === '~') {
+    return '"$HOME"'
+  }
+
+  if (value.startsWith('~/')) {
+    return `"${'$'}HOME"${quoteShellArgument(value.slice(1))}`
+  }
+
+  return quoteShellArgument(value)
+}
+
+function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`
 }
 
 export { detectSetupProgramName, isSetupInvocation }

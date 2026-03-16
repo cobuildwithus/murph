@@ -36,14 +36,25 @@ async function writeExecutable(
   await chmod(absolutePath, 0o755)
 }
 
-function makeBootstrapResult(vault: string) {
+function makeBootstrapResult(vault: string, options?: {
+  parserToolchainPath?: string
+  whisperModelPath?: string
+  whisperCommand?: string
+  createdPaths?: string[]
+  doctorChecks?: Array<{
+    name: string
+    status: 'pass' | 'warn' | 'fail'
+    message: string
+    details?: Record<string, unknown>
+  }>
+}) {
   return {
     vault,
     init: {
       runtimeDirectory: '.runtime/inboxd',
       databasePath: '.runtime/inboxd.sqlite',
       configPath: '.runtime/inboxd/config.json',
-      createdPaths: ['.runtime', '.runtime/inboxd'],
+      createdPaths: options?.createdPaths ?? ['.runtime', '.runtime/inboxd'],
       rebuiltCaptures: 0,
     },
     setup: {
@@ -64,8 +75,8 @@ function makeBootstrapResult(vault: string) {
         },
         whisper: {
           available: true,
-          command: '/usr/local/bin/whisper-cli',
-          modelPath: '/tmp/model.bin',
+          command: options?.whisperCommand ?? '/usr/local/bin/whisper-cli',
+          modelPath: options?.whisperModelPath ?? '/tmp/model.bin',
           reason: 'whisper.cpp CLI and model path configured.',
           source: 'config' as const,
         },
@@ -82,9 +93,41 @@ function makeBootstrapResult(vault: string) {
       databasePath: '.runtime/inboxd.sqlite',
       target: null,
       ok: true,
-      checks: [],
+      checks: options?.doctorChecks ?? [],
       connectors: [],
-      parserToolchain: null,
+      parserToolchain: options?.parserToolchainPath
+        ? {
+            configPath: '.runtime/parsers/toolchain.json',
+            discoveredAt: '2026-03-13T12:05:00.000Z',
+            tools: {
+              ffmpeg: {
+                available: true,
+                command: '/usr/local/bin/ffmpeg',
+                reason: 'ffmpeg CLI available.',
+                source: 'config' as const,
+              },
+              pdftotext: {
+                available: true,
+                command: '/usr/local/bin/pdftotext',
+                reason: 'pdftotext CLI available.',
+                source: 'config' as const,
+              },
+              whisper: {
+                available: true,
+                command: options.whisperCommand ?? options.parserToolchainPath,
+                modelPath: options.whisperModelPath ?? options.parserToolchainPath,
+                reason: 'whisper.cpp CLI and model path configured.',
+                source: 'config' as const,
+              },
+              paddleocr: {
+                available: true,
+                command: options.parserToolchainPath,
+                reason: 'PaddleOCR CLI available.',
+                source: 'config' as const,
+              },
+            },
+          }
+        : null,
     },
   }
 }
@@ -122,6 +165,13 @@ function makeSetupResult(vault: string): SetupResult {
     },
     vault,
     whisperModel: 'base.en',
+  }
+}
+
+function makeHomeRedactedSetupResult(): SetupResult {
+  return {
+    ...makeSetupResult('~/vault'),
+    vault: '~/vault',
   }
 }
 
@@ -387,11 +437,83 @@ test.sequential('setup CLI keeps post-setup CTAs usable when invoked as healthyb
   assert.equal(result.ok, true)
   assert.equal(
     result.meta.cta?.commands[0]?.command,
-    'healthybob inbox doctor --vault "./vault"',
+    "healthybob inbox doctor --vault './vault'",
   )
   assert.equal(
     result.meta.cta?.commands[1]?.command,
-    'healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault "./vault"',
+    "healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault './vault'",
+  )
+})
+
+test.sequential('setup CLI keeps home-relative CTA paths shell-safe', async () => {
+  const result = await runSetupCli<SetupResult>(
+    ['setup', '--vault', './vault'],
+    {
+      async setupMacos() {
+        return makeHomeRedactedSetupResult()
+      },
+    },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(
+    result.meta.cta?.commands[0]?.command,
+    `healthybob inbox doctor --vault "$HOME"'/vault'`,
+  )
+  assert.equal(
+    result.meta.cta?.commands[1]?.command,
+    `healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault "$HOME"'/vault'`,
+  )
+})
+
+test.sequential('setup CLI keeps exact-home CTA paths shell-safe', async () => {
+  const result = await runSetupCli<SetupResult>(
+    ['setup', '--vault', './vault'],
+    {
+      async setupMacos() {
+        return makeSetupResult('~')
+      },
+    },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(
+    result.meta.cta?.commands[0]?.command,
+    'healthybob inbox doctor --vault "$HOME"',
+  )
+  assert.equal(
+    result.meta.cta?.commands[1]?.command,
+    'healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault "$HOME"',
+  )
+})
+
+test.sequential('setup CLI shell-escapes CTA vault paths with shell metacharacters', async () => {
+  const absolutePathResult = await runSetupCli<SetupResult>(
+    ['setup', '--vault', './vault'],
+    {
+      async setupMacos() {
+        return makeSetupResult(`/tmp/vault $USER/it's $(pwd)`)
+      },
+    },
+  )
+  const homeRelativeResult = await runSetupCli<SetupResult>(
+    ['setup', '--vault', './vault'],
+    {
+      async setupMacos() {
+        return makeSetupResult(`~/vault $USER/it's $(pwd)`)
+      },
+    },
+  )
+
+  assert.equal(absolutePathResult.ok, true)
+  assert.equal(
+    absolutePathResult.meta.cta?.commands[0]?.command,
+    `healthybob inbox doctor --vault '/tmp/vault $USER/it'"'"'s $(pwd)'`,
+  )
+  assert.equal(homeRelativeResult.ok, true)
+  assert.equal(
+    homeRelativeResult.meta.cta?.commands[0]?.command,
+    `healthybob inbox doctor --vault "$HOME"'/vault $USER/it'"'"'s $(pwd)'`,
   )
 })
 
@@ -693,6 +815,145 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
   }
 })
 
+test.sequential('setup service redacts nested bootstrap toolchain paths under the home directory', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-redaction-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(homeRoot, 'vault')
+  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
+  const formulaPrefixes = {
+    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
+    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
+    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
+  }
+  const brewCommand = path.join(homebrewBin, 'brew')
+  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
+  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
+  const whisperFormulaCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
+  const homeWhisperCommand = path.join(homeRoot, '.healthybob', 'toolchain', 'bin', 'whisper-cli')
+  const homeWhisperModel = path.join(
+    homeRoot,
+    '.healthybob',
+    'toolchain',
+    'models',
+    'whisper',
+    'ggml-base.en.bin',
+  )
+  const homePaddle = path.join(homeRoot, '.healthybob', 'toolchain', 'venvs', 'paddlex-ocr', 'bin', 'paddlex')
+  const siblingPrefixPath = path.join(tempRoot, 'homebrew', 'bin', 'ffmpeg')
+  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  let bootstrapCalls = 0
+
+  await mkdir(vaultRoot, { recursive: true })
+  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+  await writeExecutable(brewCommand)
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperFormulaCommand)
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    downloadFile: async (_url, destinationPath) => {
+      await mkdir(path.dirname(destinationPath), { recursive: true })
+      await writeFile(destinationPath, 'model', 'utf8')
+    },
+    env: () => ({ PATH: homebrewBin }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap() {
+        bootstrapCalls += 1
+        return makeBootstrapResult(vaultRoot, {
+          createdPaths: [path.join(homeRoot, '.healthybob', 'toolchain'), '.runtime/inboxd'],
+          doctorChecks: [
+            {
+              details: {
+                artifactPaths: [homeWhisperModel, homePaddle, siblingPrefixPath],
+              },
+              message: 'Configured parser assets were discovered.',
+              name: 'parser-assets',
+              status: 'pass',
+            },
+          ],
+          parserToolchainPath: homePaddle,
+          whisperCommand: homeWhisperCommand,
+          whisperModelPath: homeWhisperModel,
+        })
+      },
+    },
+    log() {},
+    platform: () => 'darwin',
+    runCommand: async ({ file, args }) => {
+      if (path.basename(file) === 'brew' && args[0] === 'list' && args[1] === '--versions') {
+        const formula = args[2] ?? ''
+        return {
+          exitCode: installedFormulas.has(formula) ? 0 : 1,
+          stderr: '',
+          stdout: installedFormulas.has(formula) ? `${formula} 1.0.0\n` : '',
+        }
+      }
+
+      if (path.basename(file) === 'brew' && args[0] === '--prefix') {
+        const formula = args[1] as keyof typeof formulaPrefixes
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: `${formulaPrefixes[formula]}\n`,
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+    vaultServices: {
+      core: {
+        async init() {
+          throw new Error('init should not be called for an existing vault')
+        },
+      },
+    } as any,
+  })
+
+  try {
+    const result = await services.setupMacos({
+      skipOcr: true,
+      vault: vaultRoot,
+      whisperModel: 'base.en',
+    })
+
+    assert.equal(bootstrapCalls, 1)
+    assert.equal(result.bootstrap?.vault, '~/vault')
+    assert.deepEqual(result.bootstrap?.init.createdPaths, ['~/.healthybob/toolchain', '.runtime/inboxd'])
+    assert.equal(
+      result.bootstrap?.setup.tools.whisper.command,
+      '~/.healthybob/toolchain/bin/whisper-cli',
+    )
+    assert.equal(
+      result.bootstrap?.setup.tools.whisper.modelPath,
+      '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+    )
+    assert.equal(
+      result.bootstrap?.doctor.parserToolchain?.tools.whisper.command,
+      '~/.healthybob/toolchain/bin/whisper-cli',
+    )
+    assert.equal(
+      result.bootstrap?.doctor.parserToolchain?.tools.whisper.modelPath,
+      '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+    )
+    assert.equal(
+      result.bootstrap?.doctor.parserToolchain?.tools.paddleocr.command,
+      '~/.healthybob/toolchain/venvs/paddlex-ocr/bin/paddlex',
+    )
+    assert.deepEqual(
+      result.bootstrap?.doctor.checks[0]?.details?.artifactPaths,
+      [
+        '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+        '~/.healthybob/toolchain/venvs/paddlex-ocr/bin/paddlex',
+        siblingPrefixPath,
+      ],
+    )
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test('setup routing helpers keep the setup alias stable', () => {
   assert.equal(isSetupInvocation(['setup', '--dryRun']), true)
   assert.equal(isSetupInvocation(['inbox', 'doctor']), false)
@@ -703,9 +964,25 @@ test('setup routing helpers keep the setup alias stable', () => {
     isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'healthybob'),
     true,
   )
+  assert.equal(
+    isSetupInvocation(['--filter-output', 'steps[0].title', '--help'], 'healthybob'),
+    true,
+  )
+  assert.equal(
+    isSetupInvocation(['--token-limit', '10', '--help'], 'healthybob'),
+    true,
+  )
+  assert.equal(
+    isSetupInvocation(['--token-offset', '5', 'setup', '--dry-run'], 'healthybob'),
+    true,
+  )
   assert.equal(isSetupInvocation(['inbox', 'doctor'], 'healthybob'), false)
   assert.equal(
     isSetupInvocation(['--format', 'json', 'inbox', 'doctor'], 'healthybob'),
+    false,
+  )
+  assert.equal(
+    isSetupInvocation(['--token-limit', '10', 'inbox', 'doctor'], 'healthybob'),
     false,
   )
   assert.equal(

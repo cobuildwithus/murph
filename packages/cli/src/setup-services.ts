@@ -114,7 +114,12 @@ function whisperModelDownloadUrl(model: WhisperModel): string {
   return `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${modelFileNames[model]}`
 }
 
-const rootOptionsWithValues = new Set(['--format'])
+const rootOptionsWithValues = new Set([
+  '--filter-output',
+  '--format',
+  '--token-limit',
+  '--token-offset',
+])
 
 function buildBaseFormulaSpecs(): ToolFormulaSpec[] {
   return [
@@ -412,10 +417,7 @@ export function createSetupServices(
       bootstrap:
         bootstrap === null
           ? null
-          : {
-              ...bootstrap,
-              vault: redactHomePath(bootstrap.vault, homeDirectory),
-            },
+          : redactHomePathsInValue(bootstrap, homeDirectory),
       dryRun,
       notes: notes.map((note) => redactHomePathInText(note, homeDirectory)),
       platform,
@@ -1017,7 +1019,31 @@ function redactHomePath(value: string, homeDirectory: string): string {
 function redactHomePathInText(text: string, homeDirectory: string): string {
   const normalizedHome = path.resolve(homeDirectory)
   const escapedHome = escapeRegExp(normalizedHome)
-  return text.replace(new RegExp(escapedHome, 'g'), '~')
+  return text.replace(new RegExp(`${escapedHome}(?=$|[/\\\\])`, 'g'), '~')
+}
+
+function redactHomePathsInValue<T>(
+  value: T,
+  homeDirectory: string,
+): T {
+  if (typeof value === 'string') {
+    return redactHomePathInText(value, homeDirectory) as T
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactHomePathsInValue(entry, homeDirectory)) as T
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        redactHomePathsInValue(entry, homeDirectory),
+      ]),
+    ) as T
+  }
+
+  return value
 }
 
 function escapeRegExp(value: string): string {

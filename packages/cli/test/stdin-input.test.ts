@@ -50,7 +50,10 @@ test.sequential('payload-based commands accept stdin via --input -', async () =>
 
     assert.equal(profileUpsert.ok, true)
     assert.match(requireData(profileUpsert).snapshotId, /^psnap_/u)
-    assert.match(requireData(profileUpsert).currentProfilePath, /^bank\/current\//u)
+    assert.equal(
+      requireData(profileUpsert).currentProfilePath,
+      'bank/profile/current.md',
+    )
     assert.deepEqual(requireData(profileUpsert).profile.topGoalIds, [goalId])
 
     const profileShow = await runCli<{

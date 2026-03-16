@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 export interface CliSuccessEnvelope<TData = Record<string, unknown>> {
   ok: true
@@ -45,6 +47,31 @@ export type CliEnvelope<TData = Record<string, unknown>> =
 export const packageDir = fileURLToPath(new URL('../', import.meta.url))
 export const repoRoot = path.resolve(packageDir, '../..')
 export const binPath = path.join(packageDir, 'dist/bin.js')
+const execFileAsync = promisify(execFile)
+
+const requiredRuntimeArtifactPaths = [
+  path.join(repoRoot, 'packages/contracts/dist/index.js'),
+  path.join(repoRoot, 'packages/runtime-state/dist/index.js'),
+  path.join(repoRoot, 'packages/core/dist/index.js'),
+  path.join(repoRoot, 'packages/importers/dist/index.js'),
+  path.join(repoRoot, 'packages/query/dist/index.js'),
+  path.join(repoRoot, 'packages/inboxd/dist/index.js'),
+  path.join(repoRoot, 'packages/parsers/dist/index.js'),
+  binPath,
+]
+
+const runtimeBuildSteps: Array<{ cwd: string; args: string[] }> = [
+  { cwd: repoRoot, args: ['--dir', 'packages/contracts', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/runtime-state', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/core', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/importers', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/query', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/inboxd', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/parsers', 'build'] },
+  { cwd: packageDir, args: ['build'] },
+]
+
+let cliRuntimeArtifactsPromise: Promise<void> | null = null
 
 export async function runCli<TData = Record<string, unknown>>(
   args: string[],
@@ -113,6 +140,27 @@ export function commandOutputFromError(error: unknown): string | null {
   return decodeCommandOutput(maybeOutput.stdout) ?? decodeCommandOutput(maybeOutput.stderr)
 }
 
+export async function ensureCliRuntimeArtifacts(): Promise<void> {
+  if (requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))) {
+    return
+  }
+
+  if (cliRuntimeArtifactsPromise === null) {
+    cliRuntimeArtifactsPromise = (async () => {
+      for (const step of runtimeBuildSteps) {
+        await execFileAsync('pnpm', step.args, {
+          cwd: step.cwd,
+          encoding: 'utf8',
+        })
+      }
+    })().finally(() => {
+      cliRuntimeArtifactsPromise = null
+    })
+  }
+
+  await cliRuntimeArtifactsPromise
+}
+
 function decodeCommandOutput(output: Buffer | string | undefined): string | null {
   if (typeof output === 'string') {
     return output.trim().length > 0 ? output : null
@@ -146,6 +194,8 @@ async function execCli(
     stdin?: string
   },
 ) {
+  await ensureCliRuntimeArtifacts()
+
   return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = execFile(
       process.execPath,

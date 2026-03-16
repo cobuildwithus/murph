@@ -348,6 +348,64 @@ test("meal, journal, experiment, and samples mutations write expected contract d
   assert.equal(validation.valid, true);
 });
 
+test("importSamples normalizes uppercase unit aliases and falls back invalid source metadata", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const imported = await importSamples({
+    vaultRoot,
+    stream: "glucose",
+    unit: "MG/DL",
+    source: 42 as unknown as string,
+    quality: { invalid: true } as unknown as string,
+    samples: [
+      {
+        recordedAt: "2026-01-15T10:00:00.000Z",
+        value: 95,
+      },
+    ],
+  });
+  const record = expectRecord<SampleRecord>(imported.records[0]);
+
+  assert.equal(record.stream, "glucose");
+  assert.equal(record.unit, "mg_dL");
+  assert.equal(record.source, "import");
+  assert.equal(record.quality, "raw");
+});
+
+test("importSamples rejects invalid sample objects and unsupported units", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      importSamples({
+        vaultRoot,
+        stream: "heart_rate",
+        unit: "bpm",
+        samples: [null] as unknown as Array<Record<string, unknown>>,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLE",
+  );
+
+  await assert.rejects(
+    () =>
+      importSamples({
+        vaultRoot,
+        stream: "glucose",
+        unit: "mmol/L",
+        samples: [
+          {
+            recordedAt: "2026-01-15T10:00:00.000Z",
+            value: 95,
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLE_UNIT",
+  );
+});
+
 test("createExperiment returns the existing experiment for idempotent retries", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });

@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { test } from 'vitest'
-import { commandOutputFromError, repoRoot } from './cli-test-helpers.js'
+import {
+  commandOutputFromError,
+  ensureCliRuntimeArtifacts,
+  repoRoot,
+} from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
 const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
@@ -40,6 +44,8 @@ type CliEnvelope<TData = Record<string, unknown>> =
 async function runSourceCli<TData = Record<string, unknown>>(
   args: string[],
 ): Promise<CliEnvelope<TData>> {
+  await ensureCliRuntimeArtifacts()
+
   try {
     const { stdout } = await execFileAsync(
       'pnpm',
@@ -59,6 +65,8 @@ async function runSourceCli<TData = Record<string, unknown>>(
 }
 
 async function runRawSourceCli(args: string[]): Promise<string> {
+  await ensureCliRuntimeArtifacts()
+
   try {
     const { stdout } = await execFileAsync(
       'pnpm',
@@ -358,6 +366,7 @@ Afternoon crash after pasta lunch returned.
       total: number
     }>([
       'search',
+      'query',
       '--text',
       'afternoon crash pasta',
       '--from',
@@ -374,6 +383,7 @@ Afternoon crash after pasta lunch returned.
       total: number
     }>([
       'search',
+      'query',
       '--text',
       'afternoon crash pasta',
       '--vault',

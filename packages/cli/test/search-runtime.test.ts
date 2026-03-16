@@ -10,6 +10,7 @@ import { test } from 'vitest'
 import {
   type CliEnvelope,
   commandOutputFromError,
+  ensureCliRuntimeArtifacts,
   repoRoot,
   requireData,
   runCli,
@@ -31,6 +32,8 @@ interface RetrievalFixture {
 async function runSourceCli<TData = Record<string, unknown>>(
   args: string[],
 ): Promise<CliEnvelope<TData>> {
+  await ensureCliRuntimeArtifacts()
+
   try {
     const { stdout } = await execFileAsync(
       'pnpm',
