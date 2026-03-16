@@ -74,11 +74,11 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
           description: 'Suggested next commands:',
           commands: [
             {
-              command: `${commandName} inbox doctor --vault "${result.vault}"`,
+              command: `inbox doctor --vault "${result.vault}"`,
               description: 'Verify the local runtime after setup.',
             },
             {
-              command: `${commandName} inbox source add imessage --id imessage:self --account self --includeOwn --vault "${result.vault}"`,
+              command: `inbox source add imessage --id imessage:self --account self --includeOwn --vault "${result.vault}"`,
               description:
                 'Add a local iMessage connector when you are ready to ingest captures.',
             },

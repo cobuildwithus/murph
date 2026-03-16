@@ -77,6 +77,21 @@ interface FormulaInstallResult {
   env: NodeJS.ProcessEnv
 }
 
+type FormulaCommandKey = 'ffmpegCommand' | 'pdftotextCommand' | 'whisperCommand'
+
+interface FormulaSpec {
+  commandCandidates: string[]
+  formula: string
+  id: string
+  installDetail: string
+  missingPlanDetail: string
+  title: string
+}
+
+interface ToolFormulaSpec extends FormulaSpec {
+  key: FormulaCommandKey
+}
+
 const DEFAULT_TOOLCHAIN_DIRECTORY = path.join('.healthybob', 'toolchain')
 const PADDLEX_VENV_NAME = 'paddlex-ocr'
 const PADDLEX_REQUIREMENT = 'paddlex[ocr]'
@@ -97,6 +112,55 @@ const modelFileNames: Record<WhisperModel, string> = {
 
 function whisperModelDownloadUrl(model: WhisperModel): string {
   return `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${modelFileNames[model]}`
+}
+
+const rootOptionsWithValues = new Set(['--format'])
+
+function buildBaseFormulaSpecs(): ToolFormulaSpec[] {
+  return [
+    {
+      commandCandidates: ['ffmpeg'],
+      formula: 'ffmpeg',
+      id: 'ffmpeg',
+      installDetail: 'Installed ffmpeg through Homebrew.',
+      key: 'ffmpegCommand',
+      missingPlanDetail:
+        'Would install ffmpeg through Homebrew for audio/video normalization.',
+      title: 'ffmpeg',
+    },
+    {
+      commandCandidates: ['pdftotext'],
+      formula: 'poppler',
+      id: 'pdftotext',
+      installDetail: 'Installed poppler so pdftotext is available for PDF parsing.',
+      key: 'pdftotextCommand',
+      missingPlanDetail:
+        'Would install poppler through Homebrew so pdftotext is available for PDF parsing.',
+      title: 'pdftotext',
+    },
+    {
+      commandCandidates: ['whisper-cli', 'whisper-cpp'],
+      formula: 'whisper-cpp',
+      id: 'whisper-cpp',
+      installDetail: 'Installed whisper.cpp through Homebrew.',
+      key: 'whisperCommand',
+      missingPlanDetail:
+        'Would install whisper.cpp through Homebrew for local transcription.',
+      title: 'whisper.cpp',
+    },
+  ]
+}
+
+function buildPythonFormulaSpec(): FormulaSpec {
+  return {
+    commandCandidates: ['python3.12', 'python3', 'python'],
+    formula: 'python@3.12',
+    id: 'python',
+    installDetail: 'Installed Python 3.12 through Homebrew for OCR tooling.',
+    missingPlanDetail:
+      'Would install Python 3.12 through Homebrew for OCR tooling.',
+    title: 'Python 3.12',
+  }
 }
 
 export function createSetupServices(
@@ -167,61 +231,30 @@ export function createSetupServices(
       title: 'Local toolchain root',
     })
 
-    const ffmpegResult = await ensureBrewFormula({
-      brewState: state,
-      commandCandidates: ['ffmpeg'],
-      dryRun,
-      formula: 'ffmpeg',
-      id: 'ffmpeg',
-      installDetail: 'Installed ffmpeg through Homebrew.',
-      kind: 'install',
-      missingPlanDetail:
-        'Would install ffmpeg through Homebrew for audio/video normalization.',
-      runCommand,
-      steps,
-      title: 'ffmpeg',
-    })
-    state = {
-      ...state,
-      env: ffmpegResult.env,
+    const formulaCommands: Record<FormulaCommandKey, string | null> = {
+      ffmpegCommand: null,
+      pdftotextCommand: null,
+      whisperCommand: null,
     }
-
-    const pdftotextResult = await ensureBrewFormula({
-      brewState: state,
-      commandCandidates: ['pdftotext'],
-      dryRun,
-      formula: 'poppler',
-      id: 'pdftotext',
-      installDetail: 'Installed poppler so pdftotext is available for PDF parsing.',
-      kind: 'install',
-      missingPlanDetail:
-        'Would install poppler through Homebrew so pdftotext is available for PDF parsing.',
-      runCommand,
-      steps,
-      title: 'pdftotext',
-    })
-    state = {
-      ...state,
-      env: pdftotextResult.env,
-    }
-
-    const whisperCommandResult = await ensureBrewFormula({
-      brewState: state,
-      commandCandidates: ['whisper-cli', 'whisper-cpp'],
-      dryRun,
-      formula: 'whisper-cpp',
-      id: 'whisper-cpp',
-      installDetail: 'Installed whisper.cpp through Homebrew.',
-      kind: 'install',
-      missingPlanDetail:
-        'Would install whisper.cpp through Homebrew for local transcription.',
-      runCommand,
-      steps,
-      title: 'whisper.cpp',
-    })
-    state = {
-      ...state,
-      env: whisperCommandResult.env,
+    for (const formulaSpec of buildBaseFormulaSpecs()) {
+      const formulaResult = await ensureBrewFormula({
+        brewState: state,
+        commandCandidates: formulaSpec.commandCandidates,
+        dryRun,
+        formula: formulaSpec.formula,
+        id: formulaSpec.id,
+        installDetail: formulaSpec.installDetail,
+        kind: 'install',
+        missingPlanDetail: formulaSpec.missingPlanDetail,
+        runCommand,
+        steps,
+        title: formulaSpec.title,
+      })
+      state = {
+        ...state,
+        env: formulaResult.env,
+      }
+      formulaCommands[formulaSpec.key] = formulaResult.command
     }
 
     const whisperModelPath = path.join(
@@ -269,19 +302,19 @@ export function createSetupServices(
         'OCR was skipped because PaddlePaddle does not currently publish macOS x86_64 support.',
       )
     } else {
+      const pythonFormulaSpec = buildPythonFormulaSpec()
       const pythonResult = await ensureBrewFormula({
         brewState: state,
-        commandCandidates: ['python3.12', 'python3', 'python'],
+        commandCandidates: pythonFormulaSpec.commandCandidates,
         dryRun,
-        formula: 'python@3.12',
-        id: 'python',
-        installDetail: 'Installed Python 3.12 through Homebrew for OCR tooling.',
+        formula: pythonFormulaSpec.formula,
+        id: pythonFormulaSpec.id,
+        installDetail: pythonFormulaSpec.installDetail,
         kind: 'install',
-        missingPlanDetail:
-          'Would install Python 3.12 through Homebrew for OCR tooling.',
+        missingPlanDetail: pythonFormulaSpec.missingPlanDetail,
         runCommand,
         steps,
-        title: 'Python 3.12',
+        title: pythonFormulaSpec.title,
       })
       state = {
         ...state,
@@ -299,9 +332,9 @@ export function createSetupServices(
     }
 
     const tools: SetupTools = {
-      ffmpegCommand: ffmpegResult.command,
-      pdftotextCommand: pdftotextResult.command,
-      whisperCommand: whisperCommandResult.command,
+      ffmpegCommand: formulaCommands.ffmpegCommand,
+      pdftotextCommand: formulaCommands.pdftotextCommand,
+      whisperCommand: formulaCommands.whisperCommand,
       whisperModelPath,
       paddleocrCommand,
     }
@@ -333,14 +366,16 @@ export function createSetupServices(
         }),
       )
     } else {
-      await vaultServices.core.init({
-        requestId,
-        vault,
-      })
+      if (!hasExistingVault) {
+        await vaultServices.core.init({
+          requestId,
+          vault,
+        })
+      }
       steps.push(
         createStep({
           detail: hasExistingVault
-            ? `Refreshed the existing vault scaffold at ${vault}.`
+            ? `Reusing the existing vault at ${vault}.`
             : `Initialized a new vault scaffold at ${vault}.`,
           id: 'vault-init',
           kind: 'configure',
@@ -411,8 +446,44 @@ export function detectSetupProgramName(argv0: string | undefined): string {
   return baseName === 'healthybob' ? 'healthybob' : 'vault-cli'
 }
 
-export function isSetupInvocation(args: string[]): boolean {
-  return args[0] === 'setup'
+function resolveEffectiveTopLevelToken(args: string[]): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]
+    if (!token) {
+      continue
+    }
+
+    if (token === '--') {
+      return args[index + 1] ?? null
+    }
+
+    if (!token.startsWith('-')) {
+      return token
+    }
+
+    if (rootOptionsWithValues.has(token)) {
+      index += 1
+      continue
+    }
+  }
+
+  return null
+}
+
+export function isSetupInvocation(
+  args: string[],
+  programName = 'vault-cli',
+): boolean {
+  const commandToken = resolveEffectiveTopLevelToken(args)
+  if (commandToken === 'setup') {
+    return true
+  }
+
+  if (programName !== 'healthybob') {
+    return false
+  }
+
+  return commandToken === null || commandToken === 'help'
 }
 
 function createStep(input: {

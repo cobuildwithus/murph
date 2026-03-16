@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { test } from 'vitest'
 import {
   createSetupCli,
@@ -10,7 +19,13 @@ import {
 } from '../src/setup-cli.js'
 import { createSetupServices } from '../src/setup-services.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
-import { requireData, type CliEnvelope } from './cli-test-helpers.js'
+import {
+  repoRoot,
+  requireData,
+  type CliEnvelope,
+} from './cli-test-helpers.js'
+
+const execFileAsync = promisify(execFile)
 
 async function writeExecutable(
   absolutePath: string,
@@ -74,6 +89,42 @@ function makeBootstrapResult(vault: string) {
   }
 }
 
+function makeSetupResult(vault: string): SetupResult {
+  return {
+    arch: 'arm64',
+    bootstrap: makeBootstrapResult(vault),
+    dryRun: false,
+    notes: [],
+    platform: 'darwin',
+    steps: [
+      {
+        detail: `Initialized a new vault scaffold at ${vault}.`,
+        id: 'vault-init',
+        kind: 'configure',
+        status: 'completed',
+        title: 'Vault initialization',
+      },
+      {
+        detail: 'Wrote parser toolchain config under .runtime/parsers and completed inbox doctor checks.',
+        id: 'inbox-bootstrap',
+        kind: 'configure',
+        status: 'completed',
+        title: 'Inbox bootstrap',
+      },
+    ],
+    toolchainRoot: '~/.healthybob/toolchain',
+    tools: {
+      ffmpegCommand: '/usr/local/bin/ffmpeg',
+      paddleocrCommand: '/usr/local/bin/paddlex',
+      pdftotextCommand: '/usr/local/bin/pdftotext',
+      whisperCommand: '/usr/local/bin/whisper-cli',
+      whisperModelPath: '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+    },
+    vault,
+    whisperModel: 'base.en',
+  }
+}
+
 async function runSetupCli<TData>(
   args: string[],
   services: ReturnType<typeof createSetupServices> | { setupMacos(input: any): Promise<any> },
@@ -94,6 +145,74 @@ async function runSetupCli<TData>(
   })
 
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
+}
+
+async function runSetupAliasRaw(
+  aliasName: string,
+  args: string[],
+): Promise<string> {
+  const aliasRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-alias-'))
+  const aliasPath = path.join(aliasRoot, aliasName)
+
+  try {
+    await writeFile(
+      aliasPath,
+      `#!/usr/bin/env node
+;(async () => {
+  const { join } = await import('node:path')
+  const { pathToFileURL } = await import('node:url')
+  await import(pathToFileURL(join(process.cwd(), 'packages/cli/src/bin.ts')).href)
+})().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
+`,
+      'utf8',
+    )
+    await chmod(aliasPath, 0o755)
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ['--import=tsx', aliasPath, ...args],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    )
+    return stdout.trim()
+  } finally {
+    await rm(aliasRoot, { recursive: true, force: true })
+  }
+}
+
+async function runSetupWrapper(
+  args: string[],
+  envOverrides: NodeJS.ProcessEnv,
+): Promise<{ stdout: string; stderr: string }> {
+  return await execFileAsync('bash', [path.join(repoRoot, 'scripts/setup-macos.sh'), ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ...envOverrides,
+    },
+  })
+}
+
+async function readOptionalText(absolutePath: string): Promise<string> {
+  try {
+    return await readFile(absolutePath, 'utf8')
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return ''
+    }
+    throw error
+  }
 }
 
 test.sequential('setup CLI dry-run returns a macOS plan without mutating services', async () => {
@@ -178,6 +297,102 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
   } finally {
     await rm(homeRoot, { recursive: true, force: true })
   }
+})
+
+test.sequential('setup CLI dry-run reuses an existing vault without mutating services', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-existing-dryrun-home-'))
+  const vaultRoot = path.join(homeRoot, 'vault')
+  let coreInitCalls = 0
+  let bootstrapCalls = 0
+
+  await mkdir(vaultRoot, { recursive: true })
+  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    env: () => ({ PATH: '' }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap() {
+        bootstrapCalls += 1
+        return makeBootstrapResult(vaultRoot)
+      },
+    },
+    log() {},
+    platform: () => 'darwin',
+    runCommand: async ({ file, args }) => {
+      if (path.basename(file) === 'brew' && args[0] === 'list' && args[1] === '--versions') {
+        return {
+          exitCode: 1,
+          stderr: '',
+          stdout: '',
+        }
+      }
+
+      if (path.basename(file) === 'brew' && args[0] === '--prefix') {
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: '',
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+    vaultServices: {
+      core: {
+        async init() {
+          coreInitCalls += 1
+          return {
+            created: true,
+            directories: [],
+            files: [],
+            vault: vaultRoot,
+          }
+        },
+      },
+    } as any,
+  })
+
+  try {
+    const result = await runSetupCli<SetupResult>(
+      ['setup', '--dryRun', '--vault', vaultRoot],
+      services,
+    )
+    const data = requireData(result)
+    const vaultInitStep = data.steps.find((step) => step.id === 'vault-init')
+    const inboxBootstrapStep = data.steps.find((step) => step.id === 'inbox-bootstrap')
+
+    assert.equal(data.dryRun, true)
+    assert.equal(coreInitCalls, 0)
+    assert.equal(bootstrapCalls, 0)
+    assert.equal(vaultInitStep?.status, 'reused')
+    assert.match(String(vaultInitStep?.detail), /Would reuse the existing vault/u)
+    assert.equal(inboxBootstrapStep?.status, 'planned')
+  } finally {
+    await rm(homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup CLI keeps post-setup CTAs usable when invoked as healthybob', async () => {
+  const result = await runSetupCli<SetupResult>(
+    ['setup', '--vault', './vault'],
+    {
+      async setupMacos() {
+        return makeSetupResult('./vault')
+      },
+    },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(
+    result.meta.cta?.commands[0]?.command,
+    'healthybob inbox doctor --vault "./vault"',
+  )
+  assert.equal(
+    result.meta.cta?.commands[1]?.command,
+    'healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault "./vault"',
+  )
 })
 
 test.sequential('setup service provisions formulas, downloads the model, and bootstraps the vault', async () => {
@@ -364,9 +579,135 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   }
 })
 
+test.sequential('setup service reuses an existing vault and still bootstraps inbox runtime', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-existing-vault-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
+  const formulaPrefixes = {
+    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
+    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
+    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
+  }
+  const brewCommand = path.join(homebrewBin, 'brew')
+  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
+  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
+  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
+  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const initCalls: Array<{ requestId: string | null; vault: string }> = []
+  const bootstrapCalls: Array<Record<string, unknown>> = []
+
+  await mkdir(vaultRoot, { recursive: true })
+  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+  await writeExecutable(brewCommand)
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperCommand)
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    downloadFile: async (_url, destinationPath) => {
+      await mkdir(path.dirname(destinationPath), { recursive: true })
+      await writeFile(destinationPath, 'model', 'utf8')
+    },
+    env: () => ({ PATH: homebrewBin }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap(input) {
+        bootstrapCalls.push(input as unknown as Record<string, unknown>)
+        return makeBootstrapResult(vaultRoot)
+      },
+    },
+    log() {},
+    platform: () => 'darwin',
+    runCommand: async ({ file, args }) => {
+      const baseName = path.basename(file)
+
+      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
+        const formula = args[2] ?? ''
+        return installedFormulas.has(formula)
+          ? {
+              exitCode: 0,
+              stderr: '',
+              stdout: `${formula} 1.0.0\n`,
+            }
+          : {
+              exitCode: 1,
+              stderr: '',
+              stdout: '',
+            }
+      }
+
+      if (baseName === 'brew' && args[0] === '--prefix') {
+        const formula = args[1] as keyof typeof formulaPrefixes
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: `${formulaPrefixes[formula]}\n`,
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+    vaultServices: {
+      core: {
+        async init(input: { requestId: string | null; vault: string }) {
+          initCalls.push(input)
+          return {
+            created: true,
+            directories: [],
+            files: [],
+            vault: input.vault,
+          }
+        },
+      },
+    } as any,
+  })
+
+  try {
+    const result = await services.setupMacos({
+      requestId: 'req-existing',
+      skipOcr: true,
+      vault: vaultRoot,
+      whisperModel: 'base.en',
+    })
+
+    assert.equal(initCalls.length, 0)
+    assert.equal(bootstrapCalls.length, 1)
+    assert.equal(bootstrapCalls[0]?.vault, vaultRoot)
+    assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
+    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
+    assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
+    assert.equal(result.bootstrap?.vault, vaultRoot)
+    assert.equal(
+      result.steps.some(
+        (step) =>
+          step.id === 'vault-init' &&
+          step.status === 'reused' &&
+          /Reusing the existing vault/u.test(step.detail),
+      ),
+      true,
+    )
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test('setup routing helpers keep the setup alias stable', () => {
   assert.equal(isSetupInvocation(['setup', '--dryRun']), true)
   assert.equal(isSetupInvocation(['inbox', 'doctor']), false)
+  assert.equal(isSetupInvocation([], 'healthybob'), true)
+  assert.equal(isSetupInvocation(['--help'], 'healthybob'), true)
+  assert.equal(isSetupInvocation(['--verbose', '--format', 'json'], 'healthybob'), true)
+  assert.equal(
+    isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'healthybob'),
+    true,
+  )
+  assert.equal(isSetupInvocation(['inbox', 'doctor'], 'healthybob'), false)
+  assert.equal(
+    isSetupInvocation(['--format', 'json', 'inbox', 'doctor'], 'healthybob'),
+    false,
+  )
   assert.equal(
     detectSetupProgramName('/usr/local/bin/healthybob'),
     'healthybob',
@@ -378,6 +719,138 @@ test('setup routing helpers keep the setup alias stable', () => {
 
   const cli = createSetupCli({ commandName: 'healthybob' })
   assert.ok(cli)
+})
+
+test.sequential('healthybob alias routes empty and help invocations to setup help', async () => {
+  const help = await runSetupAliasRaw('healthybob', ['--help'])
+  const emptyInvocation = await runSetupAliasRaw('healthybob', [])
+  const inboxHelp = await runSetupAliasRaw('healthybob', ['inbox', 'doctor', '--help'])
+
+  assert.match(help, /Healthy Bob local machine setup helpers\./u)
+  assert.match(help, /setup\s+Provision the macOS parser\/runtime toolchain/u)
+  assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
+  assert.match(emptyInvocation, /Healthy Bob local machine setup helpers\./u)
+  assert.doesNotMatch(inboxHelp, /Healthy Bob local machine setup helpers\./u)
+  assert.match(inboxHelp, /vault-cli inbox doctor/u)
+})
+
+test.sequential('setup-macos wrapper rejects non-macOS hosts before bootstrapping', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wrapper-linux-'))
+  const stubBin = path.join(tempRoot, 'bin')
+  const callLog = path.join(tempRoot, 'calls.log')
+  const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
+
+  await writeExecutable(path.join(stubBin, 'uname'), '#!/usr/bin/env bash\necho Linux\n')
+  await writeExecutable(
+    path.join(stubBin, 'brew'),
+    '#!/usr/bin/env bash\nprintf "brew\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+  await writeExecutable(
+    path.join(stubBin, 'node'),
+    '#!/usr/bin/env bash\nprintf "node\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+  await writeExecutable(
+    path.join(stubBin, 'corepack'),
+    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+
+  try {
+    await assert.rejects(
+      runSetupWrapper(['--vault', './vault'], {
+        CALL_LOG: callLog,
+        HOME: tempRoot,
+        PATH: pathValue,
+      }),
+      (error: unknown) => {
+        assert.equal(typeof error, 'object')
+        assert.match(String((error as { stderr?: string }).stderr ?? ''), /macOS only/u)
+        return true
+      },
+    )
+    assert.equal(await readOptionalText(callLog), '')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup-macos wrapper stays macOS-only even for dry-run invocations', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wrapper-linux-dryrun-'))
+  const stubBin = path.join(tempRoot, 'bin')
+  const callLog = path.join(tempRoot, 'calls.log')
+  const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
+
+  await writeExecutable(path.join(stubBin, 'uname'), '#!/usr/bin/env bash\necho Linux\n')
+  await writeExecutable(
+    path.join(stubBin, 'brew'),
+    '#!/usr/bin/env bash\nprintf "brew\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+  await writeExecutable(
+    path.join(stubBin, 'node'),
+    '#!/usr/bin/env bash\nprintf "node\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+  await writeExecutable(
+    path.join(stubBin, 'corepack'),
+    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+
+  try {
+    await assert.rejects(
+      runSetupWrapper(['--dryRun', '--vault', './vault'], {
+        CALL_LOG: callLog,
+        HOME: tempRoot,
+        PATH: pathValue,
+      }),
+      (error: unknown) => {
+        assert.equal(typeof error, 'object')
+        assert.match(String((error as { stderr?: string }).stderr ?? ''), /macOS only/u)
+        return true
+      },
+    )
+    assert.equal(await readOptionalText(callLog), '')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup-macos wrapper dry-run prints a plan without mutating the machine', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wrapper-dryrun-'))
+  const stubBin = path.join(tempRoot, 'bin')
+  const callLog = path.join(tempRoot, 'calls.log')
+  const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
+
+  await writeExecutable(path.join(stubBin, 'uname'), '#!/usr/bin/env bash\necho Darwin\n')
+  await writeExecutable(
+    path.join(stubBin, 'brew'),
+    '#!/usr/bin/env bash\nprintf "brew\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+  await writeExecutable(
+    path.join(stubBin, 'node'),
+    '#!/usr/bin/env bash\nprintf "node\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+  await writeExecutable(
+    path.join(stubBin, 'corepack'),
+    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "${CALL_LOG}"\nexit 99\n',
+  )
+
+  try {
+    const result = await runSetupWrapper(['--dry-run', '--vault', './vault'], {
+      CALL_LOG: callLog,
+      HOME: tempRoot,
+      PATH: pathValue,
+    })
+
+    assert.match(result.stdout, /Dry run requested/u)
+    assert.match(result.stdout, /Ensure Node >= 22\.16\.0/u)
+    assert.match(result.stdout, /corepack pnpm install/u)
+    assert.match(
+      result.stdout,
+      /node packages\/cli\/dist\/bin\.js setup --dry-run --vault \.\/vault/u,
+    )
+    assert.equal(result.stderr, '')
+    assert.equal(await readOptionalText(callLog), '')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
 })
 
 test('setup service rejects non-macOS hosts', async () => {

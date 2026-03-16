@@ -1,15 +1,72 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "$(uname -s)" != "Darwin" ]; then
+  printf 'scripts/setup-macos.sh supports macOS only.\n' >&2
+  exit 1
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-required_node="22.16.0"
-pnpm_version="9.15.9"
+required_node="$(sed -nE 's/^[[:space:]]*"node":[[:space:]]*">=([^"]+)".*/\1/p' package.json | head -n 1)"
+pnpm_version="$(sed -nE 's/^[[:space:]]*"packageManager":[[:space:]]*"pnpm@([^+\"]+).*/\1/p' package.json | head -n 1)"
+
+if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
+  printf 'Unable to resolve Node/pnpm versions from package.json.\n' >&2
+  exit 1
+fi
 
 log() {
   printf '[healthybob-setup] %s\n' "$*"
 }
+
+has_dry_run_flag() {
+  for arg in "$@"; do
+    case "$arg" in
+      --dryRun|--dry-run|--dryRun=*|--dry-run=*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+render_command_args() {
+  local rendered=()
+
+  for arg in "$@"; do
+    rendered+=("$(printf '%q' "$arg")")
+  done
+
+  printf '%s' "${rendered[*]}"
+}
+
+print_dry_run_plan() {
+  local delegated_args
+
+  delegated_args="$(render_command_args "$@")"
+
+  log 'Dry run requested. This wrapper will not modify the machine or workspace.'
+  printf '%s\n' 'Planned wrapper steps:'
+  printf '1. Ensure Homebrew is available.\n'
+  printf '2. Ensure Node >= %s is available.\n' "$required_node"
+  printf '3. Activate pnpm@%s through corepack.\n' "$pnpm_version"
+  printf '%s\n' '4. Install workspace dependencies with `corepack pnpm install`.'
+  printf '%s\n' '5. Build the workspace with `corepack pnpm build`.'
+  if [ -n "$delegated_args" ]; then
+    printf '6. Delegate to `node packages/cli/dist/bin.js setup %s`.\n' "$delegated_args"
+  else
+    printf '%s\n' '6. Delegate to `node packages/cli/dist/bin.js setup`.'
+  fi
+  printf '%s\n' 'Run the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview.'
+}
+
+if has_dry_run_flag "$@"; then
+  print_dry_run_plan "$@"
+  exit 0
+fi
 
 ensure_brew_shellenv() {
   if command -v brew >/dev/null 2>&1; then
@@ -49,8 +106,10 @@ has_required_node() {
     return 1
   fi
 
-  node - <<'NODE'
-const required = [22, 16, 0]
+  REQUIRED_NODE_VERSION="$required_node" node - <<'NODE'
+const required = (process.env.REQUIRED_NODE_VERSION ?? '')
+  .split('.')
+  .map((value) => Number.parseInt(value, 10))
 const current = process.versions.node.split('.').map((value) => Number.parseInt(value, 10))
 for (let index = 0; index < required.length; index += 1) {
   const left = current[index] ?? 0

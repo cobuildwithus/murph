@@ -8,10 +8,11 @@ import {
 } from './setup-cli.js'
 
 const argv = process.argv.slice(2)
+const setupProgramName = detectSetupProgramName(process.argv[1])
 
-if (isSetupInvocation(argv)) {
+if (isSetupInvocation(argv, setupProgramName)) {
   const setupCli = createSetupCli({
-    commandName: detectSetupProgramName(process.argv[1]),
+    commandName: setupProgramName,
   })
   setupCli.serve(argv)
 } else {

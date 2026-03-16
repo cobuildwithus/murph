@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-16 (inbox model-routing trust boundaries, assistant routing safety follow-up notes, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
+Last verified: 2026-03-16 (inbox model-routing trust boundaries, assistant routing safety follow-up notes, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 
@@ -25,7 +25,7 @@ This index is the table of contents for durable, repository-local context that a
 | `agent-docs/references/repo-scope.md` | Repo scope, ownership boundary, and unknowns. | Workspace routing + local decisions | Healthy Bob Maintainer | Per scope change | High | 2026-03-12 |
 | `packages/parsers/README.md` | Package-local overview for local-first attachment parsing, provider ranking, and derived artifact publication. | `packages/parsers/**` | Healthy Bob Maintainer | Per parser-layer change | Medium | 2026-03-13 |
 | `agent-docs/references/testing-ci-map.md` | Current verification map for contracts/runtime packages, built CLI checks, the smoke harness, the targeted Vitest/V8 package coverage surface, and the source-artifact guard. | `package.json`, `scripts/**`, `fixtures/**`, `e2e/**`, future CI | Healthy Bob Maintainer | Per verification change | High | 2026-03-16 |
-| `agent-docs/operations/verification-and-runtime.md` | Required checks, runtime-package verification matrix, built CLI behavior coverage, package-local no-emit typecheck semantics, and current runtime assumptions for the TypeScript-first workspace. | `AGENTS.md`, `package.json`, `fixtures/**`, `e2e/**`, `scripts/**` | Healthy Bob Maintainer | Per process/runtime change | High | 2026-03-16 |
+| `agent-docs/operations/verification-and-runtime.md` | Required checks, runtime-package verification matrix, built CLI behavior coverage, setup alias/wrapper semantics, package-local no-emit typecheck semantics, and current runtime assumptions for the TypeScript-first workspace. | `AGENTS.md`, `package.json`, `fixtures/**`, `e2e/**`, `scripts/**` | Healthy Bob Maintainer | Per process/runtime change | High | 2026-03-16 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit workflow. | Prompts + completion process | Healthy Bob Maintainer | Per process change | High | 2026-03-13 |
 | `agent-docs/prompts/simplify.md` | Reusable simplification pass prompt with parallel-agent handoff output. | Completion workflow | Healthy Bob Maintainer | Per process change | Medium | 2026-03-13 |
 | `agent-docs/prompts/test-coverage-audit.md` | Reusable coverage-audit prompt with parallel-agent handoff output. | Completion workflow | Healthy Bob Maintainer | Per process change | High | 2026-03-13 |

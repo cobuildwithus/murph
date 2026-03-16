@@ -250,13 +250,13 @@ Noun-specific filters still exist where the underlying records justify them: `hi
 
 ## One-Command macOS Setup
 
-Healthy Bob now ships a dedicated macOS setup path for the local parser/runtime stack:
+Healthy Bob now has a dedicated macOS setup surface for the local parser/runtime stack:
 
 ```bash
 healthybob setup
 ```
 
-That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. On macOS it will:
+That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. The built CLI shape already includes a setup-first `healthybob` alias: `healthybob`, `healthybob --help`, and `healthybob setup ...` route to that setup surface, while other commands continue through the main operator surface. On macOS it will:
 
 - install or reuse Homebrew
 - install or reuse `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`
@@ -268,10 +268,10 @@ Common options:
 
 - `--vault <path>` defaults to `./vault`
 - `--whisperModel <tiny|tiny.en|base|base.en|small|small.en|medium|medium.en|large-v3-turbo>` picks the downloaded whisper.cpp model
-- `--dryRun` shows the plan without mutating the machine or vault
+- `--dry-run` shows the plan without mutating the machine or vault
 - `--skipOcr` disables the PaddleX OCR step even on Apple Silicon
 
-The published CLI package exposes `healthybob` as a setup-focused alias. The existing operator/data-plane surface remains under `vault-cli`.
+The existing operator/data-plane surface remains under `vault-cli`. The npm publish story is still intentionally blocked by `workspace:*` dependencies in `@healthybob/cli`, so the real supported onboarding path today is the repo-local wrapper below.
 
 ### Repo-local macOS bootstrap
 
@@ -281,7 +281,7 @@ If you are starting from a fresh checkout and the workspace itself still needs N
 ./scripts/setup-macos.sh --vault ./vault
 ```
 
-That wrapper ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js setup ...` so the same installer logic is reused for both published-package and local-checkout flows.
+That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js setup ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
 ## Local Inbox Parser Bootstrap
 

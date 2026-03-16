@@ -16,11 +16,11 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - Top-level retrieval commands now include `search` for lexical read-model search, `search index status` / `search index rebuild` for the optional SQLite FTS index stored in `.runtime/search.sqlite`, and `timeline` for descending journal/event/sample-summary context, with the query package boundary isolated in `src/query-runtime.ts`.
 - The inbox CLI runtime now resolves `.runtime` paths through `@healthybob/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
 - The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion via `src/inbox-services.ts`.
-- The published package now exposes both `vault-cli` and a setup-focused `healthybob` alias from the same entrypoint; `healthybob setup` provisions the macOS local parser/runtime toolchain before handing off to the existing inbox bootstrap flow.
+- The built CLI package shape exposes both `vault-cli` and a setup-focused `healthybob` alias from the same entrypoint; `healthybob`, `healthybob --help`, and `healthybob setup ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
 
 ## macOS setup
 
-For an installed CLI package, the fastest onboarding path is:
+Once `@healthybob/cli` is publish-ready, the installed-package onboarding path will be:
 
 ```bash
 healthybob setup --vault ./vault
@@ -28,7 +28,9 @@ healthybob setup --vault ./vault
 
 That command installs or reuses the Homebrew-based local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.healthybob/toolchain/models/whisper/`, optionally installs PaddleX OCR on Apple Silicon, initializes the target vault, and then runs inbox bootstrap so the machine is ready for local ingestion out of the box.
 
-Useful flags include `--dryRun`, `--whisperModel small.en`, and `--skipOcr`. When working from a fresh repository checkout instead of an installed package, use the root `scripts/setup-macos.sh` wrapper first so Node, pnpm, dependencies, and the workspace build are present before the setup command runs.
+Useful flags include `--dry-run`, `--whisperModel small.en`, and `--skipOcr`.
+
+Today the supported onboarding path is still the repo-local `scripts/setup-macos.sh` wrapper, because `pnpm release:check` intentionally blocks npm publish while `@healthybob/cli` still depends on `workspace:*` packages. The wrapper is macOS-only, and `./scripts/setup-macos.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build.
 
 ## Release Flow
 

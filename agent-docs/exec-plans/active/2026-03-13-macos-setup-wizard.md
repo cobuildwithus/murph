@@ -10,11 +10,11 @@ Updated: 2026-03-16
 
 ## Success criteria
 
-- `healthybob setup` works through the published CLI bin alias and provisions the local parser stack on macOS.
+- The built CLI shape exposes a setup-first `healthybob` alias, with `healthybob`, `healthybob --help`, and `healthybob setup ...` routing to the setup surface while other commands continue through the main operator surface.
 - `node packages/cli/dist/bin.js setup ...` works from a checked-out repo after build, so a shell wrapper can bootstrap the workspace and then delegate to the same installer logic.
 - The setup flow installs or reuses Homebrew-managed `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`, downloads a Whisper model, and configures the inbox parser toolchain through the existing bootstrap services.
 - Apple Silicon hosts can optionally install PaddleX OCR in a managed venv; unsupported macOS architectures skip OCR with a truthful note instead of failing the whole setup.
-- Focused tests cover dry-run/service orchestration and the bin/setup routing path.
+- Focused tests cover dry-run/service orchestration, existing-vault reuse, shell-wrapper gating, and the bin/setup routing path.
 
 ## Scope
 
@@ -48,7 +48,7 @@ Updated: 2026-03-16
 
 1. Add setup contracts and a macOS installer service with injected command runners for testability.
 2. Route `setup` through `packages/cli/src/bin.ts` and add the `healthybob` bin alias.
-3. Add a repo-level `scripts/setup-macos.sh` wrapper that ensures Node/pnpm/workspace build prerequisites, then delegates to the built CLI setup entrypoint.
+3. Add a repo-level `scripts/setup-macos.sh` wrapper that hard-fails off macOS, keeps `--dryRun` wrapper-only and non-mutating, ensures Node/pnpm/workspace build prerequisites on real runs, then delegates to the built CLI setup entrypoint.
 4. Update README/runtime docs, add focused tests, run the completion-workflow audit prompts, and execute repo verification as far as the workspace allows.
 
 ## Verification
