@@ -55,7 +55,7 @@
     "@healthybob/query": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
     "ai": "^6.0.116",
-    "incur": "0.3.3",
+    "incur": "0.3.4",
     "zod": "^4.1.8"
   }
 }
