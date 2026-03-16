@@ -40,6 +40,7 @@ export default defineConfig({
       "packages/cli/test/list-cursor-compat.test.ts",
       "packages/cli/test/runtime.test.ts",
       "packages/cli/test/search-runtime.test.ts",
+      "packages/cli/test/setup-cli.test.ts",
       "packages/cli/test/selector-filter-normalization.test.ts",
       "packages/cli/test/stdin-input.test.ts",
       "packages/cli/test/release-script-coverage-audit.test.ts",
