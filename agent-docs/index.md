@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-16 (inbox model-routing trust boundaries, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
+Last verified: 2026-03-16 (inbox model-routing trust boundaries, assistant routing safety follow-up notes, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 

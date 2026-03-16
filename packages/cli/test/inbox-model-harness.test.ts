@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { test } from 'vitest'
-import { createDefaultAssistantToolCatalog } from '../src/assistant-cli-tools.js'
+import { test, vi } from 'vitest'
+import {
+  createDefaultAssistantToolCatalog,
+  createInboxRoutingAssistantToolCatalog,
+} from '../src/assistant-cli-tools.js'
 import { materializeInboxModelBundle } from '../src/inbox-model-harness.js'
 import type { InboxCliServices } from '../src/inbox-services.js'
 import type { VaultCliServices } from '../src/vault-cli-services.js'
@@ -194,9 +197,14 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       result.bundle.tools.some((tool) => tool.name === 'vault.show'),
       false,
     )
+    assert.equal(
+      result.bundle.tools.some((tool) => tool.name === 'vault.regimen.stop'),
+      false,
+    )
     assert.match(result.bundle.routingText, /Please file this lab summary/u)
     assert.match(result.bundle.routingText, /Extracted plain text from the attachment/u)
     assert.match(result.bundle.routingText, /Lab values and follow-up notes/u)
+    assert.doesNotMatch(result.bundle.routingText, /Tool reminders:/u)
 
     const persistedBundle = JSON.parse(
       await readFile(path.join(vaultRoot, result.bundlePath), 'utf8'),
@@ -212,6 +220,274 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeInboxModelBundle ignores derived parser paths that escape the vault through symlinks', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-bundle-symlink-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-outside-'))
+  const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_2', 'attachment-1')
+  const linkedPlainText = path.join(derivedDirectory, 'linked-plain.txt')
+  await mkdir(derivedDirectory, { recursive: true })
+  await writeFile(
+    path.join(outsideRoot, 'secret.txt'),
+    'outside-vault text should never enter the routing bundle',
+    'utf8',
+  )
+  await symlink(path.join(outsideRoot, 'secret.txt'), linkedPlainText)
+  await writeFile(
+    path.join(derivedDirectory, 'notes.md'),
+    '# Parsed Markdown\n\nIn-vault markdown still loads.\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(derivedDirectory, 'manifest.json'),
+    JSON.stringify(
+      {
+        schema: 'healthybob.parser-manifest.v1',
+        paths: {
+          plainTextPath: 'derived/inbox/cap_2/attachment-1/linked-plain.txt',
+          markdownPath: 'derived/inbox/cap_2/attachment-1/notes.md',
+          tablesPath: null,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_2',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-2',
+      threadId: 'thread-2',
+      threadTitle: 'Care team',
+      actorId: 'contact-1',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-13T10:00:00.000Z',
+      receivedAt: '2026-03-13T10:00:02.000Z',
+      text: 'Please file this attachment safely.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_2/envelope.json',
+      eventId: 'evt_2',
+      promotions: [],
+      createdAt: '2026-03-13T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_2',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'lab-summary.pdf',
+          storedPath: 'raw/inbox/captures/cap_2/attachments/1/lab-summary.pdf',
+          extractedText: 'CBC and lipid panel attached.',
+          transcriptText: null,
+          derivedPath: 'derived/inbox/cap_2/attachment-1/manifest.json',
+          parserProviderId: 'text-file',
+          parseState: 'succeeded',
+        },
+      ],
+      raw: {},
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_symlink',
+      captureId: 'cap_2',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.doesNotMatch(
+      result.bundle.routingText,
+      /outside-vault text should never enter the routing bundle/u,
+    )
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some(
+        (fragment) => fragment.kind === 'derived_plain_text',
+      ),
+      false,
+    )
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some(
+        (fragment) =>
+          fragment.kind === 'derived_markdown' &&
+          /In-vault markdown still loads/u.test(fragment.text),
+      ),
+      true,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+    await rm(outsideRoot, { recursive: true, force: true })
+  }
+})
+
+test('createInboxRoutingAssistantToolCatalog excludes stateful write tools and rejects file paths outside the vault', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-routing-tools-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-routing-outside-'))
+  const importDocument = vi.fn(async () => ({
+    vault: vaultRoot,
+    lookupId: 'doc_1',
+    documentId: 'doc_1',
+    created: true,
+    path: 'raw/documents/doc_1.pdf',
+  }))
+  const vaultServices = createStubVaultServices({
+    importers: {
+      importDocument,
+    } as unknown as VaultCliServices['importers'],
+  })
+
+  try {
+    await mkdir(path.join(vaultRoot, 'raw', 'inbox', 'captures', 'cap_1', 'attachments', '1'), {
+      recursive: true,
+    })
+    await writeFile(path.join(outsideRoot, 'outside.pdf'), 'outside vault document', 'utf8')
+    await symlink(
+      path.join(outsideRoot, 'outside.pdf'),
+      path.join(vaultRoot, 'raw', 'inbox', 'captures', 'cap_1', 'attachments', '1', 'linked.pdf'),
+    )
+
+    const catalog = createInboxRoutingAssistantToolCatalog({
+      requestId: 'req_route',
+      vault: vaultRoot,
+      vaultServices,
+    })
+
+    assert.equal(catalog.hasTool('vault.regimen.stop'), false)
+
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.document.import',
+          input: {
+            file: '../outside.pdf',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'failed')
+    assert.equal(results[0]?.errorCode, 'ASSISTANT_PATH_OUTSIDE_VAULT')
+    assert.equal(importDocument.mock.calls.length, 0)
+
+    const symlinkResults = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.document.import',
+          input: {
+            file: 'raw/inbox/captures/cap_1/attachments/1/linked.pdf',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(symlinkResults[0]?.status, 'failed')
+    assert.equal(symlinkResults[0]?.errorCode, 'ASSISTANT_PATH_OUTSIDE_VAULT')
+    assert.equal(importDocument.mock.calls.length, 0)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+    await rm(outsideRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeInboxModelBundle ignores derived parser paths that resolve outside the vault', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-bundle-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-outside-'))
+  const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_2', 'attachment-1')
+  const outsideTextPath = path.join(outsideRoot, 'outside.txt')
+
+  await mkdir(derivedDirectory, { recursive: true })
+  await writeFile(outsideTextPath, 'This text should never be read into the bundle.\n', 'utf8')
+  await writeFile(
+    path.join(derivedDirectory, 'manifest.json'),
+    JSON.stringify(
+      {
+        schema: 'healthybob.parser-manifest.v1',
+        paths: {
+          plainTextPath: outsideTextPath,
+          markdownPath: outsideTextPath,
+          tablesPath: null,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_2',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-2',
+      threadId: 'thread-2',
+      threadTitle: 'Care team',
+      actorId: 'contact-2',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-13T10:00:00.000Z',
+      receivedAt: '2026-03-13T10:00:02.000Z',
+      text: 'Please review this external file path.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_2/envelope.json',
+      eventId: 'evt_2',
+      promotions: [],
+      createdAt: '2026-03-13T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_2',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'unsafe.pdf',
+          storedPath: 'raw/inbox/captures/cap_2/attachments/1/unsafe.pdf',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: 'derived/inbox/cap_2/attachment-1/manifest.json',
+          parserProviderId: 'text-file',
+          parseState: 'succeeded',
+        },
+      ],
+      raw: {},
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_outside',
+      captureId: 'cap_2',
+      vault: vaultRoot,
+    })
+
+    assert.equal(result.bundle.attachments[0]?.fragments.length, 1)
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some((fragment) =>
+        fragment.kind.startsWith('derived_'),
+      ),
+      false,
+    )
+    assert.doesNotMatch(
+      result.bundle.routingText,
+      /This text should never be read into the bundle/u,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+    await rm(outsideRoot, { recursive: true, force: true })
   }
 })
 

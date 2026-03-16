@@ -5,6 +5,7 @@ import {
   healthEntityDescriptors,
   hasHealthCommandDescriptor,
 } from './health-cli-descriptors.js'
+import { resolveAssistantVaultPath } from './assistant-vault-paths.js'
 import {
   createAssistantToolCatalog,
   type AssistantToolCatalog,
@@ -32,6 +33,7 @@ interface AssistantToolContext {
 
 export interface AssistantToolCatalogOptions {
   includeQueryTools?: boolean
+  includeStatefulWriteTools?: boolean
 }
 
 export function createDefaultAssistantToolCatalog(
@@ -41,8 +43,17 @@ export function createDefaultAssistantToolCatalog(
   return createAssistantToolCatalog([
     ...createInboxPromotionToolDefinitions(input),
     ...(options.includeQueryTools ?? true ? createVaultQueryToolDefinitions(input) : []),
-    ...createVaultWriteToolDefinitions(input),
+    ...createVaultWriteToolDefinitions(input, options),
   ])
+}
+
+export function createInboxRoutingAssistantToolCatalog(
+  input: AssistantToolContext,
+): AssistantToolCatalog {
+  return createDefaultAssistantToolCatalog(input, {
+    includeQueryTools: false,
+    includeStatefulWriteTools: false,
+  })
 }
 
 function createInboxPromotionToolDefinitions(
@@ -176,12 +187,13 @@ function createVaultQueryToolDefinitions(
 
 function createVaultWriteToolDefinitions(
   input: AssistantToolContext,
+  options: AssistantToolCatalogOptions = {},
 ): AssistantToolDefinition[] {
   if (!input.vaultServices) {
     return []
   }
 
-  return [
+  const tools: AssistantToolDefinition[] = [
     {
       name: 'vault.document.import',
       description:
@@ -197,11 +209,11 @@ function createVaultWriteToolDefinitions(
         file: 'raw/inbox/captures/cap_123/attachments/1/report.pdf',
         source: 'import',
       },
-      execute: ({ file, title, occurredAt, note, source }) =>
+      execute: async ({ file, title, occurredAt, note, source }) =>
         input.vaultServices!.importers.importDocument({
           vault: input.vault,
           requestId: input.requestId ?? null,
-          file: resolveVaultFilePath(input.vault, file),
+          file: await resolveAssistantVaultPath(input.vault, file, 'file path'),
           title,
           occurredAt,
           note,
@@ -222,12 +234,14 @@ function createVaultWriteToolDefinitions(
         photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
         note: 'Post-workout meal',
       },
-      execute: ({ photo, audio, note, occurredAt }) =>
+      execute: async ({ photo, audio, note, occurredAt }) =>
         input.vaultServices!.core.addMeal({
           vault: input.vault,
           requestId: input.requestId ?? null,
-          photo: resolveVaultFilePath(input.vault, photo),
-          audio: audio ? resolveVaultFilePath(input.vault, audio) : undefined,
+          photo: await resolveAssistantVaultPath(input.vault, photo, 'file path'),
+          audio: audio
+            ? await resolveAssistantVaultPath(input.vault, audio, 'file path')
+            : undefined,
           note,
           occurredAt,
         }),
@@ -374,64 +388,71 @@ function createVaultWriteToolDefinitions(
       inputExample: {
         file: 'raw/inbox/captures/cap_123/attachments/1/assessment.json',
       },
-      execute: ({ file }) =>
+      execute: async ({ file }) =>
         input.vaultServices!.importers.importAssessmentResponse({
           vault: input.vault,
           requestId: input.requestId ?? null,
-          file: resolveVaultFilePath(input.vault, file),
-        }),
-    },
-    {
-      name: 'vault.intake.project',
-      description:
-        'Project one imported intake assessment into a typed proposal object without directly mutating the health registries.',
-      inputSchema: z.object({
-        assessmentId: z.string().min(1),
-      }),
-      inputExample: {
-        assessmentId: 'asmt_example',
-      },
-      execute: ({ assessmentId }) =>
-        input.vaultServices!.core.projectAssessment({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          assessmentId,
-        }),
-    },
-    {
-      name: 'vault.profile.rebuildCurrent',
-      description:
-        'Rebuild the derived current profile page from the latest accepted profile snapshot.',
-      inputSchema: z.object({}),
-      inputExample: {},
-      execute: () =>
-        input.vaultServices!.core.rebuildCurrentProfile({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-        }),
-    },
-    {
-      name: 'vault.regimen.stop',
-      description:
-        'Stop an existing regimen while preserving its canonical id.',
-      inputSchema: z.object({
-        regimenId: z.string().min(1),
-        stoppedOn: localDateSchema.optional(),
-      }),
-      inputExample: {
-        regimenId: 'reg_example',
-        stoppedOn: '2026-03-13',
-      },
-      execute: ({ regimenId, stoppedOn }) =>
-        input.vaultServices!.core.stopRegimen({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          regimenId,
-          stoppedOn,
+          file: await resolveAssistantVaultPath(input.vault, file, 'file path'),
         }),
     },
     ...createHealthUpsertToolDefinitions(input),
   ]
+
+  if (options.includeStatefulWriteTools ?? true) {
+    tools.push(
+      {
+        name: 'vault.intake.project',
+        description:
+          'Project one imported intake assessment into a typed proposal object without directly mutating the health registries.',
+        inputSchema: z.object({
+          assessmentId: z.string().min(1),
+        }),
+        inputExample: {
+          assessmentId: 'asmt_example',
+        },
+        execute: ({ assessmentId }) =>
+          input.vaultServices!.core.projectAssessment({
+            vault: input.vault,
+            requestId: input.requestId ?? null,
+            assessmentId,
+          }),
+      },
+      {
+        name: 'vault.profile.rebuildCurrent',
+        description:
+          'Rebuild the derived current profile page from the latest accepted profile snapshot.',
+        inputSchema: z.object({}),
+        inputExample: {},
+        execute: () =>
+          input.vaultServices!.core.rebuildCurrentProfile({
+            vault: input.vault,
+            requestId: input.requestId ?? null,
+          }),
+      },
+      {
+        name: 'vault.regimen.stop',
+        description:
+          'Stop an existing regimen while preserving its canonical id.',
+        inputSchema: z.object({
+          regimenId: z.string().min(1),
+          stoppedOn: localDateSchema.optional(),
+        }),
+        inputExample: {
+          regimenId: 'reg_example',
+          stoppedOn: '2026-03-13',
+        },
+        execute: ({ regimenId, stoppedOn }) =>
+          input.vaultServices!.core.stopRegimen({
+            vault: input.vault,
+            requestId: input.requestId ?? null,
+            regimenId,
+            stoppedOn,
+          }),
+      },
+    )
+  }
+
+  return tools
 }
 
 function createHealthUpsertToolDefinitions(
@@ -473,15 +494,6 @@ function createHealthUpsertToolDefinitions(
         })
       },
     }))
-}
-
-function resolveVaultFilePath(vaultRoot: string, filePath: string): string {
-  const normalized = filePath.trim()
-  if (path.isAbsolute(normalized)) {
-    return normalized
-  }
-
-  return path.join(vaultRoot, normalized)
 }
 
 async function writeAssistantPayloadFile(

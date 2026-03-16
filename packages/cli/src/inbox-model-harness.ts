@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
+import { resolveAssistantVaultPath } from './assistant-vault-paths.js'
 import {
-  createDefaultAssistantToolCatalog,
+  createInboxRoutingAssistantToolCatalog,
 } from './assistant-cli-tools.js'
 import {
   generateAssistantObject,
@@ -140,23 +141,20 @@ async function prepareInboxModelSession(
   input: BuildInboxModelBundleInput,
 ): Promise<{
   bundle: InboxModelBundle
-  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>
+  toolCatalog: ReturnType<typeof createInboxRoutingAssistantToolCatalog>
 }> {
   const shown = await input.inboxServices.show({
     vault: input.vault,
     requestId: input.requestId ?? null,
     captureId: input.captureId,
   })
-  const toolCatalog = createDefaultAssistantToolCatalog(
-    {
-      inboxServices: input.inboxServices,
-      requestId: input.requestId ?? null,
-      captureId: input.captureId,
-      vault: input.vault,
-      vaultServices: input.vaultServices,
-    },
-    { includeQueryTools: false },
-  )
+  const toolCatalog = createInboxRoutingAssistantToolCatalog({
+    inboxServices: input.inboxServices,
+    requestId: input.requestId ?? null,
+    captureId: input.captureId,
+    vault: input.vault,
+    vaultServices: input.vaultServices,
+  })
   const tools = toolCatalog.listTools()
   const attachments = await Promise.all(
     shown.capture.attachments.map((attachment) =>
@@ -167,7 +165,7 @@ async function prepareInboxModelSession(
     ),
   )
   const routingText = clampText(
-    renderRoutingText(shown.capture, attachments, tools),
+    renderRoutingText(shown.capture, attachments),
     DEFAULT_MAX_ROUTING_CHARS,
   ).text
 
@@ -240,7 +238,7 @@ function buildInboxPlacementPrompt(bundle: InboxModelBundle): string {
 
 function validateAssistantPlan(
   value: unknown,
-  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>,
+  toolCatalog: ReturnType<typeof createInboxRoutingAssistantToolCatalog>,
 ) {
   const plan = assistantExecutionPlanSchema.parse(value)
 
@@ -410,7 +408,6 @@ async function buildDerivedTextFragments(
 function renderRoutingText(
   capture: InboxShowResult['capture'],
   attachments: InboxModelAttachmentBundle[],
-  tools: InboxModelBundle['tools'],
 ): string {
   const lines: string[] = [
     `Capture id: ${capture.captureId}`,
@@ -437,10 +434,6 @@ function renderRoutingText(
     }
   }
 
-  if (tools.length > 0) {
-    lines.push('', 'Tool reminders:', renderToolCatalog(tools))
-  }
-
   return lines.join('\n')
 }
 
@@ -458,7 +451,7 @@ async function readParserManifest(
   relativePath: string,
 ): Promise<z.infer<typeof parserManifestSchema> | null> {
   try {
-    const raw = await readFile(path.join(vaultRoot, relativePath), 'utf8')
+    const raw = await readFile(await resolveAssistantVaultPath(vaultRoot, relativePath), 'utf8')
     return parserManifestSchema.parse(JSON.parse(raw))
   } catch {
     return null
@@ -471,7 +464,7 @@ async function readRelativeTextFile(
 ): Promise<string | null> {
   try {
     return normalizeNullableString(
-      await readFile(path.join(vaultRoot, relativePath), 'utf8'),
+      await readFile(await resolveAssistantVaultPath(vaultRoot, relativePath), 'utf8'),
     )
   } catch {
     return null
