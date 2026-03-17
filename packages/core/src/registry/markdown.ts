@@ -4,6 +4,7 @@ import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { readUtf8File, walkVaultFiles } from "../fs.js";
 import { emitAuditRecord } from "../audit.js";
 import { runCanonicalWrite } from "../operations/index.js";
+import { resolveRecordByIdOrSlug } from "./id-or-slug.js";
 
 import type { FrontmatterObject, DateInput } from "../types.js";
 
@@ -119,14 +120,19 @@ export function selectExistingRegistryRecord<TRecord extends RegistryRecord>({
   conflictCode,
   conflictMessage,
 }: ExistingRegistrySelectionOptions<TRecord>): TRecord | null {
-  const byId = recordId ? records.find((record) => getRecordId(record) === recordId) ?? null : null;
-  const bySlug = slug ? records.find((record) => record.slug === slug) ?? null : null;
+  const selection = resolveRecordByIdOrSlug({
+    records,
+    recordId,
+    slug,
+    getRecordId,
+    detectConflict: true,
+  });
 
-  if (byId && bySlug && getRecordId(byId) !== getRecordId(bySlug)) {
+  if (selection.hasConflict) {
     throw new VaultError(conflictCode, conflictMessage);
   }
 
-  return byId ?? bySlug;
+  return selection.match;
 }
 
 export function readRegistryRecord<TRecord extends RegistryRecord>({
@@ -137,9 +143,12 @@ export function readRegistryRecord<TRecord extends RegistryRecord>({
   readMissingCode,
   readMissingMessage,
 }: RegistrySelectionOptions<TRecord>): TRecord {
-  const match =
-    (recordId ? records.find((record) => getRecordId(record) === recordId) : undefined) ??
-    (slug ? records.find((record) => record.slug === slug) : undefined);
+  const match = resolveRecordByIdOrSlug({
+    records,
+    recordId,
+    slug,
+    getRecordId,
+  }).match;
 
   if (!match) {
     throw new VaultError(readMissingCode, readMissingMessage);

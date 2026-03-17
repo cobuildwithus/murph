@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { initializeVault, readJsonlRecords } from "../src/index.js";
+import { initializeVault, readJsonlRecords, VaultError } from "../src/index.js";
 import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.js";
 import {
   listAllergies,
@@ -91,6 +91,59 @@ test("goals support multiple active records and preserve relationships in markdo
   assert.equal(
     goalAuditRecords.filter((record) => (record as { action?: string }).action === "goal_upsert").length,
     4,
+  );
+});
+
+test("goal id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-goal-resolution");
+  await initializeVault({ vaultRoot });
+
+  const first = await upsertGoal({
+    vaultRoot,
+    title: "Build aerobic base",
+    window: {
+      startAt: "2026-03-01",
+    },
+  });
+  const second = await upsertGoal({
+    vaultRoot,
+    title: "Increase lean mass",
+    window: {
+      startAt: "2026-03-02",
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
+        goalId: first.record.goalId,
+        slug: second.record.slug,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_GOAL_CONFLICT" &&
+      error.message === "Goal id and slug resolve to different records.",
+  );
+
+  const readByConflictingSelectors = await readGoal({
+    vaultRoot,
+    goalId: first.record.goalId,
+    slug: second.record.slug,
+  });
+
+  assert.equal(readByConflictingSelectors.goalId, first.record.goalId);
+
+  await assert.rejects(
+    () =>
+      readGoal({
+        vaultRoot,
+        slug: "missing-goal",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_GOAL_MISSING" &&
+      error.message === "Goal was not found.",
   );
 });
 

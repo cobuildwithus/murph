@@ -4,6 +4,7 @@ import { VaultError } from "../errors.js";
 import { parseFrontmatterDocument } from "../frontmatter.js";
 import { readUtf8File, walkVaultFiles } from "../fs.js";
 import { sanitizePathSegment } from "../path-safety.js";
+import { resolveRecordByIdOrSlug } from "../registry/id-or-slug.js";
 import { toDateOnly } from "../time.js";
 
 import {
@@ -139,14 +140,19 @@ export function selectRecordByIdOrSlug<TRecord extends RegistryRecordBase>(
   entityLabel: string,
   conflictCode: string,
 ): TRecord | null {
-  const byId = idValue ? records.find((record) => getId(record) === idValue) ?? null : null;
-  const bySlug = slug ? records.find((record) => record.slug === slug) ?? null : null;
+  const selection = resolveRecordByIdOrSlug({
+    records,
+    recordId: idValue,
+    slug,
+    getRecordId: getId,
+    detectConflict: true,
+  });
 
-  if (byId && bySlug && getId(byId) !== getId(bySlug)) {
+  if (selection.hasConflict) {
     throw new VaultError(conflictCode, `${entityLabel} id and slug resolve to different records.`);
   }
 
-  return byId ?? bySlug;
+  return selection.match;
 }
 
 export function findRecordByIdOrSlug<TRecord extends RegistryRecordBase>(
@@ -155,15 +161,12 @@ export function findRecordByIdOrSlug<TRecord extends RegistryRecordBase>(
   slug: string | undefined,
   getId: (record: TRecord) => string,
 ): TRecord | null {
-  return (
-    records.find((record) => {
-      if (idValue && getId(record) === idValue) {
-        return true;
-      }
-
-      return slug ? record.slug === slug : false;
-    }) ?? null
-  );
+  return resolveRecordByIdOrSlug({
+    records,
+    recordId: idValue,
+    slug,
+    getRecordId: getId,
+  }).match;
 }
 
 export function requireMatchingDocType(

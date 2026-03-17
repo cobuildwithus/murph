@@ -577,6 +577,14 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_FAMILY_MEMBER_MISSING",
   );
 
+  const readFamilyByConflictingSelectors = await readFamilyMember({
+    vaultRoot,
+    memberId: mother.record.familyMemberId,
+    slug: father.record.slug,
+  });
+
+  assert.equal(readFamilyByConflictingSelectors.familyMemberId, mother.record.familyMemberId);
+
   const apoe = await upsertGeneticVariant({
     vaultRoot,
     gene: "APOE",
@@ -611,4 +619,12 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_GENETIC_VARIANT_MISSING",
   );
+
+  const readVariantByConflictingSelectors = await readGeneticVariant({
+    vaultRoot,
+    variantId: apoe.record.variantId,
+    slug: mthfr.record.slug,
+  });
+
+  assert.equal(readVariantByConflictingSelectors.variantId, apoe.record.variantId);
 });
