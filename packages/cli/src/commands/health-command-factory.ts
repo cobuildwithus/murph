@@ -1,5 +1,10 @@
 import { Cli, z } from 'incur'
-import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
+import {
+  emptyArgsSchema,
+  requestIdFromOptions,
+  withBaseOptions,
+  type CommonCommandOptions,
+} from '../command-helpers.js'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
@@ -120,16 +125,14 @@ interface HealthCrudGroupConfig<
   description: string
 }
 
-type HealthCrudConfigAny = HealthCrudConfig<any, any, any, any>
-
 type MethodName<TService, TInput> = {
-  [TKey in keyof TService]: TService[TKey] extends ServiceMethod<TInput, any>
+  [TKey in keyof TService]: TService[TKey] extends ServiceMethod<TInput, unknown>
     ? TKey
     : never
 }[keyof TService]
 
 type MethodResult<TService, TKey extends keyof TService> =
-  TService[TKey] extends ServiceMethod<any, infer TResult> ? TResult : never
+  TService[TKey] extends ServiceMethod<unknown, infer TResult> ? TResult : never
 
 interface CrudServiceMethodNames<
   TCore extends object,
@@ -152,9 +155,18 @@ interface SuggestedCommand {
   options?: Record<string, unknown>
 }
 
+interface CrudPresentationContext {
+  noun: string
+  payloadFile: string
+  pluralNoun: string
+  showId: {
+    example: string
+  }
+}
+
 const defaultExamplesByCommand: Record<
   CrudCommandName,
-  (config: HealthCrudConfigAny) => CommandExamples
+  (config: CrudPresentationContext) => CommandExamples
 > = {
   list(config) {
     return [
@@ -204,7 +216,7 @@ const defaultExamplesByCommand: Record<
 }
 
 const defaultHintsByCommand: Partial<
-  Record<CrudCommandName, (config: HealthCrudConfigAny) => string>
+  Record<CrudCommandName, (config: CrudPresentationContext) => string>
 > = {
   list() {
     return 'Use --limit to cap results.'
@@ -217,15 +229,25 @@ const defaultHintsByCommand: Partial<
   },
 }
 
-function examplesFor(
-  config: HealthCrudConfigAny,
+function examplesFor<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(
+  config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>,
   command: CrudCommandName,
 ) {
   return config.examples?.[command] ?? defaultExamplesByCommand[command](config)
 }
 
-function hintFor(
-  config: HealthCrudConfigAny,
+function hintFor<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(
+  config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>,
   command: keyof CrudHints,
 ) {
   return config.hints?.[command] ?? defaultHintsByCommand[command]?.(config)
@@ -322,8 +344,421 @@ export function suggestedCommandsCta(commands: SuggestedCommand[]) {
   }
 }
 
-function upsertCta<TUpsert extends object>(
-  config: HealthCrudConfig<any, TUpsert, any, any>,
+type CommandArgShape = z.ZodRawShape
+type CommandOptionShape = Record<string, z.ZodType<unknown>>
+type FactoryCommandOptions<TOptions extends CommandOptionShape> =
+  CommonCommandOptions & z.infer<z.ZodObject<TOptions>>
+
+interface ListDateOptionConfig {
+  description: string
+  name: string
+}
+
+interface CommonListOptionNames {
+  experiment: string
+  from: string
+  kind: string
+  limit: string
+  status: string
+  tag: string
+  to: string
+}
+
+interface CommonListOptionsConfig {
+  experiment?: z.ZodType<string | undefined>
+  from?: ListDateOptionConfig
+  kind?: z.ZodType<string | undefined>
+  limit?: z.ZodType<number>
+  status?: z.ZodType<string | undefined>
+  tag?: z.ZodType<unknown>
+  to?: ListDateOptionConfig
+}
+
+interface FactoryCommandConfig<
+  TResult,
+  TArgs extends CommandArgShape = CommandArgShape,
+  TOptions extends CommandOptionShape = CommandOptionShape,
+> {
+  name: string
+  args: z.ZodObject<TArgs>
+  description: string
+  examples?: CommandExamples
+  hint?: string
+  options?: TOptions
+  output: z.ZodType<TResult>
+  run(input: {
+    args: z.infer<z.ZodObject<TArgs>>
+    options: FactoryCommandOptions<TOptions>
+    requestId: string | null
+  }): Promise<TResult>
+}
+
+type AnyFactoryCommandConfig = FactoryCommandConfig<unknown>
+
+interface FactoryCommandGroupConfig {
+  commandName: string
+  description: string
+  commands: readonly AnyFactoryCommandConfig[]
+}
+
+type NamedArgShape<
+  TArgName extends string,
+  TArgSchema extends z.ZodType<string>,
+> = {
+  [TKey in TArgName]: TArgSchema
+}
+
+interface NamedArgCommandConfig<
+  TResult,
+  TArgName extends string = string,
+> {
+  description: string
+  argName: TArgName
+  argSchema: z.ZodType<string>
+  examples?: CommandExamples
+  hint?: string
+  output: z.ZodType<TResult>
+  run(input: ShowCommandContext): Promise<TResult>
+}
+
+interface InputFileCommandConfig<TResult> {
+  description: string
+  examples?: CommandExamples
+  hint?: string
+  output: z.ZodType<TResult>
+  run(input: UpsertCommandContext): Promise<TResult>
+}
+
+interface RegistryDocEntityGroupConfig<
+  TScaffold,
+  TUpsert,
+  TShow,
+  TList,
+> {
+  commandName: string
+  description: string
+  scaffold: FactoryCommandConfig<TScaffold>
+  upsert: InputFileCommandConfig<TUpsert>
+  show: NamedArgCommandConfig<TShow>
+  list: {
+    description: string
+    examples?: CommandExamples
+    hint?: string
+    output: z.ZodType<TList>
+    statusOption?: z.ZodType<string | undefined>
+    run(input: ListCommandContext): Promise<TList>
+  }
+}
+
+interface LedgerEventListCommandContext extends ListCommandContext {
+  experiment?: string
+  tag?: unknown
+}
+
+interface LedgerEventEntityGroupConfig<
+  TScaffold,
+  TUpsert,
+  TShow,
+  TList,
+> {
+  commandName: string
+  description: string
+  scaffold: {
+    description: string
+    examples?: CommandExamples
+    hint?: string
+    kindOption: z.ZodType<string>
+    output: z.ZodType<TScaffold>
+    run(input: CommandContext & { kind: string }): Promise<TScaffold>
+  }
+  upsert: InputFileCommandConfig<TUpsert>
+  show: NamedArgCommandConfig<TShow>
+  list: {
+    description: string
+    examples?: CommandExamples
+    hint?: string
+    experimentOption?: z.ZodType<string | undefined>
+    kindOption?: z.ZodType<string | undefined>
+    output: z.ZodType<TList>
+    tagOption?: z.ZodType<unknown>
+    run(input: LedgerEventListCommandContext): Promise<TList>
+  }
+}
+
+interface ArtifactListOptionNames {
+  from: string
+  to: string
+}
+
+interface ArtifactBackedEntityGroupConfig<
+  TPrimary,
+  TShow,
+  TList,
+  TManifest,
+> {
+  commandName: string
+  description: string
+  primaryAction: FactoryCommandConfig<TPrimary>
+  show: NamedArgCommandConfig<TShow>
+  list: {
+    description: string
+    examples?: CommandExamples
+    hint?: string
+    limitOption?: z.ZodType<number>
+    optionNames?: ArtifactListOptionNames
+    output: z.ZodType<TList>
+    run(input: CommandContext & { from?: string; to?: string; limit?: number }): Promise<TList>
+  }
+  manifest: NamedArgCommandConfig<TManifest>
+  additionalCommands?: readonly AnyFactoryCommandConfig[]
+}
+
+interface LifecycleEntityGroupConfig<
+  TCreate,
+  TShow,
+  TList,
+  TUpdate,
+  TCheckpoint,
+  TStop,
+> {
+  commandName: string
+  description: string
+  create: FactoryCommandConfig<TCreate>
+  show: NamedArgCommandConfig<TShow>
+  list: {
+    description: string
+    examples?: CommandExamples
+    hint?: string
+    output: z.ZodType<TList>
+    statusOption?: z.ZodType<string | undefined>
+    run(input: ListCommandContext): Promise<TList>
+  }
+  update: FactoryCommandConfig<TUpdate>
+  checkpoint: FactoryCommandConfig<TCheckpoint>
+  stop: {
+    description: string
+    argName: string
+    argSchema: z.ZodType<string>
+    examples?: CommandExamples
+    hint?: string
+    options?: CommandOptionShape
+    output: z.ZodType<TStop>
+    run(input: CommandContext & { id: string } & Record<string, unknown>): Promise<TStop>
+  }
+}
+
+const defaultCommonListOptionNames: CommonListOptionNames = {
+  experiment: 'experiment',
+  from: 'from',
+  kind: 'kind',
+  limit: 'limit',
+  status: 'status',
+  tag: 'tag',
+  to: 'to',
+}
+
+function optionStringValue(
+  options: Record<string, unknown>,
+  key: string,
+) {
+  return typeof options[key] === 'string' ? options[key] : undefined
+}
+
+function optionNumberValue(
+  options: Record<string, unknown>,
+  key: string,
+) {
+  return typeof options[key] === 'number' ? options[key] : undefined
+}
+
+function buildListOptionShape(config: CommonListOptionsConfig) {
+  const shape: CommandOptionShape = {}
+
+  if (config.status) {
+    shape.status = config.status
+  }
+
+  if (config.kind) {
+    shape.kind = config.kind
+  }
+
+  if (config.from) {
+    shape[config.from.name] = localDateOptionSchema
+      .optional()
+      .describe(config.from.description)
+  }
+
+  if (config.to) {
+    shape[config.to.name] = localDateOptionSchema
+      .optional()
+      .describe(config.to.description)
+  }
+
+  if (config.tag) {
+    shape.tag = config.tag
+  }
+
+  if (config.experiment) {
+    shape.experiment = config.experiment
+  }
+
+  if (config.limit) {
+    shape.limit = config.limit
+  }
+
+  return shape
+}
+
+function extractCommonListOptions(
+  options: Record<string, unknown>,
+  names: Partial<CommonListOptionNames> = {},
+) {
+  const resolvedNames = {
+    ...defaultCommonListOptionNames,
+    ...names,
+  }
+
+  return {
+    experiment: optionStringValue(options, resolvedNames.experiment),
+    from: optionStringValue(options, resolvedNames.from),
+    kind: optionStringValue(options, resolvedNames.kind),
+    limit: optionNumberValue(options, resolvedNames.limit),
+    status: optionStringValue(options, resolvedNames.status),
+    tag: options[resolvedNames.tag],
+    to: optionStringValue(options, resolvedNames.to),
+  }
+}
+
+function createNamedArgSchema<
+  TArgName extends string,
+  TArgSchema extends z.ZodType<string>,
+>(
+  argName: TArgName,
+  argSchema: TArgSchema,
+): z.ZodObject<NamedArgShape<TArgName, TArgSchema>> {
+  return z.object({
+    [argName]: argSchema,
+  } as NamedArgShape<TArgName, TArgSchema>)
+}
+
+function createNamedArgFactoryCommand<
+  TResult,
+  TArgName extends string,
+>(
+  name: string,
+  config: NamedArgCommandConfig<TResult, TArgName>,
+): FactoryCommandConfig<
+  TResult,
+  NamedArgShape<TArgName, z.ZodType<string>>,
+  {}
+> {
+  return {
+    name,
+    args: createNamedArgSchema(config.argName, config.argSchema),
+    description: config.description,
+    examples: config.examples,
+    hint: config.hint,
+    output: config.output,
+    async run({ args, options, requestId }) {
+      const namedArgs = args as Record<TArgName, string>
+
+      return config.run({
+        id: namedArgs[config.argName],
+        requestId,
+        vault: options.vault,
+      })
+    },
+  }
+}
+
+function createInputFileFactoryCommand<TResult>(
+  name: string,
+  config: InputFileCommandConfig<TResult>,
+): FactoryCommandConfig<
+  TResult,
+  {},
+  { input: typeof inputFileOptionSchema }
+> {
+  return {
+    name,
+    args: emptyArgsSchema,
+    description: config.description,
+    examples: config.examples,
+    hint: config.hint,
+    options: {
+      input: inputFileOptionSchema,
+    },
+    output: config.output,
+    async run({ options, requestId }) {
+      return config.run({
+        input: normalizeInputFileOption(options.input),
+        requestId,
+        vault: options.vault,
+      })
+    },
+  }
+}
+
+function registerFactoryCommand<
+  TResult,
+  TArgs extends CommandArgShape,
+  TOptions extends CommandOptionShape,
+>(
+  group: Cli.Cli,
+  command: FactoryCommandConfig<TResult, TArgs, TOptions>,
+) {
+  group.command(command.name, {
+    args: command.args,
+    description: command.description,
+    examples: command.examples,
+    hint: command.hint,
+    options: withBaseOptions((command.options ?? {}) as TOptions),
+    output: command.output,
+    async run(context) {
+      return command.run({
+        args: context.args as z.infer<z.ZodObject<TArgs>>,
+        options: context.options as FactoryCommandOptions<TOptions>,
+        requestId: requestIdFromOptions(context.options as CommonCommandOptions),
+      })
+    },
+  })
+}
+
+function createFactoryCommandGroup(config: FactoryCommandGroupConfig) {
+  const group = Cli.create(config.commandName, {
+    description: config.description,
+  })
+
+  for (const command of config.commands) {
+    registerFactoryCommand(group, command)
+  }
+
+  return group
+}
+
+function createCrudScaffoldCta(
+  config: Pick<
+    HealthCrudConfig<unknown, object, unknown, unknown>,
+    'groupName' | 'noun' | 'payloadFile'
+  >,
+) {
+  return suggestedCommandsCta([
+    {
+      command: `${config.groupName} upsert`,
+      description: `Apply the edited ${config.noun} payload.`,
+      options: {
+        input: `@${config.payloadFile}`,
+        vault: true,
+      },
+    },
+  ])
+}
+
+function createCrudUpsertCta<TUpsert extends object>(
+  config: Pick<
+    HealthCrudConfig<unknown, TUpsert, unknown, unknown>,
+    'groupName' | 'noun' | 'pluralNoun' | 'showId'
+  >,
   result: TUpsert,
 ) {
   return suggestedCommandsCta([
@@ -353,8 +788,36 @@ export function registerHealthCrudCommands<
   TShow,
   TList,
 >(config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>) {
+  const listOptions = buildListOptionShape({
+    from: config.listFilterCapabilities?.includes('date-range')
+      ? {
+          description: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
+          name: 'from',
+        }
+      : undefined,
+    kind: config.listFilterCapabilities?.includes('kind')
+      ? z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Optional history event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
+          )
+      : undefined,
+    limit: limitOptionSchema,
+    status: config.listStatusDescription
+      ? statusOptionSchema.describe(config.listStatusDescription)
+      : undefined,
+    to: config.listFilterCapabilities?.includes('date-range')
+      ? {
+          description: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
+          name: 'to',
+        }
+      : undefined,
+  })
+
   config.group.command('scaffold', {
-    args: z.object({}),
+    args: emptyArgsSchema,
     description: config.descriptions.scaffold,
     examples: examplesFor(config, 'scaffold'),
     hint: hintFor(config, 'scaffold'),
@@ -367,22 +830,13 @@ export function registerHealthCrudCommands<
       })
 
       return context.ok(result, {
-        cta: suggestedCommandsCta([
-          {
-            command: `${config.groupName} upsert`,
-            description: `Apply the edited ${config.noun} payload.`,
-            options: {
-              input: `@${config.payloadFile}`,
-              vault: true,
-            },
-          },
-        ]),
+        cta: createCrudScaffoldCta(config),
       })
     },
   })
 
   config.group.command('upsert', {
-    args: z.object({}),
+    args: emptyArgsSchema,
     description: config.descriptions.upsert,
     examples: examplesFor(config, 'upsert'),
     hint: hintFor(config, 'upsert'),
@@ -398,7 +852,7 @@ export function registerHealthCrudCommands<
       })
 
       return context.ok(result, {
-        cta: upsertCta(config, result),
+        cta: createCrudUpsertCta(config, result),
       })
     },
   })
@@ -421,310 +875,28 @@ export function registerHealthCrudCommands<
     },
   })
 
-  const listOptionShape: Record<string, z.ZodTypeAny> = {
-    limit: limitOptionSchema,
-  }
-
-  if (config.listStatusDescription) {
-    listOptionShape.status = statusOptionSchema.describe(config.listStatusDescription)
-  }
-
-  if (config.listFilterCapabilities?.includes('date-range')) {
-    listOptionShape.from = localDateOptionSchema
-      .optional()
-      .describe('Optional inclusive lower date bound in YYYY-MM-DD form.')
-    listOptionShape.to = localDateOptionSchema
-      .optional()
-      .describe('Optional inclusive upper date bound in YYYY-MM-DD form.')
-  }
-
-  if (config.listFilterCapabilities?.includes('kind')) {
-    listOptionShape.kind = z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        'Optional history event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
-      )
-  }
-
-  const listOptions = withBaseOptions(listOptionShape)
-
   config.group.command('list', {
-    args: z.object({}),
+    args: emptyArgsSchema,
     description: config.descriptions.list,
     examples: examplesFor(config, 'list'),
     hint: hintFor(config, 'list'),
-    options: listOptions,
+    options: withBaseOptions(listOptions),
     output: config.outputs.list,
     async run(context) {
-      const limit =
-        'limit' in context.options &&
-        typeof context.options.limit === 'number'
-          ? context.options.limit
-          : undefined
-      const requestId =
-        'requestId' in context.options &&
-        typeof context.options.requestId === 'string'
-          ? context.options.requestId
-          : null
-      const status =
-        'status' in context.options &&
-        typeof context.options.status === 'string'
-          ? context.options.status
-          : undefined
-      const vault =
-        'vault' in context.options &&
-        typeof context.options.vault === 'string'
-          ? context.options.vault
-          : ''
+      const options = context.options as CommonCommandOptions & Record<string, unknown>
+      const listInput = extractCommonListOptions(options)
 
       return config.services.list({
-        from:
-          'from' in context.options &&
-          typeof context.options.from === 'string'
-            ? context.options.from
-            : undefined,
-        kind:
-          'kind' in context.options &&
-          typeof context.options.kind === 'string'
-            ? context.options.kind
-            : undefined,
-        limit,
-        requestId,
-        status,
-        to:
-          'to' in context.options &&
-          typeof context.options.to === 'string'
-            ? context.options.to
-            : undefined,
-        vault,
+        from: listInput.from,
+        kind: listInput.kind,
+        limit: listInput.limit,
+        requestId: requestIdFromOptions(options),
+        status: listInput.status,
+        to: listInput.to,
+        vault: options.vault,
       })
     },
   })
-}
-
-type CommandOptionShape = Record<string, z.ZodTypeAny>
-
-interface FactoryCommandConfig<TResult> {
-  name: string
-  args: z.ZodObject<any>
-  description: string
-  examples?: CommandExamples
-  hint?: string
-  options?: CommandOptionShape
-  output: z.ZodType<TResult>
-  run(input: {
-    args: Record<string, unknown>
-    options: Record<string, unknown> & { vault: string }
-    requestId: string | null
-  }): Promise<TResult>
-}
-
-interface FactoryCommandGroupConfig {
-  commandName: string
-  description: string
-  commands: readonly FactoryCommandConfig<any>[]
-}
-
-interface NamedArgCommandConfig<TResult> {
-  description: string
-  argName: string
-  argSchema: z.ZodTypeAny
-  examples?: CommandExamples
-  hint?: string
-  output: z.ZodType<TResult>
-  run(input: ShowCommandContext): Promise<TResult>
-}
-
-interface RegistryDocEntityGroupConfig<
-  TScaffold,
-  TUpsert,
-  TShow,
-  TList,
-> {
-  commandName: string
-  description: string
-  scaffold: FactoryCommandConfig<TScaffold>
-  upsert: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    output: z.ZodType<TUpsert>
-    run(input: UpsertCommandContext): Promise<TUpsert>
-  }
-  show: NamedArgCommandConfig<TShow>
-  list: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    output: z.ZodType<TList>
-    statusOption?: z.ZodTypeAny
-    run(input: ListCommandContext): Promise<TList>
-  }
-}
-
-interface LedgerEventListCommandContext extends ListCommandContext {
-  experiment?: string
-  tag?: unknown
-}
-
-interface LedgerEventEntityGroupConfig<
-  TScaffold,
-  TUpsert,
-  TShow,
-  TList,
-> {
-  commandName: string
-  description: string
-  scaffold: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    kindOption: z.ZodTypeAny
-    output: z.ZodType<TScaffold>
-    run(input: CommandContext & { kind: string }): Promise<TScaffold>
-  }
-  upsert: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    output: z.ZodType<TUpsert>
-    run(input: UpsertCommandContext): Promise<TUpsert>
-  }
-  show: NamedArgCommandConfig<TShow>
-  list: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    experimentOption?: z.ZodTypeAny
-    kindOption?: z.ZodTypeAny
-    output: z.ZodType<TList>
-    tagOption?: z.ZodTypeAny
-    run(input: LedgerEventListCommandContext): Promise<TList>
-  }
-}
-
-interface ArtifactListOptionNames {
-  from: string
-  to: string
-}
-
-interface ArtifactBackedEntityGroupConfig<
-  TPrimary,
-  TShow,
-  TList,
-  TManifest,
-> {
-  commandName: string
-  description: string
-  primaryAction: FactoryCommandConfig<TPrimary>
-  show: NamedArgCommandConfig<TShow>
-  list: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    limitOption?: z.ZodTypeAny
-    optionNames?: ArtifactListOptionNames
-    output: z.ZodType<TList>
-    run(input: CommandContext & { from?: string; to?: string; limit?: number }): Promise<TList>
-  }
-  manifest: NamedArgCommandConfig<TManifest>
-  additionalCommands?: readonly FactoryCommandConfig<any>[]
-}
-
-interface LifecycleEntityGroupConfig<
-  TCreate,
-  TShow,
-  TList,
-  TUpdate,
-  TCheckpoint,
-  TStop,
-> {
-  commandName: string
-  description: string
-  create: FactoryCommandConfig<TCreate>
-  show: NamedArgCommandConfig<TShow>
-  list: {
-    description: string
-    examples?: CommandExamples
-    hint?: string
-    output: z.ZodType<TList>
-    statusOption?: z.ZodTypeAny
-    run(input: ListCommandContext): Promise<TList>
-  }
-  update: FactoryCommandConfig<TUpdate>
-  checkpoint: FactoryCommandConfig<TCheckpoint>
-  stop: {
-    description: string
-    argName: string
-    argSchema: z.ZodTypeAny
-    examples?: CommandExamples
-    hint?: string
-    options?: CommandOptionShape
-    output: z.ZodType<TStop>
-    run(input: CommandContext & { id: string } & Record<string, unknown>): Promise<TStop>
-  }
-}
-
-function optionStringValue(
-  options: Record<string, unknown>,
-  key: string,
-) {
-  return typeof options[key] === 'string' ? options[key] : undefined
-}
-
-function optionNumberValue(
-  options: Record<string, unknown>,
-  key: string,
-) {
-  return typeof options[key] === 'number' ? options[key] : undefined
-}
-
-function createNamedArgSchema(
-  argName: string,
-  argSchema: z.ZodTypeAny,
-): z.ZodObject<any> {
-  return z.object({
-    [argName]: argSchema,
-  })
-}
-
-function createFactoryCommandGroup(config: FactoryCommandGroupConfig) {
-  const group = Cli.create(config.commandName, {
-    description: config.description,
-  })
-
-  for (const command of config.commands) {
-    group.command(command.name, {
-      args: command.args,
-      description: command.description,
-      examples: command.examples,
-      hint: command.hint,
-      options: withBaseOptions(command.options ?? {}),
-      output: command.output,
-      async run(context) {
-        return command.run({
-          args: context.args as Record<string, unknown>,
-          options: context.options as Record<string, unknown> & { vault: string },
-          requestId: requestIdFromOptions(
-            context.options as { vault: string; requestId?: string },
-          ),
-        })
-      },
-    })
-  }
-
-  return group
-}
-
-function registerFactoryCommandGroup(
-  cli: Cli.Cli,
-  config: FactoryCommandGroupConfig,
-) {
-  const group = createFactoryCommandGroup(config)
-  cli.command(group)
-  return group
 }
 
 export function createRegistryDocEntityGroup<
@@ -740,56 +912,27 @@ export function createRegistryDocEntityGroup<
     description: config.description,
     commands: [
       config.scaffold,
-      {
-        name: 'upsert',
-        args: z.object({}),
-        description: config.upsert.description,
-        examples: config.upsert.examples,
-        hint: config.upsert.hint,
-        options: {
-          input: inputFileOptionSchema,
-        },
-        output: config.upsert.output,
-        run({ options, requestId }) {
-          return config.upsert.run({
-            input: normalizeInputFileOption(String(options.input ?? '')),
-            requestId,
-            vault: String(options.vault ?? ''),
-          })
-        },
-      },
-      {
-        name: 'show',
-        args: createNamedArgSchema(config.show.argName, config.show.argSchema),
-        description: config.show.description,
-        examples: config.show.examples,
-        hint: config.show.hint,
-        output: config.show.output,
-        run({ args, options, requestId }) {
-          return config.show.run({
-            id: String(args[config.show.argName] ?? ''),
-            requestId,
-            vault: String(options.vault ?? ''),
-          })
-        },
-      },
+      createInputFileFactoryCommand('upsert', config.upsert),
+      createNamedArgFactoryCommand('show', config.show),
       {
         name: 'list',
-        args: z.object({}),
+        args: emptyArgsSchema,
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: {
-          ...(config.list.statusOption ? { status: config.list.statusOption } : {}),
+        options: buildListOptionShape({
           limit: limitOptionSchema,
-        },
+          status: config.list.statusOption,
+        }),
         output: config.list.output,
-        run({ options, requestId }) {
+        async run({ options, requestId }) {
+          const listInput = extractCommonListOptions(options)
+
           return config.list.run({
-            limit: optionNumberValue(options, 'limit'),
+            limit: listInput.limit,
             requestId,
-            status: optionStringValue(options, 'status'),
-            vault: String(options.vault ?? ''),
+            status: listInput.status,
+            vault: options.vault,
           })
         },
       },
@@ -825,7 +968,7 @@ export function createLedgerEventEntityGroup<
     commands: [
       {
         name: 'scaffold',
-        args: z.object({}),
+        args: emptyArgsSchema,
         description: config.scaffold.description,
         examples: config.scaffold.examples,
         hint: config.scaffold.hint,
@@ -833,74 +976,49 @@ export function createLedgerEventEntityGroup<
           kind: config.scaffold.kindOption,
         },
         output: config.scaffold.output,
-        run({ options, requestId }) {
+        async run({ options, requestId }) {
           return config.scaffold.run({
-            kind: String(options.kind ?? ''),
+            kind: String(options.kind),
             requestId,
-            vault: String(options.vault ?? ''),
+            vault: options.vault,
           })
         },
       },
-      {
-        name: 'upsert',
-        args: z.object({}),
-        description: config.upsert.description,
-        examples: config.upsert.examples,
-        hint: config.upsert.hint,
-        options: {
-          input: inputFileOptionSchema,
-        },
-        output: config.upsert.output,
-        run({ options, requestId }) {
-          return config.upsert.run({
-            input: normalizeInputFileOption(String(options.input ?? '')),
-            requestId,
-            vault: String(options.vault ?? ''),
-          })
-        },
-      },
-      {
-        name: 'show',
-        args: createNamedArgSchema(config.show.argName, config.show.argSchema),
-        description: config.show.description,
-        examples: config.show.examples,
-        hint: config.show.hint,
-        output: config.show.output,
-        run({ args, options, requestId }) {
-          return config.show.run({
-            id: String(args[config.show.argName] ?? ''),
-            requestId,
-            vault: String(options.vault ?? ''),
-          })
-        },
-      },
+      createInputFileFactoryCommand('upsert', config.upsert),
+      createNamedArgFactoryCommand('show', config.show),
       {
         name: 'list',
-        args: z.object({}),
+        args: emptyArgsSchema,
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: {
-          ...(config.list.kindOption ? { kind: config.list.kindOption } : {}),
-          from: localDateOptionSchema.optional(),
-          to: localDateOptionSchema.optional(),
-          ...(config.list.tagOption ? { tag: config.list.tagOption } : {}),
-          ...(config.list.experimentOption
-            ? { experiment: config.list.experimentOption }
-            : {}),
+        options: buildListOptionShape({
+          experiment: config.list.experimentOption,
+          from: {
+            description: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
+            name: 'from',
+          },
+          kind: config.list.kindOption,
           limit: limitOptionSchema,
-        },
+          tag: config.list.tagOption,
+          to: {
+            description: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
+            name: 'to',
+          },
+        }),
         output: config.list.output,
-        run({ options, requestId }) {
+        async run({ options, requestId }) {
+          const listInput = extractCommonListOptions(options)
+
           return config.list.run({
-            experiment: optionStringValue(options, 'experiment'),
-            from: optionStringValue(options, 'from'),
-            kind: optionStringValue(options, 'kind'),
-            limit: optionNumberValue(options, 'limit'),
+            experiment: listInput.experiment,
+            from: listInput.from,
+            kind: listInput.kind,
+            limit: listInput.limit,
             requestId,
-            tag: options.tag,
-            to: optionStringValue(options, 'to'),
-            vault: String(options.vault ?? ''),
+            tag: listInput.tag,
+            to: listInput.to,
+            vault: options.vault,
           })
         },
       },
@@ -940,65 +1058,38 @@ export function createArtifactBackedEntityGroup<
     description: config.description,
     commands: [
       config.primaryAction,
-      {
-        name: 'show',
-        args: createNamedArgSchema(config.show.argName, config.show.argSchema),
-        description: config.show.description,
-        examples: config.show.examples,
-        hint: config.show.hint,
-        output: config.show.output,
-        run({ args, options, requestId }) {
-          return config.show.run({
-            id: String(args[config.show.argName] ?? ''),
-            requestId,
-            vault: String(options.vault ?? ''),
-          })
-        },
-      },
+      createNamedArgFactoryCommand('show', config.show),
       {
         name: 'list',
-        args: z.object({}),
+        args: emptyArgsSchema,
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: {
-          [optionNames.from]: localDateOptionSchema
-            .optional()
-            .describe('Optional inclusive start date in YYYY-MM-DD form.'),
-          [optionNames.to]: localDateOptionSchema
-            .optional()
-            .describe('Optional inclusive end date in YYYY-MM-DD form.'),
-          ...(config.list.limitOption ? { limit: config.list.limitOption } : {}),
-        },
+        options: buildListOptionShape({
+          from: {
+            description: 'Optional inclusive start date in YYYY-MM-DD form.',
+            name: optionNames.from,
+          },
+          limit: config.list.limitOption,
+          to: {
+            description: 'Optional inclusive end date in YYYY-MM-DD form.',
+            name: optionNames.to,
+          },
+        }),
         output: config.list.output,
-        run({ options, requestId }) {
+        async run({ options, requestId }) {
+          const listInput = extractCommonListOptions(options, optionNames)
+
           return config.list.run({
-            from: optionStringValue(options, optionNames.from),
-            limit: optionNumberValue(options, 'limit'),
+            from: listInput.from,
+            limit: listInput.limit,
             requestId,
-            to: optionStringValue(options, optionNames.to),
-            vault: String(options.vault ?? ''),
+            to: listInput.to,
+            vault: options.vault,
           })
         },
       },
-      {
-        name: 'manifest',
-        args: createNamedArgSchema(
-          config.manifest.argName,
-          config.manifest.argSchema,
-        ),
-        description: config.manifest.description,
-        examples: config.manifest.examples,
-        hint: config.manifest.hint,
-        output: config.manifest.output,
-        run({ args, options, requestId }) {
-          return config.manifest.run({
-            id: String(args[config.manifest.argName] ?? ''),
-            requestId,
-            vault: String(options.vault ?? ''),
-          })
-        },
-      },
+      createNamedArgFactoryCommand('manifest', config.manifest),
       ...(config.additionalCommands ?? []),
     ],
   })
@@ -1040,38 +1131,26 @@ export function createLifecycleEntityGroup<
     description: config.description,
     commands: [
       config.create,
-      {
-        name: 'show',
-        args: createNamedArgSchema(config.show.argName, config.show.argSchema),
-        description: config.show.description,
-        examples: config.show.examples,
-        hint: config.show.hint,
-        output: config.show.output,
-        run({ args, options, requestId }) {
-          return config.show.run({
-            id: String(args[config.show.argName] ?? ''),
-            requestId,
-            vault: String(options.vault ?? ''),
-          })
-        },
-      },
+      createNamedArgFactoryCommand('show', config.show),
       {
         name: 'list',
-        args: z.object({}),
+        args: emptyArgsSchema,
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: {
-          ...(config.list.statusOption ? { status: config.list.statusOption } : {}),
+        options: buildListOptionShape({
           limit: limitOptionSchema,
-        },
+          status: config.list.statusOption,
+        }),
         output: config.list.output,
-        run({ options, requestId }) {
+        async run({ options, requestId }) {
+          const listInput = extractCommonListOptions(options)
+
           return config.list.run({
-            limit: optionNumberValue(options, 'limit'),
+            limit: listInput.limit,
             requestId,
-            status: optionStringValue(options, 'status'),
-            vault: String(options.vault ?? ''),
+            status: listInput.status,
+            vault: options.vault,
           })
         },
       },
@@ -1085,11 +1164,11 @@ export function createLifecycleEntityGroup<
         hint: config.stop.hint,
         options: config.stop.options,
         output: config.stop.output,
-        run({ args, options, requestId }) {
+        async run({ args, options, requestId }) {
           return config.stop.run({
-            id: String(args[config.stop.argName] ?? ''),
+            id: String(args[config.stop.argName]),
             requestId,
-            vault: String(options.vault ?? ''),
+            vault: options.vault,
             ...(options as Record<string, unknown>),
           })
         },

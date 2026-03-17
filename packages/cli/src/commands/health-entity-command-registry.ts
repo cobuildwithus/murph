@@ -14,7 +14,6 @@ import {
   healthShowResultSchema,
   type HealthCommandDescriptorEntry,
 } from "../health-cli-descriptors.js";
-import type { HealthScaffoldResult } from "../health-cli-method-types.js";
 import { pathSchema } from "../vault-cli-contracts.js";
 import type { VaultCliServices } from "../vault-cli-services.js";
 
@@ -75,10 +74,6 @@ function bindCrudServices(
   });
 }
 
-type BoundCrudServices = ReturnType<typeof bindCrudServices>;
-type BoundCrudShowResult = Awaited<ReturnType<BoundCrudServices["show"]>>;
-type BoundCrudListResult = Awaited<ReturnType<BoundCrudServices["list"]>>;
-
 function buildCrudGroupConfig(
   services: VaultCliServices,
   descriptor: HealthCommandDescriptorEntry,
@@ -118,12 +113,7 @@ export function registerHealthEntityCrudGroup(
   commandName: string,
 ) {
   const descriptor = requireHealthCommandDescriptor(commandName);
-  registerHealthCrudGroup<
-    HealthScaffoldResult<string>,
-    object,
-    BoundCrudShowResult,
-    BoundCrudListResult
-  >(cli, buildCrudGroupConfig(services, descriptor));
+  registerHealthCrudGroup(cli, buildCrudGroupConfig(services, descriptor));
 }
 
 export function createHealthEntityCrudGroup(
@@ -131,10 +121,5 @@ export function createHealthEntityCrudGroup(
   commandName: string,
 ) {
   const descriptor = requireHealthCommandDescriptor(commandName);
-  return createHealthCrudGroup<
-    HealthScaffoldResult<string>,
-    object,
-    BoundCrudShowResult,
-    BoundCrudListResult
-  >(buildCrudGroupConfig(services, descriptor));
+  return createHealthCrudGroup(buildCrudGroupConfig(services, descriptor));
 }
