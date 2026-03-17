@@ -13,10 +13,17 @@ import {
   readOptionalMarkdownDocument,
 } from "./loaders.js";
 import {
-  fallbackCurrentProfileEntity,
   projectCurrentProfileEntity,
   projectProfileSnapshotEntity,
 } from "../canonical-entities.js";
+import {
+  compareCurrentProfileSnapshotRecency,
+  fallbackCurrentProfileEntityFromSnapshotRecord,
+  fallbackFromLatestCurrentProfileSnapshot,
+  isCurrentProfileStale,
+  selectLatestCurrentProfileSnapshot,
+  type CurrentProfileSnapshotSortFields,
+} from "./current-profile-resolution.js";
 
 import type {
   CanonicalEntity,
@@ -140,14 +147,10 @@ export function compareSnapshots(
   left: ProfileSnapshotQueryRecord,
   right: ProfileSnapshotQueryRecord,
 ): number {
-  const leftTimestamp = left.recordedAt ?? left.capturedAt ?? "";
-  const rightTimestamp = right.recordedAt ?? right.capturedAt ?? "";
-
-  if (leftTimestamp !== rightTimestamp) {
-    return rightTimestamp.localeCompare(leftTimestamp);
-  }
-
-  return left.id.localeCompare(right.id);
+  return compareCurrentProfileSnapshotRecency(
+    profileSnapshotSortFields(left),
+    profileSnapshotSortFields(right),
+  );
 }
 
 function isProfileSnapshotRecord(
@@ -200,26 +203,32 @@ export async function readCurrentProfile(
   vaultRoot: string,
 ): Promise<CurrentProfileQueryRecord | null> {
   const snapshots = await listProfileSnapshots(vaultRoot);
-  const latestSnapshot = snapshots[0] ?? null;
+  const latestSnapshot = selectLatestCurrentProfileSnapshot(
+    snapshots,
+    profileSnapshotSortFields,
+  );
 
   if (!latestSnapshot) {
     return null;
   }
 
+  const fallbackCurrentProfile = () =>
+    fallbackFromLatestCurrentProfileSnapshot(latestSnapshot, fallbackCurrent);
+
   try {
     const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
     if (!document) {
-      return fallbackCurrent(latestSnapshot);
+      return fallbackCurrentProfile();
     }
 
     const record = toCurrentProfileRecord(document);
-    if (record.snapshotId !== latestSnapshot.id) {
-      return fallbackCurrent(latestSnapshot);
+    if (isCurrentProfileStale(record.snapshotId, latestSnapshot.id)) {
+      return fallbackCurrentProfile();
     }
 
     return record;
   } catch {
-    return fallbackCurrent(latestSnapshot);
+    return fallbackCurrentProfile();
   }
 }
 
@@ -239,29 +248,16 @@ export async function showProfile(
 function fallbackCurrent(
   latestSnapshot: ProfileSnapshotQueryRecord,
 ): CurrentProfileQueryRecord | null {
-  const fallback = fallbackCurrentProfileEntity({
-    entityId: latestSnapshot.id,
-    primaryLookupId: latestSnapshot.id,
-    lookupIds: [latestSnapshot.id],
-    family: "profile_snapshot",
-    kind: "profile_snapshot",
-    status: latestSnapshot.status,
-    occurredAt: latestSnapshot.recordedAt ?? latestSnapshot.capturedAt,
-    date: (latestSnapshot.recordedAt ?? latestSnapshot.capturedAt)?.slice(0, 10) ?? null,
-    path: latestSnapshot.relativePath,
-    title: latestSnapshot.summary ?? latestSnapshot.id,
-    body: latestSnapshot.summary,
-    attributes: {
-      profile: latestSnapshot.profile,
-      sourceAssessmentIds: latestSnapshot.sourceAssessmentIds,
-      sourceEventIds: latestSnapshot.sourceEventIds,
-    },
-    frontmatter: null,
-    relatedIds: [...latestSnapshot.sourceAssessmentIds, ...latestSnapshot.sourceEventIds],
-    stream: null,
-    experimentSlug: null,
-    tags: ["profile_snapshot", latestSnapshot.status],
-  });
+  const fallback = fallbackCurrentProfileEntityFromSnapshotRecord(latestSnapshot);
 
   return fallback ? currentProfileRecordFromEntity(fallback) : null;
+}
+
+function profileSnapshotSortFields(
+  snapshot: ProfileSnapshotQueryRecord,
+): CurrentProfileSnapshotSortFields {
+  return {
+    snapshotId: snapshot.id,
+    snapshotTimestamp: snapshot.recordedAt ?? snapshot.capturedAt,
+  };
 }

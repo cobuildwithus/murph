@@ -35,6 +35,12 @@ import {
   type RegistryDefinition,
   type RegistryMarkdownRecord,
 } from "./registries.js";
+import {
+  fallbackFromLatestCurrentProfileSnapshot,
+  isCurrentProfileStale,
+  selectLatestCurrentProfileSnapshot,
+  type CurrentProfileSnapshotSortFields,
+} from "./current-profile-resolution.js";
 import { firstString } from "./shared.js";
 
 type RegistryFamily = Extract<
@@ -554,19 +560,29 @@ async function readCurrentProfileStrict(
   profileSnapshots: CanonicalEntity[],
   markdownByPath: Map<string, string>,
 ): Promise<CanonicalEntity | null> {
-  const latestSnapshot = getLatestProfileSnapshot(profileSnapshots);
+  const latestSnapshot = selectLatestCurrentProfileSnapshot(
+    profileSnapshots,
+    canonicalProfileSnapshotSortFields,
+  );
+  const fallbackCurrentProfile = () =>
+    fallbackFromLatestCurrentProfileSnapshot(
+      latestSnapshot,
+      fallbackCurrentProfileEntity,
+    );
   const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
 
   if (!document) {
-    return latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null;
+    return fallbackCurrentProfile();
   }
 
   const currentProfile = projectCurrentProfileEntity(document);
   if (
-    latestSnapshot &&
-    firstString(currentProfile.attributes, ["snapshotId"]) !== latestSnapshot.entityId
+    isCurrentProfileStale(
+      firstString(currentProfile.attributes, ["snapshotId"]),
+      latestSnapshot?.entityId ?? null,
+    )
   ) {
-    return fallbackCurrentProfileEntity(latestSnapshot);
+    return fallbackCurrentProfile();
   }
 
   markdownByPath.set(currentProfile.path, document.markdown);
@@ -578,7 +594,15 @@ async function readCurrentProfileTolerant(
   profileSnapshots: CanonicalEntity[],
   markdownByPath: Map<string, string>,
 ): Promise<{ entity: CanonicalEntity | null; failures: ParseFailure[] }> {
-  const latestSnapshot = getLatestProfileSnapshot(profileSnapshots);
+  const latestSnapshot = selectLatestCurrentProfileSnapshot(
+    profileSnapshots,
+    canonicalProfileSnapshotSortFields,
+  );
+  const fallbackCurrentProfile = () =>
+    fallbackFromLatestCurrentProfileSnapshot(
+      latestSnapshot,
+      fallbackCurrentProfileEntity,
+    );
   const outcome = await readOptionalMarkdownDocumentOutcome(
     vaultRoot,
     "bank/profile/current.md",
@@ -586,25 +610,27 @@ async function readCurrentProfileTolerant(
 
   if (!outcome) {
     return {
-      entity: latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null,
+      entity: fallbackCurrentProfile(),
       failures: [],
     };
   }
 
   if (!outcome.ok) {
     return {
-      entity: latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null,
+      entity: fallbackCurrentProfile(),
       failures: [outcome],
     };
   }
 
   const currentProfile = projectCurrentProfileEntity(outcome.document);
   if (
-    latestSnapshot &&
-    firstString(currentProfile.attributes, ["snapshotId"]) !== latestSnapshot.entityId
+    isCurrentProfileStale(
+      firstString(currentProfile.attributes, ["snapshotId"]),
+      latestSnapshot?.entityId ?? null,
+    )
   ) {
     return {
-      entity: fallbackCurrentProfileEntity(latestSnapshot),
+      entity: fallbackCurrentProfile(),
       failures: [],
     };
   }
@@ -621,7 +647,15 @@ function readCurrentProfileTolerantSync(
   profileSnapshots: CanonicalEntity[],
   markdownByPath: Map<string, string>,
 ): { entity: CanonicalEntity | null; failures: ParseFailure[] } {
-  const latestSnapshot = getLatestProfileSnapshot(profileSnapshots);
+  const latestSnapshot = selectLatestCurrentProfileSnapshot(
+    profileSnapshots,
+    canonicalProfileSnapshotSortFields,
+  );
+  const fallbackCurrentProfile = () =>
+    fallbackFromLatestCurrentProfileSnapshot(
+      latestSnapshot,
+      fallbackCurrentProfileEntity,
+    );
   const outcome = readOptionalMarkdownDocumentOutcomeSync(
     vaultRoot,
     "bank/profile/current.md",
@@ -629,25 +663,27 @@ function readCurrentProfileTolerantSync(
 
   if (!outcome) {
     return {
-      entity: latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null,
+      entity: fallbackCurrentProfile(),
       failures: [],
     };
   }
 
   if (!outcome.ok) {
     return {
-      entity: latestSnapshot ? fallbackCurrentProfileEntity(latestSnapshot) : null,
+      entity: fallbackCurrentProfile(),
       failures: [outcome],
     };
   }
 
   const currentProfile = projectCurrentProfileEntity(outcome.document);
   if (
-    latestSnapshot &&
-    firstString(currentProfile.attributes, ["snapshotId"]) !== latestSnapshot.entityId
+    isCurrentProfileStale(
+      firstString(currentProfile.attributes, ["snapshotId"]),
+      latestSnapshot?.entityId ?? null,
+    )
   ) {
     return {
-      entity: fallbackCurrentProfileEntity(latestSnapshot),
+      entity: fallbackCurrentProfile(),
       failures: [],
     };
   }
@@ -659,19 +695,11 @@ function readCurrentProfileTolerantSync(
   };
 }
 
-function getLatestProfileSnapshot(
-  profileSnapshots: CanonicalEntity[],
-): CanonicalEntity | null {
-  return [...profileSnapshots].sort(compareLatestEntity)[0] ?? null;
-}
-
-function compareLatestEntity(left: CanonicalEntity, right: CanonicalEntity): number {
-  const leftSortKey = left.occurredAt ?? left.date ?? "";
-  const rightSortKey = right.occurredAt ?? right.date ?? "";
-
-  if (leftSortKey !== rightSortKey) {
-    return rightSortKey.localeCompare(leftSortKey);
-  }
-
-  return left.entityId.localeCompare(right.entityId);
+function canonicalProfileSnapshotSortFields(
+  snapshot: CanonicalEntity,
+): CurrentProfileSnapshotSortFields {
+  return {
+    snapshotId: snapshot.entityId,
+    snapshotTimestamp: snapshot.occurredAt ?? snapshot.date,
+  };
 }

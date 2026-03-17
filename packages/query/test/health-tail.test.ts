@@ -10,6 +10,7 @@ import {
   getVaultEntities,
   listEntities,
   listRecords,
+  readCurrentProfile,
   lookupEntityById,
   readVault,
   readVaultTolerant,
@@ -398,6 +399,34 @@ test("showProfile derives the current profile from the latest snapshot when the 
     if (!("snapshotId" in current)) {
       throw new Error("Expected the derived current-profile record.");
     }
+    assert.equal(current.snapshotId, "psnap_health_01");
+    assert.deepEqual(current.topGoalIds, ["goal_sleep_01"]);
+    assert.equal(current.markdown, null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("readCurrentProfile falls back to the latest snapshot when current-profile markdown is malformed", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+  });
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/profile/current.md",
+      `---
+schemaVersion: hb.frontmatter.profile-current.v1
+snapshotId psnap_health_01
+---
+# Current Profile
+`,
+    );
+
+    const current = await readCurrentProfile(vaultRoot);
+
+    assert.ok(current);
     assert.equal(current.snapshotId, "psnap_health_01");
     assert.deepEqual(current.topGoalIds, ["goal_sleep_01"]);
     assert.equal(current.markdown, null);
