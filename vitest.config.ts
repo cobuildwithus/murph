@@ -55,6 +55,7 @@ export default defineConfig({
       "packages/cli/test/setup-cli.test.ts",
       "packages/cli/test/selector-filter-normalization.test.ts",
       "packages/cli/test/stdin-input.test.ts",
+      "packages/cli/test/vault-usecase-helpers.test.ts",
       "packages/cli/test/release-script-coverage-audit.test.ts",
       "packages/cli/test/release-workflow-guards.test.ts",
     ],

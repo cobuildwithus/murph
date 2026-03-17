@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -10,61 +9,29 @@ import {
   type ProviderFrontmatter,
 } from '@healthybob/contracts'
 import { z } from 'incur'
-import {
-  inferHealthEntityKind,
-  isHealthQueryableRecordId,
-} from '../health-cli-descriptors.js'
 import { loadJsonInputObject } from '../json-input.js'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
-import { loadQueryRuntime, type QueryRuntimeModule } from '../query-runtime.js'
+import {
+  loadQueryRuntime,
+  type QueryRuntimeModule,
+  type QueryVaultRecord as QueryRecord,
+} from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
+import {
+  compactObject,
+  generateContractId,
+  inferVaultLinkKind,
+  isVaultQueryableRecordId,
+  normalizeIsoTimestamp,
+  normalizeOptionalText,
+  normalizeStringArray,
+  resolveVaultRelativePath,
+  stringArray,
+  uniqueStrings,
+} from './vault-usecase-helpers.js'
 
 type JsonObject = Record<string, unknown>
-
-interface QueryRecord {
-  displayId: string
-  primaryLookupId: string
-  lookupIds: string[]
-  recordType: string
-  sourcePath: string
-  occurredAt: string | null
-  date: string | null
-  kind: string | null
-  status?: string | null
-  stream: string | null
-  experimentSlug: string | null
-  title: string | null
-  tags: string[]
-  data: JsonObject
-  body: string | null
-  frontmatter: JsonObject | null
-  relatedIds?: string[]
-}
-
-interface QueryReadModel {
-  records: QueryRecord[]
-}
-
-interface ProviderEventQueryRuntime extends QueryRuntimeModule {
-  readVault(vaultRoot: string): Promise<QueryReadModel>
-  lookupRecordById(vault: QueryReadModel, recordId: string): QueryRecord | null
-  listRecords(
-    vault: QueryReadModel,
-    filters?: {
-      ids?: string[]
-      recordTypes?: string[]
-      kinds?: string[]
-      streams?: string[]
-      experimentSlug?: string
-      date?: string
-      from?: string
-      to?: string
-      tags?: string[]
-      text?: string
-    },
-  ): QueryRecord[]
-}
 
 interface CanonicalWriteLockHandle {
   release(): Promise<void>
@@ -110,10 +77,7 @@ interface ProviderEventCoreRuntime {
   }>
 }
 
-const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
 const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u
-const CROCKFORD_BASE32_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 const providerStatusSchema = z.string().min(1)
 const slugSchema = z
   .string()
@@ -390,7 +354,7 @@ export async function upsertProviderRecord(input: {
       website: normalizeOptionalText(input.payload.website) ?? undefined,
       phone: normalizeOptionalText(input.payload.phone) ?? undefined,
       note: normalizeOptionalText(input.payload.note) ?? undefined,
-      aliases: normalizeTextArray(input.payload.aliases) ?? undefined,
+      aliases: normalizeStringArray(input.payload.aliases) ?? undefined,
     }))
     const body = normalizeProviderBody(
       input.payload.body,
@@ -883,70 +847,9 @@ function buildRecordLinks(record: QueryRecord) {
 
   return links.map((id) => ({
     id,
-    kind: inferLinkKind(id),
-    queryable: isQueryableRecordId(id),
+    kind: inferVaultLinkKind(id, { includeProviderIds: true }),
+    queryable: isVaultQueryableRecordId(id),
   }))
-}
-
-function inferLinkKind(id: string) {
-  const healthKind = inferHealthEntityKind(id)
-  if (healthKind) {
-    return healthKind
-  }
-
-  if (id === 'core') {
-    return 'core'
-  }
-
-  if (id.startsWith('aud_') || id.startsWith('audit:')) {
-    return 'audit'
-  }
-
-  if (id.startsWith('evt_') || id.startsWith('event:')) {
-    return 'event'
-  }
-
-  if (id.startsWith('exp_') || id.startsWith('experiment:')) {
-    return 'experiment'
-  }
-
-  if (id.startsWith('journal:')) {
-    return 'journal'
-  }
-
-  if (id.startsWith('smp_') || id.startsWith('sample:')) {
-    return 'sample'
-  }
-
-  if (id.startsWith('meal_')) {
-    return 'meal'
-  }
-
-  if (id.startsWith('doc_')) {
-    return 'document'
-  }
-
-  if (id.startsWith('prov_')) {
-    return 'provider'
-  }
-
-  return 'entity'
-}
-
-function isQueryableRecordId(id: string) {
-  return (
-    id === 'core' ||
-    isHealthQueryableRecordId(id) ||
-    id.startsWith('aud_') ||
-    id.startsWith('evt_') ||
-    id.startsWith('exp_') ||
-    id.startsWith('smp_') ||
-    id.startsWith('audit:') ||
-    id.startsWith('event:') ||
-    id.startsWith('experiment:') ||
-    id.startsWith('journal:') ||
-    id.startsWith('sample:')
-  )
 }
 
 function valueAsString(value: unknown) {
@@ -960,23 +863,6 @@ function normalizeRequiredText(value: unknown, message: string) {
   }
 
   return normalized
-}
-
-function normalizeOptionalText(value: string | undefined) {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function normalizeIsoTimestamp(value: string | null | undefined) {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  return ISO_TIMESTAMP_WITH_OFFSET_PATTERN.test(value) ? value : null
 }
 
 function normalizeTimestampInput(value: unknown) {
@@ -1003,112 +889,12 @@ function normalizeLocalDate(value: string | undefined) {
   return LOCAL_DATE_PATTERN.test(value) ? value : undefined
 }
 
-function normalizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return undefined
-  }
-
-  const normalized = value
-    .filter((entry): entry is string => typeof entry === 'string')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-
-  return normalized.length > 0 ? uniqueStrings(normalized) : undefined
-}
-
-function normalizeTextArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    return undefined
-  }
-
-  const normalized = value
-    .filter((entry): entry is string => typeof entry === 'string')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-
-  return normalized.length > 0 ? uniqueStrings(normalized) : undefined
-}
-
-function stringArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
-    : []
-}
-
-function uniqueStrings(values: readonly string[]) {
-  return [...new Set(values)]
-}
-
-function compactObject(record: JsonObject) {
-  return Object.fromEntries(
-    Object.entries(record).filter(([, value]) => value !== undefined),
-  )
-}
-
-async function loadProviderEventQueryRuntime(): Promise<ProviderEventQueryRuntime> {
-  return loadQueryRuntime() as Promise<ProviderEventQueryRuntime>
+async function loadProviderEventQueryRuntime(): Promise<QueryRuntimeModule> {
+  return loadQueryRuntime()
 }
 
 async function loadProviderEventCoreRuntime(): Promise<ProviderEventCoreRuntime> {
   return loadRuntimeModule<ProviderEventCoreRuntime>('@healthybob/core')
-}
-
-function resolveVaultRelativePath(vaultRoot: string, relativePath: string) {
-  const normalized = String(relativePath).trim().replace(/\\/g, '/')
-
-  if (
-    normalized.length === 0 ||
-    path.posix.isAbsolute(normalized) ||
-    /^[A-Za-z]:/u.test(normalized)
-  ) {
-    throw new VaultCliError(
-      'invalid_path',
-      `Vault-relative path "${relativePath}" is invalid.`,
-    )
-  }
-
-  const absoluteRoot = path.resolve(vaultRoot)
-  const absolutePath = path.resolve(absoluteRoot, normalized)
-  const containment = path.relative(absoluteRoot, absolutePath)
-
-  if (
-    containment === '..' ||
-    containment.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(containment)
-  ) {
-    throw new VaultCliError(
-      'invalid_path',
-      `Vault-relative path "${relativePath}" escapes the selected vault root.`,
-    )
-  }
-
-  return absolutePath
-}
-
-function generateContractId(prefix: string) {
-  return `${prefix}_${generateUlid()}`
-}
-
-function generateUlid() {
-  return `${encodeTime(Date.now(), 10)}${encodeRandom(16)}`
-}
-
-function encodeTime(value: number, length: number) {
-  let remaining = value
-  let output = ''
-
-  for (let index = 0; index < length; index += 1) {
-    output = CROCKFORD_BASE32_ALPHABET[remaining % 32] + output
-    remaining = Math.floor(remaining / 32)
-  }
-
-  return output
-}
-
-function encodeRandom(length: number) {
-  return Array.from(randomBytes(length), (byte) =>
-    CROCKFORD_BASE32_ALPHABET[byte % 32],
-  ).join('')
 }
 
 function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
