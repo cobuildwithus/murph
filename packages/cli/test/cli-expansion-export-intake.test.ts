@@ -160,9 +160,19 @@ test.sequential(
         kind: string
         manifestFile: string
         manifest: {
+          schemaVersion: string
           importId: string
           importKind: string
+          rawDirectory: string
           source: string | null
+          artifacts: Array<{
+            role: string
+            relativePath: string
+            originalFileName: string
+            mediaType: string
+            byteSize: number
+            sha256: string
+          }>
           provenance: {
             title?: string
             lookupId?: string
@@ -203,9 +213,36 @@ test.sequential(
       assert.equal(requireData(manifestResult).lookupId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).kind, 'assessment')
       assert.equal(requireData(manifestResult).manifestFile, requireData(imported).manifestFile)
+      assert.equal(requireData(manifestResult).manifest.schemaVersion, 'hb.raw-import-manifest.v1')
       assert.equal(requireData(manifestResult).manifest.importId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).manifest.importKind, 'assessment')
       assert.equal(requireData(manifestResult).manifest.source, 'manual')
+      assert.equal(
+        requireData(manifestResult).manifest.rawDirectory,
+        path.posix.dirname(requireData(manifestResult).manifest.artifacts[0]?.relativePath ?? ''),
+      )
+      assert.equal(requireData(manifestResult).manifest.artifacts[0]?.role, 'source_assessment')
+      assert.equal(
+        requireData(manifestResult).manifest.artifacts[0]?.relativePath,
+        requireData(imported).rawFile,
+      )
+      assert.equal(
+        requireData(manifestResult).manifest.artifacts[0]?.originalFileName,
+        path.basename(assessmentPath),
+      )
+      assert.equal(
+        requireData(manifestResult).manifest.artifacts[0]?.mediaType,
+        'application/json',
+      )
+      assert.equal(
+        Number.isInteger(requireData(manifestResult).manifest.artifacts[0]?.byteSize),
+        true,
+      )
+      assert.equal((requireData(manifestResult).manifest.artifacts[0]?.byteSize ?? 0) > 0, true)
+      assert.match(
+        requireData(manifestResult).manifest.artifacts[0]?.sha256 ?? '',
+        /^[a-f0-9]{64}$/u,
+      )
       assert.equal(requireData(manifestResult).manifest.provenance.title, 'Baseline Intake')
       assert.equal(
         requireData(manifestResult).manifest.provenance.lookupId,

@@ -15,6 +15,7 @@ import {
   journalDayFrontmatterSchema,
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
+  rawImportManifestSchema,
   regimenFrontmatterSchema,
   safeParseContract,
   sampleRecordSchema,
@@ -543,6 +544,19 @@ async function validateRawManifestFile(
 
   const issues: ValidationIssue[] = [];
   const expectedRawDirectory = path.posix.dirname(relativePath);
+  const contractResult = safeParseContract(rawImportManifestSchema, manifest);
+
+  if (!contractResult.success) {
+    issues.push(
+      ...contractResult.errors.map((error: string) =>
+        validationIssue(
+          "HB_RAW_MANIFEST_INVALID",
+          `Raw import manifest ${error}.`,
+          relativePath,
+        ),
+      ),
+    );
+  }
 
   if (typeof manifest.schemaVersion !== "string" || manifest.schemaVersion.trim().length === 0) {
     issues.push(validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest is missing schemaVersion.", relativePath));

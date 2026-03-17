@@ -24,6 +24,7 @@ import {
   GOAL_STATUSES,
   ID_PREFIXES,
   PROFILE_SNAPSHOT_SOURCES,
+  RAW_IMPORT_KINDS,
   REGIMEN_KINDS,
   REGIMEN_STATUSES,
   SAMPLE_QUALITIES,
@@ -42,6 +43,7 @@ export type EventSource = (typeof EVENT_SOURCES)[number];
 export type ExperimentPhase = (typeof EXPERIMENT_PHASES)[number];
 export type GoalHorizon = (typeof GOAL_HORIZONS)[number];
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
+export type RawImportKind = (typeof RAW_IMPORT_KINDS)[number];
 export type ConditionClinicalStatus = (typeof CONDITION_CLINICAL_STATUSES)[number];
 export type ConditionVerificationStatus = (typeof CONDITION_VERIFICATION_STATUSES)[number];
 export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
@@ -77,6 +79,7 @@ const RAW_DOCUMENT_PATH_PATTERN = "^raw/documents/[A-Za-z0-9._/-]+$";
 const RAW_MEAL_PATH_PATTERN = "^raw/meals/[A-Za-z0-9._/-]+$";
 const RAW_ASSESSMENT_SOURCE_PATTERN = "^raw/assessments/[A-Za-z0-9._/-]+/source\\.json$";
 const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
+const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -610,6 +613,30 @@ export const assessmentResponseSchema = withContractMetadata(
   "Healthy Bob Assessment Response",
 );
 
+export const rawImportManifestArtifactSchema = z
+  .object({
+    role: boundedString(1, 160),
+    relativePath: patternedString(RAW_PATH_PATTERN),
+    originalFileName: boundedString(1, 255),
+    mediaType: boundedString(1, 255),
+    byteSize: integerSchema(0),
+    sha256: patternedString(SHA256_HEX_PATTERN, 64, 64),
+  })
+  .strict();
+
+export const rawImportManifestSchema = z
+  .object({
+    schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.rawImportManifest),
+    importId: patternedString(GENERIC_CONTRACT_ID_PATTERN),
+    importKind: z.enum(RAW_IMPORT_KINDS),
+    importedAt: isoDateTimeString(),
+    source: boundedString(1, 160).nullable(),
+    rawDirectory: patternedString(RAW_PATH_PATTERN),
+    artifacts: uniqueArray(rawImportManifestArtifactSchema, { minItems: 1 }),
+    provenance: jsonObjectSchema,
+  })
+  .strict();
+
 export const profileSnapshotSchema = withContractMetadata(
   z
     .object({
@@ -808,6 +835,8 @@ export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;
 export type ProviderFrontmatter = z.infer<typeof providerFrontmatterSchema>;
 export type AssessmentResponseRecord = z.infer<typeof assessmentResponseSchema>;
+export type RawImportManifestArtifact = z.infer<typeof rawImportManifestArtifactSchema>;
+export type RawImportManifest = z.infer<typeof rawImportManifestSchema>;
 export type ProfileSnapshotRecord = z.infer<typeof profileSnapshotSchema>;
 export type ProfileCurrentFrontmatter = z.infer<typeof profileCurrentFrontmatterSchema>;
 export type GoalFrontmatter = z.infer<typeof goalFrontmatterSchema>;

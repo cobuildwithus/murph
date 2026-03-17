@@ -1,3 +1,4 @@
+import { rawImportManifestSchema } from '@healthybob/contracts'
 import { Cli, z } from 'incur'
 import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import {
@@ -10,7 +11,6 @@ import {
 import { loadRuntimeModule } from '../runtime-import.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
-  rawImportManifestSchema,
   showAssessmentManifest,
   showAssessmentRaw,
 } from './export-intake-read-helpers.js'

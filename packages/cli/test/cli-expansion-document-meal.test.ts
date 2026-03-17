@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
@@ -26,6 +26,7 @@ interface DocumentImportEnvelope {
   documentId: string
   eventId: string
   lookupId: string
+  manifestFile: string
 }
 
 interface MealAddEnvelope {
@@ -75,11 +76,18 @@ interface ManifestEnvelope {
   kind: string
   manifestFile: string
   manifest: {
+    schemaVersion: string
     importId: string
     importKind: string
+    rawDirectory: string
     source: string | null
     artifacts: Array<{
-      role?: string
+      role: string
+      relativePath: string
+      originalFileName: string
+      mediaType: string
+      byteSize: number
+      sha256: string
     }>
     provenance: {
       lookupId?: string
@@ -245,13 +253,71 @@ test.sequential(
       assert.equal(requireData(manifest).lookupId, currentDocument.lookupId)
       assert.equal(requireData(manifest).kind, 'document')
       assert.match(requireData(manifest).manifestFile, /\/manifest\.json$/u)
+      assert.equal(requireData(manifest).manifest.schemaVersion, 'hb.raw-import-manifest.v1')
       assert.equal(requireData(manifest).manifest.importKind, 'document')
       assert.equal(requireData(manifest).manifest.importId, currentDocument.documentId)
       assert.equal(requireData(manifest).manifest.source, 'device')
+      assert.equal(
+        requireData(manifest).manifest.rawDirectory,
+        path.posix.dirname(requireData(manifest).manifest.artifacts[0]?.relativePath ?? ''),
+      )
       assert.equal(requireData(manifest).manifest.provenance.lookupId, currentDocument.lookupId)
       assert.equal(requireData(manifest).manifest.provenance.title, 'Lab Report')
       assert.equal(requireData(manifest).manifest.provenance.note, 'Fasted lipid panel.')
       assert.equal(requireData(manifest).manifest.artifacts[0]?.role, 'source_document')
+      assert.match(
+        requireData(manifest).manifest.artifacts[0]?.relativePath ?? '',
+        /^raw\/documents\/\d{4}\/\d{2}\/doc_/u,
+      )
+      assert.equal(
+        requireData(manifest).manifest.artifacts[0]?.originalFileName,
+        path.basename(sampleDocumentPath),
+      )
+      assert.equal(requireData(manifest).manifest.artifacts[0]?.mediaType, 'text/markdown')
+      assert.equal(
+        Number.isInteger(requireData(manifest).manifest.artifacts[0]?.byteSize),
+        true,
+      )
+      assert.equal((requireData(manifest).manifest.artifacts[0]?.byteSize ?? 0) > 0, true)
+      assert.match(
+        requireData(manifest).manifest.artifacts[0]?.sha256 ?? '',
+        /^[a-f0-9]{64}$/u,
+      )
+
+      const manifestPath = path.join(vaultRoot, currentDocument.manifestFile)
+      const tamperedManifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+        artifacts: Array<{
+          role: string
+          relativePath: string
+          originalFileName: string
+          mediaType: string
+          byteSize: number
+        }>
+      }
+      const firstArtifact = tamperedManifest.artifacts[0]
+      assert.ok(firstArtifact)
+
+      tamperedManifest.artifacts[0] = {
+        role: firstArtifact.role,
+        relativePath: firstArtifact.relativePath,
+        originalFileName: firstArtifact.originalFileName,
+        mediaType: firstArtifact.mediaType,
+        byteSize: firstArtifact.byteSize,
+      }
+      await writeFile(manifestPath, `${JSON.stringify(tamperedManifest, null, 2)}\n`, 'utf8')
+
+      const invalidManifest = await runSourceCli([
+        'document',
+        'manifest',
+        currentDocument.lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(invalidManifest.ok, false)
+      if (invalidManifest.ok) {
+        throw new Error('expected tampered document manifest to be rejected')
+      }
+      assert.equal(invalidManifest.error.code, 'manifest_invalid')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

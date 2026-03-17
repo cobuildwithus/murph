@@ -2,6 +2,13 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+import {
+  CONTRACT_SCHEMA_VERSION,
+  rawImportManifestSchema,
+  type RawImportKind,
+  type RawImportManifestArtifact,
+} from "@healthybob/contracts";
+
 import type { WriteBatch } from "./write-batch.js";
 
 interface RawArtifactLike {
@@ -11,30 +18,10 @@ interface RawArtifactLike {
   stagedAbsolutePath: string;
 }
 
-interface RawManifestArtifact {
-  role: string;
-  relativePath: string;
-  originalFileName: string;
-  mediaType: string;
-  byteSize: number;
-  sha256: string;
-}
-
-interface RawImportManifest {
-  schemaVersion: "hb.raw-import-manifest.v1";
-  importId: string;
-  importKind: "assessment" | "device_batch" | "document" | "meal" | "sample_batch";
-  importedAt: string;
-  source: string | null;
-  rawDirectory: string;
-  artifacts: RawManifestArtifact[];
-  provenance: Record<string, unknown>;
-}
-
 interface StageRawImportManifestInput {
   batch: WriteBatch;
   importId: string;
-  importKind: RawImportManifest["importKind"];
+  importKind: RawImportKind;
   importedAt: string;
   source: string | null;
   artifacts: Array<{
@@ -44,12 +31,10 @@ interface StageRawImportManifestInput {
   provenance: Record<string, unknown>;
 }
 
-const RAW_IMPORT_MANIFEST_SCHEMA_VERSION = "hb.raw-import-manifest.v1";
-
 async function describeRawArtifact(
   artifact: RawArtifactLike,
   role: string,
-): Promise<RawManifestArtifact> {
+): Promise<RawImportManifestArtifact> {
   const content = await fs.readFile(artifact.stagedAbsolutePath);
 
   return {
@@ -98,8 +83,8 @@ export async function stageRawImportManifest({
   provenance,
 }: StageRawImportManifestInput): Promise<string> {
   const manifestPath = resolveRawManifestPath(artifacts.map(({ raw }) => raw));
-  const manifest: RawImportManifest = {
-    schemaVersion: RAW_IMPORT_MANIFEST_SCHEMA_VERSION,
+  const manifest = rawImportManifestSchema.parse({
+    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
     importId,
     importKind,
     importedAt,
@@ -109,7 +94,7 @@ export async function stageRawImportManifest({
       artifacts.map(({ raw, role }) => describeRawArtifact(raw, role)),
     ),
     provenance,
-  };
+  });
 
   await batch.stageTextWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
     allowRaw: true,

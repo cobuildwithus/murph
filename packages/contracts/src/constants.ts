@@ -13,6 +13,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   profileCurrentFrontmatter: "hb.frontmatter.profile-current.v1",
   profileSnapshot: "hb.profile-snapshot.v1",
   providerFrontmatter: "hb.frontmatter.provider.v1",
+  rawImportManifest: "hb.raw-import-manifest.v1",
   regimenFrontmatter: "hb.frontmatter.regimen.v1",
   sample: "hb.sample.v1",
   vault: "hb.vault.v1",
@@ -80,6 +81,14 @@ export const SAMPLE_QUALITIES = Object.freeze(["raw", "normalized", "derived"] a
 export const SLEEP_STAGES = Object.freeze(["awake", "light", "deep", "rem"] as const);
 
 export const ASSESSMENT_SOURCES = Object.freeze(["import", "manual", "derived"] as const);
+
+export const RAW_IMPORT_KINDS = Object.freeze([
+  "assessment",
+  "device_batch",
+  "document",
+  "meal",
+  "sample_batch",
+] as const);
 
 export const PROFILE_SNAPSHOT_SOURCES = Object.freeze(["assessment_projection", "manual", "derived"] as const);
 
