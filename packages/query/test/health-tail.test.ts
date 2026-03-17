@@ -1165,3 +1165,30 @@ test("buildExportPack tolerates vaults with no health directories", async () => 
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
+
+test("standalone current-profile markdown does not resolve without a latest snapshot", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-health-orphan-current-"));
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/profile/current.md",
+      `---
+schemaVersion: hb.frontmatter.profile-current.v1
+docType: profile_current
+snapshotId: psnap_orphan_01
+updatedAt: 2026-03-12T14:00:00Z
+---
+# Current Profile
+
+Snapshot ID: \`psnap_orphan_01\`
+`,
+    );
+
+    assert.equal(await readCurrentProfile(vaultRoot), null);
+    assert.equal((await readVault(vaultRoot)).currentProfile, null);
+    assert.equal((await readVaultTolerant(vaultRoot)).currentProfile, null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});

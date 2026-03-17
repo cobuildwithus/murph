@@ -36,9 +36,8 @@ import {
   type RegistryMarkdownRecord,
 } from "./registries.js";
 import {
-  fallbackFromLatestCurrentProfileSnapshot,
-  isCurrentProfileStale,
-  selectLatestCurrentProfileSnapshot,
+  resolveCurrentProfileProjection,
+  resolveCurrentProfileSnapshot,
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.js";
 import { firstString } from "./shared.js";
@@ -560,29 +559,30 @@ async function readCurrentProfileStrict(
   profileSnapshots: CanonicalEntity[],
   markdownByPath: Map<string, string>,
 ): Promise<CanonicalEntity | null> {
-  const latestSnapshot = selectLatestCurrentProfileSnapshot(
+  const resolution = resolveCurrentProfileSnapshot(
     profileSnapshots,
     canonicalProfileSnapshotSortFields,
+    fallbackCurrentProfileEntity,
   );
-  const fallbackCurrentProfile = () =>
-    fallbackFromLatestCurrentProfileSnapshot(
-      latestSnapshot,
-      fallbackCurrentProfileEntity,
-    );
   const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
 
   if (!document) {
-    return fallbackCurrentProfile();
+    return resolution.fallbackCurrentProfile;
   }
 
   const currentProfile = projectCurrentProfileEntity(document);
-  if (
-    isCurrentProfileStale(
-      firstString(currentProfile.attributes, ["snapshotId"]),
-      latestSnapshot?.entityId ?? null,
-    )
-  ) {
-    return fallbackCurrentProfile();
+  const resolvedCurrentProfile = resolveCurrentProfileProjection(
+    resolution,
+    currentProfile,
+    (entity) => firstString(entity.attributes, ["snapshotId"]),
+  );
+
+  if (resolvedCurrentProfile !== currentProfile) {
+    if (resolution.latestSnapshotId === null) {
+      markdownByPath.set(currentProfile.path, document.markdown);
+    }
+
+    return resolvedCurrentProfile;
   }
 
   markdownByPath.set(currentProfile.path, document.markdown);
@@ -594,15 +594,11 @@ async function readCurrentProfileTolerant(
   profileSnapshots: CanonicalEntity[],
   markdownByPath: Map<string, string>,
 ): Promise<{ entity: CanonicalEntity | null; failures: ParseFailure[] }> {
-  const latestSnapshot = selectLatestCurrentProfileSnapshot(
+  const resolution = resolveCurrentProfileSnapshot(
     profileSnapshots,
     canonicalProfileSnapshotSortFields,
+    fallbackCurrentProfileEntity,
   );
-  const fallbackCurrentProfile = () =>
-    fallbackFromLatestCurrentProfileSnapshot(
-      latestSnapshot,
-      fallbackCurrentProfileEntity,
-    );
   const outcome = await readOptionalMarkdownDocumentOutcome(
     vaultRoot,
     "bank/profile/current.md",
@@ -610,27 +606,32 @@ async function readCurrentProfileTolerant(
 
   if (!outcome) {
     return {
-      entity: fallbackCurrentProfile(),
+      entity: resolution.fallbackCurrentProfile,
       failures: [],
     };
   }
 
   if (!outcome.ok) {
     return {
-      entity: fallbackCurrentProfile(),
+      entity: resolution.fallbackCurrentProfile,
       failures: [outcome],
     };
   }
 
   const currentProfile = projectCurrentProfileEntity(outcome.document);
-  if (
-    isCurrentProfileStale(
-      firstString(currentProfile.attributes, ["snapshotId"]),
-      latestSnapshot?.entityId ?? null,
-    )
-  ) {
+  const resolvedCurrentProfile = resolveCurrentProfileProjection(
+    resolution,
+    currentProfile,
+    (entity) => firstString(entity.attributes, ["snapshotId"]),
+  );
+
+  if (resolvedCurrentProfile !== currentProfile) {
+    if (resolution.latestSnapshotId === null) {
+      markdownByPath.set(currentProfile.path, outcome.document.markdown);
+    }
+
     return {
-      entity: fallbackCurrentProfile(),
+      entity: resolvedCurrentProfile,
       failures: [],
     };
   }
@@ -647,15 +648,11 @@ function readCurrentProfileTolerantSync(
   profileSnapshots: CanonicalEntity[],
   markdownByPath: Map<string, string>,
 ): { entity: CanonicalEntity | null; failures: ParseFailure[] } {
-  const latestSnapshot = selectLatestCurrentProfileSnapshot(
+  const resolution = resolveCurrentProfileSnapshot(
     profileSnapshots,
     canonicalProfileSnapshotSortFields,
+    fallbackCurrentProfileEntity,
   );
-  const fallbackCurrentProfile = () =>
-    fallbackFromLatestCurrentProfileSnapshot(
-      latestSnapshot,
-      fallbackCurrentProfileEntity,
-    );
   const outcome = readOptionalMarkdownDocumentOutcomeSync(
     vaultRoot,
     "bank/profile/current.md",
@@ -663,27 +660,32 @@ function readCurrentProfileTolerantSync(
 
   if (!outcome) {
     return {
-      entity: fallbackCurrentProfile(),
+      entity: resolution.fallbackCurrentProfile,
       failures: [],
     };
   }
 
   if (!outcome.ok) {
     return {
-      entity: fallbackCurrentProfile(),
+      entity: resolution.fallbackCurrentProfile,
       failures: [outcome],
     };
   }
 
   const currentProfile = projectCurrentProfileEntity(outcome.document);
-  if (
-    isCurrentProfileStale(
-      firstString(currentProfile.attributes, ["snapshotId"]),
-      latestSnapshot?.entityId ?? null,
-    )
-  ) {
+  const resolvedCurrentProfile = resolveCurrentProfileProjection(
+    resolution,
+    currentProfile,
+    (entity) => firstString(entity.attributes, ["snapshotId"]),
+  );
+
+  if (resolvedCurrentProfile !== currentProfile) {
+    if (resolution.latestSnapshotId === null) {
+      markdownByPath.set(currentProfile.path, outcome.document.markdown);
+    }
+
     return {
-      entity: fallbackCurrentProfile(),
+      entity: resolvedCurrentProfile,
       failures: [],
     };
   }

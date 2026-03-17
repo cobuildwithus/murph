@@ -19,9 +19,8 @@ import {
 import {
   compareCurrentProfileSnapshotRecency,
   fallbackCurrentProfileEntityFromSnapshotRecord,
-  fallbackFromLatestCurrentProfileSnapshot,
-  isCurrentProfileStale,
-  selectLatestCurrentProfileSnapshot,
+  resolveCurrentProfileProjection,
+  resolveCurrentProfileSnapshot,
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.js";
 
@@ -60,6 +59,11 @@ export interface ProfileSnapshotListOptions {
   to?: string;
   text?: string;
   limit?: number;
+}
+
+interface CurrentProfileState {
+  currentProfile: CurrentProfileQueryRecord | null;
+  snapshots: ProfileSnapshotQueryRecord[];
 }
 
 function profileSnapshotRecordFromEntity(
@@ -108,7 +112,7 @@ function currentProfileRecordFromEntity(
     sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
     topGoalIds: firstStringArray(attributes, ["topGoalIds"]),
     relativePath: entity.path,
-    markdown: entity.frontmatter ? entity.body : entity.body,
+    markdown: entity.body,
     body: entity.body,
   };
 }
@@ -202,47 +206,62 @@ export async function readProfileSnapshot(
 export async function readCurrentProfile(
   vaultRoot: string,
 ): Promise<CurrentProfileQueryRecord | null> {
-  const snapshots = await listProfileSnapshots(vaultRoot);
-  const latestSnapshot = selectLatestCurrentProfileSnapshot(
-    snapshots,
-    profileSnapshotSortFields,
-  );
-
-  if (!latestSnapshot) {
-    return null;
-  }
-
-  const fallbackCurrentProfile = () =>
-    fallbackFromLatestCurrentProfileSnapshot(latestSnapshot, fallbackCurrent);
-
-  try {
-    const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
-    if (!document) {
-      return fallbackCurrentProfile();
-    }
-
-    const record = toCurrentProfileRecord(document);
-    if (isCurrentProfileStale(record.snapshotId, latestSnapshot.id)) {
-      return fallbackCurrentProfile();
-    }
-
-    return record;
-  } catch {
-    return fallbackCurrentProfile();
-  }
+  return (await readCurrentProfileState(vaultRoot)).currentProfile;
 }
 
 export async function showProfile(
   vaultRoot: string,
   lookup: string,
 ): Promise<ProfileSnapshotQueryRecord | CurrentProfileQueryRecord | null> {
-  const current = await readCurrentProfile(vaultRoot);
-  if (current && matchesLookup(lookup, current.id, current.snapshotId)) {
-    return current;
+  const { currentProfile, snapshots } = await readCurrentProfileState(vaultRoot);
+  if (currentProfile && matchesLookup(lookup, currentProfile.id, currentProfile.snapshotId)) {
+    return currentProfile;
   }
 
-  const snapshots = await listProfileSnapshots(vaultRoot);
   return snapshots.find((snapshot) => matchesLookup(lookup, snapshot.id, snapshot.summary)) ?? null;
+}
+
+async function readCurrentProfileState(
+  vaultRoot: string,
+): Promise<CurrentProfileState> {
+  const snapshots = await listProfileSnapshots(vaultRoot);
+  const resolution = resolveCurrentProfileSnapshot(
+    snapshots,
+    profileSnapshotSortFields,
+    fallbackCurrent,
+  );
+
+  if (resolution.latestSnapshotId === null) {
+    return {
+      currentProfile: null,
+      snapshots,
+    };
+  }
+
+  try {
+    const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
+    if (!document) {
+      return {
+        currentProfile: resolution.fallbackCurrentProfile,
+        snapshots,
+      };
+    }
+
+    const record = toCurrentProfileRecord(document);
+    return {
+      currentProfile: resolveCurrentProfileProjection(
+        resolution,
+        record,
+        (currentProfile) => currentProfile.snapshotId,
+      ),
+      snapshots,
+    };
+  } catch {
+    return {
+      currentProfile: resolution.fallbackCurrentProfile,
+      snapshots,
+    };
+  }
 }
 
 function fallbackCurrent(

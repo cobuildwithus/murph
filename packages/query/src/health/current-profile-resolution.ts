@@ -21,6 +21,11 @@ export interface CurrentProfileFallbackSnapshotRecord {
   relativePath: string;
 }
 
+export interface CurrentProfileResolution<TFallback> {
+  latestSnapshotId: string | null;
+  fallbackCurrentProfile: TFallback | null;
+}
+
 export function compareCurrentProfileSnapshotRecency(
   left: CurrentProfileSnapshotSortFields,
   right: CurrentProfileSnapshotSortFields,
@@ -56,11 +61,41 @@ export function isCurrentProfileStale(
   return latestSnapshotId !== null && currentSnapshotId !== latestSnapshotId;
 }
 
-export function fallbackFromLatestCurrentProfileSnapshot<TSnapshot, TFallback>(
-  latestSnapshot: TSnapshot | null,
+export function resolveCurrentProfileSnapshot<TSnapshot, TFallback>(
+  snapshots: readonly TSnapshot[],
+  getSortFields: (snapshot: TSnapshot) => CurrentProfileSnapshotSortFields,
   buildFallback: (snapshot: TSnapshot) => TFallback | null,
-): TFallback | null {
-  return latestSnapshot ? buildFallback(latestSnapshot) : null;
+): CurrentProfileResolution<TFallback> {
+  const latestSnapshot = selectLatestCurrentProfileSnapshot(snapshots, getSortFields);
+
+  return {
+    latestSnapshotId: latestSnapshot ? getSortFields(latestSnapshot).snapshotId : null,
+    fallbackCurrentProfile: latestSnapshot ? buildFallback(latestSnapshot) : null,
+  };
+}
+
+export function resolveCurrentProfileProjection<TCurrent, TFallback>(
+  resolution: Pick<
+    CurrentProfileResolution<TFallback>,
+    "latestSnapshotId" | "fallbackCurrentProfile"
+  >,
+  currentProfile: TCurrent | null,
+  getSnapshotId: (currentProfile: TCurrent) => string | null | undefined,
+): TCurrent | TFallback | null {
+  if (resolution.latestSnapshotId === null) {
+    return null;
+  }
+
+  if (!currentProfile) {
+    return resolution.fallbackCurrentProfile;
+  }
+
+  return isCurrentProfileStale(
+    getSnapshotId(currentProfile),
+    resolution.latestSnapshotId,
+  )
+    ? resolution.fallbackCurrentProfile
+    : currentProfile;
 }
 
 export function fallbackCurrentProfileEntityFromSnapshotRecord(
