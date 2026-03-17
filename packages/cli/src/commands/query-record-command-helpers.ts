@@ -50,7 +50,9 @@ const RUNTIME_PACKAGES = ['@healthybob/core', '@healthybob/importers', '@healthy
 
 let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
 
-export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
+export async function loadQueryRuntime(
+  operation = 'samples/audit query reads',
+): Promise<QueryRuntimeModule> {
   queryRuntimePromise ??= (async () => {
     try {
       const runtime = await loadBaseQueryRuntime()
@@ -66,7 +68,7 @@ export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
       return runtime
     } catch (error) {
       queryRuntimePromise = null
-      throw createRuntimeUnavailableError('samples/audit query reads', error)
+      throw createRuntimeUnavailableError(operation, error)
     }
   })()
 
@@ -77,6 +79,34 @@ export function toCommandShowEntity(
   record: QueryRecord,
   extraLinkKeys: string[] = [],
 ): CommandShowEntity {
+  return toCommandShowEntityWithLinks(
+    record,
+    toCommandEntityLinks(record, { extraLinkKeys }),
+  )
+}
+
+export function toOwnedEventCommandShowEntity(
+  record: QueryRecord,
+  extraLinkKeys: string[] = [],
+): CommandShowEntity {
+  return toCommandShowEntityWithLinks(
+    record,
+    toCommandEntityLinks(record, {
+      extraLinkKeys,
+      includeRelatedIds: false,
+      seedIds:
+        record.displayId !== record.primaryLookupId
+          ? [record.primaryLookupId]
+          : [],
+      sort: false,
+    }),
+  )
+}
+
+function toCommandShowEntityWithLinks(
+  record: QueryRecord,
+  links: CommandEntityLink[],
+): CommandShowEntity {
   return {
     id: record.displayId || record.primaryLookupId,
     kind: record.kind ?? record.recordType,
@@ -85,7 +115,7 @@ export function toCommandShowEntity(
     path: record.sourcePath ?? null,
     markdown: record.body ?? null,
     data: record.data,
-    links: toCommandEntityLinks(record, extraLinkKeys),
+    links,
   }
 }
 
@@ -290,13 +320,32 @@ export function isMissingPathError(
 
 function toCommandEntityLinks(
   record: QueryRecord,
-  extraLinkKeys: string[] = [],
+  options: {
+    extraLinkKeys?: string[]
+    includeRelatedIds?: boolean
+    seedIds?: readonly string[]
+    sort?: boolean
+  } = {},
 ): CommandEntityLink[] {
   const ids = new Set<string>()
+  const {
+    extraLinkKeys = [],
+    includeRelatedIds = true,
+    seedIds = [],
+    sort = true,
+  } = options
 
-  for (const relatedId of record.relatedIds ?? []) {
-    if (typeof relatedId === 'string' && relatedId.trim().length > 0) {
-      ids.add(relatedId.trim())
+  for (const seedId of seedIds) {
+    if (typeof seedId === 'string' && seedId.trim().length > 0) {
+      ids.add(seedId.trim())
+    }
+  }
+
+  if (includeRelatedIds) {
+    for (const relatedId of record.relatedIds ?? []) {
+      if (typeof relatedId === 'string' && relatedId.trim().length > 0) {
+        ids.add(relatedId.trim())
+      }
     }
   }
 
@@ -306,8 +355,12 @@ function toCommandEntityLinks(
     }
   }
 
-  return [...ids]
-    .sort((left, right) => left.localeCompare(right))
+  const linkIds = [...ids]
+  if (sort) {
+    linkIds.sort((left, right) => left.localeCompare(right))
+  }
+
+  return linkIds
     .map((id) => ({
       id,
       kind: inferEntityKind(id),

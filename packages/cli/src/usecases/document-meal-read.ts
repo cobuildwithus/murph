@@ -2,20 +2,20 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema, type RawImportManifest } from '@healthybob/contracts'
 import { z } from 'incur'
-import { firstString } from '../command-helpers.js'
 import {
+  firstString,
+  isJsonObject,
   loadQueryRuntime,
-  type QueryRuntimeModule,
-  type QueryVaultRecord as VaultRecord,
-} from '../query-runtime.js'
-import { pathSchema } from '../vault-cli-contracts.js'
+  toOwnedEventCommandShowEntity,
+  type QueryRecord,
+} from '../commands/query-record-command-helpers.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-
-type JsonObject = Record<string, unknown>
+import { pathSchema } from '../vault-cli-contracts.js'
 
 type DocumentMealKind = 'document' | 'meal'
 
 const DEFAULT_LIST_LIMIT = 50
+const OWNED_EVENT_LINK_KEYS = ['relatedIds', 'eventIds']
 
 export const documentLookupSchema = z
   .string()
@@ -42,6 +42,10 @@ export const rawImportManifestResultSchema = z.object({
   manifest: rawImportManifestSchema,
 })
 
+export type RawImportManifestResult = z.infer<
+  typeof rawImportManifestResultSchema
+>
+
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return []
@@ -54,40 +58,7 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
 }
 
-function isPlainObject(value: unknown): value is JsonObject {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function buildLinks(query: QueryRuntimeModule, record: VaultRecord) {
-  const linkIds = uniqueStrings([
-    ...(record.displayId !== record.primaryLookupId
-      ? [record.primaryLookupId]
-      : []),
-    ...stringArray(record.data.relatedIds),
-    ...stringArray(record.data.eventIds),
-  ])
-
-  return linkIds.map((id) => ({
-    id,
-    kind: query.inferIdEntityKind(id),
-    queryable: query.isQueryableLookupId(id),
-  }))
-}
-
-function toReadEntity(query: QueryRuntimeModule, record: VaultRecord) {
-  return {
-    id: record.displayId,
-    kind: record.kind ?? record.recordType,
-    title: record.title ?? null,
-    occurredAt: record.occurredAt ?? null,
-    path: record.sourcePath ?? null,
-    markdown: record.body ?? null,
-    data: record.data,
-    links: buildLinks(query, record),
-  }
-}
-
-function resolveManifestArtifactPaths(record: VaultRecord): string[] {
+function resolveManifestArtifactPaths(record: QueryRecord): string[] {
   const documentPath = firstString(record.data, ['documentPath', 'document_path'])
 
   return uniqueStrings([
@@ -100,7 +71,7 @@ function resolveManifestArtifactPaths(record: VaultRecord): string[] {
   ])
 }
 
-function resolveManifestFile(record: VaultRecord, expectedKind: DocumentMealKind): string {
+function resolveManifestFile(record: QueryRecord, expectedKind: DocumentMealKind): string {
   const artifactPaths = resolveManifestArtifactPaths(record)
 
   if (artifactPaths.length === 0) {
@@ -131,8 +102,8 @@ async function loadOwnedRecord(
   vault: string,
   lookup: string,
   expectedKind: DocumentMealKind,
-) {
-  const query = await loadQueryRuntime()
+): Promise<QueryRecord> {
+  const query = await loadQueryRuntime('document/meal query reads')
   const readModel = await query.readVault(vault)
   const record = query.lookupRecordById(readModel, lookup)
 
@@ -140,10 +111,7 @@ async function loadOwnedRecord(
     throw new VaultCliError('not_found', `No ${expectedKind} found for "${lookup}".`)
   }
 
-  return {
-    query,
-    record,
-  }
+  return record
 }
 
 async function readImportManifest(
@@ -179,7 +147,7 @@ async function readImportManifest(
     )
   }
 
-  if (!isPlainObject(manifest)) {
+  if (!isJsonObject(manifest)) {
     throw new VaultCliError(
       'manifest_invalid',
       `Manifest file "${manifestFile}" must contain a JSON object.`,
@@ -204,11 +172,11 @@ async function showOwnedRecord(
   lookup: string,
   expectedKind: DocumentMealKind,
 ) {
-  const { query, record } = await loadOwnedRecord(vault, lookup, expectedKind)
+  const record = await loadOwnedRecord(vault, lookup, expectedKind)
 
   return {
     vault,
-    entity: toReadEntity(query, record),
+    entity: toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS),
   }
 }
 
@@ -218,7 +186,7 @@ async function listOwnedRecords(input: {
   from?: string
   to?: string
 }) {
-  const query = await loadQueryRuntime()
+  const query = await loadQueryRuntime('document/meal query reads')
   const readModel = await query.readVault(input.vault)
   const items = query
     .listRecords(readModel, {
@@ -228,7 +196,7 @@ async function listOwnedRecords(input: {
       to: input.to,
     })
     .slice(0, DEFAULT_LIST_LIMIT)
-    .map((record: VaultRecord) => toReadEntity(query, record))
+    .map((record: QueryRecord) => toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS))
 
   return {
     vault: input.vault,
@@ -250,7 +218,7 @@ async function showOwnedManifest(
   lookup: string,
   expectedKind: DocumentMealKind,
 ) {
-  const { record } = await loadOwnedRecord(vault, lookup, expectedKind)
+  const record = await loadOwnedRecord(vault, lookup, expectedKind)
   const manifestFile = resolveManifestFile(record, expectedKind)
   const manifest = await readImportManifest(vault, manifestFile)
 

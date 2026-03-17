@@ -6,6 +6,7 @@ import {
   toCommandShowEntity,
   toSampleCommandListItem,
   type CommandShowEntity,
+  type QueryRecord,
   type SampleCommandListItem,
 } from './query-record-command-helpers.js'
 
@@ -45,7 +46,7 @@ export async function listSamples(
       streams: options.stream ? [options.stream] : undefined,
       to: options.to,
     })
-    .filter((record) => (options.quality ? record.status === options.quality : true))
+    .filter((record: QueryRecord) => (options.quality ? record.status === options.quality : true))
     .sort(compareByLatest)
 
   return applyLimit(items, options.limit).map(toSampleCommandListItem)

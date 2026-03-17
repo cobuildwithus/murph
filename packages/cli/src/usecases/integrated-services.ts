@@ -10,6 +10,7 @@ import type {
   DeviceSyncServices,
   ImporterServices,
   ProjectAssessmentInput,
+  QueryEntity,
   QueryServices,
   StopRegimenInput,
   VaultCliServices,
@@ -36,10 +37,10 @@ import {
 } from "./shared.js"
 import { normalizeRepeatableFlagOption } from "../option-utils.js"
 import {
-  listDocuments as listDocumentsUseCase,
-  showDocument as showDocumentUseCase,
-  showDocumentImportManifest as showDocumentImportManifestUseCase,
-} from "./document.js"
+  listDocumentRecords as listDocumentsUseCase,
+  showDocumentManifest as showDocumentImportManifestUseCase,
+  showDocumentRecord as showDocumentUseCase,
+} from "./document-meal-read.js"
 import {
   addSampleRecordsFromInput,
   eventScaffoldKindSchema,
@@ -360,7 +361,7 @@ function createIntegratedQueryServices(): QueryServices {
     async showDocument(input: CommandContext & {
       id: string
     }) {
-      return showDocumentUseCase(input)
+      return showDocumentUseCase(input.vault, input.id)
     },
     async listDocuments(input: CommandContext & {
       from?: string
@@ -371,7 +372,7 @@ function createIntegratedQueryServices(): QueryServices {
     async showDocumentManifest(input: CommandContext & {
       id: string
     }) {
-      return showDocumentImportManifestUseCase(input)
+      return showDocumentImportManifestUseCase(input.vault, input.id)
     },
     async showProvider(input: CommandContext & {
       lookup: string
@@ -492,7 +493,7 @@ function createIntegratedQueryServices(): QueryServices {
                 tags: tags.length > 0 ? tags : undefined,
                 to,
               })
-              .filter((entity) => matchesGenericKindFilter(entity, kind))
+              .filter((entity: QueryEntity) => matchesGenericKindFilter(entity, kind))
               .slice(0, limit)
               .map(toGenericListItem)
 
@@ -542,7 +543,7 @@ function createIntegratedQueryServices(): QueryServices {
         experiment: experiment ?? null,
         outDir: out ?? null,
         packId: pack.packId,
-        files: pack.files.map((file) => file.path),
+        files: pack.files.map((file: { path: string }) => file.path),
       }
     },
   } satisfies QueryServices

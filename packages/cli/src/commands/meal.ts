@@ -7,14 +7,14 @@ import {
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import { loadRuntimeModule } from '../runtime-import.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
 import {
   listMealRecords,
   mealLookupSchema,
   rawImportManifestResultSchema,
   showMealManifest,
   showMealRecord,
-} from './document-meal-read-helpers.js'
+} from '../usecases/document-meal-read.js'
+import type { VaultCliServices } from '../vault-cli-services.js'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])

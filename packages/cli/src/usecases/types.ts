@@ -20,7 +20,7 @@ import type {
   VaultInitResult,
   VaultValidateResult,
 } from "../vault-cli-contracts.js"
-import type { RawImportManifestResult } from "./document.js"
+import type { RawImportManifestResult } from "./document-meal-read.js"
 import type {
   CommandContext,
   HealthCoreRuntimeMethods,
