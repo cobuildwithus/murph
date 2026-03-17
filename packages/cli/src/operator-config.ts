@@ -46,6 +46,7 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'allergy',
   'assistant',
   'audit',
+  'chat',
   'condition',
   'document',
   'event',

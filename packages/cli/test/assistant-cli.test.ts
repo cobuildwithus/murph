@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, test } from 'vitest'
-import { saveDefaultVaultConfig } from '../src/operator-config.js'
+import {
+  applyDefaultVaultToArgs,
+  saveDefaultVaultConfig,
+} from '../src/operator-config.js'
 import { resolveAssistantSession } from '../src/assistant-state.js'
 import { ensureCliRuntimeArtifacts, repoRoot, requireData, runCli } from './cli-test-helpers.js'
 
@@ -187,6 +190,18 @@ test.sequential(
   },
   20000,
 )
+
+test('root chat alias participates in default-vault injection', () => {
+  assert.deepEqual(applyDefaultVaultToArgs(['chat'], '/tmp/default-vault'), [
+    'chat',
+    '--vault',
+    '/tmp/default-vault',
+  ])
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['chat', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
+    ['chat', '--vault', '/tmp/explicit-vault'],
+  )
+})
 
 function restoreEnvironmentVariable(
   key: string,
