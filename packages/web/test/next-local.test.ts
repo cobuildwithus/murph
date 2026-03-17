@@ -11,9 +11,9 @@ import {
   shouldEnsureRuntimeBuild,
 } from "../scripts/next-local";
 
-test("buildNextCliArgs forces localhost for dev and start", () => {
-  assert.deepEqual(buildNextCliArgs(["dev"]), ["dev", "--hostname", "127.0.0.1", "--webpack"]);
-  assert.deepEqual(buildNextCliArgs(["start"]), ["start", "--hostname", "127.0.0.1"]);
+test("buildNextCliArgs leaves host selection unchanged for dev and start", () => {
+  assert.deepEqual(buildNextCliArgs(["dev"]), ["dev", "--webpack"]);
+  assert.deepEqual(buildNextCliArgs(["start"]), ["start"]);
   assert.deepEqual(buildNextCliArgs(["start", "--hostname", "localhost"]), [
     "start",
     "--hostname",
@@ -23,12 +23,7 @@ test("buildNextCliArgs forces localhost for dev and start", () => {
 
 test("buildNextCliArgs preserves explicit bundler flags", () => {
   assert.deepEqual(buildNextCliArgs(["build"]), ["build", "--webpack"]);
-  assert.deepEqual(buildNextCliArgs(["dev", "--turbopack"]), [
-    "dev",
-    "--hostname",
-    "127.0.0.1",
-    "--turbopack",
-  ]);
+  assert.deepEqual(buildNextCliArgs(["dev", "--turbopack"]), ["dev", "--turbopack"]);
 });
 
 test("isBlockedDotEnvPath matches .env and .env.* files only", () => {

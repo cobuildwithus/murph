@@ -5,7 +5,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { rememberLaunchCwd } from "../src/lib/vault";
 
-const LOCAL_HOST = "127.0.0.1";
 const require = createRequire(import.meta.url);
 const fs = require("node:fs") as typeof import("node:fs");
 const fsPromises = require("node:fs/promises") as typeof import("node:fs/promises");
@@ -39,10 +38,6 @@ interface RuntimeBuildTarget {
 export function buildNextCliArgs(argv: readonly string[]): string[] {
   const [command = "dev", ...rest] = argv;
   const args = [command];
-
-  if ((command === "dev" || command === "start") && !hasHostFlag(rest)) {
-    args.push("--hostname", LOCAL_HOST);
-  }
 
   if ((command === "dev" || command === "build") && !hasBundlerFlag(rest)) {
     args.push("--webpack");
@@ -246,10 +241,6 @@ function resolvePnpmInvocation(): { command: string; prefixArgs: string[] } {
     command: "pnpm",
     prefixArgs: [],
   };
-}
-
-function hasHostFlag(args: readonly string[]): boolean {
-  return args.some((value) => value === "--hostname" || value === "-H");
 }
 
 function hasBundlerFlag(args: readonly string[]): boolean {
