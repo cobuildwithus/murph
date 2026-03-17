@@ -5,12 +5,12 @@ import {
   HEALTH_HISTORY_KINDS,
   compareCanonicalEntities,
   normalizeCanonicalDate,
+  normalizeUniqueStringArray,
   uniqueStrings,
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "./canonical-entities.js";
 import { collectCanonicalEntities } from "./health/canonical-collector.js";
-import { maybeString } from "./health/shared.js";
 import { deriveVaultRecordIdentity } from "./id-families.js";
 import { parseMarkdownDocument } from "./markdown.js";
 
@@ -509,8 +509,8 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         },
         frontmatter: attributes,
         relatedIds: uniqueStrings([
-          ...normalizeStringArray(attributes.relatedIds),
-          ...normalizeStringArray(attributes.eventIds),
+          ...normalizeUniqueStringArray(attributes.relatedIds),
+          ...normalizeUniqueStringArray(attributes.eventIds),
         ]),
         stream: null,
         experimentSlug: slug,
@@ -547,8 +547,8 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
         date;
       const id = pickString(attributes, ["id"]) ?? `journal:${date}`;
       const relatedIds = uniqueStrings([
-        ...normalizeStringArray(attributes.relatedIds),
-        ...normalizeStringArray(attributes.eventIds),
+        ...normalizeUniqueStringArray(attributes.relatedIds),
+        ...normalizeUniqueStringArray(attributes.eventIds),
       ]);
 
       pages.push({
@@ -607,8 +607,8 @@ async function readJsonlRecordFamily(
       ]);
       const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
       const relatedIds = uniqueStrings([
-        ...normalizeStringArray(payload.relatedIds),
-        ...normalizeStringArray(payload.eventIds),
+        ...normalizeUniqueStringArray(payload.relatedIds),
+        ...normalizeUniqueStringArray(payload.eventIds),
       ]);
 
       return {
@@ -676,7 +676,7 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         body: null,
         attributes: payload,
         frontmatter: null,
-        relatedIds: uniqueStrings(normalizeStringArray(payload.relatedIds)),
+        relatedIds: uniqueStrings(normalizeUniqueStringArray(payload.relatedIds)),
         stream,
         experimentSlug: pickString(payload, ["experimentSlug", "experiment_slug"]),
         tags: normalizeTags(payload.tags),
@@ -820,33 +820,6 @@ function toVaultRecord(entity: CanonicalEntity, vaultRoot: string): VaultRecord 
   };
 }
 
-function recordToCanonicalEntity(record: VaultRecord): CanonicalEntity {
-  return {
-    entityId: record.displayId,
-    primaryLookupId: record.primaryLookupId,
-    lookupIds: record.lookupIds,
-    family: record.recordType,
-    kind: record.kind ?? record.recordType,
-    status: record.status ?? maybeString(record.data.status),
-    occurredAt: record.occurredAt,
-    date: record.date,
-    path: record.sourcePath,
-    title: record.title,
-    body: record.body,
-    attributes: record.data,
-    frontmatter: record.frontmatter,
-    relatedIds:
-      record.relatedIds ??
-      uniqueStrings([
-        ...normalizeStringArray(record.data.relatedIds),
-        ...normalizeStringArray(record.data.eventIds),
-      ]),
-    stream: record.stream,
-    experimentSlug: record.experimentSlug,
-    tags: record.tags,
-  };
-}
-
 function firstRecordOfType(
   records: readonly VaultRecord[],
   recordType: VaultRecordType,
@@ -898,7 +871,7 @@ function extractMarkdownHeading(body: string): string | null {
 }
 
 function normalizeTags(value: unknown): string[] {
-  return normalizeStringArray(value);
+  return normalizeUniqueStringArray(value);
 }
 
 function lookupById<T extends { lookupIds: readonly string[] }>(
@@ -1102,7 +1075,7 @@ function normalizeFrontmatterAttributes(
         ["vaultId", ["vaultId", "vault_id", "id"]],
         ["updatedAt", ["updatedAt", "updated_at"]],
       ]);
-      normalized.tags = normalizeStringArray(normalized.tags);
+      normalized.tags = normalizeUniqueStringArray(normalized.tags);
       return normalized;
     case "experiment":
       assignCanonicalStrings(normalized, attributes, [
@@ -1111,7 +1084,7 @@ function normalizeFrontmatterAttributes(
         ["startedOn", ["startedOn", "started_on"]],
         ["updatedAt", ["updatedAt", "updated_at"]],
       ]);
-      normalized.tags = normalizeStringArray(normalized.tags);
+      normalized.tags = normalizeUniqueStringArray(normalized.tags);
       return normalized;
     case "journal":
       assignCanonicalStrings(normalized, attributes, [
@@ -1123,7 +1096,7 @@ function normalizeFrontmatterAttributes(
         ["eventIds", ["eventIds", "event_ids"]],
         ["sampleStreams", ["sampleStreams", "sample_streams"]],
       ]);
-      normalized.tags = normalizeStringArray(normalized.tags);
+      normalized.tags = normalizeUniqueStringArray(normalized.tags);
       return normalized;
     default:
       return normalized;
@@ -1190,10 +1163,10 @@ function normalizeRecordData(
   if (recordType === "event" && displayId !== rawRecordId) {
     data.entityId = displayId;
     data.eventIds = uniqueStrings([
-      ...normalizeStringArray(data.eventIds),
+      ...normalizeUniqueStringArray(data.eventIds),
       primaryLookupId,
     ]);
-    data.relatedIds = uniqueStrings(normalizeStringArray(data.relatedIds)).filter(
+    data.relatedIds = uniqueStrings(normalizeUniqueStringArray(data.relatedIds)).filter(
       (relatedId) => relatedId !== displayId,
     );
   }
@@ -1227,7 +1200,7 @@ function assignCanonicalArray(
 ): void {
   const value = pickFirstArray(source, aliases);
   if (value) {
-    target[key] = normalizeStringArray(value);
+    target[key] = normalizeUniqueStringArray(value);
   }
 }
 
@@ -1267,19 +1240,6 @@ function pickFirstArray(
   }
 
   return null;
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return uniqueStrings(
-    value
-      .filter((entry): entry is string => typeof entry === "string")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-  );
 }
 
 function hasMarkdownExtension(entry: string): boolean {

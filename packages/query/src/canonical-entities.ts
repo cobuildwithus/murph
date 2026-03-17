@@ -101,7 +101,7 @@ export function uniqueStrings(values: readonly unknown[]): string[] {
   ];
 }
 
-function normalizeStringArray(value: unknown): string[] {
+export function normalizeUniqueStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -115,7 +115,7 @@ function normalizeStringArray(value: unknown): string[] {
 }
 
 function normalizeTags(value: unknown): string[] {
-  return normalizeStringArray(value);
+  return normalizeUniqueStringArray(value);
 }
 
 export function projectAssessmentEntity(
@@ -232,10 +232,10 @@ export function fallbackCurrentProfileEntity(
   }
 
   const profile = asObject(latestSnapshot.attributes.profile) ?? {};
-  const sourceAssessmentIds = normalizeStringArray(
+  const sourceAssessmentIds = normalizeUniqueStringArray(
     latestSnapshot.attributes.sourceAssessmentIds,
   );
-  const sourceEventIds = normalizeStringArray(latestSnapshot.attributes.sourceEventIds);
+  const sourceEventIds = normalizeUniqueStringArray(latestSnapshot.attributes.sourceEventIds);
   const topGoalIds = firstStringArray(profile, ["topGoalIds"]);
 
   return {

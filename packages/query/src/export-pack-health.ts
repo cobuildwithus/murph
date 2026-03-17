@@ -3,6 +3,10 @@ import {
 } from "./canonical-entities.js";
 import type { ParseFailure } from "./health/loaders.js";
 import { collectCanonicalEntities } from "./health/canonical-collector.js";
+import {
+  compareByOccurredAtDescThenId,
+  compareByRecordedOrImportedAtDescThenId,
+} from "./health/comparators.js";
 import { firstObject, firstString, firstStringArray } from "./health/shared.js";
 
 import type { FrontmatterObject } from "./health/shared.js";
@@ -128,20 +132,6 @@ function mapBankPages(
   );
 }
 
-function compareAssessments(
-  left: ExportPackAssessmentRecord,
-  right: ExportPackAssessmentRecord,
-): number {
-  const leftTimestamp = left.recordedAt ?? left.importedAt ?? "";
-  const rightTimestamp = right.recordedAt ?? right.importedAt ?? "";
-
-  if (leftTimestamp !== rightTimestamp) {
-    return rightTimestamp.localeCompare(leftTimestamp);
-  }
-
-  return left.id.localeCompare(right.id);
-}
-
 function compareSnapshots(
   left: ExportPackProfileSnapshotRecord,
   right: ExportPackProfileSnapshotRecord,
@@ -151,17 +141,6 @@ function compareSnapshots(
 
   if (leftTimestamp !== rightTimestamp) {
     return rightTimestamp.localeCompare(leftTimestamp);
-  }
-
-  return left.id.localeCompare(right.id);
-}
-
-function compareHistory(
-  left: ExportPackHistoryRecord,
-  right: ExportPackHistoryRecord,
-): number {
-  if (left.occurredAt !== right.occurredAt) {
-    return right.occurredAt.localeCompare(left.occurredAt);
   }
 
   return left.id.localeCompare(right.id);
@@ -179,7 +158,7 @@ export function readHealthContext(
         .map(assessmentRecordFromEntity)
         .filter((entry): entry is ExportPackAssessmentRecord => entry !== null)
         .filter((entry) => matchesDateWindow(entry.recordedAt ?? entry.importedAt, filters))
-        .sort(compareAssessments),
+        .sort(compareByRecordedOrImportedAtDescThenId),
       profileSnapshots: collected.profileSnapshots
         .map(profileSnapshotRecordFromEntity)
         .filter((entry): entry is ExportPackProfileSnapshotRecord => entry !== null)
@@ -189,7 +168,7 @@ export function readHealthContext(
         .map(historyRecordFromEntity)
         .filter((entry): entry is ExportPackHistoryRecord => entry !== null)
         .filter((entry) => matchesDateWindow(entry.occurredAt, filters))
-        .sort(compareHistory),
+        .sort(compareByOccurredAtDescThenId),
       currentProfile: collected.currentProfile
         ? currentProfileFromEntity(
             collected.currentProfile,

@@ -7,6 +7,7 @@ import {
   matchesStatus,
   matchesText,
 } from "./shared.js";
+import { compareByOccurredAtDescThenId } from "./comparators.js";
 import { readJsonlRecords } from "./loaders.js";
 import {
   HEALTH_HISTORY_KINDS,
@@ -81,11 +82,7 @@ export function toHistoryRecord(
 }
 
 export function compareHistory(left: HistoryQueryRecord, right: HistoryQueryRecord): number {
-  if (left.occurredAt !== right.occurredAt) {
-    return right.occurredAt.localeCompare(left.occurredAt);
-  }
-
-  return left.id.localeCompare(right.id);
+  return compareByOccurredAtDescThenId(left, right);
 }
 
 function isHistoryRecord(record: HistoryQueryRecord | null): record is HistoryQueryRecord {

@@ -7,6 +7,7 @@ import {
   matchesLookup,
   matchesText,
 } from "./shared.js";
+import { compareByRecordedOrImportedAtDescThenId } from "./comparators.js";
 import { readJsonlRecords } from "./loaders.js";
 import { projectAssessmentEntity } from "../canonical-entities.js";
 
@@ -72,14 +73,7 @@ export function compareAssessments(
   left: AssessmentQueryRecord,
   right: AssessmentQueryRecord,
 ): number {
-  const leftTimestamp = left.recordedAt ?? left.importedAt ?? "";
-  const rightTimestamp = right.recordedAt ?? right.importedAt ?? "";
-
-  if (leftTimestamp !== rightTimestamp) {
-    return rightTimestamp.localeCompare(leftTimestamp);
-  }
-
-  return left.id.localeCompare(right.id);
+  return compareByRecordedOrImportedAtDescThenId(left, right);
 }
 
 function isAssessmentRecord(
