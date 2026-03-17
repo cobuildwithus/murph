@@ -16,6 +16,7 @@ import {
   searchVault,
   showProfile,
 } from "../src/index.js";
+import { ALL_VAULT_RECORD_TYPES } from "../src/model.js";
 import { readHealthContext } from "../src/export-pack-health.js";
 import { listAssessments } from "../src/health/assessments.js";
 import type { VaultReadModel, VaultRecord } from "../src/model.js";
@@ -520,6 +521,12 @@ test("canonical entity helpers filter projected health families and preserve leg
   assert.deepEqual(
     listRecords(vault).map((record) => record.recordType),
     ["sample"],
+  );
+  assert.deepEqual(
+    listRecords(vault, {
+      recordTypes: [...ALL_VAULT_RECORD_TYPES],
+    }).map((record) => record.recordType),
+    ["assessment", "goal", "sample"],
   );
   assert.deepEqual(
     listRecords(vault, {

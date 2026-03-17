@@ -108,14 +108,72 @@ export interface JournalFilter {
   text?: string;
 }
 
-const DEFAULT_LIST_RECORD_TYPES: VaultRecordType[] = [
+interface SharedListFilterInput {
+  ids?: string[];
+  kinds?: string[];
+  streams?: string[];
+  experimentSlug?: string;
+  date?: string;
+  from?: string;
+  to?: string;
+  tags?: string[];
+  text?: string;
+}
+
+interface PreparedTagAndTextFilter {
+  tagSet: ReadonlySet<string> | null;
+  normalizedText: string | null;
+}
+
+interface PreparedRecordLikeFilter extends PreparedTagAndTextFilter {
+  idSet: ReadonlySet<string> | null;
+  kindSet: ReadonlySet<string> | null;
+  streamSet: ReadonlySet<string> | null;
+  experimentSlug?: string;
+  date?: string;
+  from?: string;
+  to?: string;
+}
+
+interface RecordLikeFilterSource {
+  lookupIds: readonly string[];
+  kind: string | null;
+  stream: string | null;
+  experimentSlug: string | null;
+  date: string | null;
+  occurredAt: string | null;
+  tags: readonly string[];
+}
+
+export const ALL_VAULT_RECORD_TYPES = [
+  "allergy",
+  "assessment",
+  "audit",
+  "condition",
+  "core",
+  "current_profile",
+  "event",
+  "experiment",
+  "family",
+  "genetics",
+  "goal",
+  "history",
+  "journal",
+  "profile_snapshot",
+  "regimen",
+  "sample",
+] as const satisfies readonly VaultRecordType[];
+
+// `listRecords()` preserves this historical subset by default for compatibility.
+// It is intentionally narrower than the full read-model coverage in `ALL_VAULT_RECORD_TYPES`.
+const LEGACY_DEFAULT_LIST_RECORD_TYPES = [
   "audit",
   "core",
   "event",
   "experiment",
   "journal",
   "sample",
-];
+] as const satisfies readonly VaultRecordType[];
 
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
   return readVaultWithHealthMode(vaultRoot, "strict-async");
@@ -194,84 +252,30 @@ export function lookupEntityById(
   vault: VaultReadModel,
   entityId: string,
 ): CanonicalEntity | null {
-  if (typeof entityId !== "string" || !entityId.trim()) {
-    return null;
-  }
-
-  const normalizedId = entityId.trim();
-  const entities = getVaultEntities(vault);
-
-  return (
-    entities.find((entity) => entity.entityId === normalizedId) ??
-    entities.find((entity) => entity.lookupIds.includes(normalizedId)) ??
-    null
-  );
+  return lookupById(getVaultEntities(vault), entityId, (entity) => entity.entityId);
 }
 
 export function listEntities(
   vault: VaultReadModel,
   filters: EntityFilter = {},
 ): CanonicalEntity[] {
-  const {
-    ids,
-    families,
-    kinds,
-    statuses,
-    streams,
-    experimentSlug,
-    date,
-    from,
-    to,
-    tags,
-    text,
-  } = filters;
-
-  const idSet = ids ? new Set(ids) : null;
-  const familySet = families ? new Set(families) : null;
-  const kindSet = kinds ? new Set(kinds) : null;
-  const statusSet = statuses ? new Set(statuses) : null;
-  const streamSet = streams ? new Set(streams) : null;
-  const tagSet = tags ? new Set(tags) : null;
-  const normalizedText = normalizeFilterText(text);
+  const { families, statuses } = filters;
+  const recordLikeFilter = prepareRecordLikeFilter(filters);
+  const familySet = toOptionalSet(families);
+  const statusSet = toOptionalSet(statuses);
 
   return getVaultEntities(vault).filter((entity) => {
-    if (idSet && !entity.lookupIds.some((lookupId) => idSet.has(lookupId))) {
+    if (!matchesRequiredSet(entity.family, familySet)) {
       return false;
     }
 
-    if (familySet && !familySet.has(entity.family)) {
+    if (!matchesOptionalSet(entity.status, statusSet)) {
       return false;
     }
 
-    if (kindSet && !kindSet.has(entity.kind)) {
-      return false;
-    }
-
-    if (statusSet && (!entity.status || !statusSet.has(entity.status))) {
-      return false;
-    }
-
-    if (streamSet && (!entity.stream || !streamSet.has(entity.stream))) {
-      return false;
-    }
-
-    if (experimentSlug && entity.experimentSlug !== experimentSlug) {
-      return false;
-    }
-
-    if (date && entity.date !== date) {
-      return false;
-    }
-
-    if (!matchesDateBounds(entity.date ?? entity.occurredAt, from, to)) {
-      return false;
-    }
-
-    if (!matchesTagSet(entity.tags, tagSet)) {
-      return false;
-    }
-
-    return matchesFilterText(
+    return matchesRecordLikeFilter(
+      entity,
+      recordLikeFilter,
       [
         entity.entityId,
         entity.primaryLookupId,
@@ -285,7 +289,6 @@ export function listEntities(
         entity.body,
         JSON.stringify(entity.attributes),
       ],
-      normalizedText,
     );
   });
 }
@@ -294,77 +297,25 @@ export function lookupRecordById(
   vault: VaultReadModel,
   recordId: string,
 ): VaultRecord | null {
-  if (typeof recordId !== "string" || !recordId.trim()) {
-    return null;
-  }
-
-  const normalizedId = recordId.trim();
-
-  return (
-    vault.records.find((record) => record.displayId === normalizedId) ??
-    vault.records.find((record) => record.lookupIds.includes(normalizedId)) ??
-    null
-  );
+  return lookupById(vault.records, recordId, (record) => record.displayId);
 }
 
 export function listRecords(
   vault: VaultReadModel,
   filters: RecordFilter = {},
 ): VaultRecord[] {
-  const {
-    ids,
-    recordTypes,
-    kinds,
-    streams,
-    experimentSlug,
-    date,
-    from,
-    to,
-    tags,
-    text,
-  } = filters;
-
-  const idSet = ids ? new Set(ids) : null;
-  const typeSet = new Set(recordTypes ?? DEFAULT_LIST_RECORD_TYPES);
-  const kindSet = kinds ? new Set(kinds) : null;
-  const streamSet = streams ? new Set(streams) : null;
-  const tagSet = tags ? new Set(tags) : null;
-  const normalizedText = normalizeFilterText(text);
+  const { recordTypes } = filters;
+  const recordLikeFilter = prepareRecordLikeFilter(filters);
+  const typeSet = new Set(recordTypes ?? LEGACY_DEFAULT_LIST_RECORD_TYPES);
 
   return vault.records.filter((record) => {
-    if (idSet && !record.lookupIds.some((lookupId) => idSet.has(lookupId))) {
+    if (!matchesRequiredSet(record.recordType, typeSet)) {
       return false;
     }
 
-    if (!typeSet.has(record.recordType)) {
-      return false;
-    }
-
-    if (kindSet && (!record.kind || !kindSet.has(record.kind))) {
-      return false;
-    }
-
-    if (streamSet && (!record.stream || !streamSet.has(record.stream))) {
-      return false;
-    }
-
-    if (experimentSlug && record.experimentSlug !== experimentSlug) {
-      return false;
-    }
-
-    if (date && record.date !== date) {
-      return false;
-    }
-
-    if (!matchesDateBounds(record.date ?? record.occurredAt, from, to)) {
-      return false;
-    }
-
-    if (!matchesTagSet(record.tags, tagSet)) {
-      return false;
-    }
-
-    return matchesFilterText(
+    return matchesRecordLikeFilter(
+      record,
+      recordLikeFilter,
       [
         record.displayId,
         record.primaryLookupId,
@@ -377,7 +328,6 @@ export function listRecords(
         record.body,
         JSON.stringify(record.data),
       ],
-      normalizedText,
     );
   });
 }
@@ -386,22 +336,18 @@ export function listExperiments(
   vault: VaultReadModel,
   filters: ExperimentFilter = {},
 ): VaultRecord[] {
-  const { slug, tags, text } = filters;
-  const tagSet = tags ? new Set(tags) : null;
-  const normalizedText = normalizeFilterText(text);
+  const { slug } = filters;
+  const tagAndTextFilter = prepareTagAndTextFilter(filters);
 
   return vault.experiments.filter((record) => {
     if (slug && record.experimentSlug !== slug) {
       return false;
     }
 
-    if (!matchesTagSet(record.tags, tagSet)) {
-      return false;
-    }
-
-    return matchesFilterText(
+    return matchesTagAndTextFilter(
+      record.tags,
       [record.title, record.body, JSON.stringify(record.frontmatter)],
-      normalizedText,
+      tagAndTextFilter,
     );
   });
 }
@@ -417,9 +363,8 @@ export function listJournalEntries(
   vault: VaultReadModel,
   filters: JournalFilter = {},
 ): VaultRecord[] {
-  const { from, to, experimentSlug, tags, text } = filters;
-  const tagSet = tags ? new Set(tags) : null;
-  const normalizedText = normalizeFilterText(text);
+  const { from, to, experimentSlug } = filters;
+  const tagAndTextFilter = prepareTagAndTextFilter(filters);
 
   return vault.journalEntries.filter((record) => {
     if (!matchesDateBounds(record.date, from, to)) {
@@ -430,13 +375,10 @@ export function listJournalEntries(
       return false;
     }
 
-    if (!matchesTagSet(record.tags, tagSet)) {
-      return false;
-    }
-
-    return matchesFilterText(
+    return matchesTagAndTextFilter(
+      record.tags,
       [record.title, record.body, JSON.stringify(record.frontmatter)],
-      normalizedText,
+      tagAndTextFilter,
     );
   });
 }
@@ -959,6 +901,113 @@ function normalizeTags(value: unknown): string[] {
   return normalizeStringArray(value);
 }
 
+function lookupById<T extends { lookupIds: readonly string[] }>(
+  items: readonly T[],
+  rawId: string,
+  getDirectId: (item: T) => string,
+): T | null {
+  const normalizedId = normalizeLookupId(rawId);
+  if (!normalizedId) {
+    return null;
+  }
+
+  return (
+    items.find((item) => getDirectId(item) === normalizedId) ??
+    items.find((item) => item.lookupIds.includes(normalizedId)) ??
+    null
+  );
+}
+
+function normalizeLookupId(value: string): string | null {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  return value.trim();
+}
+
+function prepareTagAndTextFilter(filters: {
+  tags?: string[];
+  text?: string;
+}): PreparedTagAndTextFilter {
+  return {
+    tagSet: toOptionalSet(filters.tags),
+    normalizedText: normalizeFilterText(filters.text),
+  };
+}
+
+function prepareRecordLikeFilter(
+  filters: SharedListFilterInput,
+): PreparedRecordLikeFilter {
+  return {
+    ...prepareTagAndTextFilter(filters),
+    idSet: toOptionalSet(filters.ids),
+    kindSet: toOptionalSet(filters.kinds),
+    streamSet: toOptionalSet(filters.streams),
+    experimentSlug: filters.experimentSlug,
+    date: filters.date,
+    from: filters.from,
+    to: filters.to,
+  };
+}
+
+function matchesRecordLikeFilter(
+  source: RecordLikeFilterSource,
+  filter: PreparedRecordLikeFilter,
+  haystackValues: readonly unknown[],
+): boolean {
+  if (!matchesLookupIds(source.lookupIds, filter.idSet)) {
+    return false;
+  }
+
+  if (!matchesOptionalSet(source.kind, filter.kindSet)) {
+    return false;
+  }
+
+  if (!matchesOptionalSet(source.stream, filter.streamSet)) {
+    return false;
+  }
+
+  if (filter.experimentSlug && source.experimentSlug !== filter.experimentSlug) {
+    return false;
+  }
+
+  if (filter.date && source.date !== filter.date) {
+    return false;
+  }
+
+  if (!matchesDateBounds(source.date ?? source.occurredAt, filter.from, filter.to)) {
+    return false;
+  }
+
+  return matchesTagAndTextFilter(source.tags, haystackValues, filter);
+}
+
+function matchesLookupIds(
+  lookupIds: readonly string[],
+  idSet: ReadonlySet<string> | null,
+): boolean {
+  return !idSet || lookupIds.some((lookupId) => idSet.has(lookupId));
+}
+
+function matchesRequiredSet<T>(
+  value: T,
+  valueSet: ReadonlySet<T> | null,
+): boolean {
+  return !valueSet || valueSet.has(value);
+}
+
+function matchesOptionalSet<T>(
+  value: T | null | undefined,
+  valueSet: ReadonlySet<T> | null,
+): boolean {
+  return !valueSet || (value !== null && value !== undefined && valueSet.has(value));
+}
+
+function toOptionalSet<T>(values: readonly T[] | undefined): ReadonlySet<T> | null {
+  return values ? new Set(values) : null;
+}
+
 function normalizeFilterText(text: string | undefined): string | null {
   return text ? text.toLowerCase() : null;
 }
@@ -984,6 +1033,18 @@ function matchesTagSet(
   tagSet: ReadonlySet<string> | null,
 ): boolean {
   return !tagSet || values.some((value) => tagSet.has(value));
+}
+
+function matchesTagAndTextFilter(
+  tags: readonly string[],
+  haystackValues: readonly unknown[],
+  filter: PreparedTagAndTextFilter,
+): boolean {
+  if (!matchesTagSet(tags, filter.tagSet)) {
+    return false;
+  }
+
+  return matchesFilterText(haystackValues, filter.normalizedText);
 }
 
 function matchesFilterText(
