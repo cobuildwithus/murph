@@ -9,6 +9,11 @@ import {
   isHealthQueryableRecordId,
 } from "../health-cli-descriptors.js"
 import { loadJsonInputObject } from "../json-input.js"
+import {
+  describeQueryLookupConstraint,
+  inferQueryIdEntityKind,
+  isQueryableQueryLookupId,
+} from "../query-runtime.js"
 
 import type {
   HealthEntityEnvelope,
@@ -50,96 +55,31 @@ export function inferEntityKind(id: string) {
     return healthKind
   }
 
-  if (id === "core") {
-    return "core"
+  if (isHealthQueryableRecordId(id)) {
+    return "entity"
   }
 
-  if (id.startsWith("evt_")) {
-    return "event"
-  }
-
-  if (id.startsWith("event:")) {
-    return "event"
-  }
-
-  if (id.startsWith("smp_")) {
-    return "sample"
-  }
-
-  if (id.startsWith("sample:")) {
-    return "sample"
-  }
-
-  if (id.startsWith("aud_")) {
-    return "audit"
-  }
-
-  if (id.startsWith("audit:")) {
-    return "audit"
-  }
-
-  if (id.startsWith("exp_")) {
-    return "experiment"
-  }
-
-  if (id.startsWith("experiment:")) {
-    return "experiment"
-  }
-
-  if (id.startsWith("journal:")) {
-    return "journal"
-  }
-
-  if (id.startsWith("meal_")) {
-    return "meal"
-  }
-
-  if (id.startsWith("doc_")) {
-    return "document"
-  }
-
-  if (id.startsWith("prov_")) {
+  if (isProviderLookupId(id)) {
     return "provider"
   }
 
-  return "entity"
+  return inferQueryIdEntityKind(id)
 }
 
 export function isQueryableRecordId(id: string) {
-  return (
-    id === "core" ||
-    id === "current" ||
-    isHealthQueryableRecordId(id) ||
-    id.startsWith("aud_") ||
-    id.startsWith("evt_") ||
-    id.startsWith("exp_") ||
-    id.startsWith("smp_") ||
-    id.startsWith("audit:") ||
-    id.startsWith("event:") ||
-    id.startsWith("experiment:") ||
-    id.startsWith("journal:") ||
-    id.startsWith("sample:")
-  )
+  return isHealthQueryableRecordId(id) || isQueryableQueryLookupId(id)
 }
 
 export function describeLookupConstraint(id: string) {
-  if (id.startsWith("meal_")) {
-    return "Meal ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead."
+  if (isHealthQueryableRecordId(id) || isProviderLookupId(id)) {
+    return null
   }
 
-  if (id.startsWith("doc_")) {
-    return "Document ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead."
-  }
+  return describeQueryLookupConstraint(id)
+}
 
-  if (id.startsWith("xfm_")) {
-    return "Transform ids identify an import batch, not a query-layer record. Use the returned lookupIds or `list --kind sample` instead."
-  }
-
-  if (id.startsWith("pack_")) {
-    return "Export pack ids identify derived exports, not canonical vault records. Inspect the materialized pack files instead of passing the pack id to `show`."
-  }
-
-  return null
+function isProviderLookupId(id: string) {
+  return id.startsWith("prov_")
 }
 
 function isPlainObject(value: unknown): value is JsonObject {

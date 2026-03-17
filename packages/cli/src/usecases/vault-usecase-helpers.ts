@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
-import {
-  inferHealthEntityKind,
-  isHealthQueryableRecordId,
-} from '../health-cli-descriptors.js'
 import { VaultCliError } from '../vault-cli-errors.js'
+import {
+  inferEntityKind,
+  isQueryableRecordId,
+} from './shared.js'
 
 const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
@@ -16,64 +16,17 @@ export function inferVaultLinkKind(
     includeProviderIds?: boolean
   } = {},
 ) {
-  const healthKind = inferHealthEntityKind(id)
-  if (healthKind) {
-    return healthKind
+  const kind = inferEntityKind(id)
+
+  if (kind === 'provider' && !options.includeProviderIds) {
+    return 'entity'
   }
 
-  if (id === 'core') {
-    return 'core'
-  }
-
-  if (id.startsWith('aud_') || id.startsWith('audit:')) {
-    return 'audit'
-  }
-
-  if (id.startsWith('evt_') || id.startsWith('event:')) {
-    return 'event'
-  }
-
-  if (id.startsWith('exp_') || id.startsWith('experiment:')) {
-    return 'experiment'
-  }
-
-  if (id.startsWith('journal:')) {
-    return 'journal'
-  }
-
-  if (id.startsWith('smp_') || id.startsWith('sample:')) {
-    return 'sample'
-  }
-
-  if (id.startsWith('meal_')) {
-    return 'meal'
-  }
-
-  if (id.startsWith('doc_')) {
-    return 'document'
-  }
-
-  if (options.includeProviderIds && id.startsWith('prov_')) {
-    return 'provider'
-  }
-
-  return 'entity'
+  return kind
 }
 
 export function isVaultQueryableRecordId(id: string) {
-  return (
-    id === 'core' ||
-    isHealthQueryableRecordId(id) ||
-    id.startsWith('aud_') ||
-    id.startsWith('evt_') ||
-    id.startsWith('exp_') ||
-    id.startsWith('smp_') ||
-    id.startsWith('audit:') ||
-    id.startsWith('event:') ||
-    id.startsWith('experiment:') ||
-    id.startsWith('journal:') ||
-    id.startsWith('sample:')
-  )
+  return isQueryableRecordId(id)
 }
 
 export function normalizeOptionalText(value: string | undefined) {

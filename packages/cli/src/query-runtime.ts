@@ -1,3 +1,8 @@
+import {
+  describeLookupConstraint as describeQueryLookupConstraint,
+  inferIdEntityKind as inferQueryIdEntityKind,
+  isQueryableLookupId as isQueryableQueryLookupId,
+} from '@healthybob/query'
 import { loadRuntimeModule } from './runtime-import.js'
 
 type QueryModule = typeof import('@healthybob/query')
@@ -7,6 +12,7 @@ export type QueryRuntimeModule = Pick<
   | 'ALL_VAULT_RECORD_TYPES'
   | 'buildExportPack'
   | 'buildTimeline'
+  | 'describeLookupConstraint'
   | 'getSqliteSearchStatus'
   | 'inferIdEntityKind'
   | 'isQueryableLookupId'
@@ -62,6 +68,12 @@ export type QueryExportPackOptions = NonNullable<
   Parameters<QueryRuntimeModule['buildExportPack']>[1]
 >
 export type QueryExportPack = ReturnType<QueryRuntimeModule['buildExportPack']>
+
+export {
+  describeQueryLookupConstraint,
+  inferQueryIdEntityKind,
+  isQueryableQueryLookupId,
+}
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
   return loadRuntimeModule<QueryRuntimeModule>('@healthybob/query')

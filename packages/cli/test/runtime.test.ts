@@ -278,12 +278,26 @@ test.sequential(
       assert.equal(requireData(showSample).entity.id, fixture.samples.lookupIds[0])
       assert.equal(requireData(showSample).entity.kind, 'sample')
 
-      for (const invalidId of [
-        fixture.meal.mealId,
-        fixture.document.documentId,
-        fixture.samples.transformId,
-        'pack_placeholder',
-      ]) {
+      const invalidLookups = [
+        [
+          fixture.meal.mealId,
+          'Meal ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead.',
+        ],
+        [
+          fixture.document.documentId,
+          'Document ids are stable related ids, not query-layer record ids. Use the returned lookupId/eventId with `show` instead.',
+        ],
+        [
+          fixture.samples.transformId,
+          'Transform ids identify an import batch, not a query-layer record. Use the returned lookupIds or `list --kind sample` instead.',
+        ],
+        [
+          'pack_placeholder',
+          'Export pack ids identify derived exports, not canonical vault records. Inspect the materialized pack files instead of passing the pack id to `show`.',
+        ],
+      ] as const
+
+      for (const [invalidId, expectedMessage] of invalidLookups) {
         const result = await runCli([
           'show',
           invalidId,
@@ -292,6 +306,7 @@ test.sequential(
         ])
         assert.equal(result.ok, false)
         assert.equal(result.error?.code, 'invalid_lookup_id')
+        assert.equal(result.error?.message, expectedMessage)
         assert.equal(result.meta?.command, 'show')
       }
     } finally {

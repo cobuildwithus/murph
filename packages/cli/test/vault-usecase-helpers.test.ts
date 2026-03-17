@@ -18,12 +18,17 @@ test('link-kind and queryable helpers preserve provider and current semantics', 
     inferVaultLinkKind('prov_01JNV422Y2M5ZBV64ZP4N1DRB1', { includeProviderIds: true }),
     'provider',
   )
+  assert.equal(inferVaultLinkKind('current'), 'entity')
   assert.equal(inferVaultLinkKind('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'), 'event')
+  assert.equal(inferVaultLinkKind('xfm_01JNV422Y2M5ZBV64ZP4N1DRB1'), 'transform')
+  assert.equal(inferVaultLinkKind('pack_focus'), 'export_pack')
 
   assert.equal(isVaultQueryableRecordId('current'), true)
   assert.equal(isVaultQueryableRecordId('core'), true)
   assert.equal(isVaultQueryableRecordId('doc_01JNV422Y2M5ZBV64ZP4N1DRB1'), false)
   assert.equal(isVaultQueryableRecordId('meal_01JNV422Y2M5ZBV64ZP4N1DRB1'), false)
+  assert.equal(isVaultQueryableRecordId('xfm_01JNV422Y2M5ZBV64ZP4N1DRB1'), false)
+  assert.equal(isVaultQueryableRecordId('pack_focus'), false)
 })
 
 test('normalization helpers keep their distinct trim and dedupe behavior', () => {
