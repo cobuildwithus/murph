@@ -1353,6 +1353,19 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     })
 
     assert.match(result.stdout, /Dry run requested/u)
+    assert.match(result.stdout, /Healthy Bob macOS setup will install or reuse:/u)
+    assert.match(
+      result.stdout,
+      /Homebrew, Node >= 22\.16\.0, and pnpm@9\.15\.9 via corepack/u,
+    )
+    assert.match(
+      result.stdout,
+      /ffmpeg, poppler\/pdftotext, whisper\.cpp, and a local Whisper model/u,
+    )
+    assert.match(
+      result.stdout,
+      /the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob\/vault-cli shims, and assistant chat/u,
+    )
     assert.match(result.stdout, /Ensure Node >= 22\.16\.0/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(

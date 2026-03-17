@@ -21,6 +21,15 @@ log() {
   printf '[healthybob-setup] %s\n' "$*"
 }
 
+print_install_summary() {
+  log 'Healthy Bob macOS setup will install or reuse:'
+  printf '  - Homebrew, Node >= %s, and pnpm@%s via corepack\n' "$required_node" "$pnpm_version"
+  printf '%s\n' '  - workspace dependencies and build output'
+  printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model'
+  printf '%s\n' '  - PaddleX OCR on Apple Silicon unless you pass --skip-ocr'
+  printf '%s\n' '  - the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob/vault-cli shims, and assistant chat'
+}
+
 has_dry_run_flag() {
   for arg in "$@"; do
     case "$arg" in
@@ -49,6 +58,7 @@ print_dry_run_plan() {
   delegated_args="$(render_command_args "$@")"
 
   log 'Dry run requested. This wrapper will not modify the machine or workspace.'
+  print_install_summary
   printf '%s\n' 'Planned wrapper steps:'
   printf '1. Ensure Homebrew is available.\n'
   printf '2. Ensure Node >= %s is available.\n' "$required_node"
@@ -67,6 +77,8 @@ if has_dry_run_flag "$@"; then
   print_dry_run_plan "$@"
   exit 0
 fi
+
+print_install_summary
 
 ensure_brew_shellenv() {
   if command -v brew >/dev/null 2>&1; then

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-03-13
-Updated: 2026-03-16
+Updated: 2026-03-17
 
 ## Goal
 
@@ -50,6 +50,11 @@ Updated: 2026-03-16
 2. Route `setup` through `packages/cli/src/bin.ts` and add the `healthybob` bin alias.
 3. Add a repo-level `scripts/setup-macos.sh` wrapper that hard-fails off macOS, keeps `--dryRun` wrapper-only and non-mutating, ensures Node/pnpm/workspace build prerequisites on real runs, then delegates to the built CLI setup entrypoint.
 4. Update README/runtime docs, add focused tests, run the completion-workflow audit prompts, and execute repo verification as far as the workspace allows.
+
+## 2026-03-17 follow-up
+
+- Added a concise wrapper preflight summary so `pnpm onboard`/`pnpm run setup` says what it will install or reuse before mutating the machine.
+- Covered the new summary in the existing setup-wrapper dry-run test so the phrasing stays present.
 
 ## Verification
 
