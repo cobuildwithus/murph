@@ -560,7 +560,7 @@ export function registerInboxCommands(
     args: z.object({
       captureId: z.string().min(1).describe('Inbox capture id to show.'),
     }),
-    description: 'Show one captured inbox item with raw metadata and stored attachment references.',
+    description: 'Show one captured inbox item with normalized metadata and stored attachment references.',
     options: withBaseOptions(),
     output: inboxShowResultSchema,
     async run(context) {

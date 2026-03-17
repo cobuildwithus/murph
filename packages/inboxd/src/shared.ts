@@ -2,6 +2,13 @@ import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+import {
+  VaultError,
+  assertPathWithinVaultOnDisk,
+  normalizeRelativeVaultPath,
+  resolveVaultPath as resolveCoreVaultPath,
+} from "@healthybob/core";
+
 import type { StoredAttachment } from "./contracts/capture.js";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -95,47 +102,64 @@ const USER_PATH_PATTERNS = [
   /^\/home\/[^/]+/u,
   /^[A-Za-z]:\\Users\\[^\\]+/u,
 ];
+const REDACTED_PATH = "<REDACTED_PATH>";
+const REDACTED_SECRET = "<REDACTED_SECRET>";
+const SENSITIVE_RAW_KEYS = new Set([
+  "accesskey",
+  "accesstoken",
+  "apikey",
+  "apitoken",
+  "auth",
+  "authtoken",
+  "authorization",
+  "bearertoken",
+  "clientsecret",
+  "cookie",
+  "credential",
+  "credentials",
+  "csrftoken",
+  "idtoken",
+  "oauthtoken",
+  "password",
+  "passwd",
+  "privatekey",
+  "refreshtoken",
+  "secret",
+  "session",
+  "sessionid",
+  "sessiontoken",
+  "setcookie",
+  "token",
+]);
+const SENSITIVE_STRING_PATTERNS = [
+  /^\s*(bearer|basic|digest)\s+\S+/iu,
+  /\b(authorization|cookie|set-cookie|access_token|refresh_token|api[_-]?key|session(?:[_-]?(?:id|token))?|secret)\b\s*[:=]\s*\S+/iu,
+];
 
 export function normalizeRelativePath(relativePath: string): string {
-  const candidate = relativePath.trim().replace(/\\/g, "/");
-
-  if (!candidate) {
-    throw new TypeError("Vault-relative path is required.");
+  try {
+    return normalizeRelativeVaultPath(relativePath);
+  } catch (error) {
+    throw toTypeError(error);
   }
-
-  if (candidate.includes("\u0000")) {
-    throw new TypeError("Vault-relative path may not contain NUL bytes.");
-  }
-
-  if (/^[A-Za-z]:\//u.test(candidate) || path.posix.isAbsolute(candidate)) {
-    throw new TypeError("Vault-relative path must not be absolute.");
-  }
-
-  const normalized = path.posix.normalize(candidate);
-
-  if (
-    normalized === "." ||
-    normalized === ".." ||
-    normalized.startsWith("../") ||
-    normalized.includes("/../")
-  ) {
-    throw new TypeError("Vault-relative path may not escape the vault root.");
-  }
-
-  return normalized;
 }
 
-export function resolveVaultPath(vaultRoot: string, relativePath: string): string {
-  const absoluteRoot = path.resolve(vaultRoot);
-  const normalizedRelativePath = normalizeRelativePath(relativePath);
-  const absolutePath = path.resolve(absoluteRoot, normalizedRelativePath);
-  const relative = path.relative(absoluteRoot, absolutePath);
-
-  if (relative === ".." || relative.startsWith(`..${path.sep}`)) {
-    throw new TypeError("Resolved path escaped the vault root.");
+export async function resolveVaultPath(vaultRoot: string, relativePath: string): Promise<string> {
+  try {
+    const resolved = resolveCoreVaultPath(vaultRoot, relativePath);
+    await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+    return resolved.absolutePath;
+  } catch (error) {
+    throw toTypeError(error);
   }
+}
 
-  return absolutePath;
+export async function assertVaultPathOnDisk(vaultRoot: string, absolutePath: string): Promise<void> {
+  try {
+    await assertPathWithinVaultOnDisk(vaultRoot, absolutePath);
+  } catch (error) {
+    throw toTypeError(error);
+  }
 }
 
 export function createCaptureCheckpoint(capture: {
@@ -224,26 +248,144 @@ export function createDeterministicInboxCaptureId(input: {
   return `cap_${createHash("sha256").update(createInboxCaptureIdentityKey(input)).digest("hex").slice(0, 26)}`;
 }
 
+export function sanitizeRawMetadata(value: unknown): unknown {
+  return sanitizeRawMetadataValue(value);
+}
+
 export function redactSensitivePaths(value: unknown): unknown {
+  return sanitizeRawMetadataValue(value);
+}
+
+function sanitizeRawMetadataValue(value: unknown): unknown {
   if (value instanceof Date) {
     return value.toISOString();
   }
 
+  if (value instanceof Uint8Array) {
+    return `<${value.byteLength} bytes>`;
+  }
+
   if (Array.isArray(value)) {
-    return value.map((entry) => redactSensitivePaths(entry));
+    return value.map((entry) => {
+      const sanitizedEntry = sanitizeRawMetadataValue(entry);
+      return sanitizedEntry === undefined ? null : sanitizedEntry;
+    });
   }
 
   if (value && typeof value === "object") {
-    return mapObjectEntries(value, (key, entry) => [key, redactSensitivePaths(entry)]);
+    const sanitizedEntries: Array<[string, unknown]> = [];
+
+    for (const [key, entry] of Object.entries(value)) {
+      if (isSensitiveRawKey(key)) {
+        sanitizedEntries.push([key, REDACTED_SECRET]);
+        continue;
+      }
+
+      const sanitizedEntry = sanitizeRawMetadataValue(entry);
+      if (sanitizedEntry !== undefined) {
+        sanitizedEntries.push([key, sanitizedEntry]);
+      }
+    }
+
+    return Object.fromEntries(sanitizedEntries);
   }
 
   if (typeof value === "string") {
+    if (looksSensitiveStringValue(value)) {
+      return REDACTED_SECRET;
+    }
+
     return USER_PATH_PATTERNS.some((pattern) => pattern.test(value))
-      ? "<REDACTED_PATH>"
+      ? REDACTED_PATH
       : value;
   }
 
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "function") {
+    return String(value);
+  }
+
   return value;
+}
+
+function isSensitiveRawKey(key: string): boolean {
+  const collapsed = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+
+  if (!collapsed) {
+    return false;
+  }
+
+  if (SENSITIVE_RAW_KEYS.has(collapsed)) {
+    return true;
+  }
+
+  if (collapsed.includes("authorization") || collapsed.includes("setcookie")) {
+    return true;
+  }
+
+  if (
+    collapsed.includes("accesstoken") ||
+    collapsed.includes("refreshtoken") ||
+    collapsed.includes("sessiontoken") ||
+    collapsed.includes("sessionid") ||
+    collapsed.includes("apikey") ||
+    collapsed.includes("privatekey") ||
+    collapsed.includes("clientsecret") ||
+    collapsed.includes("oauthtoken") ||
+    collapsed.includes("idtoken")
+  ) {
+    return true;
+  }
+
+  const parts = key
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((part) => part.length > 0);
+  const partSet = new Set(parts);
+
+  if (
+    partSet.has("authorization") ||
+    partSet.has("cookie") ||
+    partSet.has("secret") ||
+    partSet.has("session") ||
+    partSet.has("credential") ||
+    partSet.has("credentials") ||
+    partSet.has("password") ||
+    partSet.has("passwd")
+  ) {
+    return true;
+  }
+
+  if (
+    partSet.has("token") &&
+    (
+      parts.length === 1 ||
+      partSet.has("access") ||
+      partSet.has("refresh") ||
+      partSet.has("api") ||
+      partSet.has("auth") ||
+      partSet.has("oauth") ||
+      partSet.has("session") ||
+      partSet.has("id") ||
+      partSet.has("bearer") ||
+      partSet.has("csrf")
+    )
+  ) {
+    return true;
+  }
+
+  return partSet.has("key") && (partSet.has("api") || partSet.has("private") || partSet.has("client"));
+}
+
+function looksSensitiveStringValue(value: string): boolean {
+  return SENSITIVE_STRING_PATTERNS.some((pattern) => pattern.test(value.trim()));
 }
 
 export async function walkNamedFiles(
@@ -275,4 +417,12 @@ export async function walkNamedFiles(
   }
 
   return files;
+}
+
+function toTypeError(error: unknown): Error {
+  if (error instanceof VaultError) {
+    return new TypeError(error.message);
+  }
+
+  return error instanceof Error ? error : new TypeError(String(error));
 }

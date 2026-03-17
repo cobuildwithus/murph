@@ -166,7 +166,6 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
           parseState: 'succeeded',
         },
       ],
-      raw: {},
     },
   })
   const vaultServices = createStubVaultServices()
@@ -294,7 +293,6 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
           parseState: 'succeeded',
         },
       ],
-      raw: {},
     },
   })
 
@@ -463,7 +461,6 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
           parseState: 'succeeded',
         },
       ],
-      raw: {},
     },
   })
 

@@ -66,8 +66,22 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
     ],
     raw: {
       localPath: "/Users/<REDACTED_USER>/Library/Messages/chat.db",
+      authorization: "Bearer <AUTH_SECRET>",
+      cookie: "session=<COOKIE_SECRET>",
+      stringifiedAuth: "Authorization: Bearer <AUTH_SECRET>",
+      headers: {
+        Authorization: "Bearer <AUTH_SECRET>",
+        "set-cookie": "session=<COOKIE_SECRET>; Path=/",
+      },
       nested: {
         attachmentPath: "/home/<REDACTED_USER>/Attachments/foo.jpg",
+        access_token: "<ACCESS_TOKEN>",
+        refreshToken: "<REFRESH_TOKEN>",
+        api_key: "<API_KEY>",
+        secret: "<NESTED_SECRET>",
+        session: {
+          id: "<SESSION_ID>",
+        },
       },
     },
   });
@@ -102,9 +116,31 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
   assert.equal(capture.attachments[0]?.originalPath, null);
   assert.equal(capture.attachments[0]?.storedPath?.startsWith("raw/inbox/imessage/self/"), true);
   assert.equal(capture.raw.localPath, "<REDACTED_PATH>");
+  assert.equal(capture.raw.authorization, "<REDACTED_SECRET>");
+  assert.equal(capture.raw.cookie, "<REDACTED_SECRET>");
+  assert.equal(capture.raw.stringifiedAuth, "<REDACTED_SECRET>");
+  assert.deepEqual(capture.raw.headers, {
+    Authorization: "<REDACTED_SECRET>",
+    "set-cookie": "<REDACTED_SECRET>",
+  });
   assert.deepEqual(capture.raw.nested, {
     attachmentPath: "<REDACTED_PATH>",
+    access_token: "<REDACTED_SECRET>",
+    refreshToken: "<REDACTED_SECRET>",
+    api_key: "<REDACTED_SECRET>",
+    secret: "<REDACTED_SECRET>",
+    session: "<REDACTED_SECRET>",
   });
+
+  const captureDatabase = new DatabaseSync(runtime.databasePath);
+  const captureRow = captureDatabase
+    .prepare("select raw_json from capture where capture_id = ?")
+    .get(first.captureId) as { raw_json: string } | undefined;
+  captureDatabase.close();
+  assert.ok(captureRow);
+  assert.match(captureRow.raw_json, /<REDACTED_SECRET>/u);
+  assert.equal(captureRow.raw_json.includes("<AUTH_SECRET>"), false);
+  assert.equal(captureRow.raw_json.includes("<ACCESS_TOKEN>"), false);
 
   const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
   assert.equal(jobs.length, 1);
@@ -128,6 +164,21 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
   assert.equal(envelope.stored.eventId, first.eventId);
   assert.equal(envelope.input.attachments[0]?.originalPath, null);
   assert.equal(envelope.input.raw.localPath, "<REDACTED_PATH>");
+  assert.equal(envelope.input.raw.authorization, "<REDACTED_SECRET>");
+  assert.equal(envelope.input.raw.cookie, "<REDACTED_SECRET>");
+  assert.equal(envelope.input.raw.stringifiedAuth, "<REDACTED_SECRET>");
+  assert.deepEqual(envelope.input.raw.headers, {
+    Authorization: "<REDACTED_SECRET>",
+    "set-cookie": "<REDACTED_SECRET>",
+  });
+  assert.deepEqual(envelope.input.raw.nested, {
+    attachmentPath: "<REDACTED_PATH>",
+    access_token: "<REDACTED_SECRET>",
+    refreshToken: "<REDACTED_SECRET>",
+    api_key: "<REDACTED_SECRET>",
+    secret: "<REDACTED_SECRET>",
+    session: "<REDACTED_SECRET>",
+  });
   assert.match(envelope.stored.attachments[0]?.attachmentId ?? "", /^att_/u);
 
   const eventRecords = await readJsonlRecords({
@@ -890,17 +941,26 @@ test("runPollConnector backfills and watches iMessage messages while advancing t
   pipeline.close();
 });
 
-test("normalizeImessageMessage trims text, sanitizes raw keys, and registry kind checks stay explicit", () => {
+test("normalizeImessageMessage trims text, allowlists raw fields, and registry kind checks stay explicit", () => {
   const capture = normalizeImessageMessage({
     message: {
       guid: "im-raw-1",
       chatGuid: "chat-raw-1",
       text: "  hello from raw  ",
       date: new Date("2026-03-13T10:00:00.000Z"),
-      attachments: null,
-      ["display-name"]: "Friend",
+      displayName: "Friend",
+      authorization: "Bearer <AUTH_SECRET>",
+      attachments: [
+        {
+          guid: "att-raw-1",
+          fileName: "photo.heic",
+          path: "/Users/<REDACTED_USER>/Library/Messages/Attachments/photo.heic",
+          mimeType: "image/heic",
+          api_key: "<API_KEY>",
+        },
+      ],
       nested: {
-        ["child-key"]: new Date("2026-03-13T10:00:01.000Z"),
+        childKey: new Date("2026-03-13T10:00:01.000Z"),
       },
     },
     chat: {
@@ -911,9 +971,17 @@ test("normalizeImessageMessage trims text, sanitizes raw keys, and registry kind
   assert.equal(capture.text, "hello from raw");
   assert.equal(capture.thread.isDirect, false);
   assert.equal(capture.raw.display_name, "Friend");
-  assert.deepEqual(capture.raw.nested, {
-    child_key: "2026-03-13T10:00:01.000Z",
-  });
+  assert.equal(capture.raw.date, "2026-03-13T10:00:00.000Z");
+  assert.deepEqual(capture.raw.attachments, [
+    {
+      guid: "att-raw-1",
+      file_name: "photo.heic",
+      path: "<REDACTED_PATH>",
+      mime_type: "image/heic",
+    },
+  ]);
+  assert.equal("authorization" in capture.raw, false);
+  assert.equal("nested" in capture.raw, false);
 
   const registry = createConnectorRegistry([
     {

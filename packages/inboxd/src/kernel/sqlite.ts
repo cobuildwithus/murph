@@ -29,7 +29,7 @@ import {
   generatePrefixedId,
   normalizeAccountKey,
   normalizeStoredAttachments,
-  redactSensitivePaths,
+  sanitizeRawMetadata,
 } from "../shared.js";
 
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
@@ -455,7 +455,7 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
           input.occurredAt,
           normalizeNullable(input.receivedAt),
           normalizeNullable(input.text),
-          JSON.stringify(redactSensitivePaths(input.raw)),
+          JSON.stringify(sanitizeRawMetadata(input.raw)),
           eventId,
           stored.envelopePath,
           stored.storedAt,

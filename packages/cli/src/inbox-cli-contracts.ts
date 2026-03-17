@@ -126,7 +126,6 @@ export const inboxCaptureDetailSchema = inboxCaptureSummarySchema.extend({
   createdAt: isoTimestampSchema,
   threadIsDirect: z.boolean(),
   attachments: z.array(inboxAttachmentSchema),
-  raw: z.record(z.string(), z.unknown()),
 })
 
 export const inboxInitResultSchema = z.object({

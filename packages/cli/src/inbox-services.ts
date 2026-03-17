@@ -2474,7 +2474,6 @@ function detailCapture(capture: RuntimeCaptureRecord, promotions: InboxPromotion
     createdAt: capture.createdAt,
     threadIsDirect: capture.thread.isDirect ?? false,
     attachments: capture.attachments.map(toCliAttachment),
-    raw: capture.raw,
   }
 }
 

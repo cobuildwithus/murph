@@ -99,6 +99,67 @@ test("normalizeTelegramUpdate builds thread-aware captures and hydrates download
   assert.equal(capture.attachments[0]?.data?.byteLength, 4);
 });
 
+test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-bearing extras", async () => {
+  const capture = await normalizeTelegramUpdate({
+    update: {
+      update_id: 124,
+      authorization: "Bearer <AUTH_SECRET>",
+      message: {
+        message_id: 18,
+        date: 1_773_397_201,
+        text: "Secret-free update",
+        cookie: "session=<COOKIE_SECRET>",
+        chat: {
+          id: 42,
+          type: "private",
+          first_name: "Alice",
+          session: "<SESSION_ID>",
+        },
+        from: {
+          id: 111,
+          first_name: "Alice",
+          api_key: "<API_KEY>",
+        },
+        photo: [
+          {
+            file_id: "photo-2",
+            file_unique_id: "photo-unique-2",
+            file_size: 64,
+            width: 64,
+            height: 64,
+            secret: "<PHOTO_SECRET>",
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(capture.raw.update_id, 124);
+  assert.equal("authorization" in capture.raw, false);
+  const messageRaw = capture.raw.message as Record<string, unknown>;
+  assert.ok(messageRaw);
+  assert.equal(messageRaw.text, "Secret-free update");
+  assert.equal("cookie" in messageRaw, false);
+  assert.deepEqual(messageRaw.chat, {
+    id: 42,
+    type: "private",
+    first_name: "Alice",
+  });
+  assert.deepEqual(messageRaw.from, {
+    id: 111,
+    first_name: "Alice",
+  });
+  assert.deepEqual(messageRaw.photo, [
+    {
+      file_id: "photo-2",
+      file_unique_id: "photo-unique-2",
+      file_size: 64,
+      width: 64,
+      height: 64,
+    },
+  ]);
+});
+
 test("createTelegramPollConnector backfills in update order and emits Telegram update checkpoints", async () => {
   const emitted: Array<{ capture: InboundCapture; checkpoint?: Record<string, unknown> | null }> = [];
   let watcher:

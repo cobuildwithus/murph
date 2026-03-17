@@ -100,7 +100,6 @@ function createStubInboxServices(
             parseState: 'succeeded',
           },
         ],
-        raw: {},
       },
     }),
     search: async () => {

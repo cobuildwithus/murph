@@ -1,7 +1,7 @@
 import type { ChatMessage } from "../chat/message.js";
 import { createInboundCaptureFromChatMessage } from "../chat/message.js";
 import type { InboundAttachment, InboundCapture } from "../../contracts/capture.js";
-import { mapObjectEntries, normalizeTextValue, sanitizeObjectKey, toIsoTimestamp } from "../../shared.js";
+import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.js";
 import type {
   TelegramChat,
   TelegramFile,
@@ -396,34 +396,102 @@ function inferAttachmentKind(
 }
 
 function sanitizeRawTelegramUpdate(update: TelegramUpdateLike): Record<string, unknown> {
-  return coerceRawValue(update) as Record<string, unknown>;
+  return sanitizeRawMetadata(compactRecord({
+    update_id: update.update_id,
+    message: pickTelegramMessage(update.message),
+    edited_message: pickTelegramMessage(update.edited_message),
+    channel_post: pickTelegramMessage(update.channel_post),
+    edited_channel_post: pickTelegramMessage(update.edited_channel_post),
+    business_message: pickTelegramMessage(update.business_message),
+    edited_business_message: pickTelegramMessage(update.edited_business_message),
+  })) as Record<string, unknown>;
 }
 
-function coerceRawValue(value: unknown): unknown {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
+function pickTelegramMessage(
+  message: TelegramMessageLike | null | undefined,
+): Record<string, unknown> | null {
+  if (!message) {
+    return null;
   }
 
-  if (value instanceof Date) {
-    return value.toISOString();
+  return compactRecord({
+    message_id: message.message_id,
+    date: message.date,
+    edit_date: message.edit_date,
+    message_thread_id: message.message_thread_id,
+    text: message.text,
+    caption: message.caption,
+    chat: pickTelegramChat(message.chat),
+    from: pickTelegramUser(message.from),
+    sender_chat: pickTelegramChat(message.sender_chat),
+    photo: message.photo?.map((photo) => pickTelegramPhotoSize(photo)) ?? message.photo ?? undefined,
+    document: pickTelegramFile(message.document),
+    audio: pickTelegramFile(message.audio),
+    voice: pickTelegramFile(message.voice),
+    video: pickTelegramFile(message.video),
+    video_note: pickTelegramFile(message.video_note),
+    animation: pickTelegramFile(message.animation),
+    sticker: pickTelegramFile(message.sticker),
+  });
+}
+
+function pickTelegramChat(chat: TelegramChat | null | undefined): Record<string, unknown> | null {
+  if (!chat) {
+    return null;
   }
 
-  if (value instanceof Uint8Array) {
-    return `<${value.byteLength} bytes>`;
+  return compactRecord({
+    id: chat.id,
+    type: chat.type,
+    title: chat.title,
+    username: chat.username,
+    first_name: chat.first_name,
+    last_name: chat.last_name,
+  });
+}
+
+function pickTelegramUser(user: TelegramUser | null | undefined): Record<string, unknown> | null {
+  if (!user) {
+    return null;
   }
 
-  if (Array.isArray(value)) {
-    return value.map((entry) => coerceRawValue(entry));
+  return compactRecord({
+    id: user.id,
+    is_bot: user.is_bot,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    username: user.username,
+  });
+}
+
+function pickTelegramPhotoSize(photo: TelegramPhotoSize): Record<string, unknown> {
+  return compactRecord({
+    file_id: photo.file_id,
+    file_unique_id: photo.file_unique_id,
+    file_size: photo.file_size,
+    file_name: photo.file_name,
+    mime_type: photo.mime_type,
+    width: photo.width,
+    height: photo.height,
+  });
+}
+
+function pickTelegramFile(file: TelegramFileBase | null | undefined): Record<string, unknown> | null {
+  if (!file) {
+    return null;
   }
 
-  if (typeof value === "object") {
-    return mapObjectEntries(value, (key, entry) => [sanitizeObjectKey(key), coerceRawValue(entry)]);
-  }
+  return compactRecord({
+    file_id: file.file_id,
+    file_unique_id: file.file_unique_id,
+    file_size: file.file_size,
+    file_name: file.file_name,
+    mime_type: file.mime_type,
+  });
+}
 
-  return String(value);
+function compactRecord(fields: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined),
+  );
 }

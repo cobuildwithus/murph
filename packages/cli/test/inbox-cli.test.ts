@@ -772,6 +772,7 @@ test.sequential(
       })
       assert.equal(showResult.capture.text, 'Toast and eggs')
       assert.equal(showResult.capture.attachments[0]?.storedPath?.includes('raw/inbox/'), true)
+      assert.equal('raw' in showResult.capture, false)
 
       const searchResult = await services.search({
         vault: fixture.vaultRoot,
