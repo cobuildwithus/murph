@@ -15,11 +15,15 @@ import {
   CHAT_BANNER,
   CHAT_MODEL_OPTIONS,
   CHAT_REASONING_OPTIONS,
+  CHAT_SLASH_COMMANDS,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatBusyStatus,
   formatChatMetadata,
   formatSessionBinding,
+  getMatchingSlashCommands,
+  resolveChatSubmitAction,
+  shouldClearComposerForSubmitAction,
   type InkChatEntry,
   seedChatEntries,
 } from './view-model.js'
@@ -34,11 +38,10 @@ const SWITCHER_ACCENT_COLOR = '#0f766e'
 const SWITCHER_BACKGROUND = '#f8fafc'
 const SWITCHER_MUTED_COLOR = '#6b7280'
 const SWITCHER_TEXT_COLOR = '#111827'
-
 interface ComposerInputProps {
   disabled: boolean
   onChange: (value: string) => void
-  onSubmit: (value: string) => void
+  onSubmit: (value: string) => ComposerSubmitDisposition
   placeholder: string
   value: string
 }
@@ -58,6 +61,36 @@ interface ModelSwitcherState {
   mode: 'model' | 'reasoning'
   modelIndex: number
   reasoningIndex: number
+}
+
+type ComposerSubmitDisposition = 'clear' | 'keep'
+
+interface ChatHeaderProps {
+  bindingSummary: string | null
+  sessionId: string
+}
+
+interface ChatHistoryProps {
+  entries: readonly InkChatEntry[]
+}
+
+interface ChatStatusProps {
+  busy: boolean
+  busySeconds: number
+  status: {
+    kind: 'error' | 'info' | 'success'
+    text: string
+  } | null
+}
+
+interface ChatComposerProps {
+  busy: boolean
+  modelSwitcherActive: boolean
+  onSubmit: (value: string) => ComposerSubmitDisposition
+}
+
+interface ChatFooterProps {
+  metadataLine: string
 }
 
 function ComposerInput(props: ComposerInputProps): React.ReactElement {
@@ -87,7 +120,9 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
       }
 
       if (key.return) {
-        props.onSubmit(props.value)
+        if (props.onSubmit(props.value) === 'clear') {
+          props.onChange('')
+        }
         return
       }
 
@@ -145,6 +180,188 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
     }),
   )
 }
+
+const ChatHeader = React.memo(function ChatHeader(
+  props: ChatHeaderProps,
+): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      marginBottom: 1,
+    },
+    createElement(Text, {}, 'Healthy Bob'),
+    createElement(Text, { dimColor: true }, `session ${props.sessionId}`),
+    props.bindingSummary
+      ? createElement(Text, { dimColor: true }, props.bindingSummary)
+      : null,
+  )
+})
+
+const ChatHistory = React.memo(function ChatHistory(
+  props: ChatHistoryProps,
+): React.ReactElement {
+  const createElement = React.createElement
+  const history = props.entries.slice(-16)
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      flexGrow: 1,
+      justifyContent: 'flex-end',
+      marginBottom: 1,
+      overflow: 'hidden',
+    },
+    history.length > 0
+      ? history.map((entry: InkChatEntry, index: number) => {
+          const key = `${entry.kind}:${index}:${entry.text.slice(0, 24)}`
+
+          if (entry.kind === 'assistant') {
+            return createElement(
+              Box,
+              {
+                key,
+                marginBottom: 1,
+              },
+              createElement(Text, {}, entry.text),
+            )
+          }
+
+          if (entry.kind === 'error') {
+            return createElement(
+              Box,
+              {
+                key,
+                marginBottom: 1,
+              },
+              createElement(Text, { color: 'red' }, `Error: ${entry.text}`),
+            )
+          }
+
+          return createElement(
+            Box,
+            {
+              key,
+              marginBottom: 1,
+              width: '100%',
+            },
+            createElement(
+              Box,
+              {
+                backgroundColor: COMPOSER_BACKGROUND,
+                flexDirection: 'row',
+                paddingX: 2,
+                paddingY: 1,
+                width: '100%',
+              },
+              createElement(
+                Text,
+                { color: COMPOSER_TEXT_COLOR },
+                `› ${entry.text}`,
+              ),
+            ),
+          )
+        })
+      : null,
+  )
+})
+
+const ChatStatus = React.memo(function ChatStatus(
+  props: ChatStatusProps,
+): React.ReactElement | null {
+  const createElement = React.createElement
+
+  if (props.busy) {
+    return createElement(
+      Box,
+      {
+        marginBottom: 1,
+      },
+      createElement(Text, { dimColor: true }, formatBusyStatus(props.busySeconds)),
+    )
+  }
+
+  if (!props.status) {
+    return null
+  }
+
+  return createElement(
+    Box,
+    {
+      marginBottom: 1,
+    },
+    createElement(
+      Text,
+      props.status.kind === 'error'
+        ? { color: 'red' }
+        : props.status.kind === 'success'
+          ? { color: 'green' }
+          : { dimColor: true },
+      props.status.text,
+    ),
+  )
+})
+
+const ChatComposer = React.memo(function ChatComposer(
+  props: ChatComposerProps,
+): React.ReactElement {
+  const createElement = React.createElement
+  const [value, setValue] = React.useState('')
+  const slashSuggestions =
+    props.modelSwitcherActive ? [] : getMatchingSlashCommands(value)
+
+  return createElement(
+    React.Fragment,
+    {},
+    createElement(
+      Box,
+      {
+        backgroundColor: COMPOSER_BACKGROUND,
+        flexDirection: 'row',
+        marginBottom: slashSuggestions.length > 0 ? 0 : 1,
+        paddingX: 2,
+        paddingY: 1,
+        width: '100%',
+      },
+      createElement(
+        React.Fragment,
+        {},
+        createElement(
+          Text,
+          { color: COMPOSER_TEXT_COLOR },
+          '› ',
+        ),
+        createElement(ComposerInput, {
+          disabled: props.busy || props.modelSwitcherActive,
+          value,
+          placeholder: 'Type a message',
+          onChange: setValue,
+          onSubmit: props.onSubmit,
+        }),
+      ),
+    ),
+    createElement(SlashCommandSuggestions, {
+      commands: slashSuggestions,
+    }),
+  )
+})
+
+const ChatFooter = React.memo(function ChatFooter(
+  props: ChatFooterProps,
+): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+    },
+    createElement(Text, { dimColor: true }, props.metadataLine),
+  )
+})
 
 function clampComposerCursorOffset(offset: number, valueLength: number): number {
   return Math.max(0, Math.min(offset, valueLength))
@@ -378,6 +595,50 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
       width: '100%',
     },
     content,
+  )
+}
+
+function SlashCommandSuggestions(input: {
+  commands: readonly (typeof CHAT_SLASH_COMMANDS)[number][]
+}): React.ReactElement | null {
+  if (input.commands.length === 0) {
+    return null
+  }
+
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      marginBottom: 1,
+      paddingX: 1,
+      width: '100%',
+    },
+    input.commands.map((command) =>
+      createElement(
+        Box,
+        {
+          key: command.command,
+          flexDirection: 'row',
+        },
+        createElement(
+          Text,
+          {
+            color: SWITCHER_ACCENT_COLOR,
+          },
+          command.command,
+        ),
+        createElement(Text, {}, '  '),
+        createElement(
+          Text,
+          {
+            color: SWITCHER_ACCENT_COLOR,
+          },
+          command.description,
+        ),
+      ),
+    ),
   )
 }
 
@@ -737,6 +998,8 @@ export async function runAssistantChatWithInk(
 
       const history = entries.slice(-16)
       const bindingSummary = formatSessionBinding(session)
+      const slashSuggestions =
+        modelSwitcherState === null ? getMatchingSlashCommands(value) : []
       const metadataLine = formatChatMetadata(
         {
           provider: session.provider,
@@ -776,7 +1039,6 @@ export async function runAssistantChatWithInk(
           Box,
           {
             flexDirection: 'column',
-            marginBottom: 1,
           },
           history.length > 0
             ? history.map((entry: InkChatEntry, index: number) => {
@@ -788,8 +1050,9 @@ export async function runAssistantChatWithInk(
                     {
                       key,
                       marginBottom: 1,
+                      width: '100%',
                     },
-                    createElement(Text, {}, entry.text),
+                    createElement(Text, { wrap: 'wrap' }, entry.text),
                   )
                 }
 
@@ -799,8 +1062,16 @@ export async function runAssistantChatWithInk(
                     {
                       key,
                       marginBottom: 1,
+                      width: '100%',
                     },
-                    createElement(Text, { color: 'red' }, `Error: ${entry.text}`),
+                    createElement(
+                      Text,
+                      {
+                        color: 'red',
+                        wrap: 'wrap',
+                      },
+                      `Error: ${entry.text}`,
+                    ),
                   )
                 }
 
@@ -823,92 +1094,117 @@ export async function runAssistantChatWithInk(
                     createElement(
                       Text,
                       { color: COMPOSER_TEXT_COLOR },
-                      `› ${entry.text}`,
+                      '› ',
+                    ),
+                    createElement(
+                      Box,
+                      {
+                        flexDirection: 'column',
+                        flexGrow: 1,
+                        flexShrink: 1,
+                      },
+                      createElement(
+                        Text,
+                        {
+                          color: COMPOSER_TEXT_COLOR,
+                          wrap: 'wrap',
+                        },
+                        entry.text,
+                      ),
                     ),
                   ),
                 )
               })
             : null,
         ),
-        busy
-          ? createElement(
-              Box,
-              {
-                marginBottom: 1,
-              },
-              createElement(Text, { dimColor: true }, formatBusyStatus(busySeconds)),
-            )
-          : status
-            ? createElement(
-                Box,
-                {
-                  marginBottom: 1,
-                },
-                createElement(
-                  Text,
-                  status.kind === 'error'
-                    ? { color: 'red' }
-                    : status.kind === 'success'
-                      ? { color: 'green' }
-                      : { dimColor: true },
-                  status.text,
-                ),
-              )
-            : null,
-        modelSwitcherState
-          ? createElement(ModelSwitcher, {
-              currentModel: activeModel,
-              currentReasoningEffort: activeReasoningEffort,
-              mode: modelSwitcherState.mode,
-              modelIndex: modelSwitcherState.modelIndex,
-              onCancel: cancelModelSwitcher,
-              onConfirm: confirmModelSwitcher,
-              onMove: moveModelSwitcherSelection,
-              reasoningIndex: modelSwitcherState.reasoningIndex,
-            })
-          : null,
-        createElement(
-          Box,
-          {
-            backgroundColor: COMPOSER_BACKGROUND,
-            flexDirection: 'row',
-            marginBottom: 1,
-            paddingX: 2,
-            paddingY: 1,
-            width: '100%',
-          },
-          createElement(
-            React.Fragment,
-            {},
-            createElement(
-              Text,
-              { color: COMPOSER_TEXT_COLOR },
-              '› ',
-            ),
-            createElement(
-              ComposerInput,
-              {
-                disabled: busy || modelSwitcherState !== null,
-                value,
-                placeholder: 'Type a message',
-                onChange: (nextValue: string) => {
-                  if (!busy) {
-                    setValue(nextValue)
-                  }
-                },
-                onSubmit: (submittedValue: string) => {
-                  void submitPrompt(submittedValue)
-                },
-              },
-            ),
-          ),
-        ),
         createElement(
           Box,
           {
             flexDirection: 'column',
           },
-          createElement(Text, { dimColor: true }, metadataLine),
+          busy
+            ? createElement(
+                Box,
+                {
+                  marginBottom: 1,
+                },
+                createElement(Text, { dimColor: true }, formatBusyStatus(busySeconds)),
+              )
+            : status
+              ? createElement(
+                  Box,
+                  {
+                    marginBottom: 1,
+                  },
+                  createElement(
+                    Text,
+                    status.kind === 'error'
+                      ? { color: 'red' }
+                      : status.kind === 'success'
+                        ? { color: 'green' }
+                        : { dimColor: true },
+                    status.text,
+                  ),
+                )
+              : null,
+          modelSwitcherState
+            ? createElement(ModelSwitcher, {
+                currentModel: activeModel,
+                currentReasoningEffort: activeReasoningEffort,
+                mode: modelSwitcherState.mode,
+                modelIndex: modelSwitcherState.modelIndex,
+                onCancel: cancelModelSwitcher,
+                onConfirm: confirmModelSwitcher,
+                onMove: moveModelSwitcherSelection,
+                reasoningIndex: modelSwitcherState.reasoningIndex,
+              })
+            : null,
+          createElement(
+            Box,
+            {
+              backgroundColor: COMPOSER_BACKGROUND,
+              flexDirection: 'row',
+              marginBottom: slashSuggestions.length > 0 ? 0 : 1,
+              paddingX: 2,
+              paddingY: 1,
+              width: '100%',
+            },
+            createElement(
+              React.Fragment,
+              {},
+              createElement(
+                Text,
+                { color: COMPOSER_TEXT_COLOR },
+                '› ',
+              ),
+              createElement(
+                ComposerInput,
+                {
+                  disabled: busy || modelSwitcherState !== null,
+                  value,
+                  placeholder: 'Type a message',
+                  onChange: (nextValue: string) => {
+                    if (!busy) {
+                      setValue(nextValue)
+                    }
+                  },
+                  onSubmit: (submittedValue: string) => {
+                    void submitPrompt(submittedValue)
+                  },
+                },
+              ),
+            ),
+          ),
+          createElement(SlashCommandSuggestions, {
+            commands: slashSuggestions,
+          }),
+          createElement(
+            Box,
+            {
+              flexDirection: 'column',
+            },
+            createElement(Text, { dimColor: true }, metadataLine),
+          ),
         ),
       )
     }

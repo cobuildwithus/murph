@@ -16,6 +16,29 @@ export interface AssistantReasoningOption {
   value: string
 }
 
+export interface AssistantSlashCommand {
+  command: string
+  description: string
+}
+
+export type ChatSubmitAction =
+  | {
+      kind: 'exit'
+    }
+  | {
+      kind: 'ignore'
+    }
+  | {
+      kind: 'model'
+    }
+  | {
+      kind: 'prompt'
+      prompt: string
+    }
+  | {
+      kind: 'session'
+    }
+
 export const CHAT_BANNER =
   'Local-first chat. Provider transcripts stay with the provider when supported.'
 
@@ -61,6 +84,21 @@ export const CHAT_REASONING_OPTIONS: readonly AssistantReasoningOption[] = [
   },
 ] as const
 
+export const CHAT_SLASH_COMMANDS: readonly AssistantSlashCommand[] = [
+  {
+    command: '/model',
+    description: 'choose what model and reasoning effort to use',
+  },
+  {
+    command: '/session',
+    description: 'show the current session id',
+  },
+  {
+    command: '/exit',
+    description: 'quit the chat',
+  },
+] as const
+
 export function seedChatEntries(_session: AssistantSession): InkChatEntry[] {
   return []
 }
@@ -81,12 +119,68 @@ export function findAssistantReasoningOptionIndex(reasoningEffort: string | null
   return index >= 0 ? index : 1
 }
 
+export function getMatchingSlashCommands(
+  input: string,
+): readonly AssistantSlashCommand[] {
+  const trimmedInput = input.trim()
+  if (!trimmedInput.startsWith('/')) {
+    return []
+  }
+
+  const normalizedInput = trimmedInput.toLowerCase()
+  return CHAT_SLASH_COMMANDS.filter((command) =>
+    command.command.startsWith(normalizedInput),
+  )
+}
+
 export function formatBusyStatus(elapsedSeconds: number): string {
   if (elapsedSeconds <= 0) {
     return 'Working'
   }
 
   return `Working (${elapsedSeconds}s)`
+}
+
+export function resolveChatSubmitAction(
+  input: string,
+  busy: boolean,
+): ChatSubmitAction {
+  const prompt = input.trim()
+
+  if (prompt.length === 0 || busy) {
+    return {
+      kind: 'ignore',
+    }
+  }
+
+  if (prompt === '/exit' || prompt === '/quit') {
+    return {
+      kind: 'exit',
+    }
+  }
+
+  if (prompt === '/session') {
+    return {
+      kind: 'session',
+    }
+  }
+
+  if (prompt === '/model') {
+    return {
+      kind: 'model',
+    }
+  }
+
+  return {
+    kind: 'prompt',
+    prompt,
+  }
+}
+
+export function shouldClearComposerForSubmitAction(
+  action: ChatSubmitAction,
+): boolean {
+  return action.kind === 'model' || action.kind === 'prompt'
 }
 
 export function formatChatMetadata(

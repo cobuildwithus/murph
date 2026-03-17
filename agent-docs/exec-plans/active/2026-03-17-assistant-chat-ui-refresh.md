@@ -14,6 +14,8 @@ Updated: 2026-03-17
 - The footer shows only model/vault metadata, with no redundant command hint line.
 - `/model` opens a model plus reasoning picker and applies the chosen model and effort to subsequent Codex turns.
 - Sent user messages render as the same pale-gray padded block as the composer instead of a plain right-aligned text line.
+- Typing `/` in the composer shows matching slash-command suggestions below the input.
+- The transcript, status line, composer, and footer use tighter vertical spacing without forcing the composer to the terminal bottom.
 - Focused assistant tests pass and required repo checks are attempted with outcomes recorded truthfully.
 
 ## Scope
@@ -49,13 +51,15 @@ Updated: 2026-03-17
 1. Refine the Ink composer palette and prompt glyph to match the intended Codex-like appearance.
 2. Add the `/model` selector and pass the selected model/reasoning effort to Codex.
 3. Restyle sent user messages to mirror the composer block.
-4. Run required checks, then commit only the scoped files if unrelated repo failures remain.
+4. Add inline slash-command suggestions and tighten the transcript/composer spacing.
+5. Run required checks, then commit only the scoped files if unrelated repo failures remain.
 
 ## Decisions
 
 - Healthy Bob reads the existing Codex config for display/defaults rather than introducing a separate assistant-owned Codex config.
 - The in-chat selector is a two-step picker: model first, reasoning effort second.
 - Sent user turns use the same pale-gray full-width block as the composer instead of right-aligned colored text.
+- Slash suggestions are passive hints filtered by the current `/...` prefix rather than a second navigable command palette.
 
 ## Verification
 

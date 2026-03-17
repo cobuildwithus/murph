@@ -53,11 +53,13 @@ import {
   CHAT_BANNER,
   CHAT_MODEL_OPTIONS,
   CHAT_REASONING_OPTIONS,
+  CHAT_SLASH_COMMANDS,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatBusyStatus,
   formatChatMetadata,
   formatSessionBinding,
+  getMatchingSlashCommands,
   seedChatEntries,
 } from '../src/assistant/ui/view-model.js'
 
@@ -773,9 +775,15 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   assert.equal(CHAT_BANNER, 'Local-first chat. Provider transcripts stay with the provider when supported.')
   assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
   assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
+  assert.equal(CHAT_SLASH_COMMANDS[0]?.command, '/model')
   assert.equal(findAssistantModelOptionIndex('gpt-5.3-codex'), 2)
   assert.equal(findAssistantReasoningOptionIndex('xhigh'), 3)
   assert.equal(findAssistantReasoningOptionIndex(null), 1)
+  assert.deepEqual(
+    getMatchingSlashCommands('/m').map((command) => command.command),
+    ['/model'],
+  )
+  assert.equal(getMatchingSlashCommands('hello').length, 0)
   assert.equal(formatBusyStatus(0), 'Working')
   assert.equal(formatBusyStatus(13), 'Working (13s)')
   assert.equal(
