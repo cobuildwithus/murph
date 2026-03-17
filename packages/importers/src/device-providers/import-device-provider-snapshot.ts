@@ -9,8 +9,8 @@ import {
   stripUndefined,
 } from "../shared.js";
 
+import { defaultDeviceProviderAdapters } from "./defaults.js";
 import { createDeviceProviderRegistry } from "./registry.js";
-import { whoopProviderAdapter } from "./whoop.js";
 
 import type { DeviceProviderRegistry } from "./registry.js";
 
@@ -36,7 +36,7 @@ const deviceProviderSnapshotImportSchema = z
   .passthrough();
 
 function resolveRegistry(registry?: DeviceProviderRegistry): DeviceProviderRegistry {
-  return registry ?? createDeviceProviderRegistry([whoopProviderAdapter]);
+  return registry ?? createDeviceProviderRegistry(defaultDeviceProviderAdapters);
 }
 
 export async function prepareDeviceProviderSnapshotImport(

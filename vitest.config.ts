@@ -27,6 +27,8 @@ export default defineConfig({
       "packages/importers/test/device-providers.test.ts",
       "packages/importers/test/importers.test.ts",
       "packages/importers/test/input-validation.test.ts",
+      "packages/device-syncd/test/config.test.ts",
+      "packages/device-syncd/test/oura-provider.test.ts",
       "packages/device-syncd/test/service.test.ts",
       "packages/inboxd/test/connectors-daemon.test.ts",
       "packages/inboxd/test/idempotency-rebuild.test.ts",

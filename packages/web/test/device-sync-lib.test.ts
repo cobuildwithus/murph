@@ -22,6 +22,7 @@ test("loadDeviceSyncOverviewFromEnv returns provider and account state from the 
                 callbackUrl: "http://127.0.0.1:8788/oauth/whoop/callback",
                 webhookPath: "/webhooks/whoop",
                 webhookUrl: "http://127.0.0.1:8788/webhooks/whoop",
+                supportsWebhooks: true,
                 defaultScopes: ["offline", "read:profile", "read:sleep"],
               },
             ],

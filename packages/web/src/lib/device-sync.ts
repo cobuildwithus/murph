@@ -6,8 +6,9 @@ export interface DeviceSyncProviderDescriptor {
   provider: string;
   callbackPath: string;
   callbackUrl: string;
-  webhookPath: string;
-  webhookUrl: string;
+  webhookPath: string | null;
+  webhookUrl: string | null;
+  supportsWebhooks: boolean;
   defaultScopes: string[];
 }
 

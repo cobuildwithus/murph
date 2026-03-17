@@ -18,8 +18,8 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
-function createFakeProvider(): DeviceSyncProvider {
-  return {
+function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
+  const baseProvider: DeviceSyncProvider = {
     provider: "demo",
     callbackPath: "/oauth/demo/callback",
     webhookPath: "/webhooks/demo",
@@ -98,6 +98,11 @@ function createFakeProvider(): DeviceSyncProvider {
       });
       return {};
     },
+  };
+
+  return {
+    ...baseProvider,
+    ...overrides,
   };
 }
 
@@ -241,6 +246,61 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
   const nextJob = await service.runWorkerOnce();
   assert.equal(nextJob, null);
   assert.equal(imports.length, 0);
+
+  service.close();
+});
+
+test("device sync service records granted callback scopes and describes polling-only providers", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-polling");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://healthybob.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        provider: "polling",
+        callbackPath: "/oauth/polling/callback",
+        webhookPath: undefined,
+        verifyAndParseWebhook: undefined,
+        defaultScopes: ["personal", "daily"],
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId: `polling-${code}`,
+            displayName: `Polling ${code}`,
+            tokens: {
+              accessToken: "polling-access",
+              refreshToken: "polling-refresh",
+            },
+          };
+        },
+      }),
+    ],
+  });
+
+  const descriptor = service.describeProvider("polling");
+  assert.equal(descriptor.supportsWebhooks, false);
+  assert.equal(descriptor.webhookPath, null);
+  assert.equal(descriptor.webhookUrl, null);
+
+  const begin = service.startConnection({
+    provider: "polling",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "polling",
+    state: begin.state,
+    code: "abc",
+    scope: "personal daily heartrate",
+  });
+
+  assert.deepEqual(connected.account.scopes, ["personal", "daily", "heartrate"]);
+
+  await assert.rejects(
+    () => service.handleWebhook("polling", new Headers(), Buffer.from("{}")),
+    /does not accept webhooks/u,
+  );
 
   service.close();
 });

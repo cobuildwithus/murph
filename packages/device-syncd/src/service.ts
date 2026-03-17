@@ -97,13 +97,15 @@ export class DeviceSyncService {
 
   describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor {
     const provider = typeof providerName === "string" ? this.requireProvider(providerName) : providerName;
+    const webhookPath = provider.webhookPath ?? null;
 
     return {
       provider: provider.provider,
       callbackPath: provider.callbackPath,
       callbackUrl: joinUrl(this.publicBaseUrl, provider.callbackPath),
-      webhookPath: provider.webhookPath,
-      webhookUrl: joinUrl(this.publicBaseUrl, provider.webhookPath),
+      webhookPath,
+      webhookUrl: webhookPath ? joinUrl(this.publicBaseUrl, webhookPath) : null,
+      supportsWebhooks: Boolean(webhookPath && provider.verifyAndParseWebhook),
       defaultScopes: [...provider.defaultScopes],
     };
   }
@@ -245,10 +247,18 @@ export class DeviceSyncService {
       });
     }
 
+    const grantedScopes = normalizeString(input.scope)
+      ? input.scope!
+        .split(/\s+/u)
+        .map((scope) => scope.trim())
+        .filter(Boolean)
+      : [];
+
     const connection = await provider.exchangeAuthorizationCode(
       {
         callbackUrl: descriptor.callbackUrl,
         now,
+        grantedScopes,
       },
       code,
     );
@@ -257,7 +267,11 @@ export class DeviceSyncService {
       provider: provider.provider,
       externalAccountId: connection.externalAccountId,
       displayName: connection.displayName ?? null,
-      scopes: connection.scopes?.length ? [...connection.scopes] : [...provider.defaultScopes],
+      scopes: connection.scopes?.length
+        ? [...connection.scopes]
+        : grantedScopes.length > 0
+          ? [...grantedScopes]
+          : [...provider.defaultScopes],
       tokens: this.encryptTokens(connection.tokens),
       metadata: connection.metadata ?? {},
       connectedAt: now,
@@ -274,6 +288,16 @@ export class DeviceSyncService {
 
   async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
     const provider = this.requireProvider(providerName);
+
+    if (!provider.webhookPath || !provider.verifyAndParseWebhook) {
+      throw deviceSyncError({
+        code: "WEBHOOKS_NOT_SUPPORTED",
+        message: `Device sync provider ${provider.provider} does not accept webhooks.`,
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
+
     const now = toIsoTimestamp(new Date());
     const parsed = await provider.verifyAndParseWebhook({
       headers,

@@ -16,8 +16,9 @@ export const deviceSyncProviderSchema = z.object({
   provider: z.string().min(1),
   callbackPath: z.string().min(1),
   callbackUrl: z.string().url(),
-  webhookPath: z.string().min(1),
-  webhookUrl: z.string().url(),
+  webhookPath: z.string().min(1).nullable(),
+  webhookUrl: z.string().url().nullable(),
+  supportsWebhooks: z.boolean(),
   defaultScopes: z.array(z.string().min(1)),
 })
 

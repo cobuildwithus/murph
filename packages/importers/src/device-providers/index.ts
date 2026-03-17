@@ -8,6 +8,12 @@ export {
   createDeviceProviderRegistry,
   type DeviceProviderRegistry,
 } from "./registry.js";
+export { defaultDeviceProviderAdapters } from "./defaults.js";
+export {
+  normalizeOuraSnapshot,
+  ouraProviderAdapter,
+  type OuraSnapshotInput,
+} from "./oura.js";
 export {
   normalizeWhoopSnapshot,
   whoopProviderAdapter,

@@ -8,6 +8,8 @@ export type { LoadedDeviceSyncEnvironment } from "./config.js";
 export { startDeviceSyncHttpServer } from "./http.js";
 export type { CreateDeviceSyncHttpServerInput } from "./http.js";
 export { SqliteDeviceSyncStore } from "./store.js";
+export { createOuraDeviceSyncProvider } from "./providers/oura.js";
+export type { OuraDeviceSyncProviderConfig } from "./providers/oura.js";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.js";
 export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.js";
 export * from "./types.js";

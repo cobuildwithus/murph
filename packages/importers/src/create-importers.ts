@@ -4,8 +4,8 @@ import { importCsvSamples } from "./csv-sample-importer.js";
 import { importDocument } from "./document-importer.js";
 import {
   createDeviceProviderRegistry,
+  defaultDeviceProviderAdapters,
   importDeviceProviderSnapshot,
-  whoopProviderAdapter,
 } from "./device-providers/index.js";
 import { importMeal } from "./meal-importer.js";
 import { createSamplePresetRegistry } from "./preset-registry.js";
@@ -59,7 +59,7 @@ export function createImporters({
   deviceProviderRegistry,
 }: CreateImportersOptions = {}) {
   const registry = presetRegistry ?? createSamplePresetRegistry();
-  const providers = deviceProviderRegistry ?? createDeviceProviderRegistry([whoopProviderAdapter]);
+  const providers = deviceProviderRegistry ?? createDeviceProviderRegistry(defaultDeviceProviderAdapters);
   const writer = corePort ?? createDefaultCorePortProxy();
 
   return {

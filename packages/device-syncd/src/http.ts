@@ -123,6 +123,7 @@ async function routeRequest(input: {
       provider: decodeURIComponent(callbackMatch[1] ?? ""),
       code: url.searchParams.get("code"),
       state: url.searchParams.get("state"),
+      scope: url.searchParams.get("scope"),
       error: url.searchParams.get("error"),
       errorDescription: url.searchParams.get("error_description"),
     });
@@ -140,8 +141,8 @@ async function routeRequest(input: {
       input.response,
       200,
       renderCallbackHtml({
-        title: "WHOOP connected",
-        body: `Connected ${escapeHtml(result.account.provider)} account ${escapeHtml(result.account.id)} successfully.`,
+        title: `${formatProviderLabel(result.account.provider)} connected`,
+        body: `Connected ${escapeHtml(formatProviderLabel(result.account.provider))} account ${escapeHtml(result.account.id)} successfully.`,
       }),
     );
     return;
@@ -351,6 +352,16 @@ function sendError(response: ServerResponse, error: unknown): void {
 function readStringField(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function formatProviderLabel(provider: string): string {
+  return (
+    provider
+      .split(/[-_\s]+/u)
+      .filter(Boolean)
+      .map((token) => token[0]?.toUpperCase() + token.slice(1))
+      .join(" ") || provider
+  );
 }
 
 function renderCallbackHtml(input: { title: string; body: string }): string {

@@ -29,8 +29,9 @@ export interface PublicProviderDescriptor {
   provider: string;
   callbackPath: string;
   callbackUrl: string;
-  webhookPath: string;
-  webhookUrl: string;
+  webhookPath: string | null;
+  webhookUrl: string | null;
+  supportsWebhooks: boolean;
   defaultScopes: string[];
 }
 
@@ -114,6 +115,7 @@ export interface DeviceSyncJobRecord {
 export interface ProviderCallbackContext {
   callbackUrl: string;
   now: string;
+  grantedScopes: string[];
 }
 
 export interface ProviderConnectionResult {
@@ -163,7 +165,7 @@ export interface ProviderJobResult {
 export interface DeviceSyncProvider {
   provider: string;
   callbackPath: string;
-  webhookPath: string;
+  webhookPath?: string;
   defaultScopes: string[];
   buildConnectUrl(input: {
     state: string;
@@ -175,7 +177,7 @@ export interface DeviceSyncProvider {
   refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
   createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
-  verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
+  verifyAndParseWebhook?(context: ProviderWebhookContext): Promise<ProviderWebhookResult>;
   executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
 }
 
@@ -201,6 +203,7 @@ export interface HandleOAuthCallbackInput {
   provider: string;
   state?: string | null;
   code?: string | null;
+  scope?: string | null;
   error?: string | null;
   errorDescription?: string | null;
 }
