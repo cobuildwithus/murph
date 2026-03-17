@@ -25,7 +25,7 @@ const deviceOptionsSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema
     .optional()
     .describe(
-      'Override the reachable device sync control-plane URL. Defaults to HEALTHYBOB_DEVICE_SYNC_BASE_URL or the local daemon default.',
+      'Override the reachable device sync control-plane URL. Defaults to HEALTHYBOB_DEVICE_SYNC_BASE_URL or the local daemon default; authenticate with HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN.',
     ),
 })
 
@@ -35,7 +35,7 @@ export function registerDeviceCommands(
 ) {
   const device = Cli.create('device', {
     description:
-      'Device sync commands for provider OAuth, account inspection, and reconcile control.',
+      'Device sync commands for local authenticated provider OAuth, account inspection, and reconcile control.',
   })
 
   const provider = Cli.create('provider', {

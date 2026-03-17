@@ -8,9 +8,15 @@ import {
 } from "../src/lib/device-sync";
 
 test("loadDeviceSyncOverviewFromEnv returns provider and account state from the local daemon", async () => {
+  const authorizationHeaders: string[] = [];
   const result = await loadDeviceSyncOverviewFromEnv({
-    fetchImpl: async (input) => {
+    env: {
+      NODE_ENV: "test",
+      HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+    },
+    fetchImpl: async (input, init) => {
       const url = String(input);
+      authorizationHeaders.push(new Headers(init?.headers).get("Authorization") ?? "");
 
       if (url.endsWith("/providers")) {
         return new Response(
@@ -71,6 +77,10 @@ test("loadDeviceSyncOverviewFromEnv returns provider and account state from the 
 
   assert.equal(result.providers[0]?.provider, "whoop");
   assert.equal(result.accounts[0]?.id, "acct_whoop_01");
+  assert.deepEqual(authorizationHeaders, [
+    "Bearer control-token-for-tests",
+    "Bearer control-token-for-tests",
+  ]);
 });
 
 test("loadDeviceSyncOverviewFromEnv returns an unavailable summary when the daemon is offline", async () => {
@@ -87,6 +97,30 @@ test("loadDeviceSyncOverviewFromEnv returns an unavailable summary when the daem
 
   assert.match(result.message, /offline/u);
   assert.match(result.suggestedCommand, /device-syncd/u);
+});
+
+test("loadDeviceSyncOverviewFromEnv explains missing control-plane auth", async () => {
+  const result = await loadDeviceSyncOverviewFromEnv({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "CONTROL_PLANE_AUTH_REQUIRED",
+            message: "Device sync control routes require a valid bearer token.",
+          },
+        }),
+        { status: 401 },
+      ),
+  });
+
+  assert.equal(result.status, "unavailable");
+  if (result.status !== "unavailable") {
+    return;
+  }
+
+  assert.match(result.message, /authentication failed/u);
+  assert.match(result.hint, /HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN/u);
+  assert.match(result.suggestedCommand, /pnpm web:dev/u);
 });
 
 test("buildWebReturnTo keeps relative paths on the current origin", () => {

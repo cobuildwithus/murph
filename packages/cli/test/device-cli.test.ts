@@ -9,6 +9,7 @@ import { requireData, runCli } from './cli-test-helpers.js'
 interface DeviceTestState {
   lastConnectBody: Record<string, unknown> | null
   lastAccountQuery: string | null
+  authorizationHeaders: string[]
 }
 
 const connectedAccount = {
@@ -42,8 +43,10 @@ test.sequential(
     const state: DeviceTestState = {
       lastConnectBody: null,
       lastAccountQuery: null,
+      authorizationHeaders: [],
     }
     const server = createServer(async (request, response) => {
+      state.authorizationHeaders.push(request.headers.authorization ?? '')
       const requestUrl = new URL(
         request.url ?? '/',
         'http://127.0.0.1:8788',
@@ -161,6 +164,7 @@ test.sequential(
     const baseUrl = `http://127.0.0.1:${address.port}`
     const env = {
       HEALTHYBOB_DEVICE_SYNC_BASE_URL: baseUrl,
+      HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
     }
 
     try {
@@ -238,6 +242,13 @@ test.sequential(
       )
       assert.equal(disconnect.account.id, 'acct_whoop_01')
       assert.equal(disconnect.account.status, 'disconnected')
+      assert.equal(state.authorizationHeaders.length > 0, true)
+      assert.equal(
+        state.authorizationHeaders.every(
+          (value) => value === 'Bearer control-token-for-tests',
+        ),
+        true,
+      )
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {

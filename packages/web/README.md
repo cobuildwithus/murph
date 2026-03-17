@@ -23,4 +23,4 @@ The local launcher keeps `@healthybob/query` on its normal package export and wi
 The wrapper also preserves the original `pnpm` launch cwd so package-local relative vault paths like `../../fixtures/demo-web-vault` keep resolving from `packages/web`.
 The Next webpack config also pins `@healthybob/query` to that built `dist/index.js` entry so repo-wide workspace source aliases do not leak `packages/query/src` into the local app.
 
-If `HEALTHYBOB_DEVICE_SYNC_BASE_URL` points at a running local device-sync daemon, the home page also renders a wearable section with one-click connect, reconcile, and disconnect actions. Those actions call the separate device control plane and do not bypass the vault/query read boundary.
+If `HEALTHYBOB_DEVICE_SYNC_BASE_URL` points at a running local device-sync daemon and the server environment also has `HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN` (or the same local bootstrap secret the daemon uses), the home page also renders a wearable section with one-click connect, reconcile, and disconnect actions. Those actions call the separate authenticated local device control plane and do not bypass the vault/query read boundary.

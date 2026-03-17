@@ -15,6 +15,7 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
   assert.equal(loaded.service.providers.length, 1);
   assert.equal(loaded.service.providers[0]?.provider, "oura");
   assert.equal(loaded.http.host, "127.0.0.1");
+  assert.equal(loaded.http.controlToken, "secret-for-tests");
 });
 
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
@@ -44,6 +45,38 @@ test("loadDeviceSyncEnvironment rejects incomplete provider credentials", () => 
         HEALTHYBOB_OURA_CLIENT_ID: "oura-client-id",
       }),
     /Oura configuration is incomplete/u,
+  );
+});
+
+test("loadDeviceSyncEnvironment supports an explicit control token and public listener", () => {
+  const loaded = loadDeviceSyncEnvironment({
+    HEALTHYBOB_VAULT_ROOT: "/tmp/healthybob-vault",
+    HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+    HEALTHYBOB_DEVICE_SYNC_SECRET: "secret-for-tests",
+    HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+    HEALTHYBOB_DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
+    HEALTHYBOB_DEVICE_SYNC_PUBLIC_PORT: "9876",
+    HEALTHYBOB_OURA_CLIENT_ID: "oura-client-id",
+    HEALTHYBOB_OURA_CLIENT_SECRET: "oura-client-secret",
+  });
+
+  assert.equal(loaded.http.controlToken, "control-token-for-tests");
+  assert.equal(loaded.http.publicHost, "0.0.0.0");
+  assert.equal(loaded.http.publicPort, 9876);
+});
+
+test("loadDeviceSyncEnvironment rejects partial public listener configuration", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        HEALTHYBOB_VAULT_ROOT: "/tmp/healthybob-vault",
+        HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+        HEALTHYBOB_DEVICE_SYNC_SECRET: "secret-for-tests",
+        HEALTHYBOB_DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
+        HEALTHYBOB_OURA_CLIENT_ID: "oura-client-id",
+        HEALTHYBOB_OURA_CLIENT_SECRET: "oura-client-secret",
+      }),
+    /PUBLIC_HOST and HEALTHYBOB_DEVICE_SYNC_PUBLIC_PORT together/u,
   );
 });
 

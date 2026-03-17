@@ -1,6 +1,9 @@
 export const HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV =
   "HEALTHYBOB_DEVICE_SYNC_BASE_URL";
+export const HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV =
+  "HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN";
 export const DEFAULT_DEVICE_SYNC_BASE_URL = "http://127.0.0.1:8788";
+const HEALTHYBOB_DEVICE_SYNC_SECRET_ENV = "HEALTHYBOB_DEVICE_SYNC_SECRET";
 
 export interface DeviceSyncProviderDescriptor {
   provider: string;
@@ -104,11 +107,22 @@ export function resolveDeviceSyncBaseUrl(
   );
 }
 
+export function resolveDeviceSyncControlToken(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  return (
+    env[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
+    env[HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]?.trim() ||
+    null
+  );
+}
+
 export async function loadDeviceSyncOverviewFromEnv(input: {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
 } = {}): Promise<DeviceSyncOverview> {
   const baseUrl = resolveDeviceSyncBaseUrl(input.env);
+  const controlToken = resolveDeviceSyncControlToken(input.env);
   const fetchImpl = input.fetchImpl ?? fetch;
 
   try {
@@ -116,12 +130,12 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
       requestDeviceSyncJson<{ providers: DeviceSyncProviderDescriptor[] }>(
         baseUrl,
         "/providers",
-        { fetchImpl },
+        { fetchImpl, controlToken },
       ),
       requestDeviceSyncJson<{ accounts: DeviceSyncAccountRecord[] }>(
         baseUrl,
         "/accounts",
-        { fetchImpl },
+        { fetchImpl, controlToken },
       ),
     ]);
 
@@ -132,8 +146,12 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
       accounts: accountResult.accounts,
     };
   } catch (error) {
+    const isAuthError =
+      isDeviceSyncWebError(error) && error.code === "CONTROL_PLANE_AUTH_REQUIRED";
     const message =
-      isDeviceSyncWebError(error) && error.code !== "device_sync_unavailable"
+      isAuthError
+        ? "Device sync control plane authentication failed."
+        : isDeviceSyncWebError(error) && error.code !== "device_sync_unavailable"
         ? error.message
         : "Device sync is offline.";
 
@@ -141,9 +159,12 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
       status: "unavailable",
       baseUrl,
       message,
-      hint:
-        "Start the local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
-      suggestedCommand: "node packages/device-syncd/dist/bin.js",
+      hint: isAuthError
+        ? "Set HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
+        : "Start the local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+      suggestedCommand: isAuthError
+        ? "HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
+        : "node packages/device-syncd/dist/bin.js",
     };
   }
 }
@@ -160,6 +181,7 @@ export async function beginDeviceConnection(input: {
   authorizationUrl: string;
 }> {
   const baseUrl = resolveDeviceSyncBaseUrl(input.env);
+  const controlToken = resolveDeviceSyncControlToken(input.env);
 
   return await requestDeviceSyncJson(
     baseUrl,
@@ -167,6 +189,7 @@ export async function beginDeviceConnection(input: {
     {
       method: "POST",
       fetchImpl: input.fetchImpl,
+      controlToken,
       body: JSON.stringify(
         input.returnTo ? { returnTo: input.returnTo } : {},
       ),
@@ -183,6 +206,7 @@ export async function reconcileDeviceAccount(input: {
   fetchImpl?: typeof fetch;
 }): Promise<{ account: DeviceSyncAccountRecord }> {
   const baseUrl = resolveDeviceSyncBaseUrl(input.env);
+  const controlToken = resolveDeviceSyncControlToken(input.env);
 
   return await requestDeviceSyncJson(
     baseUrl,
@@ -190,6 +214,7 @@ export async function reconcileDeviceAccount(input: {
     {
       method: "POST",
       fetchImpl: input.fetchImpl,
+      controlToken,
     },
   );
 }
@@ -200,6 +225,7 @@ export async function disconnectDeviceAccount(input: {
   fetchImpl?: typeof fetch;
 }): Promise<{ account: DeviceSyncAccountRecord }> {
   const baseUrl = resolveDeviceSyncBaseUrl(input.env);
+  const controlToken = resolveDeviceSyncControlToken(input.env);
 
   return await requestDeviceSyncJson(
     baseUrl,
@@ -207,6 +233,7 @@ export async function disconnectDeviceAccount(input: {
     {
       method: "POST",
       fetchImpl: input.fetchImpl,
+      controlToken,
     },
   );
 }
@@ -229,6 +256,7 @@ async function requestDeviceSyncJson<TResponse>(
     body?: string;
     headers?: HeadersInit;
     fetchImpl?: typeof fetch;
+    controlToken?: string | null;
   } = {},
 ): Promise<TResponse> {
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -239,7 +267,7 @@ async function requestDeviceSyncJson<TResponse>(
     response = await fetchImpl(url, {
       method: input.method ?? "GET",
       body: input.body,
-      headers: input.headers,
+      headers: withControlPlaneAuth(input.headers, input.controlToken ?? null),
       cache: "no-store",
     });
   } catch (error) {
@@ -276,6 +304,19 @@ async function requestDeviceSyncJson<TResponse>(
   }
 
   return payload as TResponse;
+}
+
+function withControlPlaneAuth(
+  headers: HeadersInit | undefined,
+  controlToken: string | null,
+): HeadersInit | undefined {
+  if (!controlToken) {
+    return headers;
+  }
+
+  const nextHeaders = new Headers(headers);
+  nextHeaders.set("Authorization", `Bearer ${controlToken}`);
+  return nextHeaders;
 }
 
 function parseJsonPayload(text: string): unknown {

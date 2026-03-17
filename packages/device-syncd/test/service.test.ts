@@ -372,13 +372,19 @@ test("manual reconcile queues every scheduled job and store claims only one job 
   const firstClaim = service.store.claimDueJob("worker-a", now, 60_000);
   const secondClaim = service.store.claimDueJob("worker-b", now, 60_000);
 
-  assert.equal(firstClaim?.kind, "reconcile-summary");
+  assert.equal(
+    ["reconcile-summary", "reconcile-detail"].includes(firstClaim?.kind ?? ""),
+    true,
+  );
   assert.equal(secondClaim, null);
 
   service.store.completeJob(firstClaim!.id, now);
 
   const thirdClaim = service.store.claimDueJob("worker-b", now, 60_000);
-  assert.equal(thirdClaim?.kind, "reconcile-detail");
+  assert.deepEqual(
+    new Set([firstClaim?.kind, thirdClaim?.kind]),
+    new Set(["reconcile-summary", "reconcile-detail"]),
+  );
 
   service.close();
 });

@@ -68,8 +68,10 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
   const vaultRoot = requireEnv(env, ["HEALTHYBOB_VAULT_ROOT", "HEALTHYBOB_DEVICE_SYNC_VAULT_ROOT"]);
   const publicBaseUrl = requireEnv(env, ["HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL"]);
   const secret = requireEnv(env, ["HEALTHYBOB_DEVICE_SYNC_SECRET"]);
+  const controlToken = optionalEnv(env, ["HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN"]) ?? secret;
   const logger = createConsoleDeviceSyncLogger();
   const providers = createConfiguredProviders(env);
+  const publicListener = readOptionalPublicListener(env);
 
   if (providers.length === 0) {
     throw new TypeError(
@@ -99,6 +101,8 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
     http: {
       host: optionalEnv(env, ["HEALTHYBOB_DEVICE_SYNC_HOST"]) ?? DEFAULT_DEVICE_SYNC_HOST,
       port: parseIntegerEnv(env, ["HEALTHYBOB_DEVICE_SYNC_PORT", "PORT"]) ?? 8788,
+      controlToken,
+      ...publicListener,
     },
   };
 }
@@ -131,6 +135,26 @@ function createConfiguredProviders(env: NodeJS.ProcessEnv): DeviceSyncProvider[]
 
     return credentials ? [entry.create(env, credentials)] : [];
   });
+}
+
+function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttpConfig, "publicHost" | "publicPort"> {
+  const publicHost = optionalEnv(env, ["HEALTHYBOB_DEVICE_SYNC_PUBLIC_HOST"]);
+  const publicPort = parseIntegerEnv(env, ["HEALTHYBOB_DEVICE_SYNC_PUBLIC_PORT"]);
+
+  if (!publicHost && publicPort === undefined) {
+    return {};
+  }
+
+  if (!publicHost || publicPort === undefined) {
+    throw new TypeError(
+      "Set HEALTHYBOB_DEVICE_SYNC_PUBLIC_HOST and HEALTHYBOB_DEVICE_SYNC_PUBLIC_PORT together to enable the public callback/webhook listener.",
+    );
+  }
+
+  return {
+    publicHost,
+    publicPort,
+  };
 }
 
 function readOptionalCredentialPair(

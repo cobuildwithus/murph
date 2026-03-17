@@ -2,7 +2,7 @@
 
 Standalone device sync runtime for HealthyBob.
 
-The daemon binds to localhost by default so OAuth/token control stays local-only unless an operator explicitly widens the bind or puts it behind a reverse proxy/tunnel.
+The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
 What it does:
 - serves a provider-agnostic local control plane for CLI and web auth flows
@@ -42,7 +42,8 @@ At least one provider must be configured.
 
 Common optional settings:
 - `HEALTHYBOB_DEVICE_SYNC_PORT`
-- `HEALTHYBOB_DEVICE_SYNC_HOST` (defaults to `127.0.0.1`; opt into a broader bind explicitly)
+- `HEALTHYBOB_DEVICE_SYNC_HOST` (defaults to `127.0.0.1`)
+- `HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN` (defaults to `HEALTHYBOB_DEVICE_SYNC_SECRET` if omitted)
 - `HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`
 - `HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH`
 - `HEALTHYBOB_DEVICE_SYNC_WORKER_POLL_MS`
@@ -50,6 +51,7 @@ Common optional settings:
 - `HEALTHYBOB_DEVICE_SYNC_SCHEDULER_POLL_MS`
 - `HEALTHYBOB_DEVICE_SYNC_SESSION_TTL_MS`
 - `HEALTHYBOB_DEVICE_SYNC_WORKER_LEASE_MS`
+- `HEALTHYBOB_DEVICE_SYNC_PUBLIC_HOST` plus `HEALTHYBOB_DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
 
 WHOOP settings:
 - `HEALTHYBOB_WHOOP_CLIENT_ID`
@@ -84,21 +86,25 @@ The published bin name is also `healthybob-device-syncd`.
 ## Control-plane clients
 
 - `vault-cli device ...` uses this daemon through `HEALTHYBOB_DEVICE_SYNC_BASE_URL` or `http://127.0.0.1:8788`
+- `vault-cli` and `packages/web` authenticate local control routes with `HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN` (or, for local bootstrap compatibility, `HEALTHYBOB_DEVICE_SYNC_SECRET`)
 - `packages/web` can show provider/account status and redirect through this daemon for one-click auth
 - cross-origin `returnTo` URLs are accepted only when their origin appears in `HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`; relative paths remain allowed by default
 
 ## HTTP routes
 
+Control routes: loopback-only plus `Authorization: Bearer <token>`
 - `GET /healthz`
 - `GET /providers`
 - `GET /connect/:provider?returnTo=/settings/devices`
 - `POST /providers/:provider/connect`
-- `GET /oauth/:provider/callback`
-- `POST /webhooks/:provider` for providers that support webhooks
 - `GET /accounts`
 - `GET /accounts/:id`
 - `POST /accounts/:id/reconcile`
 - `POST /accounts/:id/disconnect`
+
+Public routes: keep them on localhost unless you explicitly expose a separate callback/webhook listener
+- `GET /oauth/:provider/callback`
+- `POST /webhooks/:provider` for providers that support webhooks
 
 ## Notes for Oura
 

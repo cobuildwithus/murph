@@ -66,6 +66,7 @@ interface DeviceSyncJobRecord {
 
 export interface DeviceSyncClientOptions {
   baseUrl?: string | null
+  controlToken?: string | null
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch
   openBrowser?: (url: string) => Promise<boolean>
@@ -73,7 +74,10 @@ export interface DeviceSyncClientOptions {
 
 export const HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV =
   'HEALTHYBOB_DEVICE_SYNC_BASE_URL'
+export const HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV =
+  'HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN'
 export const DEFAULT_DEVICE_SYNC_BASE_URL = 'http://127.0.0.1:8788'
+const HEALTHYBOB_DEVICE_SYNC_SECRET_ENV = 'HEALTHYBOB_DEVICE_SYNC_SECRET'
 
 export function normalizeDeviceSyncBaseUrl(value: string): string {
   const url = new URL(value)
@@ -95,8 +99,25 @@ export function resolveDeviceSyncBaseUrl(
   return normalizeDeviceSyncBaseUrl(configured)
 }
 
+export function resolveDeviceSyncControlToken(
+  value?: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const configured =
+    (typeof value === 'string' && value.trim()) ||
+    env[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
+    env[HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]?.trim() ||
+    null
+
+  return configured || null
+}
+
 export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env)
+  const controlToken = resolveDeviceSyncControlToken(
+    input.controlToken,
+    input.env,
+  )
   const fetchImpl = input.fetchImpl ?? fetch
   const openBrowser = input.openBrowser ?? openExternalUrlInBrowser
 
@@ -108,7 +129,10 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
     let response: Response
 
     try {
-      response = await fetchImpl(url, init)
+      response = await fetchImpl(url, {
+        ...init,
+        headers: withControlPlaneAuth(init?.headers, controlToken),
+      })
     } catch (error) {
       throw new VaultCliError(
         'device_sync_unavailable',
@@ -127,8 +151,10 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
       const errorPayload = asErrorPayload(payload)
       throw new VaultCliError(
         errorPayload.code ?? 'device_sync_request_failed',
-        errorPayload.message ??
-          `Device sync request failed with HTTP ${response.status}.`,
+        response.status === 401 && !controlToken
+          ? 'Device sync control plane requires HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN.'
+          : errorPayload.message ??
+              `Device sync request failed with HTTP ${response.status}.`,
         {
           baseUrl,
           status: response.status,
@@ -229,6 +255,19 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
       )
     },
   }
+}
+
+function withControlPlaneAuth(
+  headers: HeadersInit | undefined,
+  controlToken: string | null,
+): HeadersInit | undefined {
+  if (!controlToken) {
+    return headers
+  }
+
+  const nextHeaders = new Headers(headers)
+  nextHeaders.set('Authorization', `Bearer ${controlToken}`)
+  return nextHeaders
 }
 
 function parseJsonPayload(text: string): unknown {

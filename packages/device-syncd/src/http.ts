@@ -1,14 +1,19 @@
 import { Buffer } from "node:buffer";
+import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
-import { isDeviceSyncError } from "./errors.js";
+import { deviceSyncError, isDeviceSyncError } from "./errors.js";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.js";
 
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.js";
 import type { DeviceSyncService } from "./service.js";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
+const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane"';
+
+type DeviceSyncHttpRouteKind = "control" | "public";
+type DeviceSyncHttpListenerSurface = "combined" | "control" | "public";
 
 export interface CreateDeviceSyncHttpServerInput {
   service: DeviceSyncService;
@@ -16,45 +21,75 @@ export interface CreateDeviceSyncHttpServerInput {
   bodyLimitBytes?: number;
 }
 
+export function isLoopbackRemoteAddress(value: string | null | undefined): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "::1" || normalized.startsWith("127.") || normalized.startsWith("::ffff:127.");
+}
+
+export function assertDeviceSyncControlRequest(input: {
+  headers: IncomingHttpHeaders;
+  remoteAddress: string | null | undefined;
+  controlToken: string;
+}): void {
+  if (!isLoopbackRemoteAddress(input.remoteAddress)) {
+    throw deviceSyncError({
+      code: "CONTROL_PLANE_LOOPBACK_REQUIRED",
+      message: "Device sync control routes only accept loopback requests.",
+      retryable: false,
+      httpStatus: 403,
+    });
+  }
+
+  if (!hasMatchingControlToken(input.headers, input.controlToken)) {
+    throw deviceSyncError({
+      code: "CONTROL_PLANE_AUTH_REQUIRED",
+      message: "Device sync control routes require a valid bearer token.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+}
+
 export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServerInput): Promise<NodeServerHandle> {
   const service = input.service;
   const bodyLimitBytes = Math.max(1024, input.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES);
   const host = input.config?.host ?? DEFAULT_DEVICE_SYNC_HOST;
   const port = input.config?.port ?? 8788;
+  const controlToken = requireControlToken(input.config?.controlToken);
+  const publicListener = resolvePublicListener(input.config);
 
-  const server = createServer(async (request, response) => {
-    try {
-      await routeRequest({
-        request,
-        response,
+  const controlServer = await startListener({
+    host,
+    port,
+    service,
+    bodyLimitBytes,
+    controlToken,
+    surface: publicListener ? "control" : "combined",
+  });
+  const publicServer = publicListener
+    ? await startListener({
+        host: publicListener.host,
+        port: publicListener.port,
         service,
         bodyLimitBytes,
-      });
-    } catch (error) {
-      sendError(response, error);
-    }
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
+        controlToken,
+        surface: "public",
+      })
+    : null;
 
   return {
+    control: controlServer.address,
+    public: publicServer?.address ?? null,
     async close() {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
+      if (publicServer) {
+        await closeServer(publicServer.server);
+      }
 
-          resolve();
-        });
-      });
+      await closeServer(controlServer.server);
     },
   };
 }
@@ -64,11 +99,32 @@ async function routeRequest(input: {
   response: ServerResponse;
   service: DeviceSyncService;
   bodyLimitBytes: number;
+  controlToken: string;
+  surface: DeviceSyncHttpListenerSurface;
 }): Promise<void> {
   const method = input.request.method ?? "GET";
   const url = new URL(input.request.url ?? "/", `${input.service.publicBaseUrl}/`);
   const basePath = new URL(`${input.service.publicBaseUrl}/`).pathname.replace(/\/+$/u, "");
   const pathname = stripBasePath(url.pathname, basePath);
+  const routeKind = classifyDeviceSyncHttpRoute(method, pathname);
+
+  if (!routeKind || !surfaceAllowsRoute(input.surface, routeKind)) {
+    sendJson(input.response, 404, {
+      error: {
+        code: "NOT_FOUND",
+        message: `No route for ${method} ${pathname}`,
+      },
+    });
+    return;
+  }
+
+  if (routeKind === "control") {
+    assertDeviceSyncControlRequest({
+      headers: input.request.headers,
+      remoteAddress: input.request.socket.remoteAddress,
+      controlToken: input.controlToken,
+    });
+  }
 
   if (method === "GET" && pathname === "/") {
     sendJson(input.response, 200, {
@@ -203,13 +259,138 @@ async function routeRequest(input: {
     sendJson(input.response, 200, result);
     return;
   }
+}
 
-  sendJson(input.response, 404, {
-    error: {
-      code: "NOT_FOUND",
-      message: `No route for ${method} ${pathname}`,
-    },
+async function startListener(input: {
+  host: string;
+  port: number;
+  service: DeviceSyncService;
+  bodyLimitBytes: number;
+  controlToken: string;
+  surface: DeviceSyncHttpListenerSurface;
+}): Promise<{
+  server: Server;
+  address: NodeServerHandle["control"];
+}> {
+  const server = createServer(async (request, response) => {
+    try {
+      await routeRequest({
+        request,
+        response,
+        service: input.service,
+        bodyLimitBytes: input.bodyLimitBytes,
+        controlToken: input.controlToken,
+        surface: input.surface,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
   });
+  const address = await listenServer(server, input.host, input.port);
+  return {
+    server,
+    address,
+  };
+}
+
+async function listenServer(server: Server, host: string, port: number): Promise<NodeServerHandle["control"]> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+
+  if (!address || typeof address === "string") {
+    throw new TypeError("Device sync HTTP server did not expose a TCP listener address.");
+  }
+
+  return {
+    host,
+    port: address.port,
+  };
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function requireControlToken(controlToken: string | undefined): string {
+  if (typeof controlToken === "string" && controlToken.trim()) {
+    return controlToken.trim();
+  }
+
+  throw new TypeError(
+    "Device sync control routes require HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN or HEALTHYBOB_DEVICE_SYNC_SECRET.",
+  );
+}
+
+function resolvePublicListener(
+  config: DeviceSyncHttpConfig | undefined,
+): { host: string; port: number } | null {
+  const publicHost = typeof config?.publicHost === "string" ? config.publicHost.trim() : "";
+  const publicPort = config?.publicPort;
+
+  if (!publicHost && publicPort === undefined) {
+    return null;
+  }
+
+  if (!publicHost || publicPort === undefined) {
+    throw new TypeError(
+      "Set both publicHost and publicPort to expose a separate public callback/webhook listener.",
+    );
+  }
+
+  return {
+    host: publicHost,
+    port: publicPort,
+  };
+}
+
+function classifyDeviceSyncHttpRoute(method: string, pathname: string): DeviceSyncHttpRouteKind | null {
+  if (
+    (method === "GET" &&
+      (pathname === "/" ||
+        pathname === "/healthz" ||
+        pathname === "/providers" ||
+        pathname === "/accounts" ||
+        /^\/connect\/[^/]+$/u.test(pathname) ||
+        /^\/accounts\/[^/]+$/u.test(pathname))) ||
+    (method === "POST" &&
+      (/^\/providers\/[^/]+\/connect$/u.test(pathname) ||
+        /^\/accounts\/[^/]+\/reconcile$/u.test(pathname) ||
+        /^\/accounts\/[^/]+\/disconnect$/u.test(pathname)))
+  ) {
+    return "control";
+  }
+
+  if (
+    (method === "GET" && /^\/oauth\/[^/]+\/callback$/u.test(pathname)) ||
+    (method === "POST" && /^\/webhooks\/[^/]+$/u.test(pathname))
+  ) {
+    return "public";
+  }
+
+  return null;
+}
+
+function surfaceAllowsRoute(
+  surface: DeviceSyncHttpListenerSurface,
+  routeKind: DeviceSyncHttpRouteKind,
+): boolean {
+  return surface === "combined" || surface === routeKind;
 }
 
 async function maybeReadJsonBody(request: IncomingMessage, limitBytes: number): Promise<Record<string, unknown>> {
@@ -310,6 +491,10 @@ function redirect(response: ServerResponse, location: string): void {
 
 function sendError(response: ServerResponse, error: unknown): void {
   if (isDeviceSyncError(error)) {
+    if (error.code === "CONTROL_PLANE_AUTH_REQUIRED") {
+      response.setHeader("WWW-Authenticate", CONTROL_PLANE_WWW_AUTHENTICATE);
+    }
+
     sendJson(response, error.httpStatus, {
       error: {
         code: error.code,
@@ -352,6 +537,38 @@ function sendError(response: ServerResponse, error: unknown): void {
 
 function readStringField(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function hasMatchingControlToken(headers: IncomingHttpHeaders, expectedToken: string): boolean {
+  const providedToken = readBearerToken(headers.authorization);
+
+  if (!providedToken) {
+    return false;
+  }
+
+  const expected = Buffer.from(expectedToken, "utf8");
+  const provided = Buffer.from(providedToken, "utf8");
+
+  return expected.length === provided.length && timingSafeEqual(expected, provided);
+}
+
+function readBearerToken(value: string | string[] | undefined): string | null {
+  const header = readHeaderValue(value);
+
+  if (!header) {
+    return null;
+  }
+
+  const match = header.match(/^bearer\s+(.+)$/iu);
+  return match?.[1]?.trim() || null;
+}
+
+function readHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) {
+    return value.length === 1 ? readHeaderValue(value[0]) : null;
+  }
+
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 

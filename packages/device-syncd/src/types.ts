@@ -23,6 +23,14 @@ export interface DeviceSyncServiceConfig {
 export interface DeviceSyncHttpConfig {
   host?: string;
   port?: number;
+  controlToken?: string;
+  publicHost?: string;
+  publicPort?: number;
+}
+
+export interface DeviceSyncHttpListenerAddress {
+  host: string;
+  port: number;
 }
 
 export interface PublicProviderDescriptor {
@@ -250,5 +258,7 @@ export interface DeviceSyncImporterPort {
 }
 
 export interface NodeServerHandle {
+  control: DeviceSyncHttpListenerAddress;
+  public: DeviceSyncHttpListenerAddress | null;
   close(): Promise<void>;
 }
