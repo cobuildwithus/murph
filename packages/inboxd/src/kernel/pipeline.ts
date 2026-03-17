@@ -3,6 +3,7 @@ import type { InboxRuntimeStore } from "./sqlite.js";
 import {
   appendImportAudit,
   appendInboxCaptureEvent,
+  ensureStoredCaptureCanonicalEvidence,
   ensureInboxVault,
   findStoredCaptureEnvelope,
   persistRawCapture,
@@ -65,6 +66,11 @@ export async function processCapture(
   });
 
   if (storedEnvelope) {
+    const evidence = await ensureStoredCaptureCanonicalEvidence({
+      vaultRoot,
+      envelope: storedEnvelope,
+      createAuditId: ids.audit,
+    });
     const runtimeCaptureId = runtime.upsertCaptureIndex({
       captureId: storedEnvelope.captureId,
       eventId: storedEnvelope.eventId,
@@ -79,6 +85,7 @@ export async function processCapture(
     return {
       captureId: runtimeCaptureId,
       eventId: storedEnvelope.eventId,
+      auditId: evidence.auditId,
       envelopePath: storedEnvelope.stored.envelopePath,
       createdAt: storedEnvelope.stored.storedAt,
       deduped: true,

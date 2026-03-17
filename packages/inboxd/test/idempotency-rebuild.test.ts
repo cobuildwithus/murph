@@ -11,6 +11,7 @@ import {
   appendImportAudit,
   appendInboxCaptureEvent,
   createInboxPipeline,
+  findStoredCaptureEnvelope,
   openInboxRuntime,
   persistRawCapture,
   rebuildRuntimeFromVault,
@@ -57,6 +58,21 @@ function countRows(databasePath: string, table: "attachment_parse_job" | "captur
   } finally {
     database.close();
   }
+}
+
+async function readEventRecordsForCapture(vaultRoot: string, occurredAt: string) {
+  return readJsonlRecords({
+    vaultRoot,
+    relativePath: `ledger/events/${occurredAt.slice(0, 4)}/${occurredAt.slice(0, 7)}.jsonl`,
+  });
+}
+
+async function readImportAuditsForCapture(vaultRoot: string, storedAt: string) {
+  const records = await readJsonlRecords({
+    vaultRoot,
+    relativePath: `audit/${storedAt.slice(0, 4)}/${storedAt.slice(0, 7)}.jsonl`,
+  });
+  return records.filter((record) => record.action === "intake_import");
 }
 
 test("processCapture recovers from a crash after vault persistence without duplicating vault artifacts", async () => {
@@ -137,7 +153,85 @@ test("processCapture recovers from a crash after vault persistence without dupli
   pipeline.close();
 });
 
-test("rebuildRuntimeFromVault is idempotent across repeated runs", async () => {
+test("processCapture repairs a raw-only stored envelope by appending missing event and audit rows", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-replay-raw-only-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const inbound = createCapture({
+    externalId: "msg-replay-raw-only",
+    occurredAt: "2026-03-13T10:30:00.000Z",
+    text: "Repair raw-only capture",
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2W6";
+  const runtime = await openInboxRuntime({ vaultRoot });
+
+  const stored = await persistRawCapture({
+    vaultRoot,
+    captureId,
+    eventId,
+    input: inbound,
+    storedAt: "2026-03-13T10:31:00.000Z",
+  });
+
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const repaired = await pipeline.processCapture(inbound);
+
+  assert.equal(repaired.deduped, true);
+  assert.equal(repaired.captureId, captureId);
+  assert.equal(repaired.eventId, eventId);
+  assert.match(repaired.auditId ?? "", /^aud_/u);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
+
+  pipeline.close();
+});
+
+test("processCapture repairs a stored envelope when only the audit append was lost", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-replay-missing-audit-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const inbound = createCapture({
+    externalId: "msg-replay-missing-audit",
+    occurredAt: "2026-03-13T10:45:00.000Z",
+    text: "Repair missing audit",
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2W7";
+  const runtime = await openInboxRuntime({ vaultRoot });
+
+  const stored = await persistRawCapture({
+    vaultRoot,
+    captureId,
+    eventId,
+    input: inbound,
+    storedAt: "2026-03-13T10:46:00.000Z",
+  });
+  await appendInboxCaptureEvent({
+    vaultRoot,
+    eventId,
+    occurredAt: inbound.occurredAt,
+    inbound,
+    stored,
+  });
+
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const repaired = await pipeline.processCapture(inbound);
+
+  assert.equal(repaired.deduped, true);
+  assert.equal(repaired.captureId, captureId);
+  assert.equal(repaired.eventId, eventId);
+  assert.match(repaired.auditId ?? "", /^aud_/u);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+
+  pipeline.close();
+});
+
+test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent across repeated runs", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-vault");
   const sourceRoot = await makeTempDirectory("healthybob-inbox-rebuild-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -159,7 +253,7 @@ test("rebuildRuntimeFromVault is idempotent across repeated runs", async () => {
   });
   const captureId = createDeterministicInboxCaptureId(inbound);
 
-  await persistRawCapture({
+  const stored = await persistRawCapture({
     vaultRoot,
     captureId,
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W2",
@@ -177,6 +271,148 @@ test("rebuildRuntimeFromVault is idempotent across repeated runs", async () => {
   assert.equal(capture.attachments.length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+
+  runtime.close();
+});
+
+test("persistRawCapture rejects attachment writes that traverse vault symlinks", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-symlink-write-vault");
+  const outsideRoot = await makeTempDirectory("healthybob-inbox-symlink-write-outside");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const inbound = createCapture({
+    attachments: [
+      {
+        externalId: "att-symlink-write",
+        kind: "document",
+        data: Buffer.from("unsafe write"),
+        fileName: "unsafe.txt",
+      },
+    ],
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  await fs.mkdir(path.join(vaultRoot, "raw", "inbox", "imessage", "self", "2026"), { recursive: true });
+  await fs.symlink(outsideRoot, path.join(vaultRoot, "raw", "inbox", "imessage", "self", "2026", "03"));
+
+  await assert.rejects(
+    () =>
+      persistRawCapture({
+        vaultRoot,
+        captureId,
+        eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3",
+        input: inbound,
+      }),
+    {
+      name: "TypeError",
+      message: "Vault paths may not traverse symbolic links.",
+    },
+  );
+
+  assert.deepEqual(await fs.readdir(outsideRoot), []);
+});
+
+test("findStoredCaptureEnvelope rejects symlinked envelope files", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-symlink-envelope-vault");
+  const outsideRoot = await makeTempDirectory("healthybob-inbox-symlink-envelope-outside");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const inbound = createCapture({
+    externalId: "msg-symlink-envelope",
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const captureDirectory = path.join(
+    vaultRoot,
+    "raw",
+    "inbox",
+    "imessage",
+    "self",
+    "2026",
+    "03",
+    captureId,
+  );
+  const outsideEnvelopePath = path.join(outsideRoot, "envelope.json");
+  await fs.mkdir(captureDirectory, { recursive: true });
+  await fs.writeFile(outsideEnvelopePath, JSON.stringify({ leaked: true }), "utf8");
+  await fs.symlink(outsideEnvelopePath, path.join(captureDirectory, "envelope.json"));
+
+  await assert.rejects(
+    () =>
+      findStoredCaptureEnvelope({
+        vaultRoot,
+        inbound,
+        captureId,
+      }),
+    {
+      name: "TypeError",
+      message: "Vault paths may not traverse symbolic links.",
+    },
+  );
+});
+
+test("rebuildRuntimeFromVault rejects symlinked inbox roots", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-symlink-rebuild-vault");
+  const outsideRoot = await makeTempDirectory("healthybob-inbox-symlink-rebuild-outside");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const runtime = await openInboxRuntime({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, "raw"), { recursive: true });
+  await fs.symlink(outsideRoot, path.join(vaultRoot, "raw", "inbox"));
+
+  try {
+    await assert.rejects(
+      () =>
+        rebuildRuntimeFromVault({
+          vaultRoot,
+          runtime,
+        }),
+      {
+        name: "TypeError",
+        message: "Vault paths may not traverse symbolic links.",
+      },
+    );
+  } finally {
+    runtime.close();
+  }
+});
+
+test("rebuildRuntimeFromVault repairs captures missing only the audit record", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-missing-audit-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const inbound = createCapture({
+    externalId: "msg-rebuild-missing-audit",
+    occurredAt: "2026-03-13T11:15:00.000Z",
+    text: "Rebuild missing audit",
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2W8";
+  const stored = await persistRawCapture({
+    vaultRoot,
+    captureId,
+    eventId,
+    input: inbound,
+    storedAt: "2026-03-13T11:16:00.000Z",
+  });
+  await appendInboxCaptureEvent({
+    vaultRoot,
+    eventId,
+    occurredAt: inbound.occurredAt,
+    inbound,
+    stored,
+  });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+
+  const capture = runtime.getCapture(captureId);
+  assert.ok(capture);
+  assert.equal(capture.text, "Rebuild missing audit");
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
 
   runtime.close();
 });

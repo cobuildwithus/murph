@@ -10,8 +10,11 @@ import {
   type EventRecord,
 } from "@healthybob/contracts";
 import {
+  acquireCanonicalWriteLock,
   appendJsonlRecord,
+  isVaultError,
   loadVault,
+  readJsonlRecords,
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
 } from "@healthybob/core";
@@ -22,6 +25,7 @@ import {
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
   ensureParentDirectory,
+  generatePrefixedId,
   normalizeStoredAttachments,
   normalizeAccountKey,
   normalizeRelativePath,
@@ -54,6 +58,10 @@ export interface StoredCaptureEnvelope {
 interface EnvelopeEntry {
   absolutePath: string;
   envelope: StoredCaptureEnvelope;
+}
+
+export interface StoredCaptureCanonicalEvidence {
+  auditId?: string;
 }
 
 export async function ensureInboxVault(vaultRoot: string): Promise<void> {
@@ -97,9 +105,8 @@ export async function persistRawCapture({
         `${String(ordinal).padStart(2, "0")}__${safeName}`,
       ),
     );
-    const absolutePath = resolveVaultPath(vaultRoot, relativePath);
+    const absolutePath = await resolveVaultPath(vaultRoot, relativePath);
     await ensureParentDirectory(absolutePath);
-
     if (attachment.data) {
       try {
         await writeFile(absolutePath, attachment.data, { flag: "wx" });
@@ -119,6 +126,7 @@ export async function persistRawCapture({
     }
 
     const fileStats = await stat(absolutePath);
+    const sha256 = await sha256File(absolutePath);
 
     storedAttachments.push({
       ...sanitizedAttachment,
@@ -127,13 +135,13 @@ export async function persistRawCapture({
       storedPath: relativePath,
       fileName: attachment.fileName ?? safeName,
       byteSize: attachment.byteSize ?? fileStats.size,
-      sha256: await sha256File(absolutePath),
+      sha256,
       originalPath: null,
     });
   }
 
   const envelopePath = normalizeRelativePath(path.posix.join(sourceDirectory, "envelope.json"));
-  const absoluteEnvelopePath = resolveVaultPath(vaultRoot, envelopePath);
+  const absoluteEnvelopePath = await resolveVaultPath(vaultRoot, envelopePath);
   await ensureParentDirectory(absoluteEnvelopePath);
 
   const storedCapture: StoredCapture = {
@@ -182,7 +190,7 @@ export async function findStoredCaptureEnvelope(input: {
   captureId?: string;
 }): Promise<StoredCaptureEnvelope | null> {
   const captureId = input.captureId ?? createDeterministicInboxCaptureId(input.inbound);
-  const expectedPath = resolveVaultPath(
+  const expectedPath = await resolveVaultPath(
     input.vaultRoot,
     buildInboxEnvelopePath(input.inbound, captureId),
   );
@@ -192,7 +200,7 @@ export async function findStoredCaptureEnvelope(input: {
     return expectedEnvelope;
   }
 
-  const accountRoot = resolveVaultPath(input.vaultRoot, buildInboxAccountDirectory(input.inbound));
+  const accountRoot = await resolveVaultPath(input.vaultRoot, buildInboxAccountDirectory(input.inbound));
   const envelopeFiles = await walkInboxEnvelopeFiles(accountRoot);
   let selected: EnvelopeEntry | null = null;
   const identityKey = createInboxCaptureIdentityKey(input.inbound);
@@ -211,6 +219,61 @@ export async function findStoredCaptureEnvelope(input: {
   }
 
   return selected?.envelope ?? null;
+}
+
+export async function ensureStoredCaptureCanonicalEvidence(input: {
+  vaultRoot: string;
+  envelope: StoredCaptureEnvelope;
+  createAuditId?: () => string;
+}): Promise<StoredCaptureCanonicalEvidence> {
+  const eventPath = buildInboxCaptureEventPath(input.envelope);
+  const auditPath = buildInboxCaptureAuditPath(input.envelope);
+  const lock = await acquireCanonicalWriteLock(input.vaultRoot);
+
+  try {
+    const eventRecords = await readJsonlRecordsIfPresent({
+      vaultRoot: input.vaultRoot,
+      relativePath: eventPath,
+    });
+    const eventExists = eventRecords.some((record) =>
+      isInboxCaptureEventRecord(record, input.envelope),
+    );
+
+    if (!eventExists) {
+      await appendInboxCaptureEvent({
+        vaultRoot: input.vaultRoot,
+        eventId: input.envelope.eventId,
+        occurredAt: input.envelope.input.occurredAt,
+        inbound: input.envelope.input,
+        stored: input.envelope.stored,
+      });
+    }
+
+    const auditRecords = await readJsonlRecordsIfPresent({
+      vaultRoot: input.vaultRoot,
+      relativePath: auditPath,
+    });
+    const auditExists = auditRecords.some((record) =>
+      isInboxCaptureAuditRecord(record, input.envelope, eventPath),
+    );
+    let auditId: string | undefined;
+
+    if (!auditExists) {
+      auditId = input.createAuditId?.() ?? generatePrefixedId("aud");
+      await appendImportAudit({
+        vaultRoot: input.vaultRoot,
+        auditId,
+        eventId: input.envelope.eventId,
+        inbound: input.envelope.input,
+        stored: input.envelope.stored,
+        eventPath,
+      });
+    }
+
+    return { auditId };
+  } finally {
+    await lock.release();
+  }
 }
 
 export async function appendInboxCaptureEvent(input: {
@@ -301,7 +364,7 @@ export async function rebuildRuntimeFromVault(input: {
   vaultRoot: string;
   runtime: InboxRuntimeStore;
 }): Promise<void> {
-  const inboxRoot = resolveVaultPath(input.vaultRoot, `${VAULT_LAYOUT.rawDirectory}/inbox`);
+  const inboxRoot = await resolveVaultPath(input.vaultRoot, `${VAULT_LAYOUT.rawDirectory}/inbox`);
 
   try {
     await mkdir(inboxRoot, { recursive: true });
@@ -328,6 +391,10 @@ export async function rebuildRuntimeFromVault(input: {
   }
 
   for (const entry of [...canonicalEntries.values()].sort(compareEnvelopeEntries)) {
+    await ensureStoredCaptureCanonicalEvidence({
+      vaultRoot: input.vaultRoot,
+      envelope: entry.envelope,
+    });
     const captureId = input.runtime.upsertCaptureIndex({
       captureId: entry.envelope.captureId,
       eventId: entry.envelope.eventId,
@@ -353,6 +420,22 @@ function buildEventNote(capture: InboundCapture): string {
   }
 
   return `Inbox capture from ${capture.source}.`;
+}
+
+function buildInboxCaptureEventPath(envelope: StoredCaptureEnvelope): string {
+  return toMonthlyShardRelativePath(
+    VAULT_LAYOUT.eventLedgerDirectory,
+    envelope.input.occurredAt,
+    "occurredAt",
+  );
+}
+
+function buildInboxCaptureAuditPath(envelope: StoredCaptureEnvelope): string {
+  return toMonthlyShardRelativePath(
+    VAULT_LAYOUT.auditDirectory,
+    envelope.stored.storedAt,
+    "occurredAt",
+  );
 }
 
 function buildInboxAccountDirectory(input: InboundCapture): string {
@@ -414,6 +497,21 @@ function normalizeStoredCaptureEnvelope(envelope: StoredCaptureEnvelope): Stored
   };
 }
 
+async function readJsonlRecordsIfPresent(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<unknown[]> {
+  try {
+    return await readJsonlRecords(input);
+  } catch (error) {
+    if (isVaultError(error) && error.code === "VAULT_FILE_MISSING") {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
 function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): number {
   const idComparison = comparePreferenceScore(left) - comparePreferenceScore(right);
   if (idComparison !== 0) {
@@ -435,6 +533,55 @@ function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): numb
 
 function comparePreferenceScore(entry: EnvelopeEntry): number {
   return entry.envelope.captureId === createDeterministicInboxCaptureId(entry.envelope.input) ? 0 : 1;
+}
+
+function isInboxCaptureEventRecord(record: unknown, envelope: StoredCaptureEnvelope): boolean {
+  if (!isPlainRecord(record)) {
+    return false;
+  }
+
+  return (
+    record.id === envelope.eventId &&
+    record.kind === "note" &&
+    record.occurredAt === envelope.input.occurredAt &&
+    record.recordedAt === envelope.stored.storedAt &&
+    hasStringArrayEntry(record.rawRefs, envelope.stored.envelopePath)
+  );
+}
+
+function isInboxCaptureAuditRecord(
+  record: unknown,
+  envelope: StoredCaptureEnvelope,
+  eventPath: string,
+): boolean {
+  if (!isPlainRecord(record)) {
+    return false;
+  }
+
+  return (
+    record.action === "intake_import" &&
+    record.status === "success" &&
+    record.occurredAt === envelope.stored.storedAt &&
+    record.commandName === `inboxd.processCapture:${sanitizeSegment(envelope.input.source, "source")}` &&
+    hasStringArrayEntry(record.targetIds, envelope.eventId) &&
+    hasAuditChange(record.changes, envelope.stored.envelopePath, "create") &&
+    hasAuditChange(record.changes, eventPath, "append")
+  );
+}
+
+function hasStringArrayEntry(value: unknown, expected: string): boolean {
+  return Array.isArray(value) && value.some((entry) => entry === expected);
+}
+
+function hasAuditChange(value: unknown, expectedPath: string, expectedOp: string): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some((entry) => isPlainRecord(entry) && entry.path === expectedPath && entry.op === expectedOp)
+  );
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 type PersistableInboundAttachment = Omit<InboundCapture["attachments"][number], "data">;
