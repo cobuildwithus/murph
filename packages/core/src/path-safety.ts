@@ -88,6 +88,8 @@ export function assertPathWithinVault(vaultRoot: unknown, absolutePath: unknown)
   }
 }
 
+export type ResolvedVaultPath = ReturnType<typeof resolveVaultPath>;
+
 async function resolveExistingPath(absolutePath: string, code: string, message: string): Promise<string> {
   try {
     return await fs.realpath(absolutePath);
@@ -150,6 +152,15 @@ export async function assertPathWithinVaultOnDisk(
       throw error;
     }
   }
+}
+
+export async function resolveVaultPathOnDisk(
+  vaultRoot: unknown,
+  relativePath: unknown,
+): Promise<ResolvedVaultPath> {
+  const resolved = resolveVaultPath(vaultRoot, relativePath);
+  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+  return resolved;
 }
 
 export function formatVaultRelativePath(vaultRoot: unknown, absolutePath: unknown): string {

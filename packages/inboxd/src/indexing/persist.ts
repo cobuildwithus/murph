@@ -24,6 +24,7 @@ import {
   buildLegacyAttachmentId,
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
+  assertVaultPathOnDisk,
   ensureParentDirectory,
   generatePrefixedId,
   normalizeStoredAttachments,
@@ -107,6 +108,7 @@ export async function persistRawCapture({
     );
     const absolutePath = await resolveVaultPath(vaultRoot, relativePath);
     await ensureParentDirectory(absolutePath);
+    await assertVaultPathOnDisk(vaultRoot, absolutePath);
     if (attachment.data) {
       try {
         await writeFile(absolutePath, attachment.data, { flag: "wx" });
@@ -125,7 +127,9 @@ export async function persistRawCapture({
       }
     }
 
+    await assertVaultPathOnDisk(vaultRoot, absolutePath);
     const fileStats = await stat(absolutePath);
+    await assertVaultPathOnDisk(vaultRoot, absolutePath);
     const sha256 = await sha256File(absolutePath);
 
     storedAttachments.push({
@@ -143,6 +147,7 @@ export async function persistRawCapture({
   const envelopePath = normalizeRelativePath(path.posix.join(sourceDirectory, "envelope.json"));
   const absoluteEnvelopePath = await resolveVaultPath(vaultRoot, envelopePath);
   await ensureParentDirectory(absoluteEnvelopePath);
+  await assertVaultPathOnDisk(vaultRoot, absoluteEnvelopePath);
 
   const storedCapture: StoredCapture = {
     captureId,
@@ -372,6 +377,7 @@ export async function rebuildRuntimeFromVault(input: {
     return;
   }
 
+  await assertVaultPathOnDisk(input.vaultRoot, inboxRoot);
   const envelopeFiles = await walkInboxEnvelopeFiles(inboxRoot);
   const canonicalEntries = new Map<string, EnvelopeEntry>();
 

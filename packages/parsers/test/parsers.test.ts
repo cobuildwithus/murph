@@ -30,6 +30,7 @@ import {
 } from "../src/index.js";
 import {
   describeExecutableAvailability,
+  removeVaultDirectoryIfExists,
   resolveConfiguredExecutable,
   requireExecutable,
 } from "../src/shared.js";
@@ -955,6 +956,85 @@ test("writeParserArtifacts removes stale optional files on rerun", async () => {
   assert.equal(second.manifestPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0002/manifest.json");
   await fs.access(path.join(vaultRoot, first.tablesPath ?? ""));
   await assert.rejects(fs.access(path.join(vaultRoot, second.attemptDirectoryPath, "tables.json")));
+});
+
+test("writeParserArtifacts rejects derived attempt paths that traverse symlinks", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parser-publish-symlink");
+  const outsideRoot = await makeTempDirectory("healthybob-parser-publish-symlink-outside");
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  const attemptsRoot = path.join(
+    vaultRoot,
+    "derived",
+    "inbox",
+    "cap_publish_symlink",
+    "attachments",
+    "att_publish_symlink",
+    "attempts",
+  );
+  await fs.mkdir(attemptsRoot, { recursive: true });
+  await fs.symlink(outsideRoot, path.join(attemptsRoot, "0001"));
+
+  await assert.rejects(
+    () =>
+      writeParserArtifacts({
+        attempt: 1,
+        vaultRoot,
+        output: {
+          schema: "healthybob.parser-output.v1",
+          providerId: "fake-provider",
+          artifact: {
+            captureId: "cap_publish_symlink",
+            attachmentId: "att_publish_symlink",
+            kind: "image",
+            fileName: "scan.png",
+            mime: "image/png",
+            storedPath: "raw/inbox/example/scan.png",
+          },
+          text: "blocked",
+          markdown: "blocked",
+          blocks: [],
+          tables: [],
+          metadata: {},
+          createdAt: "2026-03-13T12:10:00.000Z",
+        },
+      }),
+    {
+      name: "TypeError",
+      message: "Vault paths may not traverse symbolic links.",
+    },
+  );
+
+  assert.deepEqual(await fs.readdir(outsideRoot), []);
+});
+
+test("parser cleanup helper rejects attempt directories that traverse symlinks", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parser-cleanup-symlink");
+  const outsideRoot = await makeTempDirectory("healthybob-parser-cleanup-symlink-outside");
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  const attemptDirectoryPath = "derived/inbox/cap_cleanup_symlink/attachments/att_cleanup_symlink/attempts/0001";
+  const attemptsRoot = path.join(vaultRoot, path.dirname(attemptDirectoryPath));
+  const outsideFile = path.join(outsideRoot, "keep.txt");
+  await fs.mkdir(attemptsRoot, { recursive: true });
+  await fs.writeFile(outsideFile, "do not delete", "utf8");
+  await fs.symlink(outsideRoot, path.join(vaultRoot, attemptDirectoryPath));
+
+  await assert.rejects(
+    () => removeVaultDirectoryIfExists(vaultRoot, attemptDirectoryPath),
+    {
+      name: "TypeError",
+      message: "Vault paths may not traverse symbolic links.",
+    },
+  );
+
+  assert.equal(await fs.readFile(outsideFile, "utf8"), "do not delete");
 });
 
 test("attachment parse worker consumes inbox jobs, writes derived artifacts, and updates runtime search", async () => {

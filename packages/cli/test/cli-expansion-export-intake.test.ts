@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { initializeVault } from '@healthybob/core'
@@ -7,7 +7,12 @@ import { buildExportPack, readVault } from '@healthybob/query'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerExportCommands } from '../src/commands/export.js'
-import { showStoredExportPack } from '../src/commands/export-intake-read-helpers.js'
+import {
+  materializeStoredExportPack,
+  pruneStoredExportPack,
+  showAssessmentRaw,
+  showStoredExportPack,
+} from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
 import { materializeExportPack } from '../src/usecases/shared.js'
 import {
@@ -305,6 +310,60 @@ test.sequential(
 )
 
 test.sequential(
+  'intake raw rejects assessment artifacts that escape the vault through symlinks',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-intake-raw-symlink-'))
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-intake-raw-outside-'))
+    const assessmentPath = path.join(vaultRoot, 'assessment.json')
+
+    try {
+      await initializeVault({ vaultRoot })
+      await writeFile(
+        assessmentPath,
+        JSON.stringify({
+          questionnaireSlug: 'baseline-intake',
+          responses: {
+            symptoms: ['fatigue'],
+          },
+        }),
+        'utf8',
+      )
+
+      const imported = await runSliceCli<{
+        assessmentId: string
+        rawFile: string
+      }>([
+        'intake',
+        'import',
+        assessmentPath,
+        '--vault',
+        vaultRoot,
+      ])
+
+      const rawFile = requireData(imported).rawFile
+      const rawAbsolutePath = path.join(vaultRoot, rawFile)
+      const outsideJsonPath = path.join(outsideRoot, 'secret.json')
+      await writeFile(outsideJsonPath, JSON.stringify({ leaked: true }), 'utf8')
+      await rm(rawAbsolutePath, { force: true })
+      await symlink(outsideJsonPath, rawAbsolutePath)
+
+      await assert.rejects(
+        () => showAssessmentRaw(vaultRoot, requireData(imported).assessmentId),
+        {
+          name: 'VaultCliError',
+          code: 'invalid_path',
+          message:
+            `Vault-relative path "${rawFile}" may not traverse symbolic links inside the selected vault root.`,
+        },
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'export pack create stores the pack under the vault and treats --out as an additional copy target',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-'))
@@ -504,6 +563,66 @@ test.sequential(
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
       await rm(outRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'export pack helpers rebuild or reject when stored pack paths traverse symlinks',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-symlink-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-symlink-out-'))
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-symlink-outside-'))
+
+    try {
+      await initializeVault({ vaultRoot })
+
+      const readModel = await readVault(vaultRoot)
+      const pack = buildExportPack(readModel, {
+        from: '2026-03-10',
+        to: '2026-03-12',
+        packId: 'focus-pack',
+        generatedAt: '2026-03-13T12:00:00.000Z',
+      })
+      await materializeExportPack(vaultRoot, pack.files)
+
+      const linkedFile = pack.files.find((file) => file.path.endsWith('.md')) ?? pack.files[0]
+      assert.ok(linkedFile)
+      const storedPackFile = path.join(vaultRoot, linkedFile.path)
+      const outsideFile = path.join(outsideRoot, 'secret.md')
+      await writeFile(outsideFile, 'outside-vault export content', 'utf8')
+      await rm(storedPackFile, { force: true })
+      await symlink(outsideFile, storedPackFile)
+
+      const materialized = await materializeStoredExportPack({
+        vault: vaultRoot,
+        packId: 'focus-pack',
+        out: outRoot,
+      })
+
+      assert.equal(materialized.rebuilt, true)
+      assert.equal(
+        await readFile(path.join(outRoot, linkedFile.path), 'utf8'),
+        linkedFile.contents,
+      )
+
+      await rm(path.join(vaultRoot, 'exports', 'packs'), { recursive: true, force: true })
+      await mkdir(path.join(outsideRoot, 'focus-pack'), { recursive: true })
+      await symlink(outsideRoot, path.join(vaultRoot, 'exports', 'packs'))
+
+      await assert.rejects(
+        () => pruneStoredExportPack(vaultRoot, 'focus-pack'),
+        {
+          name: 'VaultCliError',
+          code: 'invalid_path',
+          message:
+            'Vault-relative path "exports/packs/focus-pack/manifest.json" may not traverse symbolic links inside the selected vault root.',
+        },
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+      await rm(outRoot, { recursive: true, force: true })
+      await rm(outsideRoot, { recursive: true, force: true })
     }
   },
 )

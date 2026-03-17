@@ -11,11 +11,11 @@ import {
   appendImportAudit,
   appendInboxCaptureEvent,
   createInboxPipeline,
-  findStoredCaptureEnvelope,
   openInboxRuntime,
   persistRawCapture,
   rebuildRuntimeFromVault,
 } from "../src/index.js";
+import { findStoredCaptureEnvelope } from "../src/indexing/persist.js";
 import { buildLegacyAttachmentId, createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.js";
 import type { InboundCapture } from "../src/contracts/capture.js";
 

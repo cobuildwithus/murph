@@ -2,6 +2,13 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+import {
+  assertPathWithinVaultOnDisk,
+  isVaultError,
+  normalizeRelativeVaultPath,
+  resolveVaultPathOnDisk,
+} from "@healthybob/core";
+
 import type { ParserArtifactRef, ParserArtifactSummary } from "./contracts/artifact.js";
 import type { ParsedBlock, ParseBlockKind } from "./contracts/parse.js";
 import type { ProviderAvailability } from "./contracts/provider.js";
@@ -43,44 +50,49 @@ export async function readUtf8IfExists(filePath: string): Promise<string | null>
 }
 
 export function normalizeRelativePath(relativePath: string): string {
-  const candidate = relativePath.trim().replace(/\\/g, "/");
-
-  if (!candidate) {
-    throw new TypeError("Vault-relative path is required.");
+  try {
+    return normalizeRelativeVaultPath(relativePath);
+  } catch (error) {
+    throw toTypeError(error);
   }
-
-  if (candidate.includes("\u0000")) {
-    throw new TypeError("Vault-relative path may not contain NUL bytes.");
-  }
-
-  if (/^[A-Za-z]:\//u.test(candidate) || path.posix.isAbsolute(candidate)) {
-    throw new TypeError("Vault-relative path must not be absolute.");
-  }
-
-  const normalized = path.posix.normalize(candidate);
-
-  if (
-    normalized === "." ||
-    normalized === ".." ||
-    normalized.startsWith("../") ||
-    normalized.includes("/../")
-  ) {
-    throw new TypeError("Vault-relative path may not escape the vault root.");
-  }
-
-  return normalized;
 }
 
-export function resolveVaultRelativePath(vaultRoot: string, relativePath: string): string {
-  const absoluteRoot = path.resolve(vaultRoot);
-  const normalizedRelativePath = normalizeRelativePath(relativePath);
-  const absolutePath = path.resolve(absoluteRoot, normalizedRelativePath);
-  const relative = path.relative(absoluteRoot, absolutePath);
-
-  if (relative === ".." || relative.startsWith(`..${path.sep}`)) {
-    throw new TypeError("Resolved path escaped the vault root.");
+export async function resolveVaultRelativePath(vaultRoot: string, relativePath: string): Promise<string> {
+  try {
+    const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath);
+    return resolved.absolutePath;
+  } catch (error) {
+    throw toTypeError(error);
   }
+}
 
+export async function assertVaultPathOnDisk(vaultRoot: string, absolutePath: string): Promise<void> {
+  try {
+    await assertPathWithinVaultOnDisk(vaultRoot, absolutePath);
+  } catch (error) {
+    throw toTypeError(error);
+  }
+}
+
+export async function removeVaultDirectoryIfExists(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<void> {
+  await fs.rm(await resolveVaultRelativePath(vaultRoot, relativePath), {
+    recursive: true,
+    force: true,
+  });
+}
+
+export async function resetVaultDirectory(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<string> {
+  const absolutePath = await resolveVaultRelativePath(vaultRoot, relativePath);
+  await fs.rm(absolutePath, { recursive: true, force: true });
+  await assertVaultPathOnDisk(vaultRoot, absolutePath);
+  await fs.mkdir(absolutePath, { recursive: true });
+  await assertVaultPathOnDisk(vaultRoot, absolutePath);
   return absolutePath;
 }
 
@@ -234,6 +246,14 @@ export function splitTextIntoBlocks(
       text: section,
       order: index,
     }));
+}
+
+function toTypeError(error: unknown): Error {
+  if (isVaultError(error)) {
+    return new TypeError(error.message);
+  }
+
+  return error instanceof Error ? error : new TypeError(String(error));
 }
 
 export function buildMarkdown(text: string, blocks: ParsedBlock[]): string {

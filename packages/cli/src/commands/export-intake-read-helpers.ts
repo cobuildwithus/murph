@@ -10,6 +10,7 @@ import {
   type QueryVaultRecord as VaultRecord,
 } from '../query-runtime.js'
 import { materializeExportPack } from '../usecases/shared.js'
+import { resolveVaultRelativePath } from '../usecases/vault-usecase-helpers.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { pathSchema } from '../vault-cli-contracts.js'
 
@@ -79,38 +80,6 @@ function packDirectory(packId: string) {
   return path.posix.join(EXPORTS_ROOT, packId)
 }
 
-function resolveVaultRelativePath(vaultRoot: string, relativePath: string) {
-  const normalized = String(relativePath).trim().replace(/\\/g, '/')
-
-  if (
-    normalized.length === 0 ||
-    path.posix.isAbsolute(normalized) ||
-    /^[A-Za-z]:/u.test(normalized)
-  ) {
-    throw new VaultCliError(
-      'invalid_path',
-      `Vault-relative path "${relativePath}" is invalid.`,
-    )
-  }
-
-  const absoluteRoot = path.resolve(vaultRoot)
-  const absolutePath = path.resolve(absoluteRoot, normalized)
-  const containment = path.relative(absoluteRoot, absolutePath)
-
-  if (
-    containment === '..' ||
-    containment.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(containment)
-  ) {
-    throw new VaultCliError(
-      'invalid_path',
-      `Vault-relative path "${relativePath}" escapes the selected vault root.`,
-    )
-  }
-
-  return absolutePath
-}
-
 async function readJsonRelativeFile<T>(
   vaultRoot: string,
   relativePath: string,
@@ -118,7 +87,7 @@ async function readJsonRelativeFile<T>(
   missingCode: string,
   invalidCode: string,
 ): Promise<T> {
-  const absolutePath = resolveVaultRelativePath(vaultRoot, relativePath)
+  const absolutePath = await resolveVaultRelativePath(vaultRoot, relativePath)
   let contents: string
 
   try {
@@ -273,7 +242,7 @@ async function readStoredExportPackFiles(
   return Promise.all(
     manifest.files.map(async (file) => ({
       path: file.path,
-      contents: await readFile(resolveVaultRelativePath(vaultRoot, file.path), 'utf8'),
+      contents: await readFile(await resolveVaultRelativePath(vaultRoot, file.path), 'utf8'),
     })),
   )
 }
@@ -351,7 +320,7 @@ export async function listStoredExportPacks(
     limit?: number
   } = {},
 ) {
-  const exportsDirectory = resolveVaultRelativePath(vaultRoot, EXPORTS_ROOT)
+  const exportsDirectory = await resolveVaultRelativePath(vaultRoot, EXPORTS_ROOT)
   let entries: Dirent[] = []
 
   try {
@@ -439,7 +408,7 @@ export async function materializeStoredExportPack(input: {
 export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
   const { manifest } = await readStoredExportPackManifest(vaultRoot, packId)
   const relativePackDirectory = packDirectory(packId)
-  const absolutePackDirectory = resolveVaultRelativePath(vaultRoot, relativePackDirectory)
+  const absolutePackDirectory = await resolveVaultRelativePath(vaultRoot, relativePackDirectory)
 
   await rm(absolutePackDirectory, { recursive: true, force: true })
 
@@ -476,7 +445,7 @@ export async function showAssessmentManifest(vaultRoot: string, assessmentId: st
 export async function showAssessmentRaw(vaultRoot: string, assessmentId: string) {
   const record = await loadAssessmentRecord(vaultRoot, assessmentId)
   const rawFile = resolveAssessmentRawFile(record)
-  const absoluteRawPath = resolveVaultRelativePath(vaultRoot, rawFile)
+  const absoluteRawPath = await resolveVaultRelativePath(vaultRoot, rawFile)
   let contents: string
 
   try {

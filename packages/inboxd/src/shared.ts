@@ -3,10 +3,10 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 
 import {
-  VaultError,
   assertPathWithinVaultOnDisk,
+  isVaultError,
   normalizeRelativeVaultPath,
-  resolveVaultPath as resolveCoreVaultPath,
+  resolveVaultPathOnDisk,
 } from "@healthybob/core";
 
 import type { StoredAttachment } from "./contracts/capture.js";
@@ -146,8 +146,7 @@ export function normalizeRelativePath(relativePath: string): string {
 
 export async function resolveVaultPath(vaultRoot: string, relativePath: string): Promise<string> {
   try {
-    const resolved = resolveCoreVaultPath(vaultRoot, relativePath);
-    await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
+    const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath);
     return resolved.absolutePath;
   } catch (error) {
     throw toTypeError(error);
@@ -420,7 +419,7 @@ export async function walkNamedFiles(
 }
 
 function toTypeError(error: unknown): Error {
-  if (error instanceof VaultError) {
+  if (isVaultError(error)) {
     return new TypeError(error.message);
   }
 

@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto'
-import path from 'node:path'
+import {
+  isVaultError,
+  resolveVaultPathOnDisk,
+} from '@healthybob/core'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   inferEntityKind,
@@ -75,36 +78,16 @@ export function compactObject(record: Record<string, unknown>) {
   )
 }
 
-export function resolveVaultRelativePath(vaultRoot: string, relativePath: string) {
-  const normalized = String(relativePath).trim().replace(/\\/g, '/')
-
-  if (
-    normalized.length === 0 ||
-    path.posix.isAbsolute(normalized) ||
-    /^[A-Za-z]:/u.test(normalized)
-  ) {
-    throw new VaultCliError(
-      'invalid_path',
-      `Vault-relative path "${relativePath}" is invalid.`,
-    )
+export async function resolveVaultRelativePath(
+  vaultRoot: string,
+  relativePath: string,
+) {
+  try {
+    const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath)
+    return resolved.absolutePath
+  } catch (error) {
+    throw toVaultRelativePathError(relativePath, error)
   }
-
-  const absoluteRoot = path.resolve(vaultRoot)
-  const absolutePath = path.resolve(absoluteRoot, normalized)
-  const containment = path.relative(absoluteRoot, absolutePath)
-
-  if (
-    containment === '..' ||
-    containment.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(containment)
-  ) {
-    throw new VaultCliError(
-      'invalid_path',
-      `Vault-relative path "${relativePath}" escapes the selected vault root.`,
-    )
-  }
-
-  return absolutePath
 }
 
 export function generateContractId(prefix: string) {
@@ -131,4 +114,35 @@ function encodeRandom(length: number) {
   return Array.from(randomBytes(length), (byte) =>
     CROCKFORD_BASE32_ALPHABET[byte % 32],
   ).join('')
+}
+
+function toVaultRelativePathError(relativePath: string, error: unknown) {
+  if (!isVaultError(error)) {
+    return error
+  }
+
+  if (error.code === 'VAULT_INVALID_PATH') {
+    return new VaultCliError(
+      'invalid_path',
+      error.message.includes('escape the vault root')
+        ? `Vault-relative path "${relativePath}" escapes the selected vault root.`
+        : `Vault-relative path "${relativePath}" is invalid.`,
+    )
+  }
+
+  if (error.code === 'VAULT_PATH_ESCAPE') {
+    return new VaultCliError(
+      'invalid_path',
+      `Vault-relative path "${relativePath}" escapes the selected vault root.`,
+    )
+  }
+
+  if (error.code === 'VAULT_PATH_SYMLINK') {
+    return new VaultCliError(
+      'invalid_path',
+      `Vault-relative path "${relativePath}" may not traverse symbolic links inside the selected vault root.`,
+    )
+  }
+
+  return error
 }

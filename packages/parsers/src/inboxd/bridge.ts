@@ -30,7 +30,7 @@ export async function resolveInboxAttachmentArtifact(input: {
     mime: attachment.mime ?? null,
     fileName: attachment.fileName ?? null,
     storedPath: attachment.storedPath,
-    absolutePath: resolveVaultRelativePath(input.vaultRoot, attachment.storedPath),
+    absolutePath: await resolveVaultRelativePath(input.vaultRoot, attachment.storedPath),
     byteSize: attachment.byteSize ?? null,
     sha256: attachment.sha256 ?? null,
   };

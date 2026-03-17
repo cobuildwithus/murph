@@ -4,8 +4,9 @@ import { promises as fs } from "node:fs";
 import type { ParserOutput } from "../contracts/parse.js";
 import {
   normalizeRelativePath,
-  resetDirectory,
+  removeVaultDirectoryIfExists,
   resolveVaultRelativePath,
+  resetVaultDirectory,
 } from "../shared.js";
 
 export interface PublishedParserArtifacts {
@@ -38,11 +39,7 @@ export async function writeParserArtifacts(input: {
       String(input.attempt).padStart(4, "0"),
     ),
   );
-  const absoluteAttemptDirectory = resolveVaultRelativePath(
-    input.vaultRoot,
-    attemptDirectoryPath,
-  );
-  await resetDirectory(absoluteAttemptDirectory);
+  await resetVaultDirectory(input.vaultRoot, attemptDirectoryPath);
 
   const plainTextPath = normalizeRelativePath(path.posix.join(attemptDirectoryPath, "plain.txt"));
   const markdownPath = normalizeRelativePath(path.posix.join(attemptDirectoryPath, "normalized.md"));
@@ -54,31 +51,31 @@ export async function writeParserArtifacts(input: {
 
   try {
     await fs.writeFile(
-      resolveVaultRelativePath(input.vaultRoot, plainTextPath),
+      await resolveVaultRelativePath(input.vaultRoot, plainTextPath),
       `${input.output.text.trim()}\n`,
       "utf8",
     );
     await fs.writeFile(
-      resolveVaultRelativePath(input.vaultRoot, markdownPath),
+      await resolveVaultRelativePath(input.vaultRoot, markdownPath),
       `${input.output.markdown.trim()}\n`,
       "utf8",
     );
     await fs.writeFile(
-      resolveVaultRelativePath(input.vaultRoot, chunksPath),
+      await resolveVaultRelativePath(input.vaultRoot, chunksPath),
       input.output.blocks.map((block) => JSON.stringify(block)).join("\n") + (input.output.blocks.length > 0 ? "\n" : ""),
       "utf8",
     );
 
     if (tablesPath) {
       await fs.writeFile(
-        resolveVaultRelativePath(input.vaultRoot, tablesPath),
+        await resolveVaultRelativePath(input.vaultRoot, tablesPath),
         `${JSON.stringify(input.output.tables, null, 2)}\n`,
         "utf8",
       );
     }
 
     await fs.writeFile(
-      resolveVaultRelativePath(input.vaultRoot, manifestPath),
+      await resolveVaultRelativePath(input.vaultRoot, manifestPath),
       `${JSON.stringify(
         {
           schema: "healthybob.parser-manifest.v1",
@@ -99,7 +96,7 @@ export async function writeParserArtifacts(input: {
       "utf8",
     );
   } catch (error) {
-    await fs.rm(absoluteAttemptDirectory, { recursive: true, force: true });
+    await removeVaultDirectoryIfExists(input.vaultRoot, attemptDirectoryPath);
     throw error;
   }
 

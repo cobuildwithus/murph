@@ -12,8 +12,7 @@ import { resolveInboxAttachmentArtifact } from "../inboxd/bridge.js";
 import { type FfmpegToolOptions } from "../adapters/ffmpeg.js";
 import {
   redactSensitiveText,
-  removeDirectoryIfExists,
-  resolveVaultRelativePath,
+  removeVaultDirectoryIfExists,
 } from "../shared.js";
 import { parseAttachment } from "./parse-attachment.js";
 import { writeParserArtifacts } from "../publish/writer.js";
@@ -166,5 +165,5 @@ async function removePublishedArtifacts(
   vaultRoot: string,
   attemptDirectoryPath: string,
 ): Promise<void> {
-  await removeDirectoryIfExists(resolveVaultRelativePath(vaultRoot, attemptDirectoryPath));
+  await removeVaultDirectoryIfExists(vaultRoot, attemptDirectoryPath);
 }
