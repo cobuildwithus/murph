@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Box, Text, render, useApp, useInput } from 'ink'
+import { Box, Static, Text, render, useApp, useInput, type Key } from 'ink'
 import {
   assistantChatResultSchema,
 } from '../../assistant-cli-contracts.js'
@@ -79,6 +79,20 @@ interface ChatHistoryProps {
   entries: readonly InkChatEntry[]
 }
 
+type ChatStaticItem =
+  | {
+      kind: 'banner'
+    }
+  | {
+      kind: 'entry'
+      entry: InkChatEntry
+    }
+  | {
+      bindingSummary: string | null
+      kind: 'header'
+      sessionId: string
+    }
+
 interface ChatStatusProps {
   busy: boolean
   busySeconds: number
@@ -98,9 +112,22 @@ interface ChatFooterProps {
   metadataLine: string
 }
 
+interface ComposerEditingState {
+  cursorOffset: number
+  killBuffer: string
+  value: string
+}
+
+interface ComposerEditingResult extends ComposerEditingState {
+  handled: boolean
+}
+
+const COMPOSER_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\\\|;:'\\\",.<>/?"
+
 function ComposerInput(props: ComposerInputProps): React.ReactElement {
   const createElement = React.createElement
   const [cursorOffset, setCursorOffset] = React.useState(props.value.length)
+  const [killBuffer, setKillBuffer] = React.useState('')
 
   React.useEffect(() => {
     setCursorOffset((previous) =>
@@ -131,41 +158,31 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
         return
       }
 
-      if (key.leftArrow) {
-        setCursorOffset((previous) =>
-          clampComposerCursorOffset(previous - 1, props.value.length),
-        )
-        return
-      }
+      const editingResult = applyComposerEditingInput(
+        {
+          cursorOffset,
+          killBuffer,
+          value: props.value,
+        },
+        input,
+        key,
+      )
 
-      if (key.rightArrow) {
-        setCursorOffset((previous) =>
-          clampComposerCursorOffset(previous + 1, props.value.length),
-        )
-        return
-      }
-
-      if (key.backspace || key.delete) {
-        if (cursorOffset <= 0) {
-          return
+      if (editingResult.handled) {
+        if (editingResult.cursorOffset !== cursorOffset) {
+          setCursorOffset(editingResult.cursorOffset)
         }
 
-        const nextValue =
-          props.value.slice(0, cursorOffset - 1) + props.value.slice(cursorOffset)
-        setCursorOffset(cursorOffset - 1)
-        props.onChange(nextValue)
+        if (editingResult.killBuffer !== killBuffer) {
+          setKillBuffer(editingResult.killBuffer)
+        }
+
+        if (editingResult.value !== props.value) {
+          props.onChange(editingResult.value)
+        }
+
         return
       }
-
-      if (input.length === 0) {
-        return
-      }
-
-      const nextValue =
-        props.value.slice(0, cursorOffset) + input + props.value.slice(cursorOffset)
-      const nextCursorOffset = cursorOffset + input.length
-      setCursorOffset(nextCursorOffset)
-      props.onChange(nextValue)
     },
     {
       isActive: !props.disabled,
@@ -205,93 +222,149 @@ const ChatHeader = React.memo(function ChatHeader(
   )
 })
 
-const ChatHistory = React.memo(function ChatHistory(
+const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
   props: ChatHistoryProps,
 ): React.ReactElement {
   const createElement = React.createElement
-  const history = props.entries.slice(-16)
 
   return createElement(
     Box,
     {
       flexDirection: 'column',
     },
-    history.length > 0
-      ? history.map((entry: InkChatEntry, index: number) => {
-          const key = `${entry.kind}:${index}:${entry.text.slice(0, 24)}`
+    props.entries.map((entry: InkChatEntry, index: number) => {
+      const key = `${entry.kind}:${index}:${entry.text.slice(0, 24)}`
 
-          if (entry.kind === 'assistant') {
-            return createElement(
-              Box,
-              {
-                key,
-                marginBottom: 1,
-                width: '100%',
-              },
-              createElement(Text, { wrap: 'wrap' }, entry.text),
-            )
-          }
+      if (entry.kind === 'assistant') {
+        return createElement(
+          Box,
+          {
+            key,
+            marginBottom: 1,
+            width: '100%',
+          },
+          createElement(Text, { wrap: 'wrap' }, entry.text),
+        )
+      }
 
-          if (entry.kind === 'error') {
-            return createElement(
-              Box,
-              {
-                key,
-                marginBottom: 1,
-                width: '100%',
-              },
-              createElement(
-                Text,
-                {
-                  color: 'red',
-                  wrap: 'wrap',
-                },
-                `Error: ${entry.text}`,
-              ),
-            )
-          }
+      if (entry.kind === 'error') {
+        return createElement(
+          Box,
+          {
+            key,
+            marginBottom: 1,
+            width: '100%',
+          },
+          createElement(
+            Text,
+            {
+              color: 'red',
+              wrap: 'wrap',
+            },
+            `Error: ${entry.text}`,
+          ),
+        )
+      }
 
-          return createElement(
+      return createElement(
+        Box,
+        {
+          key,
+          marginBottom: 1,
+          width: '100%',
+        },
+        createElement(
+          Box,
+          {
+            backgroundColor: COMPOSER_BACKGROUND,
+            flexDirection: 'row',
+            paddingX: 2,
+            paddingY: 1,
+            width: '100%',
+          },
+          createElement(
+            Text,
+            { color: COMPOSER_TEXT_COLOR },
+            '› ',
+          ),
+          createElement(
             Box,
             {
-              key,
-              marginBottom: 1,
-              width: '100%',
+              flexDirection: 'column',
+              flexGrow: 1,
+              flexShrink: 1,
             },
             createElement(
-              Box,
+              Text,
               {
-                backgroundColor: COMPOSER_BACKGROUND,
-                flexDirection: 'row',
-                paddingX: 2,
-                paddingY: 1,
-                width: '100%',
+                color: COMPOSER_TEXT_COLOR,
+                wrap: 'wrap',
               },
-              createElement(
-                Text,
-                { color: COMPOSER_TEXT_COLOR },
-                '› ',
-              ),
-              createElement(
-                Box,
-                {
-                  flexDirection: 'column',
-                  flexGrow: 1,
-                  flexShrink: 1,
-                },
-                createElement(
-                  Text,
-                  {
-                    color: COMPOSER_TEXT_COLOR,
-                    wrap: 'wrap',
-                  },
-                  entry.text,
-                ),
-              ),
+              entry.text,
             ),
+          ),
+        ),
+      )
+    }),
+  )
+})
+
+const ChatStaticFeed = React.memo(function ChatStaticFeed(input: {
+  bindingSummary: string | null
+  entries: readonly InkChatEntry[]
+  sessionId: string
+}): React.ReactElement {
+  const ChatStatic = Static as React.ComponentType<{
+    children: (item: ChatStaticItem, index: number) => React.ReactNode
+    items: ChatStaticItem[]
+  }>
+  // Keep the non-editing chat surface on Ink static output so old turns do not
+  // participate in future keystroke renders.
+  const staticItems: ChatStaticItem[] = [
+    {
+      kind: 'header',
+      bindingSummary: input.bindingSummary,
+      sessionId: input.sessionId,
+    },
+    {
+      kind: 'banner',
+    },
+    ...input.entries.map((entry) => ({
+      kind: 'entry' as const,
+      entry,
+    })),
+  ]
+
+  return React.createElement(
+    ChatStatic,
+    {
+      items: staticItems,
+      children: (item: ChatStaticItem, index: number) => {
+        if (item.kind === 'header') {
+          return React.createElement(ChatHeader, {
+            key: `header:${item.sessionId}`,
+            bindingSummary: item.bindingSummary,
+            sessionId: item.sessionId,
+          })
+        }
+
+        if (item.kind === 'banner') {
+          return React.createElement(
+            Box,
+            {
+              key: `banner:${index}`,
+              marginBottom: 1,
+            },
+            React.createElement(Text, { dimColor: true }, CHAT_BANNER),
           )
+        }
+
+        return React.createElement(ChatTranscriptRow, {
+          key: `entry:${index}:${item.entry.kind}:${item.entry.text.slice(0, 24)}`,
+          entries: [item.entry],
         })
-      : null,
+      },
+    },
   )
 })
 
@@ -391,6 +464,355 @@ const ChatFooter = React.memo(function ChatFooter(
 
 function clampComposerCursorOffset(offset: number, valueLength: number): number {
   return Math.max(0, Math.min(offset, valueLength))
+}
+
+function isComposerWordSeparator(character: string): boolean {
+  return COMPOSER_WORD_SEPARATORS.includes(character)
+}
+
+function isComposerWhitespace(character: string): boolean {
+  return /\s/u.test(character)
+}
+
+function moveComposerCursorLeft(state: ComposerEditingState): ComposerEditingState {
+  return {
+    ...state,
+    cursorOffset: clampComposerCursorOffset(state.cursorOffset - 1, state.value.length),
+  }
+}
+
+function moveComposerCursorRight(state: ComposerEditingState): ComposerEditingState {
+  return {
+    ...state,
+    cursorOffset: clampComposerCursorOffset(state.cursorOffset + 1, state.value.length),
+  }
+}
+
+function moveComposerCursorToStart(state: ComposerEditingState): ComposerEditingState {
+  return {
+    ...state,
+    cursorOffset: 0,
+  }
+}
+
+function moveComposerCursorToEnd(state: ComposerEditingState): ComposerEditingState {
+  return {
+    ...state,
+    cursorOffset: state.value.length,
+  }
+}
+
+function findComposerPreviousWordStart(value: string, cursorOffset: number): number {
+  let index = clampComposerCursorOffset(cursorOffset, value.length)
+
+  while (index > 0) {
+    const previousCharacter = value.slice(index - 1, index)
+    if (!isComposerWhitespace(previousCharacter)) {
+      break
+    }
+
+    index -= 1
+  }
+
+  if (index === 0) {
+    return 0
+  }
+
+  const previousCharacter = value.slice(index - 1, index)
+  const separator = isComposerWordSeparator(previousCharacter)
+
+  while (index > 0) {
+    const character = value.slice(index - 1, index)
+    if (
+      isComposerWhitespace(character) ||
+      isComposerWordSeparator(character) !== separator
+    ) {
+      break
+    }
+
+    index -= 1
+  }
+
+  return index
+}
+
+function findComposerNextWordEnd(value: string, cursorOffset: number): number {
+  let index = clampComposerCursorOffset(cursorOffset, value.length)
+
+  while (index < value.length) {
+    const character = value.slice(index, index + 1)
+    if (!isComposerWhitespace(character)) {
+      break
+    }
+
+    index += 1
+  }
+
+  if (index >= value.length) {
+    return value.length
+  }
+
+  const separator = isComposerWordSeparator(value.slice(index, index + 1))
+
+  while (index < value.length) {
+    const character = value.slice(index, index + 1)
+    if (
+      isComposerWhitespace(character) ||
+      isComposerWordSeparator(character) !== separator
+    ) {
+      break
+    }
+
+    index += 1
+  }
+
+  return index
+}
+
+function moveComposerCursorToPreviousWord(
+  state: ComposerEditingState,
+): ComposerEditingState {
+  return {
+    ...state,
+    cursorOffset: findComposerPreviousWordStart(state.value, state.cursorOffset),
+  }
+}
+
+function moveComposerCursorToNextWord(state: ComposerEditingState): ComposerEditingState {
+  return {
+    ...state,
+    cursorOffset: findComposerNextWordEnd(state.value, state.cursorOffset),
+  }
+}
+
+function replaceComposerRange(
+  state: ComposerEditingState,
+  range: {
+    end: number
+    start: number
+  },
+  replacement: string,
+): ComposerEditingState {
+  const nextValue =
+    state.value.slice(0, range.start) + replacement + state.value.slice(range.end)
+
+  return {
+    ...state,
+    cursorOffset: range.start + replacement.length,
+    value: nextValue,
+  }
+}
+
+function killComposerRange(
+  state: ComposerEditingState,
+  range: {
+    end: number
+    start: number
+  },
+): ComposerEditingState {
+  if (range.end <= range.start) {
+    return state
+  }
+
+  return {
+    ...replaceComposerRange(state, range, ''),
+    killBuffer: state.value.slice(range.start, range.end),
+  }
+}
+
+function deleteComposerBackward(state: ComposerEditingState): ComposerEditingState {
+  if (state.cursorOffset <= 0) {
+    return state
+  }
+
+  return replaceComposerRange(
+    state,
+    {
+      end: state.cursorOffset,
+      start: state.cursorOffset - 1,
+    },
+    '',
+  )
+}
+
+function deleteComposerForward(state: ComposerEditingState): ComposerEditingState {
+  if (state.cursorOffset >= state.value.length) {
+    return state
+  }
+
+  return replaceComposerRange(
+    state,
+    {
+      end: state.cursorOffset + 1,
+      start: state.cursorOffset,
+    },
+    '',
+  )
+}
+
+function deleteComposerBackwardWord(state: ComposerEditingState): ComposerEditingState {
+  return killComposerRange(state, {
+    end: state.cursorOffset,
+    start: findComposerPreviousWordStart(state.value, state.cursorOffset),
+  })
+}
+
+function deleteComposerForwardWord(state: ComposerEditingState): ComposerEditingState {
+  return killComposerRange(state, {
+    end: findComposerNextWordEnd(state.value, state.cursorOffset),
+    start: state.cursorOffset,
+  })
+}
+
+function killComposerToStart(state: ComposerEditingState): ComposerEditingState {
+  return killComposerRange(state, {
+    end: state.cursorOffset,
+    start: 0,
+  })
+}
+
+function killComposerToEnd(state: ComposerEditingState): ComposerEditingState {
+  return killComposerRange(state, {
+    end: state.value.length,
+    start: state.cursorOffset,
+  })
+}
+
+function yankComposerKillBuffer(state: ComposerEditingState): ComposerEditingState {
+  if (state.killBuffer.length === 0) {
+    return state
+  }
+
+  return replaceComposerRange(
+    state,
+    {
+      end: state.cursorOffset,
+      start: state.cursorOffset,
+    },
+    state.killBuffer,
+  )
+}
+
+function finalizeComposerEditingResult(
+  next: ComposerEditingState,
+): ComposerEditingResult {
+  return {
+    ...next,
+    handled: true,
+  }
+}
+
+export function applyComposerEditingInput(
+  state: ComposerEditingState,
+  input: string,
+  key: Key,
+): ComposerEditingResult {
+  const currentState = {
+    ...state,
+    cursorOffset: clampComposerCursorOffset(state.cursorOffset, state.value.length),
+  }
+
+  if (key.home || (key.super && key.leftArrow)) {
+    return finalizeComposerEditingResult(moveComposerCursorToStart(currentState))
+  }
+
+  if (key.end || (key.super && key.rightArrow)) {
+    return finalizeComposerEditingResult(moveComposerCursorToEnd(currentState))
+  }
+
+  if (key.leftArrow) {
+    return finalizeComposerEditingResult(
+      key.meta || key.ctrl
+        ? moveComposerCursorToPreviousWord(currentState)
+        : moveComposerCursorLeft(currentState),
+    )
+  }
+
+  if (key.rightArrow) {
+    return finalizeComposerEditingResult(
+      key.meta || key.ctrl
+        ? moveComposerCursorToNextWord(currentState)
+        : moveComposerCursorRight(currentState),
+    )
+  }
+
+  if (key.backspace) {
+    return finalizeComposerEditingResult(
+      key.super
+        ? killComposerToStart(currentState)
+        : key.meta
+          ? deleteComposerBackwardWord(currentState)
+          : deleteComposerBackward(currentState),
+    )
+  }
+
+  if (key.delete) {
+    return finalizeComposerEditingResult(
+      key.super
+        ? killComposerToEnd(currentState)
+        : key.meta
+          ? deleteComposerForwardWord(currentState)
+          : deleteComposerForward(currentState),
+    )
+  }
+
+  if (key.ctrl) {
+    switch (input) {
+      case 'a':
+        return finalizeComposerEditingResult(moveComposerCursorToStart(currentState))
+      case 'b':
+        return finalizeComposerEditingResult(moveComposerCursorLeft(currentState))
+      case 'd':
+        return finalizeComposerEditingResult(deleteComposerForward(currentState))
+      case 'e':
+        return finalizeComposerEditingResult(moveComposerCursorToEnd(currentState))
+      case 'f':
+        return finalizeComposerEditingResult(moveComposerCursorRight(currentState))
+      case 'h':
+        return finalizeComposerEditingResult(deleteComposerBackward(currentState))
+      case 'k':
+        return finalizeComposerEditingResult(killComposerToEnd(currentState))
+      case 'u':
+        return finalizeComposerEditingResult(killComposerToStart(currentState))
+      case 'w':
+        return finalizeComposerEditingResult(deleteComposerBackwardWord(currentState))
+      case 'y':
+        return finalizeComposerEditingResult(yankComposerKillBuffer(currentState))
+      default:
+        break
+    }
+  }
+
+  if (key.meta) {
+    switch (input) {
+      case 'b':
+        return finalizeComposerEditingResult(moveComposerCursorToPreviousWord(currentState))
+      case 'd':
+        return finalizeComposerEditingResult(deleteComposerForwardWord(currentState))
+      case 'f':
+        return finalizeComposerEditingResult(moveComposerCursorToNextWord(currentState))
+      default:
+        break
+    }
+  }
+
+  if (input.length === 0) {
+    return {
+      ...currentState,
+      handled: false,
+    }
+  }
+
+  return finalizeComposerEditingResult(
+    replaceComposerRange(
+      currentState,
+      {
+        end: currentState.cursorOffset,
+        start: currentState.cursorOffset,
+      },
+      input,
+    ),
+  )
 }
 
 function renderComposerValue(input: {
@@ -1084,19 +1506,10 @@ export async function runAssistantChatWithInk(
           paddingX: 1,
           paddingY: 1,
         },
-        createElement(ChatHeader, {
+        createElement(ChatStaticFeed, {
           bindingSummary,
-          sessionId: session.sessionId,
-        }),
-        createElement(
-          Box,
-          {
-            marginBottom: 1,
-          },
-          createElement(Text, { dimColor: true }, CHAT_BANNER),
-        ),
-        createElement(ChatHistory, {
           entries,
+          sessionId: session.sessionId,
         }),
         createElement(
           Box,
