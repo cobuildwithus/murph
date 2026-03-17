@@ -4,14 +4,17 @@ import {
   scoreSearchDocuments,
   type SearchCitation,
   type SearchDocument,
+  type SearchableDocument,
   type SearchFilters,
   type SearchHit,
   type SearchResult,
 } from "./search-shared.js";
 
+export { scoreSearchDocuments } from "./search-shared.js";
 export type {
   SearchCitation,
   SearchDocument,
+  SearchableDocument,
   SearchFilters,
   SearchHit,
   SearchResult,

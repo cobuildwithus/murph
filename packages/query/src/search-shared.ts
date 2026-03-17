@@ -46,7 +46,7 @@ export interface SearchResult {
   hits: SearchHit[];
 }
 
-export interface SearchDocument {
+export interface SearchableDocument {
   recordId: string;
   aliasIds: string[];
   recordType: VaultRecordType;
@@ -57,11 +57,15 @@ export interface SearchDocument {
   date: string | null;
   experimentSlug: string | null;
   tags: string[];
-  path: string;
+  path?: string | null;
   titleText: string;
   bodyText: string;
   tagsText: string;
   structuredText: string;
+}
+
+export interface SearchDocument extends SearchableDocument {
+  path: string;
 }
 
 export function materializeSearchDocument(record: VaultRecord): SearchDocument {
@@ -110,10 +114,10 @@ export function materializeSearchDocuments(
   return records.map(materializeSearchDocument);
 }
 
-export function filterSearchDocuments(
-  documents: readonly SearchDocument[],
+export function filterSearchDocuments<TDocument extends SearchableDocument>(
+  documents: readonly TDocument[],
   filters: SearchFilters,
-): SearchDocument[] {
+): TDocument[] {
   const recordTypeSet = filters.recordTypes?.length
     ? new Set(filters.recordTypes)
     : null;
@@ -163,7 +167,7 @@ export function filterSearchDocuments(
 }
 
 export function scoreSearchDocuments(
-  documents: readonly SearchDocument[],
+  documents: readonly SearchableDocument[],
   query: string,
   filters: SearchFilters = {},
 ): SearchResult {
@@ -195,7 +199,7 @@ export function scoreSearchDocuments(
 }
 
 export function scoreSearchDocument(
-  candidate: SearchDocument,
+  candidate: SearchableDocument,
   normalizedQuery: string,
   terms: readonly string[],
 ): SearchHit | null {
@@ -260,12 +264,12 @@ export function scoreSearchDocument(
     date: candidate.date,
     experimentSlug: candidate.experimentSlug,
     tags: candidate.tags,
-    path: candidate.path,
+    path: candidate.path ?? "",
     snippet: buildSnippet(candidate, terms),
     score: Number(score.toFixed(4)),
     matchedTerms: [...matchedTerms].sort(),
     citation: {
-      path: candidate.path,
+      path: candidate.path ?? "",
       recordId: candidate.recordId,
       aliasIds: candidate.aliasIds,
     },
@@ -291,7 +295,10 @@ export function compareSearchHits(left: SearchHit, right: SearchHit): number {
   return left.recordId.localeCompare(right.recordId);
 }
 
-export function buildSnippet(candidate: SearchDocument, terms: readonly string[]): string {
+export function buildSnippet(
+  candidate: SearchableDocument,
+  terms: readonly string[],
+): string {
   for (const source of [
     candidate.bodyText,
     candidate.titleText,

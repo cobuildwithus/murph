@@ -30,6 +30,10 @@ import {
 } from "../src/index.js";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.js";
 import { parseMarkdownDocument } from "../src/markdown.js";
+import {
+  scoreSearchDocuments,
+  type SearchableDocument,
+} from "../src/search.js";
 
 test("parseMarkdownDocument keeps tolerant parsing explicit", () => {
   const parsed = parseMarkdownDocument(`---
@@ -974,6 +978,81 @@ test("searchVault orders equal scores by recency and trims long snippets around 
     ["evt_caffeine_new", "evt_caffeine_old"],
   );
   assert.match(result.hits[0]?.snippet ?? "", /^\.\.\..+\.\.\.$/);
+});
+
+test("scoreSearchDocuments preserves shared hyphenated, Unicode, and one-character token behavior", () => {
+  const documents: SearchableDocument[] = [
+    {
+      aliasIds: [],
+      bodyText: "Post-run recovery note.",
+      date: "2026-03-12",
+      experimentSlug: null,
+      kind: "note",
+      occurredAt: "2026-03-12T09:00:00Z",
+      recordId: "evt_post_run",
+      recordType: "event",
+      stream: null,
+      structuredText: "",
+      tags: [],
+      tagsText: "",
+      title: "Recovery note",
+      titleText: "Recovery note",
+    },
+    {
+      aliasIds: [],
+      bodyText: "Post run recovery note.",
+      date: "2026-03-11",
+      experimentSlug: null,
+      kind: "note",
+      occurredAt: "2026-03-11T09:00:00Z",
+      recordId: "evt_post_run_split",
+      recordType: "event",
+      stream: null,
+      structuredText: "",
+      tags: [],
+      tagsText: "",
+      title: "Recovery note",
+      titleText: "Recovery note",
+    },
+    {
+      aliasIds: [],
+      bodyText: "睡眠 quality improved after the walk.",
+      date: "2026-03-13",
+      experimentSlug: null,
+      kind: "note",
+      occurredAt: "2026-03-13T09:00:00Z",
+      recordId: "evt_unicode",
+      recordType: "event",
+      stream: null,
+      structuredText: "",
+      tags: [],
+      tagsText: "",
+      title: "Unicode note",
+      titleText: "Unicode note",
+    },
+  ];
+
+  const hyphenated = scoreSearchDocuments(documents, "post-run", {
+    includeSamples: true,
+    limit: 10,
+  });
+  assert.deepEqual(hyphenated.hits.map((hit) => hit.recordId), ["evt_post_run"]);
+  assert.equal(hyphenated.hits[0]?.path, "");
+  assert.match(hyphenated.hits[0]?.snippet ?? "", /post-run/i);
+
+  const unicode = scoreSearchDocuments(documents, "睡眠", {
+    includeSamples: true,
+    limit: 10,
+  });
+  assert.deepEqual(unicode.hits.map((hit) => hit.recordId), ["evt_unicode"]);
+  assert.deepEqual(unicode.hits[0]?.matchedTerms, ["睡眠"]);
+
+  const oneCharacter = scoreSearchDocuments(documents, "a", {
+    includeSamples: true,
+    limit: 10,
+  });
+  assert.equal(oneCharacter.total, 0);
+  assert.deepEqual(oneCharacter.hits, []);
 });
 
 test("buildTimeline applies toggles, fallback timestamps, and filter caps", () => {

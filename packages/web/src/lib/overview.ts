@@ -1,7 +1,15 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { buildTimeline, readVaultTolerant, summarizeDailySamples } from "@healthybob/query";
+import {
+  scoreSearchDocuments,
+  type SearchableDocument,
+} from "@healthybob/query/search";
+import {
+  buildTimeline,
+  readVaultTolerant,
+  summarizeDailySamples,
+} from "@healthybob/query";
 
 import {
   buildExampleVaultPath,
@@ -130,18 +138,6 @@ export interface LoadVaultOverviewOptions {
   sampleLimit?: number;
   timelineLimit?: number;
   vaultRoot?: string | null;
-}
-
-interface SafeSearchFields {
-  bodyText: string;
-  structuredText: string;
-  tagsText: string;
-  titleText: string;
-}
-
-interface ScoredOverviewSearchHit extends OverviewSearchHit {
-  occurredAt: string | null;
-  score: number;
 }
 
 export function normalizeOverviewQuery(
@@ -402,24 +398,17 @@ function searchVaultSafely(
   vault: VaultReadModel,
   query: string,
 ): OverviewSearchResult {
-  const normalizedQuery = query.trim();
-  const terms = tokenize(normalizedQuery);
-
-  if (terms.length === 0) {
-    return {
-      hits: [],
-      query: normalizedQuery,
-      total: 0,
-    };
-  }
-
-  const hits = vault.records
-    .map((record) => scoreOverviewSearchRecord(record, normalizedQuery, terms))
-    .filter((entry): entry is ScoredOverviewSearchHit => entry !== null)
-    .sort(compareOverviewSearchHits);
+  const result = scoreSearchDocuments(
+    vault.records.map(buildSafeSearchDocument),
+    query,
+    {
+      includeSamples: true,
+      limit: DEFAULT_SEARCH_LIMIT,
+    },
+  );
 
   return {
-    hits: hits.slice(0, DEFAULT_SEARCH_LIMIT).map((hit) => ({
+    hits: result.hits.map((hit) => ({
       date: hit.date,
       kind: hit.kind,
       recordId: hit.recordId,
@@ -427,85 +416,32 @@ function searchVaultSafely(
       snippet: hit.snippet,
       title: hit.title,
     })),
-    query: normalizedQuery,
-    total: hits.length,
+    query: result.query,
+    total: result.total,
   };
 }
 
-function scoreOverviewSearchRecord(
-  record: VaultRecordModel,
-  normalizedQuery: string,
-  terms: readonly string[],
-): ScoredOverviewSearchHit | null {
-  const fields = buildSafeSearchFields(record);
-  const normalizedPhrase = normalizedQuery.toLowerCase();
-  const matchedTerms = new Set<string>();
-
-  const titleLower = fields.titleText.toLowerCase();
-  const bodyLower = fields.bodyText.toLowerCase();
-  const tagsLower = fields.tagsText.toLowerCase();
-  const structuredLower = fields.structuredText.toLowerCase();
-
-  const titleMetrics = scoreText(titleLower, terms);
-  const bodyMetrics = scoreText(bodyLower, terms);
-  const tagMetrics = scoreText(tagsLower, terms);
-  const structuredMetrics = scoreText(structuredLower, terms);
-
-  accumulateMatchedTerms(matchedTerms, titleMetrics.matchedTerms);
-  accumulateMatchedTerms(matchedTerms, bodyMetrics.matchedTerms);
-  accumulateMatchedTerms(matchedTerms, tagMetrics.matchedTerms);
-  accumulateMatchedTerms(matchedTerms, structuredMetrics.matchedTerms);
-
-  if (matchedTerms.size === 0) {
-    return null;
-  }
-
-  let score = 0;
-
-  if (titleLower.includes(normalizedPhrase)) {
-    score += 12;
-  }
-
-  if (bodyLower.includes(normalizedPhrase)) {
-    score += 6;
-  }
-
-  if (tagsLower.includes(normalizedPhrase) || structuredLower.includes(normalizedPhrase)) {
-    score += 4;
-  }
-
-  score += titleMetrics.count * 4.5;
-  score += bodyMetrics.count * 1.75;
-  score += tagMetrics.count * 3.5;
-  score += structuredMetrics.count * 0.9;
-  score += (matchedTerms.size / terms.length) * 6;
-
-  if (matchedTerms.size === terms.length && terms.length > 1) {
-    score += 3;
-  }
-
+function buildSafeSearchDocument(record: VaultRecordModel): SearchableDocument {
   return {
+    aliasIds: record.lookupIds,
+    bodyText: compactStrings([record.body]).join("\n").trim(),
     date: record.date,
+    experimentSlug: record.experimentSlug,
     kind: record.kind,
     occurredAt: record.occurredAt,
+    path: null,
     recordId: record.displayId,
     recordType: record.recordType,
-    score,
-    snippet: buildSafeSnippet(fields, terms),
-    title: record.title ?? record.displayId,
-  };
-}
-
-function buildSafeSearchFields(record: VaultRecordModel): SafeSearchFields {
-  return {
-    bodyText: compactStrings([record.body]).join("\n").trim(),
+    stream: record.stream,
     structuredText: compactStrings([
       record.displayId,
       record.primaryLookupId,
       ...record.lookupIds,
       ...(record.relatedIds ?? []),
     ]).join("\n"),
+    tags: record.tags,
     tagsText: compactStrings(record.tags).join(" "),
+    title: record.title,
     titleText: compactStrings([
       record.title,
       record.kind,
@@ -514,114 +450,6 @@ function buildSafeSearchFields(record: VaultRecordModel): SafeSearchFields {
       record.experimentSlug,
     ]).join(" · "),
   };
-}
-
-function compareOverviewSearchHits(
-  left: ScoredOverviewSearchHit,
-  right: ScoredOverviewSearchHit,
-): number {
-  if (right.score !== left.score) {
-    return right.score - left.score;
-  }
-
-  const leftDate = left.occurredAt ?? left.date ?? "";
-  const rightDate = right.occurredAt ?? right.date ?? "";
-
-  if (rightDate !== leftDate) {
-    return rightDate.localeCompare(leftDate);
-  }
-
-  return left.recordId.localeCompare(right.recordId);
-}
-
-function buildSafeSnippet(fields: SafeSearchFields, terms: readonly string[]): string {
-  const sourceText =
-    fields.bodyText || fields.titleText || fields.structuredText || fields.tagsText || "";
-
-  if (!sourceText) {
-    return "No matching text preview available.";
-  }
-
-  const lowerSource = sourceText.toLowerCase();
-  let matchIndex = -1;
-
-  for (const term of terms) {
-    const candidateIndex = lowerSource.indexOf(term);
-    if (candidateIndex >= 0 && (matchIndex < 0 || candidateIndex < matchIndex)) {
-      matchIndex = candidateIndex;
-    }
-  }
-
-  if (matchIndex < 0) {
-    return truncateSnippet(sourceText);
-  }
-
-  const start = Math.max(0, matchIndex - 56);
-  const end = Math.min(sourceText.length, matchIndex + 104);
-  const prefix = start > 0 ? "..." : "";
-  const suffix = end < sourceText.length ? "..." : "";
-
-  return `${prefix}${sourceText.slice(start, end).trim()}${suffix}`;
-}
-
-function scoreText(
-  text: string,
-  terms: readonly string[],
-): { count: number; matchedTerms: string[] } {
-  let count = 0;
-  const matchedTerms: string[] = [];
-
-  for (const term of terms) {
-    const occurrences = countOccurrences(text, term);
-    if (occurrences > 0) {
-      count += occurrences;
-      matchedTerms.push(term);
-    }
-  }
-
-  return {
-    count,
-    matchedTerms,
-  };
-}
-
-function countOccurrences(text: string, term: string): number {
-  if (!term) {
-    return 0;
-  }
-
-  let count = 0;
-  let startIndex = 0;
-
-  while (startIndex < text.length) {
-    const matchIndex = text.indexOf(term, startIndex);
-    if (matchIndex < 0) {
-      return count;
-    }
-
-    count += 1;
-    startIndex = matchIndex + term.length;
-  }
-
-  return count;
-}
-
-function accumulateMatchedTerms(target: Set<string>, matchedTerms: readonly string[]): void {
-  for (const term of matchedTerms) {
-    target.add(term);
-  }
-}
-
-function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9_]+/u)
-    .map((term) => term.trim())
-    .filter((term) => term.length > 0);
-}
-
-function truncateSnippet(value: string): string {
-  return value.length <= 160 ? value : `${value.slice(0, 157)}...`;
 }
 
 function compactStrings(values: readonly (string | null | undefined)[]): string[] {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { test } from "vitest";
@@ -14,6 +15,17 @@ import {
   rememberLaunchCwd,
 } from "../src/lib/vault";
 import { createWebFixtureVault, destroyWebFixtureVault } from "./web-fixture";
+
+async function writeFixtureFile(
+  vaultRoot: string,
+  relativePath: string,
+  contents: string,
+): Promise<void> {
+  await mkdir(path.dirname(path.join(vaultRoot, relativePath)), {
+    recursive: true,
+  });
+  await writeFile(path.join(vaultRoot, relativePath), contents, "utf8");
+}
 
 test("getConfiguredVaultRoot resolves relative paths from the launch cwd when preserved", () => {
   const resolved = getConfiguredVaultRoot(
@@ -105,6 +117,79 @@ test("loadVaultOverview summarizes a readable vault without leaking source paths
     const serialized = JSON.stringify(result);
     assert.equal(serialized.includes(vaultRoot), false);
     assert.equal(serialized.includes("ledger/events/2026/2026-03.jsonl"), false);
+  } finally {
+    await destroyWebFixtureVault(vaultRoot);
+  }
+});
+
+test("loadVaultOverview reuses shared tokenization while keeping overview search path-safe", async () => {
+  const vaultRoot = await createWebFixtureVault();
+
+  try {
+    await writeFixtureFile(
+      vaultRoot,
+      "bank/experiments/post-run-unicode-probe.md",
+      `---
+schemaVersion: hv/experiment@v1
+experimentId: exp_search_probe_01
+slug: recovery-probe
+title: Recovery Probe
+status: active
+startedOn: 2026-03-13
+tags:
+  - recovery
+---
+# Recovery Probe
+
+Post-run 睡眠 felt steadier after stretching.
+`,
+    );
+    await writeFixtureFile(
+      vaultRoot,
+      "bank/experiments/path-only-token-probe.md",
+      `---
+schemaVersion: hv/experiment@v1
+experimentId: exp_path_probe_01
+slug: quiet-probe
+title: Quiet Probe
+status: active
+startedOn: 2026-03-13
+---
+# Quiet Probe
+
+Ordinary notes without the filename token.
+`,
+    );
+
+    const hyphenated = await loadVaultOverview({
+      query: "post-run",
+      vaultRoot,
+    });
+    assert.equal(hyphenated.status, "ready");
+    assert.equal(hyphenated.search?.total, 1);
+    assert.equal(hyphenated.search?.hits[0]?.title, "Recovery Probe");
+
+    const unicode = await loadVaultOverview({
+      query: "睡眠",
+      vaultRoot,
+    });
+    assert.equal(unicode.status, "ready");
+    assert.equal(unicode.search?.total, 1);
+    assert.equal(unicode.search?.hits[0]?.title, "Recovery Probe");
+
+    const oneCharacter = await loadVaultOverview({
+      query: "a",
+      vaultRoot,
+    });
+    assert.equal(oneCharacter.status, "ready");
+    assert.equal(oneCharacter.search?.total, 0);
+
+    const pathProbe = await loadVaultOverview({
+      query: "path-only-token-probe",
+      vaultRoot,
+    });
+    assert.equal(pathProbe.status, "ready");
+    assert.equal(pathProbe.search?.total, 0);
   } finally {
     await destroyWebFixtureVault(vaultRoot);
   }
