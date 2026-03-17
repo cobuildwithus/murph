@@ -1,5 +1,10 @@
 import { readFile } from 'node:fs/promises'
-import { loadRuntimeModule } from '../runtime-import.js'
+import {
+  loadQueryRuntime as loadBaseQueryRuntime,
+  type QueryRuntimeModule,
+  type QueryVaultReadModel as QueryReadModel,
+  type QueryVaultRecord as QueryRecord,
+} from '../query-runtime.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   inferEntityKind,
@@ -7,52 +12,7 @@ import {
 } from '../usecases/shared.js'
 
 type JsonObject = Record<string, unknown>
-
-export interface QueryRecord {
-  displayId: string
-  primaryLookupId: string
-  lookupIds: string[]
-  recordType: string
-  sourcePath: string
-  occurredAt: string | null
-  date: string | null
-  kind: string | null
-  status?: string | null
-  stream: string | null
-  experimentSlug: string | null
-  title: string | null
-  tags: string[]
-  data: JsonObject
-  body: string | null
-  frontmatter: JsonObject | null
-  relatedIds?: string[]
-}
-
-export interface QueryReadModel {
-  records: QueryRecord[]
-  samples: QueryRecord[]
-  audits: QueryRecord[]
-}
-
-export interface QueryRuntimeModule {
-  readVault(vaultRoot: string): Promise<QueryReadModel>
-  lookupRecordById(vault: QueryReadModel, recordId: string): QueryRecord | null
-  listRecords(
-    vault: QueryReadModel,
-    filters?: {
-      ids?: string[]
-      recordTypes?: string[]
-      kinds?: string[]
-      streams?: string[]
-      experimentSlug?: string
-      date?: string
-      from?: string
-      to?: string
-      tags?: string[]
-      text?: string
-    },
-  ): QueryRecord[]
-}
+export type { QueryReadModel, QueryRecord, QueryRuntimeModule }
 
 export interface CommandEntityLink {
   id: string
@@ -93,7 +53,7 @@ let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
   queryRuntimePromise ??= (async () => {
     try {
-      const runtime = await loadRuntimeModule<QueryRuntimeModule>('@healthybob/query')
+      const runtime = await loadBaseQueryRuntime()
 
       if (
         typeof runtime.readVault !== 'function' ||

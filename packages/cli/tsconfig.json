@@ -14,6 +14,12 @@
       ],
       "@healthybob/runtime-state/*": [
         "packages/runtime-state/dist/*"
+      ],
+      "@healthybob/query": [
+        "packages/query/dist/index.d.ts"
+      ],
+      "@healthybob/query/*": [
+        "packages/query/dist/*"
       ]
     },
     "rootDir": "src",

@@ -1,63 +1,67 @@
 import { loadRuntimeModule } from './runtime-import.js'
 
-export interface QueryRuntimeModule {
-  readVault(vaultRoot: string): Promise<unknown>
-  searchVaultRuntime(
-    vaultRoot: string,
-    query: string,
-    filters: {
-      recordTypes?: string[]
-      kinds?: string[]
-      streams?: string[]
-      experimentSlug?: string
-      from?: string
-      to?: string
-      tags?: string[]
-      limit?: number
-    },
-    options?: {
-      backend?: 'auto' | 'scan' | 'sqlite'
-    },
-  ): Promise<{
-    query: string
-    total: number
-    hits: unknown[]
-  }>
-  getSqliteSearchStatus(vaultRoot: string): {
-    backend: 'sqlite'
-    dbPath: string
-    exists: boolean
-    schemaVersion: string | null
-    indexedAt: string | null
-    documentCount: number
-  }
-  rebuildSqliteSearchIndex(vaultRoot: string): Promise<{
-    backend: 'sqlite'
-    dbPath: string
-    exists: boolean
-    schemaVersion: string | null
-    indexedAt: string | null
-    documentCount: number
-    rebuilt: true
-  }>
-  buildTimeline(
-    vault: unknown,
-    filters: {
-      from?: string
-      to?: string
-      experimentSlug?: string
-      kinds?: string[]
-      streams?: string[]
-      includeJournal?: boolean
-      includeEvents?: boolean
-      includeAssessments?: boolean
-      includeHistory?: boolean
-      includeProfileSnapshots?: boolean
-      includeDailySampleSummaries?: boolean
-      limit?: number
-    },
-  ): unknown[]
-}
+type QueryModule = typeof import('@healthybob/query')
+
+export type QueryRuntimeModule = Pick<
+  QueryModule,
+  | 'ALL_VAULT_RECORD_TYPES'
+  | 'buildExportPack'
+  | 'buildTimeline'
+  | 'getSqliteSearchStatus'
+  | 'inferIdEntityKind'
+  | 'isQueryableLookupId'
+  | 'listEntities'
+  | 'listRecords'
+  | 'lookupEntityById'
+  | 'lookupRecordById'
+  | 'readVault'
+  | 'readVaultTolerant'
+  | 'rebuildSqliteSearchIndex'
+  | 'searchVaultRuntime'
+>
+
+export type QueryVaultReadModel = Awaited<
+  ReturnType<QueryRuntimeModule['readVault']>
+>
+export type QueryVaultRecord = NonNullable<
+  ReturnType<QueryRuntimeModule['lookupRecordById']>
+>
+export type QueryVaultRecordType = QueryVaultRecord['recordType']
+export type QueryCanonicalEntity = NonNullable<
+  ReturnType<QueryRuntimeModule['lookupEntityById']>
+>
+export type QueryEntityFamily = QueryCanonicalEntity['family']
+export type QueryListEntityFilters = NonNullable<
+  Parameters<QueryRuntimeModule['listEntities']>[1]
+>
+export type QueryListRecordFilters = NonNullable<
+  Parameters<QueryRuntimeModule['listRecords']>[1]
+>
+export type QuerySearchFilters = NonNullable<
+  Parameters<QueryRuntimeModule['searchVaultRuntime']>[2]
+>
+export type QuerySearchOptions = NonNullable<
+  Parameters<QueryRuntimeModule['searchVaultRuntime']>[3]
+>
+export type QuerySearchResult = Awaited<
+  ReturnType<QueryRuntimeModule['searchVaultRuntime']>
+>
+export type QuerySqliteSearchStatus = ReturnType<
+  QueryRuntimeModule['getSqliteSearchStatus']
+>
+export type QuerySqliteSearchRebuildResult = Awaited<
+  ReturnType<QueryRuntimeModule['rebuildSqliteSearchIndex']>
+>
+export type QueryTimelineFilters = NonNullable<
+  Parameters<QueryRuntimeModule['buildTimeline']>[1]
+>
+export type QueryTimelineEntry = ReturnType<
+  QueryRuntimeModule['buildTimeline']
+>[number]
+export type QueryExportPackOptions = NonNullable<
+  Parameters<QueryRuntimeModule['buildExportPack']>[1]
+>
+export type QueryExportPack = ReturnType<QueryRuntimeModule['buildExportPack']>
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
   return loadRuntimeModule<QueryRuntimeModule>('@healthybob/query')

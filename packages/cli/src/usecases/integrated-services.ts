@@ -471,22 +471,30 @@ function createIntegratedQueryServices(): QueryServices {
       } = input
       const { query } = await loadIntegratedRuntime()
       const readModel = await query.readVault(vault)
-      const recordTypes = normalizeRepeatableFlagOption(recordType, "record-type") ?? []
+      const requestedRecordTypes = normalizeRepeatableFlagOption(recordType, "record-type") ?? []
+      const supportedRecordTypes = new Set(query.ALL_VAULT_RECORD_TYPES)
+      const recordTypes = requestedRecordTypes.filter(
+        (entry): entry is (typeof query.ALL_VAULT_RECORD_TYPES)[number] =>
+          supportedRecordTypes.has(entry as (typeof query.ALL_VAULT_RECORD_TYPES)[number]),
+      )
       const streams = normalizeRepeatableFlagOption(stream, "stream") ?? []
       const tags = normalizeRepeatableFlagOption(tag, "tag") ?? []
-      const items = query
-        .listEntities(readModel, {
-          families: recordTypes.length > 0 ? recordTypes : undefined,
-          statuses: status ? [status] : undefined,
-          streams: streams.length > 0 ? streams : undefined,
-          experimentSlug: experiment,
-          from,
-          tags: tags.length > 0 ? tags : undefined,
-          to,
-        })
-        .filter((entity) => matchesGenericKindFilter(entity, kind))
-        .slice(0, limit)
-        .map(toGenericListItem)
+      const items =
+        requestedRecordTypes.length > 0 && recordTypes.length === 0
+          ? []
+          : query
+              .listEntities(readModel, {
+                families: recordTypes.length > 0 ? recordTypes : undefined,
+                statuses: status ? [status] : undefined,
+                streams: streams.length > 0 ? streams : undefined,
+                experimentSlug: experiment,
+                from,
+                tags: tags.length > 0 ? tags : undefined,
+                to,
+              })
+              .filter((entity) => matchesGenericKindFilter(entity, kind))
+              .slice(0, limit)
+              .map(toGenericListItem)
 
       return {
         vault,

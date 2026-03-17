@@ -29,6 +29,11 @@ import type {
   HealthQueryServiceMethods,
   JsonObject,
 } from "../health-cli-method-types.js"
+import type {
+  QueryCanonicalEntity,
+  QueryRuntimeModule as SharedQueryRuntimeModule,
+  QueryVaultRecord,
+} from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
 
@@ -652,53 +657,11 @@ export interface ImportersRuntimeModule {
 
 export type ImportersRuntime = ReturnType<ImportersRuntimeModule["createImporters"]>
 
-export interface QueryRecord {
-  id: string
-  recordType: string
-  sourcePath?: string | null
-  occurredAt?: string | null
-  kind?: string | null
-  title?: string | null
-  body?: string | null
-  data: Record<string, unknown>
-}
+export type QueryRecord = QueryVaultRecord
 
-export interface QueryEntity {
-  entityId: string
-  family: string
-  kind: string
-  path: string
-  title: string | null
-  occurredAt: string | null
-  body: string | null
-  attributes: Record<string, unknown>
-  relatedIds: string[]
-}
+export type QueryEntity = QueryCanonicalEntity
 
-export interface QueryRuntimeModule extends HealthQueryRuntimeMethods {
-  readVault(vaultRoot: string): Promise<unknown>
-  readVaultTolerant(vaultRoot: string): Promise<unknown>
-  lookupEntityById(readModel: unknown, entityId: string): QueryEntity | null
-  listEntities(
-    readModel: unknown,
-    filters?: Record<string, unknown>,
-  ): QueryEntity[]
-  lookupRecordById(readModel: unknown, recordId: string): QueryRecord | null
-  listRecords(
-    readModel: unknown,
-    filters?: Record<string, unknown>,
-  ): QueryRecord[]
-  buildExportPack(
-    readModel: unknown,
-    options?: Record<string, unknown>,
-  ): {
-    packId: string
-    files: Array<{
-      path: string
-      contents: string
-    }>
-  }
-}
+export type QueryRuntimeModule = SharedQueryRuntimeModule & HealthQueryRuntimeMethods
 
 export interface IntegratedRuntime {
   core: CoreRuntimeModule

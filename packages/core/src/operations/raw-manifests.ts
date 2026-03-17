@@ -4,7 +4,9 @@ import { promises as fs } from "node:fs";
 
 import {
   CONTRACT_SCHEMA_VERSION,
+  jsonObjectSchema,
   rawImportManifestSchema,
+  type JsonObject,
   type RawImportKind,
   type RawImportManifestArtifact,
 } from "@healthybob/contracts";
@@ -73,6 +75,23 @@ export function resolveRawManifestPath(artifacts: readonly { relativePath: strin
   return path.posix.join(resolveRawArtifactDirectory(artifacts), "manifest.json");
 }
 
+function sanitizeManifestProvenance(provenance: Record<string, unknown>): JsonObject {
+  let serialized: string | undefined;
+
+  try {
+    serialized = JSON.stringify(provenance);
+  } catch (error) {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new TypeError(`raw import manifest provenance must be JSON-serializable${detail}`);
+  }
+
+  if (serialized === undefined) {
+    throw new TypeError("raw import manifest provenance must be JSON-serializable");
+  }
+
+  return jsonObjectSchema.parse(JSON.parse(serialized));
+}
+
 export async function stageRawImportManifest({
   batch,
   importId,
@@ -93,7 +112,7 @@ export async function stageRawImportManifest({
     artifacts: await Promise.all(
       artifacts.map(({ raw, role }) => describeRawArtifact(raw, role)),
     ),
-    provenance,
+    provenance: sanitizeManifestProvenance(provenance),
   });
 
   await batch.stageTextWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
