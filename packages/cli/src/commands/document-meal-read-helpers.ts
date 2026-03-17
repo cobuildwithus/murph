@@ -1,45 +1,17 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { rawImportManifestSchema, type RawImportManifest } from '@healthybob/contracts'
 import { z } from 'incur'
+import { firstString } from '../command-helpers.js'
+import {
+  loadQueryRuntime,
+  type QueryRuntimeModule,
+  type QueryVaultRecord as VaultRecord,
+} from '../query-runtime.js'
 import { pathSchema } from '../vault-cli-contracts.js'
-import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 
 type JsonObject = Record<string, unknown>
-
-interface VaultRecord {
-  id: string
-  displayId: string
-  primaryLookupId: string
-  lookupIds: string[]
-  recordType: string
-  sourcePath: string
-  occurredAt: string | null
-  kind: string | null
-  title: string | null
-  data: JsonObject
-  body: string | null
-}
-
-interface VaultReadModel {
-  records: VaultRecord[]
-}
-
-interface QueryRuntimeModule {
-  inferIdEntityKind(id: string): string
-  isQueryableLookupId(id: string): boolean
-  listRecords(
-    vault: VaultReadModel,
-    filters?: {
-      recordTypes?: string[]
-      kinds?: string[]
-      from?: string
-      to?: string
-    },
-  ): VaultRecord[]
-  lookupRecordById(vault: VaultReadModel, id: string): VaultRecord | null
-  readVault(vaultRoot: string): Promise<VaultReadModel>
-}
 
 type DocumentMealKind = 'document' | 'meal'
 
@@ -61,21 +33,6 @@ export const mealLookupSchema = z
   )
   .describe('Meal id (`meal_*`) or event lookup id (`evt_*`).')
 
-const rawImportManifestSchema = z
-  .object({
-    schemaVersion: z.string().min(1),
-    importId: z.string().min(1),
-    importKind: z.string().min(1),
-    importedAt: z.string().min(1),
-    source: z.string().min(1).nullable(),
-    rawDirectory: pathSchema,
-    artifacts: z.array(z.record(z.string(), z.unknown())),
-    provenance: z.record(z.string(), z.unknown()),
-  })
-  .passthrough()
-
-type RawImportManifest = z.infer<typeof rawImportManifestSchema>
-
 export const rawImportManifestResultSchema = z.object({
   vault: pathSchema,
   entityId: z.string().min(1),
@@ -95,17 +52,6 @@ function stringArray(value: unknown): string[] {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))]
-}
-
-function firstString(source: JsonObject, keys: readonly string[]): string | null {
-  for (const key of keys) {
-    const value = source[key]
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value.trim()
-    }
-  }
-
-  return null
 }
 
 function isPlainObject(value: unknown): value is JsonObject {
@@ -179,10 +125,6 @@ function resolveManifestFile(record: VaultRecord, expectedKind: DocumentMealKind
   }
 
   return path.posix.join(directories[0], 'manifest.json')
-}
-
-async function loadQueryRuntime() {
-  return loadRuntimeModule<QueryRuntimeModule>('@healthybob/query')
 }
 
 async function loadOwnedRecord(
@@ -286,7 +228,7 @@ async function listOwnedRecords(input: {
       to: input.to,
     })
     .slice(0, DEFAULT_LIST_LIMIT)
-    .map((record) => toReadEntity(query, record))
+    .map((record: VaultRecord) => toReadEntity(query, record))
 
   return {
     vault: input.vault,

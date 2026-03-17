@@ -7,6 +7,13 @@ import {
   assistantChatProviderValues,
   assistantSandboxValues,
 } from './assistant-cli-contracts.js'
+import {
+  resolveEffectiveTopLevelToken,
+} from './command-helpers.js'
+export {
+  ROOT_OPTIONS_WITH_VALUES,
+  resolveEffectiveTopLevelToken,
+} from './command-helpers.js'
 
 const OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
 const OPERATOR_CONFIG_DIRECTORY = '.healthybob'
@@ -34,13 +41,6 @@ export type OperatorConfig = z.infer<typeof operatorConfigSchema>
 export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
-
-export const ROOT_OPTIONS_WITH_VALUES = new Set([
-  '--filter-output',
-  '--format',
-  '--token-limit',
-  '--token-offset',
-])
 
 export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'allergy',
@@ -191,29 +191,6 @@ export function hasExplicitVaultOption(args: readonly string[]): boolean {
   }
 
   return false
-}
-
-export function resolveEffectiveTopLevelToken(args: readonly string[]): string | null {
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index]
-    if (!token) {
-      continue
-    }
-
-    if (token === '--') {
-      return (args[index + 1] as string | undefined) ?? null
-    }
-
-    if (!token.startsWith('-')) {
-      return token
-    }
-
-    if (ROOT_OPTIONS_WITH_VALUES.has(token)) {
-      index += 1
-    }
-  }
-
-  return null
 }
 
 export function applyDefaultVaultToArgs(

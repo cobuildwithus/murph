@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   emptyArgsSchema,
+  parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
 } from '../command-helpers.js'
@@ -41,7 +42,6 @@ import {
 } from '../inbox-model-harness.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-import { VaultCliError } from '../vault-cli-errors.js'
 
 const inboxInitOptionFields = {
   rebuild: z
@@ -855,44 +855,4 @@ export function registerInboxCommands(
   inbox.command(model)
 
   cli.command(inbox)
-}
-
-function parseHeadersJsonOption(value?: string) {
-  if (!value) {
-    return undefined
-  }
-
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(value)
-  } catch (error) {
-    throw new VaultCliError(
-      'invalid_payload',
-      'headersJson must be a valid JSON object.',
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new VaultCliError(
-      'invalid_payload',
-      'headersJson must be a JSON object with string values.',
-    )
-  }
-
-  const headers: Record<string, string> = {}
-  for (const [key, candidate] of Object.entries(parsed)) {
-    if (typeof candidate !== 'string') {
-      throw new VaultCliError(
-        'invalid_payload',
-        'headersJson must be a JSON object with string values.',
-      )
-    }
-    headers[key] = candidate
-  }
-
-  return headers
 }

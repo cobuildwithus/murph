@@ -15,6 +15,7 @@ import {
   type VaultCliServices,
 } from './vault-cli-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import { resolveEffectiveTopLevelToken } from './command-helpers.js'
 import {
   normalizeVaultForConfig,
   readOperatorConfig,
@@ -123,13 +124,6 @@ const modelFileNames: Record<WhisperModel, string> = {
 function whisperModelDownloadUrl(model: WhisperModel): string {
   return `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${modelFileNames[model]}`
 }
-
-const rootOptionsWithValues = new Set([
-  '--filter-output',
-  '--format',
-  '--token-limit',
-  '--token-offset',
-])
 
 function buildBaseFormulaSpecs(): ToolFormulaSpec[] {
   return [
@@ -475,30 +469,6 @@ export function createSetupServices(
 export function detectSetupProgramName(argv0: string | undefined): string {
   const baseName = path.basename(argv0 ?? '')
   return baseName === 'healthybob' ? 'healthybob' : 'vault-cli'
-}
-
-function resolveEffectiveTopLevelToken(args: string[]): string | null {
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index]
-    if (!token) {
-      continue
-    }
-
-    if (token === '--') {
-      return args[index + 1] ?? null
-    }
-
-    if (!token.startsWith('-')) {
-      return token
-    }
-
-    if (rootOptionsWithValues.has(token)) {
-      index += 1
-      continue
-    }
-  }
-
-  return null
 }
 
 export function isSetupInvocation(
