@@ -3,6 +3,7 @@ import path from "node:path";
 export const HEALTHYBOB_VAULT_ENV = "HEALTHYBOB_VAULT";
 export const HEALTHYBOB_WEB_LAUNCH_CWD_ENV = "HEALTHYBOB_WEB_LAUNCH_CWD";
 export const FIXTURE_VAULT_EXAMPLE = "../../fixtures/demo-web-vault";
+const INIT_CWD_ENV = "INIT_CWD";
 
 export function getConfiguredVaultRoot(
   env: Record<string, string | undefined> = process.env,
@@ -50,7 +51,8 @@ export function rememberLaunchCwd(
     return;
   }
 
-  env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV] = cwd;
+  const initCwd = env[INIT_CWD_ENV]?.trim();
+  env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV] = initCwd ? path.resolve(cwd, initCwd) : cwd;
 }
 
 function getLaunchCwd(

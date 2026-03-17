@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-17 (assistant delivery and Ink-only chat docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned query-build checks, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
+Last verified: 2026-03-17 (assistant delivery and Ink-only chat docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned runtime-build closure checks, preserved launch-cwd semantics, and webpack query-entry pinning, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 

@@ -6,8 +6,9 @@ import { test } from "vitest";
 import {
   buildNextCliArgs,
   isBlockedDotEnvPath,
+  resolveRuntimeBuildTargets,
   resolveQueryBuildEntryPath,
-  shouldEnsureQueryBuild,
+  shouldEnsureRuntimeBuild,
 } from "../scripts/next-local";
 
 test("buildNextCliArgs forces localhost for dev and start", () => {
@@ -37,11 +38,11 @@ test("isBlockedDotEnvPath matches .env and .env.* files only", () => {
   assert.equal(isBlockedDotEnvPath("/tmp/config.env"), false);
 });
 
-test("shouldEnsureQueryBuild only targets commands that boot the local app runtime", () => {
-  assert.equal(shouldEnsureQueryBuild("dev"), true);
-  assert.equal(shouldEnsureQueryBuild("build"), true);
-  assert.equal(shouldEnsureQueryBuild("start"), true);
-  assert.equal(shouldEnsureQueryBuild("lint"), false);
+test("shouldEnsureRuntimeBuild only targets commands that boot the local app runtime", () => {
+  assert.equal(shouldEnsureRuntimeBuild("dev"), true);
+  assert.equal(shouldEnsureRuntimeBuild("build"), true);
+  assert.equal(shouldEnsureRuntimeBuild("start"), true);
+  assert.equal(shouldEnsureRuntimeBuild("lint"), false);
 });
 
 test("resolveQueryBuildEntryPath points at the query package build output", () => {
@@ -49,4 +50,24 @@ test("resolveQueryBuildEntryPath points at the query package build output", () =
     resolveQueryBuildEntryPath("/repo/packages/web"),
     path.resolve("/repo/packages/query/dist/index.js"),
   );
+});
+
+test("resolveRuntimeBuildTargets includes the query runtime dependency closure", () => {
+  assert.deepEqual(resolveRuntimeBuildTargets("/repo/packages/web"), [
+    {
+      buildDir: "../contracts",
+      entryPath: path.resolve("/repo/packages/contracts/dist/index.js"),
+      packageName: "@healthybob/contracts",
+    },
+    {
+      buildDir: "../runtime-state",
+      entryPath: path.resolve("/repo/packages/runtime-state/dist/index.js"),
+      packageName: "@healthybob/runtime-state",
+    },
+    {
+      buildDir: "../query",
+      entryPath: path.resolve("/repo/packages/query/dist/index.js"),
+      packageName: "@healthybob/query",
+    },
+  ]);
 });

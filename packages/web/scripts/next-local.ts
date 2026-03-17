@@ -6,12 +6,35 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { rememberLaunchCwd } from "../src/lib/vault";
 
 const LOCAL_HOST = "127.0.0.1";
-const QUERY_BUILD_ENTRY_RELATIVE_PATH = "../query/dist/index.js";
 const require = createRequire(import.meta.url);
 const fs = require("node:fs") as typeof import("node:fs");
 const fsPromises = require("node:fs/promises") as typeof import("node:fs/promises");
 
 let dotEnvGuardsInstalled = false;
+
+const WORKSPACE_RUNTIME_BUILD_TARGETS = [
+  {
+    buildDir: "../contracts",
+    entryRelativePath: "../contracts/dist/index.js",
+    packageName: "@healthybob/contracts",
+  },
+  {
+    buildDir: "../runtime-state",
+    entryRelativePath: "../runtime-state/dist/index.js",
+    packageName: "@healthybob/runtime-state",
+  },
+  {
+    buildDir: "../query",
+    entryRelativePath: "../query/dist/index.js",
+    packageName: "@healthybob/query",
+  },
+] as const;
+
+interface RuntimeBuildTarget {
+  buildDir: string;
+  entryPath: string;
+  packageName: string;
+}
 
 export function buildNextCliArgs(argv: readonly string[]): string[] {
   const [command = "dev", ...rest] = argv;
@@ -29,12 +52,20 @@ export function buildNextCliArgs(argv: readonly string[]): string[] {
   return args;
 }
 
-export function shouldEnsureQueryBuild(command: string): boolean {
+export function shouldEnsureRuntimeBuild(command: string): boolean {
   return command === "dev" || command === "build" || command === "start";
 }
 
 export function resolveQueryBuildEntryPath(packageDir: string): string {
-  return path.resolve(packageDir, QUERY_BUILD_ENTRY_RELATIVE_PATH);
+  return resolveRuntimeBuildTargets(packageDir).at(-1)!.entryPath;
+}
+
+export function resolveRuntimeBuildTargets(packageDir: string): RuntimeBuildTarget[] {
+  return WORKSPACE_RUNTIME_BUILD_TARGETS.map((target) => ({
+    buildDir: target.buildDir,
+    entryPath: path.resolve(packageDir, target.entryRelativePath),
+    packageName: target.packageName,
+  }));
 }
 
 export function isBlockedDotEnvPath(value: unknown): boolean {
@@ -133,47 +164,73 @@ async function main(): Promise<void> {
   rememberLaunchCwd();
   process.chdir(packageDir);
   installDotEnvGuards();
-  await ensureQueryBuild(packageDir, command);
+  await ensureRuntimeBuild(packageDir, command);
   process.argv = [process.execPath, nextBinPath, ...buildNextCliArgs(process.argv.slice(2))];
 
   await import(pathToFileURL(nextBinPath).href);
 }
 
-async function ensureQueryBuild(packageDir: string, command: string): Promise<void> {
-  if (!shouldEnsureQueryBuild(command)) {
+async function ensureRuntimeBuild(packageDir: string, command: string): Promise<void> {
+  if (!shouldEnsureRuntimeBuild(command)) {
     return;
   }
 
-  const queryBuildEntryPath = resolveQueryBuildEntryPath(packageDir);
-
-  try {
-    await fsPromises.access(queryBuildEntryPath);
+  const missingTargets = await findMissingRuntimeBuildTargets(packageDir);
+  if (missingTargets.length === 0) {
     return;
-  } catch {
-    // Fall through and rebuild the workspace package when the expected build output is absent.
   }
 
   const invocation = resolvePnpmInvocation();
-  const result = spawnSync(
-    invocation.command,
-    [...invocation.prefixArgs, "--dir", "../query", "build"],
-    {
-      cwd: packageDir,
-      stdio: "inherit",
-    },
+  for (const target of missingTargets) {
+    const result = spawnSync(
+      invocation.command,
+      [...invocation.prefixArgs, "--dir", target.buildDir, "build"],
+      {
+        cwd: packageDir,
+        stdio: "inherit",
+      },
+    );
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (result.status !== 0) {
+      throw new Error(
+        `Failed to rebuild ${target.packageName} after missing ${target.entryPath}.`,
+      );
+    }
+  }
+
+  const unresolvedTargets = await findMissingRuntimeBuildTargets(packageDir);
+  if (unresolvedTargets.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Missing runtime build output after rebuild: ${unresolvedTargets.map((target) => target.packageName).join(", ")}.`,
+  );
+}
+
+async function findMissingRuntimeBuildTargets(packageDir: string): Promise<RuntimeBuildTarget[]> {
+  const targets = resolveRuntimeBuildTargets(packageDir);
+  const checks = await Promise.all(
+    targets.map(async (target) => ({
+      missing: !(await pathExists(target.entryPath)),
+      target,
+    })),
   );
 
-  if (result.error) {
-    throw result.error;
-  }
+  return checks.filter((check) => check.missing).map((check) => check.target);
+}
 
-  if (result.status !== 0) {
-    throw new Error(
-      `Failed to rebuild @healthybob/query after missing ${queryBuildEntryPath}.`,
-    );
+async function pathExists(entryPath: string): Promise<boolean> {
+  try {
+    await fsPromises.access(entryPath);
+    return true;
+  } catch {
+    return false;
   }
-
-  await fsPromises.access(queryBuildEntryPath);
 }
 
 function resolvePnpmInvocation(): { command: string; prefixArgs: string[] } {

@@ -52,6 +52,18 @@ test("rememberLaunchCwd stores the first launch cwd only", () => {
   assert.equal(env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV], "/repo");
 });
 
+test("rememberLaunchCwd prefers INIT_CWD for package-local pnpm runs", () => {
+  const env: Record<string, string | undefined> = {
+    HEALTHYBOB_VAULT: "../../fixtures/demo-web-vault",
+    INIT_CWD: "/repo/packages/web",
+  };
+
+  rememberLaunchCwd(env, "/repo");
+
+  assert.equal(env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV], "/repo/packages/web");
+  assert.equal(getConfiguredVaultRoot(env, "/repo/packages/web"), "/repo/fixtures/demo-web-vault");
+});
+
 test("loadVaultOverview reports missing config when no vault root is set", async () => {
   const result = await loadVaultOverview();
 
