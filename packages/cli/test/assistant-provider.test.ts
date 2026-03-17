@@ -48,6 +48,9 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
 
   const result = await executeAssistantProviderTurn({
     provider: 'codex-cli',
+    env: {
+      PATH: '/tmp/healthybob-bin',
+    },
     workingDirectory: '/tmp/vault',
     systemPrompt: 'system prompt',
     userPrompt: 'hello',
@@ -76,6 +79,9 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
 
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.equal(call?.codexCommand, '/opt/homebrew/bin/codex')
+  assert.deepEqual(call?.env, {
+    PATH: '/tmp/healthybob-bin',
+  })
   assert.equal(call?.workingDirectory, '/tmp/vault')
   assert.equal(call?.resumeSessionId, 'thread-existing')
   assert.equal(call?.model, 'gpt-oss:20b')

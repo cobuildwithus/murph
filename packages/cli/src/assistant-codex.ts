@@ -11,6 +11,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 export interface CodexExecInput {
   approvalPolicy?: AssistantApprovalPolicy
   codexCommand?: string
+  env?: NodeJS.ProcessEnv
   model?: string | null
   oss?: boolean
   profile?: string | null
@@ -52,7 +53,7 @@ export async function executeCodexPrompt(
     await new Promise<void>((resolve, reject) => {
       const child = spawn(codexCommand, args, {
         cwd: workingDirectory,
-        env: process.env,
+        env: input.env ?? process.env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 

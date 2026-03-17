@@ -6,6 +6,10 @@ import {
   type AssistantDeliveryError,
   type AssistantSandbox,
 } from '../assistant-cli-contracts.js'
+import {
+  buildAssistantCliGuidanceText,
+  resolveAssistantCliAccessContext,
+} from '../assistant-cli-access.js'
 import { executeAssistantProviderTurn, resolveAssistantProviderOptions } from '../chat-provider.js'
 import { deliverAssistantMessage } from '../outbound-channel.js'
 import { resolveAssistantOperatorDefaults } from '../operator-config.js'
@@ -49,6 +53,7 @@ export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
   const defaults = await resolveAssistantOperatorDefaults()
+  const cliAccess = resolveAssistantCliAccessContext()
   const resolved = await resolveAssistantSession({
     vault: input.vault,
     sessionId: input.sessionId,
@@ -82,10 +87,11 @@ export async function sendAssistantMessage(
   const providerResult = await executeAssistantProviderTurn({
     provider: input.provider ?? defaults?.provider ?? resolved.session.provider,
     workingDirectory: input.workingDirectory ?? input.vault,
+    env: cliAccess.env,
     userPrompt: input.prompt,
     systemPrompt:
       resolved.created || resolved.session.turnCount === 0
-        ? buildAssistantSystemPrompt()
+        ? buildAssistantSystemPrompt(cliAccess)
         : null,
     sessionContext:
       resolved.created || resolved.session.turnCount === 0
@@ -161,12 +167,18 @@ export async function sendAssistantMessage(
   })
 }
 
-function buildAssistantSystemPrompt(): string {
+function buildAssistantSystemPrompt(
+  cliAccess: {
+    rawCommand: 'vault-cli'
+    setupCommand: 'healthybob'
+  },
+): string {
   return [
     'You are Healthy Bob, a local-first health assistant operating over the current working directory as a file-native health vault.',
     'Use the workspace files as the source of truth when relevant.',
     'Default to read-only analysis and conversational answers.',
     'Do not modify files unless the user explicitly asks you to propose changes.',
     'When you reference evidence from the vault, mention relative file paths when practical.',
+    buildAssistantCliGuidanceText(cliAccess),
   ].join('\n\n')
 }

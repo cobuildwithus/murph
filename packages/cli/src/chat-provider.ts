@@ -12,6 +12,7 @@ import { normalizeNullableString } from './assistant/shared.js'
 export interface AssistantProviderTurnInput {
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string
+  env?: NodeJS.ProcessEnv
   model?: string | null
   oss?: boolean
   profile?: string | null
@@ -62,6 +63,7 @@ export async function executeAssistantProviderTurn(
     case 'codex-cli': {
       const result = await executeCodexPrompt({
         codexCommand: input.codexCommand,
+        env: input.env,
         workingDirectory: input.workingDirectory,
         prompt,
         resumeSessionId: input.resumeProviderSessionId,
