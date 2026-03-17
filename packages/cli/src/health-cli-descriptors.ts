@@ -141,6 +141,67 @@ export const healthListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 });
 
+type StatusFilteredRegistryDescriptorCommandName = Extract<
+  HealthEntityKind,
+  "goal" | "condition" | "allergy" | "regimen" | "family" | "genetics"
+>;
+
+interface StatusFilteredRegistryDescriptorInput {
+  commandDescription: string;
+  commandName: StatusFilteredRegistryDescriptorCommandName;
+  listServiceMethod: HealthQueryListServiceMethodName;
+  listStatusDescription?: string;
+  noun: string;
+  payloadFile: string;
+  pluralNoun: string;
+  resultIdField: string;
+  runtimeListMethod: HealthQueryRuntimeListMethodName;
+  runtimeMethod: HealthCoreRuntimeMethodName;
+  runtimeShowMethod: HealthQueryRuntimeShowMethodName;
+  scaffoldServiceMethod: HealthCoreScaffoldServiceMethodName;
+  showId: HealthEntityCommandDescriptorExtension["showId"];
+  showServiceMethod: HealthQueryShowServiceMethodName;
+  upsertServiceMethod: HealthCoreUpsertServiceMethodName;
+}
+
+function buildStatusFilteredRegistryDescriptorExtension(
+  input: StatusFilteredRegistryDescriptorInput,
+): HealthEntityDescriptorExtension {
+  return {
+    command: {
+      commandName: input.commandName,
+      description: input.commandDescription,
+      descriptions: {
+        list: `List ${input.pluralNoun} through the health read model.`,
+        scaffold: `Emit a payload template for ${input.noun} upserts.`,
+        show: `Show one ${input.noun} by canonical id or slug.`,
+        upsert: `Upsert one ${input.noun} from a JSON payload file or stdin.`,
+      },
+      listStatusDescription: input.listStatusDescription,
+      noun: input.noun,
+      payloadFile: input.payloadFile,
+      pluralNoun: input.pluralNoun,
+      showId: input.showId,
+    },
+    core: {
+      resultIdField: input.resultIdField,
+      resultCapabilities: ["path"],
+      runtimeMethod: input.runtimeMethod,
+      scaffoldNoun: input.commandName,
+      scaffoldServiceMethod: input.scaffoldServiceMethod,
+      upsertServiceMethod: input.upsertServiceMethod,
+    },
+    query: {
+      genericListFilterCapabilities: ["status"],
+      listServiceMethod: input.listServiceMethod,
+      notFoundLabel: input.noun,
+      runtimeListMethod: input.runtimeListMethod,
+      runtimeShowMethod: input.runtimeShowMethod,
+      showServiceMethod: input.showServiceMethod,
+    },
+  };
+}
+
 const checkedHealthEntityDescriptorExtensions = {
   assessment: {
     query: {
@@ -222,150 +283,86 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showProfile",
     },
   },
-  goal: {
-    command: {
-      commandName: "goal",
-      description: "Goal registry commands for the health extension surface.",
-      descriptions: {
-        list: "List goals through the health read model.",
-        scaffold: "Emit a payload template for goal upserts.",
-        show: "Show one goal by canonical id or slug.",
-        upsert: "Upsert one goal from a JSON payload file or stdin.",
-      },
-      listStatusDescription: "Optional goal status to filter by.",
-      noun: "goal",
-      payloadFile: "goal.json",
-      pluralNoun: "goals",
-      showId: {
-        description: "Goal id or slug to show.",
-        example: "<goal-id>",
-      },
+  goal: buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: "Goal registry commands for the health extension surface.",
+    commandName: "goal",
+    listServiceMethod: "listGoals",
+    listStatusDescription: "Optional goal status to filter by.",
+    noun: "goal",
+    payloadFile: "goal.json",
+    pluralNoun: "goals",
+    resultIdField: "goalId",
+    runtimeListMethod: "listGoals",
+    runtimeMethod: "upsertGoal",
+    runtimeShowMethod: "showGoal",
+    scaffoldServiceMethod: "scaffoldGoal",
+    showId: {
+      description: "Goal id or slug to show.",
+      example: "<goal-id>",
     },
-    core: {
-      resultIdField: "goalId",
-      resultCapabilities: ["path"],
-      runtimeMethod: "upsertGoal",
-      scaffoldNoun: "goal",
-      scaffoldServiceMethod: "scaffoldGoal",
-      upsertServiceMethod: "upsertGoal",
+    showServiceMethod: "showGoal",
+    upsertServiceMethod: "upsertGoal",
+  }),
+  condition: buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: "Condition registry commands for the health extension surface.",
+    commandName: "condition",
+    listServiceMethod: "listConditions",
+    listStatusDescription: "Optional condition status to filter by.",
+    noun: "condition",
+    payloadFile: "condition.json",
+    pluralNoun: "conditions",
+    resultIdField: "conditionId",
+    runtimeListMethod: "listConditions",
+    runtimeMethod: "upsertCondition",
+    runtimeShowMethod: "showCondition",
+    scaffoldServiceMethod: "scaffoldCondition",
+    showId: {
+      description: "Condition id or slug to show.",
+      example: "<condition-id>",
     },
-    query: {
-      genericListFilterCapabilities: ["status"],
-      listServiceMethod: "listGoals",
-      notFoundLabel: "goal",
-      runtimeListMethod: "listGoals",
-      runtimeShowMethod: "showGoal",
-      showServiceMethod: "showGoal",
+    showServiceMethod: "showCondition",
+    upsertServiceMethod: "upsertCondition",
+  }),
+  allergy: buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: "Allergy registry commands for the health extension surface.",
+    commandName: "allergy",
+    listServiceMethod: "listAllergies",
+    listStatusDescription: "Optional allergy status to filter by.",
+    noun: "allergy",
+    payloadFile: "allergy.json",
+    pluralNoun: "allergies",
+    resultIdField: "allergyId",
+    runtimeListMethod: "listAllergies",
+    runtimeMethod: "upsertAllergy",
+    runtimeShowMethod: "showAllergy",
+    scaffoldServiceMethod: "scaffoldAllergy",
+    showId: {
+      description: "Allergy id or slug to show.",
+      example: "<allergy-id>",
     },
-  },
-  condition: {
-    command: {
-      commandName: "condition",
-      description: "Condition registry commands for the health extension surface.",
-      descriptions: {
-        list: "List conditions through the health read model.",
-        scaffold: "Emit a payload template for condition upserts.",
-        show: "Show one condition by canonical id or slug.",
-        upsert: "Upsert one condition from a JSON payload file or stdin.",
-      },
-      listStatusDescription: "Optional condition status to filter by.",
-      noun: "condition",
-      payloadFile: "condition.json",
-      pluralNoun: "conditions",
-      showId: {
-        description: "Condition id or slug to show.",
-        example: "<condition-id>",
-      },
+    showServiceMethod: "showAllergy",
+    upsertServiceMethod: "upsertAllergy",
+  }),
+  regimen: buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: "Regimen registry commands for the health extension surface.",
+    commandName: "regimen",
+    listServiceMethod: "listRegimens",
+    listStatusDescription: "Optional regimen status to filter by.",
+    noun: "regimen",
+    payloadFile: "regimen.json",
+    pluralNoun: "regimens",
+    resultIdField: "regimenId",
+    runtimeListMethod: "listRegimens",
+    runtimeMethod: "upsertRegimenItem",
+    runtimeShowMethod: "showRegimen",
+    scaffoldServiceMethod: "scaffoldRegimen",
+    showId: {
+      description: "Regimen id or slug to show.",
+      example: "<regimen-id>",
     },
-    core: {
-      resultIdField: "conditionId",
-      resultCapabilities: ["path"],
-      runtimeMethod: "upsertCondition",
-      scaffoldNoun: "condition",
-      scaffoldServiceMethod: "scaffoldCondition",
-      upsertServiceMethod: "upsertCondition",
-    },
-    query: {
-      genericListFilterCapabilities: ["status"],
-      listServiceMethod: "listConditions",
-      notFoundLabel: "condition",
-      runtimeListMethod: "listConditions",
-      runtimeShowMethod: "showCondition",
-      showServiceMethod: "showCondition",
-    },
-  },
-  allergy: {
-    command: {
-      commandName: "allergy",
-      description: "Allergy registry commands for the health extension surface.",
-      descriptions: {
-        list: "List allergies through the health read model.",
-        scaffold: "Emit a payload template for allergy upserts.",
-        show: "Show one allergy by canonical id or slug.",
-        upsert: "Upsert one allergy from a JSON payload file or stdin.",
-      },
-      listStatusDescription: "Optional allergy status to filter by.",
-      noun: "allergy",
-      payloadFile: "allergy.json",
-      pluralNoun: "allergies",
-      showId: {
-        description: "Allergy id or slug to show.",
-        example: "<allergy-id>",
-      },
-    },
-    core: {
-      resultIdField: "allergyId",
-      resultCapabilities: ["path"],
-      runtimeMethod: "upsertAllergy",
-      scaffoldNoun: "allergy",
-      scaffoldServiceMethod: "scaffoldAllergy",
-      upsertServiceMethod: "upsertAllergy",
-    },
-    query: {
-      genericListFilterCapabilities: ["status"],
-      listServiceMethod: "listAllergies",
-      notFoundLabel: "allergy",
-      runtimeListMethod: "listAllergies",
-      runtimeShowMethod: "showAllergy",
-      showServiceMethod: "showAllergy",
-    },
-  },
-  regimen: {
-    command: {
-      commandName: "regimen",
-      description: "Regimen registry commands for the health extension surface.",
-      descriptions: {
-        list: "List regimens through the health read model.",
-        scaffold: "Emit a payload template for regimen upserts.",
-        show: "Show one regimen by canonical id or slug.",
-        upsert: "Upsert one regimen from a JSON payload file or stdin.",
-      },
-      listStatusDescription: "Optional regimen status to filter by.",
-      noun: "regimen",
-      payloadFile: "regimen.json",
-      pluralNoun: "regimens",
-      showId: {
-        description: "Regimen id or slug to show.",
-        example: "<regimen-id>",
-      },
-    },
-    core: {
-      resultIdField: "regimenId",
-      resultCapabilities: ["path"],
-      runtimeMethod: "upsertRegimenItem",
-      scaffoldNoun: "regimen",
-      scaffoldServiceMethod: "scaffoldRegimen",
-      upsertServiceMethod: "upsertRegimen",
-    },
-    query: {
-      genericListFilterCapabilities: ["status"],
-      listServiceMethod: "listRegimens",
-      notFoundLabel: "regimen",
-      runtimeListMethod: "listRegimens",
-      runtimeShowMethod: "showRegimen",
-      showServiceMethod: "showRegimen",
-    },
-  },
+    showServiceMethod: "showRegimen",
+    upsertServiceMethod: "upsertRegimen",
+  }),
   history: {
     command: {
       commandName: "history",
@@ -402,78 +399,46 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showHistoryEvent",
     },
   },
-  family: {
-    command: {
-      commandName: "family",
-      description: "Family registry commands for the health extension surface.",
-      descriptions: {
-        list: "List family members through the health read model.",
-        scaffold: "Emit a payload template for family member upserts.",
-        show: "Show one family member by canonical id or slug.",
-        upsert: "Upsert one family member from a JSON payload file or stdin.",
-      },
-      listStatusDescription: "Optional family-member status to filter by.",
-      noun: "family member",
-      payloadFile: "family.json",
-      pluralNoun: "family members",
-      showId: {
-        description: "Family member id or slug to show.",
-        example: "<family-member-id>",
-      },
+  family: buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: "Family registry commands for the health extension surface.",
+    commandName: "family",
+    listServiceMethod: "listFamilyMembers",
+    listStatusDescription: "Optional family-member status to filter by.",
+    noun: "family member",
+    payloadFile: "family.json",
+    pluralNoun: "family members",
+    resultIdField: "familyMemberId",
+    runtimeListMethod: "listFamilyMembers",
+    runtimeMethod: "upsertFamilyMember",
+    runtimeShowMethod: "showFamilyMember",
+    scaffoldServiceMethod: "scaffoldFamilyMember",
+    showId: {
+      description: "Family member id or slug to show.",
+      example: "<family-member-id>",
     },
-    core: {
-      resultIdField: "familyMemberId",
-      resultCapabilities: ["path"],
-      runtimeMethod: "upsertFamilyMember",
-      scaffoldNoun: "family",
-      scaffoldServiceMethod: "scaffoldFamilyMember",
-      upsertServiceMethod: "upsertFamilyMember",
+    showServiceMethod: "showFamilyMember",
+    upsertServiceMethod: "upsertFamilyMember",
+  }),
+  genetics: buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: "Genetic variant commands for the health extension surface.",
+    commandName: "genetics",
+    listServiceMethod: "listGeneticVariants",
+    listStatusDescription: "Optional genetic-variant status to filter by.",
+    noun: "genetic variant",
+    payloadFile: "genetics.json",
+    pluralNoun: "genetic variants",
+    resultIdField: "variantId",
+    runtimeListMethod: "listGeneticVariants",
+    runtimeMethod: "upsertGeneticVariant",
+    runtimeShowMethod: "showGeneticVariant",
+    scaffoldServiceMethod: "scaffoldGeneticVariant",
+    showId: {
+      description: "Genetic variant id or slug to show.",
+      example: "<genetic-variant-id>",
     },
-    query: {
-      genericListFilterCapabilities: ["status"],
-      listServiceMethod: "listFamilyMembers",
-      notFoundLabel: "family member",
-      runtimeListMethod: "listFamilyMembers",
-      runtimeShowMethod: "showFamilyMember",
-      showServiceMethod: "showFamilyMember",
-    },
-  },
-  genetics: {
-    command: {
-      commandName: "genetics",
-      description: "Genetic variant commands for the health extension surface.",
-      descriptions: {
-        list: "List genetic variants through the health read model.",
-        scaffold: "Emit a payload template for genetic variant upserts.",
-        show: "Show one genetic variant by canonical id or slug.",
-        upsert: "Upsert one genetic variant from a JSON payload file or stdin.",
-      },
-      listStatusDescription: "Optional genetic-variant status to filter by.",
-      noun: "genetic variant",
-      payloadFile: "genetics.json",
-      pluralNoun: "genetic variants",
-      showId: {
-        description: "Genetic variant id or slug to show.",
-        example: "<genetic-variant-id>",
-      },
-    },
-    core: {
-      resultIdField: "variantId",
-      resultCapabilities: ["path"],
-      runtimeMethod: "upsertGeneticVariant",
-      scaffoldNoun: "genetics",
-      scaffoldServiceMethod: "scaffoldGeneticVariant",
-      upsertServiceMethod: "upsertGeneticVariant",
-    },
-    query: {
-      genericListFilterCapabilities: ["status"],
-      listServiceMethod: "listGeneticVariants",
-      notFoundLabel: "genetic variant",
-      runtimeListMethod: "listGeneticVariants",
-      runtimeShowMethod: "showGeneticVariant",
-      showServiceMethod: "showGeneticVariant",
-    },
-  },
+    showServiceMethod: "showGeneticVariant",
+    upsertServiceMethod: "upsertGeneticVariant",
+  }),
 } as const satisfies Record<HealthEntityKind, HealthEntityDescriptorExtension>;
 
 function requireScaffoldTemplate(definition: HealthEntityDefinition): JsonObject {
