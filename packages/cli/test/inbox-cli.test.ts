@@ -2391,6 +2391,165 @@ test.sequential('inbox parse and requeue drive parser queue controls without rea
   }
 })
 
+test.sequential('attachment-specific inbox services preserve lookup and parse-status response shapes', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-attachment-services')
+  const drainCalls: Array<{
+    attachmentId?: string
+    captureId?: string
+    maxJobs?: number
+    vaultRoot: string
+  }> = []
+  const drainResults: Array<{
+    attachmentId: string
+    captureId: string
+    errorCode?: string
+    errorMessage?: string
+    manifestPath?: string
+    providerId?: string
+    status: 'failed' | 'succeeded'
+  }> = []
+  const fakeParsers = createFakeParsersRuntimeModule({
+    drainResults,
+    onDrain(payload) {
+      drainCalls.push(payload)
+    },
+  })
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+    loadParsersModule: async () => fakeParsers,
+  })
+
+  try {
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+
+    const captureId = await captureSingleCaptureId({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    const listed = await services.listAttachments({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    assert.equal(listed.captureId, captureId)
+    assert.equal(listed.attachmentCount, 1)
+
+    const attachmentId = listed.attachments[0]?.attachmentId
+    assert.ok(attachmentId)
+
+    const shown = await services.showAttachment({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      attachmentId,
+    })
+    assert.equal(shown.captureId, captureId)
+    assert.equal(shown.attachment.attachmentId, attachmentId)
+    assert.equal(shown.attachment.storedPath?.includes('raw/inbox/'), true)
+
+    const initialStatus = await services.showAttachmentStatus({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      attachmentId,
+    })
+    assert.equal(initialStatus.captureId, captureId)
+    assert.equal(initialStatus.attachmentId, attachmentId)
+    assert.equal(initialStatus.parseable, true)
+    assert.equal(initialStatus.currentState, 'pending')
+    assert.equal(initialStatus.jobs.length, 1)
+    assert.equal(initialStatus.jobs[0]?.state, 'pending')
+
+    const inboxd = await loadBuiltInboxRuntime()
+    const runtime = await inboxd.openInboxRuntime({
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    try {
+      const claimed = runtime.claimNextAttachmentParseJob({
+        captureId,
+      })
+      assert.ok(claimed)
+      runtime.failAttachmentParseJob({
+        jobId: claimed.jobId,
+        attempt: claimed.attempts,
+        errorMessage: 'parser failed',
+      })
+    } finally {
+      runtime.close()
+    }
+
+    const failedStatus = await services.showAttachmentStatus({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      attachmentId,
+    })
+    assert.equal(failedStatus.currentState, 'failed')
+    assert.equal(failedStatus.jobs[0]?.state, 'failed')
+
+    const reparsed = await services.reparseAttachment({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      attachmentId,
+    })
+    assert.equal(reparsed.captureId, captureId)
+    assert.equal(reparsed.attachmentId, attachmentId)
+    assert.equal(reparsed.parseable, true)
+    assert.equal(reparsed.requeuedJobs, 1)
+    assert.equal(reparsed.currentState, 'pending')
+    assert.equal(reparsed.jobs[0]?.state, 'pending')
+
+    drainResults.push({
+      attachmentId,
+      captureId,
+      providerId: 'text-file',
+      status: 'succeeded',
+    })
+
+    const parsed = await services.parseAttachment({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      attachmentId,
+    })
+    assert.equal(parsed.captureId, captureId)
+    assert.equal(parsed.attachmentId, attachmentId)
+    assert.equal(parsed.parseable, true)
+    assert.equal(parsed.attempted, 1)
+    assert.equal(parsed.succeeded, 1)
+    assert.equal(parsed.failed, 0)
+    assert.equal(parsed.currentState, 'pending')
+    assert.equal(parsed.jobs[0]?.state, 'pending')
+    assert.equal(parsed.results[0]?.attachmentId, attachmentId)
+    assert.equal(parsed.results[0]?.captureId, captureId)
+    assert.equal(parsed.results[0]?.providerId, 'text-file')
+    assert.equal(
+      parsed.results[0]?.manifestPath,
+      `derived/inbox/${captureId}/attachments/${attachmentId}/manifest.json`,
+    )
+    assert.deepEqual(drainCalls, [
+      {
+        attachmentId,
+        maxJobs: 1,
+        vaultRoot: fixture.vaultRoot,
+      },
+    ])
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('inbox requeue can reset running attachment parse jobs', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-requeue-running')
   const services = createIntegratedInboxCliServices({
