@@ -77,7 +77,7 @@ export {
 export type {
   CreateTelegramApiPollDriverInput,
   CreateTelegramBotApiPollDriverInput,
-  TelegramApiLike,
+  TelegramApiClient,
   TelegramConnectorOptions,
   TelegramPollDriver,
 } from "./connectors/telegram/connector.js";

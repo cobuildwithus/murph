@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  DEFAULT_TELEGRAM_ALLOWED_UPDATES,
+  createTelegramApiPollDriver,
   createTelegramPollConnector,
   normalizeTelegramUpdate,
 } from "../src/index.js";
 import type {
   InboundCapture,
   PersistedCapture,
+  TelegramApiClient,
   TelegramPollDriver,
   TelegramUpdateLike,
 } from "../src/index.js";
@@ -222,4 +225,104 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
   assert.equal(deleteWebhookCalls, 1);
   assert.equal(closeCount, 1);
   assert.deepEqual(emitted.at(-1)?.checkpoint, { updateId: 7 });
+});
+
+test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api shape", async () => {
+  const updateCalls: Array<Record<string, unknown>> = [];
+  const deleteWebhookCalls: Array<Record<string, unknown>> = [];
+  let getMeCalls = 0;
+  let getFileCalls = 0;
+  let getWebhookInfoCalls = 0;
+  const downloadRequests: string[] = [];
+
+  const driver = createTelegramApiPollDriver({
+    api: {
+      token: "bot-token",
+      async getMe() {
+        getMeCalls += 1;
+        return {
+          id: 999,
+          username: "healthybob_bot",
+        };
+      },
+      async getUpdates(input) {
+        updateCalls.push(input ?? {});
+        return [
+          {
+            update_id: 43,
+            message: {
+              message_id: 1,
+              date: 1_773_397_200,
+              text: "hello",
+              chat: {
+                id: 10,
+                type: "private",
+                first_name: "Bob",
+              },
+              from: {
+                id: 111,
+                first_name: "Bob",
+              },
+            },
+          },
+        ];
+      },
+      async getFile(fileId) {
+        getFileCalls += 1;
+        assert.equal(fileId, "file-1");
+        return {
+          file_id: fileId,
+          file_path: "docs/file.txt",
+        };
+      },
+      async deleteWebhook(input) {
+        deleteWebhookCalls.push(input ?? {});
+        return true;
+      },
+      async getWebhookInfo() {
+        getWebhookInfoCalls += 1;
+        return {
+          url: "https://example.invalid/webhook",
+        };
+      },
+    } as unknown as TelegramApiClient,
+    batchSize: 5,
+    downloadFile: async (filePath) => {
+      downloadRequests.push(filePath);
+      return new Uint8Array([9, 8, 7]);
+    },
+  });
+
+  const bot = await driver.getMe();
+  assert.equal((bot as { username?: string }).username, "healthybob_bot");
+
+  const updates = await driver.getMessages({
+    cursor: { updateId: 42 },
+    limit: 1,
+  });
+  assert.deepEqual(updates.map((update) => update.update_id), [43]);
+  assert.deepEqual(updateCalls, [
+    {
+      offset: 43,
+      limit: 1,
+      timeout: 0,
+      allowed_updates: [...DEFAULT_TELEGRAM_ALLOWED_UPDATES],
+    },
+  ]);
+
+  const file = await driver.getFile("file-1");
+  assert.equal(file.file_path, "docs/file.txt");
+  const downloaded = await driver.downloadFile("docs/file.txt");
+  assert.deepEqual(downloaded, new Uint8Array([9, 8, 7]));
+  assert.deepEqual(downloadRequests, ["docs/file.txt"]);
+
+  await driver.deleteWebhook?.({ dropPendingUpdates: true });
+  assert.deepEqual(deleteWebhookCalls, [{ drop_pending_updates: true }]);
+
+  const webhookInfo = await driver.getWebhookInfo?.();
+  assert.equal(webhookInfo?.url, "https://example.invalid/webhook");
+
+  assert.equal(getMeCalls, 1);
+  assert.equal(getFileCalls, 1);
+  assert.equal(getWebhookInfoCalls, 1);
 });

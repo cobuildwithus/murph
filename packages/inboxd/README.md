@@ -53,11 +53,11 @@ When combined with `@healthybob/parsers`, operators can drive those queues throu
 
 The Telegram connector is local-first and poll-first by default.
 
-- Use `createTelegramBotApiPollDriver(...)` for a zero-extra-dependency Bot API driver.
-- Use `createTelegramApiPollDriver({ api })` when you already have a grammY `Api` instance or another compatible Bot API client.
+- Use `createTelegramBotApiPollDriver(...)` when you want the package to construct a grammY-backed poll driver from a bot token.
+- Use `createTelegramApiPollDriver({ api })` when you already have a grammY `Api` instance.
 - The connector stores source-native cursors such as Telegram `update_id` checkpoints instead of forcing every source through the same `occurredAt`/`externalId` cursor shape.
 - Downloaded media can be persisted directly from in-memory bytes, so remote transports do not need temp files just to enter the vault.
-- The CLI runtime expects a bot token in `HEALTHYBOB_TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` when it instantiates the built-in Telegram poll driver.
+- The CLI runtime expects a bot token in `HEALTHYBOB_TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` when it instantiates the grammY-backed Telegram poll driver.
 
 ## iMessage adapter contract
 

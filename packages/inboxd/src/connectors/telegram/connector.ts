@@ -1,3 +1,4 @@
+import { Api, type ApiClientOptions, type RawApi } from "grammy";
 import { createNormalizedChatPollConnector, type ChatPollDriver } from "../chat/poll.js";
 import { normalizeTelegramUpdate, type TelegramAttachmentDownloadDriver } from "./normalize.js";
 import type {
@@ -16,19 +17,13 @@ export const DEFAULT_TELEGRAM_ALLOWED_UPDATES = [
   "edited_business_message",
 ] as const;
 
-export interface TelegramApiLike {
-  token?: string;
-  getMe(signal?: AbortSignal): Promise<TelegramUser>;
-  getUpdates(input?: {
-    offset?: number;
-    limit?: number;
-    timeout?: number;
-    allowed_updates?: string[];
-  }, signal?: AbortSignal): Promise<TelegramUpdateLike[]>;
-  getFile(fileId: string, signal?: AbortSignal): Promise<TelegramFile>;
-  deleteWebhook?(input?: { drop_pending_updates?: boolean }, signal?: AbortSignal): Promise<boolean>;
-  getWebhookInfo?(signal?: AbortSignal): Promise<TelegramWebhookInfo>;
-}
+export type TelegramApiClient = Api<RawApi>;
+type TelegramApiSignal = Parameters<TelegramApiClient["getMe"]>[0];
+type TelegramAllowedUpdate =
+  NonNullable<Parameters<TelegramApiClient["getUpdates"]>[0]>["allowed_updates"] extends
+    | ReadonlyArray<infer T>
+    | undefined ? T
+    : never;
 
 export interface TelegramPollDriver
   extends ChatPollDriver<TelegramUpdateLike>,
@@ -39,8 +34,8 @@ export interface TelegramPollDriver
 }
 
 export interface CreateTelegramApiPollDriverInput {
-  api: TelegramApiLike;
-  allowedUpdates?: string[] | null;
+  api: TelegramApiClient;
+  allowedUpdates?: TelegramAllowedUpdate[] | null;
   timeoutSeconds?: number;
   batchSize?: number;
   fileBaseUrl?: string;
@@ -50,7 +45,7 @@ export interface CreateTelegramApiPollDriverInput {
 
 export interface CreateTelegramBotApiPollDriverInput {
   token: string;
-  allowedUpdates?: string[] | null;
+  allowedUpdates?: TelegramAllowedUpdate[] | null;
   timeoutSeconds?: number;
   batchSize?: number;
   apiBaseUrl?: string;
@@ -145,7 +140,7 @@ export function createTelegramApiPollDriver({
 
   return {
     async getMe(signal) {
-      return api.getMe(signal);
+      return api.getMe(asTelegramApiSignal(signal)) as unknown as Promise<TelegramUser>;
     },
     async getMessages({ cursor, limit = normalizedBatchSize, signal }) {
       let offset = nextUpdateOffset(cursor);
@@ -223,7 +218,7 @@ export function createTelegramApiPollDriver({
       };
     },
     async getFile(fileId, signal) {
-      return api.getFile(fileId, signal);
+      return api.getFile(fileId, asTelegramApiSignal(signal)) as Promise<TelegramFile>;
     },
     async downloadFile(filePath, signal) {
       return resolveDownload(filePath, signal);
@@ -233,14 +228,17 @@ export function createTelegramApiPollDriver({
         return;
       }
 
-      await api.deleteWebhook({ drop_pending_updates: input?.dropPendingUpdates ?? false }, signal);
+      await api.deleteWebhook(
+        { drop_pending_updates: input?.dropPendingUpdates ?? false },
+        asTelegramApiSignal(signal),
+      );
     },
     async getWebhookInfo(signal) {
       if (!api.getWebhookInfo) {
         return null;
       }
 
-      return api.getWebhookInfo(signal);
+      return api.getWebhookInfo(asTelegramApiSignal(signal)) as unknown as Promise<TelegramWebhookInfo | null>;
     },
   };
 }
@@ -253,7 +251,10 @@ export function createTelegramBotApiPollDriver({
   apiBaseUrl = "https://api.telegram.org",
   fileBaseUrl,
 }: CreateTelegramBotApiPollDriverInput): TelegramPollDriver {
-  const api = createTelegramBotApi({ token, apiBaseUrl });
+  const apiOptions: ApiClientOptions = {
+    apiRoot: apiBaseUrl,
+  };
+  const api = new Api<RawApi>(token, apiOptions);
 
   return createTelegramApiPollDriver({
     api,
@@ -349,12 +350,12 @@ function isTelegramMessageUpdate(update: TelegramUpdateLike): boolean {
 }
 
 async function getUpdates(
-  api: TelegramApiLike,
-  input: Parameters<TelegramApiLike["getUpdates"]>[0],
+  api: TelegramApiClient,
+  input: Parameters<TelegramApiClient["getUpdates"]>[0],
   signal?: AbortSignal,
 ): Promise<TelegramUpdateLike[]> {
   try {
-    return await api.getUpdates(input, signal);
+    return await api.getUpdates(input, asTelegramApiSignal(signal)) as TelegramUpdateLike[];
   } catch (error) {
     throw rewritePollingConflict(error);
   }
@@ -376,7 +377,7 @@ function rewritePollingConflict(error: unknown): unknown {
 }
 
 function createTelegramFileDownloader(input: {
-  api: TelegramApiLike;
+  api: TelegramApiClient;
   fileBaseUrl?: string;
   fileDownloadToken?: string;
   downloadFile?: (filePath: string, signal?: AbortSignal) => Promise<Uint8Array>;
@@ -411,91 +412,6 @@ function createTelegramFileDownloader(input: {
   };
 }
 
-function createTelegramBotApi(input: {
-  token: string;
-  apiBaseUrl: string;
-}): TelegramApiLike {
-  const baseUrl = input.apiBaseUrl.replace(/\/$/u, "");
-
-  return {
-    token: input.token,
-    async getMe(signal) {
-      return requestTelegramMethod<TelegramUser>({
-        baseUrl,
-        token: input.token,
-        method: "getMe",
-        signal,
-      });
-    },
-    async getUpdates(payload, signal) {
-      return requestTelegramMethod<TelegramUpdateLike[]>({
-        baseUrl,
-        token: input.token,
-        method: "getUpdates",
-        payload,
-        signal,
-      });
-    },
-    async getFile(fileId, signal) {
-      return requestTelegramMethod<TelegramFile>({
-        baseUrl,
-        token: input.token,
-        method: "getFile",
-        payload: { file_id: fileId },
-        signal,
-      });
-    },
-    async deleteWebhook(payload, signal) {
-      return requestTelegramMethod<boolean>({
-        baseUrl,
-        token: input.token,
-        method: "deleteWebhook",
-        payload,
-        signal,
-      });
-    },
-    async getWebhookInfo(signal) {
-      return requestTelegramMethod<TelegramWebhookInfo>({
-        baseUrl,
-        token: input.token,
-        method: "getWebhookInfo",
-        signal,
-      });
-    },
-  };
-}
-
-async function requestTelegramMethod<TResult>(input: {
-  baseUrl: string;
-  token: string;
-  method: string;
-  payload?: Record<string, unknown>;
-  signal?: AbortSignal;
-}): Promise<TResult> {
-  const response = await fetch(`${input.baseUrl}/bot${input.token}/${input.method}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: input.payload ? JSON.stringify(input.payload) : undefined,
-    signal: input.signal,
-  });
-
-  const body = (await response.json()) as {
-    ok?: boolean;
-    description?: string;
-    result?: TResult;
-  };
-
-  if (!response.ok || body.ok !== true || body.result === undefined) {
-    throw new Error(
-      `Telegram API ${input.method} failed${body.description ? `: ${body.description}` : "."}`,
-    );
-  }
-
-  return body.result;
-}
-
 function relayAbort(signal: AbortSignal, controller: AbortController): () => void {
   if (signal.aborted) {
     controller.abort();
@@ -505,6 +421,10 @@ function relayAbort(signal: AbortSignal, controller: AbortController): () => voi
   const onAbort = () => controller.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);
+}
+
+function asTelegramApiSignal(signal: AbortSignal | undefined): TelegramApiSignal {
+  return signal as TelegramApiSignal;
 }
 
 function isAbortError(error: unknown): boolean {

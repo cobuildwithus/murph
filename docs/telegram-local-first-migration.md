@@ -50,14 +50,14 @@ Connectors can now emit an explicit checkpoint alongside each normalized capture
 - update/message normalization
 - attachment hydration via `getFile`
 - local-first poll connector
-- a raw Bot API poll driver
-- a grammY-compatible API-driver wrapper
+- a grammY-backed poll driver
+- app-code injection of an existing grammY `Api`
 
 ## Recommended runtime shape
 
 ### Lowest-friction path
 
-Use the built-in Bot API poll driver from the CLI/runtime:
+Use the built-in grammY-backed poll driver from the CLI/runtime:
 
 ```bash
 export HEALTHYBOB_TELEGRAM_BOT_TOKEN='123456:abc...'

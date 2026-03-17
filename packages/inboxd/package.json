@@ -40,6 +40,7 @@
   "dependencies": {
     "@healthybob/contracts": "workspace:*",
     "@healthybob/core": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*"
+    "@healthybob/runtime-state": "workspace:*",
+    "grammy": "1.41.1"
   }
 }
