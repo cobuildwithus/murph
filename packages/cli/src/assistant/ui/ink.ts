@@ -12,13 +12,16 @@ import {
   resolveAssistantSession,
 } from '../store.js'
 import { normalizeNullableString } from '../shared.js'
+import {
+  ACTIVE_CHAT_FOOTER,
+  BUSY_CHAT_STATUS,
+  DEFAULT_CHAT_FOOTER,
+  type InkChatEntry,
+  formatEntry,
+  seedChatEntries,
+} from './view-model.js'
 
 type AssistantChatResult = ReturnType<typeof assistantChatResultSchema.parse>
-
-interface InkChatEntry {
-  kind: 'assistant' | 'error' | 'system' | 'user'
-  text: string
-}
 
 export async function runAssistantChatWithInk(
   input: AssistantChatInput,
@@ -76,9 +79,7 @@ export async function runAssistantChatWithInk(
       const [entries, setEntries] = React.useState(seedChatEntries(resolved.session))
       const [value, setValue] = React.useState('')
       const [busy, setBusy] = React.useState(false)
-      const [footer, setFooter] = React.useState(
-        'Type a message. Use /session to inspect the Healthy Bob session id and /exit to quit.',
-      )
+      const [footer, setFooter] = React.useState(DEFAULT_CHAT_FOOTER)
       const latestSessionRef = React.useRef(resolved.session)
       const latestTurnsRef = React.useRef(0)
       const initialPromptRef = React.useRef(normalizeNullableString(input.initialPrompt))
@@ -131,7 +132,7 @@ export async function runAssistantChatWithInk(
           },
         ])
         setBusy(true)
-        setFooter('Waiting for the assistant...')
+        setFooter(ACTIVE_CHAT_FOOTER)
         setValue('')
 
         try {
@@ -241,25 +242,30 @@ export async function runAssistantChatWithInk(
               ),
         ),
         busy
-          ? createElement(Text, { dimColor: true }, 'assistant is thinking...')
-          : null,
-        createElement(
-          Box,
-          {
-            marginBottom: 1,
-          },
-          createElement(Text, {}, busy ? 'you (wait)> ' : 'you> '),
-          createElement(TextInput, {
-            value,
-            placeholder: busy ? 'Waiting for the assistant...' : 'Type a message',
-            onChange: (nextValue: string) => setValue(nextValue),
-            onSubmit: (submittedValue: string) => {
-              void submitPrompt(submittedValue)
-            },
-            focus: !busy,
-            showCursor: !busy,
-          }),
-        ),
+          ? createElement(
+              Box,
+              {
+                marginBottom: 1,
+              },
+              createElement(Text, { dimColor: true }, BUSY_CHAT_STATUS),
+            )
+          : createElement(
+              Box,
+              {
+                marginBottom: 1,
+              },
+              createElement(Text, {}, 'you> '),
+              createElement(TextInput, {
+                value,
+                placeholder: 'Type a message',
+                onChange: (nextValue: string) => setValue(nextValue),
+                onSubmit: (submittedValue: string) => {
+                  void submitPrompt(submittedValue)
+                },
+                focus: true,
+                showCursor: true,
+              }),
+            ),
         createElement(Text, { dimColor: true }, footer),
       )
     }
@@ -280,42 +286,4 @@ export async function runAssistantChatWithInk(
       rejectOnce(new Error('Ink chat failed to initialize.'))
     }
   })
-}
-
-function seedChatEntries(session: AssistantSession): InkChatEntry[] {
-  const entries: InkChatEntry[] = [
-    {
-      kind: 'system',
-      text: 'Healthy Bob chat is local-first. Provider transcripts stay with the provider when supported.',
-    },
-  ]
-
-  if (session.lastUserMessage) {
-    entries.push({
-      kind: 'user',
-      text: session.lastUserMessage,
-    })
-  }
-
-  if (session.lastAssistantMessage) {
-    entries.push({
-      kind: 'assistant',
-      text: session.lastAssistantMessage,
-    })
-  }
-
-  return entries
-}
-
-function formatEntry(entry: InkChatEntry): string {
-  switch (entry.kind) {
-    case 'assistant':
-      return `assistant> ${entry.text}`
-    case 'error':
-      return `error> ${entry.text}`
-    case 'system':
-      return `system> ${entry.text}`
-    case 'user':
-      return `you> ${entry.text}`
-  }
 }

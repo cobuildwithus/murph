@@ -48,6 +48,13 @@ import {
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '../src/assistant-runtime.js'
+import {
+  ACTIVE_CHAT_FOOTER,
+  BUSY_CHAT_STATUS,
+  DEFAULT_CHAT_FOOTER,
+  formatEntry,
+  seedChatEntries,
+} from '../src/assistant/ui/view-model.js'
 
 const cleanupPaths: string[] = []
 
@@ -687,6 +694,61 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
     }),
     /ink exploded/u,
   )
+})
+
+test('assistant Ink view-model starts with a shorter local-first system message', () => {
+  const entries = seedChatEntries({
+    schema: 'healthybob.assistant-session.v2',
+    sessionId: 'asst_demo',
+    provider: 'codex-cli',
+    providerSessionId: null,
+    providerOptions: {
+      model: null,
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      profile: null,
+      oss: false,
+    },
+    alias: null,
+    binding: {
+      conversationKey: null,
+      channel: null,
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: null,
+      delivery: null,
+    },
+    createdAt: '2026-03-17T00:00:00.000Z',
+    updatedAt: '2026-03-17T00:00:00.000Z',
+    lastTurnAt: null,
+    turnCount: 0,
+    lastUserMessage: 'hello',
+    lastAssistantMessage: 'hi',
+  })
+
+  assert.deepEqual(entries, [
+    {
+      kind: 'system',
+      text: 'Local-first chat. Provider transcripts stay with the provider when supported.',
+    },
+    {
+      kind: 'user',
+      text: 'hello',
+    },
+    {
+      kind: 'assistant',
+      text: 'hi',
+    },
+  ])
+})
+
+test('assistant Ink view-model keeps busy copy single-purpose', () => {
+  assert.equal(formatEntry({ kind: 'assistant', text: 'thinking...' }), 'assistant> thinking...')
+  assert.equal(BUSY_CHAT_STATUS, 'assistant> thinking...')
+  assert.match(DEFAULT_CHAT_FOOTER, /^Type a message\./u)
+  assert.doesNotMatch(DEFAULT_CHAT_FOOTER, /Waiting for the assistant/u)
+  assert.doesNotMatch(ACTIVE_CHAT_FOOTER, /Waiting for the assistant/u)
 })
 
 function restoreEnvironmentVariable(
