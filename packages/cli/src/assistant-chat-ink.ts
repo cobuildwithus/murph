@@ -2,7 +2,6 @@ import {
   assistantChatResultSchema,
   type AssistantSession,
 } from './assistant-cli-contracts.js'
-// @ts-ignore CLI Ink chat uses the React runtime directly, but this package does not carry local React typings.
 import * as React from 'react'
 import { Box, Text, render, useApp } from 'ink'
 import TextInput from 'ink-text-input'
