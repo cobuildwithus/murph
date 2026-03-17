@@ -808,11 +808,24 @@ export async function runAssistantChatWithInk(
                   Box,
                   {
                     key,
-                    justifyContent: 'flex-end',
                     marginBottom: 1,
                     width: '100%',
                   },
-                  createElement(Text, { color: 'cyan' }, entry.text),
+                  createElement(
+                    Box,
+                    {
+                      backgroundColor: COMPOSER_BACKGROUND,
+                      flexDirection: 'row',
+                      paddingX: 2,
+                      paddingY: 1,
+                      width: '100%',
+                    },
+                    createElement(
+                      Text,
+                      { color: COMPOSER_TEXT_COLOR },
+                      `› ${entry.text}`,
+                    ),
+                  ),
                 )
               })
             : null,
