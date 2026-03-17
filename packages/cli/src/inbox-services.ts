@@ -141,6 +141,47 @@ interface RuntimeAttachmentParseJobRecord {
 }
 
 type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>
+type PromotionStore = z.infer<typeof inboxPromotionStoreSchema>
+type PromotionTarget = InboxPromotionEntry['target']
+type CanonicalPromotionLookupTarget = Extract<PromotionTarget, 'meal' | 'document'>
+
+interface CanonicalPromotionMatch {
+  lookupId: string
+  promotedAt: string
+  relatedId: string
+}
+
+interface CanonicalPromotionManifest {
+  importId: string
+  importedAt: string
+  source: string | null
+  artifacts: Array<{
+    role: string
+    sha256: string
+  }>
+  provenance: Record<string, unknown>
+}
+
+interface CanonicalPromotionLookupSpec<
+  TManifest extends CanonicalPromotionManifest,
+  TContext,
+> {
+  target: CanonicalPromotionLookupTarget
+  manifestDirectory: string
+  manifestSchema: z.ZodType<TManifest>
+  matchesManifest(manifest: TManifest, context: TContext): boolean
+}
+
+interface PromotionMarkdownTargetSpec<TContext> {
+  sectionHeading: string
+  sectionStartMarker: string
+  sectionEndMarker: string
+  blockHeading(capture: RuntimeCaptureRecord, context: TContext): string
+  blockExtraLines?(
+    capture: RuntimeCaptureRecord,
+    context: TContext,
+  ): string[]
+}
 
 interface RuntimeStore {
   close(): void
@@ -447,6 +488,32 @@ interface CoreRuntimeModule {
   acquireCanonicalWriteLock?(vaultRoot: string): Promise<{
     release(): Promise<void>
   }>
+}
+
+interface MarkdownPromotionCore {
+  parseFrontmatterDocument: NonNullable<
+    CoreRuntimeModule['parseFrontmatterDocument']
+  >
+  stringifyFrontmatterDocument: NonNullable<
+    CoreRuntimeModule['stringifyFrontmatterDocument']
+  >
+  acquireCanonicalWriteLock: NonNullable<
+    CoreRuntimeModule['acquireCanonicalWriteLock']
+  >
+}
+
+interface JournalPromotionCore extends MarkdownPromotionCore {
+  ensureJournalDay: NonNullable<CoreRuntimeModule['ensureJournalDay']>
+}
+
+interface PromotionScope<TPrepared, TDerived> {
+  input: PromoteInput
+  paths: InboxPaths
+  capture: RuntimeCaptureRecord
+  prepared: TPrepared
+  derived: TDerived
+  promotionStore: PromotionStore
+  existing: InboxPromotionEntry | undefined
 }
 
 interface CommandContext {
@@ -1912,242 +1979,170 @@ export function createIntegratedInboxCliServices(
     },
 
     async promoteMeal(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const core = await loadCore()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const capture = runtime.getCapture(input.captureId)
-        if (!capture) {
-          throw new VaultCliError(
-            'INBOX_CAPTURE_NOT_FOUND',
-            `Inbox capture "${input.captureId}" was not found.`,
-          )
-        }
-
-        const promotionStore = await readPromotionStore(paths)
-        const existing = promotionStore.entries.find(
-          (entry) =>
-            entry.captureId === input.captureId &&
-            entry.target === 'meal' &&
-            entry.status === 'applied',
-        )
-
-        const photoAttachment = capture.attachments.find(isStoredImageAttachment)
-        if (!photoAttachment) {
-          throw new VaultCliError(
-            'INBOX_PROMOTION_REQUIRES_PHOTO',
-            'Meal promotion requires an image attachment on the inbox capture.',
-          )
-        }
-        const audioAttachment = capture.attachments.find(isStoredAudioAttachment)
-        const canonicalPromotion = await findCanonicalMealPromotion({
-          capture,
+      return withPromotionScope({
+        input,
+        target: 'meal',
+        loadInbox,
+        prepare: async () => ({
+          core: await loadCore(),
+        }),
+        deriveBeforePromotionStore: () => ({}),
+        run: async ({
           paths,
-          photoAttachment,
-          audioAttachment,
-        })
-
-        if (canonicalPromotion) {
-          if (
-            existing &&
-            existing.lookupId &&
-            existing.relatedId &&
-            (existing.lookupId !== canonicalPromotion.lookupId ||
-              existing.relatedId !== canonicalPromotion.relatedId)
-          ) {
+          capture,
+          prepared,
+          promotionStore,
+          existing,
+        }) => {
+          const photoAttachment = capture.attachments.find(isStoredImageAttachment)
+          if (!photoAttachment) {
             throw new VaultCliError(
-              'INBOX_PROMOTION_STATE_INVALID',
-              'Local meal promotion state does not match the canonical vault record.',
+              'INBOX_PROMOTION_REQUIRES_PHOTO',
+              'Meal promotion requires an image attachment on the inbox capture.',
             )
           }
 
-          upsertMealPromotionEntry(promotionStore, {
-            captureId: input.captureId,
-            lookupId: canonicalPromotion.lookupId,
-            note: capture.text ?? null,
-            promotedAt: canonicalPromotion.promotedAt,
-            relatedId: canonicalPromotion.relatedId,
+          const audioAttachment = capture.attachments.find(isStoredAudioAttachment)
+          const canonicalPromotion = await findCanonicalPromotionMatch({
+            capture,
+            absoluteVaultRoot: paths.absoluteVaultRoot,
+            spec: mealCanonicalPromotionSpec,
+            context: {
+              photoSha256: await resolveAttachmentSha256(
+                paths.absoluteVaultRoot,
+                photoAttachment,
+              ),
+              audioSha256:
+                audioAttachment && typeof audioAttachment.storedPath === 'string'
+                  ? await resolveAttachmentSha256(
+                      paths.absoluteVaultRoot,
+                      audioAttachment,
+                    )
+                  : null,
+            },
           })
-          await writePromotionStore(paths, promotionStore)
+          const promotion = await reconcileCanonicalImportPromotion({
+            paths,
+            promotionStore,
+            existing,
+            capture,
+            clock,
+            target: 'meal',
+            canonicalPromotion,
+            createPromotion: async () => {
+              const result = await prepared.core.addMeal({
+                vaultRoot: paths.absoluteVaultRoot,
+                occurredAt: capture.occurredAt,
+                note: capture.text ?? undefined,
+                photoPath: path.join(
+                  paths.absoluteVaultRoot,
+                  photoAttachment.storedPath,
+                ),
+                audioPath:
+                  typeof audioAttachment?.storedPath === 'string'
+                    ? path.join(paths.absoluteVaultRoot, audioAttachment.storedPath)
+                    : undefined,
+                source: 'import',
+              })
+
+              return {
+                lookupId: result.event.id,
+                relatedId: result.mealId,
+              }
+            },
+          })
 
           return {
             vault: paths.absoluteVaultRoot,
             captureId: input.captureId,
             target: 'meal',
-            lookupId: canonicalPromotion.lookupId,
-            relatedId: canonicalPromotion.relatedId,
-            created: false,
+            lookupId: promotion.lookupId,
+            relatedId: promotion.relatedId,
+            created: promotion.created,
           }
-        }
-
-        if (existing) {
-          if (!existing.lookupId || !existing.relatedId) {
-            throw new VaultCliError(
-              'INBOX_PROMOTION_STATE_INVALID',
-              'Stored meal promotion state is missing canonical ids.',
-            )
-          }
-          throw new VaultCliError(
-            'INBOX_PROMOTION_CANONICAL_MISSING',
-            'Local meal promotion state exists, but no canonical meal record could be verified.',
-          )
-        }
-
-        const result = await core.addMeal({
-          vaultRoot: paths.absoluteVaultRoot,
-          occurredAt: capture.occurredAt,
-          note: capture.text ?? undefined,
-          photoPath: path.join(paths.absoluteVaultRoot, photoAttachment.storedPath),
-          audioPath:
-            typeof audioAttachment?.storedPath === 'string'
-              ? path.join(paths.absoluteVaultRoot, audioAttachment.storedPath)
-              : undefined,
-          source: 'import',
-        })
-
-        upsertMealPromotionEntry(promotionStore, {
-          captureId: input.captureId,
-          lookupId: result.event.id,
-          note: capture.text ?? null,
-          promotedAt: clock().toISOString(),
-          relatedId: result.mealId,
-        })
-        await writePromotionStore(paths, promotionStore)
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: input.captureId,
-          target: 'meal',
-          lookupId: result.event.id,
-          relatedId: result.mealId,
-          created: true,
-        }
-      } finally {
-        runtime.close()
-      }
+        },
+      })
     },
 
     async promoteDocument(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const importersModule = await loadImporters()
-      const importers = importersModule.createImporters()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const capture = runtime.getCapture(input.captureId)
-        if (!capture) {
-          throw new VaultCliError(
-            'INBOX_CAPTURE_NOT_FOUND',
-            `Inbox capture "${input.captureId}" was not found.`,
-          )
-        }
-
-        const promotionStore = await readPromotionStore(paths)
-        const existing = promotionStore.entries.find(
-          (entry) =>
-            entry.captureId === input.captureId &&
-            entry.target === 'document' &&
-            entry.status === 'applied',
-        )
-
-        const documentAttachment = capture.attachments.find(isStoredDocumentAttachment)
-        if (!documentAttachment) {
-          throw new VaultCliError(
-            'INBOX_PROMOTION_REQUIRES_DOCUMENT',
-            'Document promotion requires a stored document attachment on the inbox capture.',
-          )
-        }
-
-        const canonicalPromotion = await findCanonicalDocumentPromotion({
-          capture,
+      return withPromotionScope({
+        input,
+        target: 'document',
+        loadInbox,
+        prepare: async () => ({
+          importers: (await loadImporters()).createImporters(),
+        }),
+        deriveBeforePromotionStore: () => ({}),
+        run: async ({
           paths,
-          documentAttachment,
-        })
-
-        if (canonicalPromotion) {
-          if (
-            existing &&
-            existing.lookupId &&
-            existing.relatedId &&
-            (existing.lookupId !== canonicalPromotion.lookupId ||
-              existing.relatedId !== canonicalPromotion.relatedId)
-          ) {
+          capture,
+          prepared,
+          promotionStore,
+          existing,
+        }) => {
+          const documentAttachment = capture.attachments.find(
+            isStoredDocumentAttachment,
+          )
+          if (!documentAttachment) {
             throw new VaultCliError(
-              'INBOX_PROMOTION_STATE_INVALID',
-              'Local document promotion state does not match the canonical vault record.',
+              'INBOX_PROMOTION_REQUIRES_DOCUMENT',
+              'Document promotion requires a stored document attachment on the inbox capture.',
             )
           }
 
-          upsertDocumentPromotionEntry(promotionStore, {
-            captureId: input.captureId,
-            lookupId: canonicalPromotion.lookupId,
-            note: capture.text ?? null,
-            promotedAt: canonicalPromotion.promotedAt,
-            relatedId: canonicalPromotion.relatedId,
+          const canonicalPromotion = await findCanonicalPromotionMatch({
+            capture,
+            absoluteVaultRoot: paths.absoluteVaultRoot,
+            spec: documentCanonicalPromotionSpec,
+            context: {
+              documentSha256: await resolveAttachmentSha256(
+                paths.absoluteVaultRoot,
+                documentAttachment,
+              ),
+              title: normalizeNullableString(documentAttachment.fileName),
+            },
           })
-          await writePromotionStore(paths, promotionStore)
+          const promotion = await reconcileCanonicalImportPromotion({
+            paths,
+            promotionStore,
+            existing,
+            capture,
+            clock,
+            target: 'document',
+            canonicalPromotion,
+            createPromotion: async () => {
+              const title =
+                normalizeNullableString(documentAttachment.fileName) ?? undefined
+              const note = normalizeNullableString(capture.text) ?? undefined
+              const result = await prepared.importers.importDocument({
+                filePath: path.join(
+                  paths.absoluteVaultRoot,
+                  documentAttachment.storedPath,
+                ),
+                vaultRoot: paths.absoluteVaultRoot,
+                occurredAt: capture.occurredAt,
+                title,
+                note,
+                source: 'import',
+              })
+
+              return {
+                lookupId: result.event.id,
+                relatedId: result.documentId,
+              }
+            },
+          })
 
           return {
             vault: paths.absoluteVaultRoot,
             captureId: input.captureId,
             target: 'document',
-            lookupId: canonicalPromotion.lookupId,
-            relatedId: canonicalPromotion.relatedId,
-            created: false,
+            lookupId: promotion.lookupId,
+            relatedId: promotion.relatedId,
+            created: promotion.created,
           }
-        }
-
-        if (existing) {
-          if (!existing.lookupId || !existing.relatedId) {
-            throw new VaultCliError(
-              'INBOX_PROMOTION_STATE_INVALID',
-              'Stored document promotion state is missing canonical ids.',
-            )
-          }
-          throw new VaultCliError(
-            'INBOX_PROMOTION_CANONICAL_MISSING',
-            'Local document promotion state exists, but no canonical document record could be verified.',
-          )
-        }
-
-        const title = normalizeNullableString(documentAttachment.fileName) ?? undefined
-        const note = normalizeNullableString(capture.text) ?? undefined
-        const result = await importers.importDocument({
-          filePath: path.join(paths.absoluteVaultRoot, documentAttachment.storedPath),
-          vaultRoot: paths.absoluteVaultRoot,
-          occurredAt: capture.occurredAt,
-          title,
-          note,
-          source: 'import',
-        })
-
-        upsertDocumentPromotionEntry(promotionStore, {
-          captureId: input.captureId,
-          lookupId: result.event.id,
-          note: capture.text ?? null,
-          promotedAt: clock().toISOString(),
-          relatedId: result.documentId,
-        })
-        await writePromotionStore(paths, promotionStore)
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: input.captureId,
-          target: 'document',
-          lookupId: result.event.id,
-          relatedId: result.documentId,
-          created: true,
-        }
-      } finally {
-        runtime.close()
-      }
+        },
+      })
     },
 
     async promoteJournal(input) {
@@ -2155,200 +2150,186 @@ export function createIntegratedInboxCliServices(
         throw unsupportedPromotion('journal')
       }
 
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const core = await loadCore()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const capture = runtime.getCapture(input.captureId)
-        if (!capture) {
-          throw new VaultCliError(
-            'INBOX_CAPTURE_NOT_FOUND',
-            `Inbox capture "${input.captureId}" was not found.`,
-          )
-        }
-
-        if (
-          !core.ensureJournalDay ||
-          !core.parseFrontmatterDocument ||
-          !core.stringifyFrontmatterDocument ||
-          !core.acquireCanonicalWriteLock
-        ) {
-          throw unsupportedPromotion('journal')
-        }
-
-        const journalDate = occurredDayFromCapture(capture)
-        const lookupId = `journal:${journalDate}`
-        const promotionStore = await readPromotionStore(paths)
-        const existing = promotionStore.entries.find(
-          (entry) =>
-            entry.captureId === input.captureId &&
-            entry.target === 'journal' &&
-            entry.status === 'applied',
-        )
-        if (
-          existing &&
-          ((existing.lookupId && existing.lookupId !== lookupId) ||
-            (existing.relatedId && existing.relatedId !== capture.eventId))
-        ) {
-          throw new VaultCliError(
-            'INBOX_PROMOTION_STATE_INVALID',
-            'Local journal promotion state does not match the deterministic canonical journal target.',
-          )
-        }
-
-        const lock = await core.acquireCanonicalWriteLock(paths.absoluteVaultRoot)
-        try {
-          const ensured = await core.ensureJournalDay({
-            vaultRoot: paths.absoluteVaultRoot,
-            date: journalDate,
-          })
-          const absoluteJournalPath = path.join(
-            paths.absoluteVaultRoot,
-            ensured.relativePath,
-          )
-          const rawJournal = await readFile(absoluteJournalPath, 'utf8')
-          const parsedJournal = core.parseFrontmatterDocument(rawJournal)
-          const currentEventIds = frontmatterStringArray(parsedJournal.attributes.eventIds)
-          const nextBody = upsertJournalPromotionBody(parsedJournal.body, capture)
-          const nextJournal = core.stringifyFrontmatterDocument({
-            attributes: {
-              ...parsedJournal.attributes,
-              eventIds: uniqueStrings([...currentEventIds, capture.eventId]),
-            },
-            body: nextBody.body,
-          })
-
-          if (nextJournal !== rawJournal) {
-            await writeFile(absoluteJournalPath, nextJournal, 'utf8')
-          }
-
-          upsertJournalPromotionEntry(promotionStore, {
-            captureId: input.captureId,
-            lookupId,
-            promotedAt: clock().toISOString(),
-            relatedId: capture.eventId,
-            note: capture.text ?? null,
-          })
-          await writePromotionStore(paths, promotionStore)
+      return withPromotionScope({
+        input,
+        target: 'journal',
+        loadInbox,
+        prepare: async () => ({
+          core: await loadCore(),
+        }),
+        deriveBeforePromotionStore: ({ capture, prepared }) => {
+          const promotionCore = requireJournalPromotionCore(prepared.core)
+          const journalDate = occurredDayFromCapture(capture)
 
           return {
-            vault: paths.absoluteVaultRoot,
-            captureId: input.captureId,
-            target: 'journal',
-            lookupId,
-            relatedId: capture.eventId,
-            journalPath: ensured.relativePath,
-            created: ensured.created,
-            appended: nextBody.appended,
-            linked: !currentEventIds.includes(capture.eventId),
+            journalDate,
+            lookupId: `journal:${journalDate}`,
+            promotionCore,
           }
-        } finally {
-          await lock.release()
-        }
-      } finally {
-        runtime.close()
-      }
+        },
+        run: async ({
+          paths,
+          capture,
+          derived,
+          promotionStore,
+          existing,
+        }) => {
+          if (
+            existing &&
+            ((existing.lookupId && existing.lookupId !== derived.lookupId) ||
+              (existing.relatedId && existing.relatedId !== capture.eventId))
+          ) {
+            throw new VaultCliError(
+              'INBOX_PROMOTION_STATE_INVALID',
+              'Local journal promotion state does not match the deterministic canonical journal target.',
+            )
+          }
+
+          return withCanonicalWriteLock(
+            derived.promotionCore,
+            paths.absoluteVaultRoot,
+            async () => {
+              const ensured = await derived.promotionCore.ensureJournalDay({
+                vaultRoot: paths.absoluteVaultRoot,
+                date: derived.journalDate,
+              })
+              const journalUpdate = await updatePromotionMarkdownDocument({
+                core: derived.promotionCore,
+                absoluteVaultRoot: paths.absoluteVaultRoot,
+                relativePath: ensured.relativePath,
+                capture,
+                spec: journalPromotionMarkdownSpec,
+                resolveUpdate: ({ attributes }) => {
+                  const currentEventIds = frontmatterStringArray(
+                    attributes.eventIds,
+                  )
+
+                  return {
+                    context: undefined,
+                    resolved: {
+                      currentEventIds,
+                    },
+                    nextAttributes: {
+                      ...attributes,
+                      eventIds: uniqueStrings([
+                        ...currentEventIds,
+                        capture.eventId,
+                      ]),
+                    },
+                  }
+                },
+              })
+
+              await persistPromotionEntry({
+                paths,
+                promotionStore,
+                captureId: input.captureId,
+                target: 'journal',
+                lookupId: derived.lookupId,
+                promotedAt: clock().toISOString(),
+                relatedId: capture.eventId,
+                note: capture.text ?? null,
+              })
+
+              return {
+                vault: paths.absoluteVaultRoot,
+                captureId: input.captureId,
+                target: 'journal',
+                lookupId: derived.lookupId,
+                relatedId: capture.eventId,
+                journalPath: ensured.relativePath,
+                created: ensured.created,
+                appended: journalUpdate.appended,
+                linked: !journalUpdate.resolved.currentEventIds.includes(
+                  capture.eventId,
+                ),
+              }
+            },
+          )
+        },
+      })
     },
 
     async promoteExperimentNote(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const core = await loadCore()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const capture = runtime.getCapture(input.captureId)
-        if (!capture) {
-          throw new VaultCliError(
-            'INBOX_CAPTURE_NOT_FOUND',
-            `Inbox capture "${input.captureId}" was not found.`,
-          )
-        }
-
-        if (
-          !core.parseFrontmatterDocument ||
-          !core.stringifyFrontmatterDocument ||
-          !core.acquireCanonicalWriteLock
-        ) {
-          throw unsupportedPromotion('experiment-note')
-        }
-
-        const promotionStore = await readPromotionStore(paths)
-        const existing = promotionStore.entries.find(
-          (entry) =>
-            entry.captureId === input.captureId &&
-            entry.target === 'experiment-note' &&
-            entry.status === 'applied',
-        )
-        const experimentEntries = await readExperimentEntries(
-          paths.absoluteVaultRoot,
-          core,
-        )
-        const target = existing
-          ? requireExperimentPromotionEntry(
-              experimentEntries,
-              existing.lookupId,
-              existing.relatedId,
-              capture,
-            )
-          : resolveExperimentPromotionTarget(experimentEntries)
-
-        const lock = await core.acquireCanonicalWriteLock(paths.absoluteVaultRoot)
-        try {
-          const absoluteExperimentPath = path.join(
+      return withPromotionScope({
+        input,
+        target: 'experiment-note',
+        loadInbox,
+        prepare: async () => ({
+          core: await loadCore(),
+        }),
+        deriveBeforePromotionStore: ({ prepared }) => ({
+          promotionCore: requireExperimentPromotionCore(prepared.core),
+        }),
+        run: async ({
+          paths,
+          capture,
+          derived,
+          promotionStore,
+          existing,
+        }) => {
+          const experimentEntries = await readExperimentEntries(
             paths.absoluteVaultRoot,
-            target.relativePath,
+            derived.promotionCore,
           )
-          const rawExperiment = await readFile(absoluteExperimentPath, 'utf8')
-          const parsedExperiment = core.parseFrontmatterDocument(rawExperiment)
-          const experimentAttributes = validateExperimentFrontmatter(
-            parsedExperiment.attributes,
+          const target = existing
+            ? requireExperimentPromotionEntry(
+                experimentEntries,
+                existing.lookupId,
+                existing.relatedId,
+                capture,
+              )
+            : resolveExperimentPromotionTarget(experimentEntries)
+
+          return withCanonicalWriteLock(
+            derived.promotionCore,
+            paths.absoluteVaultRoot,
+            async () => {
+              const experimentUpdate = await updatePromotionMarkdownDocument({
+                core: derived.promotionCore,
+                absoluteVaultRoot: paths.absoluteVaultRoot,
+                relativePath: target.relativePath,
+                capture,
+                spec: experimentPromotionMarkdownSpec,
+                resolveUpdate: ({ attributes }) => {
+                  const experimentAttributes =
+                    validateExperimentFrontmatter(attributes)
+
+                  return {
+                    context: {
+                      experimentSlug: experimentAttributes.slug,
+                    },
+                    resolved: experimentAttributes,
+                    nextAttributes: experimentAttributes,
+                  }
+                },
+              })
+
+              await persistPromotionEntry({
+                paths,
+                promotionStore,
+                captureId: input.captureId,
+                target: 'experiment-note',
+                lookupId: experimentUpdate.resolved.experimentId,
+                promotedAt: clock().toISOString(),
+                relatedId: capture.eventId,
+                note: capture.text ?? null,
+              })
+
+              return {
+                vault: paths.absoluteVaultRoot,
+                captureId: input.captureId,
+                target: 'experiment-note',
+                lookupId: experimentUpdate.resolved.experimentId,
+                relatedId: capture.eventId,
+                experimentPath: target.relativePath,
+                experimentSlug: experimentUpdate.resolved.slug,
+                appended: experimentUpdate.appended,
+              }
+            },
           )
-          const nextBody = upsertExperimentPromotionBody(
-            parsedExperiment.body,
-            capture,
-            experimentAttributes.slug,
-          )
-          const nextExperiment = core.stringifyFrontmatterDocument({
-            attributes: experimentAttributes,
-            body: nextBody.body,
-          })
-
-          if (nextExperiment !== rawExperiment) {
-            await writeFile(absoluteExperimentPath, nextExperiment, 'utf8')
-          }
-
-          upsertExperimentPromotionEntry(promotionStore, {
-            captureId: input.captureId,
-            lookupId: experimentAttributes.experimentId,
-            promotedAt: clock().toISOString(),
-            relatedId: capture.eventId,
-            note: capture.text ?? null,
-          })
-          await writePromotionStore(paths, promotionStore)
-
-          return {
-            vault: paths.absoluteVaultRoot,
-            captureId: input.captureId,
-            target: 'experiment-note',
-            lookupId: experimentAttributes.experimentId,
-            relatedId: capture.eventId,
-            experimentPath: target.relativePath,
-            experimentSlug: experimentAttributes.slug,
-            appended: nextBody.appended,
-          }
-        } finally {
-          await lock.release()
-        }
-      } finally {
-        runtime.close()
-      }
+        },
+      })
     },
   }
 }
@@ -2663,12 +2644,12 @@ async function readPromotionsByCapture(
 
 async function readPromotionStore(
   paths: InboxPaths,
-): Promise<z.infer<typeof inboxPromotionStoreSchema>> {
+): Promise<PromotionStore> {
   if (!(await fileExists(paths.inboxPromotionsPath))) {
     return {
       version: PROMOTION_STORE_VERSION,
       entries: [],
-    } satisfies z.infer<typeof inboxPromotionStoreSchema>
+    } satisfies PromotionStore
   }
 
   return readJsonWithSchema(
@@ -2681,7 +2662,7 @@ async function readPromotionStore(
 
 async function writePromotionStore(
   paths: InboxPaths,
-  store: z.infer<typeof inboxPromotionStoreSchema>,
+  store: PromotionStore,
 ): Promise<void> {
   await writeJsonFile(
     paths.inboxPromotionsPath,
@@ -2689,51 +2670,84 @@ async function writePromotionStore(
   )
 }
 
-async function findCanonicalMealPromotion(input: {
-  capture: RuntimeCaptureRecord
-  paths: InboxPaths
-  photoAttachment: RuntimeAttachmentRecord & { storedPath: string }
-  audioAttachment?: RuntimeAttachmentRecord
-}): Promise<{
-  lookupId: string
-  manifestPath: string
-  promotedAt: string
-  relatedId: string
-} | null> {
-  const photoSha256 = await resolveAttachmentSha256(
-    input.paths.absoluteVaultRoot,
-    input.photoAttachment,
+function findAppliedPromotionEntry(
+  store: PromotionStore,
+  captureId: string,
+  target: PromotionTarget,
+): InboxPromotionEntry | undefined {
+  return store.entries.find(
+    (entry) =>
+      entry.captureId === captureId &&
+      entry.target === target &&
+      entry.status === 'applied',
   )
-  const audioSha256 =
-    input.audioAttachment && typeof input.audioAttachment.storedPath === 'string'
-      ? await resolveAttachmentSha256(
-          input.paths.absoluteVaultRoot,
-          input.audioAttachment,
+}
+
+function assertCanonicalPromotionStateMatches(
+  existing: InboxPromotionEntry | undefined,
+  canonicalPromotion: CanonicalPromotionMatch,
+  target: CanonicalPromotionLookupTarget,
+): void {
+  if (
+    existing &&
+    existing.lookupId &&
+    existing.relatedId &&
+    (existing.lookupId !== canonicalPromotion.lookupId ||
+      existing.relatedId !== canonicalPromotion.relatedId)
+  ) {
+    throw new VaultCliError(
+      'INBOX_PROMOTION_STATE_INVALID',
+      `Local ${target} promotion state does not match the canonical vault record.`,
+    )
+  }
+}
+
+function throwMissingCanonicalPromotionState(
+  existing: InboxPromotionEntry,
+  target: CanonicalPromotionLookupTarget,
+): never {
+  if (!existing.lookupId || !existing.relatedId) {
+    throw new VaultCliError(
+      'INBOX_PROMOTION_STATE_INVALID',
+      `Stored ${target} promotion state is missing canonical ids.`,
+    )
+  }
+
+  throw new VaultCliError(
+    'INBOX_PROMOTION_CANONICAL_MISSING',
+    `Local ${target} promotion state exists, but no canonical ${target} record could be verified.`,
+  )
+}
+
+async function findCanonicalPromotionMatch<
+  TManifest extends CanonicalPromotionManifest,
+  TContext,
+>(input: {
+  capture: RuntimeCaptureRecord
+  absoluteVaultRoot: string
+  context: TContext
+  spec: CanonicalPromotionLookupSpec<TManifest, TContext>
+}): Promise<CanonicalPromotionMatch | null> {
+  const note = normalizeNullableString(input.capture.text)
+  const matches = (
+    await Promise.all(
+      (
+        await listCanonicalManifestPaths(
+          input.absoluteVaultRoot,
+          input.spec.manifestDirectory,
         )
-      : null
-  const note = normalizeNullableString(input.capture.text)
-  const matches = (
-    await Promise.all(
-      (await listCanonicalMealManifestPaths(input.paths.absoluteVaultRoot)).map(
+      ).map(
         async (manifestPath) => {
-          const manifest = await readCanonicalMealManifest(
-            input.paths.absoluteVaultRoot,
+          const manifest = await readCanonicalManifest(
+            input.absoluteVaultRoot,
             manifestPath,
+            input.spec.manifestSchema,
           )
           if (!manifest) {
             return null
           }
 
-          const manifestPhoto = manifest.artifacts.find(
-            (artifact) => artifact.role === 'photo',
-          )
-          const manifestAudio = manifest.artifacts.find(
-            (artifact) => artifact.role === 'audio',
-          )
-          if (!manifestPhoto || manifestPhoto.sha256 !== photoSha256) {
-            return null
-          }
-          if ((manifestAudio?.sha256 ?? null) !== audioSha256) {
+          if (!input.spec.matchesManifest(manifest, input.context)) {
             return null
           }
           if (normalizeNullableString(manifest.source) !== 'import') {
@@ -2768,7 +2782,6 @@ async function findCanonicalMealPromotion(input: {
 
           return {
             lookupId,
-            manifestPath,
             promotedAt: manifest.importedAt,
             relatedId: manifest.importId,
           }
@@ -2778,12 +2791,7 @@ async function findCanonicalMealPromotion(input: {
   ).filter(
     (
       match,
-    ): match is {
-      lookupId: string
-      manifestPath: string
-      promotedAt: string
-      relatedId: string
-    } => match !== null,
+    ): match is CanonicalPromotionMatch => match !== null,
   )
 
   if (matches.length === 0) {
@@ -2793,7 +2801,7 @@ async function findCanonicalMealPromotion(input: {
   if (matches.length > 1) {
     throw new VaultCliError(
       'INBOX_PROMOTION_DUPLICATE_CANONICAL',
-      'Multiple canonical meal records match this inbox capture.',
+      `Multiple canonical ${input.spec.target} records match this inbox capture.`,
       {
         captureId: input.capture.captureId,
         relatedIds: matches.map((match) => match.relatedId),
@@ -2804,175 +2812,197 @@ async function findCanonicalMealPromotion(input: {
   return matches[0]
 }
 
-async function findCanonicalDocumentPromotion(input: {
-  capture: RuntimeCaptureRecord
+function upsertPromotionEntry(
+  store: PromotionStore,
+  input: {
+    captureId: string
+    target: PromotionTarget
+    lookupId: string
+    note: string | null
+    promotedAt: string
+    relatedId: string
+  },
+): void {
+  const existingIndex = store.entries.findIndex(
+    (entry) => entry.captureId === input.captureId && entry.target === input.target,
+  )
+  const nextEntry = {
+    captureId: input.captureId,
+    target: input.target,
+    status: 'applied',
+    promotedAt: input.promotedAt,
+    lookupId: input.lookupId,
+    relatedId: input.relatedId,
+    note: input.note,
+  } satisfies InboxPromotionEntry
+
+  if (existingIndex === -1) {
+    store.entries.push(nextEntry)
+    return
+  }
+
+  store.entries[existingIndex] = nextEntry
+}
+
+function requirePromotionCapture(
+  runtime: RuntimeStore,
+  captureId: string,
+): RuntimeCaptureRecord {
+  const capture = runtime.getCapture(captureId)
+  if (!capture) {
+    throw new VaultCliError(
+      'INBOX_CAPTURE_NOT_FOUND',
+      `Inbox capture "${captureId}" was not found.`,
+    )
+  }
+
+  return capture
+}
+
+async function persistPromotionEntry(input: {
   paths: InboxPaths
-  documentAttachment: RuntimeAttachmentRecord & { storedPath: string }
-}): Promise<{
+  promotionStore: PromotionStore
+  captureId: string
+  target: PromotionTarget
   lookupId: string
-  manifestPath: string
   promotedAt: string
   relatedId: string
-} | null> {
-  const documentSha256 = await resolveAttachmentSha256(
-    input.paths.absoluteVaultRoot,
-    input.documentAttachment,
-  )
-  const note = normalizeNullableString(input.capture.text)
-  const title = normalizeNullableString(input.documentAttachment.fileName)
-  const matches = (
-    await Promise.all(
-      (await listCanonicalDocumentManifestPaths(input.paths.absoluteVaultRoot)).map(
-        async (manifestPath) => {
-          const manifest = await readCanonicalDocumentManifest(
-            input.paths.absoluteVaultRoot,
-            manifestPath,
-          )
-          if (!manifest) {
-            return null
-          }
-
-          const manifestDocument = manifest.artifacts.find(
-            (artifact) => artifact.role === 'source_document',
-          )
-          if (!manifestDocument || manifestDocument.sha256 !== documentSha256) {
-            return null
-          }
-          if (normalizeNullableString(manifest.source) !== 'import') {
-            return null
-          }
-
-          const occurredAt = extractCanonicalString(
-            manifest.provenance,
-            'occurredAt',
-          )
-          if (occurredAt !== input.capture.occurredAt) {
-            return null
-          }
-
-          if (
-            normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
-            note
-          ) {
-            return null
-          }
-
-          if (
-            normalizeNullableString(extractCanonicalString(manifest.provenance, 'title')) !==
-            title
-          ) {
-            return null
-          }
-
-          const lookupId =
-            normalizeNullableString(
-              extractCanonicalString(manifest.provenance, 'lookupId'),
-            ) ??
-            normalizeNullableString(
-              extractCanonicalString(manifest.provenance, 'eventId'),
-            )
-          if (!lookupId) {
-            return null
-          }
-
-          return {
-            lookupId,
-            manifestPath,
-            promotedAt: manifest.importedAt,
-            relatedId: manifest.importId,
-          }
-        },
-      ),
-    )
-  ).filter(
-    (
-      match,
-    ): match is {
-      lookupId: string
-      manifestPath: string
-      promotedAt: string
-      relatedId: string
-    } => match !== null,
-  )
-
-  if (matches.length === 0) {
-    return null
-  }
-
-  if (matches.length > 1) {
-    throw new VaultCliError(
-      'INBOX_PROMOTION_DUPLICATE_CANONICAL',
-      'Multiple canonical document records match this inbox capture.',
-      {
-        captureId: input.capture.captureId,
-        relatedIds: matches.map((match) => match.relatedId),
-      },
-    )
-  }
-
-  return matches[0]
+  note: string | null
+}): Promise<void> {
+  upsertPromotionEntry(input.promotionStore, {
+    captureId: input.captureId,
+    target: input.target,
+    lookupId: input.lookupId,
+    note: input.note,
+    promotedAt: input.promotedAt,
+    relatedId: input.relatedId,
+  })
+  await writePromotionStore(input.paths, input.promotionStore)
 }
 
-function upsertDocumentPromotionEntry(
-  store: z.infer<typeof inboxPromotionStoreSchema>,
-  input: {
-    captureId: string
+async function reconcileCanonicalImportPromotion(input: {
+  paths: InboxPaths
+  promotionStore: PromotionStore
+  existing: InboxPromotionEntry | undefined
+  capture: RuntimeCaptureRecord
+  clock: () => Date
+  target: CanonicalPromotionLookupTarget
+  canonicalPromotion: CanonicalPromotionMatch | null
+  createPromotion(): Promise<{
     lookupId: string
-    note: string | null
-    promotedAt: string
     relatedId: string
-  },
-): void {
-  const existingIndex = store.entries.findIndex(
-    (entry) => entry.captureId === input.captureId && entry.target === 'document',
-  )
-  const nextEntry = {
-    captureId: input.captureId,
-    target: 'document',
-    status: 'applied',
-    promotedAt: input.promotedAt,
-    lookupId: input.lookupId,
-    relatedId: input.relatedId,
-    note: input.note,
-  } satisfies InboxPromotionEntry
+  }>
+}): Promise<{
+  lookupId: string
+  relatedId: string
+  created: boolean
+}> {
+  if (input.canonicalPromotion) {
+    assertCanonicalPromotionStateMatches(
+      input.existing,
+      input.canonicalPromotion,
+      input.target,
+    )
+    await persistPromotionEntry({
+      paths: input.paths,
+      promotionStore: input.promotionStore,
+      captureId: input.capture.captureId,
+      target: input.target,
+      lookupId: input.canonicalPromotion.lookupId,
+      promotedAt: input.canonicalPromotion.promotedAt,
+      relatedId: input.canonicalPromotion.relatedId,
+      note: input.capture.text ?? null,
+    })
 
-  if (existingIndex === -1) {
-    store.entries.push(nextEntry)
-    return
+    return {
+      lookupId: input.canonicalPromotion.lookupId,
+      relatedId: input.canonicalPromotion.relatedId,
+      created: false,
+    }
   }
 
-  store.entries[existingIndex] = nextEntry
+  if (input.existing) {
+    throwMissingCanonicalPromotionState(input.existing, input.target)
+  }
+
+  const createdPromotion = await input.createPromotion()
+  await persistPromotionEntry({
+    paths: input.paths,
+    promotionStore: input.promotionStore,
+    captureId: input.capture.captureId,
+    target: input.target,
+    lookupId: createdPromotion.lookupId,
+    promotedAt: input.clock().toISOString(),
+    relatedId: createdPromotion.relatedId,
+    note: input.capture.text ?? null,
+  })
+
+  return {
+    lookupId: createdPromotion.lookupId,
+    relatedId: createdPromotion.relatedId,
+    created: true,
+  }
 }
 
-function upsertMealPromotionEntry(
-  store: z.infer<typeof inboxPromotionStoreSchema>,
-  input: {
-    captureId: string
-    lookupId: string
-    note: string | null
-    promotedAt: string
-    relatedId: string
-  },
-): void {
-  const existingIndex = store.entries.findIndex(
-    (entry) => entry.captureId === input.captureId && entry.target === 'meal',
-  )
-  const nextEntry = {
-    captureId: input.captureId,
-    target: 'meal',
-    status: 'applied',
-    promotedAt: input.promotedAt,
-    lookupId: input.lookupId,
-    relatedId: input.relatedId,
-    note: input.note,
-  } satisfies InboxPromotionEntry
+async function withPromotionScope<TPrepared, TDerived, TResult>(input: {
+  input: PromoteInput
+  target: PromotionTarget
+  loadInbox: () => Promise<InboxRuntimeModule>
+  prepare(paths: InboxPaths): Promise<TPrepared>
+  deriveBeforePromotionStore(input: {
+    paths: InboxPaths
+    capture: RuntimeCaptureRecord
+    prepared: TPrepared
+  }): Promise<TDerived> | TDerived
+  run(scope: PromotionScope<TPrepared, TDerived>): Promise<TResult>
+}): Promise<TResult> {
+  const paths = await ensureInitialized(input.loadInbox, input.input.vault)
+  const inboxd = await input.loadInbox()
+  const prepared = await input.prepare(paths)
+  const runtime = await inboxd.openInboxRuntime({
+    vaultRoot: paths.absoluteVaultRoot,
+  })
 
-  if (existingIndex === -1) {
-    store.entries.push(nextEntry)
-    return
+  try {
+    const capture = requirePromotionCapture(runtime, input.input.captureId)
+    const derived = await input.deriveBeforePromotionStore({
+      paths,
+      capture,
+      prepared,
+    })
+    const promotionStore = await readPromotionStore(paths)
+    const existing = findAppliedPromotionEntry(
+      promotionStore,
+      input.input.captureId,
+      input.target,
+    )
+
+    return input.run({
+      input: input.input,
+      paths,
+      capture,
+      prepared,
+      derived,
+      promotionStore,
+      existing,
+    })
+  } finally {
+    runtime.close()
   }
+}
 
-  store.entries[existingIndex] = nextEntry
+async function withCanonicalWriteLock<TResult>(
+  core: Pick<MarkdownPromotionCore, 'acquireCanonicalWriteLock'>,
+  vaultRoot: string,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  const lock = await core.acquireCanonicalWriteLock(vaultRoot)
+
+  try {
+    return await run()
+  } finally {
+    await lock.release()
+  }
 }
 
 async function normalizeDaemonState(
@@ -3453,77 +3483,52 @@ function occurredDayFromCapture(capture: RuntimeCaptureRecord): string {
   return day
 }
 
-function upsertJournalPromotionEntry(
-  store: z.infer<typeof inboxPromotionStoreSchema>,
-  input: {
-    captureId: string
-    lookupId: string
-    promotedAt: string
-    relatedId: string
-    note: string | null
-  },
-): void {
-  const existingIndex = store.entries.findIndex(
-    (entry) => entry.captureId === input.captureId && entry.target === 'journal',
-  )
-  const nextEntry = {
-    captureId: input.captureId,
-    target: 'journal',
-    status: 'applied',
-    promotedAt: input.promotedAt,
-    lookupId: input.lookupId,
-    relatedId: input.relatedId,
-    note: input.note,
-  } satisfies InboxPromotionEntry
-
-  if (existingIndex === -1) {
-    store.entries.push(nextEntry)
-    return
+function requireJournalPromotionCore(core: CoreRuntimeModule): JournalPromotionCore {
+  if (
+    !core.ensureJournalDay ||
+    !core.parseFrontmatterDocument ||
+    !core.stringifyFrontmatterDocument ||
+    !core.acquireCanonicalWriteLock
+  ) {
+    throw unsupportedPromotion('journal')
   }
 
-  store.entries[existingIndex] = nextEntry
+  return {
+    ensureJournalDay: core.ensureJournalDay,
+    parseFrontmatterDocument: core.parseFrontmatterDocument,
+    stringifyFrontmatterDocument: core.stringifyFrontmatterDocument,
+    acquireCanonicalWriteLock: core.acquireCanonicalWriteLock,
+  }
 }
 
-function upsertExperimentPromotionEntry(
-  store: z.infer<typeof inboxPromotionStoreSchema>,
-  input: {
-    captureId: string
-    lookupId: string
-    promotedAt: string
-    relatedId: string
-    note: string | null
-  },
-): void {
-  const existingIndex = store.entries.findIndex(
-    (entry) =>
-      entry.captureId === input.captureId &&
-      entry.target === 'experiment-note',
-  )
-  const nextEntry = {
-    captureId: input.captureId,
-    target: 'experiment-note',
-    status: 'applied',
-    promotedAt: input.promotedAt,
-    lookupId: input.lookupId,
-    relatedId: input.relatedId,
-    note: input.note,
-  } satisfies InboxPromotionEntry
-
-  if (existingIndex === -1) {
-    store.entries.push(nextEntry)
-    return
+function requireExperimentPromotionCore(
+  core: CoreRuntimeModule,
+): MarkdownPromotionCore {
+  if (
+    !core.parseFrontmatterDocument ||
+    !core.stringifyFrontmatterDocument ||
+    !core.acquireCanonicalWriteLock
+  ) {
+    throw unsupportedPromotion('experiment-note')
   }
 
-  store.entries[existingIndex] = nextEntry
+  return {
+    parseFrontmatterDocument: core.parseFrontmatterDocument,
+    stringifyFrontmatterDocument: core.stringifyFrontmatterDocument,
+    acquireCanonicalWriteLock: core.acquireCanonicalWriteLock,
+  }
 }
 
-function upsertJournalPromotionBody(
-  body: string,
-  capture: RuntimeCaptureRecord,
-): {
+function upsertPromotionBody<TContext>(input: {
+  body: string
+  capture: RuntimeCaptureRecord
+  context: TContext
+  spec: PromotionMarkdownTargetSpec<TContext>
+}): {
   body: string
   appended: boolean
 } {
+  const { body, capture, context, spec } = input
   const marker = `<!-- inbox-capture:${capture.captureId} -->`
   if (body.includes(marker)) {
     return {
@@ -3532,38 +3537,26 @@ function upsertJournalPromotionBody(
     }
   }
 
-  const block = buildJournalPromotionBlock(capture, marker)
-  const normalizedBody = body.replace(/\s*$/, '')
-
-  if (
-    normalizedBody.includes(JOURNAL_PROMOTION_SECTION_START) &&
-    normalizedBody.includes(JOURNAL_PROMOTION_SECTION_END)
-  ) {
-    return {
-      body: normalizedBody.replace(
-        JOURNAL_PROMOTION_SECTION_END,
-        `${block}\n\n${JOURNAL_PROMOTION_SECTION_END}`,
-      ),
-      appended: true,
-    }
-  }
-
-  const separator = normalizedBody.length > 0 ? '\n\n' : ''
-  return {
-    body:
-      `${normalizedBody}${separator}## Inbox Captures\n\n` +
-      `${JOURNAL_PROMOTION_SECTION_START}\n\n${block}\n\n${JOURNAL_PROMOTION_SECTION_END}\n`,
-    appended: true,
-  }
+  const block = buildCapturePromotionBlock({
+    capture,
+    marker,
+    context,
+    spec,
+  })
+  return upsertMarkdownSectionBlock(body, block, spec)
 }
 
-function buildJournalPromotionBlock(
-  capture: RuntimeCaptureRecord,
-  marker: string,
-): string {
+function buildCapturePromotionBlock<TContext>(input: {
+  capture: RuntimeCaptureRecord
+  marker: string
+  context: TContext
+  spec: PromotionMarkdownTargetSpec<TContext>
+}): string {
+  const { capture, marker, context, spec } = input
   const lines = [
     marker,
-    `### Inbox Capture ${capture.captureId}`,
+    spec.blockHeading(capture, context),
+    ...(spec.blockExtraLines?.(capture, context) ?? []),
     `Occurred at: ${capture.occurredAt}`,
     `Source: ${capture.source}`,
     `Thread: ${capture.thread.title ?? capture.thread.id}`,
@@ -3599,33 +3592,24 @@ function buildJournalPromotionBlock(
   return lines.join('\n')
 }
 
-function upsertExperimentPromotionBody(
+function upsertMarkdownSectionBlock<TContext>(
   body: string,
-  capture: RuntimeCaptureRecord,
-  experimentSlug: string,
+  block: string,
+  spec: PromotionMarkdownTargetSpec<TContext>,
 ): {
   body: string
   appended: boolean
 } {
-  const marker = `<!-- inbox-capture:${capture.captureId} -->`
-  if (body.includes(marker)) {
-    return {
-      body,
-      appended: false,
-    }
-  }
-
-  const block = buildExperimentPromotionBlock(capture, marker, experimentSlug)
   const normalizedBody = body.replace(/\s*$/, '')
 
   if (
-    normalizedBody.includes(EXPERIMENT_NOTE_SECTION_START) &&
-    normalizedBody.includes(EXPERIMENT_NOTE_SECTION_END)
+    normalizedBody.includes(spec.sectionStartMarker) &&
+    normalizedBody.includes(spec.sectionEndMarker)
   ) {
     return {
       body: normalizedBody.replace(
-        EXPERIMENT_NOTE_SECTION_END,
-        `${block}\n\n${EXPERIMENT_NOTE_SECTION_END}`,
+        spec.sectionEndMarker,
+        `${block}\n\n${spec.sectionEndMarker}`,
       ),
       appended: true,
     }
@@ -3634,59 +3618,59 @@ function upsertExperimentPromotionBody(
   const separator = normalizedBody.length > 0 ? '\n\n' : ''
   return {
     body:
-      `${normalizedBody}${separator}## Inbox Experiment Notes\n\n` +
-      `${EXPERIMENT_NOTE_SECTION_START}\n\n${block}\n\n${EXPERIMENT_NOTE_SECTION_END}\n`,
+      `${normalizedBody}${separator}${spec.sectionHeading}\n\n` +
+      `${spec.sectionStartMarker}\n\n${block}\n\n${spec.sectionEndMarker}\n`,
     appended: true,
   }
 }
 
-function buildExperimentPromotionBlock(
-  capture: RuntimeCaptureRecord,
-  marker: string,
-  experimentSlug: string,
-): string {
-  const lines = [
-    marker,
-    `### Inbox Note ${capture.captureId}`,
-    `Experiment: ${experimentSlug}`,
-    `Occurred at: ${capture.occurredAt}`,
-    `Source: ${capture.source}`,
-    `Thread: ${capture.thread.title ?? capture.thread.id}`,
-    `Event: ${capture.eventId}`,
-  ]
+async function updatePromotionMarkdownDocument<TResolved, TContext>(input: {
+  core: MarkdownPromotionCore
+  absoluteVaultRoot: string
+  relativePath: string
+  capture: RuntimeCaptureRecord
+  spec: PromotionMarkdownTargetSpec<TContext>
+  resolveUpdate(input: {
+    attributes: Record<string, unknown>
+  }): {
+    context: TContext
+    resolved: TResolved
+    nextAttributes: Record<string, unknown>
+  }
+}): Promise<{
+  appended: boolean
+  resolved: TResolved
+}> {
+  const absolutePath = path.join(input.absoluteVaultRoot, input.relativePath)
+  const rawDocument = await readFile(absolutePath, 'utf8')
+  const parsedDocument = input.core.parseFrontmatterDocument(rawDocument)
+  const resolvedUpdate = input.resolveUpdate({
+    attributes: parsedDocument.attributes,
+  })
+  const nextBody = upsertPromotionBody({
+    body: parsedDocument.body,
+    capture: input.capture,
+    context: resolvedUpdate.context,
+    spec: input.spec,
+  })
+  const nextDocument = input.core.stringifyFrontmatterDocument({
+    attributes: resolvedUpdate.nextAttributes,
+    body: nextBody.body,
+  })
 
-  const actorName = normalizeNullableString(capture.actor.displayName)
-  const actorId = normalizeNullableString(capture.actor.id)
-  if (actorName || actorId) {
-    lines.push(`Actor: ${actorName ?? actorId ?? 'unknown'}`)
+  if (nextDocument !== rawDocument) {
+    await writeFile(absolutePath, nextDocument, 'utf8')
   }
 
-  if (capture.attachments.length > 0) {
-    lines.push('Attachments:')
-    for (const attachment of capture.attachments) {
-      const attachmentLabel =
-        attachment.fileName ??
-        attachment.storedPath ??
-        attachment.originalPath ??
-        attachment.externalId ??
-        `attachment-${attachment.ordinal}`
-      lines.push(
-        `- ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`} | ${attachment.kind} | ${attachmentLabel}`,
-      )
-    }
+  return {
+    appended: nextBody.appended,
+    resolved: resolvedUpdate.resolved,
   }
-
-  const text = normalizeNullableString(capture.text)
-  if (text) {
-    lines.push('', text)
-  }
-
-  return lines.join('\n')
 }
 
 async function readExperimentEntries(
   vaultRoot: string,
-  core: Pick<CoreRuntimeModule, 'parseFrontmatterDocument'>,
+  core: Pick<MarkdownPromotionCore, 'parseFrontmatterDocument'>,
 ): Promise<
   Array<{
     relativePath: string
@@ -3695,10 +3679,6 @@ async function readExperimentEntries(
     attributes: ExperimentFrontmatter
   }>
 > {
-  if (!core.parseFrontmatterDocument) {
-    throw unsupportedPromotion('experiment-note')
-  }
-
   const experimentsRoot = path.join(vaultRoot, 'bank', 'experiments')
   const files = await safeReadMarkdownFiles(experimentsRoot)
   const entries: Array<{
@@ -3819,24 +3799,11 @@ function requireExperimentPromotionEntry(
   return existing
 }
 
-async function listCanonicalMealManifestPaths(
+async function listCanonicalManifestPaths(
   absoluteVaultRoot: string,
+  manifestDirectory: string,
 ): Promise<string[]> {
-  return walkRelativeFiles(
-    absoluteVaultRoot,
-    RAW_MEALS_DIRECTORY,
-    'manifest.json',
-  )
-}
-
-async function listCanonicalDocumentManifestPaths(
-  absoluteVaultRoot: string,
-): Promise<string[]> {
-  return walkRelativeFiles(
-    absoluteVaultRoot,
-    RAW_DOCUMENTS_DIRECTORY,
-    'manifest.json',
-  )
+  return walkRelativeFiles(absoluteVaultRoot, manifestDirectory, 'manifest.json')
 }
 
 async function walkRelativeFiles(
@@ -3894,45 +3861,14 @@ async function safeReadMarkdownFiles(directory: string): Promise<string[]> {
   }
 }
 
-async function readCanonicalMealManifest(
+async function readCanonicalManifest<TManifest>(
   absoluteVaultRoot: string,
   relativePath: string,
-): Promise<{
-  importId: string
-  importKind: 'meal'
-  importedAt: string
-  source: string | null
-  artifacts: Array<{
-    role: string
-    sha256: string
-  }>
-  provenance: Record<string, unknown>
-} | null> {
+  schema: z.ZodType<TManifest>,
+): Promise<TManifest | null> {
   try {
     const raw = await readFile(path.join(absoluteVaultRoot, relativePath), 'utf8')
-    return canonicalMealManifestSchema.parse(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-async function readCanonicalDocumentManifest(
-  absoluteVaultRoot: string,
-  relativePath: string,
-): Promise<{
-  importId: string
-  importKind: 'document'
-  importedAt: string
-  source: string | null
-  artifacts: Array<{
-    role: string
-    sha256: string
-  }>
-  provenance: Record<string, unknown>
-} | null> {
-  try {
-    const raw = await readFile(path.join(absoluteVaultRoot, relativePath), 'utf8')
-    return canonicalDocumentManifestSchema.parse(JSON.parse(raw))
+    return schema.parse(JSON.parse(raw))
   } catch {
     return null
   }
@@ -4056,3 +3992,96 @@ const canonicalDocumentManifestSchema = z.object({
   ),
   provenance: z.record(z.string(), z.unknown()),
 })
+
+type CanonicalMealManifest = z.infer<typeof canonicalMealManifestSchema>
+type CanonicalDocumentManifest = z.infer<typeof canonicalDocumentManifestSchema>
+
+const mealCanonicalPromotionSpec = {
+  target: 'meal',
+  manifestDirectory: RAW_MEALS_DIRECTORY,
+  manifestSchema: canonicalMealManifestSchema,
+  matchesManifest(
+    manifest: CanonicalMealManifest,
+    context: {
+      photoSha256: string
+      audioSha256: string | null
+    },
+  ): boolean {
+    const manifestPhoto = manifest.artifacts.find(
+      (artifact) => artifact.role === 'photo',
+    )
+    const manifestAudio = manifest.artifacts.find(
+      (artifact) => artifact.role === 'audio',
+    )
+    if (!manifestPhoto || manifestPhoto.sha256 !== context.photoSha256) {
+      return false
+    }
+
+    return (manifestAudio?.sha256 ?? null) === context.audioSha256
+  },
+} satisfies CanonicalPromotionLookupSpec<
+  CanonicalMealManifest,
+  {
+    photoSha256: string
+    audioSha256: string | null
+  }
+>
+
+const documentCanonicalPromotionSpec = {
+  target: 'document',
+  manifestDirectory: RAW_DOCUMENTS_DIRECTORY,
+  manifestSchema: canonicalDocumentManifestSchema,
+  matchesManifest(
+    manifest: CanonicalDocumentManifest,
+    context: {
+      documentSha256: string
+      title: string | null
+    },
+  ): boolean {
+    const manifestDocument = manifest.artifacts.find(
+      (artifact) => artifact.role === 'source_document',
+    )
+    if (!manifestDocument || manifestDocument.sha256 !== context.documentSha256) {
+      return false
+    }
+
+    return (
+      normalizeNullableString(extractCanonicalString(manifest.provenance, 'title')) ===
+      context.title
+    )
+  },
+} satisfies CanonicalPromotionLookupSpec<
+  CanonicalDocumentManifest,
+  {
+    documentSha256: string
+    title: string | null
+  }
+>
+
+const journalPromotionMarkdownSpec = {
+  sectionHeading: '## Inbox Captures',
+  sectionStartMarker: JOURNAL_PROMOTION_SECTION_START,
+  sectionEndMarker: JOURNAL_PROMOTION_SECTION_END,
+  blockHeading(capture: RuntimeCaptureRecord): string {
+    return `### Inbox Capture ${capture.captureId}`
+  },
+} satisfies PromotionMarkdownTargetSpec<undefined>
+
+const experimentPromotionMarkdownSpec = {
+  sectionHeading: '## Inbox Experiment Notes',
+  sectionStartMarker: EXPERIMENT_NOTE_SECTION_START,
+  sectionEndMarker: EXPERIMENT_NOTE_SECTION_END,
+  blockHeading(capture: RuntimeCaptureRecord): string {
+    return `### Inbox Note ${capture.captureId}`
+  },
+  blockExtraLines(
+    _capture: RuntimeCaptureRecord,
+    context: {
+      experimentSlug: string
+    },
+  ): string[] {
+    return [`Experiment: ${context.experimentSlug}`]
+  },
+} satisfies PromotionMarkdownTargetSpec<{
+  experimentSlug: string
+}>

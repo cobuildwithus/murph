@@ -11,6 +11,7 @@ import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href
 const builtInboxRuntimeUrl = new URL('../../inboxd/dist/index.js', import.meta.url).href
+const builtImportersRuntimeUrl = new URL('../../importers/dist/index.js', import.meta.url).href
 const builtParsersRuntimeUrl = new URL('../../parsers/dist/index.js', import.meta.url).href
 
 async function makeVaultFixture(prefix: string): Promise<{
@@ -66,6 +67,10 @@ async function loadBuiltInboxRuntime() {
   return (await import(builtInboxRuntimeUrl)) as any
 }
 
+async function loadBuiltImportersRuntime() {
+  return (await import(builtImportersRuntimeUrl)) as any
+}
+
 async function loadBuiltParsersRuntime() {
   return (await import(builtParsersRuntimeUrl)) as any
 }
@@ -76,6 +81,10 @@ function inboxPaths(vaultRoot: string) {
 
 async function listMealManifestPaths(vaultRoot: string): Promise<string[]> {
   return listNamedFiles(path.join(vaultRoot, 'raw', 'meals'), 'manifest.json')
+}
+
+async function listDocumentManifestPaths(vaultRoot: string): Promise<string[]> {
+  return listNamedFiles(path.join(vaultRoot, 'raw', 'documents'), 'manifest.json')
 }
 
 async function listNamedFiles(root: string, name: string): Promise<string[]> {
@@ -2591,6 +2600,73 @@ test.sequential('meal promotion remains idempotent after local promotion state i
   }
 })
 
+test.sequential('document promotion remains idempotent after local promotion state is deleted', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-document-promotion')
+  const paths = inboxPaths(fixture.vaultRoot)
+  const documentPath = path.join(fixture.vaultRoot, 'lab-note.pdf')
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadImportersModule: loadBuiltImportersRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-doc-1',
+            fileName: 'lab-note.pdf',
+            path: documentPath,
+            mimeType: 'application/pdf',
+          },
+        ],
+      }),
+  })
+
+  try {
+    await writeFile(documentPath, 'document body', 'utf8')
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+    const captureId = await captureSingleCaptureId({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const firstPromotion = await services.promoteDocument({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    assert.equal(firstPromotion.created, true)
+    assert.match(firstPromotion.lookupId, /^evt_/u)
+    assert.match(firstPromotion.relatedId, /^doc_/u)
+    assert.equal((await listDocumentManifestPaths(fixture.vaultRoot)).length, 1)
+
+    await rm(paths.inboxPromotionsPath, { force: true })
+
+    const retriedPromotion = await services.promoteDocument({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    assert.equal(retriedPromotion.created, false)
+    assert.equal(retriedPromotion.lookupId, firstPromotion.lookupId)
+    assert.equal(retriedPromotion.relatedId, firstPromotion.relatedId)
+    assert.equal((await listDocumentManifestPaths(fixture.vaultRoot)).length, 1)
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('meal promotion retries do not duplicate canonical meals after a local promotion-store write failure', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-promotion-write-failure')
   const paths = inboxPaths(fixture.vaultRoot)
@@ -2683,6 +2759,14 @@ test.sequential('promotion safeguards cover missing photos, invalid stored ids, 
         captureId,
       }),
       'INBOX_PROMOTION_REQUIRES_PHOTO',
+    )
+    await expectVaultCliError(
+      services.promoteDocument({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        captureId,
+      }),
+      'INBOX_PROMOTION_REQUIRES_DOCUMENT',
     )
 
     const photoFixture = await makeVaultFixture('healthybob-inbox-promotion-state')
