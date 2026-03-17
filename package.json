@@ -31,6 +31,8 @@
     "plan:open": "bash scripts/open-exec-plan.sh",
     "plan:close": "bash scripts/close-exec-plan.sh",
     "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
+    "setup": "bash scripts/setup-macos.sh",
+    "onboard": "bash scripts/setup-macos.sh",
     "setup:inbox": "bash scripts/setup-inbox-local.sh",
     "doctor:inbox": "node packages/cli/dist/bin.js inbox doctor",
     "zip:src": "bash scripts/package-audit-context.sh --zip",

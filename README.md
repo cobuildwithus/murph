@@ -4,6 +4,42 @@ Healthy Bob is a file-native health vault. It keeps human-reviewable truth in Ma
 
 The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, a local-only Next.js web surface, and the CLI, along with deterministic fixtures and repo-level verification.
 
+## Install (recommended)
+
+Runtime: Node >= 22.16.0. One-command setup is currently macOS-only.
+
+Healthy Bob is not publishable to npm yet because `@healthybob/cli` still depends on workspace packages. Today the recommended install path is from this repo root:
+
+```bash
+pnpm onboard --vault ./vault
+# or, if pnpm is not available yet:
+./scripts/setup-macos.sh --vault ./vault
+```
+
+`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then opens `assistant chat`.
+
+Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
+
+## Quick Start (TL;DR)
+
+Runtime: Node >= 22.16.0.
+
+```bash
+pnpm onboard --vault ./vault
+
+HEALTHYBOB_VAULT=./vault pnpm web:dev
+
+healthybob assistant chat
+vault-cli inbox doctor
+vault-cli vault stats
+```
+
+For a quick web-only demo against the included fixture vault:
+
+```bash
+HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev
+```
+
 ## What Healthy Bob Is
 
 Healthy Bob is built around a few hard rules:
@@ -320,11 +356,13 @@ The existing operator/data-plane surface remains under `vault-cli`. The npm publ
 
 ### Repo-local macOS bootstrap
 
-If you are starting from a fresh checkout and the workspace itself still needs Node, pnpm, dependencies, and a build, use the repo-local wrapper instead:
+If you are starting from a fresh checkout and the workspace itself still needs Node, pnpm, dependencies, and a build, use the repo-local wrapper entrypoint instead:
 
 ```bash
-./scripts/setup-macos.sh --vault ./vault
+pnpm onboard --vault ./vault
 ```
+
+`pnpm onboard` is a thin alias for the existing macOS wrapper. `pnpm run setup --vault ./vault` works too. Plain `pnpm setup` cannot be claimed by this repo because `pnpm` reserves `setup` as its own built-in command.
 
 That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js setup ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
@@ -335,10 +373,10 @@ Successful setup now also installs user-level `healthybob` and `vault-cli` shims
 For a local-first parser setup, the repo exposes one bootstrap command:
 
 ```bash
-pnpm setup:inbox -- --vault ./vault
+pnpm setup:inbox --vault ./vault
 ```
 
-That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. Use this lower-level wrapper when you already manage the external parser tools yourself; use `healthybob setup` or `./scripts/setup-macos.sh` when you also want the macOS dependency/toolchain provisioning step.
+That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. Use this lower-level wrapper when you already manage the external parser tools yourself; use `healthybob setup`, `pnpm onboard`, or `./scripts/setup-macos.sh` when you also want the macOS dependency/toolchain provisioning step.
 
 For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so pending parser jobs drain once on startup and new captures continue auto-draining without a separate manual worker step.
 
