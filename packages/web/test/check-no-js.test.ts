@@ -10,11 +10,10 @@ import {
 
 test("check-no-js allowlists the current Next.js declaration stub exactly", async () => {
   const nextEnvContents = await readFile("packages/web/next-env.d.ts", "utf8");
+  const allowedVariants = allowedDeclarationArtifacts.get("packages/web/next-env.d.ts");
 
-  assert.equal(
-    nextEnvContents,
-    allowedDeclarationArtifacts.get("packages/web/next-env.d.ts"),
-  );
+  assert.equal(Array.isArray(allowedVariants), true);
+  assert.equal(allowedVariants?.includes(nextEnvContents), true);
   assert.equal(
     isAllowedDeclarationArtifactContents("packages/web/next-env.d.ts", nextEnvContents),
     true,

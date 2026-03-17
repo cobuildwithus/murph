@@ -2,6 +2,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { rememberLaunchCwd } from "../src/lib/vault";
+
 const LOCAL_HOST = "127.0.0.1";
 const require = createRequire(import.meta.url);
 const fs = require("node:fs") as typeof import("node:fs");
@@ -117,6 +119,7 @@ async function main(): Promise<void> {
   const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const nextBinPath = path.join(packageDir, "node_modules/next/dist/bin/next");
 
+  rememberLaunchCwd();
   process.chdir(packageDir);
   installDotEnvGuards();
   process.argv = [process.execPath, nextBinPath, ...buildNextCliArgs(process.argv.slice(2))];

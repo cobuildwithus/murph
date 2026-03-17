@@ -3,14 +3,18 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
-vi.mock("../src/lib/overview", async () => {
-  const actual = await vi.importActual<typeof import("../src/lib/overview")>(
-    "../src/lib/overview",
-  );
-
+vi.mock("../src/lib/overview", () => {
   return {
-    ...actual,
+    DEFAULT_SAMPLE_LIMIT: 6,
+    DEFAULT_TIMELINE_LIMIT: 8,
     loadVaultOverviewFromEnv: vi.fn(),
+    normalizeOverviewQuery(value: string | string[] | null | undefined): string {
+      if (Array.isArray(value)) {
+        return typeof value[0] === "string" ? value[0].trim() : "";
+      }
+
+      return typeof value === "string" ? value.trim() : "";
+    },
   };
 });
 
@@ -29,7 +33,12 @@ test("HomePage normalizes search params and renders the ready state", async () =
       recordedAt: "2026-03-12T14:00:00Z",
       summary: "Sleep steadier and energy improving.",
       title: "Current Profile",
-      topGoalIds: ["goal_sleep_01"],
+      topGoals: [
+        {
+          id: "goal_sleep_01",
+          title: "Protect sleep consistency",
+        },
+      ],
     },
     generatedAt: "2026-03-12T15:00:00Z",
     metrics: [
@@ -37,6 +46,15 @@ test("HomePage normalizes search params and renders the ready state", async () =
         label: "records",
         note: "Canonical read model rows",
         value: 10,
+      },
+    ],
+    recentJournals: [
+      {
+        date: "2026-03-12",
+        id: "journal:2026-03-12",
+        summary: "Sleep felt steadier after a lighter dinner.",
+        tags: ["recovery"],
+        title: "March 12",
       },
     ],
     sampleSummaries: [
@@ -90,8 +108,10 @@ test("HomePage normalizes search params and renders the ready state", async () =
     timelineLimit: 8,
   });
   assert.match(markup, /Healthy Bob Observatory/);
+  assert.match(markup, /Recent journal days/);
+  assert.match(markup, /Protect sleep consistency/);
+  assert.match(markup, /Sleep felt steadier after a lighter dinner/);
   assert.match(markup, /Matches for/);
-  assert.match(markup, /goal_sleep_01/);
 });
 
 test("HomePage renders the setup state when no vault is configured", async () => {
@@ -101,9 +121,9 @@ test("HomePage renders the setup state when no vault is configured", async () =>
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
     envVar: "HEALTHYBOB_VAULT",
-    exampleVaultPath: "../../fixtures/minimal-vault",
+    exampleVaultPath: "fixtures/demo-web-vault",
     status: "missing-config",
-    suggestedCommand: "HEALTHYBOB_VAULT=../../fixtures/minimal-vault pnpm dev",
+    suggestedCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
   });
 
   const markup = renderToStaticMarkup(await HomePage({}));
@@ -121,7 +141,7 @@ test("HomePage renders the unreadable-vault error state", async () => {
     envVar: "HEALTHYBOB_VAULT",
     hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
     message: "The configured vault could not be read.",
-    recoveryCommand: "HEALTHYBOB_VAULT=../../fixtures/minimal-vault pnpm dev",
+    recoveryCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
     status: "error",
   });
 

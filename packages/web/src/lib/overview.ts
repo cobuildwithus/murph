@@ -1,8 +1,11 @@
+import { access, stat } from "node:fs/promises";
+import path from "node:path";
+
 import { buildTimeline, readVaultTolerant, summarizeDailySamples } from "@healthybob/query";
 
 import {
+  buildExampleVaultPath,
   buildSuggestedCommand,
-  FIXTURE_VAULT_EXAMPLE,
   getConfiguredVaultRoot,
   HEALTHYBOB_VAULT_ENV,
 } from "./vault";
@@ -26,7 +29,20 @@ export interface OverviewProfile {
   recordedAt: string | null;
   summary: string | null;
   title: string;
-  topGoalIds: string[];
+  topGoals: OverviewGoal[];
+}
+
+export interface OverviewGoal {
+  id: string;
+  title: string;
+}
+
+export interface OverviewJournalEntry {
+  date: string;
+  id: string;
+  summary: string | null;
+  tags: string[];
+  title: string;
 }
 
 export interface OverviewSampleSummary {
@@ -65,6 +81,7 @@ export interface ReadyOverview {
   currentProfile: OverviewProfile | null;
   generatedAt: string;
   metrics: OverviewMetric[];
+  recentJournals: OverviewJournalEntry[];
   sampleSummaries: OverviewSampleSummary[];
   search: OverviewSearchResult | null;
   status: "ready";
@@ -73,7 +90,7 @@ export interface ReadyOverview {
 
 export interface MissingConfigOverview {
   envVar: typeof HEALTHYBOB_VAULT_ENV;
-  exampleVaultPath: typeof FIXTURE_VAULT_EXAMPLE;
+  exampleVaultPath: string;
   status: "missing-config";
   suggestedCommand: string;
 }
@@ -142,13 +159,14 @@ export async function loadVaultOverview(
   if (!vaultRoot) {
     return {
       envVar: HEALTHYBOB_VAULT_ENV,
-      exampleVaultPath: FIXTURE_VAULT_EXAMPLE,
+      exampleVaultPath: buildExampleVaultPath(),
       status: "missing-config",
       suggestedCommand: buildSuggestedCommand(),
     };
   }
 
   try {
+    await assertVaultRootReadable(vaultRoot);
     const vault = await readVaultTolerant(vaultRoot);
     const timelineLimit = clampLimit(options.timelineLimit, DEFAULT_TIMELINE_LIMIT, 16);
     const sampleLimit = clampLimit(options.sampleLimit, DEFAULT_SAMPLE_LIMIT, 12);
@@ -158,6 +176,7 @@ export async function loadVaultOverview(
       currentProfile: summarizeCurrentProfile(vault),
       generatedAt: new Date().toISOString(),
       metrics: buildMetrics(vault),
+      recentJournals: summarizeRecentJournals(vault),
       sampleSummaries: summarizeDailySamples(vault)
         .slice(-sampleLimit)
         .reverse()
@@ -236,13 +255,17 @@ function summarizeCurrentProfile(vault: VaultReadModel): OverviewProfile | null 
     return null;
   }
 
-  const currentProfileData = isRecord(current.data.profile) ? current.data.profile : null;
-  const latestSnapshotProfile = isRecord(vault.profileSnapshots[0]?.data.profile)
-    ? vault.profileSnapshots[0].data.profile
+  const currentData = isRecord(current.data) ? current.data : null;
+  const currentProfileData = isRecord(getRecordField(currentData, "profile"))
+    ? getRecordField(currentData, "profile")
+    : null;
+  const latestSnapshotProfile = isRecord(getRecordField(getLatestProfileSnapshot(vault)?.data, "profile"))
+    ? getRecordField(getLatestProfileSnapshot(vault)?.data, "profile")
     : null;
   const topGoalIds = extractStringArray(
-    currentProfileData?.topGoalIds,
-    latestSnapshotProfile?.topGoalIds,
+    getRecordField(currentData, "topGoalIds"),
+    getRecordField(currentProfileData, "topGoalIds"),
+    getRecordField(latestSnapshotProfile, "topGoalIds"),
   );
 
   return {
@@ -250,8 +273,21 @@ function summarizeCurrentProfile(vault: VaultReadModel): OverviewProfile | null 
     recordedAt: current.occurredAt,
     summary: summarizeText(current.body),
     title: current.title ?? current.displayId,
-    topGoalIds,
+    topGoals: resolveGoals(vault, topGoalIds),
   };
+}
+
+function summarizeRecentJournals(vault: VaultReadModel): OverviewJournalEntry[] {
+  return [...vault.journalEntries]
+    .sort((left, right) => compareLatestStrings(right.date ?? right.occurredAt, left.date ?? left.occurredAt))
+    .slice(0, 3)
+    .map((entry) => ({
+      date: entry.date ?? extractDate(entry.occurredAt),
+      id: entry.displayId,
+      summary: summarizeText(entry.body),
+      tags: compactStrings(entry.tags),
+      title: entry.title ?? entry.displayId,
+    }));
 }
 
 function searchVaultSafely(
@@ -484,6 +520,28 @@ function compactStrings(values: readonly (string | null | undefined)[]): string[
   return values.filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
+function resolveGoals(vault: VaultReadModel, goalIds: readonly string[]): OverviewGoal[] {
+  const goalLookup = new Map<string, VaultReadModel["goals"][number]>();
+
+  for (const goal of vault.goals) {
+    const lookupIds = [goal.displayId, goal.primaryLookupId, ...goal.lookupIds];
+    for (const lookupId of lookupIds) {
+      if (lookupId) {
+        goalLookup.set(lookupId, goal);
+      }
+    }
+  }
+
+  return goalIds.map((goalId) => {
+    const goal = goalLookup.get(goalId);
+
+    return {
+      id: goalId,
+      title: goal?.title ?? goalId,
+    };
+  });
+}
+
 function toOverviewTimelineEntry(entry: TimelineItem): OverviewTimelineEntry {
   return {
     entryType: entry.entryType,
@@ -503,6 +561,8 @@ function summarizeText(value: string | null): string | null {
   const normalized = value
     .split("\n")
     .map((line) => line.trim())
+    .filter((line) => !/^#{1,6}\s+/u.test(line))
+    .map((line) => line.replace(/^[-*+]\s+/u, "").trim())
     .filter((line) => line.length > 0)
     .join(" ");
 
@@ -525,12 +585,78 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function getRecordField(record: unknown, key: string): unknown {
+  if (!isRecord(record)) {
+    return undefined;
+  }
+
+  return record[key];
+}
+
 function extractStringArray(...values: unknown[]): string[] {
+  let fallback: string[] | null = null;
+
   for (const value of values) {
     if (Array.isArray(value)) {
-      return value.filter((entry): entry is string => typeof entry === "string");
+      const strings = value.filter((entry): entry is string => typeof entry === "string");
+      if (fallback === null) {
+        fallback = strings;
+      }
+
+      if (strings.length > 0) {
+        return strings;
+      }
     }
   }
 
-  return [];
+  return fallback ?? [];
+}
+
+async function assertVaultRootReadable(vaultRoot: string): Promise<void> {
+  const rootStats = await stat(vaultRoot);
+  if (!rootStats.isDirectory()) {
+    throw new Error("Vault root is not a directory.");
+  }
+
+  const hasVaultJson = await pathExists(path.join(vaultRoot, "vault.json"));
+  const hasCoreDocument = await pathExists(path.join(vaultRoot, "CORE.md"));
+  if (!hasVaultJson && !hasCoreDocument) {
+    throw new Error("Vault root markers are missing.");
+  }
+}
+
+async function pathExists(candidatePath: string): Promise<boolean> {
+  try {
+    await access(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getLatestProfileSnapshot(vault: VaultReadModel): VaultReadModel["profileSnapshots"][number] | null {
+  let latest: VaultReadModel["profileSnapshots"][number] | null = null;
+
+  for (const snapshot of vault.profileSnapshots) {
+    if (
+      latest === null ||
+      compareLatestStrings(snapshot.occurredAt, latest.occurredAt) > 0
+    ) {
+      latest = snapshot;
+    }
+  }
+
+  return latest;
+}
+
+function compareLatestStrings(left: string | null | undefined, right: string | null | undefined): number {
+  return (left ?? "").localeCompare(right ?? "");
+}
+
+function extractDate(value: string | null | undefined): string {
+  if (typeof value === "string" && value.length >= 10) {
+    return value.slice(0, 10);
+  }
+
+  return "Undated";
 }

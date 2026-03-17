@@ -8,18 +8,27 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const scanRoots = ["packages", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
 const execFileAsync = promisify(execFile);
-export const allowedDeclarationArtifacts = new Map<string, string>([
+const nextEnvCommonLines = [
+  '/// <reference types="next" />',
+  '/// <reference types="next/image-types/global" />',
+];
+const nextEnvTrailingLines = [
+  "",
+  "// NOTE: This file should not be edited",
+  "// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.",
+  "",
+];
+export const allowedDeclarationArtifacts = new Map<string, string[]>([
   [
     "packages/web/next-env.d.ts",
     [
-      '/// <reference types="next" />',
-      '/// <reference types="next/image-types/global" />',
-      'import "./.next/types/routes.d.ts";',
-      "",
-      "// NOTE: This file should not be edited",
-      "// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.",
-      "",
-    ].join("\n"),
+      [...nextEnvCommonLines, 'import "./.next/types/routes.d.ts";', ...nextEnvTrailingLines].join(
+        "\n",
+      ),
+      [...nextEnvCommonLines, 'import "./.next/dev/types/routes.d.ts";', ...nextEnvTrailingLines].join(
+        "\n",
+      ),
+    ],
   ],
 ]);
 
@@ -105,7 +114,7 @@ export function isAllowedDeclarationArtifactContents(
   contents: string,
 ): boolean {
   const expectedContents = allowedDeclarationArtifacts.get(relativePath);
-  return expectedContents === contents;
+  return expectedContents?.includes(contents) ?? false;
 }
 
 async function findTrackedBuildArtifacts(): Promise<string[]> {

@@ -3,8 +3,13 @@ import {
   DEFAULT_TIMELINE_LIMIT,
   loadVaultOverviewFromEnv,
   normalizeOverviewQuery,
+  type OverviewJournalEntry,
   type OverviewResult,
+  type OverviewSampleSummary,
+  type OverviewTimelineEntry,
 } from "../src/lib/overview";
+
+const SEARCH_SUGGESTIONS = ["sleep", "glucose", "routine"];
 
 export const dynamic = "force-dynamic";
 
@@ -22,36 +27,51 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   });
 
   return (
-    <main className="shell">
-      <div className="shell__backdrop" />
-      <div className="shell__grain" />
-      <section className="hero">
-        <div className="hero__eyebrow">Local-only vault viewer</div>
-        <h1>Healthy Bob Observatory</h1>
-        <p className="hero__lede">
-          A read-only local interface over the file-native vault. It uses the query
-          layer on the server, keeps search scoped to safe record fields, and stays
-          intentionally narrow while product semantics remain undefined.
-        </p>
-        <form className="query-form" action="/" method="get">
-          <label className="query-form__label" htmlFor="query">
-            Search the vault
-          </label>
-          <div className="query-form__row">
-            <input
-              className="query-form__input"
-              defaultValue={query}
-              id="query"
-              name="q"
-              placeholder="sleep, glucose, goal ids, tags, notes..."
-              type="search"
-            />
-            <button className="query-form__button" type="submit">
-              Inspect
-            </button>
+    <main className="page-shell">
+      <section className="page-header">
+        <div className="page-header__copy">
+          <p className="page-header__eyebrow">Local-only vault view</p>
+          <h1>Healthy Bob Observatory</h1>
+          <p className="page-header__lede">
+            Read-only overview of the configured vault. The goal here is clarity:
+            show the latest profile, notes, measurements, and activity without making
+            you hunt for them.
+          </p>
+        </div>
+        <dl className="status-strip">
+          <div>
+            <dt>scope</dt>
+            <dd>read only</dd>
           </div>
-        </form>
+          <div>
+            <dt>network</dt>
+            <dd>localhost only</dd>
+          </div>
+          <div>
+            <dt>search</dt>
+            <dd>safe fields only</dd>
+          </div>
+        </dl>
       </section>
+
+      <form action="/" className="query-bar" method="get">
+        <label className="query-bar__label" htmlFor="query">
+          Search the vault
+        </label>
+        <div className="query-bar__row">
+          <input
+            className="query-bar__input"
+            defaultValue={query}
+            id="query"
+            name="q"
+            placeholder="sleep, glucose, goal ids, tags, notes..."
+            type="search"
+          />
+          <button className="query-bar__button" type="submit">
+            Search
+          </button>
+        </div>
+      </form>
 
       {overview.status === "ready" ? <ReadyState overview={overview} /> : null}
       {overview.status === "missing-config" ? <MissingConfigState overview={overview} /> : null}
@@ -63,106 +83,130 @@ export default async function HomePage({ searchParams }: HomePageProps) {
 function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: "ready" }> }) {
   return (
     <>
-      <section className="metrics-panel panel panel--accent">
-        <div className="metrics-panel__header">
-          <div>
-            <p className="panel__kicker">Read model pulse</p>
-            <h2>Observed shape</h2>
+      <section className="overview-grid">
+        <article className="card card--profile">
+          <div className="card__header">
+            <div>
+              <p className="card__eyebrow">Current profile</p>
+              <h2>{overview.currentProfile?.title ?? "No current profile surfaced"}</h2>
+            </div>
+            <p className="card__meta">
+              {overview.currentProfile?.recordedAt
+                ? `Updated ${formatMoment(overview.currentProfile.recordedAt)}`
+                : "No recorded profile timestamp"}
+            </p>
           </div>
-          <p className="panel__meta">Generated {formatMoment(overview.generatedAt)}</p>
-        </div>
-        <div className="metrics-grid">
-          {overview.metrics.map((metric) => (
-            <article className="metric" key={metric.label}>
-              <div className="metric__label">{metric.label}</div>
-              <div className="metric__value">{metric.value}</div>
-              <p className="metric__note">{metric.note}</p>
-            </article>
-          ))}
-        </div>
+          <p className="card__copy">
+            {overview.currentProfile?.summary ??
+              "The vault is readable, but there is no current profile summary yet."}
+          </p>
+          <div className="goal-list">
+            {overview.currentProfile?.topGoals.length ? (
+              overview.currentProfile.topGoals.map((goal) => (
+                <div className="goal-chip" key={goal.id}>
+                  <span className="goal-chip__label">Goal</span>
+                  <span>{goal.title}</span>
+                </div>
+              ))
+            ) : (
+              <p className="card__muted">No top goals are linked to the current profile.</p>
+            )}
+          </div>
+        </article>
+
+        <article className="card card--metrics">
+          <div className="card__header">
+            <div>
+              <p className="card__eyebrow">At a glance</p>
+              <h2>Current vault shape</h2>
+            </div>
+            <p className="card__meta">Generated {formatMoment(overview.generatedAt)}</p>
+          </div>
+          <div className="metric-list">
+            {overview.metrics.map((metric) => (
+              <div className="metric-row" key={metric.label}>
+                <div>
+                  <div className="metric-row__label">{metric.label}</div>
+                  <div className="metric-row__note">{metric.note}</div>
+                </div>
+                <div className="metric-row__value">{metric.value}</div>
+              </div>
+            ))}
+          </div>
+        </article>
       </section>
 
-      <section className="content-grid">
-        <article className="panel panel--profile">
-          <p className="panel__kicker">Current profile</p>
-          <h2>{overview.currentProfile?.title ?? "No current profile surfaced"}</h2>
-          <p className="panel__copy">
-            {overview.currentProfile?.summary ??
-              "The vault is readable, but there is no current profile summary available yet."}
-          </p>
-          <div className="chip-row">
-            {overview.currentProfile?.topGoalIds.length ? (
-              overview.currentProfile.topGoalIds.map((goalId) => (
-                <span className="chip" key={goalId}>
-                  {goalId}
-                </span>
-              ))
+      <section className="dashboard-grid">
+        <article className="card">
+          <div className="card__header">
+            <div>
+              <p className="card__eyebrow">Latest notes</p>
+              <h2>Recent journal days</h2>
+            </div>
+          </div>
+          <div className="stack-list">
+            {overview.recentJournals.length ? (
+              overview.recentJournals.map((journal) => <JournalCard journal={journal} key={journal.id} />)
             ) : (
-              <span className="chip chip--muted">No top goals linked</span>
+              <p className="card__muted">No journal notes are available in this vault.</p>
             )}
           </div>
         </article>
 
-        <article className="panel">
-          <p className="panel__kicker">Sample rhythms</p>
-          <h2>Recent daily summaries</h2>
-          <div className="summary-list">
+        <article className="card">
+          <div className="card__header">
+            <div>
+              <p className="card__eyebrow">Measurements</p>
+              <h2>Daily sample summaries</h2>
+            </div>
+          </div>
+          <div className="stack-list">
             {overview.sampleSummaries.length ? (
               overview.sampleSummaries.map((summary) => (
-                <div className="summary-row" key={`${summary.date}:${summary.stream}`}>
-                  <div>
-                    <div className="summary-row__title">{summary.stream}</div>
-                    <div className="summary-row__meta">{formatDate(summary.date)}</div>
-                  </div>
-                  <div className="summary-row__value">
-                    {summary.averageValue ?? "n/a"}
-                    {summary.unit ? <span className="summary-row__unit">{summary.unit}</span> : null}
-                  </div>
-                  <div className="summary-row__meta">{summary.sampleCount} samples</div>
-                </div>
+                <SampleSummaryRow key={`${summary.date}:${summary.stream}`} summary={summary} />
               ))
             ) : (
-              <p className="panel__copy">No recent sample summaries are available.</p>
+              <p className="card__muted">No measurement summaries are available yet.</p>
             )}
           </div>
         </article>
 
-        <article className="panel panel--timeline">
-          <p className="panel__kicker">Timeline</p>
-          <h2>Latest canonical activity</h2>
+        <article className="card card--wide">
+          <div className="card__header">
+            <div>
+              <p className="card__eyebrow">Recent activity</p>
+              <h2>Latest timeline entries</h2>
+            </div>
+          </div>
           <div className="timeline-list">
             {overview.timeline.length ? (
-              overview.timeline.map((entry) => (
-                <div className="timeline-entry" key={entry.id}>
-                  <div className="timeline-entry__date">{formatMoment(entry.occurredAt)}</div>
-                  <div className="timeline-entry__body">
-                    <div className="timeline-entry__title">{entry.title}</div>
-                    <div className="timeline-entry__meta">
-                      {entry.entryType}
-                      {entry.kind ? ` · ${entry.kind}` : ""}
-                      {entry.stream ? ` · ${entry.stream}` : ""}
-                    </div>
-                  </div>
-                </div>
-              ))
+              overview.timeline.map((entry) => <TimelineRow entry={entry} key={entry.id} />)
             ) : (
-              <p className="panel__copy">No timeline entries matched the current view.</p>
+              <p className="card__muted">No timeline entries matched the current view.</p>
             )}
           </div>
         </article>
 
-        <article className="panel">
-          <p className="panel__kicker">Search</p>
-          <h2>{overview.search ? `Matches for “${overview.search.query}”` : "Search status"}</h2>
+        <article className="card card--wide">
+          <div className="card__header">
+            <div>
+              <p className="card__eyebrow">Search</p>
+              <h2>{overview.search ? `Matches for “${overview.search.query}”` : "Search the vault"}</h2>
+            </div>
+            {overview.search ? (
+              <p className="card__meta">{overview.search.total} total hits</p>
+            ) : (
+              <p className="card__meta">Suggestions: {SEARCH_SUGGESTIONS.join(", ")}</p>
+            )}
+          </div>
           {overview.search ? (
-            <div className="search-results">
-              <p className="panel__meta">{overview.search.total} hits returned by the query layer</p>
+            <div className="stack-list">
               {overview.search.hits.length ? (
                 overview.search.hits.map((hit) => (
-                  <article className="search-hit" key={`${hit.recordId}:${hit.date ?? "undated"}`}>
-                    <div className="search-hit__eyebrow">
-                      {hit.recordType}
-                      {hit.kind ? ` · ${hit.kind}` : ""}
+                  <article className="search-row" key={`${hit.recordId}:${hit.date ?? "undated"}`}>
+                    <div className="search-row__meta">
+                      {humanizeToken(hit.recordType)}
+                      {hit.kind ? ` · ${humanizeToken(hit.kind)}` : ""}
                       {hit.date ? ` · ${formatDate(hit.date)}` : ""}
                     </div>
                     <h3>{hit.title ?? hit.recordId}</h3>
@@ -170,12 +214,15 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
                   </article>
                 ))
               ) : (
-                <p className="panel__copy">The query parsed cleanly, but it did not score any hits.</p>
+                <p className="card__muted">
+                  The query parsed cleanly, but it did not score any hits.
+                </p>
               )}
             </div>
           ) : (
-            <p className="panel__copy">
-              Submit a search term to inspect safe record fields without exposing vault paths.
+            <p className="card__copy">
+              Search stays scoped to titles, safe body text, tags, and structured ids. Raw
+              vault paths are intentionally excluded from this view.
             </p>
           )}
         </article>
@@ -190,31 +237,88 @@ function MissingConfigState({
   overview: Extract<OverviewResult, { status: "missing-config" }>;
 }) {
   return (
-    <section className="panel panel--setup">
-      <p className="panel__kicker">Setup required</p>
+    <section className="card card--setup">
+      <p className="card__eyebrow">Setup required</p>
       <h2>No vault is configured yet</h2>
-      <p className="panel__copy">
+      <p className="card__copy">
         Start the app with <code>{overview.envVar}</code> pointing at a Healthy Bob vault root.
         The app will not guess paths or scan your filesystem.
       </p>
       <div className="command-block">
         <code>{overview.suggestedCommand}</code>
       </div>
-      <p className="panel__meta">Example relative path: {overview.exampleVaultPath}</p>
+      <p className="card__meta">Example vault path: {overview.exampleVaultPath}</p>
     </section>
   );
 }
 
 function ErrorState({ overview }: { overview: Extract<OverviewResult, { status: "error" }> }) {
   return (
-    <section className="panel panel--setup">
-      <p className="panel__kicker">Vault unreadable</p>
+    <section className="card card--setup">
+      <p className="card__eyebrow">Vault unreadable</p>
       <h2>{overview.message}</h2>
-      <p className="panel__copy">{overview.hint}</p>
+      <p className="card__copy">{overview.hint}</p>
       <div className="command-block">
         <code>{overview.recoveryCommand}</code>
       </div>
     </section>
+  );
+}
+
+function JournalCard({ journal }: { journal: OverviewJournalEntry }) {
+  return (
+    <article className="note-card">
+      <div className="note-card__header">
+        <div>
+          <h3>{journal.title}</h3>
+          <p className="note-card__date">{formatDate(journal.date)}</p>
+        </div>
+        {journal.tags.length ? (
+          <div className="tag-row">
+            {journal.tags.map((tag) => (
+              <span className="tag" key={tag}>
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <p className="note-card__summary">
+        {journal.summary ?? "No journal summary text is available for this day."}
+      </p>
+    </article>
+  );
+}
+
+function SampleSummaryRow({ summary }: { summary: OverviewSampleSummary }) {
+  return (
+    <div className="sample-row">
+      <div>
+        <div className="sample-row__label">{humanizeToken(summary.stream)}</div>
+        <div className="sample-row__meta">{formatDate(summary.date)}</div>
+      </div>
+      <div className="sample-row__value">
+        {formatSampleValue(summary.averageValue)}
+        {summary.unit ? <span className="sample-row__unit">{summary.unit}</span> : null}
+      </div>
+      <div className="sample-row__meta">{summary.sampleCount} samples</div>
+    </div>
+  );
+}
+
+function TimelineRow({ entry }: { entry: OverviewTimelineEntry }) {
+  return (
+    <div className="timeline-row">
+      <div className="timeline-row__moment">{formatMoment(entry.occurredAt)}</div>
+      <div className="timeline-row__body">
+        <div className="timeline-row__title">{entry.title}</div>
+        <div className="timeline-row__meta">
+          {humanizeToken(entry.entryType)}
+          {entry.kind ? ` · ${humanizeToken(entry.kind)}` : ""}
+          {entry.stream ? ` · ${humanizeToken(entry.stream)}` : ""}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -231,4 +335,20 @@ function formatMoment(value: string): string {
     timeStyle: "short",
     timeZone: "UTC",
   }).format(new Date(value));
+}
+
+function humanizeToken(value: string): string {
+  return value
+    .split(/[_-]+/u)
+    .filter((part) => part.length > 0)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatSampleValue(value: number | null): string {
+  if (value === null) {
+    return "n/a";
+  }
+
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }

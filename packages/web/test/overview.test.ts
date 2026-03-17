@@ -6,22 +6,50 @@ import { test } from "vitest";
 import { loadVaultOverview } from "../src/lib/overview";
 import {
   buildSuggestedCommand,
+  buildExampleVaultPath,
   FIXTURE_VAULT_EXAMPLE,
   getConfiguredVaultRoot,
   HEALTHYBOB_VAULT_ENV,
+  HEALTHYBOB_WEB_LAUNCH_CWD_ENV,
+  rememberLaunchCwd,
 } from "../src/lib/vault";
 import { createWebFixtureVault, destroyWebFixtureVault } from "./web-fixture";
 
-test("getConfiguredVaultRoot resolves relative paths from the web package cwd", () => {
+test("getConfiguredVaultRoot resolves relative paths from the launch cwd when preserved", () => {
   const resolved = getConfiguredVaultRoot(
     {
-      [HEALTHYBOB_VAULT_ENV]: "../../fixtures/minimal-vault",
+      [HEALTHYBOB_VAULT_ENV]: "fixtures/demo-web-vault",
+      [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
     },
     "/repo/packages/web",
   );
 
-  assert.equal(resolved, "/repo/fixtures/minimal-vault");
+  assert.equal(resolved, "/repo/fixtures/demo-web-vault");
+  assert.equal(buildExampleVaultPath({
+    [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
+  }, "/repo/packages/web"), "fixtures/demo-web-vault");
+  assert.equal(
+    buildSuggestedCommand(
+      {
+        [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
+      },
+      "/repo/packages/web",
+    ),
+    `${HEALTHYBOB_VAULT_ENV}=fixtures/demo-web-vault pnpm web:dev`,
+  );
+});
+
+test("buildSuggestedCommand keeps the package-local example for direct package runs", () => {
   assert.equal(buildSuggestedCommand(), `${HEALTHYBOB_VAULT_ENV}=${FIXTURE_VAULT_EXAMPLE} pnpm dev`);
+});
+
+test("rememberLaunchCwd stores the first launch cwd only", () => {
+  const env: Record<string, string | undefined> = {};
+
+  rememberLaunchCwd(env, "/repo");
+  rememberLaunchCwd(env, "/repo/packages/web");
+
+  assert.equal(env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV], "/repo");
 });
 
 test("loadVaultOverview reports missing config when no vault root is set", async () => {
@@ -45,7 +73,9 @@ test("loadVaultOverview summarizes a readable vault without leaking source paths
 
     assert.equal(result.status, "ready");
     assert.equal(result.metrics.find((metric) => metric.label === "records")?.value, 10);
-    assert.equal(result.currentProfile?.topGoalIds[0], "goal_sleep_01");
+    assert.equal(result.currentProfile?.topGoals[0]?.title, "Protect sleep consistency");
+    assert.equal(result.currentProfile?.summary?.includes("#"), false);
+    assert.equal(result.recentJournals[0]?.title, "March 12");
     assert.equal(result.sampleSummaries[0]?.stream, "glucose");
     assert.equal(result.search?.query, "sleep");
     assert.ok((result.search?.total ?? 0) >= 1);
@@ -85,4 +115,13 @@ test("loadVaultOverview returns a safe error payload when the vault root is unre
   } finally {
     await destroyWebFixtureVault(vaultRoot);
   }
+});
+
+test("loadVaultOverview returns an error when the vault root does not exist", async () => {
+  const result = await loadVaultOverview({
+    vaultRoot: "/definitely/not/a/vault",
+  });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.recoveryCommand.includes("/definitely/not/a/vault"), false);
 });
