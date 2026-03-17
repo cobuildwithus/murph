@@ -183,6 +183,13 @@ interface PromotionMarkdownTargetSpec<TContext> {
   ): string[]
 }
 
+type CanonicalAttachmentPromotionResult<
+  TTarget extends CanonicalPromotionLookupTarget,
+> = Extract<
+  InboxPromoteMealResult | InboxPromoteDocumentResult,
+  { target: TTarget }
+>
+
 interface RuntimeStore {
   close(): void
   getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
@@ -1679,467 +1686,363 @@ export function createIntegratedInboxCliServices(
     },
 
     async list(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const config = await readConfig(paths)
-      const sourceFilter = resolveSourceFilter(config, input.sourceId ?? null)
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
+      return withInitializedInboxRuntime(
+        loadInbox,
+        input.vault,
+        async ({ paths, runtime }) => {
+          const config = await readConfig(paths)
+          const sourceFilter = resolveSourceFilter(config, input.sourceId ?? null)
+          const limit = normalizeLimit(input.limit, 50, 200)
+          const afterOccurredAt = normalizeNullableString(input.afterOccurredAt)
+          const afterCaptureId = normalizeNullableString(input.afterCaptureId)
+          const oldestFirst = input.oldestFirst ?? false
+          const items = runtime.listCaptures({
+            source: sourceFilter?.source,
+            accountId: sourceFilter?.accountId,
+            limit,
+            afterOccurredAt,
+            afterCaptureId,
+            oldestFirst,
+          })
+          const promotionsByCapture = await readPromotionsByCapture(paths)
 
-      try {
-        const items = runtime.listCaptures({
-          source: sourceFilter?.source,
-          accountId: sourceFilter?.accountId,
-          limit: normalizeLimit(input.limit, 50, 200),
-          afterOccurredAt: normalizeNullableString(input.afterOccurredAt),
-          afterCaptureId: normalizeNullableString(input.afterCaptureId),
-          oldestFirst: input.oldestFirst ?? false,
-        })
-        const promotionsByCapture = await readPromotionsByCapture(paths)
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          filters: {
-            sourceId: input.sourceId ?? null,
-            limit: normalizeLimit(input.limit, 50, 200),
-            afterOccurredAt: normalizeNullableString(input.afterOccurredAt),
-            afterCaptureId: normalizeNullableString(input.afterCaptureId),
-            oldestFirst: input.oldestFirst ?? false,
-          },
-          items: items.map((capture) =>
-            summarizeCapture(capture, promotionsByCapture.get(capture.captureId) ?? []),
-          ),
-        }
-      } finally {
-        runtime.close()
-      }
+          return {
+            vault: paths.absoluteVaultRoot,
+            filters: {
+              sourceId: input.sourceId ?? null,
+              limit,
+              afterOccurredAt,
+              afterCaptureId,
+              oldestFirst,
+            },
+            items: items.map((capture) =>
+              summarizeCapture(capture, promotionsByCapture.get(capture.captureId) ?? []),
+            ),
+          }
+        },
+      )
     },
 
     async listAttachments(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const capture = runtime.getCapture(input.captureId)
-        if (!capture) {
-          throw new VaultCliError(
-            'INBOX_CAPTURE_NOT_FOUND',
-            `Inbox capture "${input.captureId}" was not found.`,
-          )
-        }
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: capture.captureId,
-          attachmentCount: capture.attachments.length,
-          attachments: capture.attachments.map(toCliAttachment),
-        }
-      } finally {
-        runtime.close()
-      }
+      return withInitializedInboxRuntime(
+        loadInbox,
+        input.vault,
+        async ({ paths, runtime }) => {
+          const capture = requireCapture(runtime, input.captureId)
+          return {
+            vault: paths.absoluteVaultRoot,
+            captureId: capture.captureId,
+            attachmentCount: capture.attachments.length,
+            attachments: capture.attachments.map(toCliAttachment),
+          }
+        },
+      )
     },
 
     async showAttachment(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const match = requireAttachmentRecord(runtime, input.attachmentId)
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: match.capture.captureId,
-          attachment: toCliAttachment(match.attachment),
-        }
-      } finally {
-        runtime.close()
-      }
+      return withInitializedInboxRuntime(
+        loadInbox,
+        input.vault,
+        async ({ paths, runtime }) => {
+          const match = requireAttachmentRecord(runtime, input.attachmentId)
+          return {
+            vault: paths.absoluteVaultRoot,
+            captureId: match.capture.captureId,
+            attachment: toCliAttachment(match.attachment),
+          }
+        },
+      )
     },
 
     async showAttachmentStatus(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        if (!runtime.listAttachmentParseJobs) {
-          throw unsupportedAttachmentParse('show status')
-        }
-        const match = requireAttachmentRecord(runtime, input.attachmentId)
-        const jobs = runtime.listAttachmentParseJobs({
-          attachmentId: input.attachmentId,
-          limit: 20,
-        })
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: match.capture.captureId,
-          attachmentId: input.attachmentId,
-          parseable: isParseableAttachment(match.attachment),
-          currentState: resolveAttachmentParseState(match.attachment, jobs),
-          jobs: jobs.map(toCliAttachmentParseJob),
-        }
-      } finally {
-        runtime.close()
-      }
-    },
-
-    async parseAttachment(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        if (!runtime.listAttachmentParseJobs) {
-          throw unsupportedAttachmentParse('parse')
-        }
-        const match = requireAttachmentRecord(runtime, input.attachmentId)
-        if (!isParseableAttachment(match.attachment)) {
-          throw new VaultCliError(
-            'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
-            `Attachment "${input.attachmentId}" is not supported by the current runtime parse queue.`,
-          )
-        }
-
-        const parserService = await createParserServiceContext(
-          paths.absoluteVaultRoot,
-          runtime,
-          await requireParsers('attachment-level inbox parser drains'),
-        )
-        const results = await parserService.drain({
-          attachmentId: input.attachmentId,
-          maxJobs: 1,
-        })
-        const summary = summarizeParserDrain(paths.absoluteVaultRoot, results)
-        const refreshedCapture = runtime.getCapture(match.capture.captureId)
-        const refreshedAttachment =
-          refreshedCapture?.attachments.find(
-            (attachment) => attachment.attachmentId === input.attachmentId,
-          ) ?? match.attachment
-        const jobs = runtime.listAttachmentParseJobs({
-          attachmentId: input.attachmentId,
-          limit: 20,
-        })
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: match.capture.captureId,
-          attachmentId: input.attachmentId,
-          parseable: true,
-          attempted: summary.attempted,
-          succeeded: summary.succeeded,
-          failed: summary.failed,
-          currentState: resolveAttachmentParseState(refreshedAttachment, jobs),
-          jobs: jobs.map(toCliAttachmentParseJob),
-          results: summary.results,
-        }
-      } finally {
-        runtime.close()
-      }
-    },
-
-    async reparseAttachment(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        if (!runtime.listAttachmentParseJobs || !runtime.requeueAttachmentParseJobs) {
-          throw unsupportedAttachmentParse('reparse')
-        }
-        const match = requireAttachmentRecord(runtime, input.attachmentId)
-        if (!isParseableAttachment(match.attachment)) {
-          throw new VaultCliError(
-            'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
-            `Attachment "${input.attachmentId}" is not supported by the current runtime parse queue.`,
-          )
-        }
-
-        const existingJobs = runtime.listAttachmentParseJobs({
-          attachmentId: input.attachmentId,
-          limit: 20,
-        })
-        if (existingJobs.length === 0) {
-          throw new VaultCliError(
-            'INBOX_ATTACHMENT_PARSE_MISSING',
-            `Attachment "${input.attachmentId}" does not have a runtime parse job to requeue.`,
-          )
-        }
-
-        const requeuedJobs = runtime.requeueAttachmentParseJobs({
-          attachmentId: input.attachmentId,
-        })
-        const refreshedCapture = runtime.getCapture(match.capture.captureId)
-        const refreshedAttachment =
-          refreshedCapture?.attachments.find(
-            (attachment) => attachment.attachmentId === input.attachmentId,
-          ) ?? match.attachment
-        const jobs = runtime.listAttachmentParseJobs({
-          attachmentId: input.attachmentId,
-          limit: 20,
-        })
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: match.capture.captureId,
-          attachmentId: input.attachmentId,
-          parseable: true,
-          requeuedJobs,
-          currentState: resolveAttachmentParseState(refreshedAttachment, jobs),
-          jobs: jobs.map(toCliAttachmentParseJob),
-        }
-      } finally {
-        runtime.close()
-      }
-    },
-
-    async show(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const capture = runtime.getCapture(input.captureId)
-        if (!capture) {
-          throw new VaultCliError(
-            'INBOX_CAPTURE_NOT_FOUND',
-            `Inbox capture "${input.captureId}" was not found.`,
-          )
-        }
-
-        const promotionsByCapture = await readPromotionsByCapture(paths)
-        return {
-          vault: paths.absoluteVaultRoot,
-          capture: detailCapture(
-            capture,
-            promotionsByCapture.get(capture.captureId) ?? [],
-          ),
-        }
-      } finally {
-        runtime.close()
-      }
-    },
-
-    async search(input) {
-      const paths = await ensureInitialized(loadInbox, input.vault)
-      const inboxd = await loadInbox()
-      const config = await readConfig(paths)
-      const sourceFilter = resolveSourceFilter(config, input.sourceId ?? null)
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-
-      try {
-        const hits = runtime.searchCaptures({
-          text: input.text,
-          source: sourceFilter?.source,
-          accountId: sourceFilter?.accountId,
-          limit: normalizeLimit(input.limit, 20, 200),
-        })
-        const promotionsByCapture = await readPromotionsByCapture(paths)
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          filters: {
-            text: input.text,
-            sourceId: input.sourceId ?? null,
-            limit: normalizeLimit(input.limit, 20, 200),
-          },
-          hits: hits.map((hit) => ({
-            captureId: hit.captureId,
-            source: hit.source,
-            accountId: hit.accountId ?? null,
-            threadId: hit.threadId,
-            threadTitle: hit.threadTitle ?? null,
-            occurredAt: hit.occurredAt,
-            text: hit.text,
-            snippet: hit.snippet,
-            score: hit.score,
-            envelopePath: hit.envelopePath,
-            promotions: promotionsByCapture.get(hit.captureId) ?? [],
-          })),
-        }
-      } finally {
-        runtime.close()
-      }
-    },
-
-    async promoteMeal(input) {
-      return withPromotionScope({
-        input,
-        target: 'meal',
+      return withInitializedInboxRuntime(
         loadInbox,
-        prepare: async () => ({
-          core: await loadCore(),
-        }),
-        deriveBeforePromotionStore: () => ({}),
-        run: async ({
-          paths,
-          capture,
-          prepared,
-          promotionStore,
-          existing,
-        }) => {
-          const photoAttachment = capture.attachments.find(isStoredImageAttachment)
-          if (!photoAttachment) {
-            throw new VaultCliError(
-              'INBOX_PROMOTION_REQUIRES_PHOTO',
-              'Meal promotion requires an image attachment on the inbox capture.',
-            )
-          }
-
-          const audioAttachment = capture.attachments.find(isStoredAudioAttachment)
-          const canonicalPromotion = await findCanonicalPromotionMatch({
-            capture,
-            absoluteVaultRoot: paths.absoluteVaultRoot,
-            spec: mealCanonicalPromotionSpec,
-            context: {
-              photoSha256: await resolveAttachmentSha256(
-                paths.absoluteVaultRoot,
-                photoAttachment,
-              ),
-              audioSha256:
-                audioAttachment && typeof audioAttachment.storedPath === 'string'
-                  ? await resolveAttachmentSha256(
-                      paths.absoluteVaultRoot,
-                      audioAttachment,
-                    )
-                  : null,
-            },
-          })
-          const promotion = await reconcileCanonicalImportPromotion({
-            paths,
-            promotionStore,
-            existing,
-            capture,
-            clock,
-            target: 'meal',
-            canonicalPromotion,
-            createPromotion: async () => {
-              const result = await prepared.core.addMeal({
-                vaultRoot: paths.absoluteVaultRoot,
-                occurredAt: capture.occurredAt,
-                note: capture.text ?? undefined,
-                photoPath: path.join(
-                  paths.absoluteVaultRoot,
-                  photoAttachment.storedPath,
-                ),
-                audioPath:
-                  typeof audioAttachment?.storedPath === 'string'
-                    ? path.join(paths.absoluteVaultRoot, audioAttachment.storedPath)
-                    : undefined,
-                source: 'import',
-              })
-
-              return {
-                lookupId: result.event.id,
-                relatedId: result.mealId,
-              }
-            },
+        input.vault,
+        async ({ paths, runtime }) => {
+          const listAttachmentParseJobs = requireAttachmentParseJobs(
+            runtime,
+            'show status',
+          )
+          const match = requireAttachmentRecord(runtime, input.attachmentId)
+          const status = buildAttachmentParseStatus({
+            runtime,
+            listAttachmentParseJobs,
+            captureId: match.capture.captureId,
+            attachmentId: input.attachmentId,
+            fallbackAttachment: match.attachment,
           })
 
           return {
             vault: paths.absoluteVaultRoot,
-            captureId: input.captureId,
-            target: 'meal',
-            lookupId: promotion.lookupId,
-            relatedId: promotion.relatedId,
-            created: promotion.created,
+            captureId: match.capture.captureId,
+            attachmentId: input.attachmentId,
+            parseable: isParseableAttachment(match.attachment),
+            ...status,
+          }
+        },
+      )
+    },
+
+    async parseAttachment(input) {
+      return withInitializedInboxRuntime(
+        loadInbox,
+        input.vault,
+        async ({ paths, runtime }) => {
+          const listAttachmentParseJobs = requireAttachmentParseJobs(runtime, 'parse')
+          const match = requireAttachmentRecord(runtime, input.attachmentId)
+          if (!isParseableAttachment(match.attachment)) {
+            throw new VaultCliError(
+              'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
+              `Attachment "${input.attachmentId}" is not supported by the current runtime parse queue.`,
+            )
+          }
+
+          const parserService = await createParserServiceContext(
+            paths.absoluteVaultRoot,
+            runtime,
+            await requireParsers('attachment-level inbox parser drains'),
+          )
+          const results = await parserService.drain({
+            attachmentId: input.attachmentId,
+            maxJobs: 1,
+          })
+          const summary = summarizeParserDrain(paths.absoluteVaultRoot, results)
+          const status = buildAttachmentParseStatus({
+            runtime,
+            listAttachmentParseJobs,
+            captureId: match.capture.captureId,
+            attachmentId: input.attachmentId,
+            fallbackAttachment: match.attachment,
+          })
+
+          return {
+            vault: paths.absoluteVaultRoot,
+            captureId: match.capture.captureId,
+            attachmentId: input.attachmentId,
+            parseable: true,
+            attempted: summary.attempted,
+            succeeded: summary.succeeded,
+            failed: summary.failed,
+            ...status,
+            results: summary.results,
+          }
+        },
+      )
+    },
+
+    async reparseAttachment(input) {
+      return withInitializedInboxRuntime(
+        loadInbox,
+        input.vault,
+        async ({ paths, runtime }) => {
+          const {
+            listAttachmentParseJobs,
+            requeueAttachmentParseJobs,
+          } = requireAttachmentReparseSupport(runtime)
+          const match = requireAttachmentRecord(runtime, input.attachmentId)
+          if (!isParseableAttachment(match.attachment)) {
+            throw new VaultCliError(
+              'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
+              `Attachment "${input.attachmentId}" is not supported by the current runtime parse queue.`,
+            )
+          }
+
+          const existingJobs = listAttachmentParseJobs({
+            attachmentId: input.attachmentId,
+            limit: 20,
+          })
+          if (existingJobs.length === 0) {
+            throw new VaultCliError(
+              'INBOX_ATTACHMENT_PARSE_MISSING',
+              `Attachment "${input.attachmentId}" does not have a runtime parse job to requeue.`,
+            )
+          }
+
+          const requeuedJobs = requeueAttachmentParseJobs({
+            attachmentId: input.attachmentId,
+          })
+          const status = buildAttachmentParseStatus({
+            runtime,
+            listAttachmentParseJobs,
+            captureId: match.capture.captureId,
+            attachmentId: input.attachmentId,
+            fallbackAttachment: match.attachment,
+          })
+
+          return {
+            vault: paths.absoluteVaultRoot,
+            captureId: match.capture.captureId,
+            attachmentId: input.attachmentId,
+            parseable: true,
+            requeuedJobs,
+            ...status,
+          }
+        },
+      )
+    },
+
+    async show(input) {
+      return withInitializedInboxRuntime(
+        loadInbox,
+        input.vault,
+        async ({ paths, runtime }) => {
+          const capture = requireCapture(runtime, input.captureId)
+          const promotionsByCapture = await readPromotionsByCapture(paths)
+          return {
+            vault: paths.absoluteVaultRoot,
+            capture: detailCapture(
+              capture,
+              promotionsByCapture.get(capture.captureId) ?? [],
+            ),
+          }
+        },
+      )
+    },
+
+    async search(input) {
+      return withInitializedInboxRuntime(
+        loadInbox,
+        input.vault,
+        async ({ paths, runtime }) => {
+          const config = await readConfig(paths)
+          const sourceFilter = resolveSourceFilter(config, input.sourceId ?? null)
+          const limit = normalizeLimit(input.limit, 20, 200)
+          const hits = runtime.searchCaptures({
+            text: input.text,
+            source: sourceFilter?.source,
+            accountId: sourceFilter?.accountId,
+            limit,
+          })
+          const promotionsByCapture = await readPromotionsByCapture(paths)
+
+          return {
+            vault: paths.absoluteVaultRoot,
+            filters: {
+              text: input.text,
+              sourceId: input.sourceId ?? null,
+              limit,
+            },
+            hits: hits.map((hit) => ({
+              captureId: hit.captureId,
+              source: hit.source,
+              accountId: hit.accountId ?? null,
+              threadId: hit.threadId,
+              threadTitle: hit.threadTitle ?? null,
+              occurredAt: hit.occurredAt,
+              text: hit.text,
+              snippet: hit.snippet,
+              score: hit.score,
+              envelopePath: hit.envelopePath,
+              promotions: promotionsByCapture.get(hit.captureId) ?? [],
+            })),
+          }
+        },
+      )
+    },
+
+    async promoteMeal(input) {
+      return promoteCanonicalAttachmentImport({
+        input,
+        target: 'meal',
+        clock,
+        loadInbox,
+        prepare: async () => ({
+          core: await loadCore(),
+        }),
+        findRequiredAttachment: (capture) =>
+          capture.attachments.find(isStoredImageAttachment),
+        missingAttachmentError: () =>
+          new VaultCliError(
+            'INBOX_PROMOTION_REQUIRES_PHOTO',
+            'Meal promotion requires an image attachment on the inbox capture.',
+          ),
+        canonicalPromotionSpec: mealCanonicalPromotionSpec,
+        buildCanonicalMatchContext: async ({
+          paths,
+          capture,
+          attachment,
+        }) => {
+          const audioAttachment = capture.attachments.find(isStoredAudioAttachment)
+          return {
+            photoSha256: await resolveAttachmentSha256(
+              paths.absoluteVaultRoot,
+              attachment,
+            ),
+            audioSha256:
+              audioAttachment && typeof audioAttachment.storedPath === 'string'
+                ? await resolveAttachmentSha256(
+                    paths.absoluteVaultRoot,
+                    audioAttachment,
+                  )
+                : null,
+          }
+        },
+        createPromotion: async ({ paths, capture, prepared, attachment }) => {
+          const audioAttachment = capture.attachments.find(isStoredAudioAttachment)
+          const result = await prepared.core.addMeal({
+            vaultRoot: paths.absoluteVaultRoot,
+            occurredAt: capture.occurredAt,
+            note: capture.text ?? undefined,
+            photoPath: path.join(paths.absoluteVaultRoot, attachment.storedPath),
+            audioPath:
+              typeof audioAttachment?.storedPath === 'string'
+                ? path.join(paths.absoluteVaultRoot, audioAttachment.storedPath)
+                : undefined,
+            source: 'import',
+          })
+
+          return {
+            lookupId: result.event.id,
+            relatedId: result.mealId,
           }
         },
       })
     },
 
     async promoteDocument(input) {
-      return withPromotionScope({
+      return promoteCanonicalAttachmentImport({
         input,
         target: 'document',
+        clock,
         loadInbox,
         prepare: async () => ({
           importers: (await loadImporters()).createImporters(),
         }),
-        deriveBeforePromotionStore: () => ({}),
-        run: async ({
+        findRequiredAttachment: (capture) =>
+          capture.attachments.find(isStoredDocumentAttachment),
+        missingAttachmentError: () =>
+          new VaultCliError(
+            'INBOX_PROMOTION_REQUIRES_DOCUMENT',
+            'Document promotion requires a stored document attachment on the inbox capture.',
+          ),
+        canonicalPromotionSpec: documentCanonicalPromotionSpec,
+        buildCanonicalMatchContext: async ({
           paths,
-          capture,
-          prepared,
-          promotionStore,
-          existing,
+          attachment,
         }) => {
-          const documentAttachment = capture.attachments.find(
-            isStoredDocumentAttachment,
-          )
-          if (!documentAttachment) {
-            throw new VaultCliError(
-              'INBOX_PROMOTION_REQUIRES_DOCUMENT',
-              'Document promotion requires a stored document attachment on the inbox capture.',
-            )
+          return {
+            documentSha256: await resolveAttachmentSha256(
+              paths.absoluteVaultRoot,
+              attachment,
+            ),
+            title: normalizeNullableString(attachment.fileName),
           }
-
-          const canonicalPromotion = await findCanonicalPromotionMatch({
-            capture,
-            absoluteVaultRoot: paths.absoluteVaultRoot,
-            spec: documentCanonicalPromotionSpec,
-            context: {
-              documentSha256: await resolveAttachmentSha256(
-                paths.absoluteVaultRoot,
-                documentAttachment,
-              ),
-              title: normalizeNullableString(documentAttachment.fileName),
-            },
-          })
-          const promotion = await reconcileCanonicalImportPromotion({
-            paths,
-            promotionStore,
-            existing,
-            capture,
-            clock,
-            target: 'document',
-            canonicalPromotion,
-            createPromotion: async () => {
-              const title =
-                normalizeNullableString(documentAttachment.fileName) ?? undefined
-              const note = normalizeNullableString(capture.text) ?? undefined
-              const result = await prepared.importers.importDocument({
-                filePath: path.join(
-                  paths.absoluteVaultRoot,
-                  documentAttachment.storedPath,
-                ),
-                vaultRoot: paths.absoluteVaultRoot,
-                occurredAt: capture.occurredAt,
-                title,
-                note,
-                source: 'import',
-              })
-
-              return {
-                lookupId: result.event.id,
-                relatedId: result.documentId,
-              }
-            },
+        },
+        createPromotion: async ({ paths, capture, prepared, attachment }) => {
+          const title = normalizeNullableString(attachment.fileName) ?? undefined
+          const note = normalizeNullableString(capture.text) ?? undefined
+          const result = await prepared.importers.importDocument({
+            filePath: path.join(paths.absoluteVaultRoot, attachment.storedPath),
+            vaultRoot: paths.absoluteVaultRoot,
+            occurredAt: capture.occurredAt,
+            title,
+            note,
+            source: 'import',
           })
 
           return {
-            vault: paths.absoluteVaultRoot,
-            captureId: input.captureId,
-            target: 'document',
-            lookupId: promotion.lookupId,
-            relatedId: promotion.relatedId,
-            created: promotion.created,
+            lookupId: result.event.id,
+            relatedId: result.documentId,
           }
         },
       })
@@ -2338,8 +2241,14 @@ async function ensureInitialized(
   loadInbox: () => Promise<InboxRuntimeModule>,
   vaultRoot: string,
 ): Promise<InboxPaths> {
+  return ensureInitializedWithInbox(await loadInbox(), vaultRoot)
+}
+
+async function ensureInitializedWithInbox(
+  inboxd: InboxRuntimeModule,
+  vaultRoot: string,
+): Promise<InboxPaths> {
   const paths = resolveRuntimePaths(vaultRoot)
-  const inboxd = await loadInbox()
   await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
 
   if (!(await fileExists(paths.inboxConfigPath))) {
@@ -2351,6 +2260,27 @@ async function ensureInitialized(
 
   await readConfig(paths)
   return paths
+}
+
+async function withInitializedInboxRuntime<TResult>(
+  loadInbox: () => Promise<InboxRuntimeModule>,
+  vaultRoot: string,
+  fn: (input: {
+    paths: InboxPaths
+    runtime: RuntimeStore
+  }) => Promise<TResult>,
+): Promise<TResult> {
+  const inboxd = await loadInbox()
+  const paths = await ensureInitializedWithInbox(inboxd, vaultRoot)
+  const runtime = await inboxd.openInboxRuntime({
+    vaultRoot: paths.absoluteVaultRoot,
+  })
+
+  try {
+    return await fn({ paths, runtime })
+  } finally {
+    runtime.close()
+  }
 }
 
 async function ensureDirectory(
@@ -2586,6 +2516,21 @@ function toCliAttachmentParseJob(job: RuntimeAttachmentParseJobRecord) {
   }
 }
 
+function requireCapture(
+  runtime: RuntimeStore,
+  captureId: string,
+): RuntimeCaptureRecord {
+  const capture = runtime.getCapture(captureId)
+  if (!capture) {
+    throw new VaultCliError(
+      'INBOX_CAPTURE_NOT_FOUND',
+      `Inbox capture "${captureId}" was not found.`,
+    )
+  }
+
+  return capture
+}
+
 function requireAttachmentRecord(
   runtime: RuntimeStore,
   attachmentId: string,
@@ -2610,6 +2555,72 @@ function requireAttachmentRecord(
     'INBOX_ATTACHMENT_NOT_FOUND',
     `Inbox attachment "${attachmentId}" was not found.`,
   )
+}
+
+function requireAttachmentParseJobs(
+  runtime: RuntimeStore,
+  action: 'show status' | 'parse' | 'reparse',
+): NonNullable<RuntimeStore['listAttachmentParseJobs']> {
+  if (!runtime.listAttachmentParseJobs) {
+    throw unsupportedAttachmentParse(action)
+  }
+
+  return runtime.listAttachmentParseJobs
+}
+
+function requireAttachmentReparseSupport(
+  runtime: RuntimeStore,
+): {
+  listAttachmentParseJobs: NonNullable<RuntimeStore['listAttachmentParseJobs']>
+  requeueAttachmentParseJobs: NonNullable<RuntimeStore['requeueAttachmentParseJobs']>
+} {
+  if (!runtime.listAttachmentParseJobs || !runtime.requeueAttachmentParseJobs) {
+    throw unsupportedAttachmentParse('reparse')
+  }
+
+  return {
+    listAttachmentParseJobs: runtime.listAttachmentParseJobs,
+    requeueAttachmentParseJobs: runtime.requeueAttachmentParseJobs,
+  }
+}
+
+function refreshAttachmentForCapture(
+  runtime: RuntimeStore,
+  captureId: string,
+  attachmentId: string,
+  fallbackAttachment: RuntimeAttachmentRecord,
+): RuntimeAttachmentRecord {
+  return (
+    runtime
+      .getCapture(captureId)
+      ?.attachments.find(
+        (attachment) => attachment.attachmentId === attachmentId,
+      ) ?? fallbackAttachment
+  )
+}
+
+function buildAttachmentParseStatus(input: {
+  runtime: RuntimeStore
+  listAttachmentParseJobs: NonNullable<RuntimeStore['listAttachmentParseJobs']>
+  captureId: string
+  attachmentId: string
+  fallbackAttachment: RuntimeAttachmentRecord
+}) {
+  const jobs = input.listAttachmentParseJobs({
+    attachmentId: input.attachmentId,
+    limit: 20,
+  })
+  const attachment = refreshAttachmentForCapture(
+    input.runtime,
+    input.captureId,
+    input.attachmentId,
+    input.fallbackAttachment,
+  )
+
+  return {
+    currentState: resolveAttachmentParseState(attachment, jobs),
+    jobs: jobs.map(toCliAttachmentParseJob),
+  }
 }
 
 function resolveSourceFilter(
@@ -2989,6 +3000,99 @@ async function withPromotionScope<TPrepared, TDerived, TResult>(input: {
   } finally {
     runtime.close()
   }
+}
+
+async function promoteCanonicalAttachmentImport<
+  TPrepared,
+  TAttachment extends RuntimeAttachmentRecord & { storedPath: string },
+  TManifest extends CanonicalPromotionManifest,
+  TContext,
+  TTarget extends CanonicalPromotionLookupTarget,
+>(input: {
+  input: PromoteInput
+  target: TTarget
+  clock: () => Date
+  loadInbox: () => Promise<InboxRuntimeModule>
+  prepare(paths: InboxPaths): Promise<TPrepared>
+  findRequiredAttachment(
+    capture: RuntimeCaptureRecord,
+  ): TAttachment | undefined
+  missingAttachmentError(): VaultCliError
+  canonicalPromotionSpec: CanonicalPromotionLookupSpec<TManifest, TContext>
+  buildCanonicalMatchContext(input: {
+    paths: InboxPaths
+    capture: RuntimeCaptureRecord
+    prepared: TPrepared
+    attachment: TAttachment
+  }): Promise<TContext> | TContext
+  createPromotion(input: {
+    paths: InboxPaths
+    capture: RuntimeCaptureRecord
+    prepared: TPrepared
+    attachment: TAttachment
+  }): Promise<{
+    lookupId: string
+    relatedId: string
+  }>
+}): Promise<CanonicalAttachmentPromotionResult<TTarget>> {
+  return withPromotionScope<TPrepared, undefined, CanonicalAttachmentPromotionResult<TTarget>>(
+    {
+      input: input.input,
+      target: input.target,
+      loadInbox: input.loadInbox,
+      prepare: input.prepare,
+      deriveBeforePromotionStore: () => undefined,
+      run: async ({
+        paths,
+        capture,
+        prepared,
+        promotionStore,
+        existing,
+      }) => {
+        const attachment = input.findRequiredAttachment(capture)
+        if (!attachment) {
+          throw input.missingAttachmentError()
+        }
+
+        const canonicalPromotion = await findCanonicalPromotionMatch({
+          capture,
+          absoluteVaultRoot: paths.absoluteVaultRoot,
+          spec: input.canonicalPromotionSpec,
+          context: await input.buildCanonicalMatchContext({
+            paths,
+            capture,
+            prepared,
+            attachment,
+          }),
+        })
+        const promotion = await reconcileCanonicalImportPromotion({
+          paths,
+          promotionStore,
+          existing,
+          capture,
+          clock: input.clock,
+          target: input.target,
+          canonicalPromotion,
+          createPromotion: () =>
+            input.createPromotion({
+              paths,
+              capture,
+              prepared,
+              attachment,
+            }),
+        })
+
+        return {
+          vault: paths.absoluteVaultRoot,
+          captureId: input.input.captureId,
+          target: input.target,
+          lookupId: promotion.lookupId,
+          relatedId: promotion.relatedId,
+          created: promotion.created,
+        } as CanonicalAttachmentPromotionResult<TTarget>
+      },
+    },
+  )
 }
 
 async function withCanonicalWriteLock<TResult>(
