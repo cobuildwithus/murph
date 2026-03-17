@@ -19,6 +19,7 @@ export {
   copyRawArtifact,
   createExperiment,
   importAssessmentResponse,
+  importDeviceBatch,
   importDocument,
   importMeal,
   importSamples,

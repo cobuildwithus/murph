@@ -3,6 +3,7 @@ import {
   addMeal as addMealInternal,
   createExperiment as createExperimentInternal,
   ensureJournalDay as ensureJournalDayInternal,
+  importDeviceBatch as importDeviceBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
 } from "./mutations.js";
@@ -132,6 +133,12 @@ export async function importSamples(
   input: Parameters<typeof importSamplesInternal>[0],
 ): ReturnType<typeof importSamplesInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => importSamplesInternal(input));
+}
+
+export async function importDeviceBatch(
+  input: Parameters<typeof importDeviceBatchInternal>[0],
+): ReturnType<typeof importDeviceBatchInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => importDeviceBatchInternal(input));
 }
 
 export async function importAssessmentResponse(

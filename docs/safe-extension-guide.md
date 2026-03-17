@@ -45,6 +45,14 @@ If a proposed record cannot be represented as Markdown truth plus append-only JS
 
 Importers may prepare payloads, but they do not decide new canonical storage rules on their own.
 
+### Add a new device/provider connector
+
+1. Model the provider behind a small adapter in `@healthybob/importers` that normalizes upstream payloads into shared device-batch payloads.
+2. Preserve immutable provider snapshots under `raw/integrations/<provider>/**` through `@healthybob/core`; do not write those files directly from importer code.
+3. Attach upstream provenance with shared `externalRef` fields on canonical events/samples so retries dedupe by provider resource id, version, and optional facet.
+4. Keep provider secrets, OAuth tokens, and background sync state outside the vault; only immutable payload evidence and canonical normalized records belong in the vault.
+5. Avoid inventing unsupported time series. If the upstream API only exposes summaries, normalize summaries into baseline observations/samples instead of fabricating minute-level streams.
+
 ### Add a new query or export
 
 1. Read only from canonical Markdown and JSONL data.
@@ -92,8 +100,9 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 
 - Contract docs still describe the new behavior truthfully.
 - Package ownership remains one-way: `contracts` -> `core`/`importers`/`query`/`cli`, with canonical writes only through core.
-- New paths under the vault root preserve Markdown truth, append-only JSONL, and immutable `raw/`.
+- New paths under the vault root preserve Markdown truth, append-only JSONL, and immutable `raw/`, including provider snapshots under `raw/integrations/**`.
 - Health-cutover changes keep Markdown for curated current state and JSONL for append-only assessments, snapshots, timed history, samples, and audit.
+- Device/provider connectors keep upstream provenance on canonical records via shared `externalRef` metadata rather than implicit importer-only state.
 - Fixtures and smoke flows cover the new behavior at the public surface, not just internals.
 - Verification docs and package scripts are updated if runtime expectations change.
 - Release notes explain whether the change is scaffold-only, contract-only, or operator-visible.
@@ -109,4 +118,4 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 
 ## Current Integration Status
 
-As of 2026-03-12, the contract fence has been reconciled against the executable `contracts`, `core`, `importers`, and `query` packages. The remaining integration gap is the TypeScript CLI runtime: its source now delegates to real package functions, but this workspace still lacks the `incur` toolchain needed to execute or typecheck `vault-cli` end to end.
+As of 2026-03-16, the contract fence covers canonical device/provider imports as well: `@healthybob/importers` can normalize provider payloads into a shared device-batch seam, while `@healthybob/core` persists immutable provider snapshots under `raw/integrations/**` plus append-only events/samples with explicit upstream provenance. The remaining integration gap is still the TypeScript CLI runtime: its source now delegates to real package functions, but this workspace still lacks the `incur` toolchain needed to execute or typecheck `vault-cli` end to end.

@@ -23,7 +23,7 @@ interface RawManifestArtifact {
 interface RawImportManifest {
   schemaVersion: "hb.raw-import-manifest.v1";
   importId: string;
-  importKind: "assessment" | "document" | "meal" | "sample_batch";
+  importKind: "assessment" | "device_batch" | "document" | "meal" | "sample_batch";
   importedAt: string;
   source: string | null;
   rawDirectory: string;

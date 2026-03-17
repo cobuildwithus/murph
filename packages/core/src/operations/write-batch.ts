@@ -57,6 +57,13 @@ interface StageRawCopyInput extends StageRawCopyOptions {
   mediaType: string;
 }
 
+interface StageRawTextInput extends StageRawCopyOptions {
+  targetRelativePath: string;
+  originalFileName: string;
+  mediaType: string;
+  content: string;
+}
+
 interface StagedRawCopy {
   relativePath: string;
   originalFileName: string;
@@ -444,6 +451,44 @@ export class WriteBatch {
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
     await fs.copyFile(sourceAbsolutePath, stageAbsolutePath);
+
+    this.record.actions.push({
+      kind: "raw_copy",
+      state: "staged",
+      targetRelativePath: normalizedTarget,
+      stageRelativePath,
+      allowExistingMatch,
+      originalFileName,
+      mediaType,
+    });
+    await this.persist();
+
+    return {
+      relativePath: normalizedTarget,
+      originalFileName,
+      mediaType,
+      stagedAbsolutePath: stageAbsolutePath,
+    };
+  }
+
+  async stageRawText({
+    targetRelativePath,
+    originalFileName,
+    mediaType,
+    content,
+    allowExistingMatch = false,
+  }: StageRawTextInput): Promise<StagedRawCopy> {
+    this.assertMutable();
+    const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
+    assertValidRawTarget(normalizedTarget);
+
+    const stageRelativePath = stageArtifactRelativePath(
+      this.operationId,
+      `${String(this.record.actions.length).padStart(4, "0")}.raw`,
+    );
+    const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
+    await ensureDirectory(path.dirname(stageAbsolutePath));
+    await fs.writeFile(stageAbsolutePath, content, "utf8");
 
     this.record.actions.push({
       kind: "raw_copy",

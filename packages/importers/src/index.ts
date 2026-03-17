@@ -15,6 +15,12 @@ export {
   type CanonicalWriteMethod,
   type CanonicalWritePort,
   type SampleImportBatchProvenance,
+  type DeviceBatchImportPayload,
+  type DeviceEventPayload,
+  type DeviceExternalRefPayload,
+  type DeviceRawArtifactPayload,
+  type DeviceSamplePayload,
+  type DeviceSampleValuePayload,
   type DocumentImportPayload,
   type MealImportPayload,
   type SampleImportConfig,
@@ -24,6 +30,7 @@ export {
 } from "./core-port.js";
 export { createImporters } from "./create-importers.js";
 export { importDocument, prepareDocumentImport } from "./document-importer.js";
+export * from "./device-providers/index.js";
 export { importMeal, prepareMealImport } from "./meal-importer.js";
 export {
   createSamplePresetRegistry,

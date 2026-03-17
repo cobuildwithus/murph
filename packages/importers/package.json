@@ -19,7 +19,7 @@
   "scripts": {
     "build": "rimraf dist && tsc -b tsconfig.json",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
-    "test": "pnpm --dir ../.. exec vitest run packages/importers/test/importers.test.ts packages/importers/test/input-validation.test.ts --no-coverage"
+    "test": "pnpm --dir ../.. exec vitest run packages/importers/test/importers.test.ts packages/importers/test/input-validation.test.ts packages/importers/test/device-providers.test.ts --no-coverage"
   },
   "dependencies": {
     "@healthybob/core": "workspace:*",

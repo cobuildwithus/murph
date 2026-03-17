@@ -15,7 +15,7 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
 | event | `evt` | canonical event record id |
 | sample | `smp` | canonical sample record id |
 | audit | `aud` | canonical audit record id |
-| transform batch | `xfm` | import-batch id returned from sample-import flows and used in raw paths |
+| transform batch | `xfm` | import-batch id returned from sample-import and normalized device/provider import flows and used in raw paths |
 | document | `doc` | related id stored on document events |
 | meal | `meal` | related id stored on meal events |
 | experiment | `exp` | experiment page id and related event id |
@@ -34,9 +34,9 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
 - Vault metadata:
   `schemaVersion`, `vaultId`, `createdAt`, `title`, `timezone`, `idPolicy`, `paths`, `shards`
 - Event records:
-  `schemaVersion`, `id`, `kind`, `occurredAt`, `recordedAt`, `dayKey`, `source`, `title`, plus kind-specific fields
+  `schemaVersion`, `id`, `kind`, `occurredAt`, `recordedAt`, `dayKey`, `source`, `title`, plus kind-specific fields and optional provenance fields
 - Sample records:
-  `schemaVersion`, `id`, `stream`, `recordedAt`, `dayKey`, `source`, `quality`, plus stream-specific fields
+  `schemaVersion`, `id`, `stream`, `recordedAt`, `dayKey`, `source`, `quality`, plus stream-specific fields and optional provenance fields
 - Audit records:
   `schemaVersion`, `id`, `action`, `status`, `occurredAt`, `actor`, `commandName`, `summary`, `changes`
 - Assessment response records:
@@ -68,7 +68,7 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 | `adverse_effect` | `substance`, `effect`, `severity` |
 | `exposure` | `exposureType`, `substance` |
 
-Shared optional event fields are limited to `note`, `tags`, `relatedIds`, and `rawRefs`.
+Shared optional event fields are limited to `note`, `tags`, `relatedIds`, `rawRefs`, and `externalRef`. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
 ## Sample Streams
 
@@ -81,6 +81,8 @@ Shared optional event fields are limited to `note`, `tags`, `relatedIds`, and `r
 | `respiratory_rate` | `value`, `unit: "breaths_per_minute"` |
 | `temperature` | `value`, `unit: "celsius"` |
 | `glucose` | `value`, `unit: "mg_dL"` |
+
+Sample records may also carry optional `externalRef` provenance with the same shape as events so normalized device/provider imports can dedupe retries against upstream resource ids and versions.
 
 ## Frontmatter Contracts
 

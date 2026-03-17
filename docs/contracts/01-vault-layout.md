@@ -26,6 +26,8 @@ vault/
   raw/meals/YYYY/MM/<mealId>/manifest.json
   raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv
   raw/samples/<stream>/YYYY/MM/<transformId>/manifest.json
+  raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>
+  raw/integrations/<provider>/YYYY/MM/<transformId>/manifest.json
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
   ledger/profile-snapshots/YYYY/YYYY-MM.jsonl
@@ -59,6 +61,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Each raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.
+- `raw/integrations/<provider>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from normalized device/provider imports and keeps provider API snapshots immutable alongside a manifest.
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
 - Profile snapshot shards use `recordedAt`: `ledger/profile-snapshots/YYYY/YYYY-MM.jsonl`.
@@ -75,6 +78,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Assessment imports use `raw/assessments/YYYY/MM/<assessmentId>/source.json`.
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.
+- Device/provider API snapshot imports use `raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>`, where `transformId` is the returned device-batch id.
 - Each raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
 - File names are slug-safe ASCII and preserve the original extension.
 

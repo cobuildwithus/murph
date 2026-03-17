@@ -227,6 +227,16 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 
 export const jsonObjectSchema: z.ZodType<JsonObject> = z.object({}).catchall(jsonValueSchema);
 
+export const externalRefSchema = z
+  .object({
+    system: patternedString(SLUG_PATTERN),
+    resourceType: patternedString(SLUG_PATTERN),
+    resourceId: boundedString(1, 200),
+    version: boundedString(1, 200).optional(),
+    facet: patternedString(SLUG_PATTERN).optional(),
+  })
+  .strict();
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
@@ -241,6 +251,7 @@ const baseEventOptionalShape = {
   tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
   relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
+  externalRef: externalRefSchema.optional(),
 } satisfies z.ZodRawShape;
 
 function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape>(
@@ -267,6 +278,10 @@ const baseSampleShape = {
   quality: z.enum(SAMPLE_QUALITIES),
 } satisfies z.ZodRawShape;
 
+const baseSampleOptionalShape = {
+  externalRef: externalRefSchema.optional(),
+} satisfies z.ZodRawShape;
+
 function sampleSchema<const TStream extends SampleStream, TExtra extends z.ZodRawShape>(
   stream: TStream,
   extraShape: TExtra,
@@ -275,6 +290,7 @@ function sampleSchema<const TStream extends SampleStream, TExtra extends z.ZodRa
     .object({
       ...baseSampleShape,
       stream: z.literal(stream),
+      ...baseSampleOptionalShape,
       ...extraShape,
     })
     .strict();
@@ -760,6 +776,7 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
   "Healthy Bob Genetic Variant Frontmatter",
 );
 
+export type ExternalRef = z.infer<typeof externalRefSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;

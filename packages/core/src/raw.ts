@@ -14,6 +14,7 @@ interface CopyRawArtifactInput {
   recordId?: string;
   slot?: string;
   stream?: string;
+  provider?: string;
   allowExistingMatch?: boolean;
 }
 
@@ -24,6 +25,11 @@ export interface RawArtifact {
 }
 
 type PrepareRawArtifactInput = Omit<CopyRawArtifactInput, "vaultRoot">;
+
+interface PrepareInlineRawArtifactInput extends Omit<PrepareRawArtifactInput, "sourcePath"> {
+  fileName: string;
+  mediaType?: string;
+}
 
 const MEDIA_TYPES = new Map<string, string>([
   [".csv", "text/csv"],
@@ -61,6 +67,7 @@ function resolveRawRelativePath({
   slot,
   stream,
   targetName,
+  provider,
 }: {
   category: string;
   occurredAt: DateInput;
@@ -69,6 +76,7 @@ function resolveRawRelativePath({
   slot?: string;
   stream?: string;
   targetName?: string;
+  provider?: string;
 }): string {
   const timestamp = toIsoTimestamp(occurredAt, "occurredAt");
   const year = timestamp.slice(0, 4);
@@ -97,6 +105,11 @@ function resolveRawRelativePath({
     return `${VAULT_LAYOUT.rawAssessmentsDirectory}/${year}/${month}/${stableId}/source.json`;
   }
 
+  if (category === "integrations") {
+    const safeProvider = sanitizePathSegment(provider, "provider");
+    return `${VAULT_LAYOUT.rawDirectory}/integrations/${safeProvider}/${year}/${month}/${stableId}/${safeFileName}`;
+  }
+
   return `${VAULT_LAYOUT.rawDirectory}/${sanitizePathSegment(category, "artifact")}/${year}/${month}/${stableId}/${safeFileName}`;
 }
 
@@ -121,6 +134,7 @@ export function prepareRawArtifact({
   recordId,
   slot,
   stream,
+  provider,
 }: PrepareRawArtifactInput): RawArtifact {
   const originalFileName = basenameFromFilePath(sourcePath);
   const relativePath = resolveRawRelativePath({
@@ -131,11 +145,42 @@ export function prepareRawArtifact({
     slot,
     stream,
     targetName,
+    provider,
   });
 
   return {
     relativePath,
     originalFileName,
     mediaType: inferMediaType(originalFileName),
+  };
+}
+
+export function prepareInlineRawArtifact({
+  fileName,
+  category = "artifact",
+  occurredAt = new Date(),
+  targetName,
+  recordId,
+  slot,
+  stream,
+  provider,
+  mediaType,
+}: PrepareInlineRawArtifactInput): RawArtifact {
+  const originalFileName = basenameFromFilePath(fileName);
+  const relativePath = resolveRawRelativePath({
+    category,
+    occurredAt,
+    originalFileName,
+    recordId,
+    slot,
+    stream,
+    targetName,
+    provider,
+  });
+
+  return {
+    relativePath,
+    originalFileName,
+    mediaType: mediaType ?? inferMediaType(originalFileName),
   };
 }

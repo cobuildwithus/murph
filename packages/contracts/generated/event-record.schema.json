@@ -71,6 +71,39 @@
           },
           "uniqueItems": true
         },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
         "documentId": {
           "type": "string",
           "pattern": "^doc_[0-9A-HJKMNP-TV-Z]{26}$"
@@ -174,6 +207,39 @@
           },
           "uniqueItems": true
         },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
         "encounterType": {
           "type": "string",
           "minLength": 1,
@@ -271,6 +337,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "mealId": {
           "type": "string",
@@ -377,6 +476,39 @@
           },
           "uniqueItems": true
         },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
         "symptom": {
           "type": "string",
           "minLength": 1,
@@ -472,6 +604,39 @@
           },
           "uniqueItems": true
         },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
         "note": {
           "type": "string",
           "minLength": 1,
@@ -560,6 +725,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "metric": {
           "type": "string",
@@ -657,6 +855,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "experimentId": {
           "type": "string",
@@ -760,6 +991,39 @@
           },
           "uniqueItems": true
         },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
         "medicationName": {
           "type": "string",
           "minLength": 1,
@@ -859,6 +1123,39 @@
           },
           "uniqueItems": true
         },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
         "procedure": {
           "type": "string",
           "minLength": 1,
@@ -953,6 +1250,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "supplementName": {
           "type": "string",
@@ -1052,6 +1382,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "testName": {
           "type": "string",
@@ -1158,6 +1521,39 @@
           },
           "uniqueItems": true
         },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
         "activityType": {
           "type": "string",
           "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
@@ -1254,6 +1650,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "startAt": {
           "type": "string",
@@ -1352,6 +1781,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "substance": {
           "type": "string",
@@ -1456,6 +1918,39 @@
             "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
           },
           "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
         },
         "exposureType": {
           "type": "string",

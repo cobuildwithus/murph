@@ -2,12 +2,20 @@ import type { SamplePresetRegistry } from "./preset-registry.js";
 import { importAssessmentResponse } from "./assessment/import-assessment-response.js";
 import { importCsvSamples } from "./csv-sample-importer.js";
 import { importDocument } from "./document-importer.js";
+import {
+  createDeviceProviderRegistry,
+  importDeviceProviderSnapshot,
+  whoopProviderAdapter,
+} from "./device-providers/index.js";
 import { importMeal } from "./meal-importer.js";
 import { createSamplePresetRegistry } from "./preset-registry.js";
+
+import type { DeviceProviderRegistry } from "./device-providers/index.js";
 
 export interface CreateImportersOptions {
   corePort?: unknown;
   presetRegistry?: SamplePresetRegistry;
+  deviceProviderRegistry?: DeviceProviderRegistry;
 }
 
 let defaultCorePortPromise: Promise<unknown> | null = null
@@ -34,6 +42,10 @@ function createDefaultCorePortProxy() {
       const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
       return corePort.importSamples(payload)
     },
+    async importDeviceBatch(payload: unknown) {
+      const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
+      return corePort.importDeviceBatch(payload)
+    },
     async importAssessmentResponse(payload: unknown) {
       const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
       return corePort.importAssessmentResponse(payload)
@@ -41,12 +53,18 @@ function createDefaultCorePortProxy() {
   }
 }
 
-export function createImporters({ corePort, presetRegistry }: CreateImportersOptions = {}) {
+export function createImporters({
+  corePort,
+  presetRegistry,
+  deviceProviderRegistry,
+}: CreateImportersOptions = {}) {
   const registry = presetRegistry ?? createSamplePresetRegistry();
+  const providers = deviceProviderRegistry ?? createDeviceProviderRegistry([whoopProviderAdapter]);
   const writer = corePort ?? createDefaultCorePortProxy();
 
   return {
     presetRegistry: registry,
+    deviceProviderRegistry: providers,
     importDocument(input: unknown) {
       return importDocument(input, { corePort: writer });
     },
@@ -60,6 +78,12 @@ export function createImporters({ corePort, presetRegistry }: CreateImportersOpt
       return importCsvSamples(input, {
         corePort: writer,
         presetRegistry: registry,
+      });
+    },
+    importDeviceProviderSnapshot(input: unknown) {
+      return importDeviceProviderSnapshot(input, {
+        corePort: writer,
+        providerRegistry: providers,
       });
     },
   };
