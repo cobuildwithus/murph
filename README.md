@@ -30,14 +30,14 @@ The current repo implements:
 - local-first multimedia parsing and derived artifact publication in `packages/parsers`
 - a read model and export-pack builder in `packages/query`
 - a local-only Next.js observability app in `packages/web`
-- a typed `vault-cli` command surface in `packages/cli`
+- a typed `vault-cli` command surface in `packages/cli`, including provider-backed assistant chat/session commands plus an always-on inbox triage loop
 - deterministic fixtures and smoke manifests under `fixtures/` and `e2e/`
 
 The repo does not define a deployment target yet. It is currently a local TypeScript workspace with truthful package/runtime verification and fixture-based smoke coverage.
 
 ## Mental Model
 
-Healthy Bob splits the vault into six kinds of state:
+Healthy Bob splits the overall system into seven kinds of state:
 
 1. Human-readable canonical docs
    `CORE.md`, journal pages, experiments, current profile, goals, conditions, allergies, regimens, family records, and genetics records.
@@ -49,7 +49,9 @@ Healthy Bob splits the vault into six kinds of state:
    normalized outputs under `derived/inbox`.
 5. Local runtime state
    rebuildable machine-local indexes and config under `.runtime`.
-6. Derived exports
+6. Assistant session metadata
+   provider-backed session aliases and minimal thread metadata outside the vault under `assistant-state/`.
+7. Derived exports
    read-only packs under `exports/packs`.
 
 That means a typical record is not hidden in a database. You can inspect the vault directly, and the package boundaries are designed to keep writes disciplined.
@@ -63,7 +65,8 @@ Every CLI command follows the same shape:
 3. The handler delegates exactly one boundary call into `core`, `importers`, `inboxd`, or `query`, with parser-toolchain queue control layered through the inbox CLI services.
 4. Write commands copy raw artifacts first; inbox ingestion flows persist capture evidence under `raw/inbox/...` and enqueue attachment parse jobs in `.runtime/`.
 5. Parser-capable product flows may use `@healthybob/parsers` to drain those jobs and publish only derived artifacts under `derived/inbox/...`.
-6. For `--format json`, successful commands return the command-specific payload directly and failures return a direct error object.
+6. Provider-backed assistant chat flows may reuse external transcript/session storage while persisting only minimal local alias/session metadata under `assistant-state/`.
+7. For `--format json`, successful commands return the command-specific payload directly and failures return a direct error object.
 
 Shared options:
 
@@ -129,6 +132,8 @@ vault/
   exports/packs/<packId>/
 ```
 
+Sibling local assistant state lives outside the vault at `assistant-state/<vault-name>-<hash>/sessions/<sessionId>.json`.
+
 Important storage rules:
 
 - stored paths are always relative to the vault root
@@ -138,6 +143,7 @@ Important storage rules:
 - `bank/profile/current.md` is derived from profile snapshots
 - inbox parser outputs under `derived/inbox/**` are rebuildable and non-canonical
 - `.runtime/**` is local runtime state and may be rebuilt from durable vault files
+- `assistant-state/**` is local assistant/session metadata outside the vault and is never canonical health truth
 - export packs are derived outputs, not canonical records
 
 Schema version policy:
@@ -161,7 +167,7 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | `packages/parsers` | Local-first attachment parsing, provider selection, and derived artifact publication under `derived/inbox/**`. |
 | `packages/query` | Read model assembly, lookups, list filters, summaries, and export-pack generation. |
 | `packages/web` | Local-only Next.js app that reads the vault on the server through `packages/query` and exposes a read-only observability surface. |
-| `packages/cli` | The `vault-cli` operator surface, input validation, middleware, and output envelopes. |
+| `packages/cli` | The `vault-cli` operator surface, input validation, assistant session orchestration, middleware, and output envelopes. |
 
 ## Local Web Observatory
 
@@ -225,6 +231,17 @@ The repo also includes local-first inbox parser controls:
 - `vault-cli inbox promote meal|document|journal|experiment-note` exposes implemented promotion flows for deterministic meal, document, journal, and experiment-note follow-ups
 - `vault-cli inbox model bundle <captureId>` materializes the normalized text-only routing bundle for one inbox capture
 - `vault-cli inbox model route <captureId> --model <model> [--baseUrl <url>] [--apply]` uses the shared Vercel AI SDK harness to preview or apply canonical CLI actions
+
+### Assistant Commands
+
+The repo also includes a Healthy Bob-native assistant layer:
+
+- `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter and stores only session metadata outside the canonical vault
+- `vault-cli assistant chat [prompt]` opens a simple terminal chat loop with `/exit` and `/session` helpers
+- `vault-cli assistant run --model <model> [--baseUrl <url>]` runs the always-on inbox triage loop and auto-applies model-routed canonical promotions
+- `vault-cli assistant session list|show` inspects local assistant session metadata under `assistant-state/`
+
+The first installed chat provider adapter is Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
 
 ### Health Extension Commands
 

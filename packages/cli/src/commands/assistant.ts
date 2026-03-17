@@ -1,0 +1,420 @@
+import { Cli, z } from 'incur'
+import {
+  assistantApprovalPolicyValues,
+  assistantAskResultSchema,
+  assistantChatProviderValues,
+  assistantChatResultSchema,
+  assistantRunResultSchema,
+  assistantSandboxValues,
+  assistantSessionListResultSchema,
+  assistantSessionShowResultSchema,
+} from '../assistant-cli-contracts.js'
+import {
+  runAssistantAutomation,
+  runAssistantChat,
+  sendAssistantMessage,
+} from '../assistant-runtime.js'
+import {
+  redactAssistantDisplayPath,
+  getAssistantSession,
+  listAssistantSessions,
+  resolveAssistantStatePaths,
+} from '../assistant-state.js'
+import {
+  emptyArgsSchema,
+  requestIdFromOptions,
+  withBaseOptions,
+} from '../command-helpers.js'
+import type { InboxCliServices } from '../inbox-services.js'
+import { VaultCliError } from '../vault-cli-errors.js'
+import type { VaultCliServices } from '../vault-cli-services.js'
+
+const assistantSessionOptionFields = {
+  session: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Existing Healthy Bob assistant session id to resume.'),
+  alias: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional stable alias used to map an external conversation onto one assistant session.',
+    ),
+  channel: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional channel label such as imessage or telegram.'),
+  identity: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional local assistant identity id for multi-user routing.'),
+  participant: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional remote participant id for multi-user routing.'),
+  sourceThread: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional upstream thread id from the source channel.'),
+}
+
+const assistantProviderOptionFields = {
+  provider: z
+    .enum(assistantChatProviderValues)
+    .default('codex-cli')
+    .describe(
+      'Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.',
+    ),
+  codexCommand: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional Codex CLI executable path. Defaults to `codex`.'),
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional provider model override for local chat turns.'),
+  sandbox: z
+    .enum(assistantSandboxValues)
+    .default('read-only')
+    .describe(
+      'Codex sandbox mode for local assistant chat. Defaults to read-only.',
+    ),
+  approvalPolicy: z
+    .enum(assistantApprovalPolicyValues)
+    .default('never')
+    .describe(
+      'Codex approval policy for local assistant chat. Defaults to never in read-only mode.',
+    ),
+  profile: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional Codex config profile name.'),
+  oss: z
+    .boolean()
+    .optional()
+    .describe(
+      'Use Codex OSS mode, which expects a local Ollama-backed open-source provider.',
+    ),
+}
+
+export function registerAssistantCommands(
+  cli: Cli.Cli,
+  inboxServices: InboxCliServices,
+  vaultServices?: VaultCliServices,
+) {
+  const assistant = Cli.create('assistant', {
+    description:
+      'Healthy Bob-native assistant runtime with provider-backed local chat sessions and auto-routing inbox automation.',
+  })
+
+  assistant.command('ask', {
+    args: z.object({
+      prompt: z.string().min(1).describe('Prompt to send to the local assistant session.'),
+    }),
+    description:
+      'Send one message through the local provider-backed assistant and persist only minimal session metadata outside the canonical vault.',
+    hint:
+      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata and conversation aliases under assistant-state/.',
+    examples: [
+      {
+        args: {
+          prompt: 'Summarize the latest documents in this vault.',
+        },
+        options: {
+          vault: './vault',
+        },
+        description: 'Start a new local assistant session rooted at the vault directory.',
+      },
+      {
+        args: {
+          prompt: 'What did this person eat yesterday?',
+        },
+        options: {
+          vault: './vault',
+          channel: 'imessage',
+          identity: 'assistant:primary',
+          participant: 'contact:bob',
+          sourceThread: 'chat-123',
+        },
+        description: 'Reuse or create a stable session for one remote chat thread.',
+      },
+    ],
+    options: withBaseOptions({
+      ...assistantSessionOptionFields,
+      ...assistantProviderOptionFields,
+    }),
+    output: assistantAskResultSchema,
+    async run(context) {
+      return sendAssistantMessage({
+        vault: context.options.vault,
+        prompt: context.args.prompt,
+        sessionId: context.options.session,
+        alias: context.options.alias,
+        channel: context.options.channel,
+        identityId: context.options.identity,
+        participantId: context.options.participant,
+        sourceThreadId: context.options.sourceThread,
+        provider: context.options.provider,
+        codexCommand: context.options.codexCommand,
+        model: context.options.model,
+        sandbox: context.options.sandbox,
+        approvalPolicy: context.options.approvalPolicy,
+        profile: context.options.profile,
+        oss: context.options.oss,
+      })
+    },
+  })
+
+  assistant.command('chat', {
+    args: z.object({
+      prompt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional first prompt to send before the chat loop starts.'),
+    }),
+    description:
+      'Open a simple terminal chat loop backed by the chosen provider while Healthy Bob stores only session metadata.',
+    hint:
+      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+    options: withBaseOptions({
+      ...assistantSessionOptionFields,
+      ...assistantProviderOptionFields,
+    }),
+    output: assistantChatResultSchema,
+    async run(context) {
+      return runAssistantChat({
+        vault: context.options.vault,
+        initialPrompt: context.args.prompt,
+        sessionId: context.options.session,
+        alias: context.options.alias,
+        channel: context.options.channel,
+        identityId: context.options.identity,
+        participantId: context.options.participant,
+        sourceThreadId: context.options.sourceThread,
+        provider: context.options.provider,
+        codexCommand: context.options.codexCommand,
+        model: context.options.model,
+        sandbox: context.options.sandbox,
+        approvalPolicy: context.options.approvalPolicy,
+        profile: context.options.profile,
+        oss: context.options.oss,
+      })
+    },
+  })
+
+  assistant.command('run', {
+    args: emptyArgsSchema,
+    description:
+      'Start the local assistant automation loop that watches the inbox runtime and auto-applies model-routed canonical promotions.',
+    hint:
+      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama; the chat surface can still use a different provider adapter.',
+    examples: [
+      {
+        options: {
+          vault: './vault',
+          model: 'gpt-oss:20b',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+        },
+        description: 'Run the always-on inbox assistant against a local Ollama model.',
+      },
+      {
+        options: {
+          vault: './vault',
+          model: 'gpt-oss:20b',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          once: true,
+          skipDaemon: true,
+        },
+        description: 'Run a single inbox scan without starting the foreground daemon.',
+      },
+    ],
+    options: withBaseOptions({
+      model: z
+        .string()
+        .min(1)
+        .describe(
+          'Model id for inbox triage routing, such as gpt-oss:20b or an AI Gateway model string.',
+        ),
+      baseUrl: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional OpenAI-compatible base URL for the inbox routing model.'),
+      apiKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional explicit API key for the OpenAI-compatible routing endpoint.'),
+      apiKeyEnv: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional environment variable name that stores the routing API key.'),
+      providerName: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional stable provider label for the routing endpoint.'),
+      headersJson: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional JSON object of extra HTTP headers for the routing endpoint.'),
+      scanIntervalMs: z
+        .number()
+        .int()
+        .positive()
+        .max(60000)
+        .default(5000)
+        .describe('Polling interval between inbox scans when running continuously.'),
+      maxPerScan: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .default(50)
+        .describe('Maximum inbox captures to inspect during each assistant scan.'),
+      once: z
+        .boolean()
+        .optional()
+        .describe('Run one assistant scan and then exit.'),
+      skipDaemon: z
+        .boolean()
+        .optional()
+        .describe('Do not start the inbox foreground daemon; only run the assistant scan loop.'),
+    }),
+    output: assistantRunResultSchema,
+    async run(context) {
+      return runAssistantAutomation({
+        inboxServices,
+        vaultServices,
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        modelSpec: {
+          model: context.options.model,
+          baseUrl: context.options.baseUrl,
+          apiKey: context.options.apiKey,
+          apiKeyEnv: context.options.apiKeyEnv,
+          providerName: context.options.providerName,
+          headers: parseHeadersJsonOption(context.options.headersJson),
+        },
+        scanIntervalMs: context.options.scanIntervalMs,
+        maxPerScan: context.options.maxPerScan,
+        once: context.options.once,
+        startDaemon: context.options.skipDaemon ? false : true,
+        onEvent(event) {
+          if (event.type === 'scan.started') {
+            console.error(`[assistant] scanning inbox: ${event.details ?? ''}`)
+            return
+          }
+
+          if (event.type === 'capture.routed') {
+            console.error(
+              `[assistant] routed ${event.captureId}: ${(event.tools ?? []).join(', ')}`,
+            )
+            return
+          }
+
+          console.error(
+            `[assistant] ${event.type.replace(/^capture\./u, '')} ${event.captureId}: ${event.details ?? ''}`,
+          )
+        },
+      })
+    },
+  })
+
+  const session = Cli.create('session', {
+    description:
+      'Inspect Healthy Bob assistant session metadata stored outside the canonical vault.',
+  })
+
+  session.command('list', {
+    args: emptyArgsSchema,
+    description: 'List known assistant sessions for one vault.',
+    options: withBaseOptions(),
+    output: assistantSessionListResultSchema,
+    async run(context) {
+      const statePaths = resolveAssistantStatePaths(context.options.vault)
+      const sessions = await listAssistantSessions(context.options.vault)
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
+        sessions,
+      }
+    },
+  })
+
+  session.command('show', {
+    args: z.object({
+      sessionId: z.string().min(1).describe('Healthy Bob assistant session id to inspect.'),
+    }),
+    description: 'Show one assistant session metadata record.',
+    options: withBaseOptions(),
+    output: assistantSessionShowResultSchema,
+    async run(context) {
+      const statePaths = resolveAssistantStatePaths(context.options.vault)
+      const session = await getAssistantSession(
+        context.options.vault,
+        context.args.sessionId,
+      )
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
+        session,
+      }
+    },
+  })
+
+  assistant.command(session)
+  cli.command(assistant)
+}
+
+function parseHeadersJsonOption(value?: string) {
+  if (!value) {
+    return undefined
+  }
+
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(value)
+  } catch (error) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'headersJson must be a valid JSON object.',
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'headersJson must be a JSON object with string values.',
+    )
+  }
+
+  const headers: Record<string, string> = {}
+  for (const [key, candidate] of Object.entries(parsed)) {
+    if (typeof candidate !== 'string') {
+      throw new VaultCliError(
+        'invalid_payload',
+        'headersJson must be a JSON object with string values.',
+      )
+    }
+    headers[key] = candidate
+  }
+
+  return headers
+}

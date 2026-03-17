@@ -73,6 +73,10 @@
   ],
   "goldenOutputs": [
     {
+      "id": "assistant",
+      "path": "fixtures/golden-outputs/assistant"
+    },
+    {
       "id": "init",
       "path": "fixtures/golden-outputs/init"
     },

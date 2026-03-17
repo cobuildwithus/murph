@@ -46,10 +46,10 @@ repo/
 - `packages/runtime-state` defines canonical `.runtime` paths plus shared SQLite defaults for rebuildable local state.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
 - `packages/importers` parses external inputs but delegates all canonical writes to core.
-- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, inbox-local runtime cursors/capture indexes, and attachment-level derived-job orchestration.
+- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state, builds derived export packs, and owns the optional lexical search index under `.runtime/search.sqlite`.
-- `packages/cli` exposes the `vault-cli` command surface and must not bypass core for writes.
+- `packages/cli` exposes the `vault-cli` command surface, provider-backed assistant orchestration, and must not bypass core for canonical writes.
 
 ## Storage Model
 
@@ -71,6 +71,7 @@ repo/
   - `.runtime/search.sqlite`
 - Out-of-vault assistant/session state:
   - `assistant-state/`
+  - provider-owned transcript history should remain external when the chosen chat adapter supports it
 
 ## First Release Scope
 

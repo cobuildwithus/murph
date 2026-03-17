@@ -1,0 +1,10 @@
+{
+  "id": "assistant-run",
+  "command": "vault-cli assistant run --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--scanIntervalMs <ms>] [--maxPerScan <n>] [--once] [--skipDaemon] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents the always-on inbox assistant loop, including external routing-model configuration and auto-apply behavior over the existing inbox model harness."
+}

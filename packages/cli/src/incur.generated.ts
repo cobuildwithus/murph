@@ -5,6 +5,11 @@ declare module 'incur' {
       'allergy scaffold': { args: {}; options: { vault: string; requestId: string } }
       'allergy show': { args: { id: string }; options: { vault: string; requestId: string } }
       'allergy upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'assistant ask': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli"; codexCommand: string; model: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean } }
+      'assistant chat': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli"; codexCommand: string; model: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean } }
+      'assistant run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; once: boolean; skipDaemon: boolean } }
+      'assistant session list': { args: {}; options: { vault: string; requestId: string } }
+      'assistant session show': { args: { sessionId: string }; options: { vault: string; requestId: string } }
       'audit list': { args: {}; options: { vault: string; requestId: string; action: string; actor: string; status: string; from: string; to: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { vault: string; requestId: string } }
       'audit tail': { args: {}; options: { vault: string; requestId: string; limit: number } }
@@ -69,7 +74,7 @@ declare module 'incur' {
       'inbox search': { args: {}; options: { vault: string; requestId: string; text: string; source: string; limit: number } }
       'inbox setup': { args: {}; options: { vault: string; requestId: string; ffmpegCommand: string; pdftotextCommand: string; whisperCommand: string; whisperModelPath: string; paddleocrCommand: string } }
       'inbox show': { args: { captureId: string }; options: { vault: string; requestId: string } }
-      'inbox source add': { args: { source: "imessage" }; options: { vault: string; requestId: string; id: string; account: string; includeOwn: boolean; backfillLimit: number } }
+      'inbox source add': { args: { source: "imessage" | "telegram" }; options: { vault: string; requestId: string; id: string; account: string; includeOwn: boolean; backfillLimit: number } }
       'inbox source list': { args: {}; options: { vault: string; requestId: string } }
       'inbox source remove': { args: { id: string }; options: { vault: string; requestId: string } }
       'inbox status': { args: {}; options: { vault: string; requestId: string } }

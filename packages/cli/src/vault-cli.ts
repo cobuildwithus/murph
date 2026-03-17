@@ -14,6 +14,7 @@ import { registerProviderCommands } from './commands/provider.js'
 import { registerReadCommands } from './commands/read.js'
 import { registerSearchCommands } from './commands/search.js'
 import { registerAuditCommands } from './commands/audit.js'
+import { registerAssistantCommands } from './commands/assistant.js'
 import { registerRegimenCommands } from './commands/regimen.js'
 import { registerSamplesCommands } from './commands/samples.js'
 import { registerVaultCommands } from './commands/vault.js'
@@ -52,6 +53,7 @@ export function createVaultCli(
   })
 
   registerVaultCommands(cli, services)
+  registerAssistantCommands(cli, inboxServices, services)
   registerAuditCommands(cli, services)
   registerDocumentCommands(cli, services)
   registerMealCommands(cli, services)

@@ -1,0 +1,10 @@
+{
+  "id": "assistant-session-list",
+  "command": "vault-cli assistant session list --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents inspection of local assistant session metadata stored outside the canonical vault."
+}
