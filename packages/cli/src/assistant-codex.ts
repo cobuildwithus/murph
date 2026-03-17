@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import type {
   AssistantApprovalPolicy,
@@ -16,6 +16,7 @@ export interface CodexExecInput {
   oss?: boolean
   profile?: string | null
   prompt: string
+  reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
   workingDirectory: string
@@ -27,6 +28,11 @@ export interface CodexExecResult {
   sessionId: string | null
   stderr: string
   stdout: string
+}
+
+export interface CodexDisplayOptions {
+  model: string | null
+  reasoningEffort: string | null
 }
 
 export async function executeCodexPrompt(
@@ -151,6 +157,25 @@ export async function executeCodexPrompt(
   }
 }
 
+export async function resolveCodexDisplayOptions(input: {
+  configPath?: string
+  model?: string | null
+  profile?: string | null
+}): Promise<CodexDisplayOptions> {
+  const explicitModel = normalizeNullableString(input.model)
+  const explicitProfile = normalizeNullableString(input.profile)
+  const config = await readCodexDisplayConfig(input.configPath)
+  const activeProfile = explicitProfile
+    ? config.profiles[explicitProfile] ?? null
+    : null
+
+  return {
+    model: explicitModel ?? activeProfile?.model ?? config.model,
+    reasoningEffort:
+      activeProfile?.reasoningEffort ?? config.reasoningEffort,
+  }
+}
+
 export function buildCodexArgs(
   input: CodexExecInput & {
     outputFile: string
@@ -190,9 +215,100 @@ export function buildCodexArgs(
     args.push('--model', input.model)
   }
 
+  if (input.reasoningEffort) {
+    args.push(
+      '--config',
+      `model_reasoning_effort=${JSON.stringify(input.reasoningEffort)}`,
+    )
+  }
+
   args.push(input.prompt)
 
   return [...rootArgs, ...args]
+}
+
+async function readCodexDisplayConfig(
+  configPath = path.join(homedir(), '.codex', 'config.toml'),
+): Promise<CodexDisplayConfig> {
+  try {
+    const raw = await readFile(configPath, 'utf8')
+    return parseCodexDisplayConfig(raw)
+  } catch {
+    return {
+      defaultProfile: null,
+      model: null,
+      reasoningEffort: null,
+      profiles: {},
+    }
+  }
+}
+
+function parseCodexDisplayConfig(raw: string): CodexDisplayConfig {
+  const config: CodexDisplayConfig = {
+    defaultProfile: null,
+    model: null,
+    reasoningEffort: null,
+    profiles: {},
+  }
+
+  let activeProfile: string | null = null
+
+  for (const rawLine of raw.split(/\r?\n/u)) {
+    const line = rawLine.trim()
+    if (line.length === 0 || line.startsWith('#')) {
+      continue
+    }
+
+    const profileSectionMatch = /^\[profiles\.([^\]]+)\]$/u.exec(line)
+    if (profileSectionMatch) {
+      activeProfile = profileSectionMatch[1] ?? null
+      if (activeProfile && !config.profiles[activeProfile]) {
+        config.profiles[activeProfile] = {
+          model: null,
+          reasoningEffort: null,
+        }
+      }
+      continue
+    }
+
+    if (/^\[.*\]$/u.test(line)) {
+      activeProfile = null
+      continue
+    }
+
+    const stringAssignmentMatch =
+      /^([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*$/u.exec(line)
+    if (!stringAssignmentMatch) {
+      continue
+    }
+
+    const [, key, value] = stringAssignmentMatch
+    const normalizedValue = normalizeNullableString(value)
+
+    if (activeProfile) {
+      const profile = config.profiles[activeProfile]
+      if (!profile) {
+        continue
+      }
+
+      if (key === 'model') {
+        profile.model = normalizedValue
+      } else if (key === 'model_reasoning_effort') {
+        profile.reasoningEffort = normalizedValue
+      }
+      continue
+    }
+
+    if (key === 'model') {
+      config.model = normalizedValue
+    } else if (key === 'model_reasoning_effort') {
+      config.reasoningEffort = normalizedValue
+    } else if (key === 'profile') {
+      config.defaultProfile = normalizedValue
+    }
+  }
+
+  return config
 }
 
 function consumeCompleteLines(
@@ -339,6 +455,19 @@ function buildCodexFailureMessage(input: {
   }
 
   return parts.join(' ')
+}
+
+interface CodexDisplayConfig {
+  defaultProfile: string | null
+  model: string | null
+  reasoningEffort: string | null
+  profiles: Record<
+    string,
+    {
+      model: string | null
+      reasoningEffort: string | null
+    }
+  >
 }
 
 function tailText(value: string): string | null {

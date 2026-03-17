@@ -18,6 +18,7 @@ export interface AssistantProviderTurnInput {
   profile?: string | null
   prompt?: string
   provider?: AssistantChatProvider
+  reasoningEffort?: string | null
   resumeProviderSessionId?: string | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
@@ -68,6 +69,7 @@ export async function executeAssistantProviderTurn(
         prompt,
         resumeSessionId: input.resumeProviderSessionId,
         model: normalizeNullableString(input.model),
+        reasoningEffort: normalizeNullableString(input.reasoningEffort),
         sandbox: input.sandbox ?? undefined,
         approvalPolicy: input.approvalPolicy ?? undefined,
         profile: normalizeNullableString(input.profile),

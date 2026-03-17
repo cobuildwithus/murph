@@ -51,7 +51,10 @@ import {
 } from '../src/assistant-runtime.js'
 import {
   CHAT_BANNER,
-  CHAT_COMMAND_HINT,
+  CHAT_MODEL_OPTIONS,
+  CHAT_REASONING_OPTIONS,
+  findAssistantModelOptionIndex,
+  findAssistantReasoningOptionIndex,
   formatBusyStatus,
   formatChatMetadata,
   formatSessionBinding,
@@ -111,6 +114,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
     sourceThreadId: 'chat-123',
     provider: 'codex-cli',
     prompt: 'What did Bob eat?',
+    reasoningEffort: 'xhigh',
     sandbox: 'read-only',
     approvalPolicy: 'never',
   })
@@ -140,6 +144,8 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   const secondCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
   assert.equal(firstCall.resumeProviderSessionId, null)
   assert.equal(secondCall.resumeProviderSessionId, 'thread-123')
+  assert.equal(firstCall.reasoningEffort, 'xhigh')
+  assert.equal(secondCall.reasoningEffort, null)
   assert.match(firstCall.systemPrompt ?? '', /You are Healthy Bob/u)
   assert.equal(firstCall.userPrompt, 'What did Bob eat?')
   assert.equal(firstCall.sessionContext?.binding.channel, 'imessage')
@@ -765,7 +771,11 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   } as const
 
   assert.equal(CHAT_BANNER, 'Local-first chat. Provider transcripts stay with the provider when supported.')
-  assert.equal(CHAT_COMMAND_HINT, '/session for session id · /exit to quit')
+  assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
+  assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
+  assert.equal(findAssistantModelOptionIndex('gpt-5.3-codex'), 2)
+  assert.equal(findAssistantReasoningOptionIndex('xhigh'), 3)
+  assert.equal(findAssistantReasoningOptionIndex(null), 1)
   assert.equal(formatBusyStatus(0), 'Working')
   assert.equal(formatBusyStatus(13), 'Working (13s)')
   assert.equal(

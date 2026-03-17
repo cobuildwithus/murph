@@ -1,19 +1,26 @@
 #!/usr/bin/env node
 
-import cli from './index.js'
-import {
+installSqliteExperimentalWarningFilter()
+
+const cliModule = await import('./index.js')
+const operatorConfigModule = await import('./operator-config.js')
+const setupCliModule = await import('./setup-cli.js')
+
+const cli = cliModule.default
+const {
   applyDefaultVaultToArgs,
   expandConfiguredVaultPath,
   resolveDefaultVault,
   resolveOperatorHomeDirectory,
-} from './operator-config.js'
-import {
+} = operatorConfigModule
+const {
   createSetupCli,
   detectSetupProgramName,
   isSetupInvocation,
   shouldAutoLaunchAssistantAfterSetup,
-  type SuccessfulSetupContext,
-} from './setup-cli.js'
+} = setupCliModule
+
+type SuccessfulSetupContext = import('./setup-cli.js').SuccessfulSetupContext
 
 const argv = process.argv.slice(2)
 const setupProgramName = detectSetupProgramName(process.argv[1])
@@ -43,4 +50,40 @@ if (isSetupInvocation(argv, setupProgramName)) {
 } else {
   const defaultVault = await resolveDefaultVault(homeDirectory)
   cli.serve(applyDefaultVaultToArgs(argv, defaultVault))
+}
+
+function installSqliteExperimentalWarningFilter(): void {
+  const originalEmitWarning = process.emitWarning.bind(process)
+
+  process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+    const message =
+      typeof warning === 'string'
+        ? warning
+        : warning instanceof Error
+          ? warning.message
+          : ''
+    const warningType =
+      typeof args[0] === 'string'
+        ? args[0]
+        : warning instanceof Error
+          ? warning.name
+          : ''
+
+    if (
+      warningType === 'ExperimentalWarning' &&
+      message.includes('SQLite is an experimental feature')
+    ) {
+      return
+    }
+
+    return originalEmitWarning(
+      warning as Parameters<typeof process.emitWarning>[0],
+      ...(args as Parameters<typeof process.emitWarning> extends [
+        unknown,
+        ...infer Rest,
+      ]
+        ? Rest
+        : never),
+    )
+  }) as typeof process.emitWarning
 }

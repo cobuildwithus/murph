@@ -34,6 +34,7 @@ export interface AssistantMessageInput {
   profile?: string | null
   prompt: string
   provider?: AssistantChatProvider
+  reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
   sessionId?: string | null
   sourceThreadId?: string | null
@@ -101,6 +102,7 @@ export async function sendAssistantMessage(
     resumeProviderSessionId: resolved.session.providerSessionId,
     codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
     model: providerOptions.model,
+    reasoningEffort: input.reasoningEffort ?? null,
     sandbox: providerOptions.sandbox,
     approvalPolicy: providerOptions.approvalPolicy,
     profile: providerOptions.profile,
