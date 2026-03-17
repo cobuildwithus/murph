@@ -8,7 +8,7 @@ Last verified: 2026-03-17
 - `packages/runtime-state`: shared `.runtime` path resolution plus SQLite defaults for rebuildable local state used by query, inboxd, and CLI inbox flows
 - `packages/core`: the only package allowed to mutate canonical vault data
 - `packages/importers`: ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core
-- `packages/device-syncd`: standalone local device OAuth/webhook/reconcile runtime that stores encrypted provider credentials outside the vault and imports normalized provider snapshots through importers/core
+- `packages/device-syncd`: standalone local device OAuth/webhook/reconcile runtime that stores encrypted provider credentials outside the vault, binds localhost by default, and imports normalized provider snapshots through importers/core
 - `packages/inboxd`: inbox capture ingestion/runtime package that persists canonical raw inbox evidence while keeping inbox-only cursors, source-specific checkpoints, capture indexes, and attachment job state in local SQLite state
 - `packages/parsers`: local-first attachment parsing, parser-service helpers, and derived artifact publication under `derived/inbox/**`
 - `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
@@ -41,7 +41,7 @@ Last verified: 2026-03-17
 4. Parser workers or parsed-pipeline wrappers consume those attachment jobs and publish only derived artifacts.
 5. Inbox model routing can materialize a text-only bundle, call a configured model backend, and write audited bundle/plan/result artifacts before any optional apply step.
 6. Importers may parse and normalize external inputs but must never write canonical vault files directly. Provider connectors normalize upstream payloads into shared device-batch payloads and still rely on `packages/core` for canonical persistence.
-7. `packages/device-syncd` owns provider OAuth state, reconnect/disconnect control, scheduled device backfills, and optional webhook fan-in; polling-first providers remain first-class citizens, provider credentials stay outside the vault, and canonical health writes still flow through `packages/importers` and `packages/core`.
+7. `packages/device-syncd` owns provider OAuth state, reconnect/disconnect control, scheduled device backfills, and optional webhook fan-in; polling-first providers remain first-class citizens, provider credentials stay outside the vault, per-account jobs should be serialized to avoid rotating-refresh-token races, and canonical health writes still flow through `packages/importers` and `packages/core`.
 8. Provider-backed assistant chat and outbound channel flows may persist only minimal local session metadata plus explicit delivery bindings outside the vault, but they must never bypass canonical write boundaries for health data.
 9. Query/export paths are read-only and must not mutate canonical vault state.
 10. The local web app reads vault data only on the server through query helpers, constrains search to safe record fields, and may redirect to the local device control plane for auth/account actions without gaining direct canonical write access.

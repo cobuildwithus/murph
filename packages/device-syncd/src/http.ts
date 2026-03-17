@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 
 import { isDeviceSyncError } from "./errors.js";
+import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.js";
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.js";
@@ -18,7 +19,7 @@ export interface CreateDeviceSyncHttpServerInput {
 export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServerInput): Promise<NodeServerHandle> {
   const service = input.service;
   const bodyLimitBytes = Math.max(1024, input.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES);
-  const host = input.config?.host ?? "0.0.0.0";
+  const host = input.config?.host ?? DEFAULT_DEVICE_SYNC_HOST;
   const port = input.config?.port ?? 8788;
 
   const server = createServer(async (request, response) => {

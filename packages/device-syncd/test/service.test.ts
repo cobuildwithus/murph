@@ -157,6 +157,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
 
   const reconcile = service.queueManualReconcile(connected.account.id);
   assert.equal(reconcile.account.id, connected.account.id);
+  assert.equal(reconcile.jobs.length, 1);
 
   service.close();
 });
@@ -301,6 +302,83 @@ test("device sync service records granted callback scopes and describes polling-
     () => service.handleWebhook("polling", new Headers(), Buffer.from("{}")),
     /does not accept webhooks/u,
   );
+
+  service.close();
+});
+
+test("manual reconcile queues every scheduled job and store claims only one job per account at a time", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-serialized");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://healthybob.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async exchangeAuthorizationCode(_context, code) {
+          return {
+            externalAccountId: `serialized-${code}`,
+            displayName: `Serialized ${code}`,
+            tokens: {
+              accessToken: "serialized-access",
+              refreshToken: "serialized-refresh",
+            },
+            initialJobs: [],
+            nextReconcileAt: null,
+          };
+        },
+        createScheduledJobs() {
+          return {
+            jobs: [
+              {
+                kind: "reconcile-summary",
+                payload: {
+                  slice: "summary",
+                },
+              },
+              {
+                kind: "reconcile-detail",
+                payload: {
+                  slice: "detail",
+                },
+              },
+            ],
+            nextReconcileAt: null,
+          };
+        },
+      }),
+    ],
+  });
+
+  const begin = service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  const reconcile = service.queueManualReconcile(connected.account.id);
+  assert.equal(reconcile.job.kind, "reconcile-summary");
+  assert.deepEqual(
+    reconcile.jobs.map((job) => job.kind),
+    ["reconcile-summary", "reconcile-detail"],
+  );
+
+  const now = new Date().toISOString();
+  const firstClaim = service.store.claimDueJob("worker-a", now, 60_000);
+  const secondClaim = service.store.claimDueJob("worker-b", now, 60_000);
+
+  assert.equal(firstClaim?.kind, "reconcile-summary");
+  assert.equal(secondClaim, null);
+
+  service.store.completeJob(firstClaim!.id, now);
+
+  const thirdClaim = service.store.claimDueJob("worker-b", now, 60_000);
+  assert.equal(thirdClaim?.kind, "reconcile-detail");
 
   service.close();
 });

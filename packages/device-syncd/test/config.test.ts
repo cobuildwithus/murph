@@ -14,6 +14,7 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
 
   assert.equal(loaded.service.providers.length, 1);
   assert.equal(loaded.service.providers[0]?.provider, "oura");
+  assert.equal(loaded.http.host, "127.0.0.1");
 });
 
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {

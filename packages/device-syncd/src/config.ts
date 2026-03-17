@@ -1,6 +1,6 @@
 import { createOuraDeviceSyncProvider } from "./providers/oura.js";
 import { createWhoopDeviceSyncProvider } from "./providers/whoop.js";
-import { normalizeString } from "./shared.js";
+import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.js";
 
 import type { CreateDeviceSyncServiceInput } from "./service.js";
 import type {
@@ -14,6 +14,55 @@ export interface LoadedDeviceSyncEnvironment {
   service: CreateDeviceSyncServiceInput;
   http: DeviceSyncHttpConfig;
 }
+
+interface DeviceSyncProviderFactoryEntry {
+  label: string;
+  clientIdKeys: readonly string[];
+  clientSecretKeys: readonly string[];
+  create(env: NodeJS.ProcessEnv, credentials: { clientId: string; clientSecret: string }): DeviceSyncProvider;
+}
+
+const DEVICE_SYNC_PROVIDER_FACTORIES: readonly DeviceSyncProviderFactoryEntry[] = Object.freeze([
+  {
+    label: "WHOOP",
+    clientIdKeys: ["HEALTHYBOB_WHOOP_CLIENT_ID"],
+    clientSecretKeys: ["HEALTHYBOB_WHOOP_CLIENT_SECRET"],
+    create(env, credentials) {
+      return createWhoopDeviceSyncProvider({
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
+        baseUrl: optionalEnv(env, ["HEALTHYBOB_WHOOP_BASE_URL"]),
+        scopes: parseCsvEnv(env, ["HEALTHYBOB_WHOOP_SCOPES"]),
+        backfillDays: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_BACKFILL_DAYS"]),
+        reconcileDays: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_RECONCILE_DAYS"]),
+        reconcileIntervalMs: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_RECONCILE_INTERVAL_MS"]),
+        webhookTimestampToleranceMs: parseIntegerEnv(
+          env,
+          ["HEALTHYBOB_WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS"],
+        ),
+        requestTimeoutMs: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_REQUEST_TIMEOUT_MS"]),
+      });
+    },
+  },
+  {
+    label: "Oura",
+    clientIdKeys: ["HEALTHYBOB_OURA_CLIENT_ID"],
+    clientSecretKeys: ["HEALTHYBOB_OURA_CLIENT_SECRET"],
+    create(env, credentials) {
+      return createOuraDeviceSyncProvider({
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
+        authBaseUrl: optionalEnv(env, ["HEALTHYBOB_OURA_AUTH_BASE_URL"]),
+        apiBaseUrl: optionalEnv(env, ["HEALTHYBOB_OURA_API_BASE_URL"]),
+        scopes: parseCsvEnv(env, ["HEALTHYBOB_OURA_SCOPES"]),
+        backfillDays: parseIntegerEnv(env, ["HEALTHYBOB_OURA_BACKFILL_DAYS"]),
+        reconcileDays: parseIntegerEnv(env, ["HEALTHYBOB_OURA_RECONCILE_DAYS"]),
+        reconcileIntervalMs: parseIntegerEnv(env, ["HEALTHYBOB_OURA_RECONCILE_INTERVAL_MS"]),
+        requestTimeoutMs: parseIntegerEnv(env, ["HEALTHYBOB_OURA_REQUEST_TIMEOUT_MS"]),
+      });
+    },
+  },
+]);
 
 export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env): LoadedDeviceSyncEnvironment {
   const vaultRoot = requireEnv(env, ["HEALTHYBOB_VAULT_ROOT", "HEALTHYBOB_DEVICE_SYNC_VAULT_ROOT"]);
@@ -48,7 +97,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
       providers,
     },
     http: {
-      host: optionalEnv(env, ["HEALTHYBOB_DEVICE_SYNC_HOST"]) ?? "0.0.0.0",
+      host: optionalEnv(env, ["HEALTHYBOB_DEVICE_SYNC_HOST"]) ?? DEFAULT_DEVICE_SYNC_HOST,
       port: parseIntegerEnv(env, ["HEALTHYBOB_DEVICE_SYNC_PORT", "PORT"]) ?? 8788,
     },
   };
@@ -72,56 +121,16 @@ export function createConsoleDeviceSyncLogger(consoleLike: Console = console): D
 }
 
 function createConfiguredProviders(env: NodeJS.ProcessEnv): DeviceSyncProvider[] {
-  const providers: DeviceSyncProvider[] = [];
-  const whoopCredentials = readOptionalCredentialPair(
-    env,
-    ["HEALTHYBOB_WHOOP_CLIENT_ID"],
-    ["HEALTHYBOB_WHOOP_CLIENT_SECRET"],
-    "WHOOP",
-  );
-  const ouraCredentials = readOptionalCredentialPair(
-    env,
-    ["HEALTHYBOB_OURA_CLIENT_ID"],
-    ["HEALTHYBOB_OURA_CLIENT_SECRET"],
-    "Oura",
-  );
-
-  if (whoopCredentials) {
-    providers.push(
-      createWhoopDeviceSyncProvider({
-        clientId: whoopCredentials.clientId,
-        clientSecret: whoopCredentials.clientSecret,
-        baseUrl: optionalEnv(env, ["HEALTHYBOB_WHOOP_BASE_URL"]),
-        scopes: parseCsvEnv(env, ["HEALTHYBOB_WHOOP_SCOPES"]),
-        backfillDays: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_BACKFILL_DAYS"]),
-        reconcileDays: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_RECONCILE_DAYS"]),
-        reconcileIntervalMs: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_RECONCILE_INTERVAL_MS"]),
-        webhookTimestampToleranceMs: parseIntegerEnv(
-          env,
-          ["HEALTHYBOB_WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS"],
-        ),
-        requestTimeoutMs: parseIntegerEnv(env, ["HEALTHYBOB_WHOOP_REQUEST_TIMEOUT_MS"]),
-      }),
+  return DEVICE_SYNC_PROVIDER_FACTORIES.flatMap((entry) => {
+    const credentials = readOptionalCredentialPair(
+      env,
+      entry.clientIdKeys,
+      entry.clientSecretKeys,
+      entry.label,
     );
-  }
 
-  if (ouraCredentials) {
-    providers.push(
-      createOuraDeviceSyncProvider({
-        clientId: ouraCredentials.clientId,
-        clientSecret: ouraCredentials.clientSecret,
-        authBaseUrl: optionalEnv(env, ["HEALTHYBOB_OURA_AUTH_BASE_URL"]),
-        apiBaseUrl: optionalEnv(env, ["HEALTHYBOB_OURA_API_BASE_URL"]),
-        scopes: parseCsvEnv(env, ["HEALTHYBOB_OURA_SCOPES"]),
-        backfillDays: parseIntegerEnv(env, ["HEALTHYBOB_OURA_BACKFILL_DAYS"]),
-        reconcileDays: parseIntegerEnv(env, ["HEALTHYBOB_OURA_RECONCILE_DAYS"]),
-        reconcileIntervalMs: parseIntegerEnv(env, ["HEALTHYBOB_OURA_RECONCILE_INTERVAL_MS"]),
-        requestTimeoutMs: parseIntegerEnv(env, ["HEALTHYBOB_OURA_REQUEST_TIMEOUT_MS"]),
-      }),
-    );
-  }
-
-  return providers;
+    return credentials ? [entry.create(env, credentials)] : [];
+  });
 }
 
 function readOptionalCredentialPair(

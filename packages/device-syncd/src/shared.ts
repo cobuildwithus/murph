@@ -3,6 +3,8 @@ import path from "node:path";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+export const DEFAULT_DEVICE_SYNC_HOST = "127.0.0.1";
+
 export function toIsoTimestamp(value: string | number | Date): string {
   const date = value instanceof Date ? value : new Date(value);
 

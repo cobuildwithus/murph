@@ -224,6 +224,7 @@ export interface HandleWebhookResult {
 export interface QueueManualReconcileResult {
   account: PublicDeviceSyncAccount;
   job: DeviceSyncJobRecord;
+  jobs: DeviceSyncJobRecord[];
 }
 
 export interface DisconnectAccountResult {

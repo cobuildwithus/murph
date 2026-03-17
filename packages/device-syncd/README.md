@@ -2,12 +2,15 @@
 
 Standalone device sync runtime for HealthyBob.
 
+The daemon binds to localhost by default so OAuth/token control stays local-only unless an operator explicitly widens the bind or puts it behind a reverse proxy/tunnel.
+
 What it does:
 - serves a provider-agnostic local control plane for CLI and web auth flows
 - owns OAuth connection state
 - stores encrypted provider tokens in SQLite under `.runtime/device-syncd.sqlite`
 - accepts provider webhooks when a provider supports them
 - runs background backfill and reconcile jobs
+- serializes active jobs per account so rotating refresh-token flows do not race
 - imports provider snapshots through `@healthybob/importers`
 
 Current providers:
@@ -39,7 +42,7 @@ At least one provider must be configured.
 
 Common optional settings:
 - `HEALTHYBOB_DEVICE_SYNC_PORT`
-- `HEALTHYBOB_DEVICE_SYNC_HOST`
+- `HEALTHYBOB_DEVICE_SYNC_HOST` (defaults to `127.0.0.1`; opt into a broader bind explicitly)
 - `HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`
 - `HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH`
 - `HEALTHYBOB_DEVICE_SYNC_WORKER_POLL_MS`

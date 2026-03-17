@@ -255,6 +255,9 @@ export class SqliteDeviceSyncStore {
       create index if not exists device_job_account_idx
       on device_job (account_id, status, created_at desc);
 
+      create index if not exists device_job_account_running_idx
+      on device_job (account_id, status, lease_expires_at);
+
       create table if not exists webhook_trace (
         provider text not null,
         trace_id text not null,
@@ -670,15 +673,29 @@ export class SqliteDeviceSyncStore {
     return withImmediateTransaction(this.database, () => {
       const row = this.database.prepare(`
         select *
-        from device_job
+        from device_job as candidate
         where (
-          status = 'queued' and available_at <= ?
-        ) or (
-          status = 'running' and lease_expires_at is not null and lease_expires_at <= ? and attempts < max_attempts
+          (
+            candidate.status = 'queued' and candidate.available_at <= ?
+          ) or (
+            candidate.status = 'running'
+            and candidate.lease_expires_at is not null
+            and candidate.lease_expires_at <= ?
+            and candidate.attempts < candidate.max_attempts
+          )
         )
-        order by priority desc, available_at asc, created_at asc, id asc
+        and not exists (
+          select 1
+          from device_job as blocking
+          where blocking.account_id = candidate.account_id
+            and blocking.id != candidate.id
+            and blocking.status = 'running'
+            and blocking.lease_expires_at is not null
+            and blocking.lease_expires_at > ?
+        )
+        order by candidate.priority desc, candidate.available_at asc, candidate.created_at asc, candidate.id asc
         limit 1
-      `).get(now, now) as StoredJobRow | undefined;
+      `).get(now, now, now) as StoredJobRow | undefined;
 
       if (!row) {
         return null;

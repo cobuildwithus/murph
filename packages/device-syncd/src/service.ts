@@ -14,6 +14,8 @@ import {
   normalizePublicBaseUrl,
   normalizeString,
   resolveRelativeOrAllowedOriginUrl,
+  sha256Text,
+  stringifyJson,
   toIsoTimestamp,
 } from "./shared.js";
 import { SqliteDeviceSyncStore } from "./store.js";
@@ -397,22 +399,34 @@ export class DeviceSyncService {
 
     const provider = this.requireProvider(account.provider);
     const now = toIsoTimestamp(new Date());
-    const jobs = provider.createScheduledJobs?.(account, now).jobs ?? [{ kind: "reconcile", priority: 80 }];
-    const primary = jobs[0] ?? { kind: "reconcile", priority: 80 };
-    const queued = this.store.enqueueJob({
-      provider: provider.provider,
-      accountId: account.id,
-      kind: primary.kind,
-      payload: primary.payload ?? {},
-      priority: Math.max(primary.priority ?? 0, 80),
-      availableAt: now,
-      maxAttempts: primary.maxAttempts ?? 5,
-      dedupeKey: `${primary.dedupeKey ?? `manual-reconcile:${now}`}`,
-    });
+    const scheduledJobs = provider.createScheduledJobs?.(account, now).jobs ?? [];
+    const jobs = scheduledJobs.length > 0 ? scheduledJobs : [{ kind: "reconcile", priority: 80 }];
+    const queuedJobs = this.enqueueJobs(
+      account,
+      jobs.map((job) => ({
+        ...job,
+        priority: Math.max(job.priority ?? 0, 80),
+        availableAt: now,
+        dedupeKey:
+          job.dedupeKey ??
+          `manual-reconcile:${job.kind}:${sha256Text(stringifyJson(job.payload ?? {}))}`,
+      })),
+    );
+    const primary = queuedJobs[0];
+
+    if (!primary) {
+      throw deviceSyncError({
+        code: "RECONCILE_JOBS_MISSING",
+        message: `Device sync provider ${provider.provider} did not produce any manual reconcile jobs.`,
+        retryable: false,
+        httpStatus: 500,
+      });
+    }
 
     return {
       account: this.toPublicAccount(account),
-      job: queued,
+      job: primary,
+      jobs: queuedJobs,
     };
   }
 
