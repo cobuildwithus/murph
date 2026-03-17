@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   CONTRACT_SCHEMA_VERSION,
@@ -37,6 +37,22 @@ interface CanonicalWriteLockHandle {
   release(): Promise<void>
 }
 
+interface CanonicalTextWriteInput {
+  relativePath: string
+  content: string
+  overwrite?: boolean
+  allowExistingMatch?: boolean
+}
+
+interface CanonicalJsonlAppendInput {
+  relativePath: string
+  record: JsonObject
+}
+
+interface CanonicalDeleteInput {
+  relativePath: string
+}
+
 interface FrontmatterDocument {
   attributes: JsonObject
   body: string
@@ -44,6 +60,19 @@ interface FrontmatterDocument {
 
 interface ProviderEventCoreRuntime {
   acquireCanonicalWriteLock(vaultRoot: string): Promise<CanonicalWriteLockHandle>
+  applyCanonicalWriteBatch(input: {
+    vaultRoot: string
+    operationType: string
+    summary: string
+    occurredAt?: string | Date
+    textWrites?: CanonicalTextWriteInput[]
+    jsonlAppends?: CanonicalJsonlAppendInput[]
+    deletes?: CanonicalDeleteInput[]
+  }): Promise<{
+    textWrites: string[]
+    jsonlAppends: string[]
+    deletes: string[]
+  }>
   appendJsonlRecord<TRecord extends object>(input: {
     vaultRoot: string
     relativePath: string
@@ -303,8 +332,6 @@ export async function upsertProviderRecord(input: {
 }) {
   const core = await loadProviderEventCoreRuntime()
   const lock = await core.acquireCanonicalWriteLock(input.vault)
-  const providersDirectory = resolveVaultRelativePath(input.vault, 'bank/providers')
-  await mkdir(providersDirectory, { recursive: true })
 
   try {
     const existingEntries = await readProviderEntries(input.vault)
@@ -362,19 +389,30 @@ export async function upsertProviderRecord(input: {
       nextAttributes.title,
       nextAttributes.note,
     )
-
-    await writeFile(
-      resolveVaultRelativePath(input.vault, relativePath),
-      core.stringifyFrontmatterDocument({
-        attributes: nextAttributes,
-        body,
-      }),
-      'utf8',
-    )
-
-    if (previousPath && previousPath !== relativePath) {
-      await rm(resolveVaultRelativePath(input.vault, previousPath), { force: true })
-    }
+    await core.applyCanonicalWriteBatch({
+      vaultRoot: input.vault,
+      operationType: 'provider_upsert',
+      summary: `Upsert provider ${providerId}`,
+      occurredAt: new Date(),
+      textWrites: [
+        {
+          relativePath,
+          content: core.stringifyFrontmatterDocument({
+            attributes: nextAttributes,
+            body,
+          }),
+          overwrite: true,
+        },
+      ],
+      deletes:
+        previousPath && previousPath !== relativePath
+          ? [
+              {
+                relativePath: previousPath,
+              },
+            ]
+          : [],
+    })
 
     return {
       vault: input.vault,
@@ -711,7 +749,7 @@ async function requireProviderRecord(vault: string, lookup: string) {
 
 async function readProviderEntries(vaultRoot: string) {
   const core = await loadProviderEventCoreRuntime()
-  const providersRoot = resolveVaultRelativePath(vaultRoot, 'bank/providers')
+  const providersRoot = await resolveVaultRelativePath(vaultRoot, 'bank/providers')
   const files = await safeReadMarkdownFiles(providersRoot)
   const entries: Array<{
     relativePath: string
@@ -723,7 +761,7 @@ async function readProviderEntries(vaultRoot: string) {
   for (const fileName of files) {
     const relativePath = path.posix.join('bank/providers', fileName)
     const markdown = await readFile(
-      resolveVaultRelativePath(vaultRoot, relativePath),
+      await resolveVaultRelativePath(vaultRoot, relativePath),
       'utf8',
     )
     const document = core.parseFrontmatterDocument(markdown)

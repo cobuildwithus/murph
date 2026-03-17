@@ -11,6 +11,7 @@ import {
   acquireCanonicalWriteLock,
   inspectCanonicalWriteLock,
 } from "./operations/canonical-write-lock.js";
+import { runCanonicalWrite } from "./operations/write-batch.js";
 import { copyRawArtifact as copyRawArtifactInternal } from "./raw.js";
 import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.js";
 import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.js";
@@ -27,9 +28,46 @@ import {
   appendProfileSnapshot as appendProfileSnapshotInternal,
   rebuildCurrentProfile as rebuildCurrentProfileInternal,
 } from "./profile/storage.js";
-import { initializeVault as initializeVaultInternal, validateVault as validateVaultInternal } from "./vault.js";
+import { VaultError } from "./errors.js";
+import {
+  initializeVault as initializeVaultInternal,
+  loadVault as loadVaultInternal,
+  validateVault as validateVaultInternal,
+} from "./vault.js";
 
-import type { ValidationIssue } from "./types.js";
+import type { DateInput, ValidationIssue } from "./types.js";
+
+interface CanonicalTextWriteInput {
+  relativePath: string;
+  content: string;
+  overwrite?: boolean;
+  allowExistingMatch?: boolean;
+}
+
+interface CanonicalJsonlAppendInput<TRecord extends object = Record<string, unknown>> {
+  relativePath: string;
+  record: TRecord;
+}
+
+interface CanonicalDeleteInput {
+  relativePath: string;
+}
+
+interface ApplyCanonicalWriteBatchInput {
+  vaultRoot: string;
+  operationType: string;
+  summary: string;
+  occurredAt?: DateInput;
+  textWrites?: CanonicalTextWriteInput[];
+  jsonlAppends?: CanonicalJsonlAppendInput[];
+  deletes?: CanonicalDeleteInput[];
+}
+
+interface ApplyCanonicalWriteBatchResult {
+  textWrites: string[];
+  jsonlAppends: string[];
+  deletes: string[];
+}
 
 async function withCanonicalWriteLock<TResult>(
   vaultRoot: string | undefined,
@@ -95,6 +133,57 @@ export async function appendJsonlRecord<TRecord extends object>(input: {
   record: TRecord;
 }): Promise<TRecord> {
   return withCanonicalWriteLock(input.vaultRoot, () => appendJsonlRecordInternal(input));
+}
+
+export async function applyCanonicalWriteBatch(
+  input: ApplyCanonicalWriteBatchInput,
+): Promise<ApplyCanonicalWriteBatchResult> {
+  const textWrites = input.textWrites ?? [];
+  const jsonlAppends = input.jsonlAppends ?? [];
+  const deletes = input.deletes ?? [];
+
+  if (textWrites.length === 0 && jsonlAppends.length === 0 && deletes.length === 0) {
+    throw new VaultError(
+      "HB_CANONICAL_WRITE_EMPTY",
+      "Canonical write batch requires at least one staged action.",
+    );
+  }
+
+  return withCanonicalWriteLock(input.vaultRoot, async () => {
+    await loadVaultInternal({ vaultRoot: input.vaultRoot });
+
+    return runCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: input.operationType,
+      summary: input.summary,
+      occurredAt: input.occurredAt,
+      mutate: async ({ batch }) => {
+        for (const textWrite of textWrites) {
+          await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
+            overwrite: textWrite.overwrite,
+            allowExistingMatch: textWrite.allowExistingMatch,
+          });
+        }
+
+        for (const jsonlAppend of jsonlAppends) {
+          await batch.stageJsonlAppend(
+            jsonlAppend.relativePath,
+            `${JSON.stringify(jsonlAppend.record)}\n`,
+          );
+        }
+
+        for (const deletion of deletes) {
+          await batch.stageDelete(deletion.relativePath);
+        }
+
+        return {
+          textWrites: textWrites.map((entry) => entry.relativePath),
+          jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
+          deletes: deletes.map((entry) => entry.relativePath),
+        };
+      },
+    });
+  });
 }
 
 export async function copyRawArtifact(

@@ -27,6 +27,7 @@ import {
 
 import {
   addMeal,
+  applyCanonicalWriteBatch,
   appendProfileSnapshot,
   appendJsonlRecord,
   copyRawArtifact,
@@ -39,6 +40,8 @@ import {
   parseFrontmatterDocument,
   projectAssessmentResponse,
   readJsonlRecords,
+  stringifyFrontmatterDocument,
+  toMonthlyShardRelativePath,
   validateVault,
   VaultError,
 } from "../src/index.js";
@@ -1318,6 +1321,242 @@ test("WriteBatch rolls back earlier writes when a later staged action fails duri
     operation.actions.filter((action) => action.state === "rolled_back").length,
     1,
   );
+});
+
+test("applyCanonicalWriteBatch rolls back vault summary writes when a later text write fails", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const metadataAbsolutePath = path.join(vaultRoot, "vault.json");
+  const coreAbsolutePath = path.join(vaultRoot, "CORE.md");
+  const originalMetadata = await fs.readFile(metadataAbsolutePath, "utf8");
+  const originalCore = await fs.readFile(coreAbsolutePath, "utf8");
+  const parsedMetadata = JSON.parse(originalMetadata) as Record<string, unknown>;
+  const parsedCore = parseFrontmatterDocument(originalCore);
+  const nextTitle = "Rollback Summary Test";
+  const nextTimezone = "UTC";
+  const updatedAt = "2026-03-16T12:00:00.000Z";
+  const nextCore = stringifyFrontmatterDocument({
+    attributes: {
+      ...parsedCore.attributes,
+      title: nextTitle,
+      timezone: nextTimezone,
+      updatedAt,
+    },
+    body: parsedCore.body.replace(/^# .*$/mu, `# ${nextTitle}`),
+  });
+  const originalApplyTextWrite = (
+    WriteBatch.prototype as unknown as {
+      applyTextWrite: (index: number, action: unknown) => Promise<void>;
+    }
+  ).applyTextWrite;
+  let textWriteCalls = 0;
+
+  (
+    WriteBatch.prototype as unknown as {
+      applyTextWrite: (index: number, action: unknown) => Promise<void>;
+    }
+  ).applyTextWrite = async function applyTextWriteWithFailure(index: number, action: unknown) {
+    textWriteCalls += 1;
+
+    if (textWriteCalls === 2) {
+      throw new Error("injected text write failure");
+    }
+
+    return originalApplyTextWrite.call(this, index, action);
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        applyCanonicalWriteBatch({
+          vaultRoot,
+          operationType: "vault_summary_update",
+          summary: "Rollback summary update",
+          occurredAt: updatedAt,
+          textWrites: [
+            {
+              relativePath: "vault.json",
+              content: `${JSON.stringify(
+                {
+                  ...parsedMetadata,
+                  title: nextTitle,
+                  timezone: nextTimezone,
+                },
+                null,
+                2,
+              )}\n`,
+              overwrite: true,
+            },
+            {
+              relativePath: "CORE.md",
+              content: nextCore,
+              overwrite: true,
+            },
+          ],
+        }),
+      /injected text write failure/u,
+    );
+  } finally {
+    (
+      WriteBatch.prototype as unknown as {
+        applyTextWrite: (index: number, action: unknown) => Promise<void>;
+      }
+    ).applyTextWrite = originalApplyTextWrite;
+  }
+
+  assert.equal(await fs.readFile(metadataAbsolutePath, "utf8"), originalMetadata);
+  assert.equal(await fs.readFile(coreAbsolutePath, "utf8"), originalCore);
+});
+
+test("applyCanonicalWriteBatch rolls back experiment markdown when the lifecycle ledger append fails", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const experiment = await createExperiment({
+    vaultRoot,
+    slug: "focus-sprint",
+    title: "Focus Sprint",
+    startedOn: "2026-03-10",
+  });
+  const experimentRelativePath = experiment.experiment.relativePath;
+  const experimentAbsolutePath = path.join(vaultRoot, experimentRelativePath);
+  const originalExperimentMarkdown = await fs.readFile(experimentAbsolutePath, "utf8");
+  const occurredAt = "2026-03-16T14:30:00.000Z";
+  const ledgerRelativePath = toMonthlyShardRelativePath("ledger/events", occurredAt, "occurredAt");
+  const rollbackEventId = "evt_rollback_check";
+  const ledgerRecordsBefore = await readJsonlRecords({
+    vaultRoot,
+    relativePath: ledgerRelativePath,
+  });
+  const originalApplyJsonlAppend = (
+    WriteBatch.prototype as unknown as {
+      applyJsonlAppend: (index: number, action: unknown) => Promise<void>;
+    }
+  ).applyJsonlAppend;
+
+  (
+    WriteBatch.prototype as unknown as {
+      applyJsonlAppend: (index: number, action: unknown) => Promise<void>;
+    }
+  ).applyJsonlAppend = async function applyJsonlAppendWithFailure() {
+    throw new Error("injected jsonl append failure");
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        applyCanonicalWriteBatch({
+          vaultRoot,
+          operationType: "experiment_lifecycle_event",
+          summary: "Rollback lifecycle append",
+          occurredAt,
+          textWrites: [
+            {
+              relativePath: experimentRelativePath,
+              content: `${originalExperimentMarkdown.trimEnd()}\n\n## Checkpoint\n\nAppend should roll back.\n`,
+              overwrite: true,
+            },
+          ],
+          jsonlAppends: [
+            {
+              relativePath: ledgerRelativePath,
+              record: {
+                schemaVersion: CONTRACT_SCHEMA_VERSION.event,
+                id: rollbackEventId,
+                kind: "experiment_event",
+                occurredAt,
+                recordedAt: occurredAt,
+                dayKey: "2026-03-16",
+                source: "manual",
+                title: "Focus Sprint Checkpoint",
+                experimentId: experiment.experiment.id,
+                experimentSlug: experiment.experiment.slug,
+                phase: "checkpoint",
+              },
+            },
+          ],
+        }),
+      /injected jsonl append failure/u,
+    );
+  } finally {
+    (
+      WriteBatch.prototype as unknown as {
+        applyJsonlAppend: (index: number, action: unknown) => Promise<void>;
+      }
+    ).applyJsonlAppend = originalApplyJsonlAppend;
+  }
+
+  assert.equal(await fs.readFile(experimentAbsolutePath, "utf8"), originalExperimentMarkdown);
+  const ledgerRecordsAfter = await readJsonlRecords({
+    vaultRoot,
+    relativePath: ledgerRelativePath,
+  });
+  assert.equal(ledgerRecordsAfter.length, ledgerRecordsBefore.length);
+  assert.equal(
+    ledgerRecordsAfter.some((record) => record.id === rollbackEventId),
+    false,
+  );
+});
+
+test("applyCanonicalWriteBatch rolls back provider slug renames when deleting the previous path fails", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const alphaRelativePath = "bank/providers/alpha.md";
+  const betaRelativePath = "bank/providers/beta.md";
+  const alphaAbsolutePath = path.join(vaultRoot, alphaRelativePath);
+  const betaAbsolutePath = path.join(vaultRoot, betaRelativePath);
+  const alphaMarkdown = "---\nproviderId: prov_alpha\nslug: alpha\ntitle: Alpha Clinic\n---\n# Alpha Clinic\n";
+  const originalApplyDelete = (
+    WriteBatch.prototype as unknown as {
+      applyDelete: (index: number, action: unknown) => Promise<void>;
+    }
+  ).applyDelete;
+
+  await fs.mkdir(path.dirname(alphaAbsolutePath), { recursive: true });
+  await fs.writeFile(alphaAbsolutePath, alphaMarkdown, "utf8");
+  (
+    WriteBatch.prototype as unknown as {
+      applyDelete: (index: number, action: unknown) => Promise<void>;
+    }
+  ).applyDelete = async function applyDeleteWithFailure() {
+    throw new Error("injected delete failure");
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        applyCanonicalWriteBatch({
+          vaultRoot,
+          operationType: "provider_upsert",
+          summary: "Rollback provider rename",
+          occurredAt: "2026-03-16T16:00:00.000Z",
+          textWrites: [
+            {
+              relativePath: betaRelativePath,
+              content: "---\nproviderId: prov_alpha\nslug: beta\ntitle: Alpha Clinic Renamed\n---\n# Alpha Clinic Renamed\n",
+              overwrite: true,
+            },
+          ],
+          deletes: [
+            {
+              relativePath: alphaRelativePath,
+            },
+          ],
+        }),
+      /injected delete failure/u,
+    );
+  } finally {
+    (
+      WriteBatch.prototype as unknown as {
+        applyDelete: (index: number, action: unknown) => Promise<void>;
+      }
+    ).applyDelete = originalApplyDelete;
+  }
+
+  assert.equal(await fs.readFile(alphaAbsolutePath, "utf8"), alphaMarkdown);
+  await assert.rejects(() => fs.access(betaAbsolutePath));
 });
 
 test("validateVault reports malformed raw manifests", async () => {

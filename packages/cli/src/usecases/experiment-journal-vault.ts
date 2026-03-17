@@ -1,5 +1,4 @@
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readFile } from 'node:fs/promises'
 import {
   CONTRACT_SCHEMA_VERSION,
   EXPERIMENT_STATUSES,
@@ -47,6 +46,22 @@ interface CanonicalWriteLockHandle {
   release(): Promise<void>
 }
 
+interface CanonicalTextWriteInput {
+  relativePath: string
+  content: string
+  overwrite?: boolean
+  allowExistingMatch?: boolean
+}
+
+interface CanonicalJsonlAppendInput {
+  relativePath: string
+  record: JsonObject
+}
+
+interface CanonicalDeleteInput {
+  relativePath: string
+}
+
 interface FrontmatterDocument {
   attributes: JsonObject
   body: string
@@ -56,6 +71,19 @@ interface ExperimentJournalVaultCoreRuntime {
   acquireCanonicalWriteLock(
     vaultRoot: string,
   ): Promise<CanonicalWriteLockHandle>
+  applyCanonicalWriteBatch(input: {
+    vaultRoot: string
+    operationType: string
+    summary: string
+    occurredAt?: string | Date
+    textWrites?: CanonicalTextWriteInput[]
+    jsonlAppends?: CanonicalJsonlAppendInput[]
+    deletes?: CanonicalDeleteInput[]
+  }): Promise<{
+    textWrites: string[]
+    jsonlAppends: string[]
+    deletes: string[]
+  }>
   createExperiment(input: {
     vaultRoot: string
     slug: string
@@ -179,7 +207,7 @@ export async function updateExperimentRecord(input: {
   const core = await loadExperimentJournalVaultCoreRuntime()
   const entity = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const relativePath = entity.path
-  const absolutePath = resolveVaultRelativePath(input.vault, relativePath)
+  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
   const lock = await core.acquireCanonicalWriteLock(input.vault)
 
   try {
@@ -205,7 +233,19 @@ export async function updateExperimentRecord(input: {
       attributes: validated,
       body: input.body ?? parsed.body,
     })
-    await writeFile(absolutePath, nextMarkdown, 'utf8')
+    await core.applyCanonicalWriteBatch({
+      vaultRoot: input.vault,
+      operationType: 'experiment_update',
+      summary: `Update experiment ${validated.experimentId}`,
+      occurredAt: new Date(),
+      textWrites: [
+        {
+          relativePath,
+          content: nextMarkdown,
+          overwrite: true,
+        },
+      ],
+    })
 
     return {
       vault: input.vault,
@@ -347,7 +387,7 @@ export async function appendJournalText(input: {
     date: input.date,
   })
   const relativePath = ensured.relativePath
-  const absolutePath = resolveVaultRelativePath(input.vault, relativePath)
+  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
   const lock = await core.acquireCanonicalWriteLock(input.vault)
 
   try {
@@ -357,7 +397,19 @@ export async function appendJournalText(input: {
       attributes: parsed.attributes,
       body: appendMarkdownParagraph(parsed.body, input.text),
     })
-    await writeFile(absolutePath, nextMarkdown, 'utf8')
+    await core.applyCanonicalWriteBatch({
+      vaultRoot: input.vault,
+      operationType: 'journal_append_text',
+      summary: `Append journal text for ${input.date}`,
+      occurredAt: `${input.date}T00:00:00.000Z`,
+      textWrites: [
+        {
+          relativePath,
+          content: nextMarkdown,
+          overwrite: true,
+        },
+      ],
+    })
 
     return {
       vault: input.vault,
@@ -512,8 +564,8 @@ export async function updateVaultSummary(input: {
   const core = await loadExperimentJournalVaultCoreRuntime()
   const metadataPath = 'vault.json'
   const corePath = 'CORE.md'
-  const absoluteMetadataPath = resolveVaultRelativePath(input.vault, metadataPath)
-  const absoluteCorePath = resolveVaultRelativePath(input.vault, corePath)
+  const absoluteMetadataPath = await resolveVaultRelativePath(input.vault, metadataPath)
+  const absoluteCorePath = await resolveVaultRelativePath(input.vault, corePath)
   const lock = await core.acquireCanonicalWriteLock(input.vault)
 
   try {
@@ -539,20 +591,27 @@ export async function updateVaultSummary(input: {
       timezone: nextTimezone,
       updatedAt,
     }))
-
-    await writeFile(
-      absoluteMetadataPath,
-      `${JSON.stringify(nextMetadata, null, 2)}\n`,
-      'utf8',
-    )
-    await writeFile(
-      absoluteCorePath,
-      core.stringifyFrontmatterDocument({
-        attributes: nextCoreAttributes,
-        body: replaceMarkdownTitle(coreDocument.body, nextTitle),
-      }),
-      'utf8',
-    )
+    await core.applyCanonicalWriteBatch({
+      vaultRoot: input.vault,
+      operationType: 'vault_summary_update',
+      summary: 'Update vault summary',
+      occurredAt: updatedAt,
+      textWrites: [
+        {
+          relativePath: metadataPath,
+          content: `${JSON.stringify(nextMetadata, null, 2)}\n`,
+          overwrite: true,
+        },
+        {
+          relativePath: corePath,
+          content: core.stringifyFrontmatterDocument({
+            attributes: nextCoreAttributes,
+            body: replaceMarkdownTitle(coreDocument.body, nextTitle),
+          }),
+          overwrite: true,
+        },
+      ],
+    })
 
     return {
       vault: input.vault,
@@ -625,7 +684,7 @@ async function appendExperimentLifecycleEvent(input: {
   const core = await loadExperimentJournalVaultCoreRuntime()
   const entity = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const relativePath = entity.path
-  const absolutePath = resolveVaultRelativePath(input.vault, relativePath)
+  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
   const lock = await core.acquireCanonicalWriteLock(input.vault)
   const occurredAt = normalizeTimestampInput(input.occurredAt ?? new Date())
 
@@ -663,9 +722,25 @@ async function appendExperimentLifecycleEvent(input: {
       occurredAt,
       'occurredAt',
     )
-
-    await writeFile(absolutePath, nextMarkdown, 'utf8')
-    await appendJsonLine(input.vault, ledgerFile, eventRecord)
+    await core.applyCanonicalWriteBatch({
+      vaultRoot: input.vault,
+      operationType: 'experiment_lifecycle_event',
+      summary: `Append ${input.phase} lifecycle event for ${attributes.experimentId}`,
+      occurredAt,
+      textWrites: [
+        {
+          relativePath,
+          content: nextMarkdown,
+          overwrite: true,
+        },
+      ],
+      jsonlAppends: [
+        {
+          relativePath: ledgerFile,
+          record: eventRecord,
+        },
+      ],
+    })
 
     return {
       vault: input.vault,
@@ -701,7 +776,7 @@ async function mutateJournalLinks(input: {
       : null
   const relativePath =
     ensured?.relativePath ?? `journal/${input.date.slice(0, 4)}/${input.date}.md`
-  const absolutePath = resolveVaultRelativePath(input.vault, relativePath)
+  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
   const lock = await core.acquireCanonicalWriteLock(input.vault)
 
   try {
@@ -728,14 +803,22 @@ async function mutateJournalLinks(input: {
       ...parsed.attributes,
       [input.key]: [...currentValues].sort((left, right) => left.localeCompare(right)),
     }, relativePath)
-    await writeFile(
-      absolutePath,
-      core.stringifyFrontmatterDocument({
-        attributes: nextAttributes,
-        body: parsed.body,
-      }),
-      'utf8',
-    )
+    await core.applyCanonicalWriteBatch({
+      vaultRoot: input.vault,
+      operationType: input.operation === 'link' ? 'journal_link' : 'journal_unlink',
+      summary: `${input.operation === 'link' ? 'Link' : 'Unlink'} journal ${input.key} for ${input.date}`,
+      occurredAt: `${input.date}T00:00:00.000Z`,
+      textWrites: [
+        {
+          relativePath,
+          content: core.stringifyFrontmatterDocument({
+            attributes: nextAttributes,
+            body: parsed.body,
+          }),
+          overwrite: true,
+        },
+      ],
+    })
 
     return {
       vault: input.vault,
@@ -750,16 +833,6 @@ async function mutateJournalLinks(input: {
   } finally {
     await lock.release()
   }
-}
-
-async function appendJsonLine(
-  vaultRoot: string,
-  relativePath: string,
-  record: JsonObject,
-) {
-  const absolutePath = resolveVaultRelativePath(vaultRoot, relativePath)
-  await mkdir(path.dirname(absolutePath), { recursive: true })
-  await appendFile(absolutePath, `${JSON.stringify(record)}\n`, 'utf8')
 }
 
 async function requireEntityFamily(

@@ -8,11 +8,20 @@ export {
   VAULT_SCHEMA_VERSION,
 } from "./constants.js";
 export { VaultError, isVaultError } from "./errors.js";
+export {
+  assertPathWithinVault,
+  assertPathWithinVaultOnDisk,
+  normalizeRelativeVaultPath,
+  normalizeVaultRoot,
+  resolveVaultPath,
+  resolveVaultPathOnDisk,
+} from "./path-safety.js";
 export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.js";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
 export { loadVault } from "./vault.js";
 export {
   addMeal,
+  applyCanonicalWriteBatch,
   appendHistoryEvent,
   appendJsonlRecord,
   appendProfileSnapshot,
@@ -46,6 +55,7 @@ export type {
   CanonicalWriteLockInspection,
   CanonicalWriteLockMetadata,
 } from "./operations/index.js";
+export type { ResolvedVaultPath } from "./path-safety.js";
 export {
   listAssessmentResponses,
   projectAssessmentResponse,

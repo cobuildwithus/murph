@@ -539,3 +539,75 @@ test.sequential(
     }
   },
 )
+
+test.sequential(
+  'provider upsert renames the provider document when the same provider id moves to a new slug',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-provider-rename-'))
+    const initialPayloadPath = path.join(vaultRoot, 'provider-initial.json')
+    const renamedPayloadPath = path.join(vaultRoot, 'provider-renamed.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      await writeFile(
+        initialPayloadPath,
+        JSON.stringify({
+          title: 'Alpha Clinic',
+          slug: 'alpha',
+          status: 'active',
+          body: '# Alpha Clinic\n',
+        }),
+        'utf8',
+      )
+
+      const created = await runSliceCli<{ providerId: string; path: string }>([
+        'provider',
+        'upsert',
+        '--input',
+        `@${initialPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(created.ok, true)
+
+      await writeFile(
+        renamedPayloadPath,
+        JSON.stringify({
+          providerId: requireData(created).providerId,
+          title: 'Alpha Clinic Renamed',
+          slug: 'beta',
+          status: 'active',
+          body: '# Alpha Clinic Renamed\n',
+        }),
+        'utf8',
+      )
+
+      const renamed = await runSliceCli<{ path: string; created: boolean }>([
+        'provider',
+        'upsert',
+        '--input',
+        `@${renamedPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(renamed.ok, true)
+      assert.equal(requireData(renamed).path, 'bank/providers/beta.md')
+      assert.equal(requireData(renamed).created, false)
+
+      await access(path.join(vaultRoot, 'bank/providers/beta.md'))
+      await assert.rejects(() => access(path.join(vaultRoot, 'bank/providers/alpha.md')))
+
+      const renamedMarkdown = await readFile(
+        path.join(vaultRoot, 'bank/providers/beta.md'),
+        'utf8',
+      )
+      assert.match(renamedMarkdown, new RegExp(requireData(created).providerId, 'u'))
+      assert.match(renamedMarkdown, /Alpha Clinic Renamed/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
