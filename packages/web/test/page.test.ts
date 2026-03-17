@@ -107,11 +107,13 @@ test("HomePage normalizes search params and renders the ready state", async () =
     sampleLimit: 6,
     timelineLimit: 8,
   });
-  assert.match(markup, /Healthy Bob Observatory/);
+  assert.match(markup, /Healthy Bob/);
   assert.match(markup, /Recent journal days/);
   assert.match(markup, /Protect sleep consistency/);
   assert.match(markup, /Sleep felt steadier after a lighter dinner/);
   assert.match(markup, /Matches for/);
+  assert.doesNotMatch(markup, /localhost only/);
+  assert.doesNotMatch(markup, /safe fields only/);
 });
 
 test("HomePage renders the setup state when no vault is configured", async () => {

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   DEFAULT_SAMPLE_LIMIT,
   DEFAULT_TIMELINE_LIMIT,
@@ -8,8 +10,6 @@ import {
   type OverviewSampleSummary,
   type OverviewTimelineEntry,
 } from "../src/lib/overview";
-
-const SEARCH_SUGGESTIONS = ["sleep", "glucose", "routine"];
 
 export const dynamic = "force-dynamic";
 
@@ -30,28 +30,12 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     <main className="page-shell">
       <section className="page-header">
         <div className="page-header__copy">
-          <p className="page-header__eyebrow">Local-only vault view</p>
-          <h1>Healthy Bob Observatory</h1>
+          <p className="page-header__eyebrow">Overview</p>
+          <h1>Healthy Bob</h1>
           <p className="page-header__lede">
-            Read-only overview of the configured vault. The goal here is clarity:
-            show the latest profile, notes, measurements, and activity without making
-            you hunt for them.
+            Recent profile, notes, measurements, and activity in one place.
           </p>
         </div>
-        <dl className="status-strip">
-          <div>
-            <dt>scope</dt>
-            <dd>read only</dd>
-          </div>
-          <div>
-            <dt>network</dt>
-            <dd>localhost only</dd>
-          </div>
-          <div>
-            <dt>search</dt>
-            <dd>safe fields only</dd>
-          </div>
-        </dl>
       </section>
 
       <form action="/" className="query-bar" method="get">
@@ -73,6 +57,20 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         </div>
       </form>
 
+      <section className="library-teaser">
+        <div>
+          <p className="card__eyebrow">Health library</p>
+          <h2>Resting Heart Rate now has a graph-backed page</h2>
+          <p className="card__copy">
+            See measurement contexts, reference sets, linked protocols, provenance,
+            and the live goal plus experiment layer in one route.
+          </p>
+        </div>
+        <Link className="library-teaser__link" href="/biomarkers/resting-heart-rate">
+          Open RHR page
+        </Link>
+      </section>
+
       {overview.status === "ready" ? <ReadyState overview={overview} /> : null}
       {overview.status === "missing-config" ? <MissingConfigState overview={overview} /> : null}
       {overview.status === "error" ? <ErrorState overview={overview} /> : null}
@@ -84,17 +82,15 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
   return (
     <>
       <section className="overview-grid">
-        <article className="card card--profile">
+        <article className="card card--profile card--wide">
           <div className="card__header">
             <div>
-              <p className="card__eyebrow">Current profile</p>
-              <h2>{overview.currentProfile?.title ?? "No current profile surfaced"}</h2>
+              <p className="card__eyebrow">Profile</p>
+              <h2>{overview.currentProfile?.title ?? "No current profile yet"}</h2>
             </div>
-            <p className="card__meta">
-              {overview.currentProfile?.recordedAt
-                ? `Updated ${formatMoment(overview.currentProfile.recordedAt)}`
-                : "No recorded profile timestamp"}
-            </p>
+            {overview.currentProfile?.recordedAt ? (
+              <p className="card__meta">{formatMoment(overview.currentProfile.recordedAt)}</p>
+            ) : null}
           </div>
           <p className="card__copy">
             {overview.currentProfile?.summary ??
@@ -104,34 +100,18 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
             {overview.currentProfile?.topGoals.length ? (
               overview.currentProfile.topGoals.map((goal) => (
                 <div className="goal-chip" key={goal.id}>
-                  <span className="goal-chip__label">Goal</span>
-                  <span>{goal.title}</span>
+                  {goal.title}
                 </div>
               ))
             ) : (
               <p className="card__muted">No top goals are linked to the current profile.</p>
             )}
           </div>
-        </article>
-
-        <article className="card card--metrics">
-          <div className="card__header">
-            <div>
-              <p className="card__eyebrow">At a glance</p>
-              <h2>Current vault shape</h2>
-            </div>
-            <p className="card__meta">Generated {formatMoment(overview.generatedAt)}</p>
-          </div>
-          <div className="metric-list">
-            {overview.metrics.map((metric) => (
-              <div className="metric-row" key={metric.label}>
-                <div>
-                  <div className="metric-row__label">{metric.label}</div>
-                  <div className="metric-row__note">{metric.note}</div>
-                </div>
-                <div className="metric-row__value">{metric.value}</div>
-              </div>
-            ))}
+          <div className="summary-strip">
+            <SummaryPill label="goals" value={metricValue(overview, "registries")} />
+            <SummaryPill label="journal days" value={metricValue(overview, "journal days")} />
+            <SummaryPill label="measurements" value={metricValue(overview, "samples")} />
+            <SummaryPill label="events" value={metricValue(overview, "events")} />
           </div>
         </article>
       </section>
@@ -140,7 +120,7 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
         <article className="card">
           <div className="card__header">
             <div>
-              <p className="card__eyebrow">Latest notes</p>
+              <p className="card__eyebrow">Notes</p>
               <h2>Recent journal days</h2>
             </div>
           </div>
@@ -157,7 +137,7 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
           <div className="card__header">
             <div>
               <p className="card__eyebrow">Measurements</p>
-              <h2>Daily sample summaries</h2>
+              <h2>Recent measurements</h2>
             </div>
           </div>
           <div className="stack-list">
@@ -174,8 +154,8 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
         <article className="card card--wide">
           <div className="card__header">
             <div>
-              <p className="card__eyebrow">Recent activity</p>
-              <h2>Latest timeline entries</h2>
+              <p className="card__eyebrow">Activity</p>
+              <h2>Latest activity</h2>
             </div>
           </div>
           <div className="timeline-list">
@@ -191,13 +171,9 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
           <div className="card__header">
             <div>
               <p className="card__eyebrow">Search</p>
-              <h2>{overview.search ? `Matches for “${overview.search.query}”` : "Search the vault"}</h2>
+              <h2>{overview.search ? `Matches for “${overview.search.query}”` : "Search"}</h2>
             </div>
-            {overview.search ? (
-              <p className="card__meta">{overview.search.total} total hits</p>
-            ) : (
-              <p className="card__meta">Suggestions: {SEARCH_SUGGESTIONS.join(", ")}</p>
-            )}
+            {overview.search ? <p className="card__meta">{overview.search.total} hits</p> : null}
           </div>
           {overview.search ? (
             <div className="stack-list">
@@ -214,16 +190,11 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
                   </article>
                 ))
               ) : (
-                <p className="card__muted">
-                  The query parsed cleanly, but it did not score any hits.
-                </p>
+                <p className="card__muted">No matches yet.</p>
               )}
             </div>
           ) : (
-            <p className="card__copy">
-              Search stays scoped to titles, safe body text, tags, and structured ids. Raw
-              vault paths are intentionally excluded from this view.
-            </p>
+            <p className="card__copy">Search notes, goals, events, and measurements.</p>
           )}
         </article>
       </section>
@@ -290,6 +261,15 @@ function JournalCard({ journal }: { journal: OverviewJournalEntry }) {
   );
 }
 
+function SummaryPill({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="summary-pill">
+      <span className="summary-pill__value">{value}</span>
+      <span className="summary-pill__label">{label}</span>
+    </div>
+  );
+}
+
 function SampleSummaryRow({ summary }: { summary: OverviewSampleSummary }) {
   return (
     <div className="sample-row">
@@ -351,4 +331,11 @@ function formatSampleValue(value: number | null): string {
   }
 
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function metricValue(
+  overview: Extract<OverviewResult, { status: "ready" }>,
+  label: string,
+): number {
+  return overview.metrics.find((metric) => metric.label === label)?.value ?? 0;
 }
