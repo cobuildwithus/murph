@@ -60,7 +60,9 @@ import {
   formatChatMetadata,
   formatSessionBinding,
   getMatchingSlashCommands,
+  resolveChatSubmitAction,
   seedChatEntries,
+  shouldClearComposerForSubmitAction,
 } from '../src/assistant/ui/view-model.js'
 
 const cleanupPaths: string[] = []
@@ -800,6 +802,38 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   assert.equal(
     formatSessionBinding(session),
     'imessage · contact:bob · thread-123',
+  )
+})
+
+test('assistant Ink view-model resolves composer submit actions and clear behavior', () => {
+  assert.deepEqual(resolveChatSubmitAction('   ', false), {
+    kind: 'ignore',
+  })
+  assert.deepEqual(resolveChatSubmitAction('hello', true), {
+    kind: 'ignore',
+  })
+  assert.deepEqual(resolveChatSubmitAction('/quit', false), {
+    kind: 'exit',
+  })
+  assert.deepEqual(resolveChatSubmitAction('/session', false), {
+    kind: 'session',
+  })
+
+  const modelAction = resolveChatSubmitAction('/model', false)
+  const promptAction = resolveChatSubmitAction('  hello Bob  ', false)
+
+  assert.deepEqual(modelAction, {
+    kind: 'model',
+  })
+  assert.equal(shouldClearComposerForSubmitAction(modelAction), true)
+  assert.deepEqual(promptAction, {
+    kind: 'prompt',
+    prompt: 'hello Bob',
+  })
+  assert.equal(shouldClearComposerForSubmitAction(promptAction), true)
+  assert.equal(
+    shouldClearComposerForSubmitAction(resolveChatSubmitAction('/session', false)),
+    false,
   )
 })
 

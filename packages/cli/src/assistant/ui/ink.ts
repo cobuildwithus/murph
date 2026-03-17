@@ -210,10 +210,6 @@ const ChatHistory = React.memo(function ChatHistory(
     Box,
     {
       flexDirection: 'column',
-      flexGrow: 1,
-      justifyContent: 'flex-end',
-      marginBottom: 1,
-      overflow: 'hidden',
     },
     history.length > 0
       ? history.map((entry: InkChatEntry, index: number) => {
@@ -225,8 +221,9 @@ const ChatHistory = React.memo(function ChatHistory(
               {
                 key,
                 marginBottom: 1,
+                width: '100%',
               },
-              createElement(Text, {}, entry.text),
+              createElement(Text, { wrap: 'wrap' }, entry.text),
             )
           }
 
@@ -236,8 +233,16 @@ const ChatHistory = React.memo(function ChatHistory(
               {
                 key,
                 marginBottom: 1,
+                width: '100%',
               },
-              createElement(Text, { color: 'red' }, `Error: ${entry.text}`),
+              createElement(
+                Text,
+                {
+                  color: 'red',
+                  wrap: 'wrap',
+                },
+                `Error: ${entry.text}`,
+              ),
             )
           }
 
@@ -260,7 +265,23 @@ const ChatHistory = React.memo(function ChatHistory(
               createElement(
                 Text,
                 { color: COMPOSER_TEXT_COLOR },
-                `› ${entry.text}`,
+                '› ',
+              ),
+              createElement(
+                Box,
+                {
+                  flexDirection: 'column',
+                  flexGrow: 1,
+                  flexShrink: 1,
+                },
+                createElement(
+                  Text,
+                  {
+                    color: COMPOSER_TEXT_COLOR,
+                    wrap: 'wrap',
+                  },
+                  entry.text,
+                ),
               ),
             ),
           )
@@ -755,7 +776,6 @@ export async function runAssistantChatWithInk(
       const [session, setSession] = React.useState(resolved.session)
       const [turns, setTurns] = React.useState(0)
       const [entries, setEntries] = React.useState(seedChatEntries(resolved.session))
-      const [value, setValue] = React.useState('')
       const [busy, setBusy] = React.useState(false)
       const [status, setStatus] = React.useState<{
         kind: 'error' | 'info' | 'success'
@@ -897,92 +917,95 @@ export async function runAssistantChatWithInk(
         })
       }
 
-      const submitPrompt = async (rawValue: string) => {
-        const prompt = rawValue.trim()
-        if (prompt.length === 0 || busy) {
-          return
+      const submitPrompt = (rawValue: string): ComposerSubmitDisposition => {
+        const action = resolveChatSubmitAction(rawValue, busy)
+
+        if (action.kind === 'ignore') {
+          return 'keep'
         }
 
-        if (prompt === '/exit' || prompt === '/quit') {
+        if (action.kind === 'exit') {
           exit()
-          return
+          return 'keep'
         }
 
-        if (prompt === '/session') {
+        if (action.kind === 'session') {
           setStatus({
             kind: 'info',
             text: `session ${latestSessionRef.current.sessionId}`,
           })
-          return
+          return 'keep'
         }
 
-        if (prompt === '/model') {
-          setValue('')
+        if (action.kind === 'model') {
           setStatus(null)
           openModelSwitcher()
-          return
+          return 'clear'
         }
 
         setEntries((previous: InkChatEntry[]) => [
           ...previous,
           {
             kind: 'user',
-            text: prompt,
+            text: action.prompt,
           },
         ])
         setBusy(true)
         setBusyStartedAt(Date.now())
         setStatus(null)
-        setValue('')
 
-        try {
-          const result = await sendAssistantMessage({
-            ...input,
-            model: activeModel,
-            prompt,
-            reasoningEffort: activeReasoningEffort,
-            sessionId: latestSessionRef.current.sessionId,
-          })
+        void (async () => {
+          try {
+            const result = await sendAssistantMessage({
+              ...input,
+              model: activeModel,
+              prompt: action.prompt,
+              reasoningEffort: activeReasoningEffort,
+              sessionId: latestSessionRef.current.sessionId,
+            })
 
-          latestSessionRef.current = result.session
-          setSession(result.session)
-          setTurns((previous: number) => previous + 1)
-          setEntries((previous: InkChatEntry[]) => [
-            ...previous,
-            {
-              kind: 'assistant',
-              text: result.response,
-            },
-          ])
-          setStatus(
-            result.delivery
-              ? {
-                  kind: 'success',
-                  text: `Delivered over ${result.delivery.channel} to ${result.delivery.target}.`,
-                }
-              : result.deliveryError
+            latestSessionRef.current = result.session
+            setSession(result.session)
+            setTurns((previous: number) => previous + 1)
+            setEntries((previous: InkChatEntry[]) => [
+              ...previous,
+              {
+                kind: 'assistant',
+                text: result.response,
+              },
+            ])
+            setStatus(
+              result.delivery
                 ? {
-                    kind: 'error',
-                    text: `Response saved locally, but delivery failed: ${result.deliveryError.message}`,
+                    kind: 'success',
+                    text: `Delivered over ${result.delivery.channel} to ${result.delivery.target}.`,
                   }
-                : null,
-          )
-        } catch (error) {
-          setEntries((previous: InkChatEntry[]) => [
-            ...previous,
-            {
+                : result.deliveryError
+                  ? {
+                      kind: 'error',
+                      text: `Response saved locally, but delivery failed: ${result.deliveryError.message}`,
+                    }
+                  : null,
+            )
+          } catch (error) {
+            setEntries((previous: InkChatEntry[]) => [
+              ...previous,
+              {
+                kind: 'error',
+                text: error instanceof Error ? error.message : String(error),
+              },
+            ])
+            setStatus({
               kind: 'error',
-              text: error instanceof Error ? error.message : String(error),
-            },
-          ])
-          setStatus({
-            kind: 'error',
-            text: 'The assistant hit an error. Fix it or keep chatting.',
-          })
-        } finally {
-          setBusy(false)
-          setBusyStartedAt(null)
-        }
+              text: 'The assistant hit an error. Fix it or keep chatting.',
+            })
+          } finally {
+            setBusy(false)
+            setBusyStartedAt(null)
+          }
+        })()
+
+        return shouldClearComposerForSubmitAction(action) ? 'clear' : 'keep'
       }
 
       React.useEffect(() => {
@@ -992,14 +1015,11 @@ export async function runAssistantChatWithInk(
 
         bootstrappedRef.current = true
         if (initialPromptRef.current) {
-          void submitPrompt(initialPromptRef.current)
+          submitPrompt(initialPromptRef.current)
         }
       }, [])
 
-      const history = entries.slice(-16)
       const bindingSummary = formatSessionBinding(session)
-      const slashSuggestions =
-        modelSwitcherState === null ? getMatchingSlashCommands(value) : []
       const metadataLine = formatChatMetadata(
         {
           provider: session.provider,
@@ -1016,18 +1036,10 @@ export async function runAssistantChatWithInk(
           paddingX: 1,
           paddingY: 1,
         },
-        createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            marginBottom: 1,
-          },
-          createElement(Text, {}, 'Healthy Bob'),
-          createElement(Text, { dimColor: true }, `session ${session.sessionId}`),
-          bindingSummary
-            ? createElement(Text, { dimColor: true }, bindingSummary)
-            : null,
-        ),
+        createElement(ChatHeader, {
+          bindingSummary,
+          sessionId: session.sessionId,
+        }),
         createElement(
           Box,
           {
@@ -1035,118 +1047,19 @@ export async function runAssistantChatWithInk(
           },
           createElement(Text, { dimColor: true }, CHAT_BANNER),
         ),
+        createElement(ChatHistory, {
+          entries,
+        }),
         createElement(
           Box,
           {
             flexDirection: 'column',
           },
-          history.length > 0
-            ? history.map((entry: InkChatEntry, index: number) => {
-                const key = `${entry.kind}:${index}:${entry.text.slice(0, 24)}`
-
-                if (entry.kind === 'assistant') {
-                  return createElement(
-                    Box,
-                    {
-                      key,
-                      marginBottom: 1,
-                      width: '100%',
-                    },
-                    createElement(Text, { wrap: 'wrap' }, entry.text),
-                  )
-                }
-
-                if (entry.kind === 'error') {
-                  return createElement(
-                    Box,
-                    {
-                      key,
-                      marginBottom: 1,
-                      width: '100%',
-                    },
-                    createElement(
-                      Text,
-                      {
-                        color: 'red',
-                        wrap: 'wrap',
-                      },
-                      `Error: ${entry.text}`,
-                    ),
-                  )
-                }
-
-                return createElement(
-                  Box,
-                  {
-                    key,
-                    marginBottom: 1,
-                    width: '100%',
-                  },
-                  createElement(
-                    Box,
-                    {
-                      backgroundColor: COMPOSER_BACKGROUND,
-                      flexDirection: 'row',
-                      paddingX: 2,
-                      paddingY: 1,
-                      width: '100%',
-                    },
-                    createElement(
-                      Text,
-                      { color: COMPOSER_TEXT_COLOR },
-                      '› ',
-                    ),
-                    createElement(
-                      Box,
-                      {
-                        flexDirection: 'column',
-                        flexGrow: 1,
-                        flexShrink: 1,
-                      },
-                      createElement(
-                        Text,
-                        {
-                          color: COMPOSER_TEXT_COLOR,
-                          wrap: 'wrap',
-                        },
-                        entry.text,
-                      ),
-                    ),
-                  ),
-                )
-              })
-            : null,
-        ),
-        createElement(
-          Box,
-          {
-            flexDirection: 'column',
-          },
-          busy
-            ? createElement(
-                Box,
-                {
-                  marginBottom: 1,
-                },
-                createElement(Text, { dimColor: true }, formatBusyStatus(busySeconds)),
-              )
-            : status
-              ? createElement(
-                  Box,
-                  {
-                    marginBottom: 1,
-                  },
-                  createElement(
-                    Text,
-                    status.kind === 'error'
-                      ? { color: 'red' }
-                      : status.kind === 'success'
-                        ? { color: 'green' }
-                        : { dimColor: true },
-                    status.text,
-                  ),
-                )
-              : null,
+          createElement(ChatStatus, {
+            busy,
+            busySeconds,
+            status,
+          }),
           modelSwitcherState
             ? createElement(ModelSwitcher, {
                 currentModel: activeModel,
@@ -1159,52 +1072,14 @@ export async function runAssistantChatWithInk(
                 reasoningIndex: modelSwitcherState.reasoningIndex,
               })
             : null,
-          createElement(
-            Box,
-            {
-              backgroundColor: COMPOSER_BACKGROUND,
-              flexDirection: 'row',
-              marginBottom: slashSuggestions.length > 0 ? 0 : 1,
-              paddingX: 2,
-              paddingY: 1,
-              width: '100%',
-            },
-            createElement(
-              React.Fragment,
-              {},
-              createElement(
-                Text,
-                { color: COMPOSER_TEXT_COLOR },
-                '› ',
-              ),
-              createElement(
-                ComposerInput,
-                {
-                  disabled: busy || modelSwitcherState !== null,
-                  value,
-                  placeholder: 'Type a message',
-                  onChange: (nextValue: string) => {
-                    if (!busy) {
-                      setValue(nextValue)
-                    }
-                  },
-                  onSubmit: (submittedValue: string) => {
-                    void submitPrompt(submittedValue)
-                  },
-                },
-              ),
-            ),
-          ),
-          createElement(SlashCommandSuggestions, {
-            commands: slashSuggestions,
+          createElement(ChatComposer, {
+            busy,
+            modelSwitcherActive: modelSwitcherState !== null,
+            onSubmit: submitPrompt,
           }),
-          createElement(
-            Box,
-            {
-              flexDirection: 'column',
-            },
-            createElement(Text, { dimColor: true }, metadataLine),
-          ),
+          createElement(ChatFooter, {
+            metadataLine,
+          }),
         ),
       )
     }
