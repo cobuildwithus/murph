@@ -65,6 +65,12 @@
       ],
       "@healthybob/cli/*": [
         "packages/cli/src/*"
+      ],
+      "@healthybob/device-syncd": [
+        "packages/device-syncd/src/index.ts"
+      ],
+      "@healthybob/device-syncd/*": [
+        "packages/device-syncd/src/*"
       ]
     },
     "types": [

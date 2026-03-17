@@ -1,0 +1,33 @@
+{
+  "name": "@healthybob/device-syncd",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "healthybob-device-syncd": "./dist/bin.js"
+  },
+  "files": [
+    "README.md",
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc -b tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@healthybob/importers": "workspace:*",
+    "@healthybob/runtime-state": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

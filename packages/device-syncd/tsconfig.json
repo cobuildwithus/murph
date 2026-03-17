@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "references": [
+    {
+      "path": "../runtime-state"
+    },
+    {
+      "path": "../importers"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

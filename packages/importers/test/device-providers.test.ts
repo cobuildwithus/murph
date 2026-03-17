@@ -227,6 +227,36 @@ test("createImporters composes custom device providers behind the same core seam
   assert.equal(calls[0]?.events?.[0]?.fields?.value, 12345);
 });
 
+test("prepareDeviceProviderSnapshotImport records WHOOP deletions as append-only tombstone observations", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    vault: "fixture-vault",
+    snapshot: {
+      accountId: "whoop-user-3",
+      importedAt: "2026-03-16T12:00:00.000Z",
+      deletions: [
+        {
+          resource_type: "sleep",
+          resource_id: "sleep-9",
+          occurred_at: "2026-03-16T12:00:00.000Z",
+          source_event_type: "sleep.deleted",
+          payload: {
+            trace_id: "trace-9",
+          },
+        },
+      ],
+    },
+  });
+
+  const deletionEvent = payload.events?.find((event) => event.externalRef?.facet === "deleted");
+  const deletionArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "deletion:sleep:sleep-9");
+
+  assert.equal(deletionEvent?.kind, "observation");
+  assert.equal(deletionEvent?.fields?.metric, "external-resource-deleted");
+  assert.equal(deletionEvent?.fields?.deleted, true);
+  assert.equal(deletionArtifact?.fileName, "deletion-sleep-sleep-9.json");
+});
+
 test("device provider registry normalizes provider keys and rejects invalid registrations", () => {
   const registry = createDeviceProviderRegistry();
   const garminAdapter: DeviceProviderAdapter<{ steps?: number }> = {

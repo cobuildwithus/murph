@@ -27,6 +27,7 @@ export interface WhoopSnapshotInput {
   recoveries?: unknown[];
   sleeps?: unknown[];
   workouts?: unknown[];
+  deletions?: unknown[];
 }
 
 function asPlainObject(value: unknown): PlainObject | undefined {
@@ -228,6 +229,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
   const recoveries = asArray(request.recoveries).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const cycles = asArray(request.cycles).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const workouts = asArray(request.workouts).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
+  const deletions = asArray(request.deletions).map((entry) => asPlainObject(entry)).filter(Boolean) as PlainObject[];
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
   const rawArtifacts: DeviceRawArtifactPayload[] = [];
@@ -594,6 +596,47 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     });
   }
 
+
+  for (const deletion of deletions) {
+    const resourceType = slugify(deletion.resource_type ?? deletion.resourceType, "resource");
+    const resourceId = stringId(deletion.resource_id ?? deletion.resourceId) ?? `deleted-${events.length + 1}`;
+    const occurredAt = toIso(deletion.occurred_at ?? deletion.occurredAt) ?? importedAt;
+    const sourceEventType =
+      typeof deletion.source_event_type === "string" && deletion.source_event_type.trim()
+        ? deletion.source_event_type.trim()
+        : typeof deletion.sourceEventType === "string" && deletion.sourceEventType.trim()
+          ? deletion.sourceEventType.trim()
+          : undefined;
+    const deletionRole = `deletion:${resourceType}:${resourceId}`;
+
+    pushRawArtifact(
+      rawArtifacts,
+      createRawArtifact(deletionRole, `deletion-${resourceType}-${resourceId}.json`, deletion),
+    );
+
+    events.push(
+      stripUndefined({
+        kind: "observation",
+        occurredAt,
+        recordedAt: occurredAt,
+        source: "device",
+        title: trimToLength(`WHOOP ${resourceType} deleted`, 160),
+        note: sourceEventType ? trimToLength(`Webhook event: ${sourceEventType}`, 4000) : undefined,
+        rawArtifactRoles: [deletionRole],
+        externalRef: makeExternalRef(resourceType, resourceId, occurredAt, "deleted"),
+        fields: stripUndefined({
+          metric: "external-resource-deleted",
+          value: 1,
+          unit: "boolean",
+          provider: "whoop",
+          resourceType,
+          deleted: true,
+          sourceEventType,
+        }),
+      }),
+    );
+  }
+
   const provenance = stripEmptyObject({
     whoopUserId: stringId(profile?.user_id ?? profile?.userId ?? profile?.id),
     importedSections: {
@@ -603,6 +646,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
       recoveries: recoveries.length,
       cycles: cycles.length,
       workouts: workouts.length,
+      deletions: deletions.length,
     },
   });
 
