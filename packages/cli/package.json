@@ -68,5 +68,8 @@
     "@photon-ai/imessage-kit": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
   }
 }
