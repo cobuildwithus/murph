@@ -143,8 +143,10 @@ type AssistantChatOptions = z.infer<typeof assistantChatOptionsSchema>
 async function runAssistantChatCommand(context: {
   args: AssistantChatArgs
   options: AssistantChatOptions
+  agent: boolean
+  formatExplicit: boolean
 }) {
-  return runAssistantChat({
+  const result = await runAssistantChat({
     vault: context.options.vault,
     initialPrompt: context.args.prompt,
     sessionId: context.options.session,
@@ -161,6 +163,18 @@ async function runAssistantChatCommand(context: {
     profile: context.options.profile,
     oss: context.options.oss,
   })
+
+  if (!context.agent && !context.formatExplicit) {
+    process.stderr.write(
+      `Resume chat by typing: ${formatAssistantChatResumeCommand(result.session.sessionId)}\n`,
+    )
+  }
+
+  return result
+}
+
+function formatAssistantChatResumeCommand(sessionId: string): string {
+  return `healthybob chat --session "${sessionId}"`
 }
 
 function createAssistantChatCommandDefinition(input?: {
@@ -177,6 +191,7 @@ function createAssistantChatCommandDefinition(input?: {
       'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
     options: assistantChatOptionsSchema,
     output: assistantChatResultSchema,
+    outputPolicy: 'agent-only' as const,
     run: runAssistantChatCommand,
   }
 }

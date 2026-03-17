@@ -4,17 +4,36 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, test } from 'vitest'
+import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
   applyDefaultVaultToArgs,
+  readOperatorConfig,
+  saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from '../src/operator-config.js'
 import { resolveAssistantSession } from '../src/assistant-state.js'
+import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { createVaultCli } from '../src/vault-cli.js'
+import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
 import { ensureCliRuntimeArtifacts, repoRoot, requireData, runCli } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
 const execFileAsync = promisify(execFile)
 const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
+const runtimeMocks = vi.hoisted(() => ({
+  runAssistantChat: vi.fn(),
+}))
+
+vi.mock('../src/assistant-runtime.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/assistant-runtime.js')>(
+    '../src/assistant-runtime.js',
+  )
+
+  return {
+    ...actual,
+    runAssistantChat: runtimeMocks.runAssistantChat,
+  }
+})
 
 afterEach(async () => {
   await Promise.all(
@@ -25,6 +44,10 @@ afterEach(async () => {
       })
     }),
   )
+})
+
+beforeEach(() => {
+  runtimeMocks.runAssistantChat.mockReset()
 })
 
 test.sequential(
@@ -203,6 +226,81 @@ test('root chat alias participates in default-vault injection', () => {
   )
 })
 
+test('root chat prints only a resume hint after a human TTY session exits', async () => {
+  runtimeMocks.runAssistantChat.mockResolvedValue(createMockChatResult('asst_human'))
+
+  const result = await runInProcessCliWithTty(['chat', '--vault', '/tmp/mock-vault'])
+
+  assert.equal(result.stdout, '')
+  assert.equal(
+    result.stderr,
+    'Resume chat by typing: healthybob chat --session "asst_human"\n',
+  )
+  assert.deepEqual(runtimeMocks.runAssistantChat.mock.calls, [
+    [
+      {
+        vault: '/tmp/mock-vault',
+        initialPrompt: undefined,
+        sessionId: undefined,
+        alias: undefined,
+        channel: undefined,
+        identityId: undefined,
+        participantId: undefined,
+        sourceThreadId: undefined,
+        provider: 'codex-cli',
+        codexCommand: undefined,
+        model: undefined,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: undefined,
+        oss: undefined,
+      },
+    ],
+  ])
+})
+
+test('root chat keeps explicit machine-readable output intact', async () => {
+  runtimeMocks.runAssistantChat.mockResolvedValue(createMockChatResult('asst_json'))
+
+  const result = await runInProcessCliWithTty([
+    'chat',
+    '--vault',
+    '/tmp/mock-vault',
+    '--format',
+    'json',
+  ])
+
+  assert.equal(result.stderr, '')
+  assert.deepEqual(JSON.parse(result.stdout), createMockChatResult('asst_json'))
+})
+
+test.sequential(
+  'assistant model defaults persist in operator config without disturbing the default vault',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-config-'))
+    const homeRoot = path.join(parent, 'home')
+    const vaultRoot = path.join(homeRoot, 'default-vault')
+    cleanupPaths.push(parent)
+
+    await mkdir(vaultRoot, { recursive: true })
+    await saveDefaultVaultConfig(vaultRoot, homeRoot)
+    await saveAssistantOperatorDefaultsPatch(
+      {
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'xhigh',
+      },
+      homeRoot,
+    )
+
+    const config = await readOperatorConfig(homeRoot)
+    assert.ok(config)
+    assert.equal(config.defaultVault, path.join('~', 'default-vault'))
+    assert.equal(config.assistant?.model, 'gpt-5.4-mini')
+    assert.equal(config.assistant?.reasoningEffort, 'xhigh')
+  },
+  20000,
+)
+
 function restoreEnvironmentVariable(
   key: string,
   value: string | undefined,
@@ -213,6 +311,90 @@ function restoreEnvironmentVariable(
   }
 
   process.env[key] = value
+}
+
+function createMockChatResult(sessionId: string) {
+  return {
+    vault: '/tmp/mock-vault',
+    startedAt: '2026-03-17T23:20:16.318Z',
+    stoppedAt: '2026-03-17T23:21:22.167Z',
+    turns: 0,
+    session: {
+      schema: 'healthybob.assistant-session.v2' as const,
+      sessionId,
+      provider: 'codex-cli' as const,
+      providerSessionId: null,
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only' as const,
+        approvalPolicy: 'never' as const,
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: null,
+        channel: null,
+        identityId: null,
+        actorId: null,
+        threadId: null,
+        threadIsDirect: null,
+        delivery: null,
+      },
+      createdAt: '2026-03-17T23:20:16.331Z',
+      updatedAt: '2026-03-17T23:20:16.331Z',
+      lastTurnAt: null,
+      turnCount: 0,
+    },
+  }
+}
+
+async function runInProcessCliWithTty(args: string[]): Promise<{
+  stderr: string
+  stdout: string
+}> {
+  const cli = createVaultCli(
+    createUnwiredVaultCliServices(),
+    createIntegratedInboxCliServices(),
+  )
+  const stdout: string[] = []
+  const stderr: string[] = []
+  const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')
+  const stderrWriteSpy = vi
+    .spyOn(process.stderr, 'write')
+    .mockImplementation(((chunk: string | Uint8Array) => {
+      stderr.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
+      return true
+    }) as typeof process.stderr.write)
+
+  Object.defineProperty(process.stdout, 'isTTY', {
+    configurable: true,
+    value: true,
+  })
+
+  try {
+    await cli.serve(args, {
+      env: process.env,
+      exit: () => {},
+      stdout(chunk) {
+        stdout.push(chunk)
+      },
+    })
+  } finally {
+    stderrWriteSpy.mockRestore()
+
+    if (stdoutTtyDescriptor) {
+      Object.defineProperty(process.stdout, 'isTTY', stdoutTtyDescriptor)
+    } else {
+      delete (process.stdout as { isTTY?: boolean }).isTTY
+    }
+  }
+
+  return {
+    stderr: stderr.join(''),
+    stdout: stdout.join(''),
+  }
 }
 
 async function runSourceCli<TData = Record<string, unknown>>(
