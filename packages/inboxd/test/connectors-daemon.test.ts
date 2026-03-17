@@ -317,6 +317,92 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
   assert.deepEqual(cursorWrites, ["self", "self"]);
 });
 
+
+
+test("runPollConnector uses connector-supplied checkpoints when emitting captures", async () => {
+  const cursorWrites: Array<Record<string, unknown> | null> = [];
+
+  await runPollConnector({
+    connector: createStubPollConnector({
+      id: "telegram:bot",
+      source: "telegram",
+      accountId: "bot",
+      async backfill(cursor, emit) {
+        assert.equal(cursor, null);
+
+        await emit(
+          {
+            source: "telegram",
+            externalId: "update:42",
+            accountId: "bot",
+            thread: {
+              id: "123",
+            },
+            actor: {
+              isSelf: false,
+            },
+            occurredAt: "2026-03-13T09:00:00.000Z",
+            text: "Scoped checkpoint write",
+            attachments: [],
+            raw: {},
+          },
+          { updateId: 42 },
+        );
+
+        return { updateId: 42 };
+      },
+    }),
+    pipeline: {
+      runtime: {
+        databasePath: ":memory:",
+        close() {},
+        getCursor() {
+          return null;
+        },
+        setCursor(_source, _accountId, cursor) {
+          cursorWrites.push(cursor);
+        },
+        findByExternalId() {
+          return null;
+        },
+        upsertCaptureIndex() {},
+        enqueueDerivedJobs() {},
+        listAttachmentParseJobs() {
+          return [];
+        },
+        claimNextAttachmentParseJob() {
+          return null;
+        },
+        requeueAttachmentParseJobs() {
+          return 0;
+        },
+        completeAttachmentParseJob() {
+          throw new Error("completeAttachmentParseJob should not be called");
+        },
+        failAttachmentParseJob() {
+          throw new Error("failAttachmentParseJob should not be called");
+        },
+        listCaptures() {
+          return [];
+        },
+        searchCaptures() {
+          return [];
+        },
+        getCapture() {
+          return null;
+        },
+      },
+      async processCapture(input) {
+        return createPersistedCapture(input);
+      },
+      close() {},
+    },
+    signal: new AbortController().signal,
+  });
+
+  assert.deepEqual(cursorWrites, [{ updateId: 42 }, { updateId: 42 }]);
+});
+
 test("runInboxDaemon aborts sibling connectors and waits for their cleanup when one fails", async () => {
   let runningConnectorAborted = false;
   let runningConnectorClosed = 0;

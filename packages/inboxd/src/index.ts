@@ -1,5 +1,6 @@
 export type {
   InboundAttachment,
+  InboundAttachmentData,
   InboundCapture,
   IndexedAttachment,
   PersistedCapture,
@@ -29,6 +30,23 @@ export type {
   PollConnector,
   WebhookConnector,
 } from "./connectors/types.js";
+export type {
+  ChatAttachment,
+  ChatMessage,
+  CreateInboundCaptureFromChatMessageInput,
+} from "./connectors/chat/message.js";
+export {
+  compareInboundCaptures,
+  createInboundCaptureFromChatMessage,
+} from "./connectors/chat/message.js";
+export type {
+  ChatPollDriver,
+  ChatPollWatcherHandle,
+  CreateNormalizedChatPollConnectorInput,
+} from "./connectors/chat/poll.js";
+export {
+  createNormalizedChatPollConnector,
+} from "./connectors/chat/poll.js";
 export {
   createImessageConnector,
   loadImessageKitDriver,
@@ -48,6 +66,43 @@ export type {
   ImessageKitChatLike,
   ImessageKitMessageLike,
 } from "./connectors/imessage/normalize.js";
+export {
+  DEFAULT_TELEGRAM_ALLOWED_UPDATES,
+  createTelegramApiPollDriver,
+  createTelegramBotApiPollDriver,
+  createTelegramPollConnector,
+  createTelegramUpdateCheckpoint,
+  readTelegramUpdateCheckpoint,
+} from "./connectors/telegram/connector.js";
+export type {
+  CreateTelegramApiPollDriverInput,
+  CreateTelegramBotApiPollDriverInput,
+  TelegramApiLike,
+  TelegramConnectorOptions,
+  TelegramPollDriver,
+} from "./connectors/telegram/connector.js";
+export {
+  buildTelegramThreadId,
+  extractTelegramMessage,
+  normalizeTelegramMessage,
+  normalizeTelegramUpdate,
+  toTelegramChatMessage,
+} from "./connectors/telegram/normalize.js";
+export type {
+  NormalizeTelegramMessageInput,
+  NormalizeTelegramUpdateInput,
+  TelegramAttachmentDownloadDriver,
+} from "./connectors/telegram/normalize.js";
+export type {
+  TelegramChat,
+  TelegramFile,
+  TelegramFileBase,
+  TelegramMessageLike,
+  TelegramPhotoSize,
+  TelegramUpdateLike,
+  TelegramUser,
+  TelegramWebhookInfo,
+} from "./connectors/telegram/types.js";
 export {
   createConnectorRegistry,
 } from "./kernel/registry.js";

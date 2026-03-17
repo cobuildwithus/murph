@@ -1,20 +1,21 @@
-import type { InboundCapture } from "../../contracts/capture.js";
-import type { Cursor, EmitCapture, PollConnector } from "../types.js";
+import { createNormalizedChatPollConnector, type ChatPollDriver } from "../chat/poll.js";
 import {
   type ImessageKitChatLike,
   type ImessageKitMessageLike,
   normalizeImessageMessage,
 } from "./normalize.js";
-import { createCaptureCheckpoint } from "../../shared.js";
 
 export interface ImessageGetMessagesInput {
-  cursor?: Cursor | null;
+  cursor?: Record<string, unknown> | null;
   limit?: number;
   includeOwnMessages?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface ImessageWatchOptions {
+  cursor?: Record<string, unknown> | null;
   includeOwnMessages?: boolean;
+  signal: AbortSignal;
   onMessage(message: ImessageKitMessageLike): Promise<void> | void;
 }
 
@@ -23,7 +24,7 @@ export interface ImessageWatcherHandle {
   stop?(): Promise<void> | void;
 }
 
-export interface ImessagePollDriver {
+export interface ImessagePollDriver extends ChatPollDriver<ImessageKitMessageLike> {
   getMessages(input: ImessageGetMessagesInput): Promise<ImessageKitMessageLike[]>;
   listChats?(): Promise<ImessageKitChatLike[]>;
   startWatching(options: ImessageWatchOptions): Promise<ImessageWatcherHandle | (() => Promise<void> | void) | void>;
@@ -45,85 +46,43 @@ export function createImessageConnector({
   accountId,
   includeOwnMessages = true,
   backfillLimit = 500,
-}: ImessageConnectorOptions): PollConnector {
+}: ImessageConnectorOptions) {
   const normalizedAccountId = normalizeImessageAccountId(accountId);
   const connectorId = id ?? `${source}:${normalizedAccountId ?? "default"}`;
-  let chats: Map<string, ImessageKitChatLike> | null = null;
-  let activeWatcher: ImessageWatcherHandle | (() => Promise<void> | void) | void;
 
-  return {
+  return createNormalizedChatPollConnector<
+    ImessageKitMessageLike,
+    ImessagePollDriver,
+    Map<string, ImessageKitChatLike>
+  >({
+    driver,
     id: connectorId,
     source,
     accountId: normalizedAccountId,
-    kind: "poll",
+    includeOwnMessages,
+    backfillLimit,
     capabilities: {
-      backfill: true,
-      watch: true,
-      webhooks: false,
       attachments: true,
       ownMessages: includeOwnMessages,
     },
-    async backfill(cursor, emit) {
-      const indexedChats = await loadChats(driver);
-      chats = indexedChats;
-      const messages = await driver.getMessages({
-        cursor,
-        limit: backfillLimit,
-        includeOwnMessages,
-      });
-      const captures = messages
-        .map((message) =>
-          normalizeImessageMessage({
-            message,
-            source,
-            accountId: normalizedAccountId,
-            chat: resolveChat(indexedChats, message),
-          }),
-        )
-        .sort(compareCaptures);
+    loadContext: loadChats,
+    refreshContext: async ({ driver, context, message }) => {
+      const existing = context ? resolveChat(context, message) : null;
 
-      let nextCursor = cursor;
-
-      for (const capture of captures) {
-        await emit(capture);
-        nextCursor = createCaptureCheckpoint(capture);
+      if (existing || !driver.listChats) {
+        return context;
       }
 
-      return nextCursor;
+      return loadChats(driver);
     },
-    async watch(cursor, emit, signal) {
-      void cursor;
-
-      activeWatcher = await driver.startWatching({
-        includeOwnMessages,
-        onMessage: async (message) => {
-          if (signal.aborted) {
-            return;
-          }
-
-          const resolved = await resolveChatWithRefresh(chats, driver, message);
-          chats = resolved.chats;
-
-          const capture = normalizeImessageMessage({
-            message,
-            source,
-            accountId: normalizedAccountId,
-            chat: resolved.chat,
-          });
-
-          await emit(capture);
-        },
-      });
-
-      await waitForAbort(signal);
-      await stopWatcher(activeWatcher);
-      activeWatcher = undefined;
-    },
-    async close() {
-      await stopWatcher(activeWatcher);
-      activeWatcher = undefined;
-    },
-  };
+    normalize: async ({ message, source, accountId, context }) =>
+      normalizeImessageMessage({
+        message,
+        source,
+        accountId,
+        chat: resolveChat(context ?? new Map(), message),
+      }),
+  });
 }
 
 export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
@@ -153,41 +112,12 @@ export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
   };
 }
 
-function compareCaptures(left: InboundCapture, right: InboundCapture): number {
-  if (left.occurredAt !== right.occurredAt) {
-    return left.occurredAt.localeCompare(right.occurredAt);
-  }
-
-  return left.externalId.localeCompare(right.externalId);
-}
-
 function resolveChat(
   chats: Map<string, ImessageKitChatLike>,
   message: ImessageKitMessageLike,
 ): ImessageKitChatLike | null {
   const key = message.chatGuid ?? message.chatId ?? null;
   return key ? (chats.get(key) ?? null) : null;
-}
-
-async function resolveChatWithRefresh(
-  chats: Map<string, ImessageKitChatLike> | null,
-  driver: ImessagePollDriver,
-  message: ImessageKitMessageLike,
-): Promise<{ chat: ImessageKitChatLike | null; chats: Map<string, ImessageKitChatLike> | null }> {
-  const existing = chats ? resolveChat(chats, message) : null;
-
-  if (existing || !driver.listChats) {
-    return {
-      chat: existing,
-      chats,
-    };
-  }
-
-  const refreshedChats = await loadChats(driver);
-  return {
-    chat: resolveChat(refreshedChats, message),
-    chats: refreshedChats,
-  };
 }
 
 async function loadChats(driver: ImessagePollDriver): Promise<Map<string, ImessageKitChatLike>> {
@@ -220,36 +150,4 @@ function normalizeImessageAccountId(accountId: string | null | undefined): strin
 
   const normalized = accountId.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-async function stopWatcher(
-  watcher: ImessageWatcherHandle | (() => Promise<void> | void) | void,
-): Promise<void> {
-  if (!watcher) {
-    return;
-  }
-
-  if (typeof watcher === "function") {
-    await watcher();
-    return;
-  }
-
-  if (typeof watcher.close === "function") {
-    await watcher.close();
-    return;
-  }
-
-  if (typeof watcher.stop === "function") {
-    await watcher.stop();
-  }
-}
-
-async function waitForAbort(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
 }

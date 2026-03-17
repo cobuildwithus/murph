@@ -1,3 +1,5 @@
+export type InboundAttachmentData = Uint8Array;
+
 export interface InboundAttachment {
   externalId?: string | null;
   kind: "image" | "audio" | "video" | "document" | "other";
@@ -5,6 +7,7 @@ export interface InboundAttachment {
   originalPath?: string | null;
   fileName?: string | null;
   byteSize?: number | null;
+  data?: InboundAttachmentData | null;
 }
 
 export interface InboundCapture {
@@ -28,7 +31,7 @@ export interface InboundCapture {
   raw: Record<string, unknown>;
 }
 
-export interface StoredAttachment extends InboundAttachment {
+export interface StoredAttachment extends Omit<InboundAttachment, "data"> {
   attachmentId: string;
   ordinal: number;
   storedPath?: string | null;

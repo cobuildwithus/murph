@@ -4,7 +4,7 @@ import {
   pathSchema,
 } from './vault-cli-contracts.js'
 
-export const inboxSourceValues = ['imessage'] as const
+export const inboxSourceValues = ['imessage', 'telegram'] as const
 export const inboxPromotionTargetValues = ['meal', 'document', 'journal', 'experiment-note'] as const
 export const inboxCheckStatusValues = ['pass', 'warn', 'fail'] as const
 

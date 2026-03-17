@@ -194,11 +194,17 @@ interface PollConnector {
   }
   backfill?(
     cursor: Record<string, unknown> | null,
-    emit: (capture: RuntimeCaptureRecordInput) => Promise<PersistedCapture>,
+    emit: (
+      capture: RuntimeCaptureRecordInput,
+      checkpoint?: Record<string, unknown> | null,
+    ) => Promise<PersistedCapture>,
   ): Promise<Record<string, unknown> | null>
   watch?(
     cursor: Record<string, unknown> | null,
-    emit: (capture: RuntimeCaptureRecordInput) => Promise<PersistedCapture>,
+    emit: (
+      capture: RuntimeCaptureRecordInput,
+      checkpoint?: Record<string, unknown> | null,
+    ) => Promise<PersistedCapture>,
     signal: AbortSignal,
   ): Promise<void>
   close?(): Promise<void> | void
@@ -227,6 +233,26 @@ interface ImessageDriver {
   listChats?(): Promise<unknown[]>
 }
 
+interface TelegramDriver {
+  getMe(signal?: AbortSignal): Promise<unknown>
+  getMessages(input: {
+    cursor?: Record<string, unknown> | null
+    limit?: number
+    includeOwnMessages?: boolean
+    signal?: AbortSignal
+  }): Promise<unknown[]>
+  startWatching(input: {
+    cursor?: Record<string, unknown> | null
+    includeOwnMessages?: boolean
+    signal: AbortSignal
+    onMessage(message: unknown): Promise<void> | void
+  }): Promise<{ close?(): Promise<void> | void; stop?(): Promise<void> | void } | (() => Promise<void> | void) | void>
+  getFile(fileId: string, signal?: AbortSignal): Promise<unknown>
+  downloadFile(filePath: string, signal?: AbortSignal): Promise<Uint8Array>
+  deleteWebhook?(input?: { dropPendingUpdates?: boolean }, signal?: AbortSignal): Promise<void>
+  getWebhookInfo?(signal?: AbortSignal): Promise<{ url?: string } | null>
+}
+
 interface InboxRuntimeModule {
   ensureInboxVault(vaultRoot: string): Promise<void>
   openInboxRuntime(input: { vaultRoot: string }): Promise<RuntimeStore>
@@ -241,6 +267,22 @@ interface InboxRuntimeModule {
     includeOwnMessages?: boolean
     backfillLimit?: number
   }): PollConnector
+  createTelegramPollConnector(input: {
+    driver: TelegramDriver
+    id?: string
+    accountId?: string | null
+    backfillLimit?: number
+    downloadAttachments?: boolean
+    resetWebhookOnStart?: boolean
+  }): PollConnector
+  createTelegramBotApiPollDriver(input: {
+    token: string
+    allowedUpdates?: string[] | null
+    timeoutSeconds?: number
+    batchSize?: number
+    apiBaseUrl?: string
+    fileBaseUrl?: string
+  }): TelegramDriver
   loadImessageKitDriver(): Promise<ImessageDriver>
   rebuildRuntimeFromVault(input: {
     vaultRoot: string
@@ -424,6 +466,8 @@ interface InboxServicesDependencies {
   loadInboxModule?: () => Promise<InboxRuntimeModule>
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
+  loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
+  getEnvironment?: () => NodeJS.ProcessEnv
 }
 
 interface SourceAddInput extends CommandContext {
@@ -587,6 +631,7 @@ export function createIntegratedInboxCliServices(
       new Promise<void>((resolve) => {
         setTimeout(resolve, milliseconds)
       }))
+  const getEnvironment = dependencies.getEnvironment ?? (() => process.env)
   const loadCore =
     dependencies.loadCoreModule ??
     (() => loadRuntimeModule<CoreRuntimeModule>('@healthybob/core'))
@@ -619,6 +664,31 @@ export function createIntegratedInboxCliServices(
 
     const inboxd = await loadInbox()
     return inboxd.loadImessageKitDriver()
+  }
+
+  const loadConfiguredTelegramDriver = async (
+    config: InboxConnectorConfig,
+  ): Promise<TelegramDriver> => {
+    if (dependencies.loadTelegramDriver) {
+      return dependencies.loadTelegramDriver(config)
+    }
+
+    const inboxd = await loadInbox()
+    const env = getEnvironment()
+    const token = resolveTelegramBotToken(env)
+
+    if (!token) {
+      throw new VaultCliError(
+        'INBOX_TELEGRAM_TOKEN_MISSING',
+        'Telegram requires a bot token in HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.',
+      )
+    }
+
+    return inboxd.createTelegramBotApiPollDriver({
+      token,
+      apiBaseUrl: resolveTelegramApiBaseUrl(env) ?? undefined,
+      fileBaseUrl: resolveTelegramFileBaseUrl(env) ?? undefined,
+    })
   }
 
   const journalPromotionEnabled =
@@ -923,6 +993,26 @@ export function createIntegratedInboxCliServices(
       ),
     )
 
+    if (databaseAvailable) {
+      try {
+        await rebuildRuntime(paths, inboxd)
+        checks.push(
+          passCheck(
+            'rebuild',
+            'Runtime rebuild from vault envelopes completed successfully.',
+          ),
+        )
+      } catch (error) {
+        checks.push(
+          failCheck(
+            'rebuild',
+            'Runtime rebuild from vault envelopes failed.',
+            { error: errorMessage(error) },
+          ),
+        )
+      }
+    }
+
     if (connector.source === 'imessage') {
       if (getPlatform() !== 'darwin') {
         checks.push(
@@ -971,26 +1061,6 @@ export function createIntegratedInboxCliServices(
         )
       }
 
-      if (databaseAvailable) {
-        try {
-          await rebuildRuntime(paths, inboxd)
-          checks.push(
-            passCheck(
-              'rebuild',
-              'Runtime rebuild from vault envelopes completed successfully.',
-            ),
-          )
-        } catch (error) {
-          checks.push(
-            failCheck(
-              'rebuild',
-              'Runtime rebuild from vault envelopes failed.',
-              { error: errorMessage(error) },
-            ),
-          )
-        }
-      }
-
       if (driver) {
         try {
           const chats = (await driver.listChats?.()) ?? []
@@ -1028,6 +1098,97 @@ export function createIntegratedInboxCliServices(
               { error: errorMessage(error) },
             ),
           )
+        }
+      }
+    }
+
+    if (connector.source === 'telegram') {
+      checks.push(passCheck('platform', 'Telegram long polling is platform-agnostic.'))
+
+      const env = getEnvironment()
+      const token = resolveTelegramBotToken(env)
+      const usesInjectedTelegramDriver = Boolean(dependencies.loadTelegramDriver)
+      if (!token && !usesInjectedTelegramDriver) {
+        checks.push(
+          failCheck(
+            'token',
+            'Telegram bot token is missing from HEALTHYBOB_TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_TOKEN.',
+          ),
+        )
+      } else if (usesInjectedTelegramDriver) {
+        checks.push(
+          passCheck(
+            'token',
+            'Telegram driver configuration is delegated to the integrating workspace.',
+          ),
+        )
+      } else {
+        checks.push(
+          passCheck('token', 'Telegram bot token was found in the local environment.'),
+        )
+      }
+
+      let driver: TelegramDriver | null = null
+      if (token || usesInjectedTelegramDriver) {
+        try {
+          driver = await loadConfiguredTelegramDriver(connector)
+          checks.push(passCheck('driver-import', 'The Telegram poll driver initialized successfully.'))
+        } catch (error) {
+          checks.push(
+            failCheck(
+              'driver-import',
+              'The Telegram poll driver could not be initialized.',
+              { error: errorMessage(error) },
+            ),
+          )
+        }
+      }
+
+      if (driver) {
+        try {
+          const bot = await driver.getMe()
+          checks.push(
+            passCheck('probe', 'The Telegram bot token authenticated successfully.', {
+              bot: typeof bot === 'object' && bot !== null && 'username' in bot ? (bot as { username?: unknown }).username ?? null : null,
+            }),
+          )
+        } catch (error) {
+          checks.push(
+            failCheck(
+              'probe',
+              'The Telegram bot token could not authenticate with getMe.',
+              { error: errorMessage(error) },
+            ),
+          )
+        }
+
+        if (driver.getWebhookInfo) {
+          try {
+            const webhook = await driver.getWebhookInfo()
+            const url = normalizeNullableString(webhook?.url)
+
+            if (url) {
+              checks.push(
+                warnCheck(
+                  'webhook',
+                  'Telegram currently has an active webhook; the local poll connector will delete it on start.',
+                  { url },
+                ),
+              )
+            } else {
+              checks.push(
+                passCheck('webhook', 'No Telegram webhook is configured; local polling can run safely.'),
+              )
+            }
+          } catch (error) {
+            checks.push(
+              warnCheck(
+                'webhook',
+                'Telegram webhook status could not be read.',
+                { error: errorMessage(error) },
+              ),
+            )
+          }
         }
       }
     }
@@ -1217,6 +1378,7 @@ export function createIntegratedInboxCliServices(
           connector: connectorConfig,
           inputLimit: input.limit,
           loadImessageDriver: loadConfiguredImessageDriver,
+          loadTelegramDriver: loadConfiguredTelegramDriver,
           loadInbox,
         })
         let importedCount = 0
@@ -1225,28 +1387,32 @@ export function createIntegratedInboxCliServices(
         const cursorAccountId = runtimeNamespaceAccountId(connectorConfig)
         let cursor = runtime.getCursor(connector.source, cursorAccountId)
 
-        const nextCursor = await connector.backfill?.(cursor, async (capture) => {
-          const persisted = await pipeline.processCapture(capture)
-          if (persisted.deduped) {
-            dedupedCount += 1
-          } else {
-            importedCount += 1
-            if (parserService && persisted.captureId) {
-              parseResults = parseResults.concat(
-                await parserService.drain({
-                  captureId: persisted.captureId,
-                }),
-              )
+        const nextCursor = await connector.backfill?.(
+          cursor,
+          async (capture, checkpoint) => {
+            const persisted = await pipeline.processCapture(capture)
+            if (persisted.deduped) {
+              dedupedCount += 1
+            } else {
+              importedCount += 1
+              if (parserService && persisted.captureId) {
+                parseResults = parseResults.concat(
+                  await parserService.drain({
+                    captureId: persisted.captureId,
+                  }),
+                )
+              }
             }
-          }
-          cursor = buildCaptureCursor(capture)
-          runtime.setCursor(
-            connector.source,
-            cursorAccountId ?? capture.accountId ?? null,
-            cursor,
-          )
-          return persisted
-        })
+            cursor =
+              checkpoint === undefined ? buildCaptureCursor(capture) : checkpoint ?? null
+            runtime.setCursor(
+              connector.source,
+              cursorAccountId ?? capture.accountId ?? null,
+              cursor,
+            )
+            return persisted
+          },
+        )
 
         runtime.setCursor(
           connector.source,
@@ -1308,6 +1474,7 @@ export function createIntegratedInboxCliServices(
           instantiateConnector({
             connector,
             loadImessageDriver: loadConfiguredImessageDriver,
+            loadTelegramDriver: loadConfiguredTelegramDriver,
             loadInbox,
           }),
         ),
@@ -2309,6 +2476,7 @@ async function instantiateConnector(input: {
   inputLimit?: number
   loadInbox: () => Promise<InboxRuntimeModule>
   loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
+  loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
 }) {
   const inboxd = await input.loadInbox()
 
@@ -2325,6 +2493,20 @@ async function instantiateConnector(input: {
           normalizeBackfillLimit(input.inputLimit) ??
           input.connector.options.backfillLimit ??
           500,
+      })
+    }
+    case 'telegram': {
+      const driver = await input.loadTelegramDriver(input.connector)
+      return inboxd.createTelegramPollConnector({
+        driver,
+        id: input.connector.id,
+        accountId: input.connector.accountId ?? 'bot',
+        backfillLimit:
+          normalizeBackfillLimit(input.inputLimit) ??
+          input.connector.options.backfillLimit ??
+          500,
+        downloadAttachments: true,
+        resetWebhookOnStart: true,
       })
     }
   }
@@ -2928,6 +3110,27 @@ function normalizeNullableString(value: string | null | undefined): string | nul
   return normalized.length > 0 ? normalized : null
 }
 
+function resolveTelegramBotToken(env: NodeJS.ProcessEnv): string | null {
+  return (
+    normalizeNullableString(env.HEALTHYBOB_TELEGRAM_BOT_TOKEN) ??
+    normalizeNullableString(env.TELEGRAM_BOT_TOKEN)
+  )
+}
+
+function resolveTelegramApiBaseUrl(env: NodeJS.ProcessEnv): string | null {
+  return (
+    normalizeNullableString(env.HEALTHYBOB_TELEGRAM_API_BASE_URL) ??
+    normalizeNullableString(env.TELEGRAM_API_BASE_URL)
+  )
+}
+
+function resolveTelegramFileBaseUrl(env: NodeJS.ProcessEnv): string | null {
+  return (
+    normalizeNullableString(env.HEALTHYBOB_TELEGRAM_FILE_BASE_URL) ??
+    normalizeNullableString(env.TELEGRAM_FILE_BASE_URL)
+  )
+}
+
 function runtimeNamespaceAccountId(
   connector: Pick<InboxConnectorConfig, 'accountId'>,
 ): string | null {
@@ -2949,6 +3152,8 @@ function normalizeConnectorAccountId(
   switch (source) {
     case 'imessage':
       return normalized ?? 'self'
+    case 'telegram':
+      return normalized ?? 'bot'
   }
 }
 

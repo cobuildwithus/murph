@@ -1257,6 +1257,37 @@ test.sequential('source add defaults the iMessage account identity to self when 
   }
 })
 
+test.sequential('source add defaults the Telegram account identity to bot when omitted', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-telegram-default-account')
+  const services = createIntegratedInboxCliServices({
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    const added = await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'telegram',
+      id: 'telegram:bot',
+    })
+    assert.equal(added.connector.accountId, 'bot')
+
+    const listed = await services.sourceList({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    assert.equal(listed.connectors[0]?.accountId, 'bot')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('source add rejects connector ids that alias the same source/account namespace', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-namespace-alias')
   const services = createIntegratedInboxCliServices({
@@ -1916,6 +1947,86 @@ test.sequential('doctor reports invalid config, missing source, and connector di
       ),
       true,
     )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('doctor reports Telegram diagnostics without consuming updates', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-telegram-doctor')
+  let getMessagesCalls = 0
+  let startWatchingCalls = 0
+
+  const services = createIntegratedInboxCliServices({
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+    loadTelegramDriver: async () => ({
+      async getMe() {
+        return {
+          id: 999,
+          username: 'healthybob_bot',
+        }
+      },
+      async getMessages() {
+        getMessagesCalls += 1
+        return []
+      },
+      async startWatching() {
+        startWatchingCalls += 1
+      },
+      async getFile() {
+        throw new Error('getFile should not run during doctor')
+      },
+      async downloadFile() {
+        throw new Error('downloadFile should not run during doctor')
+      },
+      async getWebhookInfo() {
+        return {
+          url: 'https://example.invalid/webhook',
+        }
+      },
+    }),
+    getEnvironment: () => ({}),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'telegram',
+      id: 'telegram:bot',
+    })
+
+    const doctor = await services.doctor({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'telegram:bot',
+    })
+    assert.equal(doctor.ok, true)
+    assert.equal(
+      doctor.checks.some(
+        (check) => check.name === 'token' && check.status === 'pass',
+      ),
+      true,
+    )
+    assert.equal(
+      doctor.checks.some(
+        (check) => check.name === 'probe' && check.status === 'pass',
+      ),
+      true,
+    )
+    assert.equal(
+      doctor.checks.some(
+        (check) => check.name === 'webhook' && check.status === 'warn',
+      ),
+      true,
+    )
+    assert.equal(getMessagesCalls, 0)
+    assert.equal(startWatchingCalls, 0)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

@@ -103,6 +103,15 @@ export function registerInboxCommands(
           },
         },
         {
+          command: 'vault-cli inbox source add telegram',
+          description: 'Add a Telegram long-poll connector.',
+          options: {
+            id: 'telegram:bot',
+            account: 'bot',
+            vault: true,
+          },
+        },
+        {
           command: 'vault-cli inbox doctor',
           description: 'Verify runtime setup before backfill.',
           args: { sourceId: 'imessage:self' },
@@ -258,16 +267,25 @@ export function registerInboxCommands(
         },
         description: 'Configure an iMessage source for the local account.',
       },
+      {
+        args: { source: 'telegram' },
+        options: {
+          id: 'telegram:bot',
+          account: 'bot',
+          vault: './vault',
+        },
+        description: 'Configure a Telegram bot source for local long polling.',
+      },
     ],
     hint:
-      'Use a stable runtime id such as `imessage:self`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
+      'Use a stable runtime id such as `imessage:self` or `telegram:bot`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
     options: withBaseOptions({
       id: z.string().min(1).describe('Runtime connector id.'),
       account: z
         .string()
         .min(1)
         .optional()
-        .describe('Optional account identity for the connector. Defaults to `self` for iMessage.'),
+        .describe('Optional account identity for the connector. Defaults to `self` for iMessage and `bot` for Telegram.'),
       includeOwn: z
         .boolean()
         .optional()

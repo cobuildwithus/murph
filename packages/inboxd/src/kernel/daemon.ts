@@ -18,12 +18,15 @@ export async function runPollConnector({
   const cursorAccountId = accountId ?? connector.accountId ?? null;
   let cursor = pipeline.runtime.getCursor(connector.source, cursorAccountId);
 
-  const emit = async (capture: Parameters<InboxPipeline["processCapture"]>[0]) => {
+  const emit = async (
+    capture: Parameters<InboxPipeline["processCapture"]>[0],
+    checkpoint?: Record<string, unknown> | null,
+  ) => {
     const result = await pipeline.processCapture(capture);
     pipeline.runtime.setCursor(
       connector.source,
       cursorAccountId ?? capture.accountId ?? null,
-      createCaptureCheckpoint(capture),
+      checkpoint === undefined ? createCaptureCheckpoint(capture) : checkpoint,
     );
     return result;
   };

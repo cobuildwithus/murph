@@ -2,7 +2,7 @@ import type { InboundCapture, PersistedCapture } from "../contracts/capture.js";
 
 export type ConnectorKind = "poll" | "webhook";
 export type Cursor = Record<string, unknown>;
-export type EmitCapture = (capture: InboundCapture) => Promise<PersistedCapture>;
+export type EmitCapture = (capture: InboundCapture, checkpoint?: Cursor | null) => Promise<PersistedCapture>;
 
 export interface BaseConnector {
   readonly id: string;

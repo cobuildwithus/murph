@@ -152,6 +152,64 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
   pipeline.close();
 });
 
+
+
+test("processCapture stores in-memory attachment bytes without an external source path", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-bytes-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const persisted = await pipeline.processCapture({
+    source: "telegram",
+    externalId: "update:1",
+    accountId: "bot",
+    thread: {
+      id: "chat-telegram",
+      isDirect: true,
+    },
+    actor: {
+      id: "111",
+      displayName: "Alice",
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T08:30:00.000Z",
+    text: "Photo from Telegram",
+    attachments: [
+      {
+        externalId: "photo-1",
+        kind: "image",
+        mime: "image/jpeg",
+        fileName: "telegram-photo.jpg",
+        data: new Uint8Array([7, 8, 9]),
+      },
+    ],
+    raw: {},
+  });
+
+  const capture = runtime.getCapture(persisted.captureId);
+  assert.ok(capture);
+  const storedPath = capture.attachments[0]?.storedPath;
+  assert.equal(typeof storedPath, "string");
+  assert.deepEqual(
+    new Uint8Array(await fs.readFile(path.join(vaultRoot, storedPath ?? ""))),
+    new Uint8Array([7, 8, 9]),
+  );
+
+  const envelope = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, capture.envelopePath), "utf8"),
+  ) as {
+    input: {
+      attachments: Array<Record<string, unknown>>;
+    };
+  };
+  assert.equal(envelope.input.attachments[0]?.originalPath ?? null, null);
+  assert.equal("data" in (envelope.input.attachments[0] ?? {}), false);
+
+  pipeline.close();
+});
+
 test("runtime search indexes attachment metadata and can rebuild from envelope files", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-search-vault");
   const sourceRoot = await makeTempDirectory("healthybob-inbox-search-source");

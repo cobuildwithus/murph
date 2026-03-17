@@ -13,7 +13,9 @@ test('inbox source add schema exposes the local runtime config options', async (
     await runRawCli(['inbox', 'source', 'add', '--schema', '--format', 'json']),
   ) as {
     args: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        enum?: string[]
+      }>
     }
     options: {
       properties: Record<string, unknown>
@@ -22,6 +24,7 @@ test('inbox source add schema exposes the local runtime config options', async (
   }
 
   assert.equal('source' in schema.args.properties, true)
+  assert.deepEqual(schema.args.properties.source?.enum, ['imessage', 'telegram'])
   assert.equal('id' in schema.options.properties, true)
   assert.equal('includeOwn' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'id', 'backfillLimit'])

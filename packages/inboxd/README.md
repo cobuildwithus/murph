@@ -29,7 +29,9 @@ tables, and attachment job state.
 ## Current scope
 
 - connector contracts for polling and webhook sources
-- iMessage-first poll connector over an injected driver boundary
+- a generic normalized chat-poll connector factory for source-specific transports
+- iMessage and Telegram poll connectors over injected driver boundaries
+- source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
 - capture pipeline with raw persistence, event/audit append, dedupe, and FTS
 - runtime list, show, and search helpers for future CLI/agent surfaces
 - `vault-cli inbox ...` is the intended human/operator surface layered on top of this package
@@ -46,6 +48,16 @@ The inbox runtime exposes attachment-job primitives that stay safely outside can
 These methods mutate only inbox-local runtime state such as `.runtime/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
 
 When combined with `@healthybob/parsers`, operators can drive those queues through `vault-cli inbox setup|doctor|parse|requeue` without mixing parser state into canonical health records.
+
+## Telegram adapter contract
+
+The Telegram connector is local-first and poll-first by default.
+
+- Use `createTelegramBotApiPollDriver(...)` for a zero-extra-dependency Bot API driver.
+- Use `createTelegramApiPollDriver({ api })` when you already have a grammY `Api` instance or another compatible Bot API client.
+- The connector stores source-native cursors such as Telegram `update_id` checkpoints instead of forcing every source through the same `occurredAt`/`externalId` cursor shape.
+- Downloaded media can be persisted directly from in-memory bytes, so remote transports do not need temp files just to enter the vault.
+- The CLI runtime expects a bot token in `HEALTHYBOB_TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` when it instantiates the built-in Telegram poll driver.
 
 ## iMessage adapter contract
 

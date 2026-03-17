@@ -74,10 +74,11 @@ export async function persistRawCapture({
   for (const [index, attachment] of input.attachments.entries()) {
     const ordinal = index + 1;
     const attachmentId = buildLegacyAttachmentId(captureId, ordinal);
+    const sanitizedAttachment = stripEphemeralAttachmentFields(attachment);
 
-    if (!attachment.originalPath) {
+    if (!attachment.originalPath && !attachment.data) {
       storedAttachments.push({
-        ...attachment,
+        ...sanitizedAttachment,
         attachmentId,
         ordinal,
         storedPath: null,
@@ -86,7 +87,10 @@ export async function persistRawCapture({
       continue;
     }
 
-    const safeName = sanitizeFileName(attachment.fileName ?? attachment.originalPath, `attachment-${ordinal}`);
+    const safeName = sanitizeFileName(
+      attachment.fileName ?? attachment.originalPath ?? attachment.externalId ?? `attachment-${ordinal}`,
+      `attachment-${ordinal}`,
+    );
     const relativePath = normalizeRelativePath(
       path.posix.join(
         attachmentDirectory,
@@ -95,17 +99,29 @@ export async function persistRawCapture({
     );
     const absolutePath = resolveVaultPath(vaultRoot, relativePath);
     await ensureParentDirectory(absolutePath);
-    try {
-      await copyFile(path.resolve(attachment.originalPath), absolutePath, fsConstants.COPYFILE_EXCL);
-    } catch (error) {
-      if (!isAlreadyExistsError(error)) {
-        throw error;
+
+    if (attachment.data) {
+      try {
+        await writeFile(absolutePath, attachment.data, { flag: "wx" });
+      } catch (error) {
+        if (!isAlreadyExistsError(error)) {
+          throw error;
+        }
+      }
+    } else if (attachment.originalPath) {
+      try {
+        await copyFile(path.resolve(attachment.originalPath), absolutePath, fsConstants.COPYFILE_EXCL);
+      } catch (error) {
+        if (!isAlreadyExistsError(error)) {
+          throw error;
+        }
       }
     }
+
     const fileStats = await stat(absolutePath);
 
     storedAttachments.push({
-      ...attachment,
+      ...sanitizedAttachment,
       attachmentId,
       ordinal,
       storedPath: relativePath,
@@ -133,7 +149,7 @@ export async function persistRawCapture({
     ...input,
     accountId: input.accountId ?? null,
     attachments: input.attachments.map((attachment) => ({
-      ...attachment,
+      ...stripEphemeralAttachmentFields(attachment),
       originalPath: null,
     })),
     raw: redactSensitivePaths(input.raw) as Record<string, unknown>,
@@ -152,7 +168,8 @@ export async function persistRawCapture({
       },
       null,
       2,
-    )}\n`,
+    )}
+`,
     "utf8",
   );
 
@@ -418,6 +435,15 @@ function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): numb
 
 function comparePreferenceScore(entry: EnvelopeEntry): number {
   return entry.envelope.captureId === createDeterministicInboxCaptureId(entry.envelope.input) ? 0 : 1;
+}
+
+type PersistableInboundAttachment = Omit<InboundCapture["attachments"][number], "data">;
+
+function stripEphemeralAttachmentFields(
+  attachment: InboundCapture["attachments"][number],
+): PersistableInboundAttachment {
+  const { data, ...sanitized } = attachment;
+  return sanitized;
 }
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
