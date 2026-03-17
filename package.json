@@ -33,6 +33,7 @@
     "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
     "setup": "bash scripts/setup-macos.sh",
     "onboard": "bash scripts/setup-macos.sh",
+    "chat": "pnpm exec tsx packages/cli/src/bin.ts assistant chat",
     "setup:inbox": "bash scripts/setup-inbox-local.sh",
     "doctor:inbox": "node packages/cli/dist/bin.js inbox doctor",
     "zip:src": "bash scripts/package-audit-context.sh --zip",

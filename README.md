@@ -20,6 +20,8 @@ pnpm onboard --vault ./vault
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
+After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout.
+
 ## Quick Start (TL;DR)
 
 Runtime: Node >= 22.16.0.
@@ -29,7 +31,7 @@ pnpm onboard --vault ./vault
 
 HEALTHYBOB_VAULT=./vault pnpm web:dev
 
-healthybob assistant chat
+pnpm chat
 vault-cli inbox doctor
 vault-cli vault stats
 ```
