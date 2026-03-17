@@ -9,9 +9,12 @@ export interface InboxCaptureRecord extends InboundCapture {
 }
 
 export interface InboxListFilters {
+  afterCaptureId?: string | null;
+  afterOccurredAt?: string | null;
   source?: string;
   accountId?: string | null;
   limit?: number;
+  oldestFirst?: boolean;
 }
 
 export interface InboxSearchFilters extends InboxListFilters {

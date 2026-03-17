@@ -60,15 +60,17 @@ test.sequential(
       await runCli<{
         session: {
           sessionId: string
-          channel: string | null
-          participantId: string | null
+          binding: {
+            channel: string | null
+            actorId: string | null
+          }
         }
       }>(['assistant', 'session', 'show', created.session.sessionId, '--vault', vaultRoot]),
     )
 
     assert.equal(shown.session.sessionId, created.session.sessionId)
-    assert.equal(shown.session.channel, 'telegram')
-    assert.equal(shown.session.participantId, 'contact:bob')
+    assert.equal(shown.session.binding.channel, 'telegram')
+    assert.equal(shown.session.binding.actorId, 'contact:bob')
   },
   20000,
 )

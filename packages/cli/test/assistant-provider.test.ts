@@ -12,7 +12,7 @@ vi.mock('../src/assistant-codex.js', () => ({
 import {
   executeAssistantProviderTurn,
   resolveAssistantProviderOptions,
-} from '../src/assistant-provider.js'
+} from '../src/chat-provider.js'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
@@ -49,7 +49,22 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   const result = await executeAssistantProviderTurn({
     provider: 'codex-cli',
     workingDirectory: '/tmp/vault',
-    prompt: 'hello',
+    systemPrompt: 'system prompt',
+    userPrompt: 'hello',
+    sessionContext: {
+      binding: {
+        conversationKey: 'channel:imessage|thread:chat-123',
+        channel: 'imessage',
+        identityId: null,
+        actorId: 'contact:bob',
+        threadId: 'chat-123',
+        threadIsDirect: false,
+        delivery: {
+          kind: 'thread',
+          target: 'chat-123',
+        },
+      },
+    },
     resumeProviderSessionId: 'thread-existing',
     codexCommand: '/opt/homebrew/bin/codex',
     model: 'gpt-oss:20b',
@@ -59,21 +74,19 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
     oss: true,
   })
 
-  assert.deepEqual(providerMocks.executeCodexPrompt.mock.calls, [
-    [
-      {
-        codexCommand: '/opt/homebrew/bin/codex',
-        workingDirectory: '/tmp/vault',
-        prompt: 'hello',
-        resumeSessionId: 'thread-existing',
-        model: 'gpt-oss:20b',
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: 'primary',
-        oss: true,
-      },
-    ],
-  ])
+  const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
+  assert.equal(call?.codexCommand, '/opt/homebrew/bin/codex')
+  assert.equal(call?.workingDirectory, '/tmp/vault')
+  assert.equal(call?.resumeSessionId, 'thread-existing')
+  assert.equal(call?.model, 'gpt-oss:20b')
+  assert.equal(call?.sandbox, 'read-only')
+  assert.equal(call?.approvalPolicy, 'never')
+  assert.equal(call?.profile, 'primary')
+  assert.equal(call?.oss, true)
+  assert.match(call?.prompt ?? '', /system prompt/u)
+  assert.match(call?.prompt ?? '', /channel: imessage/u)
+  assert.match(call?.prompt ?? '', /thread: chat-123/u)
+  assert.match(call?.prompt ?? '', /User message:\nhello/u)
   assert.deepEqual(result, {
     provider: 'codex-cli',
     providerSessionId: 'thread-123',

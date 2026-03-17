@@ -134,7 +134,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `export` composes readable and derived/admin capabilities.
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
-- `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, and always-on inbox triage; it stores only assistant metadata outside the canonical vault and delegates canonical promotions back through inbox/core boundaries.
+- `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, and always-on inbox triage; it stores only minimal assistant metadata outside the canonical vault, uses explicit conversation bindings for session reuse, treats `--deliveryTarget` as a one-send override, and delegates canonical promotions back through inbox/core boundaries.
 
 These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 

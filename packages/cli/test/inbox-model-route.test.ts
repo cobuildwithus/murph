@@ -10,9 +10,9 @@ const routeHarnessMocks = vi.hoisted(() => ({
   resolveAssistantLanguageModel: vi.fn(() => ({ provider: 'mock-model' })),
 }))
 
-vi.mock('../src/assistant-harness.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/assistant-harness.js')>(
-    '../src/assistant-harness.js',
+vi.mock('../src/model-harness.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/model-harness.js')>(
+    '../src/model-harness.js',
   )
 
   return {

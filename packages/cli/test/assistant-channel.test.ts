@@ -6,7 +6,7 @@ import { afterEach, test } from 'vitest'
 import {
   deliverAssistantMessage,
   resolveImessageDeliveryCandidates,
-} from '../src/assistant-channel.js'
+} from '../src/outbound-channel.js'
 
 const cleanupPaths: string[] = []
 
@@ -21,12 +21,14 @@ afterEach(async () => {
   )
 })
 
-test('resolveImessageDeliveryCandidates prefers explicit targets, then direct handles, then thread ids', () => {
+test('resolveImessageDeliveryCandidates prefers explicit targets and otherwise uses the stored binding delivery', () => {
   assert.deepEqual(
     resolveImessageDeliveryCandidates({
       explicitTarget: 'chat-override',
-      participantId: '+15551234567',
-      sourceThreadId: 'chat-123',
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-123',
+      },
     }),
     [
       {
@@ -38,34 +40,30 @@ test('resolveImessageDeliveryCandidates prefers explicit targets, then direct ha
 
   assert.deepEqual(
     resolveImessageDeliveryCandidates({
-      participantId: '+15551234567',
-      sourceThreadId: 'iMessage;-;+15551234567',
+      bindingDelivery: {
+        kind: 'participant',
+        target: '+15551234567',
+      },
     }),
     [
       {
         kind: 'participant',
         target: '+15551234567',
-      },
-      {
-        kind: 'source-thread',
-        target: 'iMessage;-;+15551234567',
       },
     ],
   )
 
   assert.deepEqual(
     resolveImessageDeliveryCandidates({
-      participantId: '+15551234567',
-      sourceThreadId: 'chat45e2b868',
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat45e2b868',
+      },
     }),
     [
       {
-        kind: 'source-thread',
+        kind: 'thread',
         target: 'chat45e2b868',
-      },
-      {
-        kind: 'participant',
-        target: '+15551234567',
       },
     ],
   )
@@ -100,9 +98,35 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and recor
   assert.equal(result.delivery.channel, 'imessage')
   assert.equal(result.delivery.target, '+15551234567')
   assert.equal(result.delivery.targetKind, 'participant')
-  assert.equal(result.session.channel, 'imessage')
+  assert.equal(result.session.binding.channel, 'imessage')
+  assert.equal(result.session.binding.delivery?.target, '+15551234567')
   assert.equal(result.session.lastAssistantMessage, 'Lunch is logged.')
   assert.equal(result.session.turnCount, 0)
+})
+
+test('deliverAssistantMessage uses one-off targets only for the current send and does not rewrite the stored binding', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-override-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'imessage',
+      participantId: '+15551234567',
+      message: 'Temporary override.',
+      target: 'chat-override',
+    },
+    {
+      sendImessage: async () => {},
+    },
+  )
+
+  assert.equal(result.delivery.target, 'chat-override')
+  assert.equal(result.delivery.targetKind, 'explicit')
+  assert.equal(result.session.binding.delivery?.kind, 'participant')
+  assert.equal(result.session.binding.delivery?.target, '+15551234567')
 })
 
 test('deliverAssistantMessage redacts HOME-based vault paths in its result payload', async () => {

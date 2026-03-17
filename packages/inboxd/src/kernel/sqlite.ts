@@ -319,12 +319,34 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
       on conflict (attachment_id, pipeline) do nothing
     `,
   );
-  const listCapturesStatement = database.prepare(
+  const listCapturesAscendingStatement = database.prepare(
     `
       select *
       from capture
       where (? is null or source = ?)
         and (? is null or account_id = ?)
+        and (
+          ? is null
+          or ? is null
+          or occurred_at > ?
+          or (occurred_at = ? and capture_id > ?)
+        )
+      order by occurred_at asc, capture_id asc
+      limit ?
+    `,
+  );
+  const listCapturesDescendingStatement = database.prepare(
+    `
+      select *
+      from capture
+      where (? is null or source = ?)
+        and (? is null or account_id = ?)
+        and (
+          ? is null
+          or ? is null
+          or occurred_at > ?
+          or (occurred_at = ? and capture_id > ?)
+        )
       order by occurred_at desc, capture_id desc
       limit ?
     `,
@@ -787,11 +809,19 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
     },
     listCaptures(filters = {}) {
       const normalizedFilters = normalizeCaptureFilters(filters);
-      const rows = listCapturesStatement.all(
+      const statement = normalizedFilters.oldestFirst
+        ? listCapturesAscendingStatement
+        : listCapturesDescendingStatement;
+      const rows = statement.all(
         normalizedFilters.source,
         normalizedFilters.source,
         normalizedFilters.accountId,
         normalizedFilters.accountId,
+        normalizedFilters.afterOccurredAt,
+        normalizedFilters.afterCaptureId,
+        normalizedFilters.afterOccurredAt,
+        normalizedFilters.afterOccurredAt,
+        normalizedFilters.afterCaptureId,
         normalizedFilters.limit,
       );
 
@@ -1088,11 +1118,21 @@ function hydrateCaptureRow(
 function normalizeCaptureFilters(
   filters: InboxListFilters,
   fallbackLimit = 50,
-): { source: string | null; accountId: string | null; limit: number } {
+): {
+  source: string | null;
+  accountId: string | null;
+  afterCaptureId: string | null;
+  afterOccurredAt: string | null;
+  limit: number;
+  oldestFirst: boolean;
+} {
   return {
     source: normalizeNullable(filters.source),
     accountId: normalizeNullable(filters.accountId),
+    afterCaptureId: normalizeNullable(filters.afterCaptureId),
+    afterOccurredAt: normalizeNullable(filters.afterOccurredAt),
     limit: normalizeLimit(filters.limit, fallbackLimit),
+    oldestFirst: filters.oldestFirst === true,
   };
 }
 

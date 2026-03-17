@@ -17,7 +17,11 @@ export const assistantChatProviderValues = ['codex-cli'] as const
 export const assistantChannelDeliveryTargetKindValues = [
   'explicit',
   'participant',
-  'source-thread',
+  'thread',
+] as const
+export const assistantBindingDeliveryKindValues = [
+  'participant',
+  'thread',
 ] as const
 
 export const assistantProviderSessionOptionsSchema = z.object({
@@ -29,21 +33,34 @@ export const assistantProviderSessionOptionsSchema = z.object({
 })
 
 export const assistantAliasStoreSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   aliases: z.record(z.string(), z.string().min(1)),
+  conversationKeys: z.record(z.string(), z.string().min(1)),
+})
+
+export const assistantBindingDeliverySchema = z.object({
+  kind: z.enum(assistantBindingDeliveryKindValues),
+  target: z.string().min(1),
+})
+
+export const assistantSessionBindingSchema = z.object({
+  conversationKey: z.string().min(1).nullable(),
+  channel: z.string().min(1).nullable(),
+  identityId: z.string().min(1).nullable(),
+  actorId: z.string().min(1).nullable(),
+  threadId: z.string().min(1).nullable(),
+  threadIsDirect: z.boolean().nullable(),
+  delivery: assistantBindingDeliverySchema.nullable(),
 })
 
 export const assistantSessionSchema = z.object({
-  schema: z.literal('healthybob.assistant-session.v1'),
+  schema: z.literal('healthybob.assistant-session.v2'),
   sessionId: z.string().min(1),
   provider: z.enum(assistantChatProviderValues),
   providerSessionId: z.string().min(1).nullable(),
   providerOptions: assistantProviderSessionOptionsSchema,
   alias: z.string().min(1).nullable(),
-  channel: z.string().min(1).nullable(),
-  identityId: z.string().min(1).nullable(),
-  participantId: z.string().min(1).nullable(),
-  sourceThreadId: z.string().min(1).nullable(),
+  binding: assistantSessionBindingSchema,
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
   lastTurnAt: isoTimestampSchema.nullable(),
@@ -60,12 +77,18 @@ export const assistantChannelDeliverySchema = z.object({
   messageLength: z.number().int().nonnegative(),
 })
 
+export const assistantDeliveryErrorSchema = z.object({
+  code: z.string().min(1).nullable(),
+  message: z.string().min(1),
+})
+
 export const assistantAskResultSchema = z.object({
   vault: pathSchema,
   prompt: z.string().min(1),
   response: z.string(),
   session: assistantSessionSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
+  deliveryError: assistantDeliveryErrorSchema.nullable(),
 })
 
 export const assistantChatResultSchema = z.object({
@@ -110,10 +133,30 @@ export const assistantRunResultSchema = z.object({
   lastError: z.string().nullable(),
 })
 
+export const assistantAutomationCursorSchema = z.object({
+  occurredAt: isoTimestampSchema,
+  captureId: z.string().min(1),
+})
+
+export const assistantAutomationStateSchema = z.object({
+  version: z.literal(1),
+  inboxScanCursor: assistantAutomationCursorSchema.nullable(),
+  updatedAt: isoTimestampSchema,
+})
+
 export type AssistantAliasStore = z.infer<typeof assistantAliasStoreSchema>
+export type AssistantBindingDelivery = z.infer<
+  typeof assistantBindingDeliverySchema
+>
+export type AssistantSessionBinding = z.infer<
+  typeof assistantSessionBindingSchema
+>
 export type AssistantSession = z.infer<typeof assistantSessionSchema>
 export type AssistantChannelDelivery = z.infer<
   typeof assistantChannelDeliverySchema
+>
+export type AssistantDeliveryError = z.infer<
+  typeof assistantDeliveryErrorSchema
 >
 export type AssistantAskResult = z.infer<typeof assistantAskResultSchema>
 export type AssistantChatResult = z.infer<typeof assistantChatResultSchema>
@@ -127,6 +170,12 @@ export type AssistantSessionShowResult = z.infer<
   typeof assistantSessionShowResultSchema
 >
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
+export type AssistantAutomationCursor = z.infer<
+  typeof assistantAutomationCursorSchema
+>
+export type AssistantAutomationState = z.infer<
+  typeof assistantAutomationStateSchema
+>
 export type AssistantSandbox = (typeof assistantSandboxValues)[number]
 export type AssistantApprovalPolicy =
   (typeof assistantApprovalPolicyValues)[number]
@@ -134,6 +183,8 @@ export type AssistantChatProvider =
   (typeof assistantChatProviderValues)[number]
 export type AssistantChannelDeliveryTargetKind =
   (typeof assistantChannelDeliveryTargetKindValues)[number]
+export type AssistantBindingDeliveryKind =
+  (typeof assistantBindingDeliveryKindValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >

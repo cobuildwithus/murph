@@ -74,6 +74,7 @@ repo/
   - `assistant-state/`
   - provider-owned transcript history should remain external when the chosen chat adapter supports it
   - channel-native send history should remain external when the chosen delivery adapter supports it
+  - store only manual aliases, explicit conversation bindings, provider session ids, and automation cursors locally
 
 ## First Release Scope
 

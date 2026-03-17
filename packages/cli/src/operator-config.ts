@@ -2,18 +2,38 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
+import {
+  assistantApprovalPolicyValues,
+  assistantChatProviderValues,
+  assistantSandboxValues,
+} from './assistant-cli-contracts.js'
 
 const OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
 const OPERATOR_CONFIG_DIRECTORY = '.healthybob'
 const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
 
+const assistantOperatorDefaultsSchema = z.object({
+  provider: z.enum(assistantChatProviderValues).nullable(),
+  codexCommand: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+  identityId: z.string().min(1).nullable(),
+  sandbox: z.enum(assistantSandboxValues).nullable(),
+  approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
+  profile: z.string().min(1).nullable(),
+  oss: z.boolean().nullable(),
+})
+
 const operatorConfigSchema = z.object({
   schema: z.literal(OPERATOR_CONFIG_SCHEMA),
   defaultVault: z.string().min(1).nullable(),
+  assistant: assistantOperatorDefaultsSchema.nullable().default(null),
   updatedAt: z.string().datetime({ offset: true }),
 })
 
 export type OperatorConfig = z.infer<typeof operatorConfigSchema>
+export type AssistantOperatorDefaults = z.infer<
+  typeof assistantOperatorDefaultsSchema
+>
 
 export const ROOT_OPTIONS_WITH_VALUES = new Set([
   '--filter-output',
@@ -126,9 +146,11 @@ export async function saveDefaultVaultConfig(
   vault: string,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig> {
+  const existing = await readOperatorConfig(homeDirectory)
   const config = operatorConfigSchema.parse({
     schema: OPERATOR_CONFIG_SCHEMA,
     defaultVault: normalizeVaultForConfig(vault, homeDirectory),
+    assistant: existing?.assistant ?? null,
     updatedAt: new Date().toISOString(),
   })
   const configPath = resolveOperatorConfigPath(homeDirectory)
@@ -148,6 +170,13 @@ export async function resolveDefaultVault(
   }
 
   return expandConfiguredVaultPath(config.defaultVault, homeDirectory)
+}
+
+export async function resolveAssistantOperatorDefaults(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<AssistantOperatorDefaults | null> {
+  const config = await readOperatorConfig(homeDirectory)
+  return config?.assistant ?? null
 }
 
 export function hasExplicitVaultOption(args: readonly string[]): boolean {

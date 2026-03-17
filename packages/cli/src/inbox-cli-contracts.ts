@@ -259,6 +259,9 @@ export const inboxListResultSchema = z.object({
   filters: z.object({
     sourceId: z.string().min(1).nullable(),
     limit: z.number().int().positive().max(200),
+    afterOccurredAt: isoTimestampSchema.nullable(),
+    afterCaptureId: z.string().min(1).nullable(),
+    oldestFirst: z.boolean(),
   }),
   items: z.array(inboxCaptureSummarySchema),
 })

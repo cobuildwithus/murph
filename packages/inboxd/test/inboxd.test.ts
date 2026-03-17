@@ -210,6 +210,75 @@ test("processCapture stores in-memory attachment bytes without an external sourc
   pipeline.close();
 });
 
+test("listCaptures supports oldest-first paging with a persisted after cursor", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-list-cursor");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  await pipeline.processCapture({
+    source: "telegram",
+    externalId: "update:1",
+    thread: { id: "100" },
+    actor: { id: "alice", isSelf: false },
+    occurredAt: "2026-03-13T08:00:00.000Z",
+    text: "first",
+    attachments: [],
+    raw: {},
+  });
+  await pipeline.processCapture({
+    source: "telegram",
+    externalId: "update:2",
+    thread: { id: "100" },
+    actor: { id: "alice", isSelf: false },
+    occurredAt: "2026-03-13T08:01:00.000Z",
+    text: "second",
+    attachments: [],
+    raw: {},
+  });
+  await pipeline.processCapture({
+    source: "telegram",
+    externalId: "update:3",
+    thread: { id: "100" },
+    actor: { id: "alice", isSelf: false },
+    occurredAt: "2026-03-13T08:02:00.000Z",
+    text: "third",
+    attachments: [],
+    raw: {},
+  });
+
+  const firstPage = runtime.listCaptures({
+    limit: 2,
+    oldestFirst: true,
+  });
+  assert.deepEqual(
+    firstPage.map((capture) => capture.text),
+    ["first", "second"],
+  );
+
+  const secondPage = runtime.listCaptures({
+    limit: 2,
+    oldestFirst: true,
+    afterOccurredAt: firstPage[1]?.occurredAt ?? null,
+    afterCaptureId: firstPage[1]?.captureId ?? null,
+  });
+  assert.deepEqual(
+    secondPage.map((capture) => capture.text),
+    ["third"],
+  );
+
+  const newestFirst = runtime.listCaptures({
+    limit: 2,
+  });
+  assert.deepEqual(
+    newestFirst.map((capture) => capture.text),
+    ["third", "second"],
+  );
+
+  pipeline.close();
+});
+
 test("runtime search indexes attachment metadata and can rebuild from envelope files", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-search-vault");
   const sourceRoot = await makeTempDirectory("healthybob-inbox-search-source");

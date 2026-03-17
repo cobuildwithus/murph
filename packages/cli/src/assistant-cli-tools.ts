@@ -10,7 +10,7 @@ import {
   createAssistantToolCatalog,
   type AssistantToolCatalog,
   type AssistantToolDefinition,
-} from './assistant-harness.js'
+} from './model-harness.js'
 import type { InboxCliServices } from './inbox-services.js'
 import type { VaultCliServices } from './vault-cli-services.js'
 

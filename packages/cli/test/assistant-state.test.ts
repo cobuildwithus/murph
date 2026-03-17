@@ -26,7 +26,7 @@ afterEach(async () => {
   )
 })
 
-test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a stable composite key', () => {
+test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a stable conversation key', () => {
   assert.equal(
     resolveAssistantAliasKey({
       alias: 'chat:bob',
@@ -42,7 +42,7 @@ test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a st
       participantId: 'contact:bob',
       sourceThreadId: 'thread/1',
     }),
-    'channel:imessage|identity:assistant%3Aprimary|participant:contact%3Abob|thread:thread%2F1',
+    'channel:imessage|identity:assistant%3Aprimary|thread:thread%2F1',
   )
   assert.equal(resolveAssistantAliasKey({}), null)
 })
@@ -76,6 +76,14 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(first.session.provider, 'codex-cli')
   assert.equal(first.session.providerOptions.model, 'gpt-oss:20b')
   assert.equal(first.session.providerOptions.oss, true)
+  assert.equal(first.session.binding.channel, 'imessage')
+  assert.equal(first.session.binding.identityId, 'assistant:primary')
+  assert.equal(first.session.binding.actorId, 'contact:bob')
+  assert.equal(first.session.binding.threadId, 'chat-1')
+  assert.equal(
+    first.session.binding.conversationKey,
+    'channel:imessage|identity:assistant%3Aprimary|thread:chat-1',
+  )
 
   const persisted = JSON.parse(
     await readFile(

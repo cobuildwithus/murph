@@ -38,7 +38,7 @@ Last verified: 2026-03-17
 - Query-owned lexical search state lives only at `.runtime/search.sqlite`; inbox-owned local state remains at `.runtime/inboxd.sqlite` plus `.runtime/inboxd/*.json`.
 - `vault-cli inbox model bundle|route` can materialize capture-scoped audit artifacts under `derived/inbox/**/assistant/*.json`; those files are rebuildable and non-canonical.
 - `vault-cli inbox model route` may call either the AI Gateway or an operator-supplied OpenAI-compatible endpoint. Automated repo checks do not execute live network model calls.
-- `vault-cli assistant ask|chat|deliver|session` persist only minimal local session metadata under `assistant-state/`; provider transcript history and channel-native send history stay external when the adapter supports them.
+- `vault-cli assistant ask|chat|deliver|session` persist only minimal local assistant state under `assistant-state/`, including explicit conversation bindings and the inbox automation cursor; provider transcript history and channel-native send history stay external when the adapter supports them.
 - `vault-cli assistant chat` uses an Ink-based stderr UI and expects `react`, `ink`, and `ink-text-input` to be installed in the CLI workspace.
 - The built `vault-cli` binary can be exercised locally with `node packages/cli/dist/bin.js ...` when a change requires an end-to-end runtime check beyond the standard repo scripts.
 - A setup-specific entrypoint also exists at `node packages/cli/dist/bin.js setup ...`; it is routed from `packages/cli/src/bin.ts` instead of the main `vault-cli` manifest so installer-style macOS provisioning can happen without reshaping the data-plane command graph.

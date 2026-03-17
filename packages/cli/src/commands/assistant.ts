@@ -58,12 +58,12 @@ const assistantSessionOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe('Optional remote participant id for multi-user routing.'),
+    .describe('Optional remote actor id for multi-user routing and direct-conversation binding.'),
   sourceThread: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional upstream thread id from the source channel.'),
+    .describe('Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.'),
 }
 
 const assistantProviderOptionFields = {
@@ -120,7 +120,7 @@ const assistantDeliveryOptionFields = {
     .min(1)
     .optional()
     .describe(
-      'Optional explicit outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
+      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
     ),
 }
 
@@ -141,7 +141,7 @@ export function registerAssistantCommands(
     description:
       'Send one message through the local provider-backed assistant and persist only minimal session metadata outside the canonical vault.',
     hint:
-      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata and conversation aliases under assistant-state/. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
+      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata plus explicit conversation bindings under assistant-state/. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
     examples: [
       {
         args: {
@@ -242,7 +242,7 @@ export function registerAssistantCommands(
     description:
       'Deliver one outbound assistant message without invoking the chat provider. iMessage is supported first and future channels can plug into the same surface.',
     hint:
-      'Use --deliveryTarget to override the mapped participant or source thread for one send. For iMessage that target can be a phone number, email handle, or chat id.',
+      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id.',
     examples: [
       {
         args: {
@@ -274,7 +274,7 @@ export function registerAssistantCommands(
         .min(1)
         .optional()
         .describe(
-          'Optional explicit outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
+          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
         ),
     }),
     output: assistantDeliverResultSchema,

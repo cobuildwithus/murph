@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-17 (assistant delivery and Ink-only chat docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned runtime-build closure checks, preserved launch-cwd semantics, and webpack query-entry pinning, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
+Last verified: 2026-03-17 (assistant binding/delivery and Ink-only chat docs, assistant automation cursor docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned runtime-build closure checks, preserved launch-cwd semantics, and webpack query-entry pinning, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 
@@ -26,7 +26,7 @@ This index is the table of contents for durable, repository-local context that a
 | `packages/web/README.md` | Package-local overview for the local-only Next.js observability app and its vault configuration contract. | `packages/web/**` | Healthy Bob Maintainer | Per web-surface change | Medium | 2026-03-17 |
 | `packages/parsers/README.md` | Package-local overview for local-first attachment parsing, provider ranking, and derived artifact publication. | `packages/parsers/**` | Healthy Bob Maintainer | Per parser-layer change | Medium | 2026-03-13 |
 | `agent-docs/references/testing-ci-map.md` | Current verification map for contracts/runtime packages, built CLI checks, the smoke harness, the targeted Vitest/V8 package coverage surface, and the source-artifact guard. | `package.json`, `scripts/**`, `fixtures/**`, `e2e/**`, future CI | Healthy Bob Maintainer | Per verification change | High | 2026-03-16 |
-| `agent-docs/operations/verification-and-runtime.md` | Required checks, runtime-package verification matrix, built CLI behavior coverage, setup alias/wrapper semantics, package-local no-emit typecheck semantics, and current runtime assumptions for the TypeScript-first workspace. | `AGENTS.md`, `package.json`, `fixtures/**`, `e2e/**`, `scripts/**` | Healthy Bob Maintainer | Per process/runtime change | High | 2026-03-17 |
+| `agent-docs/operations/verification-and-runtime.md` | Required checks, runtime-package verification matrix, built CLI behavior coverage, assistant binding/delivery runtime assumptions, setup alias/wrapper semantics, package-local no-emit typecheck semantics, and current runtime assumptions for the TypeScript-first workspace. | `AGENTS.md`, `package.json`, `fixtures/**`, `e2e/**`, `scripts/**` | Healthy Bob Maintainer | Per process/runtime change | High | 2026-03-17 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit workflow. | Prompts + completion process | Healthy Bob Maintainer | Per process change | High | 2026-03-13 |
 | `agent-docs/prompts/simplify.md` | Reusable simplification pass prompt with parallel-agent handoff output. | Completion workflow | Healthy Bob Maintainer | Per process change | Medium | 2026-03-13 |
 | `agent-docs/prompts/test-coverage-audit.md` | Reusable coverage-audit prompt with parallel-agent handoff output. | Completion workflow | Healthy Bob Maintainer | Per process change | High | 2026-03-13 |

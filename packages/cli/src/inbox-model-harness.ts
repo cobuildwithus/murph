@@ -9,7 +9,7 @@ import {
   generateAssistantObject,
   resolveAssistantLanguageModel,
   type AssistantModelSpec,
-} from './assistant-harness.js'
+} from './model-harness.js'
 import type { InboxShowResult } from './inbox-cli-contracts.js'
 import type { InboxCliServices } from './inbox-services.js'
 import {

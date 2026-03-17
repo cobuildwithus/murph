@@ -151,9 +151,12 @@ interface RuntimeStore {
     cursor: Record<string, unknown> | null,
   ): void
   listCaptures(filters?: {
+    afterCaptureId?: string | null
+    afterOccurredAt?: string | null
     source?: string
     accountId?: string | null
     limit?: number
+    oldestFirst?: boolean
   }): RuntimeCaptureRecord[]
   searchCaptures(filters: {
     text: string
@@ -521,6 +524,9 @@ interface BackfillInput extends CommandContext {
 }
 
 interface ListInput extends CommandContext {
+  afterCaptureId?: string | null
+  afterOccurredAt?: string | null
+  oldestFirst?: boolean
   sourceId?: string | null
   limit?: number
 }
@@ -1619,6 +1625,9 @@ export function createIntegratedInboxCliServices(
           source: sourceFilter?.source,
           accountId: sourceFilter?.accountId,
           limit: normalizeLimit(input.limit, 50, 200),
+          afterOccurredAt: normalizeNullableString(input.afterOccurredAt),
+          afterCaptureId: normalizeNullableString(input.afterCaptureId),
+          oldestFirst: input.oldestFirst ?? false,
         })
         const promotionsByCapture = await readPromotionsByCapture(paths)
 
@@ -1627,6 +1636,9 @@ export function createIntegratedInboxCliServices(
           filters: {
             sourceId: input.sourceId ?? null,
             limit: normalizeLimit(input.limit, 50, 200),
+            afterOccurredAt: normalizeNullableString(input.afterOccurredAt),
+            afterCaptureId: normalizeNullableString(input.afterCaptureId),
+            oldestFirst: input.oldestFirst ?? false,
           },
           items: items.map((capture) =>
             summarizeCapture(capture, promotionsByCapture.get(capture.captureId) ?? []),

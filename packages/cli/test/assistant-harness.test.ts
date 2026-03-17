@@ -35,7 +35,7 @@ vi.mock('@ai-sdk/openai-compatible', () => ({
 import {
   createAssistantToolCatalog,
   resolveAssistantLanguageModel,
-} from '../src/assistant-harness.js'
+} from '../src/model-harness.js'
 
 const TEST_API_KEY_ENV = 'HEALTHYBOB_ASSISTANT_TEST_KEY'
 

@@ -28,7 +28,7 @@ Last verified: 2026-03-17
 - The local web surface must remain read-only, local-only, and must not expose raw vault paths, home-directory paths, or write capabilities in its rendered payloads. Its launcher must bind to localhost and block framework `.env*` reads.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - General assistant/session state belongs outside the canonical vault under `assistant-state/`; only capture-scoped rebuildable audit artifacts belong under `derived/inbox/**`.
-- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Healthy Bob stores only minimal alias/thread/session metadata plus provider session references under `assistant-state/`.
+- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Healthy Bob stores only minimal manual aliases, explicit conversation bindings, automation cursors, and provider session references under `assistant-state/`.
 - `vault-cli inbox model route` may send a normalized text-only inbox bundle to either the AI Gateway or an operator-specified OpenAI-compatible endpoint.
 
 ## Control Flow
@@ -39,7 +39,7 @@ Last verified: 2026-03-17
 4. Parser workers or parsed-pipeline wrappers consume those attachment jobs and publish only derived artifacts.
 5. Inbox model routing can materialize a text-only bundle, call a configured model backend, and write audited bundle/plan/result artifacts before any optional apply step.
 6. Importers may parse and normalize external inputs but must never write canonical vault files directly. Provider connectors normalize upstream payloads into shared device-batch payloads and still rely on `packages/core` for canonical persistence.
-7. Provider-backed assistant chat and outbound channel flows may persist local session metadata outside the vault, but they must never bypass canonical write boundaries for health data.
+7. Provider-backed assistant chat and outbound channel flows may persist only minimal local session metadata plus explicit delivery bindings outside the vault, but they must never bypass canonical write boundaries for health data.
 8. Query/export paths are read-only and must not mutate canonical vault state.
 9. The local web app reads vault data only on the server through query helpers, constrains search to safe record fields, and renders a read-only surface for localhost use.
 
