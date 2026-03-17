@@ -6,15 +6,20 @@ import { promises as fs } from "node:fs";
 import { VaultError } from "../errors.js";
 import { ensureDirectory, pathExists, walkVaultFiles } from "../fs.js";
 import {
-  assertPathWithinVaultOnDisk,
-  isAppendOnlyRelativePath,
-  isRawRelativePath,
   normalizeRelativeVaultPath,
   normalizeVaultRoot,
   resolveVaultPath,
 } from "../path-safety.js";
 import { toIsoTimestamp } from "../time.js";
 import { isErrnoException, isPlainRecord } from "../types.js";
+import {
+  applyImmutableWriteTarget,
+  applyJsonlAppendTarget,
+  applyTextWriteTarget,
+  assertWriteTargetPolicy,
+  fileContentsEqual,
+  prepareVerifiedWriteTarget,
+} from "../write-policy.js";
 import { acquireCanonicalWriteLock } from "./canonical-write-lock.js";
 
 import type { DateInput } from "../types.js";
@@ -36,12 +41,9 @@ interface RunCanonicalWriteInput<TResult> extends CreateWriteBatchInput {
   mutate: (context: { batch: WriteBatch; vaultRoot: string }) => Promise<TResult>;
 }
 
-interface StageWriteTargetOptions {
+interface StageTextWriteOptions {
   allowRaw?: boolean;
   allowAppendOnlyJsonl?: boolean;
-}
-
-interface StageTextWriteOptions extends StageWriteTargetOptions {
   overwrite?: boolean;
   allowExistingMatch?: boolean;
 }
@@ -192,61 +194,8 @@ function toStoredOperationError(error: unknown): StoredWriteOperationError {
   };
 }
 
-function assertValidTextWriteTarget(relativePath: string, options: StageWriteTargetOptions): void {
-  if (isAppendOnlyRelativePath(relativePath) && relativePath.endsWith(".jsonl") && !options.allowAppendOnlyJsonl) {
-    throw new VaultError("VAULT_APPEND_ONLY_PATH", "Use stageJsonlAppend for ledger and audit shards.", {
-      relativePath,
-    });
-  }
-
-  if (isRawRelativePath(relativePath) && !options.allowRaw) {
-    throw new VaultError("VAULT_RAW_IMMUTABLE", "Use stageRawCopy for raw artifacts.", {
-      relativePath,
-    });
-  }
-}
-
-function assertValidRawTarget(relativePath: string): void {
-  if (!isRawRelativePath(relativePath)) {
-    throw new VaultError("VAULT_RAW_PATH_REQUIRED", "Raw copies must target the raw/ tree.", {
-      relativePath,
-    });
-  }
-}
-
-function assertValidJsonlTarget(relativePath: string): void {
-  if (isRawRelativePath(relativePath)) {
-    throw new VaultError("VAULT_RAW_IMMUTABLE", "Raw files are immutable once written.", {
-      relativePath,
-    });
-  }
-
-  if (!relativePath.endsWith(".jsonl") || !isAppendOnlyRelativePath(relativePath)) {
-    throw new VaultError(
-      "VAULT_APPEND_ONLY_PATH",
-      "Append-only writes are restricted to JSONL ledger and audit shards.",
-      {
-        relativePath,
-      },
-    );
-  }
-}
-
-async function ensureSafeVaultPath(vaultRoot: string, relativePath: string): Promise<ReturnType<typeof resolveVaultPath>> {
-  const resolved = resolveVaultPath(vaultRoot, relativePath);
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  await ensureDirectory(path.dirname(resolved.absolutePath));
-  await assertPathWithinVaultOnDisk(resolved.vaultRoot, resolved.absolutePath);
-  return resolved;
-}
-
 async function readText(absolutePath: string): Promise<string> {
   return fs.readFile(absolutePath, "utf8");
-}
-
-async function contentsMatch(leftAbsolutePath: string, rightAbsolutePath: string): Promise<boolean> {
-  const [left, right] = await Promise.all([fs.readFile(leftAbsolutePath), fs.readFile(rightAbsolutePath)]);
-  return left.equals(right);
 }
 
 async function safeUnlink(absolutePath: string): Promise<void> {
@@ -432,7 +381,12 @@ export class WriteBatch {
   }: StageRawCopyInput): Promise<StagedRawCopy> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
-    assertValidRawTarget(normalizedTarget);
+    assertWriteTargetPolicy(normalizedTarget, {
+      kind: "raw",
+      messages: {
+        rawRequired: "Raw copies must target the raw/ tree.",
+      },
+    });
 
     const sourceAbsolutePath = path.resolve(String(sourcePath ?? "").trim());
     if (!(await pathExists(sourceAbsolutePath))) {
@@ -480,7 +434,12 @@ export class WriteBatch {
   }: StageRawTextInput): Promise<StagedRawCopy> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
-    assertValidRawTarget(normalizedTarget);
+    assertWriteTargetPolicy(normalizedTarget, {
+      kind: "raw",
+      messages: {
+        rawRequired: "Raw copies must target the raw/ tree.",
+      },
+    });
 
     const stageRelativePath = stageArtifactRelativePath(
       this.operationId,
@@ -516,7 +475,15 @@ export class WriteBatch {
   ): Promise<string> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
-    assertValidTextWriteTarget(normalizedTarget, options);
+    assertWriteTargetPolicy(normalizedTarget, {
+      kind: "text",
+      allowAppendOnlyJsonl: options.allowAppendOnlyJsonl,
+      allowRaw: options.allowRaw,
+      messages: {
+        appendOnlyDisallowed: "Use stageJsonlAppend for ledger and audit shards.",
+        rawDisallowed: "Use stageRawCopy for raw artifacts.",
+      },
+    });
 
     const stageRelativePath = stageArtifactRelativePath(
       this.operationId,
@@ -542,7 +509,13 @@ export class WriteBatch {
   async stageJsonlAppend(targetRelativePath: string, content: string): Promise<string> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
-    assertValidJsonlTarget(normalizedTarget);
+    assertWriteTargetPolicy(normalizedTarget, {
+      kind: "jsonl_append",
+      messages: {
+        appendOnlyDisallowed: "Append-only writes are restricted to JSONL ledger and audit shards.",
+        rawDisallowed: "Raw files are immutable once written.",
+      },
+    });
 
     const stageRelativePath = stageArtifactRelativePath(
       this.operationId,
@@ -565,7 +538,13 @@ export class WriteBatch {
   async stageDelete(targetRelativePath: string): Promise<string> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
-    assertValidTextWriteTarget(normalizedTarget, {});
+    assertWriteTargetPolicy(normalizedTarget, {
+      kind: "delete",
+      messages: {
+        appendOnlyDisallowed: "Use stageJsonlAppend for ledger and audit shards.",
+        rawDisallowed: "Use stageRawCopy for raw artifacts.",
+      },
+    });
     this.record.actions.push({
       kind: "delete",
       state: "staged",
@@ -674,30 +653,19 @@ export class WriteBatch {
   }
 
   private async applyRawCopy(index: number, action: Extract<StoredWriteAction, { kind: "raw_copy" }>): Promise<void> {
-    const target = await ensureSafeVaultPath(this.vaultRoot, action.targetRelativePath);
+    const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-    const existedBefore = await pathExists(target.absolutePath);
-
-    if (existedBefore) {
-      if (action.allowExistingMatch && (await contentsMatch(stageAbsolutePath, target.absolutePath))) {
-        action.state = "reused";
-        action.effect = "reuse";
-        action.existedBefore = true;
-        action.appliedAt = nowIso();
-        this.record.updatedAt = action.appliedAt;
-        await this.persist();
-        return;
-      }
-
-      throw new VaultError("VAULT_RAW_IMMUTABLE", "Raw target already exists and may not be overwritten.", {
-        relativePath: target.relativePath,
-      });
-    }
-
-    await fs.copyFile(stageAbsolutePath, target.absolutePath, fsConstants.COPYFILE_EXCL);
-    action.state = "applied";
-    action.effect = "copy";
-    action.existedBefore = false;
+    const result = await applyImmutableWriteTarget({
+      allowExistingMatch: action.allowExistingMatch,
+      createEffect: "copy",
+      createTarget: () => fs.copyFile(stageAbsolutePath, target.absolutePath, fsConstants.COPYFILE_EXCL),
+      existsErrorMessage: "Raw target already exists and may not be overwritten.",
+      matchesExistingContent: () => fileContentsEqual(stageAbsolutePath, target.absolutePath),
+      target,
+    });
+    action.state = result.effect === "reuse" ? "reused" : "applied";
+    action.effect = result.effect === "reuse" ? "reuse" : "copy";
+    action.existedBefore = result.existedBefore;
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();
@@ -707,48 +675,34 @@ export class WriteBatch {
     index: number,
     action: Extract<StoredWriteAction, { kind: "text_write" }>,
   ): Promise<void> {
-    const target = await ensureSafeVaultPath(this.vaultRoot, action.targetRelativePath);
+    const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-    const existedBefore = await pathExists(target.absolutePath);
     const stagedContent = await readText(stageAbsolutePath);
-
-    if (existedBefore) {
-      const existingContent = await readText(target.absolutePath);
-
-      if (!action.overwrite) {
-        if (action.allowExistingMatch && existingContent === stagedContent) {
-          action.state = "reused";
-          action.effect = "reuse";
-          action.existedBefore = true;
-          action.appliedAt = nowIso();
-          this.record.updatedAt = action.appliedAt;
-          await this.persist();
-          return;
-        }
-
-        throw new VaultError("VAULT_FILE_EXISTS", `Refusing to overwrite existing file "${target.relativePath}".`, {
-          relativePath: target.relativePath,
-        });
-      }
-
-      const backupRelativePath = backupArtifactRelativePath(
-        this.operationId,
-        `${String(index).padStart(4, "0")}.bak`,
-      );
-      const backupAbsolutePath = resolveVaultPath(this.vaultRoot, backupRelativePath).absolutePath;
-      await ensureDirectory(path.dirname(backupAbsolutePath));
-      await fs.copyFile(target.absolutePath, backupAbsolutePath);
-      action.backupRelativePath = backupRelativePath;
-      action.existedBefore = true;
-      await fs.copyFile(stageAbsolutePath, target.absolutePath);
-      action.effect = "update";
-    } else {
-      await fs.copyFile(stageAbsolutePath, target.absolutePath, fsConstants.COPYFILE_EXCL);
-      action.existedBefore = false;
-      action.effect = "create";
-    }
-
-    action.state = "applied";
+    const result = await applyTextWriteTarget({
+      allowExistingMatch: action.allowExistingMatch,
+      backupExisting: action.overwrite
+        ? async () => {
+            const backupRelativePath =
+              action.backupRelativePath ??
+              backupArtifactRelativePath(this.operationId, `${String(index).padStart(4, "0")}.bak`);
+            const backupAbsolutePath = resolveVaultPath(this.vaultRoot, backupRelativePath).absolutePath;
+            await ensureDirectory(path.dirname(backupAbsolutePath));
+            await fs.copyFile(target.absolutePath, backupAbsolutePath);
+            action.backupRelativePath = backupRelativePath;
+          }
+        : undefined,
+      createTarget: () => fs.copyFile(stageAbsolutePath, target.absolutePath, fsConstants.COPYFILE_EXCL),
+      matchesExistingContent: async () => {
+        const existingContent = await readText(target.absolutePath);
+        return existingContent === stagedContent;
+      },
+      overwrite: action.overwrite,
+      replaceTarget: () => fs.copyFile(stageAbsolutePath, target.absolutePath),
+      target,
+    });
+    action.state = result.effect === "reuse" ? "reused" : "applied";
+    action.effect = result.effect;
+    action.existedBefore = result.existedBefore;
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();
@@ -758,24 +712,24 @@ export class WriteBatch {
     index: number,
     action: Extract<StoredWriteAction, { kind: "jsonl_append" }>,
   ): Promise<void> {
-    const target = await ensureSafeVaultPath(this.vaultRoot, action.targetRelativePath);
+    const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
-    const existedBefore = await pathExists(target.absolutePath);
-    const originalSize = existedBefore ? (await fs.stat(target.absolutePath)).size : 0;
-    const payload = await readText(stageAbsolutePath);
-
-    await fs.appendFile(target.absolutePath, payload, "utf8");
+    const result = await applyJsonlAppendTarget({
+      appendPayload: (payload) => fs.appendFile(target.absolutePath, payload, "utf8"),
+      readPayload: () => readText(stageAbsolutePath),
+      target,
+    });
     action.state = "applied";
-    action.effect = "append";
-    action.existedBefore = existedBefore;
-    action.originalSize = originalSize;
+    action.effect = result.effect;
+    action.existedBefore = result.existedBefore;
+    action.originalSize = result.originalSize;
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();
   }
 
   private async applyDelete(index: number, action: Extract<StoredWriteAction, { kind: "delete" }>): Promise<void> {
-    const target = await ensureSafeVaultPath(this.vaultRoot, action.targetRelativePath);
+    const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const existedBefore = await pathExists(target.absolutePath);
 
     if (!existedBefore) {

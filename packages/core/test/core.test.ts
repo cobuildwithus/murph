@@ -43,6 +43,12 @@ import {
   VaultError,
 } from "../src/index.js";
 import {
+  appendVaultTextFile,
+  copyImmutableFileIntoVaultRaw,
+  writeImmutableJsonFileIntoVaultRaw,
+  writeVaultTextFile,
+} from "../src/fs.js";
+import {
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
   WriteBatch,
@@ -940,6 +946,291 @@ test("write batches roll back earlier writes when a later action fails", async (
 
   const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
+});
+
+test("direct and batched writes reject the same invalid vault targets", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const sourcePath = await writeExternalFile(sourceRoot, "artifact.txt", "artifact\n");
+  const rawPath = "raw/testing/fixed/artifact.txt";
+  const jsonlPath = "ledger/events/2026/2026-03.jsonl";
+  const notePath = "notes/entry.txt";
+
+  await assert.rejects(
+    () => writeVaultTextFile(vaultRoot, rawPath, "raw\n"),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+
+  const rawTextBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_policy_reject_raw_text",
+    summary: "reject staged text writes into raw",
+  });
+  await assert.rejects(
+    () => rawTextBatch.stageTextWrite(rawPath, "raw\n"),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+
+  await assert.rejects(
+    () => writeVaultTextFile(vaultRoot, jsonlPath, "not-append-only\n"),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
+  );
+
+  const appendOnlyBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_policy_reject_append_only_text",
+    summary: "reject staged text writes into append-only ledgers",
+  });
+  await assert.rejects(
+    () => appendOnlyBatch.stageTextWrite(jsonlPath, "not-append-only\n"),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
+  );
+
+  await assert.rejects(
+    () => appendVaultTextFile(vaultRoot, notePath, '{"ok":true}\n'),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
+  );
+
+  const jsonlBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_policy_reject_jsonl_append",
+    summary: "reject staged jsonl appends outside append-only paths",
+  });
+  await assert.rejects(
+    () => jsonlBatch.stageJsonlAppend(notePath, '{"ok":true}\n'),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
+  );
+
+  await assert.rejects(
+    () => copyImmutableFileIntoVaultRaw(vaultRoot, sourcePath, notePath),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_PATH_REQUIRED",
+  );
+
+  const rawCopyBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_policy_reject_raw_copy",
+    summary: "reject staged raw copies outside raw",
+  });
+  await assert.rejects(
+    () =>
+      rawCopyBatch.stageRawCopy({
+        sourcePath,
+        targetRelativePath: notePath,
+        originalFileName: "artifact.txt",
+        mediaType: "text/plain",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_PATH_REQUIRED",
+  );
+
+  const deleteBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_policy_reject_delete",
+    summary: "reject staged deletes for protected paths",
+  });
+  await assert.rejects(
+    () => deleteBatch.stageDelete(rawPath),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+  await assert.rejects(
+    () => deleteBatch.stageDelete(jsonlPath),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
+  );
+});
+
+test("direct and batched immutable raw writes reuse identical content and reject divergent content", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const rawPath = "raw/testing/fixed/source.json";
+  const stableValue = {
+    ok: true,
+    nested: {
+      count: 1,
+    },
+  };
+  const stableContent = `${JSON.stringify(stableValue, null, 2)}\n`;
+
+  assert.equal(
+    await writeImmutableJsonFileIntoVaultRaw(vaultRoot, rawPath, stableValue, {
+      allowExistingMatch: true,
+    }),
+    rawPath,
+  );
+  assert.equal(
+    await writeImmutableJsonFileIntoVaultRaw(vaultRoot, rawPath, stableValue, {
+      allowExistingMatch: true,
+    }),
+    rawPath,
+  );
+
+  const reuseBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_raw_reuse_batch",
+    summary: "reuse identical staged raw content",
+  });
+  await reuseBatch.stageRawText({
+    targetRelativePath: rawPath,
+    originalFileName: "source.json",
+    mediaType: "application/json",
+    content: stableContent,
+    allowExistingMatch: true,
+  });
+  await reuseBatch.commit();
+
+  const reusedOperation = await readStoredWriteOperation(vaultRoot, reuseBatch.metadataRelativePath);
+  assert.equal(reusedOperation.status, "committed");
+  assert.equal(reusedOperation.actions[0]?.state, "reused");
+  assert.equal(reusedOperation.actions[0]?.effect, "reuse");
+
+  await assert.rejects(
+    () =>
+      writeImmutableJsonFileIntoVaultRaw(
+        vaultRoot,
+        rawPath,
+        {
+          ok: false,
+        },
+        { allowExistingMatch: true },
+      ),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+
+  const failingBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_raw_reuse_batch_reject",
+    summary: "reject divergent staged raw content",
+  });
+  await failingBatch.stageRawText({
+    targetRelativePath: rawPath,
+    originalFileName: "source.json",
+    mediaType: "application/json",
+    content: `${JSON.stringify({ ok: false }, null, 2)}\n`,
+    allowExistingMatch: true,
+  });
+  await assert.rejects(
+    () => failingBatch.commit(),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+
+  const failedOperation = await readStoredWriteOperation(vaultRoot, failingBatch.metadataRelativePath);
+  assert.equal(failedOperation.status, "rolled_back");
+});
+
+test("direct and batched raw copies reuse identical files and reject divergent files", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const rawPath = "raw/testing/fixed/source.txt";
+  const matchingSourcePath = await writeExternalFile(sourceRoot, "matching.txt", "stable raw payload\n");
+  const divergentSourcePath = await writeExternalFile(sourceRoot, "divergent.txt", "different raw payload\n");
+
+  assert.equal(
+    await copyImmutableFileIntoVaultRaw(vaultRoot, matchingSourcePath, rawPath, {
+      allowExistingMatch: true,
+    }),
+    rawPath,
+  );
+  assert.equal(
+    await copyImmutableFileIntoVaultRaw(vaultRoot, matchingSourcePath, rawPath, {
+      allowExistingMatch: true,
+    }),
+    rawPath,
+  );
+
+  const reuseBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_raw_copy_reuse_batch",
+    summary: "reuse identical staged raw copies",
+  });
+  await reuseBatch.stageRawCopy({
+    sourcePath: matchingSourcePath,
+    targetRelativePath: rawPath,
+    originalFileName: "matching.txt",
+    mediaType: "text/plain",
+    allowExistingMatch: true,
+  });
+  await reuseBatch.commit();
+
+  const reusedOperation = await readStoredWriteOperation(vaultRoot, reuseBatch.metadataRelativePath);
+  assert.equal(reusedOperation.status, "committed");
+  assert.equal(reusedOperation.actions[0]?.state, "reused");
+  assert.equal(reusedOperation.actions[0]?.effect, "reuse");
+
+  await assert.rejects(
+    () =>
+      copyImmutableFileIntoVaultRaw(vaultRoot, divergentSourcePath, rawPath, {
+        allowExistingMatch: true,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+
+  const failingBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_raw_copy_reuse_batch_reject",
+    summary: "reject divergent staged raw copies",
+  });
+  await failingBatch.stageRawCopy({
+    sourcePath: divergentSourcePath,
+    targetRelativePath: rawPath,
+    originalFileName: "divergent.txt",
+    mediaType: "text/plain",
+    allowExistingMatch: true,
+  });
+  await assert.rejects(
+    () => failingBatch.commit(),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
+  );
+
+  const failedOperation = await readStoredWriteOperation(vaultRoot, failingBatch.metadataRelativePath);
+  assert.equal(failedOperation.status, "rolled_back");
+});
+
+test("direct and batched text writes keep no-overwrite and append semantics aligned", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const notePath = "notes/parity.txt";
+  const jsonlPath = "audit/2026/parity.jsonl";
+
+  await writeVaultTextFile(vaultRoot, notePath, "first\n", { overwrite: false });
+  await assert.rejects(
+    () => writeVaultTextFile(vaultRoot, notePath, "second\n", { overwrite: false }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FILE_EXISTS",
+  );
+
+  const noOverwriteBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_no_overwrite_batch",
+    summary: "reject staged text overwrite when overwrite is disabled",
+  });
+  await noOverwriteBatch.stageTextWrite(notePath, "second\n", { overwrite: false });
+  await assert.rejects(
+    () => noOverwriteBatch.commit(),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FILE_EXISTS",
+  );
+
+  await appendVaultTextFile(vaultRoot, jsonlPath, '{"source":"direct"}\n');
+
+  const appendBatch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_jsonl_append_batch",
+    summary: "append staged jsonl payload after direct append",
+  });
+  await appendBatch.stageJsonlAppend(jsonlPath, '{"source":"batch"}\n');
+  await appendBatch.commit();
+
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, jsonlPath), "utf8"),
+    '{"source":"direct"}\n{"source":"batch"}\n',
+  );
+
+  const appendOperation = await readStoredWriteOperation(vaultRoot, appendBatch.metadataRelativePath);
+  assert.equal(appendOperation.status, "committed");
+  assert.equal(appendOperation.actions[0]?.effect, "append");
+  assert.equal(appendOperation.actions[0]?.existedBefore, true);
 });
 
 test("validateVault reports unresolved write operations", async () => {
