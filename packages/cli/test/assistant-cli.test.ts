@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, test } from 'vitest'
+import { saveDefaultVaultConfig } from '../src/operator-config.js'
 import { resolveAssistantSession } from '../src/assistant-state.js'
-import { requireData, runCli } from './cli-test-helpers.js'
+import { ensureCliRuntimeArtifacts, repoRoot, requireData, runCli } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
+const execFileAsync = promisify(execFile)
+const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
 
 afterEach(async () => {
   await Promise.all(
@@ -117,6 +122,62 @@ test.sequential(
   20000,
 )
 
+test.sequential(
+  'assistant commands use the saved default vault when --vault is omitted and still allow explicit overrides',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-default-vault-'))
+    const homeRoot = path.join(parent, 'home')
+    const defaultVaultRoot = path.join(homeRoot, 'default-vault')
+    const overrideVaultRoot = path.join(homeRoot, 'override-vault')
+    cleanupPaths.push(parent)
+
+    await mkdir(defaultVaultRoot, { recursive: true })
+    await mkdir(overrideVaultRoot, { recursive: true })
+
+    const originalHome = process.env.HOME
+    process.env.HOME = homeRoot
+
+    try {
+      const defaultSession = await resolveAssistantSession({
+        vault: defaultVaultRoot,
+        alias: 'default:bob',
+      })
+      const overrideSession = await resolveAssistantSession({
+        vault: overrideVaultRoot,
+        alias: 'override:bob',
+      })
+      await saveDefaultVaultConfig(defaultVaultRoot, homeRoot)
+
+      const defaultListed = requireData(
+        await runSourceCli<{
+          vault: string
+          sessions: Array<{
+            sessionId: string
+          }>
+        }>(['assistant', 'session', 'list']),
+      )
+      assert.equal(defaultListed.vault, path.join('~', 'default-vault'))
+      assert.equal(defaultListed.sessions.length, 1)
+      assert.equal(defaultListed.sessions[0]?.sessionId, defaultSession.session.sessionId)
+
+      const overrideListed = requireData(
+        await runCli<{
+          vault: string
+          sessions: Array<{
+            sessionId: string
+          }>
+        }>(['assistant', 'session', 'list', '--vault', overrideVaultRoot]),
+      )
+      assert.equal(overrideListed.vault, path.join('~', 'override-vault'))
+      assert.equal(overrideListed.sessions.length, 1)
+      assert.equal(overrideListed.sessions[0]?.sessionId, overrideSession.session.sessionId)
+    } finally {
+      restoreEnvironmentVariable('HOME', originalHome)
+    }
+  },
+  20000,
+)
+
 function restoreEnvironmentVariable(
   key: string,
   value: string | undefined,
@@ -127,4 +188,84 @@ function restoreEnvironmentVariable(
   }
 
   process.env[key] = value
+}
+
+async function runSourceCli<TData = Record<string, unknown>>(
+  args: string[],
+): Promise<{
+  ok: true
+  data: TData
+  meta: {
+    command: string
+    duration: string
+  }
+} | {
+  ok: false
+  error: {
+    code?: string
+    message?: string
+  }
+  meta: {
+    command: string
+    duration: string
+  }
+}> {
+  await ensureCliRuntimeArtifacts()
+
+  try {
+    const { stdout } = await execFileAsync(
+      'pnpm',
+      ['exec', 'tsx', sourceBinPath, ...withMachineOutput(args)],
+      { cwd: repoRoot },
+    )
+
+    return JSON.parse(stdout) as any
+  } catch (error) {
+    const output = outputFromError(error)
+    if (output !== null) {
+      return JSON.parse(output) as any
+    }
+
+    throw error
+  }
+}
+
+function withMachineOutput(args: string[]): string[] {
+  const nextArgs = [...args]
+
+  if (!nextArgs.includes('--verbose')) {
+    nextArgs.push('--verbose')
+  }
+
+  if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
+    nextArgs.push('--format', 'json')
+  }
+
+  return nextArgs
+}
+
+function outputFromError(error: unknown): string | null {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const maybeOutput = error as {
+    stdout?: Buffer | string
+    stderr?: Buffer | string
+  }
+
+  return decodeCommandOutput(maybeOutput.stdout) ?? decodeCommandOutput(maybeOutput.stderr)
+}
+
+function decodeCommandOutput(output: Buffer | string | undefined): string | null {
+  if (typeof output === 'string') {
+    return output.trim().length > 0 ? output : null
+  }
+
+  if (Buffer.isBuffer(output)) {
+    const text = output.toString('utf8').trim()
+    return text.length > 0 ? text : null
+  }
+
+  return null
 }

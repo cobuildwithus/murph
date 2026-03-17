@@ -27,9 +27,9 @@ Once `@healthybob/cli` is publish-ready, the installed-package onboarding path w
 healthybob setup --vault ./vault
 ```
 
-That command installs or reuses the Homebrew-based local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.healthybob/toolchain/models/whisper/`, optionally installs PaddleX OCR on Apple Silicon, initializes the target vault, and then runs inbox bootstrap so the machine is ready for local ingestion out of the box.
+That command installs or reuses the Homebrew-based local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.healthybob/toolchain/models/whisper/`, optionally installs PaddleX OCR on Apple Silicon, initializes the target vault, saves it as the default Healthy Bob CLI vault for later commands, and then runs inbox bootstrap so the machine is ready for local ingestion out of the box.
 
-Setup also installs user-level `healthybob` and `vault-cli` shims into `~/.local/bin`. If that directory is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells the operator to reload the shell.
+Setup also installs user-level `healthybob` and `vault-cli` shims into `~/.local/bin`. If that directory is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells the operator to reload the shell. Once setup has run, the main CLI can omit `--vault` when the saved default is the intended target.
 
 Useful flags include `--dry-run`, `--whisperModel small.en`, and `--skipOcr`.
 

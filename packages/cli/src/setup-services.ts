@@ -16,6 +16,11 @@ import {
 } from './vault-cli-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
+  normalizeVaultForConfig,
+  readOperatorConfig,
+  saveDefaultVaultConfig,
+} from './operator-config.js'
+import {
   type SetupResult,
   type SetupStepKind,
   type SetupStepResult,
@@ -428,6 +433,12 @@ export function createSetupServices(
       homeDirectory,
       notes,
       steps,
+    })
+    await ensureDefaultVaultSelection({
+      dryRun,
+      homeDirectory,
+      steps,
+      vault,
     })
 
     return {
@@ -1005,6 +1016,46 @@ async function ensureCliShims(input: {
       kind: 'configure',
       status,
       title: 'CLI command shims',
+    }),
+  )
+}
+
+async function ensureDefaultVaultSelection(input: {
+  dryRun: boolean
+  homeDirectory: string
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<void> {
+  const existing = await readOperatorConfig(input.homeDirectory)
+  const existingDefaultVault =
+    existing?.defaultVault === null || existing?.defaultVault === undefined
+      ? null
+      : existing.defaultVault
+  const nextDefaultVault = normalizeVaultForConfig(input.vault, input.homeDirectory)
+  const status =
+    existingDefaultVault === nextDefaultVault
+      ? 'reused'
+      : input.dryRun
+        ? 'planned'
+        : 'completed'
+  const detail =
+    existingDefaultVault === nextDefaultVault
+      ? `Reusing ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
+      : input.dryRun
+        ? `Would save ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
+        : `Saved ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
+
+  if (!input.dryRun && existingDefaultVault !== nextDefaultVault) {
+    await saveDefaultVaultConfig(input.vault, input.homeDirectory)
+  }
+
+  input.steps.push(
+    createStep({
+      detail,
+      id: 'default-vault',
+      kind: 'configure',
+      status,
+      title: 'Default vault selection',
     }),
   )
 }

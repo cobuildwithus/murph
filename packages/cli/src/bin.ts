@@ -2,6 +2,11 @@
 
 import cli from './index.js'
 import {
+  applyDefaultVaultToArgs,
+  resolveDefaultVault,
+  resolveOperatorHomeDirectory,
+} from './operator-config.js'
+import {
   createSetupCli,
   detectSetupProgramName,
   isSetupInvocation,
@@ -16,5 +21,6 @@ if (isSetupInvocation(argv, setupProgramName)) {
   })
   setupCli.serve(argv)
 } else {
-  cli.serve(argv)
+  const defaultVault = await resolveDefaultVault(resolveOperatorHomeDirectory())
+  cli.serve(applyDefaultVaultToArgs(argv, defaultVault))
 }

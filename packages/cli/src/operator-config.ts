@@ -1,0 +1,214 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { z } from 'zod'
+
+const OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
+const OPERATOR_CONFIG_DIRECTORY = '.healthybob'
+const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
+
+const operatorConfigSchema = z.object({
+  schema: z.literal(OPERATOR_CONFIG_SCHEMA),
+  defaultVault: z.string().min(1).nullable(),
+  updatedAt: z.string().datetime({ offset: true }),
+})
+
+export type OperatorConfig = z.infer<typeof operatorConfigSchema>
+
+export const ROOT_OPTIONS_WITH_VALUES = new Set([
+  '--filter-output',
+  '--format',
+  '--token-limit',
+  '--token-offset',
+])
+
+export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
+  'allergy',
+  'assistant',
+  'audit',
+  'condition',
+  'document',
+  'event',
+  'experiment',
+  'export',
+  'family',
+  'genetics',
+  'goal',
+  'history',
+  'inbox',
+  'init',
+  'intake',
+  'journal',
+  'list',
+  'meal',
+  'profile',
+  'provider',
+  'regimen',
+  'samples',
+  'search',
+  'show',
+  'timeline',
+  'validate',
+  'vault',
+])
+
+export function resolveOperatorHomeDirectory(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const configuredHome = env.HOME?.trim()
+  return path.resolve(configuredHome && configuredHome.length > 0 ? configuredHome : os.homedir())
+}
+
+export function resolveOperatorConfigPath(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): string {
+  return path.join(homeDirectory, OPERATOR_CONFIG_PATH)
+}
+
+export function normalizeVaultForConfig(
+  vault: string,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): string {
+  const absoluteVault = path.resolve(vault)
+  const normalizedHome = path.resolve(homeDirectory)
+
+  if (absoluteVault === normalizedHome) {
+    return '~'
+  }
+
+  if (absoluteVault.startsWith(`${normalizedHome}${path.sep}`)) {
+    return `~${absoluteVault.slice(normalizedHome.length)}`
+  }
+
+  return absoluteVault
+}
+
+export function expandConfiguredVaultPath(
+  configuredPath: string,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): string {
+  if (configuredPath === '~') {
+    return homeDirectory
+  }
+
+  if (configuredPath.startsWith('~/')) {
+    return path.join(homeDirectory, configuredPath.slice(2))
+  }
+
+  return path.resolve(configuredPath)
+}
+
+export async function readOperatorConfig(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<OperatorConfig | null> {
+  try {
+    const raw = await readFile(resolveOperatorConfigPath(homeDirectory), 'utf8')
+    return operatorConfigSchema.parse(JSON.parse(raw) as unknown)
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return null
+    }
+
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+export async function saveDefaultVaultConfig(
+  vault: string,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<OperatorConfig> {
+  const config = operatorConfigSchema.parse({
+    schema: OPERATOR_CONFIG_SCHEMA,
+    defaultVault: normalizeVaultForConfig(vault, homeDirectory),
+    updatedAt: new Date().toISOString(),
+  })
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+
+  return config
+}
+
+export async function resolveDefaultVault(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<string | null> {
+  const config = await readOperatorConfig(homeDirectory)
+  if (!config?.defaultVault) {
+    return null
+  }
+
+  return expandConfiguredVaultPath(config.defaultVault, homeDirectory)
+}
+
+export function hasExplicitVaultOption(args: readonly string[]): boolean {
+  for (const token of args) {
+    if (token === '--') {
+      return false
+    }
+
+    if (token === '--vault' || token.startsWith('--vault=')) {
+      return true
+    }
+  }
+
+  return false
+}
+
+export function resolveEffectiveTopLevelToken(args: readonly string[]): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]
+    if (!token) {
+      continue
+    }
+
+    if (token === '--') {
+      return (args[index + 1] as string | undefined) ?? null
+    }
+
+    if (!token.startsWith('-')) {
+      return token
+    }
+
+    if (ROOT_OPTIONS_WITH_VALUES.has(token)) {
+      index += 1
+    }
+  }
+
+  return null
+}
+
+export function applyDefaultVaultToArgs(
+  args: readonly string[],
+  vault: string | null,
+): string[] {
+  if (!vault || hasExplicitVaultOption(args)) {
+    return [...args]
+  }
+
+  const topLevelToken = resolveEffectiveTopLevelToken(args)
+  if (!topLevelToken || !TOP_LEVEL_COMMANDS_REQUIRING_VAULT.has(topLevelToken)) {
+    return [...args]
+  }
+
+  const separatorIndex = args.indexOf('--')
+  if (separatorIndex < 0) {
+    return [...args, '--vault', vault]
+  }
+
+  return [
+    ...args.slice(0, separatorIndex),
+    '--vault',
+    vault,
+    ...args.slice(separatorIndex),
+  ]
+}

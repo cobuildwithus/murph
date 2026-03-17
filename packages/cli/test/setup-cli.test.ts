@@ -17,6 +17,7 @@ import {
   detectSetupProgramName,
   isSetupInvocation,
 } from '../src/setup-cli.js'
+import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
 import { createSetupServices } from '../src/setup-services.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
 import {
@@ -348,6 +349,10 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
       data.steps.some((step) => step.id === 'cli-shims' && step.status === 'planned'),
       true,
     )
+    assert.equal(
+      data.steps.some((step) => step.id === 'default-vault' && step.status === 'planned'),
+      true,
+    )
   } finally {
     await rm(homeRoot, { recursive: true, force: true })
   }
@@ -524,7 +529,7 @@ test.sequential('setup CLI shell-escapes CTA vault paths with shell metacharacte
 test.sequential('setup service provisions formulas, downloads the model, and bootstraps the vault', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-real-'))
   const homeRoot = path.join(tempRoot, 'home')
-  const vaultRoot = path.join(tempRoot, 'vault')
+  const vaultRoot = path.join(homeRoot, 'vault')
   const expectedWhisperModelPath = path.join(
     homeRoot,
     '.healthybob',
@@ -533,6 +538,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     'whisper',
     'ggml-base.en.bin',
   )
+  const operatorConfigPath = resolveOperatorConfigPath(homeRoot)
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
@@ -663,7 +669,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       whisperModel: 'base.en',
     })
 
-    assert.equal(result.bootstrap?.vault, vaultRoot)
+    assert.equal(result.bootstrap?.vault, '~/vault')
     assert.equal(initCalls.length, 1)
     assert.deepEqual(initCalls[0], { requestId: 'req-123', vault: vaultRoot })
     assert.equal(bootstrapCalls.length, 1)
@@ -701,15 +707,23 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       true,
     )
     assert.equal(
+      result.steps.some((step) => step.id === 'default-vault' && step.status === 'completed'),
+      true,
+    )
+    assert.equal(
       result.notes.includes('Open a new shell or run source ~/.zshrc to use healthybob immediately.'),
       true,
     )
 
     const modelText = await readFile(expectedWhisperModelPath, 'utf8')
+    const operatorConfig = JSON.parse(await readFile(operatorConfigPath, 'utf8')) as {
+      defaultVault: string | null
+    }
     const healthybobShim = await readFile(healthybobShimPath, 'utf8')
     const vaultCliShim = await readFile(vaultCliShimPath, 'utf8')
     const shellProfile = await readFile(shellProfilePath, 'utf8')
     assert.equal(modelText, 'model')
+    assert.equal(operatorConfig.defaultVault, '~/vault')
     assert.match(healthybobShim, /exec node/u)
     assert.match(healthybobShim, new RegExp(escapeRegExp(cliBinPath)))
     assert.match(vaultCliShim, new RegExp(escapeRegExp(cliBinPath)))
@@ -776,6 +790,7 @@ export PATH="$HOME/.local/bin:$PATH"
 `,
     'utf8',
   )
+  await saveDefaultVaultConfig(vaultRoot, homeRoot)
 
   const services = createSetupServices({
     arch: () => 'x64',
@@ -836,6 +851,10 @@ export PATH="$HOME/.local/bin:$PATH"
     assert.equal(bootstrapCalls, 1)
     assert.equal(
       result.steps.some((step) => step.id === 'cli-shims' && step.status === 'reused'),
+      true,
+    )
+    assert.equal(
+      result.steps.some((step) => step.id === 'default-vault' && step.status === 'reused'),
       true,
     )
     assert.equal(
