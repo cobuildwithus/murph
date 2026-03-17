@@ -41,6 +41,8 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
   })
 
   assert.deepEqual(args, [
+    '--ask-for-approval',
+    'never',
     'exec',
     '--json',
     '--skip-git-repo-check',
@@ -50,8 +52,6 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
     '/tmp/vault',
     '--sandbox',
     'read-only',
-    '--ask-for-approval',
-    'never',
     '--oss',
     '--profile',
     'primary',
@@ -61,7 +61,7 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
   ])
 })
 
-test('buildCodexArgs omits unsupported sandbox and approval flags when resuming exec sessions', () => {
+test('buildCodexArgs keeps approval as a root flag and omits sandbox when resuming exec sessions', () => {
   const args = buildCodexArgs({
     prompt: 'What changed?',
     workingDirectory: '/tmp/vault',
@@ -75,6 +75,8 @@ test('buildCodexArgs omits unsupported sandbox and approval flags when resuming 
   })
 
   assert.deepEqual(args, [
+    '--ask-for-approval',
+    'on-request',
     'exec',
     'resume',
     'thread-123',

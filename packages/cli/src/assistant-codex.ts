@@ -157,9 +157,14 @@ export function buildCodexArgs(
   },
 ): string[] {
   const resumeSessionId = normalizeNullableString(input.resumeSessionId)
+  const rootArgs: string[] = []
   const args = resumeSessionId
     ? ['exec', 'resume', resumeSessionId]
     : ['exec']
+
+  if (input.approvalPolicy) {
+    rootArgs.push('--ask-for-approval', input.approvalPolicy)
+  }
 
   args.push('--json', '--skip-git-repo-check')
   args.push('--output-last-message', input.outputFile)
@@ -169,10 +174,6 @@ export function buildCodexArgs(
 
     if (input.sandbox) {
       args.push('--sandbox', input.sandbox)
-    }
-
-    if (input.approvalPolicy) {
-      args.push('--ask-for-approval', input.approvalPolicy)
     }
 
     if (input.oss) {
@@ -190,7 +191,7 @@ export function buildCodexArgs(
 
   args.push(input.prompt)
 
-  return args
+  return [...rootArgs, ...args]
 }
 
 function consumeCompleteLines(
