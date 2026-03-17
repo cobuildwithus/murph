@@ -205,7 +205,7 @@ export function registerAssistantCommands(
     description:
       'Open an Ink terminal chat UI backed by the chosen provider while Healthy Bob stores only session metadata.',
     hint:
-      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id. When Ink is unavailable, the CLI falls back to the plain readline loop.',
+      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
     options: withBaseOptions({
       ...assistantSessionOptionFields,
       ...assistantProviderOptionFields,

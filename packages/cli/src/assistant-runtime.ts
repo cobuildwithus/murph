@@ -1,6 +1,5 @@
 import { access } from 'node:fs/promises'
 import path from 'node:path'
-import readline from 'node:readline/promises'
 import {
   assistantAskResultSchema,
   assistantChatResultSchema,
@@ -184,112 +183,8 @@ export async function sendAssistantMessage(
 export async function runAssistantChat(
   input: AssistantChatInput,
 ): Promise<ReturnType<typeof assistantChatResultSchema.parse>> {
-  if (shouldUseInkChat()) {
-    try {
-      const { runAssistantChatWithInk } = await import('./assistant-chat-ink.js')
-      return await runAssistantChatWithInk(input)
-    } catch (error) {
-      if (!isOptionalInkDependencyError(error)) {
-        throw error
-      }
-    }
-  }
-
-  return runAssistantChatReadline(input)
-}
-
-async function runAssistantChatReadline(
-  input: AssistantChatInput,
-): Promise<ReturnType<typeof assistantChatResultSchema.parse>> {
-  const startedAt = new Date().toISOString()
-  let turns = 0
-  let lastResult = await resolveAssistantSession({
-    vault: input.vault,
-    sessionId: input.sessionId,
-    alias: input.alias,
-    channel: input.channel,
-    identityId: input.identityId,
-    participantId: input.participantId,
-    sourceThreadId: input.sourceThreadId,
-    provider: input.provider,
-    model: input.model,
-    sandbox: input.sandbox ?? 'read-only',
-    approvalPolicy: input.approvalPolicy ?? 'never',
-    oss: input.oss ?? false,
-    profile: input.profile,
-  })
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-    terminal: Boolean(process.stdin.isTTY && process.stderr.isTTY),
-  })
-
-  try {
-    console.error(
-      `Healthy Bob session ${lastResult.session.sessionId}. Type /exit to quit.`,
-    )
-
-    if (normalizeNullableString(input.initialPrompt)) {
-      const result = await sendAssistantMessage({
-        ...input,
-        prompt: input.initialPrompt!,
-        sessionId: lastResult.session.sessionId,
-      })
-      lastResult = {
-        ...lastResult,
-        created: false,
-        session: result.session,
-      }
-      turns += 1
-      console.error(`\nassistant> ${result.response}\n`)
-    }
-
-    while (true) {
-      const answer = await rl.question('you> ')
-      const prompt = answer.trim()
-
-      if (prompt.length === 0) {
-        continue
-      }
-
-      if (prompt === '/exit' || prompt === '/quit') {
-        break
-      }
-
-      if (prompt === '/session') {
-        console.error(lastResult.session.sessionId)
-        continue
-      }
-
-      try {
-        const result = await sendAssistantMessage({
-          ...input,
-          prompt,
-          sessionId: lastResult.session.sessionId,
-        })
-        lastResult = {
-          ...lastResult,
-          created: false,
-          session: result.session,
-        }
-        turns += 1
-        console.error(`\nassistant> ${result.response}\n`)
-      } catch (error) {
-        console.error(`\nassistant error> ${errorMessage(error)}\n`)
-      }
-    }
-  } finally {
-    rl.close()
-  }
-
-  return assistantChatResultSchema.parse({
-    vault: redactAssistantDisplayPath(input.vault),
-    startedAt,
-    stoppedAt: new Date().toISOString(),
-    turns,
-    session: lastResult.session,
-  })
+  const { runAssistantChatWithInk } = await import('./assistant-chat-ink.js')
+  return runAssistantChatWithInk(input)
 }
 
 export async function runAssistantAutomation(
@@ -650,19 +545,6 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
-}
-
-function shouldUseInkChat(): boolean {
-  return Boolean(process.stdin.isTTY && process.stderr.isTTY)
-}
-
-function isOptionalInkDependencyError(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: unknown }).code === 'ASSISTANT_CHAT_UI_UNAVAILABLE',
-  )
 }
 
 function errorMessage(error: unknown): string {

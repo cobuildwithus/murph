@@ -2,11 +2,14 @@ import {
   assistantChatResultSchema,
   type AssistantSession,
 } from './assistant-cli-contracts.js'
+// @ts-ignore CLI Ink chat uses the React runtime directly, but this package does not carry local React typings.
+import * as React from 'react'
+import { Box, Text, render, useApp } from 'ink'
+import TextInput from 'ink-text-input'
 import {
   redactAssistantDisplayPath,
   resolveAssistantSession,
 } from './assistant-state.js'
-import { VaultCliError } from './vault-cli-errors.js'
 import type { AssistantChatInput } from './assistant-runtime.js'
 import { sendAssistantMessage } from './assistant-runtime.js'
 
@@ -36,7 +39,6 @@ export async function runAssistantChatWithInk(
     oss: input.oss ?? false,
     profile: input.profile,
   })
-  const ui = await loadInkChatRuntime()
   const redactedVault = redactAssistantDisplayPath(input.vault)
 
   return await new Promise<AssistantChatResult>((resolve, reject) => {
@@ -65,40 +67,31 @@ export async function runAssistantChatWithInk(
       reject(error)
     }
 
-    const App = () => {
-      const createElement = ui.React.createElement as (...args: unknown[]) => unknown
-      const useEffect = ui.React.useEffect as (
-        effect: () => void | (() => void),
-        dependencies?: unknown[],
-      ) => void
-      const useRef = ui.React.useRef as <T>(value: T) => { current: T }
-      const useState = ui.React.useState as <T>(
-        initialValue: T,
-      ) => [T, (value: T | ((previous: T) => T)) => void]
-      const { Box, Text, TextInput, useApp } = ui
+    const App = (): React.ReactElement => {
+      const createElement = React.createElement
       const { exit } = useApp()
-      const [session, setSession] = useState(resolved.session)
-      const [turns, setTurns] = useState(0)
-      const [entries, setEntries] = useState(seedChatEntries(resolved.session))
-      const [value, setValue] = useState('')
-      const [busy, setBusy] = useState(false)
-      const [footer, setFooter] = useState(
+      const [session, setSession] = React.useState(resolved.session)
+      const [turns, setTurns] = React.useState(0)
+      const [entries, setEntries] = React.useState(seedChatEntries(resolved.session))
+      const [value, setValue] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [footer, setFooter] = React.useState(
         'Type a message. Use /session to inspect the Healthy Bob session id and /exit to quit.',
       )
-      const latestSessionRef = useRef(resolved.session)
-      const latestTurnsRef = useRef(0)
-      const initialPromptRef = useRef(normalizeNullableString(input.initialPrompt))
-      const bootstrappedRef = useRef(false)
+      const latestSessionRef = React.useRef(resolved.session)
+      const latestTurnsRef = React.useRef(0)
+      const initialPromptRef = React.useRef(normalizeNullableString(input.initialPrompt))
+      const bootstrappedRef = React.useRef(false)
 
-      useEffect(() => {
+      React.useEffect(() => {
         latestSessionRef.current = session
       }, [session])
 
-      useEffect(() => {
+      React.useEffect(() => {
         latestTurnsRef.current = turns
       }, [turns])
 
-      useEffect(
+      React.useEffect(
         () => () => {
           resolveOnce(
             assistantChatResultSchema.parse({
@@ -176,7 +169,7 @@ export async function runAssistantChatWithInk(
         }
       }
 
-      useEffect(() => {
+      React.useEffect(() => {
         if (bootstrappedRef.current) {
           return
         }
@@ -269,7 +262,7 @@ export async function runAssistantChatWithInk(
     }
 
     try {
-      instance = ui.render(ui.React.createElement(App), {
+      const renderInstance = (render as any)(React.createElement(App), {
         stdout: process.stderr,
         stderr: process.stderr,
         stdin: process.stdin,
@@ -278,18 +271,19 @@ export async function runAssistantChatWithInk(
         interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY),
         exitOnCtrlC: true,
       })
+      instance = renderInstance
 
       const onSigterm = () => {
         instance?.unmount()
       }
 
       process.on('SIGTERM', onSigterm)
-      instance
+      renderInstance
         .waitUntilExit()
         .then(() => {
           process.off('SIGTERM', onSigterm)
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           process.off('SIGTERM', onSigterm)
           rejectOnce(error)
         })
@@ -297,63 +291,6 @@ export async function runAssistantChatWithInk(
       rejectOnce(error)
     }
   })
-}
-
-async function loadInkChatRuntime(): Promise<{
-  Box: any
-  React: any
-  Text: any
-  TextInput: any
-  render: (tree: unknown, options: Record<string, unknown>) => {
-    cleanup?: () => void
-    unmount: () => void
-    waitUntilExit: () => Promise<unknown>
-  }
-  useApp: () => {
-    exit: () => void
-  }
-}> {
-  const reactSpecifier = 'react'
-  const inkSpecifier = 'ink'
-  const textInputSpecifier = 'ink-text-input'
-
-  try {
-    const React = (await import(reactSpecifier)) as Record<string, unknown>
-    const ink = (await import(inkSpecifier)) as Record<string, unknown>
-    const textInputModule = (await import(textInputSpecifier)) as Record<
-      string,
-      unknown
-    >
-    const TextInput =
-      textInputModule.default ??
-      textInputModule.TextInput ??
-      textInputModule.UncontrolledTextInput
-
-    if (typeof ink.render !== 'function') {
-      throw new TypeError('Ink did not expose render().')
-    }
-
-    if (!TextInput) {
-      throw new TypeError('ink-text-input did not expose a usable input component.')
-    }
-
-    return {
-      React,
-      Box: ink.Box,
-      Text: ink.Text,
-      TextInput,
-      render: ink.render as any,
-      useApp: ink.useApp as any,
-    }
-  } catch (error) {
-    throw new VaultCliError(
-      'ASSISTANT_CHAT_UI_UNAVAILABLE',
-      'Ink chat UI requires react, ink, and ink-text-input to be installed in the CLI workspace.',
-      {
-        cause: errorMessage(error),
-      },
-    )
-  }
 }
 
 function seedChatEntries(session: AssistantSession): InkChatEntry[] {

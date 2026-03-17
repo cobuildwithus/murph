@@ -5,17 +5,14 @@ import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const runtimeMocks = vi.hoisted(() => ({
-  createInterface: vi.fn(),
   deliverAssistantMessage: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
   routeInboxCaptureWithModel: vi.fn(),
+  runAssistantChatWithInk: vi.fn(),
 }))
 
-vi.mock('node:readline/promises', () => ({
-  default: {
-    createInterface: runtimeMocks.createInterface,
-  },
-  createInterface: runtimeMocks.createInterface,
+vi.mock('../src/assistant-chat-ink.js', () => ({
+  runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
 }))
 
 vi.mock('../src/assistant-channel.js', async () => {
@@ -65,10 +62,10 @@ afterEach(async () => {
 })
 
 beforeEach(() => {
-  runtimeMocks.createInterface.mockReset()
   runtimeMocks.deliverAssistantMessage.mockReset()
   runtimeMocks.executeAssistantProviderTurn.mockReset()
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
+  runtimeMocks.runAssistantChatWithInk.mockReset()
 })
 
 test('sendAssistantMessage persists only assistant session metadata and reuses provider sessions via alias keys', async () => {
@@ -453,138 +450,77 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   assert.equal(result.scans, 1)
 })
 
-test('runAssistantChat ignores blank input, prints the session id, and exits cleanly', async () => {
+test('runAssistantChat delegates to the Ink UI implementation', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-chat-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'codex-cli',
-    providerSessionId: 'thread-loop',
-    response: 'loop reply',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
+  runtimeMocks.runAssistantChatWithInk.mockResolvedValue({
+    vault: vaultRoot,
+    startedAt: '2026-03-17T00:00:00.000Z',
+    stoppedAt: '2026-03-17T00:00:01.000Z',
+    turns: 2,
+    session: {
+      schema: 'healthybob.assistant-session.v1',
+      sessionId: 'asst_123',
+      provider: 'codex-cli',
+      providerSessionId: 'thread-ink',
+      providerOptions: {
+        model: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: 'chat:bob',
+      channel: null,
+      identityId: null,
+      participantId: null,
+      sourceThreadId: null,
+      createdAt: '2026-03-17T00:00:00.000Z',
+      updatedAt: '2026-03-17T00:00:01.000Z',
+      lastTurnAt: '2026-03-17T00:00:01.000Z',
+      turnCount: 2,
+      lastUserMessage: 'hello',
+      lastAssistantMessage: 'loop reply',
+    },
   })
-
-  const readlineMock = mockReadlineInputs(['', '/session', 'hello', '/exit'])
-  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
   const result = await runAssistantChat({
     vault: vaultRoot,
     alias: 'chat:bob',
+    initialPrompt: 'hello',
   })
 
-  assert.equal(result.turns, 1)
-  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
-  assert.equal(
-    errorSpy.mock.calls.some(([value]) => value === result.session.sessionId),
-    true,
-  )
-  assert.equal(
-    errorSpy.mock.calls.some(
-      ([value]) =>
-        typeof value === 'string' && value.includes('assistant> loop reply'),
-    ),
-    true,
-  )
-  assert.equal(readlineMock.question.mock.calls.length, 4)
-  assert.equal(readlineMock.close.mock.calls.length, 1)
+  assert.equal(result.session.sessionId, 'asst_123')
+  assert.equal(result.turns, 2)
+  assert.deepEqual(runtimeMocks.runAssistantChatWithInk.mock.calls, [
+    [
+      {
+        vault: vaultRoot,
+        alias: 'chat:bob',
+        initialPrompt: 'hello',
+      },
+    ],
+  ])
 })
 
-test('runAssistantChat sends the optional initial prompt before entering the loop', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-initial-'))
+test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-chat-error-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'codex-cli',
-    providerSessionId: 'thread-initial',
-    response: 'initial reply',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
-  })
+  runtimeMocks.runAssistantChatWithInk.mockRejectedValue(new Error('ink exploded'))
 
-  mockReadlineInputs(['/exit'])
-  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-  const result = await runAssistantChat({
-    vault: vaultRoot,
-    initialPrompt: 'Start here.',
-  })
-
-  assert.equal(result.turns, 1)
-  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
-  assert.equal(
-    errorSpy.mock.calls.some(
-      ([value]) =>
-        typeof value === 'string' && value.includes('assistant> initial reply'),
-    ),
-    true,
+  await assert.rejects(
+    runAssistantChat({
+      vault: vaultRoot,
+    }),
+    /ink exploded/u,
   )
 })
-
-test('runAssistantChat logs provider errors and keeps the loop alive for later input', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-retry-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  runtimeMocks.executeAssistantProviderTurn
-    .mockRejectedValueOnce(new Error('provider exploded'))
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-recovered',
-      response: 'recovered reply',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    })
-
-  mockReadlineInputs(['first turn', 'second turn', '/exit'])
-  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-  const result = await runAssistantChat({
-    vault: vaultRoot,
-  })
-
-  assert.equal(result.turns, 1)
-  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
-  assert.equal(
-    errorSpy.mock.calls.some(
-      ([value]) =>
-        typeof value === 'string' &&
-        value.includes('assistant error> provider exploded'),
-    ),
-    true,
-  )
-  assert.equal(
-    errorSpy.mock.calls.some(
-      ([value]) =>
-        typeof value === 'string' &&
-        value.includes('assistant> recovered reply'),
-    ),
-    true,
-  )
-})
-
-function mockReadlineInputs(inputs: string[]) {
-  const question = vi.fn(async () => inputs.shift() ?? '/exit')
-  const close = vi.fn()
-
-  runtimeMocks.createInterface.mockReturnValue({
-    question,
-    close,
-  })
-
-  return {
-    close,
-    question,
-  }
-}
 
 function restoreEnvironmentVariable(
   key: string,
