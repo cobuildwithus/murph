@@ -344,6 +344,10 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
       data.steps.some((step) => step.id === 'inbox-bootstrap' && step.status === 'planned'),
       true,
     )
+    assert.equal(
+      data.steps.some((step) => step.id === 'cli-shims' && step.status === 'planned'),
+      true,
+    )
   } finally {
     await rm(homeRoot, { recursive: true, force: true })
   }
@@ -541,6 +545,10 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const pythonCommand = path.join(formulaPrefixes['python@3.12'], 'bin', 'python3.12')
+  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const healthybobShimPath = path.join(homeRoot, '.local', 'bin', 'healthybob')
+  const vaultCliShimPath = path.join(homeRoot, '.local', 'bin', 'vault-cli')
+  const shellProfilePath = path.join(homeRoot, '.zshrc')
   const installedFormulas = new Set<string>()
   const runCalls: Array<{ file: string; args: string[] }> = []
   const initCalls: Array<{ requestId: string | null; vault: string }> = []
@@ -557,7 +565,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     downloadFile: async (_url, destinationPath) => {
       await writeFile(destinationPath, 'model', 'utf8')
     },
-    env: () => ({ PATH: homebrewBin }),
+    env: () => ({ PATH: homebrewBin, SHELL: '/bin/zsh' }),
     getHomeDirectory: () => homeRoot,
     inboxServices: {
       async bootstrap(input) {
@@ -567,6 +575,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     },
     log() {},
     platform: () => 'darwin',
+    resolveCliBinPath: () => cliBinPath,
     runCommand: async ({ file, args }) => {
       runCalls.push({ args, file })
       const baseName = path.basename(file)
@@ -687,14 +696,151 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       result.steps.some((step) => step.id === 'paddlex-ocr' && step.status === 'completed'),
       true,
     )
+    assert.equal(
+      result.steps.some((step) => step.id === 'cli-shims' && step.status === 'completed'),
+      true,
+    )
+    assert.equal(
+      result.notes.includes('Open a new shell or run source ~/.zshrc to use healthybob immediately.'),
+      true,
+    )
 
     const modelText = await readFile(expectedWhisperModelPath, 'utf8')
+    const healthybobShim = await readFile(healthybobShimPath, 'utf8')
+    const vaultCliShim = await readFile(vaultCliShimPath, 'utf8')
+    const shellProfile = await readFile(shellProfilePath, 'utf8')
     assert.equal(modelText, 'model')
+    assert.match(healthybobShim, /exec node/u)
+    assert.match(healthybobShim, new RegExp(escapeRegExp(cliBinPath)))
+    assert.match(vaultCliShim, new RegExp(escapeRegExp(cliBinPath)))
+    assert.match(shellProfile, /export PATH="\$HOME\/\.local\/bin:\$PATH"/u)
     assert.equal(
       runCalls.some(
         ({ args, file }) => path.basename(file) === 'brew' && args.join(' ') === 'install ffmpeg',
       ),
       true,
+    )
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup service reuses existing Healthy Bob shims and PATH wiring', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-shim-reuse-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
+  const formulaPrefixes = {
+    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
+    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
+    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
+  }
+  const brewCommand = path.join(homebrewBin, 'brew')
+  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
+  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
+  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
+  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const userBinDirectory = path.join(homeRoot, '.local', 'bin')
+  const shellProfilePath = path.join(homeRoot, '.zshrc')
+  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  let bootstrapCalls = 0
+
+  await mkdir(vaultRoot, { recursive: true })
+  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+  await writeExecutable(brewCommand)
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperCommand)
+  await mkdir(userBinDirectory, { recursive: true })
+  await writeExecutable(
+    path.join(userBinDirectory, 'healthybob'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+
+exec node '${cliBinPath}' "$@"
+`,
+  )
+  await writeExecutable(
+    path.join(userBinDirectory, 'vault-cli'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+
+exec node '${cliBinPath}' "$@"
+`,
+  )
+  await writeFile(
+    shellProfilePath,
+    `# >>> Healthy Bob PATH >>>
+export PATH="$HOME/.local/bin:$PATH"
+# <<< Healthy Bob PATH <<<
+`,
+    'utf8',
+  )
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    downloadFile: async (_url, destinationPath) => {
+      await mkdir(path.dirname(destinationPath), { recursive: true })
+      await writeFile(destinationPath, 'model', 'utf8')
+    },
+    env: () => ({ PATH: `${userBinDirectory}${path.delimiter}${homebrewBin}`, SHELL: '/bin/zsh' }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap() {
+        bootstrapCalls += 1
+        return makeBootstrapResult(vaultRoot)
+      },
+    },
+    log() {},
+    platform: () => 'darwin',
+    resolveCliBinPath: () => cliBinPath,
+    runCommand: async ({ file, args }) => {
+      const baseName = path.basename(file)
+
+      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
+        const formula = args[2] ?? ''
+        return {
+          exitCode: installedFormulas.has(formula) ? 0 : 1,
+          stderr: '',
+          stdout: installedFormulas.has(formula) ? `${formula} 1.0.0\n` : '',
+        }
+      }
+
+      if (baseName === 'brew' && args[0] === '--prefix') {
+        const formula = args[1] as keyof typeof formulaPrefixes
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: `${formulaPrefixes[formula]}\n`,
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+    vaultServices: {
+      core: {
+        async init() {
+          throw new Error('init should not be called for an existing vault')
+        },
+      },
+    } as any,
+  })
+
+  try {
+    const result = await services.setupMacos({
+      skipOcr: true,
+      vault: vaultRoot,
+      whisperModel: 'base.en',
+    })
+
+    assert.equal(bootstrapCalls, 1)
+    assert.equal(
+      result.steps.some((step) => step.id === 'cli-shims' && step.status === 'reused'),
+      true,
+    )
+    assert.equal(
+      result.notes.includes('Open a new shell or run source ~/.zshrc to use healthybob immediately.'),
+      false,
     )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -1145,3 +1291,7 @@ test('setup service rejects non-macOS hosts', async () => {
     },
   )
 })
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}

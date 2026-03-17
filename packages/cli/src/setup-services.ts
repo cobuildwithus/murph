@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process'
 import { constants, createWriteStream } from 'node:fs'
-import { access, mkdir, rename, rm, stat } from 'node:fs/promises'
+import { access, chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { fileURLToPath } from 'node:url'
 import {
   createIntegratedInboxCliServices,
   type InboxCliServices,
@@ -57,6 +58,7 @@ interface SetupServicesDependencies {
   getHomeDirectory?: () => string
   log?: (message: string) => void
   platform?: () => NodeJS.Platform
+  resolveCliBinPath?: () => string
   runCommand?: (input: CommandRunInput) => Promise<CommandRunResult>
   inboxServices?: Pick<InboxCliServices, 'bootstrap'>
   vaultServices?: Pick<VaultCliServices, 'core'>
@@ -93,10 +95,13 @@ interface ToolFormulaSpec extends FormulaSpec {
 }
 
 const DEFAULT_TOOLCHAIN_DIRECTORY = path.join('.healthybob', 'toolchain')
+const DEFAULT_USER_BIN_DIRECTORY = path.join('.local', 'bin')
 const PADDLEX_VENV_NAME = 'paddlex-ocr'
 const PADDLEX_REQUIREMENT = 'paddlex[ocr]'
 const BREW_INSTALL_COMMAND =
   'NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+const HEALTHYBOB_PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
+const HEALTHYBOB_PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
 
 const modelFileNames: Record<WhisperModel, string> = {
   tiny: 'ggml-tiny.bin',
@@ -178,6 +183,8 @@ export function createSetupServices(
   const getHomeDirectory = dependencies.getHomeDirectory ?? (() => os.homedir())
   const getPlatform = dependencies.platform ?? (() => process.platform)
   const log = dependencies.log ?? defaultLogger
+  const resolveCliBinPath =
+    dependencies.resolveCliBinPath ?? defaultResolveCliBinPath
   const runCommand = dependencies.runCommand ?? createDefaultCommandRunner(log)
   const downloadFile = dependencies.downloadFile ?? defaultDownloadFile
   const vaultServices =
@@ -204,6 +211,7 @@ export function createSetupServices(
     const requestId = input.requestId ?? null
     const whisperModel = input.whisperModel ?? 'base.en'
     const homeDirectory = path.resolve(getHomeDirectory())
+    const cliBinPath = path.resolve(resolveCliBinPath())
     const toolchainRoot = path.resolve(
       getCwd(),
       input.toolchainRoot ?? path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY),
@@ -411,6 +419,16 @@ export function createSetupServices(
         }),
       )
     }
+
+    await ensureCliShims({
+      cliBinPath,
+      dryRun,
+      env: state.env,
+      fileExists,
+      homeDirectory,
+      notes,
+      steps,
+    })
 
     return {
       arch,
@@ -897,6 +915,100 @@ async function ensureDirectoryStep(input: {
   )
 }
 
+async function ensureCliShims(input: {
+  cliBinPath: string
+  dryRun: boolean
+  env: NodeJS.ProcessEnv
+  fileExists: (absolutePath: string) => Promise<boolean>
+  homeDirectory: string
+  notes: string[]
+  steps: SetupStepResult[]
+}): Promise<void> {
+  const userBinDirectory = path.join(input.homeDirectory, DEFAULT_USER_BIN_DIRECTORY)
+  const shellProfilePath = resolveShellProfilePath(input.homeDirectory, input.env)
+  const shimSpecs = [
+    {
+      name: 'healthybob',
+      path: path.join(userBinDirectory, 'healthybob'),
+    },
+    {
+      name: 'vault-cli',
+      path: path.join(userBinDirectory, 'vault-cli'),
+    },
+  ]
+  const pathPresent = pathIncludesSegment(input.env.PATH, userBinDirectory)
+  const pathBlockStatus = pathPresent
+    ? 'reused'
+    : await readPathBlockStatus(shellProfilePath, input.fileExists)
+  const shimsReady = await Promise.all(
+    shimSpecs.map(async (shim) => {
+      return await hasInstalledShim({
+        cliBinPath: input.cliBinPath,
+        fileExists: input.fileExists,
+        shimPath: shim.path,
+      })
+    }),
+  )
+  const hasAllShims = shimsReady.every(Boolean)
+
+  if (input.dryRun) {
+    const status =
+      hasAllShims && (pathPresent || pathBlockStatus === 'reused')
+        ? 'reused'
+        : 'planned'
+    const detail = hasAllShims && (pathPresent || pathBlockStatus === 'reused')
+      ? `Reusing Healthy Bob CLI shims from ${userBinDirectory}.`
+      : pathPresent
+        ? `Would install Healthy Bob CLI shims in ${userBinDirectory}.`
+        : `Would install Healthy Bob CLI shims in ${userBinDirectory} and add ${userBinDirectory} to PATH via ${shellProfilePath}.`
+
+    input.steps.push(
+      createStep({
+        detail,
+        id: 'cli-shims',
+        kind: 'configure',
+        status,
+        title: 'CLI command shims',
+      }),
+    )
+    return
+  }
+
+  await mkdir(userBinDirectory, { recursive: true })
+  let wroteShim = false
+
+  for (const shim of shimSpecs) {
+    const changed = await writeCliShim({
+      cliBinPath: input.cliBinPath,
+      shimPath: shim.path,
+    })
+    wroteShim = wroteShim || changed
+  }
+
+  let pathUpdated = false
+  if (!pathPresent) {
+    pathUpdated = await ensurePathBlock(shellProfilePath)
+    input.notes.push(
+      `Open a new shell or run source ${redactHomePath(shellProfilePath, input.homeDirectory)} to use ${shimSpecs[0].name} immediately.`,
+    )
+  }
+
+  const status = wroteShim || pathUpdated ? 'completed' : 'reused'
+  const detail = pathPresent
+    ? `${status === 'completed' ? 'Installed' : 'Reusing'} Healthy Bob CLI shims from ${userBinDirectory}.`
+    : `${status === 'completed' ? 'Installed' : 'Reusing'} Healthy Bob CLI shims from ${userBinDirectory} and ${pathUpdated ? 'added that directory to' : 'confirmed it is managed in'} ${shellProfilePath}.`
+
+  input.steps.push(
+    createStep({
+      detail,
+      id: 'cli-shims',
+      kind: 'configure',
+      status,
+      title: 'CLI command shims',
+    }),
+  )
+}
+
 async function isBrewFormulaInstalled(
   brewCommand: string,
   formula: string,
@@ -964,6 +1076,10 @@ async function resolveExecutablePath(
   return null
 }
 
+function defaultResolveCliBinPath(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'bin.js')
+}
+
 function withPrependedPath(
   env: NodeJS.ProcessEnv,
   entries: string[],
@@ -986,6 +1102,29 @@ function withPrependedPath(
     ...env,
     PATH: deduped.join(path.delimiter),
   }
+}
+
+function resolveShellProfilePath(
+  homeDirectory: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const shellBaseName = path.basename(env.SHELL ?? '')
+
+  switch (shellBaseName) {
+    case 'bash':
+      return path.join(homeDirectory, '.bashrc')
+    case 'zsh':
+      return path.join(homeDirectory, '.zshrc')
+    default:
+      return path.join(homeDirectory, '.profile')
+  }
+}
+
+function pathIncludesSegment(pathValue: string | undefined, entry: string): boolean {
+  const normalizedEntry = path.resolve(entry)
+  return listPathSegments(pathValue).some(
+    (segment) => path.resolve(segment) === normalizedEntry,
+  )
 }
 
 function preferredBrewCommandPaths(arch: string): string[] {
@@ -1055,6 +1194,96 @@ function listPathSegments(pathValue: string | undefined): string[] {
     .split(path.delimiter)
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
+}
+
+async function readPathBlockStatus(
+  profilePath: string,
+  fileExists: (absolutePath: string) => Promise<boolean>,
+): Promise<'missing' | 'reused'> {
+  if (!(await fileExists(profilePath))) {
+    return 'missing'
+  }
+
+  const contents = await readFile(profilePath, 'utf8')
+  return hasHealthyBobPathBlock(contents) ? 'reused' : 'missing'
+}
+
+async function hasInstalledShim(input: {
+  cliBinPath: string
+  fileExists: (absolutePath: string) => Promise<boolean>
+  shimPath: string
+}): Promise<boolean> {
+  if (!(await input.fileExists(input.shimPath))) {
+    return false
+  }
+
+  const contents = await readFile(input.shimPath, 'utf8')
+  if (contents !== buildCliShimScript(input.cliBinPath)) {
+    return false
+  }
+
+  return await isExecutable(input.shimPath)
+}
+
+async function writeCliShim(input: {
+  cliBinPath: string
+  shimPath: string
+}): Promise<boolean> {
+  const nextContents = buildCliShimScript(input.cliBinPath)
+  const exists = await defaultFileExists(input.shimPath)
+
+  if (exists) {
+    const currentContents = await readFile(input.shimPath, 'utf8')
+    const executable = await isExecutable(input.shimPath)
+    if (currentContents === nextContents && executable) {
+      return false
+    }
+  }
+
+  await writeFile(input.shimPath, nextContents, 'utf8')
+  await chmod(input.shimPath, 0o755)
+  return true
+}
+
+async function ensurePathBlock(profilePath: string): Promise<boolean> {
+  let existing = ''
+
+  if (await defaultFileExists(profilePath)) {
+    existing = await readFile(profilePath, 'utf8')
+    if (hasHealthyBobPathBlock(existing)) {
+      return false
+    }
+  }
+
+  const nextContents = `${existing}${existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''}${buildHealthyBobPathBlock()}`
+  await writeFile(profilePath, nextContents, 'utf8')
+  return true
+}
+
+function hasHealthyBobPathBlock(contents: string): boolean {
+  return (
+    contents.includes(HEALTHYBOB_PATH_BLOCK_BEGIN) &&
+    contents.includes(HEALTHYBOB_PATH_BLOCK_END)
+  )
+}
+
+function buildHealthyBobPathBlock(): string {
+  return `${HEALTHYBOB_PATH_BLOCK_BEGIN}
+export PATH="$HOME/.local/bin:$PATH"
+${HEALTHYBOB_PATH_BLOCK_END}
+`
+}
+
+function buildCliShimScript(cliBinPath: string): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+exec node ${quoteShellArgument(cliBinPath)} "$@"
+`
+}
+
+function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`
 }
 
 function isExplicitPath(candidate: string): boolean {
