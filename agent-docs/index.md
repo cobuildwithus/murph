@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-17 (assistant delivery and Ink-only chat docs, inbox model-routing trust boundaries, local web observability docs, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
+Last verified: 2026-03-17 (assistant delivery and Ink-only chat docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned query-build checks, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 
@@ -23,7 +23,7 @@ This index is the table of contents for durable, repository-local context that a
 | `agent-docs/product-specs/repo-bootstrap.md` | Current repository state and bootstrap success criteria. | Repository bootstrap decisions | Healthy Bob Maintainer | Until first product feature lands | High | 2026-03-12 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | `agent-docs/references/**` | Healthy Bob Maintainer | Monthly | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Repo scope, ownership boundary, and unknowns. | Workspace routing + local decisions | Healthy Bob Maintainer | Per scope change | High | 2026-03-12 |
-| `packages/web/README.md` | Package-local overview for the local-only Next.js observability app and its vault configuration contract. | `packages/web/**` | Healthy Bob Maintainer | Per web-surface change | Medium | 2026-03-16 |
+| `packages/web/README.md` | Package-local overview for the local-only Next.js observability app and its vault configuration contract. | `packages/web/**` | Healthy Bob Maintainer | Per web-surface change | Medium | 2026-03-17 |
 | `packages/parsers/README.md` | Package-local overview for local-first attachment parsing, provider ranking, and derived artifact publication. | `packages/parsers/**` | Healthy Bob Maintainer | Per parser-layer change | Medium | 2026-03-13 |
 | `agent-docs/references/testing-ci-map.md` | Current verification map for contracts/runtime packages, built CLI checks, the smoke harness, the targeted Vitest/V8 package coverage surface, and the source-artifact guard. | `package.json`, `scripts/**`, `fixtures/**`, `e2e/**`, future CI | Healthy Bob Maintainer | Per verification change | High | 2026-03-16 |
 | `agent-docs/operations/verification-and-runtime.md` | Required checks, runtime-package verification matrix, built CLI behavior coverage, setup alias/wrapper semantics, package-local no-emit typecheck semantics, and current runtime assumptions for the TypeScript-first workspace. | `AGENTS.md`, `package.json`, `fixtures/**`, `e2e/**`, `scripts/**` | Healthy Bob Maintainer | Per process/runtime change | High | 2026-03-17 |

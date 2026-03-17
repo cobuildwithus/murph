@@ -18,3 +18,4 @@ HEALTHYBOB_VAULT=../../fixtures/demo-web-vault pnpm dev
 ```
 
 The package launch wrappers bind Next to `127.0.0.1` and block framework `.env*` reads. If `HEALTHYBOB_VAULT` is unset, the app shows a setup screen instead of guessing paths.
+The local launcher keeps `@healthybob/query` on its normal package export and will rebuild that workspace package if its `dist/index.js` output is missing before Next starts.

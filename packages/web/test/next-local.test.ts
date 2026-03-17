@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import { test } from "vitest";
 
-import { buildNextCliArgs, isBlockedDotEnvPath } from "../scripts/next-local";
+import {
+  buildNextCliArgs,
+  isBlockedDotEnvPath,
+  resolveQueryBuildEntryPath,
+  shouldEnsureQueryBuild,
+} from "../scripts/next-local";
 
 test("buildNextCliArgs forces localhost for dev and start", () => {
   assert.deepEqual(buildNextCliArgs(["dev"]), ["dev", "--hostname", "127.0.0.1", "--webpack"]);
@@ -29,4 +35,18 @@ test("isBlockedDotEnvPath matches .env and .env.* files only", () => {
   assert.equal(isBlockedDotEnvPath("/tmp/.env.local"), true);
   assert.equal(isBlockedDotEnvPath("/tmp/not-env"), false);
   assert.equal(isBlockedDotEnvPath("/tmp/config.env"), false);
+});
+
+test("shouldEnsureQueryBuild only targets commands that boot the local app runtime", () => {
+  assert.equal(shouldEnsureQueryBuild("dev"), true);
+  assert.equal(shouldEnsureQueryBuild("build"), true);
+  assert.equal(shouldEnsureQueryBuild("start"), true);
+  assert.equal(shouldEnsureQueryBuild("lint"), false);
+});
+
+test("resolveQueryBuildEntryPath points at the query package build output", () => {
+  assert.equal(
+    resolveQueryBuildEntryPath("/repo/packages/web"),
+    path.resolve("/repo/packages/query/dist/index.js"),
+  );
 });

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -5,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { rememberLaunchCwd } from "../src/lib/vault";
 
 const LOCAL_HOST = "127.0.0.1";
+const QUERY_BUILD_ENTRY_RELATIVE_PATH = "../query/dist/index.js";
 const require = createRequire(import.meta.url);
 const fs = require("node:fs") as typeof import("node:fs");
 const fsPromises = require("node:fs/promises") as typeof import("node:fs/promises");
@@ -25,6 +27,14 @@ export function buildNextCliArgs(argv: readonly string[]): string[] {
 
   args.push(...rest);
   return args;
+}
+
+export function shouldEnsureQueryBuild(command: string): boolean {
+  return command === "dev" || command === "build" || command === "start";
+}
+
+export function resolveQueryBuildEntryPath(packageDir: string): string {
+  return path.resolve(packageDir, QUERY_BUILD_ENTRY_RELATIVE_PATH);
 }
 
 export function isBlockedDotEnvPath(value: unknown): boolean {
@@ -118,13 +128,67 @@ export function installDotEnvGuards(): void {
 async function main(): Promise<void> {
   const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const nextBinPath = path.join(packageDir, "node_modules/next/dist/bin/next");
+  const [command = "dev"] = process.argv.slice(2);
 
   rememberLaunchCwd();
   process.chdir(packageDir);
   installDotEnvGuards();
+  await ensureQueryBuild(packageDir, command);
   process.argv = [process.execPath, nextBinPath, ...buildNextCliArgs(process.argv.slice(2))];
 
   await import(pathToFileURL(nextBinPath).href);
+}
+
+async function ensureQueryBuild(packageDir: string, command: string): Promise<void> {
+  if (!shouldEnsureQueryBuild(command)) {
+    return;
+  }
+
+  const queryBuildEntryPath = resolveQueryBuildEntryPath(packageDir);
+
+  try {
+    await fsPromises.access(queryBuildEntryPath);
+    return;
+  } catch {
+    // Fall through and rebuild the workspace package when the expected build output is absent.
+  }
+
+  const invocation = resolvePnpmInvocation();
+  const result = spawnSync(
+    invocation.command,
+    [...invocation.prefixArgs, "--dir", "../query", "build"],
+    {
+      cwd: packageDir,
+      stdio: "inherit",
+    },
+  );
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    throw new Error(
+      `Failed to rebuild @healthybob/query after missing ${queryBuildEntryPath}.`,
+    );
+  }
+
+  await fsPromises.access(queryBuildEntryPath);
+}
+
+function resolvePnpmInvocation(): { command: string; prefixArgs: string[] } {
+  const npmExecPath = process.env.npm_execpath;
+  if (npmExecPath && path.basename(npmExecPath).startsWith("pnpm")) {
+    return {
+      command: process.execPath,
+      prefixArgs: [npmExecPath],
+    };
+  }
+
+  return {
+    command: "pnpm",
+    prefixArgs: [],
+  };
 }
 
 function hasHostFlag(args: readonly string[]): boolean {
