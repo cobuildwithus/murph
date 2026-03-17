@@ -6,6 +6,7 @@ updatedAt: 2026-03-13T20:30:00Z
 topGoalIds:
   - goal_sleep_01
   - goal_glucose_01
+  - goal_rhr_01
 sourceAssessmentIds:
   - asmt_demo_02
 sourceEventIds:
@@ -13,5 +14,6 @@ sourceEventIds:
 ---
 # Current Profile
 
-Sleep is trending more stable, fasting glucose is acceptable, and late-night
-snacking still looks like the clearest trigger for rough mornings.
+Sleep is trending more stable, lowest nighttime heart rate is drifting down,
+fasting glucose is acceptable, and evening routine still looks like the
+clearest leverage point.

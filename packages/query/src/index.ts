@@ -31,4 +31,21 @@ export {
 export { summarizeDailySamples } from "./summaries.js";
 export { buildTimeline } from "./timeline.js";
 export { buildExportPack } from "./export-pack.js";
+export {
+  readBiomarkerLibraryPage,
+  readHealthLibraryGraph,
+  type BiomarkerExperimentRun,
+  type BiomarkerHeroStat,
+  type BiomarkerInsight,
+  type BiomarkerLibraryPage,
+  type BiomarkerMeasurementContext,
+  type BiomarkerPersonalStats,
+  type BiomarkerProtocolCard,
+  type BiomarkerReferenceSet,
+  type BiomarkerUserGoal,
+  type HealthLibraryEntityType,
+  type HealthLibraryGraph,
+  type HealthLibraryNode,
+  type HealthLibraryResolvedLink,
+} from "./health-library.js";
 export * from "./health/index.js";

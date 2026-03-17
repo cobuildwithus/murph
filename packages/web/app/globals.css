@@ -830,6 +830,14 @@ button {
   max-width: 760px;
 }
 
+.rhr-shell-card h1 {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  font-size: clamp(2.4rem, 6vw, 4rem);
+  letter-spacing: -0.05em;
+  line-height: 0.94;
+  margin: 0;
+}
+
 @keyframes settle {
   from {
     opacity: 0;
