@@ -4,11 +4,13 @@ import {
   assistantAskResultSchema,
   assistantChatProviderValues,
   assistantChatResultSchema,
+  assistantDeliverResultSchema,
   assistantRunResultSchema,
   assistantSandboxValues,
   assistantSessionListResultSchema,
   assistantSessionShowResultSchema,
 } from '../assistant-cli-contracts.js'
+import { deliverAssistantMessage } from '../assistant-channel.js'
 import {
   runAssistantAutomation,
   runAssistantChat,
@@ -106,6 +108,22 @@ const assistantProviderOptionFields = {
     ),
 }
 
+const assistantDeliveryOptionFields = {
+  deliverResponse: z
+    .boolean()
+    .optional()
+    .describe(
+      'After generating a response, deliver it over the mapped outbound channel session when available.',
+    ),
+  deliveryTarget: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional explicit outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
+    ),
+}
+
 export function registerAssistantCommands(
   cli: Cli.Cli,
   inboxServices: InboxCliServices,
@@ -113,7 +131,7 @@ export function registerAssistantCommands(
 ) {
   const assistant = Cli.create('assistant', {
     description:
-      'Healthy Bob-native assistant runtime with provider-backed local chat sessions and auto-routing inbox automation.',
+      'Healthy Bob-native assistant runtime with provider-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
   })
 
   assistant.command('ask', {
@@ -123,7 +141,7 @@ export function registerAssistantCommands(
     description:
       'Send one message through the local provider-backed assistant and persist only minimal session metadata outside the canonical vault.',
     hint:
-      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata and conversation aliases under assistant-state/.',
+      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata and conversation aliases under assistant-state/. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
     examples: [
       {
         args: {
@@ -136,21 +154,21 @@ export function registerAssistantCommands(
       },
       {
         args: {
-          prompt: 'What did this person eat yesterday?',
+          prompt: 'Send a quick check-in about lunch.',
         },
         options: {
           vault: './vault',
           channel: 'imessage',
-          identity: 'assistant:primary',
-          participant: 'contact:bob',
-          sourceThread: 'chat-123',
+          participant: '+15551234567',
+          deliverResponse: true,
         },
-        description: 'Reuse or create a stable session for one remote chat thread.',
+        description: 'Generate a reply locally and deliver it over iMessage.',
       },
     ],
     options: withBaseOptions({
       ...assistantSessionOptionFields,
       ...assistantProviderOptionFields,
+      ...assistantDeliveryOptionFields,
     }),
     output: assistantAskResultSchema,
     async run(context) {
@@ -170,6 +188,8 @@ export function registerAssistantCommands(
         approvalPolicy: context.options.approvalPolicy,
         profile: context.options.profile,
         oss: context.options.oss,
+        deliverResponse: context.options.deliverResponse,
+        deliveryTarget: context.options.deliveryTarget,
       })
     },
   })
@@ -183,9 +203,9 @@ export function registerAssistantCommands(
         .describe('Optional first prompt to send before the chat loop starts.'),
     }),
     description:
-      'Open a simple terminal chat loop backed by the chosen provider while Healthy Bob stores only session metadata.',
+      'Open an Ink terminal chat UI backed by the chosen provider while Healthy Bob stores only session metadata.',
     hint:
-      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id. When Ink is unavailable, the CLI falls back to the plain readline loop.',
     options: withBaseOptions({
       ...assistantSessionOptionFields,
       ...assistantProviderOptionFields,
@@ -208,6 +228,67 @@ export function registerAssistantCommands(
         approvalPolicy: context.options.approvalPolicy,
         profile: context.options.profile,
         oss: context.options.oss,
+      })
+    },
+  })
+
+  assistant.command('deliver', {
+    args: z.object({
+      message: z
+        .string()
+        .min(1)
+        .describe('Outbound message body to deliver over the mapped assistant channel.'),
+    }),
+    description:
+      'Deliver one outbound assistant message without invoking the chat provider. iMessage is supported first and future channels can plug into the same surface.',
+    hint:
+      'Use --deliveryTarget to override the mapped participant or source thread for one send. For iMessage that target can be a phone number, email handle, or chat id.',
+    examples: [
+      {
+        args: {
+          message: 'Here is your nutrition recap for lunch.',
+        },
+        options: {
+          vault: './vault',
+          channel: 'imessage',
+          participant: '+15551234567',
+        },
+        description: 'Send a direct iMessage to one participant.',
+      },
+      {
+        args: {
+          message: 'I imported that lab report and queued the parser.',
+        },
+        options: {
+          vault: './vault',
+          session: 'asst_123',
+          deliveryTarget: 'chat45e2b868',
+        },
+        description: 'Reuse an existing session and override the outbound target for one message.',
+      },
+    ],
+    options: withBaseOptions({
+      ...assistantSessionOptionFields,
+      deliveryTarget: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Optional explicit outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
+        ),
+    }),
+    output: assistantDeliverResultSchema,
+    async run(context) {
+      return deliverAssistantMessage({
+        vault: context.options.vault,
+        message: context.args.message,
+        sessionId: context.options.session,
+        alias: context.options.alias,
+        channel: context.options.channel,
+        identityId: context.options.identity,
+        participantId: context.options.participant,
+        sourceThreadId: context.options.sourceThread,
+        target: context.options.deliveryTarget,
       })
     },
   })

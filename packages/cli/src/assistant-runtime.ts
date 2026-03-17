@@ -9,6 +9,7 @@ import {
   type AssistantChatProvider,
   type AssistantSandbox,
 } from './assistant-cli-contracts.js'
+import { deliverAssistantMessage } from './assistant-channel.js'
 import {
   executeAssistantProviderTurn,
   resolveAssistantProviderOptions,
@@ -29,6 +30,8 @@ export interface AssistantMessageInput {
   approvalPolicy?: AssistantApprovalPolicy | null
   channel?: string | null
   codexCommand?: string
+  deliverResponse?: boolean
+  deliveryTarget?: string | null
   identityId?: string | null
   model?: string | null
   oss?: boolean
@@ -129,7 +132,7 @@ export async function sendAssistantMessage(
   })
 
   const updatedAt = new Date().toISOString()
-  const session = await saveAssistantSession(input.vault, {
+  let session = await saveAssistantSession(input.vault, {
     ...resolved.session,
     provider: providerResult.provider,
     providerSessionId:
@@ -152,15 +155,50 @@ export async function sendAssistantMessage(
     lastAssistantMessage: summarizeAssistantTurn(providerResult.response),
   })
 
+  let delivery: ReturnType<typeof assistantAskResultSchema.parse>['delivery'] = null
+
+  if (input.deliverResponse) {
+    const delivered = await deliverAssistantMessage({
+      vault: input.vault,
+      sessionId: session.sessionId,
+      channel: session.channel,
+      identityId: session.identityId,
+      participantId: session.participantId,
+      sourceThreadId: session.sourceThreadId,
+      target: normalizeNullableString(input.deliveryTarget),
+      message: providerResult.response,
+    })
+    session = delivered.session
+    delivery = delivered.delivery
+  }
+
   return assistantAskResultSchema.parse({
     vault: redactAssistantDisplayPath(input.vault),
     prompt: input.prompt,
     response: providerResult.response,
     session,
+    delivery,
   })
 }
 
 export async function runAssistantChat(
+  input: AssistantChatInput,
+): Promise<ReturnType<typeof assistantChatResultSchema.parse>> {
+  if (shouldUseInkChat()) {
+    try {
+      const { runAssistantChatWithInk } = await import('./assistant-chat-ink.js')
+      return await runAssistantChatWithInk(input)
+    } catch (error) {
+      if (!isOptionalInkDependencyError(error)) {
+        throw error
+      }
+    }
+  }
+
+  return runAssistantChatReadline(input)
+}
+
+async function runAssistantChatReadline(
   input: AssistantChatInput,
 ): Promise<ReturnType<typeof assistantChatResultSchema.parse>> {
   const startedAt = new Date().toISOString()
@@ -612,6 +650,19 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function shouldUseInkChat(): boolean {
+  return Boolean(process.stdin.isTTY && process.stderr.isTTY)
+}
+
+function isOptionalInkDependencyError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'ASSISTANT_CHAT_UI_UNAVAILABLE',
+  )
 }
 
 function errorMessage(error: unknown): string {

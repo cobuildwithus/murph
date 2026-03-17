@@ -21,8 +21,9 @@ vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--req
 vault-cli audit show <id> --vault <path> [--request-id <id>]
 vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
 vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli] [--codexCommand <path>] [--model <model>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--request-id <id>]
+vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli] [--codexCommand <path>] [--model <model>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]
 vault-cli assistant chat [prompt] --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli] [--codexCommand <path>] [--model <model>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--request-id <id>]
+vault-cli assistant deliver <message> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]
 vault-cli assistant run --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--scanIntervalMs <ms>] [--maxPerScan <n>] [--once] [--skipDaemon] [--request-id <id>]
 vault-cli assistant session list --vault <path> [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
@@ -133,7 +134,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `export` composes readable and derived/admin capabilities.
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
-- `assistant` is a provider-backed orchestration noun for local chat turns, session inspection, and always-on inbox triage; it stores only assistant metadata outside the canonical vault and delegates canonical promotions back through inbox/core boundaries.
+- `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, and always-on inbox triage; it stores only assistant metadata outside the canonical vault and delegates canonical promotions back through inbox/core boundaries.
 
 These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 

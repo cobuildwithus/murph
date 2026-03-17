@@ -1,10 +1,10 @@
 {
   "id": "assistant-ask",
-  "command": "vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli] [--codexCommand <path>] [--model <model>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--request-id <id>]",
+  "command": "vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli] [--codexCommand <path>] [--model <model>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents one-shot local assistant turns backed by an external provider session while keeping only minimal Healthy Bob metadata under assistant-state/."
+  "purpose": "Documents one-shot local assistant turns backed by an external provider session, including optional outbound delivery, while keeping only minimal Healthy Bob metadata under assistant-state/."
 }

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const runtimeMocks = vi.hoisted(() => ({
   createInterface: vi.fn(),
+  deliverAssistantMessage: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
   routeInboxCaptureWithModel: vi.fn(),
 }))
@@ -16,6 +17,17 @@ vi.mock('node:readline/promises', () => ({
   },
   createInterface: runtimeMocks.createInterface,
 }))
+
+vi.mock('../src/assistant-channel.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/assistant-channel.js')>(
+    '../src/assistant-channel.js',
+  )
+
+  return {
+    ...actual,
+    deliverAssistantMessage: runtimeMocks.deliverAssistantMessage,
+  }
+})
 
 vi.mock('../src/assistant-provider.js', async () => {
   const actual = await vi.importActual<typeof import('../src/assistant-provider.js')>(
@@ -54,6 +66,7 @@ afterEach(async () => {
 
 beforeEach(() => {
   runtimeMocks.createInterface.mockReset()
+  runtimeMocks.deliverAssistantMessage.mockReset()
   runtimeMocks.executeAssistantProviderTurn.mockReset()
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
 })
@@ -104,6 +117,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(first.session.turnCount, 1)
   assert.equal(first.session.providerSessionId, 'thread-123')
   assert.equal(first.session.alias, 'imessage:bob')
+  assert.equal(first.delivery, null)
   assert.equal('vault' in first.session, false)
   assert.equal('stateRoot' in first.session, false)
   assert.equal(second.session.sessionId, first.session.sessionId)
@@ -116,6 +130,86 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(secondCall.resumeProviderSessionId, 'thread-123')
   assert.match(firstCall.prompt, /You are Healthy Bob/u)
   assert.equal(secondCall.prompt, 'What about today?')
+})
+
+test('sendAssistantMessage can optionally deliver the provider reply over the mapped outbound channel', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-delivery-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-123',
+    response: 'sent reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessage.mockImplementation(
+    async (input: { message: string; sessionId: string; vault: string }) => ({
+      vault: path.resolve(input.vault),
+      message: input.message,
+      session: {
+        schema: 'healthybob.assistant-session.v1',
+        sessionId: input.sessionId,
+        provider: 'codex-cli',
+        providerSessionId: 'thread-123',
+        providerOptions: {
+          model: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+        alias: 'imessage:bob',
+        channel: 'imessage',
+        identityId: null,
+        participantId: '+15551234567',
+        sourceThreadId: null,
+        createdAt: '2026-03-16T00:00:00.000Z',
+        updatedAt: '2026-03-16T00:00:01.000Z',
+        lastTurnAt: '2026-03-16T00:00:01.000Z',
+        turnCount: 1,
+        lastUserMessage: 'send it',
+        lastAssistantMessage: input.message,
+      },
+      delivery: {
+        channel: 'imessage',
+        target: '+15551234567',
+        targetKind: 'participant',
+        sentAt: '2026-03-16T00:00:01.000Z',
+        messageLength: input.message.length,
+      },
+    }),
+  )
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'imessage:bob',
+    channel: 'imessage',
+    participantId: '+15551234567',
+    prompt: 'send it',
+    deliverResponse: true,
+  })
+
+  assert.equal(result.response, 'sent reply')
+  assert.equal(result.delivery?.channel, 'imessage')
+  assert.equal(result.delivery?.target, '+15551234567')
+  assert.deepEqual(runtimeMocks.deliverAssistantMessage.mock.calls, [
+    [
+      {
+        vault: vaultRoot,
+        sessionId: result.session.sessionId,
+        channel: 'imessage',
+        identityId: null,
+        participantId: '+15551234567',
+        sourceThreadId: null,
+        target: null,
+        message: 'sent reply',
+      },
+    ],
+  ])
 })
 
 test('sendAssistantMessage stores only short turn excerpts in assistant state', async () => {

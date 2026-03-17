@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents the minimal terminal chat loop surface and its session reuse semantics without treating provider transcripts as part of smoke execution."
+  "purpose": "Documents the assistant chat surface, including the preferred Ink terminal UI and readline fallback semantics, without treating provider transcripts as part of smoke execution."
 }

@@ -1,0 +1,10 @@
+{
+  "id": "assistant-deliver",
+  "command": "vault-cli assistant deliver <message> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents direct outbound assistant delivery over a mapped channel such as iMessage without invoking the chat provider."
+}
