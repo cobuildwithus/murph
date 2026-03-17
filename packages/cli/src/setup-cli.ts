@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   type SetupCommandOptions,
+  type SetupResult,
   setupCommandOptionsSchema,
   setupResultSchema,
 } from './setup-cli-contracts.js'
@@ -10,8 +11,16 @@ import {
   isSetupInvocation,
 } from './setup-services.js'
 
-interface SetupCliOptions {
+export interface SuccessfulSetupContext {
+  agent: boolean
+  format: 'toon' | 'json' | 'yaml' | 'md' | 'jsonl'
+  formatExplicit: boolean
+  result: SetupResult
+}
+
+export interface SetupCliOptions {
   commandName?: string
+  onSetupSuccess?: ((context: SuccessfulSetupContext) => void | Promise<void>) | undefined
   services?: ReturnType<typeof createSetupServices>
 }
 
@@ -68,19 +77,27 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       if (result.dryRun) {
         return context.ok(result)
       }
-
-      const vaultArgument = formatCliPathArgument(result.vault)
+      await options.onSetupSuccess?.({
+        agent: context.agent,
+        format: context.format,
+        formatExplicit: context.formatExplicit,
+        result,
+      })
 
       return context.ok(result, {
         cta: {
           description: 'Suggested next commands:',
           commands: [
             {
-              command: `inbox doctor --vault ${vaultArgument}`,
+              command: 'assistant chat',
+              description: 'Open the local assistant chat against the default vault.',
+            },
+            {
+              command: 'inbox doctor',
               description: 'Verify the local runtime after setup.',
             },
             {
-              command: `inbox source add imessage --id imessage:self --account self --includeOwn --vault ${vaultArgument}`,
+              command: 'inbox source add imessage --id imessage:self --account self --includeOwn',
               description:
                 'Add a local iMessage connector when you are ready to ingest captures.',
             },
@@ -93,20 +110,18 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   return cli
 }
 
-function formatCliPathArgument(value: string): string {
-  if (value === '~') {
-    return '"$HOME"'
+export function shouldAutoLaunchAssistantAfterSetup(
+  context: SuccessfulSetupContext,
+  terminal = {
+    stderrIsTTY: process.stderr.isTTY,
+    stdinIsTTY: process.stdin.isTTY,
+  },
+): boolean {
+  if (context.result.dryRun || context.agent || context.formatExplicit) {
+    return false
   }
 
-  if (value.startsWith('~/')) {
-    return `"${'$'}HOME"${quoteShellArgument(value.slice(1))}`
-  }
-
-  return quoteShellArgument(value)
-}
-
-function quoteShellArgument(value: string): string {
-  return `'${value.replaceAll("'", `'\"'\"'`)}'`
+  return Boolean(terminal.stdinIsTTY && terminal.stderrIsTTY)
 }
 
 export { detectSetupProgramName, isSetupInvocation }

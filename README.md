@@ -237,7 +237,7 @@ The repo also includes local-first inbox parser controls:
 The repo also includes a Healthy Bob-native assistant layer:
 
 - `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores only session metadata outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel
-- `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers, then falls back to the plain readline loop when Ink is unavailable
+- `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider
 - `vault-cli assistant run --model <model> [--baseUrl <url>]` runs the always-on inbox triage loop and auto-applies model-routed canonical promotions
 - `vault-cli assistant session list|show` inspects local assistant session metadata under `assistant-state/`
@@ -307,6 +307,7 @@ That setup entrypoint is intentionally separate from the main `vault-cli` manife
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
 - save that vault as the default Healthy Bob CLI vault for future commands on the same machine
 - install user-level `healthybob` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
+- open `assistant chat` automatically after a successful interactive setup so the default vault is ready to use immediately
 
 Common options:
 
@@ -327,7 +328,7 @@ If you are starting from a fresh checkout and the workspace itself still needs N
 
 That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js setup ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
-Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It also saves the selected vault as the default CLI vault, so commands such as `healthybob assistant chat` can omit `--vault` later. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
+Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, so commands such as `healthybob assistant chat` can omit `--vault` later, and a normal interactive `healthybob setup` run drops straight into that chat surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
 
 ## Local Inbox Parser Bootstrap
 

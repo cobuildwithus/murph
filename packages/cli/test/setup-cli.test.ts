@@ -16,6 +16,8 @@ import {
   createSetupCli,
   detectSetupProgramName,
   isSetupInvocation,
+  shouldAutoLaunchAssistantAfterSetup,
+  type SuccessfulSetupContext,
 } from '../src/setup-cli.js'
 import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
 import { createSetupServices } from '../src/setup-services.js'
@@ -166,13 +168,6 @@ function makeSetupResult(vault: string): SetupResult {
     },
     vault,
     whisperModel: 'base.en',
-  }
-}
-
-function makeHomeRedactedSetupResult(): SetupResult {
-  return {
-    ...makeSetupResult('~/vault'),
-    vault: '~/vault',
   }
 }
 
@@ -433,6 +428,23 @@ test.sequential('setup CLI dry-run reuses an existing vault without mutating ser
   }
 })
 
+test.sequential('setup CLI defaults the vault to ./vault when omitted', async () => {
+  let receivedVault: string | null = null
+
+  const result = await runSetupCli<SetupResult>(
+    ['setup'],
+    {
+      async setupMacos(input: { vault: string }) {
+        receivedVault = input.vault
+        return makeSetupResult(input.vault)
+      },
+    },
+  )
+
+  assert.equal(result.ok, true)
+  assert.equal(receivedVault, './vault')
+})
+
 test.sequential('setup CLI keeps post-setup CTAs usable when invoked as healthybob', async () => {
   const result = await runSetupCli<SetupResult>(
     ['setup', '--vault', './vault'],
@@ -446,83 +458,142 @@ test.sequential('setup CLI keeps post-setup CTAs usable when invoked as healthyb
   assert.equal(result.ok, true)
   assert.equal(
     result.meta.cta?.commands[0]?.command,
-    "healthybob inbox doctor --vault './vault'",
+    'healthybob assistant chat',
   )
   assert.equal(
     result.meta.cta?.commands[1]?.command,
-    "healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault './vault'",
+    'healthybob inbox doctor',
+  )
+  assert.equal(
+    result.meta.cta?.commands[2]?.command,
+    'healthybob inbox source add imessage --id imessage:self --account self --includeOwn',
   )
 })
 
-test.sequential('setup CLI keeps home-relative CTA paths shell-safe', async () => {
-  const result = await runSetupCli<SetupResult>(
-    ['setup', '--vault', './vault'],
-    {
-      async setupMacos() {
-        return makeHomeRedactedSetupResult()
-      },
-    },
-  )
+test.sequential('setup CLI reports successful setup metadata for post-setup chat handoff', async () => {
+  const handoffContext = {
+    current: null as SuccessfulSetupContext | null,
+  }
 
-  assert.equal(result.ok, true)
-  assert.equal(
-    result.meta.cta?.commands[0]?.command,
-    `healthybob inbox doctor --vault "$HOME"'/vault'`,
-  )
-  assert.equal(
-    result.meta.cta?.commands[1]?.command,
-    `healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault "$HOME"'/vault'`,
-  )
+  const cli = createSetupCli({
+    commandName: 'healthybob',
+    onSetupSuccess(context) {
+      handoffContext.current = context
+    },
+    services: {
+      async setupMacos(input) {
+        return makeSetupResult(input.vault)
+      },
+    } as ReturnType<typeof createSetupServices>,
+  })
+
+  await cli.serve(['setup', '--format', 'json', '--verbose'], {
+    env: process.env,
+    exit: () => {},
+    stdout() {},
+  })
+
+  assert.notEqual(handoffContext.current, null)
+  const reportedContext = handoffContext.current
+  if (reportedContext === null) {
+    throw new Error('Expected setup handoff context to be reported.')
+  }
+
+  assert.equal(reportedContext.result.vault, './vault')
+  assert.equal(reportedContext.format, 'json')
+  assert.equal(reportedContext.formatExplicit, true)
 })
 
-test.sequential('setup CLI keeps exact-home CTA paths shell-safe', async () => {
-  const result = await runSetupCli<SetupResult>(
-    ['setup', '--vault', './vault'],
-    {
-      async setupMacos() {
-        return makeSetupResult('~')
-      },
-    },
-  )
+test.sequential('setup CLI does not report a handoff for dry-run setup', async () => {
+  let handoffCalls = 0
 
-  assert.equal(result.ok, true)
-  assert.equal(
-    result.meta.cta?.commands[0]?.command,
-    'healthybob inbox doctor --vault "$HOME"',
-  )
-  assert.equal(
-    result.meta.cta?.commands[1]?.command,
-    'healthybob inbox source add imessage --id imessage:self --account self --includeOwn --vault "$HOME"',
-  )
+  const cli = createSetupCli({
+    commandName: 'healthybob',
+    onSetupSuccess() {
+      handoffCalls += 1
+    },
+    services: {
+      async setupMacos(input) {
+        return {
+          ...makeSetupResult(input.vault),
+          dryRun: true,
+        }
+      },
+    } as ReturnType<typeof createSetupServices>,
+  })
+
+  await cli.serve(['setup', '--dryRun', '--format', 'json', '--verbose'], {
+    env: process.env,
+    exit: () => {},
+    stdout() {},
+  })
+
+  assert.equal(handoffCalls, 0)
 })
 
-test.sequential('setup CLI shell-escapes CTA vault paths with shell metacharacters', async () => {
-  const absolutePathResult = await runSetupCli<SetupResult>(
-    ['setup', '--vault', './vault'],
-    {
-      async setupMacos() {
-        return makeSetupResult(`/tmp/vault $USER/it's $(pwd)`)
-      },
-    },
-  )
-  const homeRelativeResult = await runSetupCli<SetupResult>(
-    ['setup', '--vault', './vault'],
-    {
-      async setupMacos() {
-        return makeSetupResult(`~/vault $USER/it's $(pwd)`)
-      },
-    },
-  )
+test('setup auto-chat gating only enables the handoff for interactive default-format runs', () => {
+  const context = {
+    agent: false,
+    format: 'toon' as const,
+    formatExplicit: false,
+    result: makeSetupResult('./vault'),
+  }
 
-  assert.equal(absolutePathResult.ok, true)
   assert.equal(
-    absolutePathResult.meta.cta?.commands[0]?.command,
-    `healthybob inbox doctor --vault '/tmp/vault $USER/it'"'"'s $(pwd)'`,
+    shouldAutoLaunchAssistantAfterSetup(context, {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    }),
+    true,
   )
-  assert.equal(homeRelativeResult.ok, true)
   assert.equal(
-    homeRelativeResult.meta.cta?.commands[0]?.command,
-    `healthybob inbox doctor --vault "$HOME"'/vault $USER/it'"'"'s $(pwd)'`,
+    shouldAutoLaunchAssistantAfterSetup(
+      {
+        ...context,
+        formatExplicit: true,
+      },
+      {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+    ),
+    false,
+  )
+  assert.equal(
+    shouldAutoLaunchAssistantAfterSetup(
+      {
+        ...context,
+        agent: true,
+      },
+      {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+    ),
+    false,
+  )
+  assert.equal(
+    shouldAutoLaunchAssistantAfterSetup(
+      {
+        ...context,
+        result: {
+          ...context.result,
+          dryRun: true,
+        },
+      },
+      {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+    ),
+    false,
+  )
+  assert.equal(
+    shouldAutoLaunchAssistantAfterSetup(context, {
+      stdinIsTTY: false,
+      stderrIsTTY: true,
+    }),
+    false,
   )
 })
 
