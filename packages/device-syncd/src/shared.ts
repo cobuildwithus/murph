@@ -149,7 +149,23 @@ export function normalizePublicBaseUrl(value: string): string {
   return url.toString().replace(/\/$/u, "");
 }
 
-export function resolveRelativeOrSameOriginUrl(candidate: string | null | undefined, publicBaseUrl: string): string | null {
+function normalizeOrigin(value: string): string {
+  return new URL(value).origin;
+}
+
+export function normalizeOriginList(values: readonly string[] | null | undefined): string[] {
+  if (!values) {
+    return [];
+  }
+
+  return [...new Set(values.map((value) => normalizeOrigin(value)).filter(Boolean))];
+}
+
+export function resolveRelativeOrAllowedOriginUrl(
+  candidate: string | null | undefined,
+  publicBaseUrl: string,
+  allowedOrigins: readonly string[] = [],
+): string | null {
   const normalized = normalizeString(candidate);
 
   if (!normalized) {
@@ -164,11 +180,13 @@ export function resolveRelativeOrSameOriginUrl(candidate: string | null | undefi
 
   try {
     const resolved = new URL(normalized);
+    const allowed = new Set([base.origin, ...normalizeOriginList(allowedOrigins)]);
 
-    if (resolved.origin !== base.origin) {
+    if (!allowed.has(resolved.origin)) {
       return null;
     }
 
+    resolved.hash = "";
     return resolved.toString();
   } catch {
     return null;

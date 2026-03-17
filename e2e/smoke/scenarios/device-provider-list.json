@@ -1,0 +1,10 @@
+{
+  "id": "device-provider-list",
+  "command": "vault-cli device provider list [--baseUrl <url>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/device-sync",
+  "purpose": "Documents provider discovery against the local device control plane."
+}

@@ -1,4 +1,12 @@
 import type {
+  DeviceAccountDisconnectResult,
+  DeviceAccountListResult,
+  DeviceAccountReconcileResult,
+  DeviceAccountShowResult,
+  DeviceConnectResult,
+  DeviceProviderListResult,
+} from "../device-cli-contracts.js"
+import type {
   DocumentImportResult,
   ExperimentCreateResult,
   ExportPackResult,
@@ -471,10 +479,39 @@ export interface QueryServices extends HealthQueryServiceMethods {
   ): Promise<ExportPackResult>
 }
 
+export interface DeviceSyncServices {
+  listProviders(input: {
+    baseUrl?: string
+  }): Promise<DeviceProviderListResult>
+  connect(input: {
+    provider: string
+    baseUrl?: string
+    returnTo?: string
+    open?: boolean
+  }): Promise<DeviceConnectResult>
+  listAccounts(input: {
+    baseUrl?: string
+    provider?: string
+  }): Promise<DeviceAccountListResult>
+  showAccount(input: {
+    baseUrl?: string
+    accountId: string
+  }): Promise<DeviceAccountShowResult>
+  reconcileAccount(input: {
+    baseUrl?: string
+    accountId: string
+  }): Promise<DeviceAccountReconcileResult>
+  disconnectAccount(input: {
+    baseUrl?: string
+    accountId: string
+  }): Promise<DeviceAccountDisconnectResult>
+}
+
 export interface VaultCliServices {
   core: CoreWriteServices
   importers: ImporterServices
   query: QueryServices
+  devices: DeviceSyncServices
 }
 
 export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {

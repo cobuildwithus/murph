@@ -1,0 +1,10 @@
+{
+  "id": "device-account-list",
+  "command": "vault-cli device account list [--baseUrl <url>] [--provider <provider>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/device-sync",
+  "purpose": "Documents listing device accounts tracked by the local device control plane."
+}

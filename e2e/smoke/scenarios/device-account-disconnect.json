@@ -1,0 +1,10 @@
+{
+  "id": "device-account-disconnect",
+  "command": "vault-cli device account disconnect <accountId> [--baseUrl <url>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/device-sync",
+  "purpose": "Documents disconnecting one device account through the local control plane."
+}

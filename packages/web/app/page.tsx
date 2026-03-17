@@ -7,6 +7,12 @@ import {
   type OverviewTimelineEntry,
   type OverviewWeeklyStat,
 } from "../src/lib/overview";
+import {
+  loadDeviceSyncOverviewFromEnv,
+  type DeviceSyncAccountRecord,
+  type DeviceSyncOverview,
+  type DeviceSyncProviderDescriptor,
+} from "../src/lib/device-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +25,13 @@ const PLACEHOLDER_STATS: OverviewWeeklyStat[] = [
 ];
 
 export default async function HomePage() {
-  const overview = await loadVaultOverviewFromEnv({
-    sampleLimit: DEFAULT_SAMPLE_LIMIT,
-    timelineLimit: DEFAULT_TIMELINE_LIMIT,
-  });
+  const [overview, deviceSync] = await Promise.all([
+    loadVaultOverviewFromEnv({
+      sampleLimit: DEFAULT_SAMPLE_LIMIT,
+      timelineLimit: DEFAULT_TIMELINE_LIMIT,
+    }),
+    loadDeviceSyncOverviewFromEnv(),
+  ]);
 
   return (
     <main className="mx-auto max-w-[1080px] min-h-screen px-6 pt-12 pb-24 max-sm:px-4 max-sm:pt-8 max-sm:pb-16">
@@ -34,18 +43,26 @@ export default async function HomePage() {
         </p>
       </header>
 
-      {overview.status === "ready" ? <ReadyState overview={overview} /> : null}
+      {overview.status === "ready" ? <ReadyState overview={overview} deviceSync={deviceSync} /> : null}
       {overview.status === "missing-config" ? <MissingConfigState overview={overview} /> : null}
       {overview.status === "error" ? <ErrorState overview={overview} /> : null}
     </main>
   );
 }
 
-function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: "ready" }> }) {
+function ReadyState({
+  overview,
+  deviceSync,
+}: {
+  overview: Extract<OverviewResult, { status: "ready" }>;
+  deviceSync: DeviceSyncOverview;
+}) {
   const stats = mergeWithPlaceholders(overview.weeklyStats);
 
   return (
     <div className="grid gap-8 animate-settle">
+      <DeviceSyncSection deviceSync={deviceSync} />
+
       {/* ── Weekly stats ── */}
       <div className="grid grid-cols-5 gap-3 max-[940px]:grid-cols-2 max-sm:grid-cols-1">
         {stats.map((stat) => (
@@ -124,6 +141,165 @@ function ReadyState({ overview }: { overview: Extract<OverviewResult, { status: 
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function DeviceSyncSection({ deviceSync }: { deviceSync: DeviceSyncOverview }) {
+  return (
+    <section className="rounded-[1.8rem] border border-line bg-paper/80 shadow-card overflow-hidden">
+      <div className="border-b border-line/70 px-6 py-5 max-sm:px-4">
+        <p className="text-accent font-display text-xs font-bold tracking-[0.14em] uppercase mb-2">
+          Device sync
+        </p>
+        <div className="flex items-end justify-between gap-4 max-sm:flex-col max-sm:items-start">
+          <div>
+            <h2 className="font-display text-[1.6rem] font-bold tracking-[-0.03em]">
+              Wearable connections
+            </h2>
+            <p className="text-muted text-sm leading-relaxed max-w-[60ch]">
+              Start OAuth from here, keep sync state in the local control plane,
+              and leave room for more providers than WHOOP.
+            </p>
+          </div>
+          {deviceSync.status === "ready" ? (
+            <p className="text-muted font-display text-[0.78rem] font-bold tracking-[0.12em] uppercase">
+              {deviceSync.accounts.length} linked account{deviceSync.accounts.length === 1 ? "" : "s"}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {deviceSync.status === "unavailable" ? (
+        <div className="px-6 py-6 max-sm:px-4">
+          <div className="rounded-2xl border border-dashed border-line bg-card/70 p-5">
+            <h3 className="font-display text-lg font-bold tracking-[-0.02em] mb-2">
+              {deviceSync.message}
+            </h3>
+            <p className="text-muted text-sm leading-relaxed mb-4">{deviceSync.hint}</p>
+            <div className="bg-ink rounded-xl text-[#f7f1e9] overflow-x-auto py-3 px-4">
+              <code className="font-mono text-sm">{deviceSync.suggestedCommand}</code>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-3 px-6 py-6 max-sm:px-4">
+          {deviceSync.providers.length ? (
+            deviceSync.providers.map((provider) => (
+              <DeviceProviderCard
+                provider={provider}
+                accounts={deviceSync.accounts.filter((account) => account.provider === provider.provider)}
+                key={provider.provider}
+              />
+            ))
+          ) : (
+            <p className="text-muted text-sm">No device providers are registered in the local sync daemon.</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DeviceProviderCard({
+  provider,
+  accounts,
+}: {
+  provider: DeviceSyncProviderDescriptor;
+  accounts: DeviceSyncAccountRecord[];
+}) {
+  const label =
+    accounts.some((account) => account.status === "reauthorization_required")
+      ? "Reconnect required"
+      : accounts.some((account) => account.status === "active")
+        ? "Connected"
+        : "Not connected";
+  const labelClass =
+    label === "Connected"
+      ? "text-accent bg-accent-soft/80"
+      : label === "Reconnect required"
+        ? "text-warm bg-[rgba(163,92,58,0.12)]"
+        : "text-muted bg-card";
+  const connectLabel =
+    accounts.some((account) => account.status !== "active") || accounts.length === 0
+      ? accounts.length === 0
+        ? "Connect"
+        : "Reconnect"
+      : "Add another";
+
+  return (
+    <article className="rounded-[1.4rem] border border-line bg-card/80 p-5">
+      <div className="flex items-start justify-between gap-4 max-sm:flex-col max-sm:items-start">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <h3 className="font-display text-[1.15rem] font-bold tracking-[-0.02em]">
+              {humanizeToken(provider.provider)}
+            </h3>
+            <span className={`inline-flex items-center rounded-full px-3 py-1 font-display text-[0.72rem] font-bold tracking-[0.12em] uppercase ${labelClass}`}>
+              {label}
+            </span>
+          </div>
+          <p className="text-muted text-sm leading-relaxed">
+            Default scopes: {provider.defaultScopes.join(", ")}
+          </p>
+        </div>
+        <a
+          className="inline-flex items-center justify-center rounded-full bg-accent px-4 py-2 font-display text-[0.8rem] font-bold tracking-[0.12em] uppercase text-[#f7f1e9] transition-colors hover:bg-ink"
+          href={`/devices/connect/${encodeURIComponent(provider.provider)}`}
+        >
+          {connectLabel}
+        </a>
+      </div>
+
+      {accounts.length ? (
+        <div className="mt-4 grid gap-2">
+          {accounts.map((account) => (
+            <DeviceAccountRow account={account} key={account.id} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-muted text-sm mt-4">
+          No account linked yet.
+        </p>
+      )}
+    </article>
+  );
+}
+
+function DeviceAccountRow({ account }: { account: DeviceSyncAccountRecord }) {
+  return (
+    <div className="rounded-xl border border-line/70 bg-card-strong/80 px-4 py-3">
+      <div className="flex items-start justify-between gap-4 max-sm:flex-col max-sm:items-start">
+        <div className="min-w-0">
+          <div className="font-display text-[0.95rem] font-bold tracking-[-0.01em]">
+            {account.displayName ?? account.externalAccountId}
+          </div>
+          <div className="text-muted text-sm leading-relaxed">
+            {humanizeToken(account.status)} · connected {formatMoment(account.connectedAt)}
+          </div>
+          {account.lastErrorMessage ? (
+            <div className="text-warm text-xs mt-1">{account.lastErrorMessage}</div>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <form action={`/devices/accounts/${encodeURIComponent(account.id)}/reconcile?returnTo=/`} method="post">
+            <button
+              className="inline-flex items-center justify-center rounded-full border border-line bg-paper px-3 py-1.5 font-display text-[0.72rem] font-bold tracking-[0.12em] uppercase text-ink transition-colors hover:border-accent hover:text-accent"
+              type="submit"
+            >
+              Reconcile
+            </button>
+          </form>
+          <form action={`/devices/accounts/${encodeURIComponent(account.id)}/disconnect?returnTo=/`} method="post">
+            <button
+              className="inline-flex items-center justify-center rounded-full border border-line bg-paper px-3 py-1.5 font-display text-[0.72rem] font-bold tracking-[0.12em] uppercase text-muted transition-colors hover:border-warm hover:text-warm"
+              type="submit"
+            >
+              Disconnect
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

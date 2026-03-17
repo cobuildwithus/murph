@@ -10,6 +10,7 @@ export interface DeviceSyncLogger {
 export interface DeviceSyncServiceConfig {
   vaultRoot: string;
   publicBaseUrl: string;
+  allowedReturnOrigins?: string[];
   stateDatabasePath?: string;
   sessionTtlMs?: number;
   workerLeaseMs?: number;

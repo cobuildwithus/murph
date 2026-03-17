@@ -76,6 +76,7 @@ let cliRuntimeArtifactsPromise: Promise<void> | null = null
 export async function runCli<TData = Record<string, unknown>>(
   args: string[],
   options?: {
+    env?: NodeJS.ProcessEnv
     stdin?: string
   },
 ): Promise<CliEnvelope<TData>> {
@@ -100,6 +101,7 @@ export async function runCli<TData = Record<string, unknown>>(
 export async function runRawCli(
   args: string[],
   options?: {
+    env?: NodeJS.ProcessEnv
     stdin?: string
   },
 ): Promise<string> {
@@ -198,6 +200,7 @@ function withMachineOutput(args: string[]): string[] {
 async function execCli(
   args: string[],
   options?: {
+    env?: NodeJS.ProcessEnv
     stdin?: string
   }
 ) {
@@ -218,6 +221,7 @@ async function execCli(
 async function execCliProcess(
   args: string[],
   options?: {
+    env?: NodeJS.ProcessEnv
     stdin?: string
   },
 ) {
@@ -228,6 +232,10 @@ async function execCliProcess(
       {
         cwd: repoRoot,
         encoding: 'utf8',
+        env: {
+          ...process.env,
+          ...options?.env,
+        },
       },
       (error, stdout, stderr) => {
         if (error) {

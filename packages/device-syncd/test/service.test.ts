@@ -156,6 +156,46 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   service.close();
 });
 
+test("device sync service accepts configured external return origins and still rejects unknown origins", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-return");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.healthybob.test/device-sync",
+      allowedReturnOrigins: ["http://127.0.0.1:3000", "http://localhost:3000/app"],
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+
+  try {
+    const begin = service.startConnection({
+      provider: "demo",
+      returnTo: "http://127.0.0.1:3000/devices",
+    });
+
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "allowed",
+    });
+
+    assert.equal(connected.returnTo, "http://127.0.0.1:3000/devices");
+
+    assert.throws(
+      () =>
+        service.startConnection({
+          provider: "demo",
+          returnTo: "https://malicious.example/steal",
+        }),
+      /allowed origin URL/u,
+    );
+  } finally {
+    service.close();
+  }
+});
+
 test("device sync service rejects manual reconcile and webhook enqueue for disconnected accounts", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-device-syncd-disconnect");
   const imports: unknown[] = [];

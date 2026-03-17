@@ -1,0 +1,10 @@
+{
+  "id": "device-connect",
+  "command": "vault-cli device connect <provider> [--baseUrl <url>] [--returnTo <url>] [--open]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/device-sync",
+  "purpose": "Documents the browser-based OAuth handoff initiated through the local device control plane."
+}

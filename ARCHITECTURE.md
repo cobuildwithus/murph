@@ -8,10 +8,11 @@ Last verified: 2026-03-17
 - `packages/runtime-state`: shared `.runtime` path resolution plus SQLite defaults for rebuildable local state used by query, inboxd, and CLI inbox flows
 - `packages/core`: the only package allowed to mutate canonical vault data
 - `packages/importers`: ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core
+- `packages/device-syncd`: standalone local device OAuth/webhook/reconcile runtime that stores encrypted provider credentials outside the vault and imports normalized provider snapshots through importers/core
 - `packages/inboxd`: inbox capture ingestion/runtime package that persists canonical raw inbox evidence while keeping inbox-only cursors, source-specific checkpoints, capture indexes, and attachment job state in local SQLite state
 - `packages/parsers`: local-first attachment parsing, parser-service helpers, and derived artifact publication under `derived/inbox/**`
 - `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
-- `packages/web`: local-only Next.js observability app that reads vault data on the server through the query package
+- `packages/web`: local-only Next.js observability app that reads vault data on the server through the query package and may initiate device-auth control-plane actions against `packages/device-syncd`
 - `packages/cli`: `vault-cli`, an incur-backed typed operator surface over core/importers/query/inboxd plus parser-toolchain queue controls, inbox model-routing helpers, provider-backed assistant session orchestration, outbound channel adapters, and local setup commands
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
@@ -25,7 +26,8 @@ Last verified: 2026-03-17
 - Inbox model-routing bundles, plans, and execution results under `derived/inbox/**/assistant/*.json` are rebuildable audit artifacts and never canonical health facts.
 - Inbox runtime state is local-only under `.runtime/inboxd.sqlite` plus `.runtime/inboxd/*.json` and is rebuildable from canonical vault evidence under `raw/inbox/**`.
 - Query search runtime state is local-only under `.runtime/search.sqlite` and is rebuildable from canonical vault evidence.
-- The local web surface must remain read-only, local-only, and must not expose raw vault paths, home-directory paths, or write capabilities in its rendered payloads. Its launcher must bind to localhost and block framework `.env*` reads.
+- Device sync runtime state is local-only under `.runtime/device-syncd.sqlite`; encrypted provider tokens, OAuth sessions, and webhook/reconcile cursors never belong in the canonical vault.
+- The local web surface must remain local-only and must not expose raw vault paths, home-directory paths, or canonical write capabilities in its rendered payloads. It may initiate device auth and account-control requests only through a separately configured local `device-syncd` control plane. Its launcher must bind to localhost and block framework `.env*` reads.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - General assistant/session state belongs outside the canonical vault under `assistant-state/`; only capture-scoped rebuildable audit artifacts belong under `derived/inbox/**`.
 - Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Healthy Bob stores only minimal manual aliases, explicit conversation bindings, automation cursors, and provider session references under `assistant-state/`.
@@ -39,9 +41,10 @@ Last verified: 2026-03-17
 4. Parser workers or parsed-pipeline wrappers consume those attachment jobs and publish only derived artifacts.
 5. Inbox model routing can materialize a text-only bundle, call a configured model backend, and write audited bundle/plan/result artifacts before any optional apply step.
 6. Importers may parse and normalize external inputs but must never write canonical vault files directly. Provider connectors normalize upstream payloads into shared device-batch payloads and still rely on `packages/core` for canonical persistence.
-7. Provider-backed assistant chat and outbound channel flows may persist only minimal local session metadata plus explicit delivery bindings outside the vault, but they must never bypass canonical write boundaries for health data.
-8. Query/export paths are read-only and must not mutate canonical vault state.
-9. The local web app reads vault data only on the server through query helpers, constrains search to safe record fields, and renders a read-only surface for localhost use.
+7. `packages/device-syncd` owns provider OAuth state, webhook ingestion, reconnect/disconnect control, and scheduled device backfills; it stores provider credentials outside the vault and still delegates canonical health writes through `packages/importers` and `packages/core`.
+8. Provider-backed assistant chat and outbound channel flows may persist only minimal local session metadata plus explicit delivery bindings outside the vault, but they must never bypass canonical write boundaries for health data.
+9. Query/export paths are read-only and must not mutate canonical vault state.
+10. The local web app reads vault data only on the server through query helpers, constrains search to safe record fields, and may redirect to the local device control plane for auth/account actions without gaining direct canonical write access.
 
 ## CLI Framework Notes
 
@@ -59,4 +62,4 @@ Last verified: 2026-03-17
 
 ## Current Verification Posture
 
-The repository still uses the bootstrap verification commands, but it now also has a repo-owned parser bootstrap path (`pnpm setup:inbox`), a local web package that builds under Next.js webpack mode, and inbox/parser package tests that exercise runtime rebuild, parser workers, parser-toolchain discovery, and parsed-pipeline flows inside the local TypeScript workspace.
+The repository still uses the bootstrap verification commands, but it now also has a repo-owned parser bootstrap path (`pnpm setup:inbox`), a local web package that builds under Next.js webpack mode, a local device-sync runtime with service/http tests, and inbox/parser package tests that exercise runtime rebuild, parser workers, parser-toolchain discovery, and parsed-pipeline flows inside the local TypeScript workspace.

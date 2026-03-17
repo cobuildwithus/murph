@@ -10,9 +10,10 @@ import {
   generatePrefixedId,
   generateStateCode,
   joinUrl,
+  normalizeOriginList,
   normalizePublicBaseUrl,
   normalizeString,
-  resolveRelativeOrSameOriginUrl,
+  resolveRelativeOrAllowedOriginUrl,
   toIsoTimestamp,
 } from "./shared.js";
 import { SqliteDeviceSyncStore } from "./store.js";
@@ -52,6 +53,7 @@ export interface CreateDeviceSyncServiceInput {
 export class DeviceSyncService {
   readonly vaultRoot: string;
   readonly publicBaseUrl: string;
+  readonly allowedReturnOrigins: string[];
   readonly store: SqliteDeviceSyncStore;
   readonly registry: DeviceSyncRegistry;
 
@@ -73,6 +75,7 @@ export class DeviceSyncService {
   constructor(input: CreateDeviceSyncServiceInput) {
     this.vaultRoot = input.config.vaultRoot;
     this.publicBaseUrl = normalizePublicBaseUrl(input.config.publicBaseUrl);
+    this.allowedReturnOrigins = normalizeOriginList(input.config.allowedReturnOrigins);
     this.registry = input.registry ?? createDeviceSyncRegistry(input.providers ?? []);
     this.importer = input.importer ?? createDefaultImporterPort();
     this.logger = input.config.log ?? console;
@@ -602,12 +605,16 @@ export class DeviceSyncService {
   }
 
   private resolveReturnTo(candidate: string | null): string | null {
-    const resolved = resolveRelativeOrSameOriginUrl(candidate, this.publicBaseUrl);
+    const resolved = resolveRelativeOrAllowedOriginUrl(
+      candidate,
+      this.publicBaseUrl,
+      this.allowedReturnOrigins,
+    );
 
     if (candidate && !resolved) {
       throw deviceSyncError({
         code: "RETURN_TO_INVALID",
-        message: "returnTo must be a relative path or same-origin URL.",
+        message: "returnTo must be a relative path or an allowed origin URL.",
         retryable: false,
         httpStatus: 400,
       });

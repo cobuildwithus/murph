@@ -6,6 +6,7 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 
 - The only public baseline namespace is `vault-cli`.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
+- `device` commands delegate to the local `@healthybob/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 
@@ -27,6 +28,12 @@ vault-cli assistant deliver <message> --vault <path> [--session <id>] [--alias <
 vault-cli assistant run --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--scanIntervalMs <ms>] [--maxPerScan <n>] [--once] [--skipDaemon] [--request-id <id>]
 vault-cli assistant session list --vault <path> [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
+vault-cli device provider list [--baseUrl <url>]
+vault-cli device connect <provider> [--baseUrl <url>] [--returnTo <url>] [--open]
+vault-cli device account list [--baseUrl <url>] [--provider <provider>]
+vault-cli device account show <accountId> [--baseUrl <url>]
+vault-cli device account reconcile <accountId> [--baseUrl <url>]
+vault-cli device account disconnect <accountId> [--baseUrl <url>]
 vault-cli provider scaffold --vault <path> [--request-id <id>]
 vault-cli provider upsert --vault <path> --input @file.json [--request-id <id>]
 vault-cli provider show <id> --vault <path> [--request-id <id>]
@@ -119,6 +126,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `dateAddressedDoc`: `ensure | show | list | append | link | unlink`
 - `derivedAdmin`: `stats | paths | rebuild | materialize | prune | validate`
 - `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/show/show-status/parse/reparse | promote | model bundle/route`
+- `deviceControl`: `provider list | connect | account list/show/reconcile/disconnect`
 
 ## Noun Composition
 
@@ -135,6 +143,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
 - `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, and always-on inbox triage; it stores only minimal assistant metadata outside the canonical vault, uses explicit conversation bindings for session reuse, treats `--deliveryTarget` as a one-send override, and delegates canonical promotions back through inbox/core boundaries.
+- `device` is a local control-plane noun backed by `@healthybob/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions without taking a `--vault` argument.
 
 These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 
@@ -164,8 +173,9 @@ Every command now uses native `incur` command definitions directly:
 
 ## Shared Option Rules
 
-- `--vault <path>` is required for every baseline command so the target vault is explicit.
-- `--request-id` is optional, forwarded to package service calls, and reserved for audit correlation.
+- `--vault <path>` is required for canonical vault commands so the target vault is explicit. `device` control-plane commands intentionally omit it because they talk to a separate local daemon instead of canonical vault files.
+- `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `HEALTHYBOB_DEVICE_SYNC_BASE_URL` and then the local daemon default.
+- `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
 - Machine-stable callers that need metadata or CTA suggestions should prefer `--verbose --format json`. The payload examples below describe the `data` body emitted by non-verbose JSON mode.
 - Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`. Comma-delimited tokens such as `--kind meal,note` are invalid and should be rewritten as repeated flags.
@@ -187,6 +197,7 @@ Every command now uses native `incur` command definitions directly:
 - Export pack ids identify derived files under `exports/packs/`; they are not valid `show` targets.
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
 - A successful `show` response may surface a stable display id such as `meal_*` or `doc_*` in `entity.id` even when the lookup key was a queryable event id such as `evt_*`.
+- `device account show|reconcile|disconnect` accept the device-sync control-plane account ids returned by `device account list`; they are not canonical vault ids.
 
 ## Success Output
 

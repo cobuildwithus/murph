@@ -1,4 +1,5 @@
 import { VaultCliError } from "../vault-cli-errors.js"
+import { createDeviceSyncClient } from "../device-sync-client.js"
 
 import type {
   ListFilters,
@@ -6,6 +7,7 @@ import type {
 import type { CommandContext } from "../health-cli-method-types.js"
 import type {
   CoreWriteServices,
+  DeviceSyncServices,
   ImporterServices,
   ProjectAssessmentInput,
   QueryServices,
@@ -538,11 +540,95 @@ function createIntegratedQueryServices(): QueryServices {
   } satisfies QueryServices
 }
 
+function createIntegratedDeviceSyncServices(): DeviceSyncServices {
+  return {
+    async listProviders(input) {
+      const client = createDeviceSyncClient({
+        baseUrl: input.baseUrl,
+      })
+      const result = await client.listProviders()
+
+      return {
+        baseUrl: client.baseUrl,
+        providers: result.providers,
+      }
+    },
+    async connect(input) {
+      const client = createDeviceSyncClient({
+        baseUrl: input.baseUrl,
+      })
+      const result = await client.beginConnection({
+        provider: input.provider,
+        returnTo: input.returnTo,
+        open: input.open,
+      })
+
+      return {
+        baseUrl: client.baseUrl,
+        provider: result.provider,
+        state: result.state,
+        expiresAt: result.expiresAt,
+        authorizationUrl: result.authorizationUrl,
+        openedBrowser: result.openedBrowser,
+      }
+    },
+    async listAccounts(input) {
+      const client = createDeviceSyncClient({
+        baseUrl: input.baseUrl,
+      })
+      const result = await client.listAccounts({
+        provider: input.provider,
+      })
+
+      return {
+        baseUrl: client.baseUrl,
+        provider: input.provider ?? null,
+        accounts: result.accounts,
+      }
+    },
+    async showAccount(input) {
+      const client = createDeviceSyncClient({
+        baseUrl: input.baseUrl,
+      })
+      const result = await client.showAccount(input.accountId)
+
+      return {
+        baseUrl: client.baseUrl,
+        account: result.account,
+      }
+    },
+    async reconcileAccount(input) {
+      const client = createDeviceSyncClient({
+        baseUrl: input.baseUrl,
+      })
+      const result = await client.reconcileAccount(input.accountId)
+
+      return {
+        baseUrl: client.baseUrl,
+        account: result.account,
+        job: result.job,
+      }
+    },
+    async disconnectAccount(input) {
+      const client = createDeviceSyncClient({
+        baseUrl: input.baseUrl,
+      })
+      const result = await client.disconnectAccount(input.accountId)
+
+      return {
+        baseUrl: client.baseUrl,
+        account: result.account,
+      }
+    },
+  } satisfies DeviceSyncServices
+}
+
 export function createIntegratedVaultCliServices(): VaultCliServices {
   return {
     core: createIntegratedCoreServices(),
     importers: createIntegratedImporterServices(),
     query: createIntegratedQueryServices(),
+    devices: createIntegratedDeviceSyncServices(),
   }
 }
 
@@ -598,5 +684,13 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
       exportPack: createUnwiredMethod("query.exportPack"),
       ...createUnwiredHealthMethodSet(healthQueryServiceMethodNames, "query"),
     } satisfies QueryServices,
+    devices: {
+      listProviders: createUnwiredMethod("devices.listProviders"),
+      connect: createUnwiredMethod("devices.connect"),
+      listAccounts: createUnwiredMethod("devices.listAccounts"),
+      showAccount: createUnwiredMethod("devices.showAccount"),
+      reconcileAccount: createUnwiredMethod("devices.reconcileAccount"),
+      disconnectAccount: createUnwiredMethod("devices.disconnectAccount"),
+    } satisfies DeviceSyncServices,
   }
 }

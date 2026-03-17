@@ -20,6 +20,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
   const serviceConfig: DeviceSyncServiceConfig = {
     vaultRoot,
     publicBaseUrl,
+    allowedReturnOrigins: parseCsvEnv(env, ["HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS"]),
     stateDatabasePath: optionalEnv(env, ["HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH"]),
     sessionTtlMs: parseIntegerEnv(env, ["HEALTHYBOB_DEVICE_SYNC_SESSION_TTL_MS"]),
     workerLeaseMs: parseIntegerEnv(env, ["HEALTHYBOB_DEVICE_SYNC_WORKER_LEASE_MS"]),

@@ -24,9 +24,11 @@ repo/
     core/
     cli/
     importers/
+    device-syncd/
     inboxd/
     parsers/
     query/
+    web/
 
   fixtures/
     minimal-vault/
@@ -46,10 +48,12 @@ repo/
 - `packages/runtime-state` defines canonical `.runtime` paths plus shared SQLite defaults for rebuildable local state.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
+- `packages/device-syncd` owns local provider OAuth state, webhook handling, reconnect/disconnect control, and scheduled wearable imports while keeping provider credentials outside the canonical vault.
 - `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state, builds derived export packs, and owns the optional lexical search index under `.runtime/search.sqlite`.
 - `packages/cli` exposes the `vault-cli` command surface, provider-backed assistant orchestration plus outbound channel delivery, and must not bypass core for canonical writes.
+- `packages/web` exposes a local-only observability UI, reads vault data through `packages/query`, and may initiate device auth/account actions through the local `packages/device-syncd` control plane without writing canonical vault data directly.
 
 ## Storage Model
 
@@ -70,11 +74,15 @@ repo/
   - `.runtime/inboxd.sqlite`
   - `.runtime/inboxd/*.json`
   - `.runtime/search.sqlite`
+  - `.runtime/device-syncd.sqlite`
 - Out-of-vault assistant/session state:
   - `assistant-state/`
   - provider-owned transcript history should remain external when the chosen chat adapter supports it
   - channel-native send history should remain external when the chosen delivery adapter supports it
   - store only manual aliases, explicit conversation bindings, provider session ids, and automation cursors locally
+- Device provider credentials:
+  - stay encrypted in the local device-sync runtime database
+  - never land in canonical vault files or append-only health ledgers
 
 ## First Release Scope
 

@@ -16,6 +16,7 @@ function createStubVaultServices(overrides: Partial<VaultCliServices> = {}): Vau
     core: {} as VaultCliServices['core'],
     importers: {} as VaultCliServices['importers'],
     query: {} as VaultCliServices['query'],
+    devices: {} as VaultCliServices['devices'],
     ...overrides,
   }
 }

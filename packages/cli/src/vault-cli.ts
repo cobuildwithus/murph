@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { Cli } from 'incur'
 import { registerHealthEntityCrudGroup } from './commands/health-entity-command-registry.js'
 import { registerDocumentCommands } from './commands/document.js'
+import { registerDeviceCommands } from './commands/device.js'
 import { registerEventCommands } from './commands/event.js'
 import { registerExperimentCommands } from './commands/experiment.js'
 import { registerExportCommands } from './commands/export.js'
@@ -56,6 +57,7 @@ export function createVaultCli(
   registerAssistantCommands(cli, inboxServices, services)
   registerAuditCommands(cli, services)
   registerDocumentCommands(cli, services)
+  registerDeviceCommands(cli, services)
   registerMealCommands(cli, services)
   registerProviderCommands(cli, services)
   registerEventCommands(cli, services)

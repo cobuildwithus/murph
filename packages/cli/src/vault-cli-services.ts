@@ -1,6 +1,7 @@
 export type { CommandContext } from "./usecases/types.js"
 export type {
   CoreWriteServices,
+  DeviceSyncServices,
   ImporterServices,
   QueryServices,
   VaultCliServices,

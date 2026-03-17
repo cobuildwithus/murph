@@ -25,6 +25,12 @@ vi.mock("../src/lib/overview", () => {
   };
 });
 
+vi.mock("../src/lib/device-sync", () => {
+  return {
+    loadDeviceSyncOverviewFromEnv: vi.fn(),
+  };
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -32,7 +38,9 @@ beforeEach(() => {
 test("HomePage renders the ready state", async () => {
   const { default: HomePage } = await import("../app/page");
   const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const { loadDeviceSyncOverviewFromEnv } = await import("../src/lib/device-sync");
   const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+  const mockedLoadDeviceSyncOverviewFromEnv = vi.mocked(loadDeviceSyncOverviewFromEnv);
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
     currentProfile: {
@@ -101,16 +109,34 @@ test("HomePage renders the ready state", async () => {
     ],
     weeklyStats: [],
   });
+  mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({
+    status: "ready",
+    baseUrl: "http://127.0.0.1:8788",
+    providers: [
+      {
+        provider: "whoop",
+        callbackPath: "/oauth/whoop/callback",
+        callbackUrl: "http://127.0.0.1:8788/oauth/whoop/callback",
+        webhookPath: "/webhooks/whoop",
+        webhookUrl: "http://127.0.0.1:8788/webhooks/whoop",
+        defaultScopes: ["offline", "read:profile", "read:sleep"],
+      },
+    ],
+    accounts: [],
+  });
 
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.equal(mockedLoadVaultOverviewFromEnv.mock.calls.length, 1);
+  assert.equal(mockedLoadDeviceSyncOverviewFromEnv.mock.calls.length, 1);
   assert.deepEqual(mockedLoadVaultOverviewFromEnv.mock.calls[0]?.[0], {
     sampleLimit: 6,
     timelineLimit: 8,
   });
   assert.match(markup, /Healthy Bob/);
   assert.match(markup, /Protect sleep consistency/);
+  assert.match(markup, /Wearable connections/);
+  assert.match(markup, /Connect/);
   assert.doesNotMatch(markup, /localhost only/);
   assert.doesNotMatch(markup, /safe fields only/);
 });
@@ -118,13 +144,22 @@ test("HomePage renders the ready state", async () => {
 test("HomePage renders the setup state when no vault is configured", async () => {
   const { default: HomePage } = await import("../app/page");
   const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const { loadDeviceSyncOverviewFromEnv } = await import("../src/lib/device-sync");
   const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+  const mockedLoadDeviceSyncOverviewFromEnv = vi.mocked(loadDeviceSyncOverviewFromEnv);
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
     envVar: "HEALTHYBOB_VAULT",
     exampleVaultPath: "fixtures/demo-web-vault",
     status: "missing-config",
     suggestedCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
+  });
+  mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({
+    status: "unavailable",
+    baseUrl: "http://127.0.0.1:8788",
+    message: "Device sync is offline.",
+    hint: "Start the local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+    suggestedCommand: "node packages/device-syncd/dist/bin.js",
   });
 
   const markup = renderToStaticMarkup(await HomePage());
@@ -136,7 +171,9 @@ test("HomePage renders the setup state when no vault is configured", async () =>
 test("HomePage renders the unreadable-vault error state", async () => {
   const { default: HomePage } = await import("../app/page");
   const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const { loadDeviceSyncOverviewFromEnv } = await import("../src/lib/device-sync");
   const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+  const mockedLoadDeviceSyncOverviewFromEnv = vi.mocked(loadDeviceSyncOverviewFromEnv);
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
     envVar: "HEALTHYBOB_VAULT",
@@ -144,6 +181,13 @@ test("HomePage renders the unreadable-vault error state", async () => {
     message: "The configured vault could not be read.",
     recoveryCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
     status: "error",
+  });
+  mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({
+    status: "unavailable",
+    baseUrl: "http://127.0.0.1:8788",
+    message: "Device sync is offline.",
+    hint: "Start the local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+    suggestedCommand: "node packages/device-syncd/dist/bin.js",
   });
 
   const markup = renderToStaticMarkup(await HomePage());

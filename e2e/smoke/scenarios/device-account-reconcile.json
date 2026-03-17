@@ -1,0 +1,10 @@
+{
+  "id": "device-account-reconcile",
+  "command": "vault-cli device account reconcile <accountId> [--baseUrl <url>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/device-sync",
+  "purpose": "Documents queueing one manual reconcile against a connected device account."
+}
