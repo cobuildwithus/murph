@@ -15,6 +15,13 @@ vi.mock("../src/lib/overview", () => {
 
       return typeof value === "string" ? value.trim() : "";
     },
+    overviewResultToHttpStatus(result: { status: "ready" | "missing-config" | "error" }): number {
+      if (result.status === "ready") {
+        return 200;
+      }
+
+      return result.status === "missing-config" ? 503 : 500;
+    },
   };
 });
 
@@ -22,7 +29,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-test("HomePage normalizes search params and renders the ready state", async () => {
+test("HomePage renders the ready state", async () => {
   const { default: HomePage } = await import("../app/page");
   const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
   const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
@@ -40,6 +47,7 @@ test("HomePage normalizes search params and renders the ready state", async () =
         },
       ],
     },
+    experiments: [],
     generatedAt: "2026-03-12T15:00:00Z",
     metrics: [
       {
@@ -91,27 +99,18 @@ test("HomePage normalizes search params and renders the ready state", async () =
         title: "Sleep consult follow-up",
       },
     ],
+    weeklyStats: [],
   });
 
-  const markup = renderToStaticMarkup(
-    await HomePage({
-      searchParams: Promise.resolve({
-        q: [" sleep ", "ignored"],
-      }),
-    }),
-  );
+  const markup = renderToStaticMarkup(await HomePage());
 
   assert.equal(mockedLoadVaultOverviewFromEnv.mock.calls.length, 1);
   assert.deepEqual(mockedLoadVaultOverviewFromEnv.mock.calls[0]?.[0], {
-    query: "sleep",
     sampleLimit: 6,
     timelineLimit: 8,
   });
   assert.match(markup, /Healthy Bob/);
-  assert.match(markup, /Recent journal days/);
   assert.match(markup, /Protect sleep consistency/);
-  assert.match(markup, /Sleep felt steadier after a lighter dinner/);
-  assert.match(markup, /Matches for/);
   assert.doesNotMatch(markup, /localhost only/);
   assert.doesNotMatch(markup, /safe fields only/);
 });
@@ -128,9 +127,9 @@ test("HomePage renders the setup state when no vault is configured", async () =>
     suggestedCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
   });
 
-  const markup = renderToStaticMarkup(await HomePage({}));
+  const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /No vault is configured yet/);
+  assert.match(markup, /No vault configured/);
   assert.match(markup, /HEALTHYBOB_VAULT/);
 });
 
@@ -147,7 +146,7 @@ test("HomePage renders the unreadable-vault error state", async () => {
     status: "error",
   });
 
-  const markup = renderToStaticMarkup(await HomePage({}));
+  const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /The configured vault could not be read\./);
   assert.match(markup, /Confirm the configured vault path points at a Healthy Bob vault root/);

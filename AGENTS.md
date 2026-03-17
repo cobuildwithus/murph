@@ -28,6 +28,7 @@ If instructions still conflict after applying this order, ask the user before ac
 
 ## Hard Rules (Non-Negotiable)
 
+- Always use Tailwind CSS utility classes in the web package (`packages/web`). No raw CSS — do not add custom classes to `globals.css` or create new `.css` files. All styling must be expressed as Tailwind utilities in JSX `className` props. The theme (colors, fonts, shadows, animations) is defined via `@theme` in `globals.css`.
 - Never access `.env` or `.env*` files.
 - Never print or commit full secrets, tokens, raw credentials, or full `Authorization` headers.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.

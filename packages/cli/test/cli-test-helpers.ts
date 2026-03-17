@@ -145,18 +145,25 @@ export async function ensureCliRuntimeArtifacts(): Promise<void> {
     return
   }
 
-  if (cliRuntimeArtifactsPromise === null) {
-    cliRuntimeArtifactsPromise = (async () => {
-      for (const step of runtimeBuildSteps) {
-        await execFileAsync('pnpm', step.args, {
-          cwd: step.cwd,
-          encoding: 'utf8',
-        })
-      }
-    })().finally(() => {
-      cliRuntimeArtifactsPromise = null
-    })
+  await rebuildCliRuntimeArtifacts()
+}
+
+export async function rebuildCliRuntimeArtifacts(): Promise<void> {
+  if (cliRuntimeArtifactsPromise !== null) {
+    await cliRuntimeArtifactsPromise
+    return
   }
+
+  cliRuntimeArtifactsPromise = (async () => {
+    for (const step of runtimeBuildSteps) {
+      await execFileAsync('pnpm', step.args, {
+        cwd: step.cwd,
+        encoding: 'utf8',
+      })
+    }
+  })().finally(() => {
+    cliRuntimeArtifactsPromise = null
+  })
 
   await cliRuntimeArtifactsPromise
 }
@@ -192,10 +199,28 @@ async function execCli(
   args: string[],
   options?: {
     stdin?: string
-  },
+  }
 ) {
   await ensureCliRuntimeArtifacts()
 
+  try {
+    return await execCliProcess(args, options)
+  } catch (error) {
+    if (!shouldRetryCliExecution(error)) {
+      throw error
+    }
+
+    await rebuildCliRuntimeArtifacts()
+    return await execCliProcess(args, options)
+  }
+}
+
+async function execCliProcess(
+  args: string[],
+  options?: {
+    stdin?: string
+  },
+) {
   return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = execFile(
       process.execPath,
@@ -217,4 +242,18 @@ async function execCli(
 
     child.stdin?.end(options?.stdin)
   })
+}
+
+function shouldRetryCliExecution(error: unknown): boolean {
+  const output = commandOutputFromError(error)
+
+  if (output === null) {
+    return false
+  }
+
+  return (
+    output.includes('ERR_MODULE_NOT_FOUND') &&
+    output.includes('@healthybob/') &&
+    output.includes('/dist/index.js')
+  )
 }

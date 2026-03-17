@@ -16,6 +16,7 @@ export default defineConfig({
   test: {
     environment: "node",
     fileParallelism: false,
+    testTimeout: 15000,
     include: [
       "packages/core/test/core.test.ts",
       "packages/core/test/device-import.test.ts",

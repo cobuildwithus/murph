@@ -14,30 +14,37 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./constants": {
       "types": "./dist/constants.d.ts",
+      "import": "./dist/constants.js",
       "default": "./dist/constants.js"
     },
     "./examples": {
       "types": "./dist/examples.d.ts",
+      "import": "./dist/examples.js",
       "default": "./dist/examples.js"
     },
     "./health-entities": {
       "types": "./dist/health-entities.d.ts",
+      "import": "./dist/health-entities.js",
       "default": "./dist/health-entities.js"
     },
     "./ids": {
       "types": "./dist/ids.d.ts",
+      "import": "./dist/ids.js",
       "default": "./dist/ids.js"
     },
     "./schemas": {
       "types": "./dist/schemas.d.ts",
+      "import": "./dist/schemas.js",
       "default": "./dist/schemas.js"
     },
     "./validate": {
       "types": "./dist/validate.d.ts",
+      "import": "./dist/validate.js",
       "default": "./dist/validate.js"
     },
     "./generated/*": "./generated/*"

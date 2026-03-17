@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "vitest";
 
 import {
@@ -111,7 +114,11 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
         username: "healthybob_bot",
       };
     },
-    async getMessages() {
+    async getMessages({ cursor }) {
+      if (cursor) {
+        return [];
+      }
+
       return [
         {
           update_id: 6,
@@ -325,4 +332,165 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
   assert.equal(getMeCalls, 1);
   assert.equal(getFileCalls, 1);
   assert.equal(getWebhookInfoCalls, 1);
+});
+
+test("createTelegramPollConnector backfills page-by-page so cursors advance after persisted captures", async () => {
+  const seenCursors: Array<Record<string, unknown> | null | undefined> = [];
+  const emitted: string[] = [];
+
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "healthybob_bot" };
+      },
+      async getMessages({ cursor }) {
+        seenCursors.push(cursor);
+        const updateId = cursor && typeof cursor.updateId === "number" ? cursor.updateId : null;
+
+        if (updateId === null) {
+          return [
+            {
+              update_id: 1,
+              message: {
+                message_id: 1,
+                date: 1_773_397_100,
+                text: "one",
+                chat: { id: 10, type: "private", first_name: "Bob" },
+                from: { id: 111, first_name: "Bob" },
+              },
+            },
+            {
+              update_id: 2,
+              message: {
+                message_id: 2,
+                date: 1_773_397_101,
+                text: "two",
+                chat: { id: 10, type: "private", first_name: "Bob" },
+                from: { id: 111, first_name: "Bob" },
+              },
+            },
+          ];
+        }
+
+        if (updateId === 2) {
+          return [
+            {
+              update_id: 3,
+              message: {
+                message_id: 3,
+                date: 1_773_397_102,
+                text: "three",
+                chat: { id: 10, type: "private", first_name: "Bob" },
+                from: { id: 111, first_name: "Bob" },
+              },
+            },
+          ];
+        }
+
+        return [];
+      },
+      async startWatching() {},
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+    },
+    downloadAttachments: false,
+    backfillLimit: 3,
+    resetWebhookOnStart: false,
+  });
+
+  const cursor = await connector.backfill(null, async (capture, checkpoint) => {
+    emitted.push(capture.externalId);
+    assert.ok(checkpoint);
+    return createPersistedCapture(capture);
+  });
+
+  assert.deepEqual(seenCursors, [null, { updateId: 2 }]);
+  assert.deepEqual(emitted, ["update:1", "update:2", "update:3"]);
+  assert.deepEqual(cursor, { updateId: 3 });
+});
+
+test("createTelegramPollConnector surfaces async polling failures from the watcher", async () => {
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "healthybob_bot" };
+      },
+      async getMessages() {
+        return [];
+      },
+      async startWatching() {
+        return {
+          done: Promise.resolve().then(() => {
+            throw new Error("watch loop failed");
+          }),
+          async close() {},
+        };
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+    },
+    downloadAttachments: false,
+    resetWebhookOnStart: false,
+  });
+
+  await assert.rejects(
+    connector.watch(
+      null,
+      async (capture) => createPersistedCapture(capture),
+      new AbortController().signal,
+    ),
+    /watch loop failed/u,
+  );
+});
+
+test("createTelegramApiPollDriver reads local Bot API file paths directly", async () => {
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), "telegram-file-"));
+  const filePath = path.join(tempDirectory, "file.txt");
+  const originalFetch = globalThis.fetch;
+
+  await writeFile(filePath, new Uint8Array([4, 5, 6]));
+
+  globalThis.fetch = (async () => {
+    throw new Error("fetch should not be called for local Bot API file paths");
+  }) as typeof fetch;
+
+  try {
+    const driver = createTelegramApiPollDriver({
+      api: {
+        token: "bot-token",
+        async getMe() {
+          return {
+            id: 999,
+            username: "healthybob_bot",
+          };
+        },
+        async getUpdates() {
+          return [];
+        },
+        async getFile(fileId) {
+          assert.equal(fileId, "file-1");
+          return {
+            file_id: fileId,
+            file_path: filePath,
+          };
+        },
+      } as unknown as TelegramApiClient,
+    });
+
+    const file = await driver.getFile("file-1");
+    const data = await driver.downloadFile(file.file_path!);
+
+    assert.deepEqual(data, new Uint8Array([4, 5, 6]));
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
 });

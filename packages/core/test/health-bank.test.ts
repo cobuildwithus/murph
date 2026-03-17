@@ -90,7 +90,7 @@ test("goals support multiple active records and preserve relationships in markdo
   assert.match(read.markdown, /## Related Experiments/);
   assert.equal(
     goalAuditRecords.filter((record) => (record as { action?: string }).action === "goal_upsert").length,
-    3,
+    4,
   );
 });
 

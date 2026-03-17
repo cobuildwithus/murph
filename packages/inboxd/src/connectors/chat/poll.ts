@@ -6,6 +6,7 @@ import { compareInboundCaptures } from "./message.js";
 export interface ChatPollWatcherHandle {
   close?(): Promise<void> | void;
   stop?(): Promise<void> | void;
+  done?: Promise<void>;
 }
 
 export interface ChatPollDriver<TMessage> {
@@ -93,40 +94,67 @@ export function createNormalizedChatPollConnector<
     },
     async backfill(cursor, emit) {
       context = await ensureContext(driver, context, loadContext);
-      const messages = await driver.getMessages({
-        cursor,
-        limit: backfillLimit,
-        includeOwnMessages,
-      });
-      const captures: Array<{ capture: InboundCapture; message: TMessage; context: TContext | null }> = [];
-
-      for (const message of messages) {
-        context = await refreshMessageContext({
-          driver,
-          context,
-          message,
-          refreshContext,
-        });
-        const capture = await normalize({
-          message,
-          source,
-          accountId,
-          context,
-        });
-        captures.push({ capture, message, context });
-      }
-
-      captures.sort((left, right) => compare(left.capture, right.capture));
-
       let nextCursor = cursor;
-      for (const entry of captures) {
-        const nextCheckpoint = checkpoint?.({
-          message: entry.message,
-          capture: entry.capture,
-          context: entry.context,
-        }) ?? createCaptureCheckpoint(entry.capture);
-        await emit(entry.capture, nextCheckpoint);
-        nextCursor = nextCheckpoint;
+      let remaining = backfillLimit;
+
+      while (remaining > 0) {
+        const messages = await driver.getMessages({
+          cursor: nextCursor,
+          limit: remaining,
+          includeOwnMessages,
+        });
+
+        if (messages.length === 0) {
+          break;
+        }
+
+        const captures: Array<{ capture: InboundCapture; message: TMessage; context: TContext | null }> = [];
+
+        for (const message of messages) {
+          context = await refreshMessageContext({
+            driver,
+            context,
+            message,
+            refreshContext,
+          });
+          const capture = await normalize({
+            message,
+            source,
+            accountId,
+            context,
+          });
+          captures.push({ capture, message, context });
+        }
+
+        captures.sort((left, right) => compare(left.capture, right.capture));
+
+        const pageStartCursor = serializeCursor(nextCursor);
+        let currentCursor = pageStartCursor;
+        for (const entry of captures) {
+          const nextCheckpoint = checkpoint?.({
+            message: entry.message,
+            capture: entry.capture,
+            context: entry.context,
+          }) ?? createCaptureCheckpoint(entry.capture);
+          const nextCursorValue = serializeCursor(nextCheckpoint);
+
+          if (nextCursorValue === currentCursor) {
+            continue;
+          }
+
+          await emit(entry.capture, nextCheckpoint);
+          nextCursor = nextCheckpoint;
+          currentCursor = nextCursorValue;
+          remaining -= 1;
+
+          if (remaining <= 0) {
+            break;
+          }
+        }
+
+        if (captures.length === 0 || serializeCursor(nextCursor) === pageStartCursor) {
+          break;
+        }
       }
 
       return nextCursor;
@@ -163,9 +191,12 @@ export function createNormalizedChatPollConnector<
         },
       });
 
-      await waitForAbort(signal);
-      await stopWatcher(activeWatcher);
-      activeWatcher = undefined;
+      try {
+        await waitForAbortOrWatcher(signal, activeWatcher);
+      } finally {
+        await stopWatcher(activeWatcher);
+        activeWatcher = undefined;
+      }
     },
     async close() {
       await stopWatcher(activeWatcher);
@@ -239,4 +270,35 @@ async function waitForAbort(signal: AbortSignal): Promise<void> {
   await new Promise<void>((resolve) => {
     signal.addEventListener("abort", () => resolve(), { once: true });
   });
+}
+
+async function waitForAbortOrWatcher(
+  signal: AbortSignal,
+  watcher: ChatPollWatcherHandle | (() => Promise<void> | void) | void,
+): Promise<void> {
+  const done = readWatcherDone(watcher);
+
+  if (!done) {
+    await waitForAbort(signal);
+    return;
+  }
+
+  await Promise.race([
+    waitForAbort(signal),
+    done,
+  ]);
+}
+
+function readWatcherDone(
+  watcher: ChatPollWatcherHandle | (() => Promise<void> | void) | void,
+): Promise<void> | null {
+  if (!watcher || typeof watcher === "function") {
+    return null;
+  }
+
+  return watcher.done ?? null;
+}
+
+function serializeCursor(cursor: Cursor | null | undefined): string {
+  return JSON.stringify(cursor ?? null);
 }

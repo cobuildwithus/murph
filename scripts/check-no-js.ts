@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = ["packages", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
+const allowedSourceArtifacts = new Set(["packages/web/postcss.config.mjs"]);
 const execFileAsync = promisify(execFile);
 const nextEnvCommonLines = [
   '/// <reference types="next" />',
@@ -94,6 +95,10 @@ async function scanPath(relativePath: string, offenders: string[]): Promise<void
     const hasBlockedDeclarationSuffix = entry.name.endsWith(".d.ts");
 
     if (blockedExtensions.has(extension) || hasBlockedDeclarationSuffix) {
+      if (allowedSourceArtifacts.has(entryRelativePath)) {
+        continue;
+      }
+
       if (await isAllowedDeclarationArtifact(entryRelativePath)) {
         continue;
       }

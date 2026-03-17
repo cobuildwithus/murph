@@ -82,10 +82,12 @@ assert.equal(packageJson.main, "./dist/index.js");
 assert.equal(packageJson.types, "./dist/index.d.ts");
 assert.deepEqual(packageJson.exports?.["."], {
   types: "./dist/index.d.ts",
+  import: "./dist/index.js",
   default: "./dist/index.js",
 });
 assert.deepEqual(packageJson.exports?.["./schemas"], {
   types: "./dist/schemas.d.ts",
+  import: "./dist/schemas.js",
   default: "./dist/schemas.js",
 });
 

@@ -9,8 +9,11 @@
       "@healthybob/contracts": [
         "packages/contracts/src/index.ts"
       ],
+      "@healthybob/contracts/schemas": [
+        "packages/contracts/src/schemas.ts"
+      ],
       "@healthybob/contracts/*": [
-        "packages/contracts/src/*"
+        "packages/contracts/src/*.ts"
       ]
     }
   },

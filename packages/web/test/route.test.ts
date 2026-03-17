@@ -35,6 +35,7 @@ test("overview route returns ready JSON with no-store caching", async () => {
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
     currentProfile: null,
+    experiments: [],
     generatedAt: "2026-03-12T15:00:00Z",
     metrics: [],
     recentJournals: [],
@@ -42,6 +43,7 @@ test("overview route returns ready JSON with no-store caching", async () => {
     search: null,
     status: "ready",
     timeline: [],
+    weeklyStats: [],
   });
 
   const response = await GET(new Request("http://localhost/api/overview?q=%20sleep%20"));

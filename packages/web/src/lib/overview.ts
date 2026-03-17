@@ -45,6 +45,24 @@ export interface OverviewJournalEntry {
   title: string;
 }
 
+export interface OverviewExperiment {
+  id: string;
+  slug: string | null;
+  startedOn: string | null;
+  status: string | null;
+  summary: string | null;
+  tags: string[];
+  title: string;
+}
+
+export interface OverviewWeeklyStat {
+  currentWeekAvg: number | null;
+  deltaPercent: number | null;
+  previousWeekAvg: number | null;
+  stream: string;
+  unit: string | null;
+}
+
 export interface OverviewSampleSummary {
   averageValue: number | null;
   date: string;
@@ -79,6 +97,7 @@ export interface OverviewSearchHit {
 
 export interface ReadyOverview {
   currentProfile: OverviewProfile | null;
+  experiments: OverviewExperiment[];
   generatedAt: string;
   metrics: OverviewMetric[];
   recentJournals: OverviewJournalEntry[];
@@ -86,6 +105,7 @@ export interface ReadyOverview {
   search: OverviewSearchResult | null;
   status: "ready";
   timeline: OverviewTimelineEntry[];
+  weeklyStats: OverviewWeeklyStat[];
 }
 
 export interface MissingConfigOverview {
@@ -174,6 +194,7 @@ export async function loadVaultOverview(
 
     return {
       currentProfile: summarizeCurrentProfile(vault),
+      experiments: summarizeExperiments(vault),
       generatedAt: new Date().toISOString(),
       metrics: buildMetrics(vault),
       recentJournals: summarizeRecentJournals(vault),
@@ -189,6 +210,7 @@ export async function loadVaultOverview(
         })),
       search: query.length > 0 ? searchVaultSafely(vault, query) : null,
       status: "ready",
+      weeklyStats: buildWeeklyStats(vault),
       timeline: buildTimeline(vault, {
         includeDailySampleSummaries: true,
         includeProfileSnapshots: true,
@@ -284,6 +306,92 @@ function summarizeRecentJournals(vault: VaultReadModel): OverviewJournalEntry[] 
     .map((entry) => ({
       date: entry.date ?? extractDate(entry.occurredAt),
       id: entry.displayId,
+      summary: summarizeText(entry.body),
+      tags: compactStrings(entry.tags),
+      title: entry.title ?? entry.displayId,
+    }));
+}
+
+function buildWeeklyStats(vault: VaultReadModel): OverviewWeeklyStat[] {
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+
+  const dayOfWeek = now.getUTCDay();
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const thisMonday = new Date(now);
+  thisMonday.setUTCDate(now.getUTCDate() - mondayOffset);
+  const thisWeekStart = thisMonday.toISOString().slice(0, 10);
+
+  const lastMonday = new Date(thisMonday);
+  lastMonday.setUTCDate(thisMonday.getUTCDate() - 7);
+  const lastWeekStart = lastMonday.toISOString().slice(0, 10);
+
+  const thisWeekSamples = new Map<string, { values: number[]; unit: string | null }>();
+  const lastWeekSamples = new Map<string, { values: number[]; unit: string | null }>();
+
+  for (const sample of vault.samples) {
+    const sampleDate = sample.date ?? extractDate(sample.occurredAt);
+    const stream = sample.stream;
+    const rawValue = sample.data?.value;
+    const numericValue = typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null;
+    if (!stream || numericValue === null) continue;
+
+    const rawUnit = sample.data?.unit;
+    const unit = typeof rawUnit === "string" && rawUnit.trim() ? rawUnit.trim() : null;
+
+    let bucket: Map<string, { values: number[]; unit: string | null }> | null = null;
+    if (sampleDate >= thisWeekStart && sampleDate <= todayStr) {
+      bucket = thisWeekSamples;
+    } else if (sampleDate >= lastWeekStart && sampleDate < thisWeekStart) {
+      bucket = lastWeekSamples;
+    }
+
+    if (!bucket) continue;
+
+    const existing = bucket.get(stream);
+    if (existing) {
+      existing.values.push(numericValue);
+    } else {
+      bucket.set(stream, { values: [numericValue], unit });
+    }
+  }
+
+  const allStreams = new Set([...thisWeekSamples.keys(), ...lastWeekSamples.keys()]);
+  const stats: OverviewWeeklyStat[] = [];
+
+  for (const stream of allStreams) {
+    const thisWeek = thisWeekSamples.get(stream);
+    const lastWeek = lastWeekSamples.get(stream);
+
+    const currentAvg = thisWeek ? thisWeek.values.reduce((a, b) => a + b, 0) / thisWeek.values.length : null;
+    const previousAvg = lastWeek ? lastWeek.values.reduce((a, b) => a + b, 0) / lastWeek.values.length : null;
+
+    let deltaPercent: number | null = null;
+    if (currentAvg !== null && previousAvg !== null && previousAvg !== 0) {
+      deltaPercent = ((currentAvg - previousAvg) / Math.abs(previousAvg)) * 100;
+    }
+
+    stats.push({
+      currentWeekAvg: currentAvg,
+      deltaPercent,
+      previousWeekAvg: previousAvg,
+      stream,
+      unit: thisWeek?.unit ?? lastWeek?.unit ?? null,
+    });
+  }
+
+  return stats.sort((a, b) => a.stream.localeCompare(b.stream));
+}
+
+function summarizeExperiments(vault: VaultReadModel): OverviewExperiment[] {
+  return [...vault.experiments]
+    .sort((left, right) => compareLatestStrings(right.occurredAt ?? right.date, left.occurredAt ?? left.date))
+    .slice(0, 6)
+    .map((entry) => ({
+      id: entry.displayId,
+      slug: entry.experimentSlug,
+      startedOn: entry.date ?? extractDate(entry.occurredAt),
+      status: entry.status ?? null,
       summary: summarizeText(entry.body),
       tags: compactStrings(entry.tags),
       title: entry.title ?? entry.displayId,

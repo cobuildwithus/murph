@@ -39,6 +39,7 @@ const sampleDocumentPath = path.join(
   repoRoot,
   'fixtures/sample-imports/README.md',
 )
+const runtimeCliTestTimeoutMs = 20_000
 
 async function makeFixtureVault(): Promise<FixtureVault> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-test-'))
@@ -221,6 +222,7 @@ test.sequential(
       await rm(fixture.vaultRoot, { recursive: true, force: true })
     }
   },
+  runtimeCliTestTimeoutMs,
 )
 
 test.sequential(
@@ -295,84 +297,93 @@ test.sequential(
       await rm(fixture.vaultRoot, { recursive: true, force: true })
     }
   },
+  runtimeCliTestTimeoutMs,
 )
 
-test.sequential('full CLI registers audit tail/show and reads init-created audit entries', async () => {
-  const fixture = await makeEmptyVaultFixture()
+test.sequential(
+  'full CLI registers audit tail/show and reads init-created audit entries',
+  async () => {
+    const fixture = await makeEmptyVaultFixture()
 
-  try {
-    const tailResult = await runCli<{
-      items: Array<{
-        id: string
-        kind: string
-      }>
-    }>([
-      'audit',
-      'tail',
-      '--vault',
-      fixture.vaultRoot,
-    ])
+    try {
+      const tailResult = await runCli<{
+        items: Array<{
+          id: string
+          kind: string
+        }>
+      }>([
+        'audit',
+        'tail',
+        '--vault',
+        fixture.vaultRoot,
+      ])
 
-    assert.equal(tailResult.ok, true)
-    assert.equal(tailResult.meta?.command, 'audit tail')
-    assert.equal(requireData(tailResult).items.length >= 1, true)
-    assert.equal(requireData(tailResult).items[0]?.kind, 'audit')
+      assert.equal(tailResult.ok, true)
+      assert.equal(tailResult.meta?.command, 'audit tail')
+      assert.equal(requireData(tailResult).items.length >= 1, true)
+      assert.equal(requireData(tailResult).items[0]?.kind, 'audit')
 
-    const firstAuditId = requireData(tailResult).items[0]?.id
-    assert.equal(typeof firstAuditId, 'string')
+      const firstAuditId = requireData(tailResult).items[0]?.id
+      assert.equal(typeof firstAuditId, 'string')
 
-    const showResult = await runCli<{
-      entity: {
-        id: string
-        kind: string
-      }
-    }>([
-      'audit',
-      'show',
-      firstAuditId as string,
-      '--vault',
-      fixture.vaultRoot,
-    ])
+      const showResult = await runCli<{
+        entity: {
+          id: string
+          kind: string
+        }
+      }>([
+        'audit',
+        'show',
+        firstAuditId as string,
+        '--vault',
+        fixture.vaultRoot,
+      ])
 
-    assert.equal(showResult.ok, true)
-    assert.equal(showResult.meta?.command, 'audit show')
-    assert.equal(requireData(showResult).entity.id, firstAuditId)
-    assert.equal(requireData(showResult).entity.kind, 'audit')
-  } finally {
-    await rm(fixture.vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('export pack materializes the derived five-file pack when --out is set', async () => {
-  const fixture = await makeFixtureVault()
-  const outDir = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-'))
-
-  try {
-    const result = await runCli<{
-      files: string[]
-    }>([
-      'export',
-      'pack',
-      'create',
-      '--from',
-      '2026-03-12',
-      '--to',
-      '2026-03-12',
-      '--out',
-      outDir,
-      '--vault',
-      fixture.vaultRoot,
-    ])
-
-    assert.equal(result.ok, true)
-    assert.equal(result.meta?.command, 'export pack create')
-    assert.equal(requireData(result).files.length, 5)
-
-    for (const relativePath of requireData(result).files) {
-      await access(path.join(outDir, relativePath))
+      assert.equal(showResult.ok, true)
+      assert.equal(showResult.meta?.command, 'audit show')
+      assert.equal(requireData(showResult).entity.id, firstAuditId)
+      assert.equal(requireData(showResult).entity.kind, 'audit')
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true })
     }
-  } finally {
-    await rm(outDir, { recursive: true, force: true })
-    await rm(fixture.vaultRoot, { recursive: true, force: true })
-  }
-})
+  },
+  runtimeCliTestTimeoutMs,
+)
+
+test.sequential(
+  'export pack materializes the derived five-file pack when --out is set',
+  async () => {
+    const fixture = await makeFixtureVault()
+    const outDir = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-'))
+
+    try {
+      const result = await runCli<{
+        files: string[]
+      }>([
+        'export',
+        'pack',
+        'create',
+        '--from',
+        '2026-03-12',
+        '--to',
+        '2026-03-12',
+        '--out',
+        outDir,
+        '--vault',
+        fixture.vaultRoot,
+      ])
+
+      assert.equal(result.ok, true)
+      assert.equal(result.meta?.command, 'export pack create')
+      assert.equal(requireData(result).files.length, 5)
+
+      for (const relativePath of requireData(result).files) {
+        await access(path.join(outDir, relativePath))
+      }
+    } finally {
+      await rm(outDir, { recursive: true, force: true })
+      await rm(fixture.vaultRoot, { recursive: true, force: true })
+    }
+  },
+  runtimeCliTestTimeoutMs,
+)

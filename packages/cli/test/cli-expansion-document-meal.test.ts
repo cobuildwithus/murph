@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import { test } from 'vitest'
-import { ensureCliRuntimeArtifacts, repoRoot } from './cli-test-helpers.js'
-
-const execFileAsync = promisify(execFile)
-const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
+import {
+  repoRoot,
+  requireData,
+  runCli,
+  runRawCli,
+} from './cli-test-helpers.js'
 
 const sampleDocumentPath = path.join(
   repoRoot,
@@ -89,78 +89,8 @@ interface ManifestEnvelope {
   }
 }
 
-interface CliSuccessEnvelope<TData = Record<string, unknown>> {
-  ok: true
-  data: TData
-  meta: {
-    command: string
-    duration: string
-  }
-}
-
-type CliEnvelope<TData = Record<string, unknown>> =
-  | CliSuccessEnvelope<TData>
-  | {
-      ok: false
-      error: {
-        code?: string
-        message?: string
-      }
-      meta: {
-        command: string
-        duration: string
-      }
-    }
-
-async function runSourceCli<TData = Record<string, unknown>>(
-  args: string[],
-): Promise<CliEnvelope<TData>> {
-  await ensureCliRuntimeArtifacts()
-
-  const { stdout } = await execFileAsync(
-    'pnpm',
-    ['exec', 'tsx', sourceBinPath, ...withMachineOutput(args)],
-    { cwd: repoRoot },
-  )
-
-  return JSON.parse(stdout) as CliEnvelope<TData>
-}
-
-async function runRawSourceCli(args: string[]): Promise<string> {
-  await ensureCliRuntimeArtifacts()
-
-  const { stdout } = await execFileAsync(
-    'pnpm',
-    ['exec', 'tsx', sourceBinPath, ...args],
-    { cwd: repoRoot },
-  )
-
-  return stdout.trim()
-}
-
-function requireData<TData>(result: CliEnvelope<TData>): TData {
-  if (!result.ok) {
-    throw new Error(
-      `CLI result failed: ${result.error.message ?? result.error.code ?? 'unknown error'}`,
-    )
-  }
-
-  return result.data
-}
-
-function withMachineOutput(args: string[]): string[] {
-  const nextArgs = [...args]
-
-  if (!nextArgs.includes('--verbose')) {
-    nextArgs.push('--verbose')
-  }
-
-  if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
-    nextArgs.push('--format', 'json')
-  }
-
-  return nextArgs
-}
+const runSourceCli = runCli
+const runRawSourceCli = runRawCli
 
 async function createVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-doc-meal-'))

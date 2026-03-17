@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Api, type ApiClientOptions, type RawApi } from "grammy";
 import { createNormalizedChatPollConnector, type ChatPollDriver } from "../chat/poll.js";
 import { normalizeTelegramUpdate, type TelegramAttachmentDownloadDriver } from "./normalize.js";
@@ -143,33 +146,14 @@ export function createTelegramApiPollDriver({
       return api.getMe(asTelegramApiSignal(signal)) as unknown as Promise<TelegramUser>;
     },
     async getMessages({ cursor, limit = normalizedBatchSize, signal }) {
-      let offset = nextUpdateOffset(cursor);
-      const updates: TelegramUpdateLike[] = [];
-      const target = Math.min(Math.max(limit, 1), 5000);
+      const batch = await getUpdates(api, {
+        offset: nextUpdateOffset(cursor),
+        limit: Math.min(Math.max(limit, 1), normalizedBatchSize),
+        timeout: 0,
+        allowed_updates: allowedUpdates ?? undefined,
+      }, signal);
 
-      while (updates.length < target) {
-        const requestLimit = Math.min(normalizedBatchSize, target - updates.length);
-        const batch = await getUpdates(api, {
-          offset,
-          limit: requestLimit,
-          timeout: 0,
-          allowed_updates: allowedUpdates ?? undefined,
-        }, signal);
-
-        if (batch.length === 0) {
-          break;
-        }
-
-        const ordered = [...batch].sort(compareTelegramUpdates);
-        offset = ordered.at(-1)!.update_id + 1;
-        updates.push(...ordered.filter(isTelegramMessageUpdate));
-
-        if (ordered.length < requestLimit) {
-          break;
-        }
-      }
-
-      return updates.slice(0, target);
+      return [...batch].sort(compareTelegramUpdates).filter(isTelegramMessageUpdate);
     },
     async startWatching({ cursor, signal, onMessage }) {
       let offset = nextUpdateOffset(cursor);
@@ -204,6 +188,7 @@ export function createTelegramApiPollDriver({
       })();
 
       return {
+        done: loop,
         async close() {
           controller.abort();
           releaseRelay();
@@ -399,6 +384,13 @@ function createTelegramFileDownloader(input: {
   const baseUrl = (input.fileBaseUrl ?? "https://api.telegram.org/file").replace(/\/$/u, "");
 
   return async (filePath, signal) => {
+    if (looksLikeLocalBotApiFilePath(filePath)) {
+      const absolutePath = filePath.startsWith("file://")
+        ? fileURLToPath(filePath)
+        : filePath;
+      return new Uint8Array(await readFile(absolutePath));
+    }
+
     const response = await fetch(`${baseUrl}/bot${token}/${filePath}`, {
       method: "GET",
       signal,
@@ -410,6 +402,14 @@ function createTelegramFileDownloader(input: {
 
     return new Uint8Array(await response.arrayBuffer());
   };
+}
+
+function looksLikeLocalBotApiFilePath(filePath: string): boolean {
+  return (
+    filePath.startsWith("file://") ||
+    path.posix.isAbsolute(filePath) ||
+    path.win32.isAbsolute(filePath)
+  );
 }
 
 function relayAbort(signal: AbortSignal, controller: AbortController): () => void {

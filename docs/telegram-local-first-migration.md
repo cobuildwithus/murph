@@ -88,6 +88,8 @@ The CLI/runtime now looks for these Telegram settings:
 
 - Telegram long polling and webhooks are mutually exclusive. If a webhook is active, the local poll connector will delete it on start by default.
 - Telegram is a forward-capture source, not a durable historical archive like iMessage.
+- Telegram backfill now advances `update_id` page-by-page after local persistence rather than acknowledging multiple pages up front.
+- When using a local Bot API server, attachment hydration can read absolute local `file_path` values directly.
 - Doctor checks intentionally avoid calling `getUpdates`, because consuming updates during diagnostics would drain pending bot traffic.
 
 ## Extension pattern for future channels

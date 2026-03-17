@@ -1,16 +1,11 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { promisify } from 'node:util'
 import { test } from 'vitest'
 import {
-  type CliEnvelope,
-  commandOutputFromError,
-  ensureCliRuntimeArtifacts,
   repoRoot,
   requireData,
   runCli,
@@ -20,50 +15,12 @@ const sampleDocumentPath = path.join(
   repoRoot,
   'fixtures/sample-imports/README.md',
 )
-const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
-const execFileAsync = promisify(execFile)
+const runSourceCli = runCli
 
 interface RetrievalFixture {
   journalPath: string
   mealId: string
   vaultRoot: string
-}
-
-async function runSourceCli<TData = Record<string, unknown>>(
-  args: string[],
-): Promise<CliEnvelope<TData>> {
-  await ensureCliRuntimeArtifacts()
-
-  try {
-    const { stdout } = await execFileAsync(
-      'pnpm',
-      ['exec', 'tsx', sourceBinPath, ...withMachineOutput(args)],
-      { cwd: repoRoot },
-    )
-
-    return JSON.parse(stdout) as CliEnvelope<TData>
-  } catch (error) {
-    const output = commandOutputFromError(error)
-    if (output !== null) {
-      return JSON.parse(output) as CliEnvelope<TData>
-    }
-
-    throw error
-  }
-}
-
-function withMachineOutput(args: string[]): string[] {
-  const nextArgs = [...args]
-
-  if (!nextArgs.includes('--verbose')) {
-    nextArgs.push('--verbose')
-  }
-
-  if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
-    nextArgs.push('--format', 'json')
-  }
-
-  return nextArgs
 }
 
 async function makeCanonicalHealthFixture(): Promise<string> {
