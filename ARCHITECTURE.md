@@ -8,7 +8,7 @@ Last verified: 2026-03-17
 - `packages/runtime-state`: shared `.runtime` path resolution plus SQLite defaults for rebuildable local state used by query, inboxd, and CLI inbox flows
 - `packages/core`: the only package allowed to mutate canonical vault data
 - `packages/importers`: ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core
-- `packages/device-syncd`: standalone local device OAuth/webhook/reconcile runtime that stores encrypted provider credentials outside the vault, binds localhost by default, and imports normalized provider snapshots through importers/core
+- `packages/device-syncd`: standalone local device OAuth/webhook/reconcile runtime with an authenticated localhost control plane, optional separate public callback/webhook ingress, encrypted provider credentials outside the vault, and normalized provider snapshot imports through importers/core
 - `packages/inboxd`: inbox capture ingestion/runtime package that persists canonical raw inbox evidence while keeping inbox-only cursors, source-specific checkpoints, capture indexes, and attachment job state in local SQLite state
 - `packages/parsers`: local-first attachment parsing, parser-service helpers, and derived artifact publication under `derived/inbox/**`
 - `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
@@ -27,10 +27,10 @@ Last verified: 2026-03-17
 - Inbox runtime state is local-only under `.runtime/inboxd.sqlite` plus `.runtime/inboxd/*.json` and is rebuildable from canonical vault evidence under `raw/inbox/**`.
 - Query search runtime state is local-only under `.runtime/search.sqlite` and is rebuildable from canonical vault evidence.
 - Device sync runtime state is local-only under `.runtime/device-syncd.sqlite`; encrypted provider tokens, OAuth sessions, and webhook/reconcile cursors never belong in the canonical vault.
-- The local web surface is for local operator use and must not expose raw vault paths, home-directory paths, or canonical write capabilities in its rendered payloads. It may initiate device auth and account-control requests only through a separately configured local `device-syncd` control plane. Its launcher must block framework `.env*` reads.
+- The local web surface is for local operator use and must not expose raw vault paths, home-directory paths, or canonical write capabilities in its rendered payloads. It may initiate device auth and account-control requests only through the separately configured local `device-syncd` control plane and its bearer-token contract. Its launcher must block framework `.env*` reads.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - General assistant/session state belongs outside the canonical vault under `assistant-state/`; only capture-scoped rebuildable audit artifacts belong under `derived/inbox/**`.
-- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Healthy Bob stores only minimal manual aliases, explicit conversation bindings, automation cursors, and provider session references under `assistant-state/`.
+- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Healthy Bob stores only minimal manual aliases, explicit conversation bindings, automation cursors, timestamps/turn counts, and provider session references under `assistant-state/`, not prompt/response excerpts.
 - `vault-cli inbox model route` may send a normalized text-only inbox bundle to either the AI Gateway or an operator-specified OpenAI-compatible endpoint.
 
 ## Control Flow
@@ -41,10 +41,10 @@ Last verified: 2026-03-17
 4. Parser workers or parsed-pipeline wrappers consume those attachment jobs and publish only derived artifacts.
 5. Inbox model routing can materialize a text-only bundle, call a configured model backend, and write audited bundle/plan/result artifacts before any optional apply step.
 6. Importers may parse and normalize external inputs but must never write canonical vault files directly. Provider connectors normalize upstream payloads into shared device-batch payloads and still rely on `packages/core` for canonical persistence.
-7. `packages/device-syncd` owns provider OAuth state, reconnect/disconnect control, scheduled device backfills, and optional webhook fan-in; polling-first providers remain first-class citizens, provider credentials stay outside the vault, per-account jobs should be serialized to avoid rotating-refresh-token races, and canonical health writes still flow through `packages/importers` and `packages/core`.
-8. Provider-backed assistant chat and outbound channel flows may persist only minimal local session metadata plus explicit delivery bindings outside the vault, but they must never bypass canonical write boundaries for health data.
+7. `packages/device-syncd` owns provider OAuth state, reconnect/disconnect control, scheduled device backfills, and optional webhook fan-in; its control routes must stay loopback-only plus bearer-authenticated, any public callback/webhook ingress should stay isolated from `/accounts/*` and `/providers/*`, polling-first providers remain first-class citizens, provider credentials stay outside the vault, per-account jobs should be serialized to avoid rotating-refresh-token races, and canonical health writes still flow through `packages/importers` and `packages/core`.
+8. Provider-backed assistant chat and outbound channel flows may persist only minimal local session metadata plus explicit delivery bindings outside the vault, but they must never persist transcript excerpts there by default or bypass canonical write boundaries for health data.
 9. Query/export paths are read-only and must not mutate canonical vault state.
-10. The local web app reads vault data only on the server through query helpers, constrains search to safe record fields, and may redirect to the local device control plane for auth/account actions without gaining direct canonical write access.
+10. The local web app reads vault data only on the server through query helpers, constrains search to safe record fields, and may redirect to the local authenticated device control plane for auth/account actions without gaining direct canonical write access.
 
 ## CLI Framework Notes
 

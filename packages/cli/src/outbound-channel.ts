@@ -8,7 +8,7 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
 } from './assistant/store.js'
-import { normalizeRequiredText, summarizeAssistantTurn } from './assistant/shared.js'
+import { normalizeRequiredText } from './assistant/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export interface DeliverAssistantMessageInput {
@@ -73,7 +73,6 @@ export async function deliverAssistantMessage(
     },
     updatedAt: delivery.sentAt,
     lastTurnAt: delivery.sentAt,
-    lastAssistantMessage: summarizeAssistantTurn(normalizedMessage),
   })
 
   return assistantDeliverResultSchema.parse({

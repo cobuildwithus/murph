@@ -65,8 +65,6 @@ export const assistantSessionSchema = z.object({
   updatedAt: isoTimestampSchema,
   lastTurnAt: isoTimestampSchema.nullable(),
   turnCount: z.number().int().nonnegative(),
-  lastUserMessage: z.string().nullable(),
-  lastAssistantMessage: z.string().nullable(),
 })
 
 export const assistantChannelDeliverySchema = z.object({

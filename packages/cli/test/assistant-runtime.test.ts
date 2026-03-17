@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
+import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 import { resolveOperatorConfigPath } from '../src/operator-config.js'
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -49,10 +50,11 @@ import {
   sendAssistantMessage,
 } from '../src/assistant-runtime.js'
 import {
-  ACTIVE_CHAT_FOOTER,
-  BUSY_CHAT_STATUS,
-  DEFAULT_CHAT_FOOTER,
-  formatEntry,
+  CHAT_BANNER,
+  CHAT_COMMAND_HINT,
+  formatBusyStatus,
+  formatChatMetadata,
+  formatSessionBinding,
   seedChatEntries,
 } from '../src/assistant/ui/view-model.js'
 
@@ -131,7 +133,8 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal('stateRoot' in first.session, false)
   assert.equal(second.session.sessionId, first.session.sessionId)
   assert.equal(second.session.turnCount, 2)
-  assert.equal(second.session.lastAssistantMessage, 'second reply')
+  assert.equal('lastUserMessage' in second.session, false)
+  assert.equal('lastAssistantMessage' in second.session, false)
 
   const firstCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
@@ -191,8 +194,6 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
         updatedAt: '2026-03-16T00:00:01.000Z',
         lastTurnAt: '2026-03-16T00:00:01.000Z',
         turnCount: 1,
-        lastUserMessage: 'send it',
-        lastAssistantMessage: input.message,
       },
       delivery: {
         channel: 'imessage',
@@ -270,10 +271,10 @@ test('sendAssistantMessage keeps provider success and session updates even when 
     message: 'delivery exploded',
   })
   assert.equal(result.session.providerSessionId, 'thread-500')
-  assert.equal(result.session.lastAssistantMessage, 'reply persisted')
+  assert.equal('lastAssistantMessage' in result.session, false)
 })
 
-test('sendAssistantMessage stores only short turn excerpts in assistant state', async () => {
+test('sendAssistantMessage does not persist prompt or response excerpts in assistant state', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-runtime-summary-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -297,10 +298,18 @@ test('sendAssistantMessage stores only short turn excerpts in assistant state', 
     prompt: longPrompt,
   })
 
-  assert.equal(result.session.lastUserMessage?.length, 280)
-  assert.equal(result.session.lastAssistantMessage?.length, 280)
-  assert.match(result.session.lastUserMessage ?? '', /\.\.\.$/u)
-  assert.match(result.session.lastAssistantMessage ?? '', /\.\.\.$/u)
+  assert.equal('lastUserMessage' in result.session, false)
+  assert.equal('lastAssistantMessage' in result.session, false)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const persisted = JSON.parse(
+    await readFile(
+      path.join(statePaths.sessionsDirectory, `${result.session.sessionId}.json`),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
+  assert.equal('lastUserMessage' in persisted, false)
+  assert.equal('lastAssistantMessage' in persisted, false)
 })
 
 test('sendAssistantMessage redacts vault paths under HOME in returned output', async () => {
@@ -656,8 +665,6 @@ test('runAssistantChat delegates to the Ink UI implementation', async () => {
       updatedAt: '2026-03-17T00:00:01.000Z',
       lastTurnAt: '2026-03-17T00:00:01.000Z',
       turnCount: 2,
-      lastUserMessage: 'hello',
-      lastAssistantMessage: 'loop reply',
     },
   })
 
@@ -696,7 +703,7 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
   )
 })
 
-test('assistant Ink view-model starts with a shorter local-first system message', () => {
+test('assistant Ink view-model does not replay persisted assistant-state excerpts', () => {
   const entries = seedChatEntries({
     schema: 'healthybob.assistant-session.v2',
     sessionId: 'asst_demo',
@@ -723,32 +730,121 @@ test('assistant Ink view-model starts with a shorter local-first system message'
     updatedAt: '2026-03-17T00:00:00.000Z',
     lastTurnAt: null,
     turnCount: 0,
-    lastUserMessage: 'hello',
-    lastAssistantMessage: 'hi',
   })
 
-  assert.deepEqual(entries, [
-    {
-      kind: 'system',
-      text: 'Local-first chat. Provider transcripts stay with the provider when supported.',
-    },
-    {
-      kind: 'user',
-      text: 'hello',
-    },
-    {
-      kind: 'assistant',
-      text: 'hi',
-    },
-  ])
+  assert.deepEqual(entries, [])
 })
 
-test('assistant Ink view-model keeps busy copy single-purpose', () => {
-  assert.equal(formatEntry({ kind: 'assistant', text: 'thinking...' }), 'assistant> thinking...')
-  assert.equal(BUSY_CHAT_STATUS, 'assistant> thinking...')
-  assert.match(DEFAULT_CHAT_FOOTER, /^Type a message\./u)
-  assert.doesNotMatch(DEFAULT_CHAT_FOOTER, /Waiting for the assistant/u)
-  assert.doesNotMatch(ACTIVE_CHAT_FOOTER, /Waiting for the assistant/u)
+test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
+  const session = {
+    schema: 'healthybob.assistant-session.v2',
+    sessionId: 'asst_demo',
+    provider: 'codex-cli',
+    providerSessionId: null,
+    providerOptions: {
+      model: 'gpt-5.4',
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      profile: null,
+      oss: false,
+    },
+    alias: null,
+    binding: {
+      conversationKey: null,
+      channel: 'imessage',
+      identityId: null,
+      actorId: 'contact:bob',
+      threadId: 'thread-123',
+      threadIsDirect: null,
+      delivery: null,
+    },
+    createdAt: '2026-03-17T00:00:00.000Z',
+    updatedAt: '2026-03-17T00:00:00.000Z',
+    lastTurnAt: null,
+    turnCount: 0,
+  } as const
+
+  assert.equal(CHAT_BANNER, 'Local-first chat. Provider transcripts stay with the provider when supported.')
+  assert.equal(CHAT_COMMAND_HINT, '/session for session id · /exit to quit')
+  assert.equal(formatBusyStatus(0), 'Working')
+  assert.equal(formatBusyStatus(13), 'Working (13s)')
+  assert.equal(
+    formatChatMetadata(
+      {
+        provider: session.provider,
+        model: 'gpt-5.4',
+        reasoningEffort: 'xhigh',
+      },
+      '~/vault',
+    ),
+    'gpt-5.4 xhigh · ~/vault',
+  )
+  assert.equal(
+    formatSessionBinding(session),
+    'imessage · contact:bob · thread-123',
+  )
+})
+
+test('assistant Ink view-model falls back to default model labels when needed', () => {
+  const ossSession = {
+    schema: 'healthybob.assistant-session.v2',
+    sessionId: 'asst_demo',
+    provider: 'codex-cli',
+    providerSessionId: null,
+    providerOptions: {
+      model: null,
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      profile: null,
+      oss: true,
+    },
+    alias: null,
+    binding: {
+      conversationKey: null,
+      channel: null,
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: null,
+      delivery: null,
+    },
+    createdAt: '2026-03-17T00:00:00.000Z',
+    updatedAt: '2026-03-17T00:00:00.000Z',
+    lastTurnAt: null,
+    turnCount: 0,
+  } as const
+
+  const defaultSession = {
+    ...ossSession,
+    providerOptions: {
+      ...ossSession.providerOptions,
+      oss: false,
+    },
+  } as const
+
+  assert.equal(
+    formatChatMetadata(
+      {
+        provider: ossSession.provider,
+        model: null,
+        reasoningEffort: 'high',
+      },
+      '~/vault',
+    ),
+    'codex-cli high · ~/vault',
+  )
+  assert.equal(
+    formatChatMetadata(
+      {
+        provider: defaultSession.provider,
+        model: null,
+        reasoningEffort: null,
+      },
+      '~/vault',
+    ),
+    'codex-cli · ~/vault',
+  )
+  assert.equal(formatSessionBinding(defaultSession), null)
 })
 
 function restoreEnvironmentVariable(

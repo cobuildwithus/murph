@@ -69,7 +69,7 @@ test('resolveImessageDeliveryCandidates prefers explicit targets and otherwise u
   )
 })
 
-test('deliverAssistantMessage resolves a session, sends over iMessage, and records the latest assistant message', async () => {
+test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps assistant state metadata-only', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -100,7 +100,7 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and recor
   assert.equal(result.delivery.targetKind, 'participant')
   assert.equal(result.session.binding.channel, 'imessage')
   assert.equal(result.session.binding.delivery?.target, '+15551234567')
-  assert.equal(result.session.lastAssistantMessage, 'Lunch is logged.')
+  assert.equal('lastAssistantMessage' in result.session, false)
   assert.equal(result.session.turnCount, 0)
 })
 

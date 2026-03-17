@@ -34,15 +34,6 @@ export function errorMessage(error: unknown): string {
   return String(error)
 }
 
-export function summarizeAssistantTurn(value: string): string {
-  const normalized = value.replace(/\s+/gu, ' ').trim()
-  if (normalized.length <= 280) {
-    return normalized
-  }
-
-  return `${normalized.slice(0, 277)}...`
-}
-
 export function resolveTimestamp(now?: Date): string {
   return (now ?? new Date()).toISOString()
 }

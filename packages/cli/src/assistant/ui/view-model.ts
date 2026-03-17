@@ -1,52 +1,66 @@
 import type { AssistantSession } from '../../assistant-cli-contracts.js'
 
 export interface InkChatEntry {
-  kind: 'assistant' | 'error' | 'system' | 'user'
+  kind: 'assistant' | 'error' | 'user'
   text: string
 }
 
-export const DEFAULT_CHAT_FOOTER =
-  'Type a message. Use /session to inspect the Healthy Bob session id and /exit to quit.'
+export const CHAT_BANNER =
+  'Local-first chat. Provider transcripts stay with the provider when supported.'
 
-export const ACTIVE_CHAT_FOOTER =
-  'Use /session to inspect the Healthy Bob session id and /exit to quit.'
+export const CHAT_COMMAND_HINT = '/session for session id · /exit to quit'
 
-export const BUSY_CHAT_STATUS = 'assistant> thinking...'
-
-export function seedChatEntries(session: AssistantSession): InkChatEntry[] {
-  const entries: InkChatEntry[] = [
-    {
-      kind: 'system',
-      text: 'Local-first chat. Provider transcripts stay with the provider when supported.',
-    },
-  ]
-
-  if (session.lastUserMessage) {
-    entries.push({
-      kind: 'user',
-      text: session.lastUserMessage,
-    })
-  }
-
-  if (session.lastAssistantMessage) {
-    entries.push({
-      kind: 'assistant',
-      text: session.lastAssistantMessage,
-    })
-  }
-
-  return entries
+export function seedChatEntries(_session: AssistantSession): InkChatEntry[] {
+  return []
 }
 
-export function formatEntry(entry: InkChatEntry): string {
-  switch (entry.kind) {
-    case 'assistant':
-      return `assistant> ${entry.text}`
-    case 'error':
-      return `error> ${entry.text}`
-    case 'system':
-      return `system> ${entry.text}`
-    case 'user':
-      return `you> ${entry.text}`
+export function formatBusyStatus(elapsedSeconds: number): string {
+  if (elapsedSeconds <= 0) {
+    return 'Working'
   }
+
+  return `Working (${elapsedSeconds}s)`
+}
+
+export function formatChatMetadata(
+  input: {
+    model: string | null
+    provider: AssistantSession['provider']
+    reasoningEffort: string | null
+  },
+  redactedVault: string,
+): string {
+  return [
+    formatModelSummary(input),
+    redactedVault,
+  ].join(' · ')
+}
+
+export function formatSessionBinding(session: AssistantSession): string | null {
+  const parts = [
+    session.binding.channel,
+    session.binding.actorId,
+    session.binding.threadId,
+  ].filter((value): value is string => Boolean(value))
+
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function formatModelSummary(input: {
+  model: string | null
+  provider: AssistantSession['provider']
+  reasoningEffort: string | null
+}): string {
+  const model = input.model?.trim()
+  const reasoningEffort = input.reasoningEffort?.trim()
+
+  if (model) {
+    return reasoningEffort ? `${model} ${reasoningEffort}` : model
+  }
+
+  if (reasoningEffort) {
+    return `${input.provider} ${reasoningEffort}`
+  }
+
+  return input.provider
 }

@@ -230,8 +230,6 @@ export async function resolveAssistantSession(
     updatedAt: now,
     lastTurnAt: null,
     turnCount: 0,
-    lastUserMessage: null,
-    lastAssistantMessage: null,
   })
 
   await writeAssistantSession(paths, session)
@@ -346,6 +344,10 @@ async function readAssistantSession(input: {
     const parsed = JSON.parse(raw) as unknown
     const current = assistantSessionSchema.safeParse(parsed)
     if (current.success) {
+      if (hasLegacyAssistantTurnExcerpts(parsed)) {
+        await writeAssistantSession(input.paths, current.data)
+        await synchronizeAssistantIndexes(input.paths, current.data, null)
+      }
       return current.data
     }
 
@@ -564,9 +566,16 @@ function parseLegacyAssistantSession(value: unknown): AssistantSession | null {
     updatedAt: parsed.updatedAt,
     lastTurnAt: parsed.lastTurnAt,
     turnCount: parsed.turnCount,
-    lastUserMessage: parsed.lastUserMessage,
-    lastAssistantMessage: parsed.lastAssistantMessage,
   })
+}
+
+function hasLegacyAssistantTurnExcerpts(value: unknown): boolean {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const candidate = value as Record<string, unknown>
+  return 'lastUserMessage' in candidate || 'lastAssistantMessage' in candidate
 }
 
 function parseLegacySessionJson(
@@ -576,9 +585,7 @@ function parseLegacySessionJson(
   channel: string | null
   createdAt: string
   identityId: string | null
-  lastAssistantMessage: string | null
   lastTurnAt: string | null
-  lastUserMessage: string | null
   participantId: string | null
   provider: AssistantChatProvider
   providerOptions: AssistantProviderSessionOptions
@@ -622,14 +629,6 @@ function parseLegacySessionJson(
     updatedAt: String(candidate.updatedAt),
     lastTurnAt: normalizeLegacyString(candidate.lastTurnAt),
     turnCount: Number(candidate.turnCount ?? 0),
-    lastUserMessage:
-      typeof candidate.lastUserMessage === 'string'
-        ? candidate.lastUserMessage
-        : null,
-    lastAssistantMessage:
-      typeof candidate.lastAssistantMessage === 'string'
-        ? candidate.lastAssistantMessage
-        : null,
   }
 }
 

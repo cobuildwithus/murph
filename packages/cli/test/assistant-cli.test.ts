@@ -55,6 +55,10 @@ test.sequential(
     assert.equal(listed.sessions[0]?.sessionId, created.session.sessionId)
     assert.equal(listed.sessions[0]?.alias, 'telegram:bob')
     assert.equal(listed.stateRoot.includes(path.join(parent, 'assistant-state')), true)
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(listed.sessions[0] ?? {}, 'lastAssistantMessage'),
+      false,
+    )
 
     const shown = requireData(
       await runCli<{
@@ -71,6 +75,10 @@ test.sequential(
     assert.equal(shown.session.sessionId, created.session.sessionId)
     assert.equal(shown.session.binding.channel, 'telegram')
     assert.equal(shown.session.binding.actorId, 'contact:bob')
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(shown.session, 'lastAssistantMessage'),
+      false,
+    )
   },
   20000,
 )

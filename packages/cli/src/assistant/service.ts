@@ -18,7 +18,6 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
 } from './store.js'
-import { summarizeAssistantTurn } from './shared.js'
 
 export interface AssistantMessageInput {
   actorId?: string | null
@@ -118,8 +117,6 @@ export async function sendAssistantMessage(
     updatedAt,
     lastTurnAt: updatedAt,
     turnCount: resolved.session.turnCount + 1,
-    lastUserMessage: summarizeAssistantTurn(input.prompt),
-    lastAssistantMessage: summarizeAssistantTurn(providerResult.response),
   })
 
   let delivery: AssistantAskResult['delivery'] = null

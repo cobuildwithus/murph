@@ -141,7 +141,7 @@ export function registerAssistantCommands(
     description:
       'Send one message through the local provider-backed assistant and persist only minimal session metadata outside the canonical vault.',
     hint:
-      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata plus explicit conversation bindings under assistant-state/. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
+      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata plus explicit conversation bindings under assistant-state/ and does not persist prompt/response excerpts there by default. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
     examples: [
       {
         args: {
@@ -416,7 +416,7 @@ export function registerAssistantCommands(
 
   const session = Cli.create('session', {
     description:
-      'Inspect Healthy Bob assistant session metadata stored outside the canonical vault.',
+      'Inspect metadata-only Healthy Bob assistant session records stored outside the canonical vault.',
   })
 
   session.command('list', {
@@ -439,7 +439,7 @@ export function registerAssistantCommands(
     args: z.object({
       sessionId: z.string().min(1).describe('Healthy Bob assistant session id to inspect.'),
     }),
-    description: 'Show one assistant session metadata record.',
+    description: 'Show one metadata-only assistant session record.',
     options: withBaseOptions(),
     output: assistantSessionShowResultSchema,
     async run(context) {

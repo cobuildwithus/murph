@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
@@ -93,6 +93,8 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   ) as Record<string, unknown>
   assert.equal('vault' in persisted, false)
   assert.equal('stateRoot' in persisted, false)
+  assert.equal('lastUserMessage' in persisted, false)
+  assert.equal('lastAssistantMessage' in persisted, false)
 
   const second = await resolveAssistantSession({
     vault: vaultRoot,
@@ -105,19 +107,89 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
 
   const saved = await saveAssistantSession(vaultRoot, {
     ...first.session,
-    lastAssistantMessage: 'logged reply',
     updatedAt: new Date('2026-03-16T17:00:00.000Z').toISOString(),
     lastTurnAt: new Date('2026-03-16T17:00:00.000Z').toISOString(),
     turnCount: 1,
   })
-  assert.equal(saved.lastAssistantMessage, 'logged reply')
+  assert.equal(saved.turnCount, 1)
 
   const listed = await listAssistantSessions(vaultRoot)
   assert.equal(listed.length, 1)
   assert.equal(listed[0]?.sessionId, first.session.sessionId)
 
   const fetched = await getAssistantSession(vaultRoot, first.session.sessionId)
-  assert.equal(fetched.lastAssistantMessage, 'logged reply')
+  assert.equal(fetched.turnCount, 1)
+  assert.equal('lastAssistantMessage' in fetched, false)
+})
+
+test('getAssistantSession migrates legacy excerpt fields out of persisted assistant state', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-migrate-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.sessionsDirectory, {
+    recursive: true,
+  })
+
+  const sessionId = 'asst_legacy'
+  await writeFile(
+    path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
+    `${JSON.stringify(
+      {
+        schema: 'healthybob.assistant-session.v2',
+        sessionId,
+        provider: 'codex-cli',
+        providerSessionId: 'thread-legacy',
+        providerOptions: {
+          model: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+        alias: 'legacy:bob',
+        binding: {
+          conversationKey: 'channel:imessage|actor:contact%3Abob',
+          channel: 'imessage',
+          identityId: null,
+          actorId: 'contact:bob',
+          threadId: 'chat-123',
+          threadIsDirect: null,
+          delivery: {
+            kind: 'participant',
+            target: 'contact:bob',
+          },
+        },
+        createdAt: '2026-03-16T10:00:00.000Z',
+        updatedAt: '2026-03-16T10:05:00.000Z',
+        lastTurnAt: '2026-03-16T10:05:00.000Z',
+        turnCount: 2,
+        lastUserMessage: 'sensitive prompt excerpt',
+        lastAssistantMessage: 'sensitive response excerpt',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  const migrated = await getAssistantSession(vaultRoot, sessionId)
+  assert.equal(migrated.sessionId, sessionId)
+  assert.equal(migrated.providerSessionId, 'thread-legacy')
+  assert.equal(migrated.turnCount, 2)
+  assert.equal('lastUserMessage' in migrated, false)
+  assert.equal('lastAssistantMessage' in migrated, false)
+
+  const rewritten = JSON.parse(
+    await readFile(
+      path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
+  assert.equal('lastUserMessage' in rewritten, false)
+  assert.equal('lastAssistantMessage' in rewritten, false)
 })
 
 test('redactAssistantDisplayPath hides HOME-prefixed paths and leaves external paths untouched', async () => {
