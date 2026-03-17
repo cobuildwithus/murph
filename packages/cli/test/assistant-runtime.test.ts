@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
-import { resolveOperatorConfigPath } from '../src/operator-config.js'
+import {
+  resolveOperatorConfigPath,
+  saveAssistantOperatorDefaultsPatch,
+} from '../src/operator-config.js'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessage: vi.fn(),
@@ -149,7 +152,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(firstCall.resumeProviderSessionId, null)
   assert.equal(secondCall.resumeProviderSessionId, 'thread-123')
   assert.equal(firstCall.reasoningEffort, 'xhigh')
-  assert.equal(secondCall.reasoningEffort, null)
+  assert.equal(secondCall.reasoningEffort, 'xhigh')
   assert.match(firstCall.systemPrompt ?? '', /You are Healthy Bob/u)
   assert.equal(firstCall.userPrompt, 'What did Bob eat?')
   assert.equal(firstCall.sessionContext?.binding.channel, 'imessage')
@@ -182,6 +185,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
         providerSessionId: 'thread-123',
         providerOptions: {
           model: null,
+          reasoningEffort: null,
           sandbox: 'read-only',
           approvalPolicy: 'never',
           profile: null,
@@ -282,6 +286,50 @@ test('sendAssistantMessage keeps provider success and session updates even when 
   })
   assert.equal(result.session.providerSessionId, 'thread-500')
   assert.equal('lastAssistantMessage' in result.session, false)
+})
+
+test('sendAssistantMessage reuses saved assistant model defaults and persists reasoning effort metadata', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-defaults-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-defaults',
+    response: 'defaults reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    await saveAssistantOperatorDefaultsPatch(
+      {
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'high',
+      },
+      homeRoot,
+    )
+
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      prompt: 'reuse defaults',
+    })
+
+    const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    assert.equal(providerCall.model, 'gpt-5.4-mini')
+    assert.equal(providerCall.reasoningEffort, 'high')
+    assert.equal(result.session.providerOptions.model, 'gpt-5.4-mini')
+    assert.equal(result.session.providerOptions.reasoningEffort, 'high')
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
 })
 
 test('sendAssistantMessage does not persist prompt or response excerpts in assistant state', async () => {
@@ -656,6 +704,7 @@ test('runAssistantChat delegates to the Ink UI implementation', async () => {
       providerSessionId: 'thread-ink',
       providerOptions: {
         model: null,
+        reasoningEffort: null,
         sandbox: 'read-only',
         approvalPolicy: 'never',
         profile: null,
@@ -721,6 +770,7 @@ test('assistant Ink view-model does not replay persisted assistant-state excerpt
     providerSessionId: null,
     providerOptions: {
       model: null,
+      reasoningEffort: null,
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: null,
@@ -753,6 +803,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     providerSessionId: null,
     providerOptions: {
       model: 'gpt-5.4',
+      reasoningEffort: null,
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: null,
@@ -845,6 +896,7 @@ test('assistant Ink view-model falls back to default model labels when needed', 
     providerSessionId: null,
     providerOptions: {
       model: null,
+      reasoningEffort: null,
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: null,

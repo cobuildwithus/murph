@@ -70,10 +70,18 @@ export async function sendAssistantMessage(
       input.approvalPolicy ?? defaults?.approvalPolicy ?? 'never',
     oss: input.oss ?? defaults?.oss ?? false,
     profile: input.profile ?? defaults?.profile ?? null,
+    reasoningEffort:
+      input.reasoningEffort ??
+      defaults?.reasoningEffort ??
+      null,
   })
 
   const providerOptions = resolveAssistantProviderOptions({
     model: input.model ?? defaults?.model ?? resolved.session.providerOptions.model,
+    reasoningEffort:
+      input.reasoningEffort ??
+      defaults?.reasoningEffort ??
+      resolved.session.providerOptions.reasoningEffort,
     sandbox: input.sandbox ?? defaults?.sandbox ?? resolved.session.providerOptions.sandbox,
     approvalPolicy:
       input.approvalPolicy ??
@@ -102,7 +110,7 @@ export async function sendAssistantMessage(
     resumeProviderSessionId: resolved.session.providerSessionId,
     codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
     model: providerOptions.model,
-    reasoningEffort: input.reasoningEffort ?? null,
+    reasoningEffort: providerOptions.reasoningEffort,
     sandbox: providerOptions.sandbox,
     approvalPolicy: providerOptions.approvalPolicy,
     profile: providerOptions.profile,

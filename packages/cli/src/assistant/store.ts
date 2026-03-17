@@ -64,6 +64,7 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   oss?: boolean
   profile?: string | null
   provider?: AssistantChatProvider
+  reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
   vault: string
 }
@@ -614,6 +615,7 @@ function parseLegacySessionJson(
     providerOptions: assistantProviderSessionOptionsSchema.parse(
       candidate.providerOptions ?? {
         model: null,
+        reasoningEffort: null,
         sandbox: null,
         approvalPolicy: null,
         profile: null,
@@ -662,10 +664,12 @@ function normalizeProviderOptions(input: {
   model?: string | null
   oss?: boolean
   profile?: string | null
+  reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
 }): AssistantProviderSessionOptions {
   return assistantProviderSessionOptionsSchema.parse({
     model: normalizeNullableString(input.model),
+    reasoningEffort: normalizeNullableString(input.reasoningEffort),
     sandbox: input.sandbox ?? null,
     approvalPolicy: input.approvalPolicy ?? null,
     profile: normalizeNullableString(input.profile),

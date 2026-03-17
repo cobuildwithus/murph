@@ -29,6 +29,7 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
     }),
     {
       model: 'gpt-oss:20b',
+      reasoningEffort: null,
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: 'primary',

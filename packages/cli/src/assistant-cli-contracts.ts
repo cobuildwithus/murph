@@ -12,6 +12,12 @@ export const assistantApprovalPolicyValues = [
   'on-request',
   'never',
 ] as const
+export const assistantReasoningEffortValues = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+] as const
 
 export const assistantChatProviderValues = ['codex-cli'] as const
 export const assistantChannelDeliveryTargetKindValues = [
@@ -26,6 +32,7 @@ export const assistantBindingDeliveryKindValues = [
 
 export const assistantProviderSessionOptionsSchema = z.object({
   model: z.string().min(1).nullable(),
+  reasoningEffort: z.string().min(1).nullable().default(null),
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   profile: z.string().min(1).nullable(),
@@ -177,6 +184,8 @@ export type AssistantAutomationState = z.infer<
 export type AssistantSandbox = (typeof assistantSandboxValues)[number]
 export type AssistantApprovalPolicy =
   (typeof assistantApprovalPolicyValues)[number]
+export type AssistantReasoningEffort =
+  (typeof assistantReasoningEffortValues)[number]
 export type AssistantChatProvider =
   (typeof assistantChatProviderValues)[number]
 export type AssistantChannelDeliveryTargetKind =

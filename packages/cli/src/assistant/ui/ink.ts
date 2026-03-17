@@ -4,11 +4,16 @@ import {
   assistantChatResultSchema,
 } from '../../assistant-cli-contracts.js'
 import { resolveCodexDisplayOptions } from '../../assistant-codex.js'
+import {
+  resolveAssistantOperatorDefaults,
+  saveAssistantOperatorDefaultsPatch,
+} from '../../operator-config.js'
 import type { AssistantChatInput } from '../service.js'
 import { sendAssistantMessage } from '../service.js'
 import {
   redactAssistantDisplayPath,
   resolveAssistantSession,
+  saveAssistantSession,
 } from '../store.js'
 import { normalizeNullableString } from '../shared.js'
 import {
@@ -356,7 +361,7 @@ const ChatComposer = React.memo(function ChatComposer(
           '› ',
         ),
         createElement(ComposerInput, {
-          disabled: props.busy || props.modelSwitcherActive,
+          disabled: props.modelSwitcherActive,
           value,
           placeholder: 'Type a message',
           onChange: setValue,
@@ -722,26 +727,35 @@ export async function runAssistantChatWithInk(
   input: AssistantChatInput,
 ): Promise<AssistantChatResult> {
   const startedAt = new Date().toISOString()
+  const defaults = await resolveAssistantOperatorDefaults()
   const resolved = await resolveAssistantSession({
     vault: input.vault,
     sessionId: input.sessionId,
     alias: input.alias,
     channel: input.channel,
-    identityId: input.identityId,
+    identityId: input.identityId ?? defaults?.identityId ?? null,
     actorId: input.actorId ?? input.participantId,
     threadId: input.threadId ?? input.sourceThreadId,
     threadIsDirect: input.threadIsDirect,
-    provider: input.provider,
-    model: input.model,
-    sandbox: input.sandbox ?? 'read-only',
-    approvalPolicy: input.approvalPolicy ?? 'never',
-    oss: input.oss ?? false,
-    profile: input.profile,
+    provider: input.provider ?? defaults?.provider ?? undefined,
+    model: input.model ?? defaults?.model ?? null,
+    sandbox: input.sandbox ?? defaults?.sandbox ?? 'read-only',
+    approvalPolicy:
+      input.approvalPolicy ?? defaults?.approvalPolicy ?? 'never',
+    oss: input.oss ?? defaults?.oss ?? false,
+    profile: input.profile ?? defaults?.profile ?? null,
+    reasoningEffort: input.reasoningEffort ?? defaults?.reasoningEffort ?? null,
   })
   const redactedVault = redactAssistantDisplayPath(input.vault)
   const codexDisplay = await resolveCodexDisplayOptions({
-    model: input.model ?? resolved.session.providerOptions.model,
-    profile: input.profile ?? resolved.session.providerOptions.profile,
+    model:
+      input.model ??
+      defaults?.model ??
+      resolved.session.providerOptions.model,
+    profile:
+      input.profile ??
+      defaults?.profile ??
+      resolved.session.providerOptions.profile,
   })
 
   return await new Promise<AssistantChatResult>((resolve, reject) => {
@@ -785,10 +799,14 @@ export async function runAssistantChatWithInk(
       const [busySeconds, setBusySeconds] = React.useState(0)
       const [activeModel, setActiveModel] = React.useState<string | null>(
         normalizeNullableString(input.model) ??
+          normalizeNullableString(defaults?.model) ??
           normalizeNullableString(resolved.session.providerOptions.model) ??
           normalizeNullableString(codexDisplay.model),
       )
       const [activeReasoningEffort, setActiveReasoningEffort] = React.useState<string | null>(
+        normalizeNullableString(input.reasoningEffort) ??
+          normalizeNullableString(defaults?.reasoningEffort) ??
+          normalizeNullableString(resolved.session.providerOptions.reasoningEffort) ??
         normalizeNullableString(codexDisplay.reasoningEffort),
       )
       const [modelSwitcherState, setModelSwitcherState] =
@@ -915,6 +933,36 @@ export async function runAssistantChatWithInk(
           kind: 'info',
           text: `Using ${nextModel ?? 'the configured model'} ${nextReasoningEffort}.`,
         })
+
+        void (async () => {
+          try {
+            const updatedSession = await saveAssistantSession(input.vault, {
+              ...latestSessionRef.current,
+              providerOptions: {
+                ...latestSessionRef.current.providerOptions,
+                model: nextModel,
+                reasoningEffort: nextReasoningEffort,
+              },
+              updatedAt: new Date().toISOString(),
+            })
+
+            latestSessionRef.current = updatedSession
+            setSession(updatedSession)
+
+            await saveAssistantOperatorDefaultsPatch({
+              model: nextModel,
+              reasoningEffort: nextReasoningEffort,
+            })
+          } catch (error) {
+            setStatus({
+              kind: 'error',
+              text:
+                error instanceof Error && error.message.trim().length > 0
+                  ? `Using ${nextModel ?? 'the configured model'} ${nextReasoningEffort} for now, but failed to save it for later chats: ${error.message}`
+                  : `Using ${nextModel ?? 'the configured model'} ${nextReasoningEffort} for now, but failed to save it for later chats.`,
+            })
+          }
+        })()
       }
 
       const submitPrompt = (rawValue: string): ComposerSubmitDisposition => {

@@ -66,6 +66,7 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
     participantId: 'contact:bob',
     sourceThreadId: 'chat-1',
     model: 'gpt-oss:20b',
+    reasoningEffort: 'high',
     sandbox: 'read-only',
     approvalPolicy: 'never',
     oss: true,
@@ -75,6 +76,7 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(first.session.alias, 'imessage:bob')
   assert.equal(first.session.provider, 'codex-cli')
   assert.equal(first.session.providerOptions.model, 'gpt-oss:20b')
+  assert.equal(first.session.providerOptions.reasoningEffort, 'high')
   assert.equal(first.session.providerOptions.oss, true)
   assert.equal(first.session.binding.channel, 'imessage')
   assert.equal(first.session.binding.identityId, 'assistant:primary')
@@ -144,6 +146,7 @@ test('getAssistantSession migrates legacy excerpt fields out of persisted assist
         providerSessionId: 'thread-legacy',
         providerOptions: {
           model: null,
+          reasoningEffort: null,
           sandbox: 'read-only',
           approvalPolicy: 'never',
           profile: null,

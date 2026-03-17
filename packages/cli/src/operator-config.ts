@@ -23,6 +23,7 @@ const assistantOperatorDefaultsSchema = z.object({
   provider: z.enum(assistantChatProviderValues).nullable(),
   codexCommand: z.string().min(1).nullable(),
   model: z.string().min(1).nullable(),
+  reasoningEffort: z.string().min(1).nullable().default(null),
   identityId: z.string().min(1).nullable(),
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
@@ -148,18 +149,58 @@ export async function saveDefaultVaultConfig(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig> {
   const existing = await readOperatorConfig(homeDirectory)
-  const config = operatorConfigSchema.parse({
-    schema: OPERATOR_CONFIG_SCHEMA,
-    defaultVault: normalizeVaultForConfig(vault, homeDirectory),
-    assistant: existing?.assistant ?? null,
-    updatedAt: new Date().toISOString(),
-  })
+  const config = buildOperatorConfig(
+    {
+      defaultVault: normalizeVaultForConfig(vault, homeDirectory),
+    },
+    existing,
+  )
   const configPath = resolveOperatorConfigPath(homeDirectory)
 
   await mkdir(path.dirname(configPath), { recursive: true })
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
 
   return config
+}
+
+export async function saveAssistantOperatorDefaultsPatch(
+  patch: Partial<AssistantOperatorDefaults>,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<OperatorConfig> {
+  const existing = await readOperatorConfig(homeDirectory)
+  const config = buildOperatorConfig(
+    {
+      assistant: mergeAssistantOperatorDefaults(existing?.assistant ?? null, patch),
+    },
+    existing,
+  )
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+
+  return config
+}
+
+function buildOperatorConfig(
+  patch: {
+    assistant?: AssistantOperatorDefaults | null
+    defaultVault?: string | null
+  },
+  existing: OperatorConfig | null,
+): OperatorConfig {
+  return operatorConfigSchema.parse({
+    schema: OPERATOR_CONFIG_SCHEMA,
+    defaultVault:
+      patch.defaultVault !== undefined
+        ? patch.defaultVault
+        : existing?.defaultVault ?? null,
+    assistant:
+      patch.assistant !== undefined
+        ? patch.assistant
+        : existing?.assistant ?? null,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
 export async function resolveDefaultVault(
@@ -178,6 +219,32 @@ export async function resolveAssistantOperatorDefaults(
 ): Promise<AssistantOperatorDefaults | null> {
   const config = await readOperatorConfig(homeDirectory)
   return config?.assistant ?? null
+}
+
+function mergeAssistantOperatorDefaults(
+  existing: AssistantOperatorDefaults | null,
+  patch: Partial<AssistantOperatorDefaults>,
+): AssistantOperatorDefaults {
+  return assistantOperatorDefaultsSchema.parse({
+    provider:
+      'provider' in patch ? patch.provider : existing?.provider ?? null,
+    codexCommand:
+      'codexCommand' in patch ? patch.codexCommand : existing?.codexCommand ?? null,
+    model: 'model' in patch ? patch.model : existing?.model ?? null,
+    reasoningEffort:
+      'reasoningEffort' in patch
+        ? patch.reasoningEffort
+        : existing?.reasoningEffort ?? null,
+    identityId:
+      'identityId' in patch ? patch.identityId : existing?.identityId ?? null,
+    sandbox: 'sandbox' in patch ? patch.sandbox : existing?.sandbox ?? null,
+    approvalPolicy:
+      'approvalPolicy' in patch
+        ? patch.approvalPolicy
+        : existing?.approvalPolicy ?? null,
+    profile: 'profile' in patch ? patch.profile : existing?.profile ?? null,
+    oss: 'oss' in patch ? patch.oss : existing?.oss ?? null,
+  })
 }
 
 export function hasExplicitVaultOption(args: readonly string[]): boolean {

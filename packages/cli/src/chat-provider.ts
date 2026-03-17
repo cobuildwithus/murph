@@ -43,10 +43,12 @@ export function resolveAssistantProviderOptions(input: {
   model?: string | null
   oss?: boolean
   profile?: string | null
+  reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
 }) {
   return {
     model: normalizeNullableString(input.model),
+    reasoningEffort: normalizeNullableString(input.reasoningEffort),
     sandbox: input.sandbox ?? null,
     approvalPolicy: input.approvalPolicy ?? null,
     profile: normalizeNullableString(input.profile),

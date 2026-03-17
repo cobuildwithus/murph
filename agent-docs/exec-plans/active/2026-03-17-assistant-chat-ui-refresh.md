@@ -16,6 +16,8 @@ Updated: 2026-03-17
 - Sent user messages render as the same pale-gray padded block as the composer instead of a plain right-aligned text line.
 - Typing `/` in the composer shows matching slash-command suggestions below the input.
 - The transcript, status line, composer, and footer use tighter vertical spacing without forcing the composer to the terminal bottom.
+- The composer remains editable while a provider turn is in flight, keeping draft text inside the chat UI instead of leaking to the parent terminal.
+- `/model` choices persist across later chat launches for the same operator/vault setup.
 - Focused assistant tests pass and required repo checks are attempted with outcomes recorded truthfully.
 
 ## Scope
@@ -24,7 +26,9 @@ Updated: 2026-03-17
 - `packages/cli/src/assistant/ui/ink.ts`
 - `packages/cli/src/assistant/ui/view-model.ts`
 - `packages/cli/src/{assistant-codex.ts,assistant/service.ts,chat-provider.ts,bin.ts}`
+- `packages/cli/src/{assistant-codex.ts,assistant/service.ts,chat-provider.ts,bin.ts,assistant-cli-contracts.ts,operator-config.ts}`
 - focused assistant test coverage in `packages/cli/test/{assistant-codex,assistant-runtime}.test.ts`
+- targeted persistence coverage in `packages/cli/test/{assistant-cli,assistant-state}.test.ts`
 - this execution plan and the coordination ledger while the lane is active
 - Out of scope:
 - broader assistant persistence changes
@@ -52,7 +56,9 @@ Updated: 2026-03-17
 2. Add the `/model` selector and pass the selected model/reasoning effort to Codex.
 3. Restyle sent user messages to mirror the composer block.
 4. Add inline slash-command suggestions and tighten the transcript/composer spacing.
-5. Run required checks, then commit only the scoped files if unrelated repo failures remain.
+5. Keep the composer editable while provider work is in flight without changing submit semantics.
+6. Persist `/model` selections as reusable assistant defaults for later chat launches.
+7. Run required checks, then commit only the scoped files if unrelated repo failures remain.
 
 ## Decisions
 
@@ -60,6 +66,7 @@ Updated: 2026-03-17
 - The in-chat selector is a two-step picker: model first, reasoning effort second.
 - Sent user turns use the same pale-gray full-width block as the composer instead of right-aligned colored text.
 - Slash suggestions are passive hints filtered by the current `/...` prefix rather than a second navigable command palette.
+- Persistent `/model` choices should update assistant-owned defaults only for model/reasoning, while Codex config remains the read-time fallback.
 
 ## Verification
 
