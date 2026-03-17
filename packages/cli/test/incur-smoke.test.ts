@@ -14,6 +14,7 @@ test('root help exposes the Incur built-ins', async () => {
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Built-in Commands:/u)
+  assert.match(help, /chat\s+Open the same assistant chat UI as/u)
   assert.match(help, /search\s+Search commands for the local read model/u)
   assert.match(help, /timeline\s+Build a descending timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
@@ -79,6 +80,24 @@ test('search index status schema stays scoped to index-management options', asyn
   assert.equal('backend' in schema.options.properties, false)
   assert.deepEqual(Object.keys(schema.options.properties), ['vault', 'requestId'])
   assert.deepEqual(schema.options.required, ['vault'])
+})
+
+test('root chat alias keeps the same command schema as assistant chat', async () => {
+  const rootSchema = JSON.parse(
+    await runRawCli(['chat', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+  const assistantSchema = JSON.parse(
+    await runRawCli(['assistant', 'chat', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+
+  assert.deepEqual(rootSchema.args, assistantSchema.args)
+  assert.deepEqual(rootSchema.options, assistantSchema.options)
 })
 
 test('profile show help exposes only the global format flag', async () => {
@@ -183,6 +202,7 @@ test('compact llms json manifest remains available', async () => {
 
   assert.equal(manifest.version, 'incur.v1')
   assert.equal(manifest.commands.some((command) => command.name === 'init'), true)
+  assert.equal(manifest.commands.some((command) => command.name === 'chat'), true)
   assert.equal(
     manifest.commands.some((command) => command.name === 'profile show'),
     true,
@@ -213,6 +233,10 @@ test('full llms json manifest remains available for schema-rich commands', async
 
   assert.equal(
     manifest.commands.some((command) => command.name === 'profile upsert'),
+    true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'chat'),
     true,
   )
   assert.equal(

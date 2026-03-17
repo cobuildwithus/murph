@@ -124,6 +124,63 @@ const assistantDeliveryOptionFields = {
     ),
 }
 
+const assistantChatArgsSchema = z.object({
+  prompt: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional first prompt to send before the chat loop starts.'),
+})
+
+const assistantChatOptionsSchema = withBaseOptions({
+  ...assistantSessionOptionFields,
+  ...assistantProviderOptionFields,
+})
+
+type AssistantChatArgs = z.infer<typeof assistantChatArgsSchema>
+type AssistantChatOptions = z.infer<typeof assistantChatOptionsSchema>
+
+async function runAssistantChatCommand(context: {
+  args: AssistantChatArgs
+  options: AssistantChatOptions
+}) {
+  return runAssistantChat({
+    vault: context.options.vault,
+    initialPrompt: context.args.prompt,
+    sessionId: context.options.session,
+    alias: context.options.alias,
+    channel: context.options.channel,
+    identityId: context.options.identity,
+    participantId: context.options.participant,
+    sourceThreadId: context.options.sourceThread,
+    provider: context.options.provider,
+    codexCommand: context.options.codexCommand,
+    model: context.options.model,
+    sandbox: context.options.sandbox,
+    approvalPolicy: context.options.approvalPolicy,
+    profile: context.options.profile,
+    oss: context.options.oss,
+  })
+}
+
+function createAssistantChatCommandDefinition(input?: {
+  description?: string
+  hint?: string
+}) {
+  return {
+    args: assistantChatArgsSchema,
+    description:
+      input?.description ??
+      'Open an Ink terminal chat UI backed by the chosen provider while Healthy Bob stores only session metadata.',
+    hint:
+      input?.hint ??
+      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+    options: assistantChatOptionsSchema,
+    output: assistantChatResultSchema,
+    run: runAssistantChatCommand,
+  }
+}
+
 export function registerAssistantCommands(
   cli: Cli.Cli,
   inboxServices: InboxCliServices,
@@ -194,43 +251,7 @@ export function registerAssistantCommands(
     },
   })
 
-  assistant.command('chat', {
-    args: z.object({
-      prompt: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional first prompt to send before the chat loop starts.'),
-    }),
-    description:
-      'Open an Ink terminal chat UI backed by the chosen provider while Healthy Bob stores only session metadata.',
-    hint:
-      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
-    options: withBaseOptions({
-      ...assistantSessionOptionFields,
-      ...assistantProviderOptionFields,
-    }),
-    output: assistantChatResultSchema,
-    async run(context) {
-      return runAssistantChat({
-        vault: context.options.vault,
-        initialPrompt: context.args.prompt,
-        sessionId: context.options.session,
-        alias: context.options.alias,
-        channel: context.options.channel,
-        identityId: context.options.identity,
-        participantId: context.options.participant,
-        sourceThreadId: context.options.sourceThread,
-        provider: context.options.provider,
-        codexCommand: context.options.codexCommand,
-        model: context.options.model,
-        sandbox: context.options.sandbox,
-        approvalPolicy: context.options.approvalPolicy,
-        profile: context.options.profile,
-        oss: context.options.oss,
-      })
-    },
-  })
+  assistant.command('chat', createAssistantChatCommandDefinition())
 
   assistant.command('deliver', {
     args: z.object({
@@ -458,4 +479,13 @@ export function registerAssistantCommands(
 
   assistant.command(session)
   cli.command(assistant)
+  cli.command(
+    'chat',
+    createAssistantChatCommandDefinition({
+      description:
+        'Open the same assistant chat UI as `assistant chat` directly from the CLI root.',
+      hint:
+        'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+    }),
+  )
 }

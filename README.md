@@ -20,7 +20,7 @@ pnpm onboard --vault ./vault
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
-After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout.
+After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout, and installed shims can use `healthybob chat` or `vault-cli chat`.
 
 ## Quick Start (TL;DR)
 
@@ -32,6 +32,7 @@ pnpm onboard --vault ./vault
 HEALTHYBOB_VAULT=./vault pnpm web:dev
 
 pnpm chat
+healthybob chat
 vault-cli inbox doctor
 vault-cli vault stats
 ```
@@ -275,6 +276,7 @@ The repo also includes local-first inbox parser controls:
 
 The repo also includes a Healthy Bob-native assistant layer:
 
+- `vault-cli chat [prompt]` is a root-level shorthand for `vault-cli assistant chat [prompt]`
 - `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores only session metadata outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel
 - `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider
@@ -369,7 +371,7 @@ pnpm onboard --vault ./vault
 
 That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js setup ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
-Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, so commands such as `healthybob assistant chat` can omit `--vault` later, and a normal interactive `healthybob setup` run drops straight into that chat surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
+Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, so commands such as `healthybob chat` or `healthybob assistant chat` can omit `--vault` later, and a normal interactive `healthybob setup` run drops straight into that chat surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
 
 ## Local Inbox Parser Bootstrap
 

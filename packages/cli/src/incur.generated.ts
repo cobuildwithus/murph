@@ -14,6 +14,7 @@ declare module 'incur' {
       'audit list': { args: {}; options: { vault: string; requestId: string; action: string; actor: string; status: string; from: string; to: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { vault: string; requestId: string } }
       'audit tail': { args: {}; options: { vault: string; requestId: string; limit: number } }
+      'chat': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli"; codexCommand: string; model: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean } }
       'condition list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
       'condition scaffold': { args: {}; options: { vault: string; requestId: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId: string } }
