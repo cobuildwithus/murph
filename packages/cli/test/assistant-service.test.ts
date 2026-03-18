@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
@@ -32,6 +32,7 @@ vi.mock('../src/chat-provider.js', async () => {
 })
 
 import { sendAssistantMessage } from '../src/assistant/service.js'
+import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 
 const cleanupPaths: string[] = []
 
@@ -107,3 +108,100 @@ function restoreEnvironmentVariable(
 
   process.env[key] = value
 }
+
+test('sendAssistantMessage loads vault-scoped assistant memory into new sessions after prior preference turns', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-memory-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-memory-1',
+      response: 'Noted.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-memory-2',
+      response: 'I remember.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:one',
+    prompt: 'Call me Chris. Going forward, keep answers concise. We are working on the assistant memory implementation.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:two',
+    prompt: 'What should you remember across sessions?',
+  })
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assert.match(longTermMemory, /Call the user Chris\./u)
+  assert.match(longTermMemory, /keep answers concise\./iu)
+  assert.match(secondCall?.systemPrompt ?? '', /Long-term assistant memory:/u)
+  assert.match(secondCall?.systemPrompt ?? '', /Call the user Chris\./u)
+  assert.match(secondCall?.systemPrompt ?? '', /keep answers concise\./iu)
+  assert.match(secondCall?.systemPrompt ?? '', /Recent daily assistant memory/u)
+})
+
+test('sendAssistantMessage can persist selected health context into assistant memory for future sessions', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-sensitive-memory-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-sensitive-1',
+      response: 'Noted.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-sensitive-2',
+      response: 'I remember.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:health-one',
+    prompt: 'Remember that my blood pressure is 120 over 80.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:health-two',
+    prompt: 'What health context should carry into future chats?',
+  })
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assert.match(longTermMemory, /## Health context/u)
+  assert.match(longTermMemory, /User's blood pressure is 120 over 80\./u)
+  assert.match(secondCall?.systemPrompt ?? '', /Long-term assistant memory:/u)
+  assert.match(secondCall?.systemPrompt ?? '', /User's blood pressure is 120 over 80\./u)
+  assert.match(secondCall?.systemPrompt ?? '', /Recent daily assistant memory/u)
+})

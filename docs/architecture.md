@@ -79,7 +79,8 @@ repo/
   - `assistant-state/`
   - provider-owned transcript history should remain external when the chosen chat adapter supports it
   - channel-native send history should remain external when the chosen delivery adapter supports it
-  - store only manual aliases, explicit conversation bindings, provider session ids, and automation cursors locally
+  - store only manual aliases, explicit conversation bindings, provider session ids, automation cursors, local transcript files, and non-canonical Markdown memory docs for naming, response preferences, standing instructions, selected health context, and recent project context locally
+  - do not store prompt/response excerpts in that memory layer; selected health context there remains non-canonical and the vault stays authoritative
 - Device provider credentials:
   - stay encrypted in the local device-sync runtime database
   - never land in canonical vault files or append-only health ledgers

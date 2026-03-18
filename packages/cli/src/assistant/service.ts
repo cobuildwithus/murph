@@ -14,10 +14,15 @@ import { executeAssistantProviderTurn, resolveAssistantProviderOptions } from '.
 import { deliverAssistantMessage } from '../outbound-channel.js'
 import { resolveAssistantOperatorDefaults } from '../operator-config.js'
 import {
+  appendAssistantTranscriptEntries,
   redactAssistantDisplayPath,
   resolveAssistantSession,
   saveAssistantSession,
 } from './store.js'
+import {
+  loadAssistantMemoryPromptBlock,
+  recordAssistantMemoryTurn,
+} from './memory.js'
 
 export interface AssistantMessageInput {
   actorId?: string | null
@@ -77,36 +82,59 @@ export async function sendAssistantMessage(
   })
 
   const providerOptions = resolveAssistantProviderOptions({
-    model: input.model ?? defaults?.model ?? resolved.session.providerOptions.model,
+    model: input.model ?? resolved.session.providerOptions.model ?? defaults?.model,
     reasoningEffort:
       input.reasoningEffort ??
-      defaults?.reasoningEffort ??
-      resolved.session.providerOptions.reasoningEffort,
-    sandbox: input.sandbox ?? defaults?.sandbox ?? resolved.session.providerOptions.sandbox,
+      resolved.session.providerOptions.reasoningEffort ??
+      defaults?.reasoningEffort,
+    sandbox:
+      input.sandbox ??
+      resolved.session.providerOptions.sandbox ??
+      defaults?.sandbox,
     approvalPolicy:
       input.approvalPolicy ??
-      defaults?.approvalPolicy ??
-      resolved.session.providerOptions.approvalPolicy,
+      resolved.session.providerOptions.approvalPolicy ??
+      defaults?.approvalPolicy,
     profile:
-      input.profile ?? defaults?.profile ?? resolved.session.providerOptions.profile,
-    oss: input.oss ?? defaults?.oss ?? resolved.session.providerOptions.oss,
+      input.profile ??
+      resolved.session.providerOptions.profile ??
+      defaults?.profile,
+    oss:
+      input.oss ??
+      resolved.session.providerOptions.oss ??
+      defaults?.oss,
   })
+
+  const shouldInjectBootstrapContext =
+    resolved.created ||
+    resolved.session.turnCount === 0 ||
+    resolved.session.providerSessionId === null
+  const assistantMemoryPrompt = shouldInjectBootstrapContext
+    ? await loadAssistantMemoryPromptBlock({
+        vault: input.vault,
+      })
+    : null
+
+  await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
+    {
+      kind: 'user',
+      text: input.prompt,
+    },
+  ])
 
   const providerResult = await executeAssistantProviderTurn({
     provider: input.provider ?? defaults?.provider ?? resolved.session.provider,
     workingDirectory: input.workingDirectory ?? input.vault,
     env: cliAccess.env,
     userPrompt: input.prompt,
-    systemPrompt:
-      resolved.created || resolved.session.turnCount === 0
-        ? buildAssistantSystemPrompt(cliAccess)
-        : null,
-    sessionContext:
-      resolved.created || resolved.session.turnCount === 0
-        ? {
-            binding: resolved.session.binding,
-          }
-        : undefined,
+    systemPrompt: shouldInjectBootstrapContext
+      ? buildAssistantSystemPrompt(cliAccess, assistantMemoryPrompt)
+      : null,
+    sessionContext: shouldInjectBootstrapContext
+      ? {
+          binding: resolved.session.binding,
+        }
+      : undefined,
     resumeProviderSessionId: resolved.session.providerSessionId,
     codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
     model: providerOptions.model,
@@ -116,6 +144,13 @@ export async function sendAssistantMessage(
     profile: providerOptions.profile,
     oss: providerOptions.oss,
   })
+
+  await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
+    {
+      kind: 'assistant',
+      text: providerResult.response,
+    },
+  ])
 
   const updatedAt = new Date().toISOString()
   let session = await saveAssistantSession(input.vault, {
@@ -128,6 +163,15 @@ export async function sendAssistantMessage(
     lastTurnAt: updatedAt,
     turnCount: resolved.session.turnCount + 1,
   })
+
+  try {
+    await recordAssistantMemoryTurn({
+      vault: input.vault,
+      prompt: input.prompt,
+    })
+  } catch {
+    // assistant memory is best-effort and must not fail the chat turn
+  }
 
   let delivery: AssistantAskResult['delivery'] = null
   let deliveryError: AssistantDeliveryError | null = null
@@ -179,6 +223,7 @@ function buildAssistantSystemPrompt(
     rawCommand: 'vault-cli'
     setupCommand: 'healthybob'
   },
+  assistantMemoryPrompt: string | null,
 ): string {
   return [
     'You are Healthy Bob, a local-first health assistant operating over the current working directory as a file-native health vault.',
@@ -186,6 +231,9 @@ function buildAssistantSystemPrompt(
     'Default to read-only analysis and conversational answers.',
     'Do not modify files unless the user explicitly asks you to propose changes.',
     'When you reference evidence from the vault, mention relative file paths when practical.',
+    assistantMemoryPrompt,
     buildAssistantCliGuidanceText(cliAccess),
-  ].join('\n\n')
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join('\n\n')
 }

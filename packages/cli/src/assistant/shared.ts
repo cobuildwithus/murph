@@ -51,11 +51,18 @@ export async function writeJsonFileAtomic(
   filePath: string,
   value: unknown,
 ): Promise<void> {
+  await writeTextFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+export async function writeTextFileAtomic(
+  filePath: string,
+  value: string,
+): Promise<void> {
   await mkdir(path.dirname(filePath), {
     recursive: true,
   })
 
   const tempPath = `${filePath}.${randomUUID().replace(/-/gu, '')}.tmp`
-  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  await writeFile(tempPath, value, 'utf8')
   await rename(tempPath, filePath)
 }

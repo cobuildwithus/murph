@@ -102,6 +102,8 @@ vault-cli inbox model bundle <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--apply] [--request-id <id>]
 ```
 
+`vault-cli assistant ask|chat` persist out-of-vault session metadata, local transcript entries, and distilled Markdown memory for conversational continuity. That memory may include selected non-canonical health context, and the vault remains authoritative.
+
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Those surfaces are provided by incur and are not re-frozen command-by-command in this contract.
 
 ## Health Noun Grammar

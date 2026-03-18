@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
   assistantProviderSessionOptionsSchema,
   assistantSessionSchema,
+  assistantTranscriptEntrySchema,
   type AssistantAliasStore,
   type AssistantApprovalPolicy,
   type AssistantAutomationState,
@@ -14,6 +15,8 @@ import {
   type AssistantProviderSessionOptions,
   type AssistantSandbox,
   type AssistantSession,
+  type AssistantTranscriptEntry,
+  type AssistantTranscriptEntryKind,
 } from '../assistant-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
@@ -39,9 +42,12 @@ export interface AssistantStatePaths {
   absoluteVaultRoot: string
   assistantStateRoot: string
   automationPath: string
+  dailyMemoryDirectory: string
   indexesPath: string
   legacyAliasesPath: string
+  longTermMemoryPath: string
   sessionsDirectory: string
+  transcriptsDirectory: string
 }
 
 export interface AssistantSessionLocator {
@@ -80,6 +86,12 @@ export interface ResolvedAssistantSession {
   session: AssistantSession
 }
 
+export interface AssistantTranscriptEntryInput {
+  createdAt?: string | null
+  kind: AssistantTranscriptEntryKind
+  text: string
+}
+
 export function resolveAssistantStatePaths(
   vaultRoot: string,
 ): AssistantStatePaths {
@@ -96,9 +108,12 @@ export function resolveAssistantStatePaths(
     absoluteVaultRoot,
     assistantStateRoot,
     automationPath: path.join(assistantStateRoot, 'automation.json'),
+    dailyMemoryDirectory: path.join(assistantStateRoot, 'memory'),
     indexesPath: path.join(assistantStateRoot, 'indexes.json'),
     legacyAliasesPath: path.join(assistantStateRoot, 'aliases.json'),
+    longTermMemoryPath: path.join(assistantStateRoot, 'MEMORY.md'),
     sessionsDirectory: path.join(assistantStateRoot, 'sessions'),
+    transcriptsDirectory: path.join(assistantStateRoot, 'transcripts'),
   }
 }
 
@@ -306,6 +321,46 @@ export async function saveAssistantSession(
   return parsed
 }
 
+export async function listAssistantTranscriptEntries(
+  vault: string,
+  sessionId: string,
+): Promise<AssistantTranscriptEntry[]> {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+  return readAssistantTranscriptEntries(paths, sessionId)
+}
+
+export async function appendAssistantTranscriptEntries(
+  vault: string,
+  sessionId: string,
+  entries: readonly AssistantTranscriptEntryInput[],
+): Promise<AssistantTranscriptEntry[]> {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+
+  if (entries.length === 0) {
+    return []
+  }
+
+  const parsed = entries.map((entry) =>
+    assistantTranscriptEntrySchema.parse({
+      schema: 'healthybob.assistant-transcript-entry.v1',
+      kind: entry.kind,
+      text: entry.text,
+      createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
+    }),
+  )
+  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+  const serialized = `${parsed.map((entry) => JSON.stringify(entry)).join('\n')}\n`
+
+  await mkdir(path.dirname(transcriptPath), {
+    recursive: true,
+  })
+  await appendFile(transcriptPath, serialized, 'utf8')
+
+  return parsed
+}
+
 export async function readAssistantAutomationState(
   vault: string,
 ): Promise<AssistantAutomationState> {
@@ -326,9 +381,14 @@ export async function saveAssistantAutomationState(
 }
 
 async function ensureAssistantState(paths: AssistantStatePaths): Promise<void> {
-  await mkdir(paths.sessionsDirectory, {
-    recursive: true,
-  })
+  await Promise.all([
+    mkdir(paths.sessionsDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.transcriptsDirectory, {
+      recursive: true,
+    }),
+  ])
 }
 
 async function readAssistantSession(input: {
@@ -346,6 +406,7 @@ async function readAssistantSession(input: {
     const current = assistantSessionSchema.safeParse(parsed)
     if (current.success) {
       if (hasLegacyAssistantTurnExcerpts(parsed)) {
+        await migrateLegacyAssistantTurnExcerpts(input.paths, current.data.sessionId, parsed)
         await writeAssistantSession(input.paths, current.data)
         await synchronizeAssistantIndexes(input.paths, current.data, null)
       }
@@ -357,6 +418,7 @@ async function readAssistantSession(input: {
       throw current.error
     }
 
+    await migrateLegacyAssistantTurnExcerpts(input.paths, legacy.sessionId, parsed)
     await writeAssistantSession(input.paths, legacy)
     await synchronizeAssistantIndexes(input.paths, legacy, null)
     return legacy
@@ -374,6 +436,60 @@ async function writeAssistantSession(
 ): Promise<void> {
   const sessionPath = path.join(paths.sessionsDirectory, `${session.sessionId}.json`)
   await writeJsonFileAtomic(sessionPath, session)
+}
+
+async function readAssistantTranscriptEntries(
+  paths: AssistantStatePaths,
+  sessionId: string,
+): Promise<AssistantTranscriptEntry[]> {
+  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+
+  try {
+    const raw = await readFile(transcriptPath, 'utf8')
+    return raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => assistantTranscriptEntrySchema.parse(JSON.parse(line) as unknown))
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+
+    throw error
+  }
+}
+
+function resolveAssistantTranscriptPath(
+  paths: AssistantStatePaths,
+  sessionId: string,
+): string {
+  return path.join(paths.transcriptsDirectory, `${sessionId}.jsonl`)
+}
+
+async function migrateLegacyAssistantTurnExcerpts(
+  paths: AssistantStatePaths,
+  sessionId: string,
+  value: unknown,
+): Promise<void> {
+  const transcriptEntries = extractLegacyAssistantTurnExcerpts(value)
+  if (transcriptEntries.length === 0) {
+    return
+  }
+
+  const existingEntries = await readAssistantTranscriptEntries(paths, sessionId)
+  if (existingEntries.length > 0) {
+    return
+  }
+
+  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+  const serialized =
+    `${transcriptEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`
+
+  await mkdir(path.dirname(transcriptPath), {
+    recursive: true,
+  })
+  await appendFile(transcriptPath, serialized, 'utf8')
 }
 
 async function persistResolvedSession(
@@ -577,6 +693,47 @@ function hasLegacyAssistantTurnExcerpts(value: unknown): boolean {
 
   const candidate = value as Record<string, unknown>
   return 'lastUserMessage' in candidate || 'lastAssistantMessage' in candidate
+}
+
+function extractLegacyAssistantTurnExcerpts(
+  value: unknown,
+): AssistantTranscriptEntry[] {
+  if (!value || typeof value !== 'object') {
+    return []
+  }
+
+  const candidate = value as Record<string, unknown>
+  const createdAt =
+    normalizeLegacyString(candidate.lastTurnAt) ??
+    normalizeLegacyString(candidate.updatedAt) ??
+    new Date().toISOString()
+  const entries: AssistantTranscriptEntry[] = []
+  const lastUserMessage = normalizeLegacyString(candidate.lastUserMessage)
+  const lastAssistantMessage = normalizeLegacyString(candidate.lastAssistantMessage)
+
+  if (lastUserMessage) {
+    entries.push(
+      assistantTranscriptEntrySchema.parse({
+        schema: 'healthybob.assistant-transcript-entry.v1',
+        kind: 'user',
+        text: lastUserMessage,
+        createdAt,
+      }),
+    )
+  }
+
+  if (lastAssistantMessage) {
+    entries.push(
+      assistantTranscriptEntrySchema.parse({
+        schema: 'healthybob.assistant-transcript-entry.v1',
+        kind: 'assistant',
+        text: lastAssistantMessage,
+        createdAt,
+      }),
+    )
+  }
+
+  return entries
 }
 
 function parseLegacySessionJson(

@@ -88,8 +88,8 @@ Healthy Bob splits the overall system into seven kinds of state:
    normalized outputs under `derived/inbox`.
 5. Local runtime state
    rebuildable machine-local indexes and config under `.runtime`.
-6. Assistant session metadata
-   provider-backed session aliases and minimal thread metadata outside the vault under `assistant-state/`, without persisting prompt/response excerpts there by default.
+6. Assistant session transcripts, metadata, and memory
+   provider-backed session aliases, minimal thread metadata, local chat transcripts, and Markdown assistant memory outside the vault under `assistant-state/`.
 7. Derived exports
    read-only packs under `exports/packs`.
 
@@ -104,7 +104,7 @@ Every CLI command follows the same shape:
 3. The handler delegates exactly one boundary call into `core`, `importers`, `inboxd`, or `query`, with parser-toolchain queue control layered through the inbox CLI services.
 4. Write commands copy raw artifacts first; inbox ingestion flows persist capture evidence under `raw/inbox/...` and enqueue attachment parse jobs in `.runtime/`.
 5. Parser-capable product flows may use `@healthybob/parsers` to drain those jobs and publish only derived artifacts under `derived/inbox/...`.
-6. Provider-backed assistant chat flows may reuse external transcript/session storage while persisting only minimal local alias/session metadata under `assistant-state/`, not local prompt/response excerpts by default.
+6. Provider-backed assistant chat flows may reuse external transcript/session storage while also persisting local alias/session metadata, local chat transcripts, and distilled Markdown memory under `assistant-state/`.
 7. For `--format json`, successful commands return the command-specific payload directly and failures return a direct error object.
 
 Shared options:
@@ -171,7 +171,7 @@ vault/
   exports/packs/<packId>/
 ```
 
-Sibling local assistant state lives outside the vault at `assistant-state/<vault-name>-<hash>/sessions/<sessionId>.json`.
+Sibling local assistant state lives outside the vault at `assistant-state/<vault-name>-<hash>/`, including `sessions/<sessionId>.json`, `MEMORY.md`, and `memory/YYYY-MM-DD.md`.
 
 Important storage rules:
 
@@ -183,7 +183,7 @@ Important storage rules:
 - inbox parser outputs under `derived/inbox/**` are rebuildable and non-canonical
 - `.runtime/**` is local runtime state and may be rebuilt from durable vault files
 - `assistant-state/**` is local assistant/session metadata outside the vault and is never canonical health truth
-- `assistant-state/**` stores only minimal session metadata such as aliases, bindings, timestamps, turn counts, and provider session references; prompt/response excerpts are not persisted there by default
+- `assistant-state/**` stores minimal session metadata, local assistant transcript files, and distilled Markdown memory such as aliases, bindings, timestamps, turn counts, provider session references, naming/preferences/instructions, recent project context, and selected health context; the vault remains authoritative on conflicts
 - export packs are derived outputs, not canonical records
 
 Schema version policy:
@@ -277,11 +277,13 @@ The repo also includes local-first inbox parser controls:
 The repo also includes a Healthy Bob-native assistant layer:
 
 - `vault-cli chat [prompt]` is a root-level shorthand for `vault-cli assistant chat [prompt]`
-- `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores only session metadata outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel
+- `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores session metadata plus local transcript entries and distilled Markdown memory outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel
 - `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider
 - `vault-cli assistant run --model <model> [--baseUrl <url>]` runs the always-on inbox triage loop and auto-applies model-routed canonical promotions
-- `vault-cli assistant session list|show` inspects local assistant session metadata under `assistant-state/` without replaying stored prompt/response excerpts
+- `vault-cli assistant session list|show` inspects local assistant session metadata under `assistant-state/`; local transcript replay is reserved for the chat UI rather than those metadata commands
+
+Fresh assistant sessions bootstrap from `assistant-state/<vault-bucket>/MEMORY.md` plus recent `assistant-state/<vault-bucket>/memory/YYYY-MM-DD.md` notes. That continuity layer may retain selected non-canonical health context for future conversations, but it never overrides canonical vault records.
 
 The first installed chat provider adapter is Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Outbound channel delivery is also adapter-backed, with iMessage as the first send path. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
 

@@ -13,7 +13,7 @@ Last verified: 2026-03-17
 - `packages/parsers`: local-first attachment parsing, parser-service helpers, and derived artifact publication under `derived/inbox/**`
 - `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
 - `packages/web`: local-only Next.js observability app that reads vault data on the server through the query package and may initiate device-auth control-plane actions against `packages/device-syncd`
-- `packages/cli`: `vault-cli`, an incur-backed typed operator surface over core/importers/query/inboxd plus parser-toolchain queue controls, inbox model-routing helpers, provider-backed assistant session orchestration, outbound channel adapters, and local setup commands
+- `packages/cli`: `vault-cli`, an incur-backed typed operator surface over core/importers/query/inboxd plus parser-toolchain queue controls, inbox model-routing helpers, provider-backed assistant session orchestration, out-of-vault assistant memory docs, outbound channel adapters, and local setup commands
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
 ## Trust Boundaries
@@ -29,8 +29,8 @@ Last verified: 2026-03-17
 - Device sync runtime state is local-only under `.runtime/device-syncd.sqlite`; encrypted provider tokens, OAuth sessions, and webhook/reconcile cursors never belong in the canonical vault.
 - The local web surface is for local operator use and must not expose raw vault paths, home-directory paths, or canonical write capabilities in its rendered payloads. It may initiate device auth and account-control requests only through the separately configured local `device-syncd` control plane and its bearer-token contract. Its launcher must block framework `.env*` reads.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
-- General assistant/session state belongs outside the canonical vault under `assistant-state/`; only capture-scoped rebuildable audit artifacts belong under `derived/inbox/**`.
-- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Healthy Bob stores only minimal manual aliases, explicit conversation bindings, automation cursors, timestamps/turn counts, and provider session references under `assistant-state/`, not prompt/response excerpts.
+- General assistant/session state belongs outside the canonical vault under `assistant-state/`, including local transcript files plus non-canonical Markdown memory for naming, response preferences, standing instructions, selected health context, and recent project context; only capture-scoped rebuildable audit artifacts belong under `derived/inbox/**`.
+- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Healthy Bob stores local assistant transcript copies, minimal manual aliases, explicit conversation bindings, automation cursors, timestamps/turn counts, provider session references, and distilled Markdown memory under `assistant-state/`. Selected health context may be copied there for continuity, but canonical vault records remain authoritative.
 - `vault-cli inbox model route` may send a normalized text-only inbox bundle to either the AI Gateway or an operator-specified OpenAI-compatible endpoint.
 
 ## Control Flow
@@ -42,7 +42,7 @@ Last verified: 2026-03-17
 5. Inbox model routing can materialize a text-only bundle, call a configured model backend, and write audited bundle/plan/result artifacts before any optional apply step.
 6. Importers may parse and normalize external inputs but must never write canonical vault files directly. Provider connectors normalize upstream payloads into shared device-batch payloads and still rely on `packages/core` for canonical persistence.
 7. `packages/device-syncd` owns provider OAuth state, reconnect/disconnect control, scheduled device backfills, and optional webhook fan-in; its control routes must stay loopback-only plus bearer-authenticated, any public callback/webhook ingress should stay isolated from `/accounts/*` and `/providers/*`, polling-first providers remain first-class citizens, provider credentials stay outside the vault, per-account jobs should be serialized to avoid rotating-refresh-token races, and canonical health writes still flow through `packages/importers` and `packages/core`.
-8. Provider-backed assistant chat and outbound channel flows may persist only minimal local session metadata plus explicit delivery bindings outside the vault, but they must never persist transcript excerpts there by default or bypass canonical write boundaries for health data.
+8. Provider-backed assistant chat and outbound channel flows may persist local session metadata, local transcript files, explicit delivery bindings, and distilled conversational memory docs outside the vault, including selected non-canonical health context for continuity, but they must not treat that state as canonical health truth or bypass canonical write boundaries for health data.
 9. Query/export paths are read-only and must not mutate canonical vault state.
 10. The local web app reads vault data only on the server through query helpers, constrains search to safe record fields, and may redirect to the local authenticated device control plane for auth/account actions without gaining direct canonical write access.
 
