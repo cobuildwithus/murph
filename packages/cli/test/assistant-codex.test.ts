@@ -49,6 +49,7 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
     prompt: 'Summarize the vault.',
     workingDirectory: '/tmp/vault',
     outputFile: '/tmp/last-message.txt',
+    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
     model: 'o3',
     reasoningEffort: 'xhigh',
     sandbox: 'read-only',
@@ -60,6 +61,8 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
   assert.deepEqual(args, [
     '--ask-for-approval',
     'never',
+    '--config',
+    'mcp_servers.healthybob_memory.command="node"',
     'exec',
     '--json',
     '--skip-git-repo-check',
@@ -86,6 +89,7 @@ test('buildCodexArgs keeps approval as a root flag and omits sandbox when resumi
     workingDirectory: '/tmp/vault',
     outputFile: '/tmp/last-message.txt',
     resumeSessionId: 'thread-123',
+    configOverrides: ['mcp_servers.healthybob_memory.required=true'],
     model: 'o3',
     reasoningEffort: 'high',
     sandbox: 'workspace-write',
@@ -97,6 +101,8 @@ test('buildCodexArgs keeps approval as a root flag and omits sandbox when resumi
   assert.deepEqual(args, [
     '--ask-for-approval',
     'on-request',
+    '--config',
+    'mcp_servers.healthybob_memory.required=true',
     'exec',
     'resume',
     'thread-123',

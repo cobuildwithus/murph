@@ -33,9 +33,9 @@ vi.mock('../src/chat-provider.js', async () => {
 
 import { sendAssistantMessage } from '../src/assistant/service.js'
 import {
-  resolveAssistantMemoryBridgeEnv,
-  upsertAssistantMemoryViaBridge,
-} from '../src/assistant/memory-bridge.js'
+  resolveAssistantMemoryTurnContext,
+  upsertAssistantMemory,
+} from '../src/assistant/memory.js'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 
 const cleanupPaths: string[] = []
@@ -57,7 +57,7 @@ beforeEach(() => {
   serviceMocks.executeAssistantProviderTurn.mockReset()
 })
 
-test('sendAssistantMessage gives the first provider turn direct Incur-backed CLI guidance, PATH access, and a memory bridge', async () => {
+test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and MCP-backed memory tools', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
@@ -89,15 +89,27 @@ test('sendAssistantMessage gives the first provider turn direct Incur-backed CLI
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const expectedUserBinDirectory = path.join(homeRoot, '.local', 'bin')
-  const bridge = resolveAssistantMemoryBridgeEnv(firstCall?.env)
+  const turnContext = resolveAssistantMemoryTurnContext(firstCall?.env)
 
   assert.equal(firstCall?.workingDirectory, vaultRoot)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
-  assert.match(firstCall?.systemPrompt ?? '', /assistant memory search/u)
-  assert.match(firstCall?.systemPrompt ?? '', /assistant memory upsert/u)
+  assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
-  assert.equal(bridge?.vault, path.resolve(vaultRoot))
+  assert.equal(turnContext?.vault, path.resolve(vaultRoot))
+  assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
+  assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
+  assert.equal(
+    firstCall?.configOverrides?.some((value: string) => value.includes('.args=[')),
+    true,
+  )
+  assert.equal(
+    firstCall?.configOverrides?.some((value: string) =>
+      value.includes('"assistant","memory","--mcp"'),
+    ),
+    true,
+  )
   assert.equal(
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],
     expectedUserBinDirectory,
@@ -116,7 +128,16 @@ function restoreEnvironmentVariable(
   process.env[key] = value
 }
 
-test('sendAssistantMessage loads only explicit bridge-written core memory into fresh sessions', async () => {
+function requireTurnContext(env: NodeJS.ProcessEnv | undefined) {
+  const turnContext = resolveAssistantMemoryTurnContext(env)
+  if (!turnContext) {
+    throw new Error('Expected assistant memory turn context on the provider turn.')
+  }
+
+  return turnContext
+}
+
+test('sendAssistantMessage loads only explicit assistant-written core memory into fresh sessions', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -125,25 +146,22 @@ test('sendAssistantMessage loads only explicit bridge-written core memory into f
 
   serviceMocks.executeAssistantProviderTurn
     .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
-      if (!bridge) {
-        throw new Error('Expected assistant memory bridge env on the first provider turn.')
-      }
+      const turnContext = requireTurnContext(input.env)
 
       await Promise.all([
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Call me Chris.',
           scope: 'both',
           section: 'Identity',
-          sourcePrompt: 'Call me Chris from now on.',
+          turnContext,
         }),
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Keep answers concise.',
           scope: 'long-term',
           section: 'Standing instructions',
-          sourcePrompt: 'Going forward, keep answers concise.',
+          turnContext,
         }),
       ])
 
@@ -230,7 +248,7 @@ test('sendAssistantMessage no longer auto-persists memory without explicit assis
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
 })
 
-test('sendAssistantMessage bootstraps only the latest mutable long-term memory written through bridge upserts', async () => {
+test('sendAssistantMessage bootstraps only the latest mutable long-term memory written through assistant memory upserts', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-upsert-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -239,32 +257,29 @@ test('sendAssistantMessage bootstraps only the latest mutable long-term memory w
 
   serviceMocks.executeAssistantProviderTurn
     .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
-      if (!bridge) {
-        throw new Error('Expected assistant memory bridge env on the first provider turn.')
-      }
+      const turnContext = requireTurnContext(input.env)
 
       await Promise.all([
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Call me Chris.',
           scope: 'both',
           section: 'Identity',
-          sourcePrompt: 'Call me Chris from now on.',
+          turnContext,
         }),
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Keep answers concise.',
           scope: 'long-term',
           section: 'Standing instructions',
-          sourcePrompt: 'Going forward, keep answers concise.',
+          turnContext,
         }),
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Use imperial units.',
           scope: 'long-term',
           section: 'Preferences',
-          sourcePrompt: 'Use imperial units.',
+          turnContext,
         }),
       ])
 
@@ -278,32 +293,29 @@ test('sendAssistantMessage bootstraps only the latest mutable long-term memory w
       }
     })
     .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
-      if (!bridge) {
-        throw new Error('Expected assistant memory bridge env on the second provider turn.')
-      }
+      const turnContext = requireTurnContext(input.env)
 
       await Promise.all([
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Call me Alex.',
           scope: 'both',
           section: 'Identity',
-          sourcePrompt: 'Actually, call me Alex from now on.',
+          turnContext,
         }),
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Keep answers detailed.',
           scope: 'long-term',
           section: 'Standing instructions',
-          sourcePrompt: 'From now on, keep answers detailed.',
+          turnContext,
         }),
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'Use metric units.',
           scope: 'long-term',
           section: 'Preferences',
-          sourcePrompt: 'Use metric units.',
+          turnContext,
         }),
       ])
 
@@ -328,13 +340,14 @@ test('sendAssistantMessage bootstraps only the latest mutable long-term memory w
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:upsert-one',
-    prompt: 'Remember the current assistant defaults.',
+    prompt: 'Call me Chris. Going forward, keep answers concise. Use imperial units.',
   })
 
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:upsert-two',
-    prompt: 'Update the saved defaults.',
+    prompt:
+      'Actually, call me Alex from now on. From now on, keep answers detailed. Use metric units.',
   })
 
   await sendAssistantMessage({
@@ -370,17 +383,12 @@ test('sendAssistantMessage can persist selected health context into assistant me
 
   serviceMocks.executeAssistantProviderTurn
     .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
-      if (!bridge) {
-        throw new Error('Expected assistant memory bridge env on the first provider turn.')
-      }
-
-      await upsertAssistantMemoryViaBridge({
-        bridge,
+      await upsertAssistantMemory({
+        vault: vaultRoot,
         text: "User's blood pressure is 120 over 80.",
         scope: 'both',
         section: 'Health context',
-        sourcePrompt: 'Remember that my blood pressure is 120 over 80.',
+        turnContext: requireTurnContext(input.env),
       })
 
       return {
@@ -432,18 +440,13 @@ test('sendAssistantMessage blocks health-memory upserts in non-private assistant
 
   serviceMocks.executeAssistantProviderTurn
     .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
-      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
-      if (!bridge) {
-        throw new Error('Expected assistant memory bridge env on the first provider turn.')
-      }
-
       await assert.rejects(
-        upsertAssistantMemoryViaBridge({
-          bridge,
+        upsertAssistantMemory({
+          vault: vaultRoot,
           text: 'User has diabetes.',
           scope: 'long-term',
           section: 'Health context',
-          sourcePrompt: 'Remember that I have diabetes.',
+          turnContext: requireTurnContext(input.env),
         }),
         /private assistant contexts/u,
       )

@@ -10,6 +10,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 export interface CodexExecInput {
   approvalPolicy?: AssistantApprovalPolicy
+  configOverrides?: readonly string[]
   codexCommand?: string
   env?: NodeJS.ProcessEnv
   model?: string | null
@@ -190,6 +191,10 @@ export function buildCodexArgs(
 
   if (input.approvalPolicy) {
     rootArgs.push('--ask-for-approval', input.approvalPolicy)
+  }
+
+  for (const override of input.configOverrides ?? []) {
+    rootArgs.push('--config', override)
   }
 
   args.push('--json', '--skip-git-repo-check')

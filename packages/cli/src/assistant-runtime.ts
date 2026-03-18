@@ -4,16 +4,23 @@ export type {
 } from './assistant/service.js'
 export { sendAssistantMessage } from './assistant/service.js'
 export type {
+  AssistantMemoryForgetInput,
   AssistantMemoryGetInput,
   AssistantMemoryPromptInput,
   AssistantMemorySearchInput,
   AssistantMemorySearchResponse,
+  AssistantMemoryTurnContext,
+  AssistantMemoryTurnContextInput,
   AssistantMemoryUpsertInput,
   AssistantMemoryUpsertWriteResult,
 } from './assistant/memory.js'
 export {
+  assertAssistantMemoryTurnContextVault,
+  createAssistantMemoryTurnContextEnv,
+  forgetAssistantMemory,
   getAssistantMemory,
   loadAssistantMemoryPromptBlock,
+  resolveAssistantMemoryTurnContext,
   searchAssistantMemory,
   upsertAssistantMemory,
 } from './assistant/memory.js'

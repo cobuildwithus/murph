@@ -8,6 +8,7 @@ import {
   getAssistantSession,
   listAssistantTranscriptEntries,
   listAssistantSessions,
+  readAssistantAutomationState,
   redactAssistantDisplayPath,
   resolveAssistantAliasKey,
   resolveAssistantSession,
@@ -15,10 +16,12 @@ import {
   saveAssistantSession,
 } from '../src/assistant-state.js'
 import {
+  createAssistantMemoryTurnContextEnv,
   extractAssistantMemory,
+  forgetAssistantMemory,
   getAssistantMemory,
   loadAssistantMemoryPromptBlock,
-  recordAssistantMemoryTurn,
+  resolveAssistantMemoryTurnContext,
   resolveAssistantDailyMemoryPath,
   searchAssistantMemory,
   upsertAssistantMemory,
@@ -200,7 +203,7 @@ test('assistant transcripts are stored separately from session metadata', async 
   assert.equal('lastAssistantMessage' in persistedSession, false)
 })
 
-test('getAssistantSession migrates legacy excerpt fields out of persisted assistant state', async () => {
+test('getAssistantSession rejects non-canonical assistant state payloads with legacy excerpt fields', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-migrate-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -254,39 +257,104 @@ test('getAssistantSession migrates legacy excerpt fields out of persisted assist
     'utf8',
   )
 
-  const migrated = await getAssistantSession(vaultRoot, sessionId)
-  assert.equal(migrated.sessionId, sessionId)
-  assert.equal(migrated.providerSessionId, 'thread-legacy')
-  assert.equal(migrated.turnCount, 2)
-  assert.equal('lastUserMessage' in migrated, false)
-  assert.equal('lastAssistantMessage' in migrated, false)
+  await assert.rejects(() => getAssistantSession(vaultRoot, sessionId))
+})
 
-  const rewritten = JSON.parse(
-    await readFile(
-      path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
-      'utf8',
-    ),
-  ) as Record<string, unknown>
-  assert.equal('lastUserMessage' in rewritten, false)
-  assert.equal('lastAssistantMessage' in rewritten, false)
+test('resolveAssistantSession ignores legacy aliases.json fallback state', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-alias-hard-cut-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
 
-  const transcript = await listAssistantTranscriptEntries(vaultRoot, sessionId)
-  assert.deepEqual(
-    transcript.map((entry) => ({
-      kind: entry.kind,
-      text: entry.text,
-    })),
-    [
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.sessionsDirectory, {
+    recursive: true,
+  })
+  await writeFile(
+    path.join(statePaths.sessionsDirectory, 'asst_existing.json'),
+    `${JSON.stringify(
       {
-        kind: 'user',
-        text: 'sensitive prompt excerpt',
+        schema: 'healthybob.assistant-session.v2',
+        sessionId: 'asst_existing',
+        provider: 'codex-cli',
+        providerSessionId: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'workspace-write',
+          approvalPolicy: 'on-request',
+          profile: null,
+          oss: false,
+        },
+        alias: 'chat:bob',
+        binding: {
+          conversationKey: null,
+          channel: null,
+          identityId: null,
+          actorId: null,
+          threadId: null,
+          threadIsDirect: null,
+          delivery: null,
+        },
+        createdAt: '2026-03-18T10:00:00.000Z',
+        updatedAt: '2026-03-18T10:00:00.000Z',
+        lastTurnAt: null,
+        turnCount: 0,
       },
-      {
-        kind: 'assistant',
-        text: 'sensitive response excerpt',
-      },
-    ],
+      null,
+      2,
+    )}\n`,
+    'utf8',
   )
+  await writeFile(
+    path.join(statePaths.assistantStateRoot, 'aliases.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        aliases: {
+          'chat:bob': 'asst_existing',
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  await assert.rejects(() =>
+    resolveAssistantSession({
+      vault: vaultRoot,
+      alias: 'chat:bob',
+      createIfMissing: false,
+    }),
+  )
+})
+
+test('readAssistantAutomationState rejects legacy automation v1 payloads', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-automation-hard-cut-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.sessionsDirectory, {
+    recursive: true,
+  })
+  await writeFile(
+    statePaths.automationPath,
+    `${JSON.stringify(
+      {
+        version: 1,
+        inboxScanCursor: null,
+        updatedAt: '2026-03-18T10:00:00.000Z',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  await assert.rejects(() => readAssistantAutomationState(vaultRoot))
 })
 
 test('redactAssistantDisplayPath hides HOME-prefixed paths and leaves external paths untouched', async () => {
@@ -329,31 +397,58 @@ function restoreEnvironmentVariable(
   process.env[key] = value
 }
 
-test('recordAssistantMemoryTurn writes vault-scoped Markdown memory without using the canonical vault', async () => {
+test('upsertAssistantMemory writes vault-scoped Markdown memory with provenance metadata and forget removes targeted records', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
   const now = new Date('2026-03-17T09:15:00.000Z')
-  const result = await recordAssistantMemoryTurn({
+  const result = await upsertAssistantMemory({
     vault: vaultRoot,
     now,
-    prompt: 'Call me Chris. Going forward, keep answers concise. We are working on the assistant memory implementation.',
+    text: 'Call me Alex.',
+    scope: 'both',
+    section: 'Identity',
+    sourcePrompt: 'Call me Alex from now on.',
   })
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   const dailyPath = resolveAssistantDailyMemoryPath(statePaths, now)
   const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
   const dailyMemory = await readFile(dailyPath, 'utf8')
+  const longTermRecord = result.memories.find((memory) => memory.kind === 'long-term')
+  const dailyRecord = result.memories.find((memory) => memory.kind === 'daily')
 
-  assert.equal(result.longTermAdded, 2)
-  assert.equal(result.dailyAdded, 3)
-  assert.match(longTermMemory, /Call the user Chris\./u)
-  assert.match(longTermMemory, /keep answers concise\./iu)
-  assert.match(dailyMemory, /assistant memory implementation\./iu)
+  assert.equal(result.longTermAdded, 1)
+  assert.equal(result.dailyAdded, 1)
+  assert.equal(longTermRecord?.provenance?.writtenBy, 'operator')
+  assert.equal(dailyRecord?.provenance?.writtenBy, 'operator')
+  assert.match(longTermMemory, /Call the user Alex\./u)
+  assert.match(dailyMemory, /Call the user Alex\./u)
+  assert.match(longTermMemory, /healthybob-assistant-memory:/u)
+  assert.match(dailyMemory, /healthybob-assistant-memory:/u)
   assert.equal(longTermMemory.includes(vaultRoot), false)
   assert.equal(dailyMemory.includes(vaultRoot), false)
+
+  const removedLongTerm = await forgetAssistantMemory({
+    vault: vaultRoot,
+    id: longTermRecord?.id ?? '',
+  })
+  const removedDaily = await forgetAssistantMemory({
+    vault: vaultRoot,
+    id: dailyRecord?.id ?? '',
+  })
+  const search = await searchAssistantMemory({
+    vault: vaultRoot,
+    scope: 'all',
+    text: 'Alex',
+  })
+
+  assert.equal(removedLongTerm.removed.id, longTermRecord?.id)
+  assert.equal(removedDaily.removed.id, dailyRecord?.id)
+  assert.equal(search.results.some((memory) => memory.id === longTermRecord?.id), false)
+  assert.equal(search.results.some((memory) => memory.id === dailyRecord?.id), false)
 })
 
 test('extractAssistantMemory strips identity tail text and ignores one-off formatting requests', () => {
@@ -406,32 +501,68 @@ test('extractAssistantMemory only keeps durable health context by default', () =
   )
 })
 
-test('recordAssistantMemoryTurn can persist selected health context into out-of-vault memory', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-health-memory-'))
+test('upsertAssistantMemory binds assistant writes to the active turn context', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-turn-context-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const now = new Date('2026-03-17T10:30:00.000Z')
-  const result = await recordAssistantMemoryTurn({
+  const turnContext = resolveAssistantMemoryTurnContext(
+    createAssistantMemoryTurnContextEnv({
+      allowSensitiveHealthContext: true,
+      sessionId: 'asst_123',
+      sourcePrompt: 'Remember that my blood pressure is 120 over 80.',
+      turnId: 'turn_123',
+      vault: vaultRoot,
+    }),
+  )
+  assert.ok(turnContext)
+
+  const result = await upsertAssistantMemory({
     vault: vaultRoot,
-    now,
-    prompt: 'Remember that my blood pressure is 120 over 80.',
+    now: new Date('2026-03-17T10:30:00.000Z'),
+    text: "User's blood pressure is 120 over 80.",
+    scope: 'both',
+    section: 'Health context',
+    sourcePrompt: 'Remember that I have diabetes.',
+    turnContext,
   })
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const dailyPath = resolveAssistantDailyMemoryPath(statePaths, now)
+  const dailyPath = resolveAssistantDailyMemoryPath(
+    statePaths,
+    new Date('2026-03-17T10:30:00.000Z'),
+  )
   const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
   const dailyMemory = await readFile(dailyPath, 'utf8')
 
-  assert.equal(result.longTermAdded, 1)
-  assert.equal(result.dailyAdded, 1)
-  assert.match(longTermMemory, /## Health context/u)
+  assert.equal(result.memories[0]?.provenance?.writtenBy, 'assistant')
+  assert.equal(result.memories[0]?.provenance?.sessionId, 'asst_123')
+  assert.equal(result.memories[0]?.provenance?.turnId, 'turn_123')
   assert.match(longTermMemory, /User's blood pressure is 120 over 80\./u)
   assert.match(dailyMemory, /User's blood pressure is 120 over 80\./u)
+
+  await assert.rejects(
+    upsertAssistantMemory({
+      vault: vaultRoot,
+      text: 'Call the user Bob.',
+      scope: 'long-term',
+      section: 'Identity',
+      turnContext: resolveAssistantMemoryTurnContext(
+        createAssistantMemoryTurnContextEnv({
+          allowSensitiveHealthContext: true,
+          sessionId: 'asst_456',
+          sourcePrompt: 'Keep answers concise.',
+          turnId: 'turn_456',
+          vault: vaultRoot,
+        }),
+      ),
+    }),
+    /grounded in the active user turn/u,
+  )
 })
 
-test('recordAssistantMemoryTurn replaces mutable long-term identity and response-style memory', async () => {
+test('upsertAssistantMemory replaces mutable long-term identity and response-style memory', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-upsert-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -440,17 +571,54 @@ test('recordAssistantMemoryTurn replaces mutable long-term identity and response
   const firstNow = new Date('2026-03-17T09:15:00.000Z')
   const secondNow = new Date('2026-03-17T11:45:00.000Z')
 
-  await recordAssistantMemoryTurn({
+  await upsertAssistantMemory({
     vault: vaultRoot,
     now: firstNow,
-    prompt: 'Call me Chris. Going forward, keep answers concise. Use imperial units.',
+    text: 'Call me Chris.',
+    scope: 'both',
+    section: 'Identity',
+    sourcePrompt: 'Call me Chris from now on.',
+  })
+  await upsertAssistantMemory({
+    vault: vaultRoot,
+    now: firstNow,
+    text: 'Keep answers concise.',
+    scope: 'long-term',
+    section: 'Standing instructions',
+    sourcePrompt: 'Going forward, keep answers concise.',
+  })
+  await upsertAssistantMemory({
+    vault: vaultRoot,
+    now: firstNow,
+    text: 'Use imperial units.',
+    scope: 'long-term',
+    section: 'Preferences',
+    sourcePrompt: 'Use imperial units.',
   })
 
-  await recordAssistantMemoryTurn({
+  await upsertAssistantMemory({
     vault: vaultRoot,
     now: secondNow,
-    prompt:
-      'Actually, call me Alex from now on. From now on, keep answers detailed. Use metric units.',
+    text: 'Call me Alex.',
+    scope: 'both',
+    section: 'Identity',
+    sourcePrompt: 'Actually, call me Alex from now on.',
+  })
+  await upsertAssistantMemory({
+    vault: vaultRoot,
+    now: secondNow,
+    text: 'Keep answers detailed.',
+    scope: 'long-term',
+    section: 'Standing instructions',
+    sourcePrompt: 'From now on, keep answers detailed.',
+  })
+  await upsertAssistantMemory({
+    vault: vaultRoot,
+    now: secondNow,
+    text: 'Use metric units.',
+    scope: 'long-term',
+    section: 'Preferences',
+    sourcePrompt: 'Use metric units.',
   })
 
   const statePaths = resolveAssistantStatePaths(vaultRoot)

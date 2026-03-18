@@ -11,7 +11,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from '../src/operator-config.js'
-import { withAssistantMemoryBridge } from '../src/assistant/memory-bridge.js'
+import { createAssistantMemoryTurnContextEnv } from '../src/assistant/memory.js'
 import { resolveAssistantSession } from '../src/assistant-state.js'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
@@ -222,7 +222,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant memory search/get/upsert expose typed memory records through the CLI',
+  'assistant memory search/get/upsert/forget expose typed memory records through the CLI',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-cli-'))
     const vaultRoot = path.join(parent, 'vault')
@@ -239,6 +239,9 @@ test.sequential(
         memories: Array<{
           id: string
           kind: string
+          provenance: {
+            writtenBy: string
+          } | null
           section: string
           text: string
         }>
@@ -262,6 +265,7 @@ test.sequential(
     assert.equal(upserted.longTermAdded, 1)
     assert.equal(upserted.dailyAdded, 1)
     assert.equal(upserted.memories.some((memory) => memory.kind === 'long-term'), true)
+    assert.equal(upserted.memories[0]?.provenance?.writtenBy, 'operator')
 
     const search = requireData(
       await runCli<{
@@ -308,83 +312,107 @@ test.sequential(
     assert.equal(fetched.memory.id, search.results[0]?.id)
     assert.equal(fetched.memory.section, 'Identity')
     assert.equal(fetched.memory.text, 'Call the user Alex.')
+
+    const forgotten = requireData(
+      await runCli<{
+        removed: {
+          id: string
+        }
+      }>([
+        'assistant',
+        'memory',
+        'forget',
+        search.results[0]?.id ?? '',
+        '--vault',
+        vaultRoot,
+      ]),
+    )
+    assert.equal(forgotten.removed.id, search.results[0]?.id)
   },
   20000,
 )
 
 test.sequential(
-  'assistant memory CLI commands can proxy through the in-session memory bridge',
+  'assistant memory CLI commands honor the bound assistant turn context',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-bridge-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-turn-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
 
     await rebuildCliRuntimeArtifacts()
 
-    await withAssistantMemoryBridge(
-      {
-        allowSensitiveHealthContext: true,
-        vault: vaultRoot,
-      },
-      async (bridgeEnv) => {
-        const upserted = requireData(
-          await runCli<{
-            longTermAdded: number
-            memories: Array<{
-              section: string
-              text: string
-            }>
-          }>(
-            [
-              'assistant',
-              'memory',
-              'upsert',
-              'Keep answers concise.',
-              '--vault',
-              vaultRoot,
-              '--scope',
-              'long-term',
-              '--section',
-              'Standing instructions',
-              '--sourcePrompt',
-              'Going forward, keep answers concise.',
-            ],
-            {
-              env: bridgeEnv,
-            },
-          ),
-        )
-        assert.equal(upserted.longTermAdded, 1)
-        assert.equal(upserted.memories[0]?.text, 'keep answers concise.')
+    const boundEnv = createAssistantMemoryTurnContextEnv({
+      allowSensitiveHealthContext: true,
+      sessionId: 'asst_cli',
+      sourcePrompt: 'Remember that my blood pressure is 120 over 80.',
+      turnId: 'turn_cli',
+      vault: vaultRoot,
+    })
 
-        const search = requireData(
-          await runCli<{
-            results: Array<{
-              section: string
-              text: string
-            }>
-          }>(
-            [
-              'assistant',
-              'memory',
-              'search',
-              '--vault',
-              vaultRoot,
-              '--scope',
-              'long-term',
-              '--text',
-              'concise',
-            ],
-            {
-              env: bridgeEnv,
-            },
-          ),
-        )
-        assert.equal(search.results[0]?.section, 'Standing instructions')
-        assert.equal(search.results[0]?.text, 'keep answers concise.')
-      },
+    const upserted = requireData(
+      await runCli<{
+        longTermAdded: number
+        memories: Array<{
+          provenance: {
+            sessionId: string | null
+            turnId: string | null
+            writtenBy: string
+          } | null
+          section: string
+          text: string
+        }>
+      }>(
+        [
+          'assistant',
+          'memory',
+          'upsert',
+          "User's blood pressure is 120 over 80.",
+          '--vault',
+          vaultRoot,
+          '--scope',
+          'both',
+          '--section',
+          'Health context',
+          '--sourcePrompt',
+          'Remember that I have diabetes.',
+        ],
+        {
+          env: boundEnv,
+        },
+      ),
     )
+    assert.equal(upserted.longTermAdded, 1)
+    assert.equal(upserted.memories[0]?.text, "User's blood pressure is 120 over 80.")
+    assert.equal(upserted.memories[0]?.provenance?.writtenBy, 'assistant')
+    assert.equal(upserted.memories[0]?.provenance?.sessionId, 'asst_cli')
+    assert.equal(upserted.memories[0]?.provenance?.turnId, 'turn_cli')
+
+    const search = requireData(
+      await runCli<{
+        results: Array<{
+          section: string
+          text: string
+        }>
+      }>(
+        [
+          'assistant',
+          'memory',
+          'search',
+          '--vault',
+          vaultRoot,
+          '--scope',
+          'long-term',
+          '--text',
+          'blood pressure',
+        ],
+        {
+          env: boundEnv,
+        },
+      ),
+    )
+    assert.equal(search.results[0]?.section, 'Health context')
+    assert.equal(search.results[0]?.text, "User's blood pressure is 120 over 80.")
   },
   20000,
 )
@@ -436,8 +464,8 @@ test('root chat prints only a resume hint after a human TTY session exits', asyn
         provider: 'codex-cli',
         codexCommand: undefined,
         model: undefined,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
+        sandbox: 'workspace-write',
+        approvalPolicy: 'on-request',
         profile: undefined,
         oss: undefined,
       },

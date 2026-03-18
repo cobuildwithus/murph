@@ -5,6 +5,7 @@ import {
   assistantChatProviderValues,
   assistantChatResultSchema,
   assistantDeliverResultSchema,
+  assistantMemoryForgetResultSchema,
   assistantMemoryGetResultSchema,
   assistantMemoryLongTermSectionValues,
   assistantMemoryQueryScopeValues,
@@ -24,20 +25,16 @@ import {
   sendAssistantMessage,
 } from '../assistant-runtime.js'
 import {
+  assertAssistantMemoryTurnContextVault,
+  forgetAssistantMemory,
   getAssistantMemory,
   redactAssistantMemoryRecord,
   redactAssistantMemorySearchHit,
+  resolveAssistantMemoryTurnContext,
   resolveAssistantMemoryPaths,
   searchAssistantMemory,
   upsertAssistantMemory,
 } from '../assistant/memory.js'
-import {
-  assertAssistantMemoryBridgeVault,
-  getAssistantMemoryViaBridge,
-  resolveAssistantMemoryBridgeEnv,
-  searchAssistantMemoryViaBridge,
-  upsertAssistantMemoryViaBridge,
-} from '../assistant/memory-bridge.js'
 import {
   redactAssistantDisplayPath,
   getAssistantSession,
@@ -107,15 +104,15 @@ const assistantProviderOptionFields = {
     .describe('Optional provider model override for local chat turns.'),
   sandbox: z
     .enum(assistantSandboxValues)
-    .default('read-only')
+    .default('workspace-write')
     .describe(
-      'Codex sandbox mode for local assistant chat. Defaults to read-only.',
+      'Codex sandbox mode for local assistant chat. Defaults to workspace-write for low-friction local tool use.',
     ),
   approvalPolicy: z
     .enum(assistantApprovalPolicyValues)
-    .default('never')
+    .default('on-request')
     .describe(
-      'Codex approval policy for local assistant chat. Defaults to never in read-only mode.',
+      'Codex approval policy for local assistant chat. Defaults to on-request with workspace-write sandboxing.',
     ),
   profile: z
     .string()
@@ -543,26 +540,20 @@ export function registerAssistantCommands(
     }),
     output: assistantMemorySearchResultSchema,
     async run(context) {
-      const bridge = resolveAssistantMemoryBridgeEnv()
-      if (bridge) {
-        assertAssistantMemoryBridgeVault(bridge, context.options.vault)
+      const turnContext = resolveAssistantMemoryTurnContext()
+      if (turnContext) {
+        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
       }
 
-      const result = bridge
-        ? await searchAssistantMemoryViaBridge({
-            bridge,
-            text: context.options.text,
-            scope: context.options.scope,
-            section: context.options.section,
-            limit: context.options.limit,
-          })
-        : await searchAssistantMemory({
-            vault: context.options.vault,
-            text: context.options.text,
-            scope: context.options.scope,
-            section: context.options.section,
-            limit: context.options.limit,
-          })
+      const result = await searchAssistantMemory({
+        vault: context.options.vault,
+        text: context.options.text,
+        scope: context.options.scope,
+        section: context.options.section,
+        limit: context.options.limit,
+        includeSensitiveHealthContext:
+          turnContext?.allowSensitiveHealthContext ?? true,
+      })
       const statePaths = resolveAssistantMemoryPaths(context.options.vault)
 
       return {
@@ -584,20 +575,17 @@ export function registerAssistantCommands(
     options: withBaseOptions(),
     output: assistantMemoryGetResultSchema,
     async run(context) {
-      const bridge = resolveAssistantMemoryBridgeEnv()
-      if (bridge) {
-        assertAssistantMemoryBridgeVault(bridge, context.options.vault)
+      const turnContext = resolveAssistantMemoryTurnContext()
+      if (turnContext) {
+        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
       }
 
-      const memoryRecord = bridge
-        ? await getAssistantMemoryViaBridge({
-            bridge,
-            id: context.args.memoryId,
-          })
-        : await getAssistantMemory({
-            vault: context.options.vault,
-            id: context.args.memoryId,
-          })
+      const memoryRecord = await getAssistantMemory({
+        vault: context.options.vault,
+        id: context.args.memoryId,
+        includeSensitiveHealthContext:
+          turnContext?.allowSensitiveHealthContext ?? true,
+      })
       const statePaths = resolveAssistantMemoryPaths(context.options.vault)
 
       return {
@@ -615,7 +603,7 @@ export function registerAssistantCommands(
     description:
       'Create or update assistant memory through the typed memory commit layer.',
     hint:
-      'Use --scope both to mirror durable long-term memory into today\'s daily note, and pass --sourcePrompt when the original user wording matters for validation.',
+      'Use --scope both to mirror durable long-term memory into today\'s daily note. In live assistant turns, the host binds writes to the real user message and ignores any client-supplied --sourcePrompt.',
     examples: [
       {
         args: {
@@ -657,26 +645,19 @@ export function registerAssistantCommands(
     }),
     output: assistantMemoryUpsertResultSchema,
     async run(context) {
-      const bridge = resolveAssistantMemoryBridgeEnv()
-      if (bridge) {
-        assertAssistantMemoryBridgeVault(bridge, context.options.vault)
+      const turnContext = resolveAssistantMemoryTurnContext()
+      if (turnContext) {
+        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
       }
 
-      const result = bridge
-        ? await upsertAssistantMemoryViaBridge({
-            bridge,
-            text: context.args.text,
-            scope: context.options.scope,
-            section: context.options.section,
-            sourcePrompt: context.options.sourcePrompt,
-          })
-        : await upsertAssistantMemory({
-            vault: context.options.vault,
-            text: context.args.text,
-            scope: context.options.scope,
-            section: context.options.section,
-            sourcePrompt: context.options.sourcePrompt,
-          })
+      const result = await upsertAssistantMemory({
+        vault: context.options.vault,
+        text: context.args.text,
+        scope: context.options.scope,
+        section: context.options.section,
+        sourcePrompt: context.options.sourcePrompt,
+        turnContext,
+      })
       const statePaths = resolveAssistantMemoryPaths(context.options.vault)
 
       return {
@@ -686,6 +667,35 @@ export function registerAssistantCommands(
         longTermAdded: result.longTermAdded,
         dailyAdded: result.dailyAdded,
         memories: result.memories.map(redactAssistantMemoryRecord),
+      }
+    },
+  })
+
+  memory.command('forget', {
+    args: z.object({
+      memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
+    }),
+    description: 'Remove one assistant memory record by id.',
+    hint:
+      'Use this when a memory item is mistaken or obsolete; prefer forgetting it over appending a contradiction.',
+    options: withBaseOptions(),
+    output: assistantMemoryForgetResultSchema,
+    async run(context) {
+      const turnContext = resolveAssistantMemoryTurnContext()
+      if (turnContext) {
+        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+      }
+
+      const result = await forgetAssistantMemory({
+        vault: context.options.vault,
+        id: context.args.memoryId,
+      })
+      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
+        removed: redactAssistantMemoryRecord(result.removed),
       }
     },
   })

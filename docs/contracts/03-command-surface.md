@@ -32,6 +32,7 @@ vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli assistant memory search --vault <path> [--text <query>] [--scope long-term|daily|all] [--section <section>] [--limit <n>] [--request-id <id>]
 vault-cli assistant memory get <memoryId> --vault <path> [--request-id <id>]
 vault-cli assistant memory upsert <text> --vault <path> [--scope long-term|daily|both] [--section <section>] [--sourcePrompt <text>] [--request-id <id>]
+vault-cli assistant memory forget <memoryId> --vault <path> [--request-id <id>]
 vault-cli device provider list [--baseUrl <url>]
 vault-cli device connect <provider> [--baseUrl <url>] [--returnTo <url>] [--open]
 vault-cli device account list [--baseUrl <url>] [--provider <provider>]
@@ -106,7 +107,7 @@ vault-cli inbox model bundle <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--apply] [--request-id <id>]
 ```
 
-`vault-cli assistant ask|chat` persist out-of-vault session metadata and local transcript entries. Durable assistant memory is now managed explicitly through `vault-cli assistant memory search|get|upsert`, with only a small core long-term block injected automatically into fresh sessions. That memory may include selected non-canonical health context in private contexts, and the vault remains authoritative.
+`vault-cli assistant ask|chat` persist out-of-vault session metadata and local transcript entries. Durable assistant memory is now managed explicitly through `vault-cli assistant memory search|get|upsert|forget`, with only a small core long-term block injected automatically into fresh sessions. In provider-backed Codex sessions the live memory path is exposed as a bounded MCP tool surface, assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, that memory may include selected non-canonical health context only in private contexts, and the vault remains authoritative.
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Those surfaces are provided by incur and are not re-frozen command-by-command in this contract.
 
@@ -500,8 +501,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 }
 ```
 
-During the compatibility window, `dbPath` may report `.runtime/inboxd.sqlite` if
-legacy search tables have not been rebuilt into `.runtime/search.sqlite` yet.
+`dbPath` always reports the dedicated search index at `.runtime/search.sqlite`. Older inbox runtime databases are ignored by search status and should not be treated as a fallback search backend.
 
 ### `search index rebuild`
 
@@ -576,7 +576,7 @@ legacy search tables have not been rebuilt into `.runtime/search.sqlite` yet.
 ```
 
 Export packs are derived outputs and do not create canonical vault records.
-The five-file pack shape stays stable; health extensions enrich `manifest.json`, `question-pack.json`, and `assistant-context.md` with assessments, profile snapshots/current profile, health history, and registry context while preserving `records.json` as the legacy records array.
+The five-file pack shape stays stable; health extensions enrich `manifest.json`, `question-pack.json`, and `assistant-context.md` with assessments, profile snapshots/current profile, health history, and registry context while keeping `records.json` as the main exported records array.
 
 ## Boundary Rules
 

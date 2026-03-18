@@ -1253,7 +1253,7 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
             {
               color: theme.switcherMutedColor,
             },
-            'Access legacy models by running codex -m <model_name> or in your config.toml',
+            'Access additional models by running codex -m <model_name> or in your config.toml',
           ),
           createElement(
             Box,
@@ -1453,9 +1453,9 @@ export async function runAssistantChatWithInk(
     threadIsDirect: input.threadIsDirect,
     provider: input.provider ?? defaults?.provider ?? undefined,
     model: input.model ?? defaults?.model ?? null,
-    sandbox: input.sandbox ?? defaults?.sandbox ?? 'read-only',
+    sandbox: input.sandbox ?? defaults?.sandbox ?? 'workspace-write',
     approvalPolicy:
-      input.approvalPolicy ?? defaults?.approvalPolicy ?? 'never',
+      input.approvalPolicy ?? defaults?.approvalPolicy ?? 'on-request',
     oss: input.oss ?? defaults?.oss ?? false,
     profile: input.profile ?? defaults?.profile ?? null,
     reasoningEffort: input.reasoningEffort ?? defaults?.reasoningEffort ?? null,

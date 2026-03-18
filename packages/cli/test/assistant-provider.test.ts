@@ -49,6 +49,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
 
   const result = await executeAssistantProviderTurn({
     provider: 'codex-cli',
+    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
     env: {
       PATH: '/tmp/healthybob-bin',
     },
@@ -80,6 +81,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
 
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.equal(call?.codexCommand, '/opt/homebrew/bin/codex')
+  assert.deepEqual(call?.configOverrides, ['mcp_servers.healthybob_memory.command="node"'])
   assert.deepEqual(call?.env, {
     PATH: '/tmp/healthybob-bin',
   })

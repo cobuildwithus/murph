@@ -38,6 +38,10 @@ export const assistantMemoryRecordKindValues = [
   'long-term',
   'daily',
 ] as const
+export const assistantMemoryWriteActorValues = [
+  'assistant',
+  'operator',
+] as const
 export const assistantMemoryQueryScopeValues = [
   'long-term',
   'daily',
@@ -68,11 +72,13 @@ export const assistantProviderSessionOptionsSchema = z.object({
   oss: z.boolean(),
 })
 
-export const assistantAliasStoreSchema = z.object({
-  version: z.literal(2),
-  aliases: z.record(z.string(), z.string().min(1)),
-  conversationKeys: z.record(z.string(), z.string().min(1)),
-})
+export const assistantAliasStoreSchema = z
+  .object({
+    version: z.literal(2),
+    aliases: z.record(z.string(), z.string().min(1)),
+    conversationKeys: z.record(z.string(), z.string().min(1)),
+  })
+  .strict()
 
 export const assistantBindingDeliverySchema = z.object({
   kind: z.enum(assistantBindingDeliveryKindValues),
@@ -89,19 +95,21 @@ export const assistantSessionBindingSchema = z.object({
   delivery: assistantBindingDeliverySchema.nullable(),
 })
 
-export const assistantSessionSchema = z.object({
-  schema: z.literal('healthybob.assistant-session.v2'),
-  sessionId: z.string().min(1),
-  provider: z.enum(assistantChatProviderValues),
-  providerSessionId: z.string().min(1).nullable(),
-  providerOptions: assistantProviderSessionOptionsSchema,
-  alias: z.string().min(1).nullable(),
-  binding: assistantSessionBindingSchema,
-  createdAt: isoTimestampSchema,
-  updatedAt: isoTimestampSchema,
-  lastTurnAt: isoTimestampSchema.nullable(),
-  turnCount: z.number().int().nonnegative(),
-})
+export const assistantSessionSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-session.v2'),
+    sessionId: z.string().min(1),
+    provider: z.enum(assistantChatProviderValues),
+    providerSessionId: z.string().min(1).nullable(),
+    providerOptions: assistantProviderSessionOptionsSchema,
+    alias: z.string().min(1).nullable(),
+    binding: assistantSessionBindingSchema,
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    lastTurnAt: isoTimestampSchema.nullable(),
+    turnCount: z.number().int().nonnegative(),
+  })
+  .strict()
 
 export const assistantTranscriptEntrySchema = z.object({
   schema: z.literal('healthybob.assistant-transcript-entry.v1'),
@@ -123,6 +131,12 @@ export const assistantDeliveryErrorSchema = z.object({
   message: z.string().min(1),
 })
 
+export const assistantMemoryRecordProvenanceSchema = z.object({
+  writtenBy: z.enum(assistantMemoryWriteActorValues),
+  sessionId: z.string().min(1).nullable(),
+  turnId: z.string().min(1).nullable(),
+})
+
 export const assistantMemoryRecordSchema = z.object({
   id: z.string().min(1),
   kind: z.enum(assistantMemoryRecordKindValues),
@@ -131,6 +145,7 @@ export const assistantMemoryRecordSchema = z.object({
   recordedAt: z.string().min(1).nullable(),
   sourcePath: pathSchema,
   sourceLine: z.number().int().positive(),
+  provenance: assistantMemoryRecordProvenanceSchema.nullable(),
 })
 
 export const assistantMemorySearchHitSchema = assistantMemoryRecordSchema.extend({
@@ -197,6 +212,12 @@ export const assistantMemoryUpsertResultSchema = z.object({
   memories: z.array(assistantMemoryRecordSchema),
 })
 
+export const assistantMemoryForgetResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  removed: assistantMemoryRecordSchema,
+})
+
 export const assistantRunResultSchema = z.object({
   vault: pathSchema,
   startedAt: isoTimestampSchema,
@@ -221,20 +242,16 @@ export const assistantAutomationCursorSchema = z.object({
   captureId: z.string().min(1),
 })
 
-export const assistantAutomationStateV1Schema = z.object({
-  version: z.literal(1),
-  inboxScanCursor: assistantAutomationCursorSchema.nullable(),
-  updatedAt: isoTimestampSchema,
-})
-
-export const assistantAutomationStateSchema = z.object({
-  version: z.literal(2),
-  inboxScanCursor: assistantAutomationCursorSchema.nullable(),
-  autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
-  autoReplyChannels: z.array(z.string().min(1)),
-  autoReplyPrimed: z.boolean(),
-  updatedAt: isoTimestampSchema,
-})
+export const assistantAutomationStateSchema = z
+  .object({
+    version: z.literal(2),
+    inboxScanCursor: assistantAutomationCursorSchema.nullable(),
+    autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
+    autoReplyChannels: z.array(z.string().min(1)),
+    autoReplyPrimed: z.boolean(),
+    updatedAt: isoTimestampSchema,
+  })
+  .strict()
 
 export type AssistantAliasStore = z.infer<typeof assistantAliasStoreSchema>
 export type AssistantBindingDelivery = z.infer<
@@ -267,6 +284,9 @@ export type AssistantSessionShowResult = z.infer<
 export type AssistantMemoryRecord = z.infer<
   typeof assistantMemoryRecordSchema
 >
+export type AssistantMemoryRecordProvenance = z.infer<
+  typeof assistantMemoryRecordProvenanceSchema
+>
 export type AssistantMemorySearchHit = z.infer<
   typeof assistantMemorySearchHitSchema
 >
@@ -279,12 +299,12 @@ export type AssistantMemoryGetResult = z.infer<
 export type AssistantMemoryUpsertResult = z.infer<
   typeof assistantMemoryUpsertResultSchema
 >
+export type AssistantMemoryForgetResult = z.infer<
+  typeof assistantMemoryForgetResultSchema
+>
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema
->
-export type AssistantAutomationStateV1 = z.infer<
-  typeof assistantAutomationStateV1Schema
 >
 export type AssistantAutomationState = z.infer<
   typeof assistantAutomationStateSchema

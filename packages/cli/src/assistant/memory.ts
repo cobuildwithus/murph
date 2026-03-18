@@ -1,10 +1,12 @@
-import { mkdir, readFile, readdir } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantMemoryLongTermSectionValues,
   type AssistantMemoryLongTermSection,
   type AssistantMemoryQueryScope,
   type AssistantMemoryRecord,
+  type AssistantMemoryRecordProvenance,
   type AssistantMemoryRecordKind,
   type AssistantMemorySearchHit,
   type AssistantMemoryVisibleSection,
@@ -24,6 +26,26 @@ const MEMORY_PROMPT_MAX_CHARS = 2_800
 const MEMORY_SEARCH_DEFAULT_LIMIT = 8
 const MEMORY_SEARCH_MAX_LIMIT = 25
 const MEMORY_TIME_SEPARATOR = ' — '
+const ASSISTANT_MEMORY_METADATA_COMMENT_PREFIX = 'healthybob-assistant-memory:'
+const ASSISTANT_MEMORY_LOCK_DIRECTORY = '.locks/assistant-memory-write'
+const ASSISTANT_MEMORY_LOCK_METADATA_PATH = `${ASSISTANT_MEMORY_LOCK_DIRECTORY}/owner.json`
+const ASSISTANT_MEMORY_TURN_VAULT_ENV =
+  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_VAULT'
+const ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV =
+  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT'
+const ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV =
+  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT'
+const ASSISTANT_MEMORY_TURN_SESSION_ID_ENV =
+  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_SESSION_ID'
+const ASSISTANT_MEMORY_TURN_ID_ENV =
+  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_TURN_ID'
+export const assistantMemoryTurnEnvKeys = [
+  ASSISTANT_MEMORY_TURN_VAULT_ENV,
+  ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV,
+  ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV,
+  ASSISTANT_MEMORY_TURN_SESSION_ID_ENV,
+  ASSISTANT_MEMORY_TURN_ID_ENV,
+] as const
 const RESPONSE_CONTEXT_PATTERN =
   /\b(?:answer|answers|response|responses|reply|replies|summary|summaries)\b/iu
 const RESPONSE_STYLE_PATTERN =
@@ -67,6 +89,15 @@ export interface AssistantMemoryGetInput {
   includeSensitiveHealthContext?: boolean
 }
 
+export interface AssistantMemoryForgetInput {
+  id: string
+  vault: string
+}
+
+interface AssistantMemoryForgetWriteResult {
+  removed: AssistantMemoryRecord
+}
+
 export interface AssistantMemoryUpsertInput {
   now?: Date
   scope?: AssistantMemoryWriteScope
@@ -75,6 +106,9 @@ export interface AssistantMemoryUpsertInput {
   text: string
   vault: string
   allowSensitiveHealthContext?: boolean
+  provenance?: AssistantMemoryRecordProvenance | null
+  requireSourcePromptMatch?: boolean
+  turnContext?: AssistantMemoryTurnContext | null
 }
 
 export interface AssistantMemoryUpsertWriteResult {
@@ -84,15 +118,19 @@ export interface AssistantMemoryUpsertWriteResult {
   scope: AssistantMemoryWriteScope
 }
 
-export interface AssistantMemoryWriteInput {
-  now?: Date
-  prompt: string
+export interface AssistantMemoryTurnContextInput {
+  allowSensitiveHealthContext: boolean
+  sessionId: string
+  sourcePrompt: string
+  turnId: string
   vault: string
 }
 
-export interface AssistantMemoryWriteResult {
-  dailyAdded: number
-  longTermAdded: number
+export interface AssistantMemoryTurnContext {
+  allowSensitiveHealthContext: boolean
+  provenance: AssistantMemoryRecordProvenance
+  sourcePrompt: string
+  vault: string
 }
 
 export interface AssistantLongTermMemoryEntry {
@@ -118,12 +156,14 @@ interface ParsedMarkdownDocument {
 interface AssistantMemoryBullet {
   key: string
   rawText: string
+  provenance: AssistantMemoryRecordProvenance | null
   replaceKey: string | null
 }
 
 interface ParsedAssistantMemoryRecord {
   id: string
   kind: AssistantMemoryRecordKind
+  provenance: AssistantMemoryRecordProvenance | null
   recordedAt: string | null
   section: AssistantMemoryVisibleSection
   sourceLine: number
@@ -139,10 +179,28 @@ interface MemoryRecordParseInput {
 }
 
 interface NormalizedAssistantMemoryUpsert {
+  provenance: AssistantMemoryRecordProvenance
   dailyText: string | null
   longTermEntry: AssistantLongTermMemoryEntry | null
+  requireSourcePromptMatch: boolean
+  sourcePrompt: string | null
   scope: AssistantMemoryWriteScope
 }
+
+interface AssistantMemoryWriteLockMetadata {
+  command: string
+  pid: number
+  startedAt: string
+}
+
+interface ProcessAssistantMemoryLockState {
+  depth: number
+  metadata: AssistantMemoryWriteLockMetadata
+}
+
+const processAssistantMemoryLocks = new Map<string, ProcessAssistantMemoryLockState>()
+const processAssistantMemoryWriteChains = new Map<string, Promise<void>>()
+const assistantMemoryWriteOwnerStorage = new AsyncLocalStorage<Set<string>>()
 
 export function resolveAssistantMemoryPaths(vault: string): AssistantStatePaths {
   return resolveAssistantStatePaths(vault)
@@ -153,6 +211,61 @@ export function resolveAssistantDailyMemoryPath(
   now = new Date(),
 ): string {
   return path.join(paths.dailyMemoryDirectory, `${formatLocalDate(now)}.md`)
+}
+
+export function createAssistantMemoryTurnContextEnv(
+  input: AssistantMemoryTurnContextInput,
+): NodeJS.ProcessEnv {
+  return {
+    [ASSISTANT_MEMORY_TURN_ID_ENV]: input.turnId,
+    [ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV]: input.allowSensitiveHealthContext
+      ? '1'
+      : '0',
+    [ASSISTANT_MEMORY_TURN_SESSION_ID_ENV]: input.sessionId,
+    [ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV]: input.sourcePrompt,
+    [ASSISTANT_MEMORY_TURN_VAULT_ENV]: path.resolve(input.vault),
+  }
+}
+
+export function resolveAssistantMemoryTurnContext(
+  env: NodeJS.ProcessEnv = process.env,
+): AssistantMemoryTurnContext | null {
+  const vault = normalizeNullableString(env[ASSISTANT_MEMORY_TURN_VAULT_ENV])
+  const sourcePrompt = normalizeNullableString(
+    env[ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV],
+  )
+  const sessionId = normalizeNullableString(
+    env[ASSISTANT_MEMORY_TURN_SESSION_ID_ENV],
+  )
+  const turnId = normalizeNullableString(env[ASSISTANT_MEMORY_TURN_ID_ENV])
+
+  if (!vault || !sourcePrompt || !sessionId || !turnId) {
+    return null
+  }
+
+  return {
+    allowSensitiveHealthContext:
+      env[ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV]?.trim() === '1',
+    provenance: {
+      writtenBy: 'assistant',
+      sessionId,
+      turnId,
+    },
+    sourcePrompt,
+    vault: path.resolve(vault),
+  }
+}
+
+export function assertAssistantMemoryTurnContextVault(
+  context: AssistantMemoryTurnContext,
+  vault: string,
+): void {
+  if (context.vault !== path.resolve(vault)) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_TURN_VAULT_MISMATCH',
+      'Assistant memory turn context is only valid for the active assistant vault.',
+    )
+  }
 }
 
 export async function loadAssistantMemoryPromptBlock(
@@ -227,10 +340,94 @@ export async function searchAssistantMemory(
 export async function getAssistantMemory(
   input: AssistantMemoryGetInput,
 ): Promise<AssistantMemoryRecord> {
+  return await requireAssistantMemoryRecord({
+    id: input.id,
+    includeSensitiveHealthContext: input.includeSensitiveHealthContext ?? true,
+    vault: input.vault,
+  })
+}
+
+export async function forgetAssistantMemory(
+  input: AssistantMemoryForgetInput,
+): Promise<AssistantMemoryForgetWriteResult> {
+  const paths = resolveAssistantMemoryPaths(input.vault)
+  const removed = await withAssistantMemoryWriteLock(paths, async () => {
+    const target = await requireAssistantMemoryRecord({
+      id: input.id,
+      includeSensitiveHealthContext: true,
+      vault: input.vault,
+    })
+    await removeAssistantMemoryRecord(paths, target)
+    return target
+  })
+
+  return {
+    removed,
+  }
+}
+
+export async function upsertAssistantMemory(
+  input: AssistantMemoryUpsertInput,
+): Promise<AssistantMemoryUpsertWriteResult> {
+  const normalized = normalizeAssistantMemoryUpsert(input)
+  const paths = resolveAssistantMemoryPaths(input.vault)
+  const now = input.now ?? new Date()
+  const { dailyAdded, longTermAdded, memories } = await withAssistantMemoryWriteLock(
+    paths,
+    async () => {
+      let nextLongTermAdded = 0
+      let nextDailyAdded = 0
+
+      if (normalized.longTermEntry) {
+        nextLongTermAdded = await mergeLongTermAssistantMemory(
+          paths,
+          [normalized.longTermEntry],
+          now,
+          normalized.provenance,
+        )
+      }
+
+      if (normalized.dailyText) {
+        nextDailyAdded = await appendAssistantDailyMemory(
+          paths,
+          [normalized.dailyText],
+          now,
+          normalized.provenance,
+        )
+      }
+
+      const memories = await resolveUpsertedAssistantMemoryRecords({
+        dailyDate: normalized.dailyText ? formatLocalDate(now) : null,
+        dailyText: normalized.dailyText,
+        longTermEntry: normalized.longTermEntry,
+        paths,
+      })
+
+      return {
+        dailyAdded: nextDailyAdded,
+        longTermAdded: nextLongTermAdded,
+        memories,
+      }
+    },
+  )
+
+  return {
+    dailyAdded,
+    longTermAdded,
+    memories,
+    scope: normalized.scope,
+  }
+}
+
+async function requireAssistantMemoryRecord(input: {
+  id: string
+  includeSensitiveHealthContext: boolean
+  vault: string
+}): Promise<AssistantMemoryRecord> {
   const records = await loadAssistantMemoryRecords({
     vault: input.vault,
     scope: 'all',
-    includeSensitiveHealthContext: input.includeSensitiveHealthContext ?? true,
+    includeSensitiveHealthContext: input.includeSensitiveHealthContext,
   })
   const record = records.find((candidate) => candidate.id === input.id)
 
@@ -244,75 +441,57 @@ export async function getAssistantMemory(
   return record
 }
 
-export async function upsertAssistantMemory(
-  input: AssistantMemoryUpsertInput,
-): Promise<AssistantMemoryUpsertWriteResult> {
-  const normalized = normalizeAssistantMemoryUpsert(input)
-  const paths = resolveAssistantMemoryPaths(input.vault)
-  const now = input.now ?? new Date()
-  let longTermAdded = 0
-  let dailyAdded = 0
-
-  if (normalized.longTermEntry) {
-    longTermAdded = await mergeLongTermAssistantMemory(
-      paths,
-      [normalized.longTermEntry],
-      now,
+async function removeAssistantMemoryRecord(
+  paths: AssistantStatePaths,
+  record: AssistantMemoryRecord,
+): Promise<void> {
+  const existing = await readOptionalText(record.sourcePath)
+  if (!existing) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_NOT_FOUND',
+      `Assistant memory "${record.id}" was not found.`,
     )
   }
 
-  if (normalized.dailyText) {
-    dailyAdded = await appendAssistantDailyMemory(paths, [normalized.dailyText], now)
+  const document = parseMarkdownDocument(existing)
+  const section = document.sections.find((candidate) => candidate.heading === record.section)
+  if (!section) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_NOT_FOUND',
+      `Assistant memory "${record.id}" was not found.`,
+    )
   }
 
-  const memories = await resolveUpsertedAssistantMemoryRecords({
-    dailyDate: normalized.dailyText ? formatLocalDate(now) : null,
-    dailyText: normalized.dailyText,
-    longTermEntry: normalized.longTermEntry,
-    paths,
-  })
-
-  return {
-    dailyAdded,
-    longTermAdded,
-    memories,
-    scope: normalized.scope,
-  }
-}
-
-export async function recordAssistantMemoryTurn(
-  input: AssistantMemoryWriteInput,
-): Promise<AssistantMemoryWriteResult> {
-  const extracted = extractAssistantMemory(input.prompt)
-  if (extracted.longTerm.length === 0 && extracted.daily.length === 0) {
-    return {
-      dailyAdded: 0,
-      longTermAdded: 0,
-    }
+  const key =
+    record.kind === 'long-term' && isLongTermSection(record.section)
+      ? normalizeMemoryLookup(record.text)
+      : buildDailyMemoryMapKey(record.text)
+  if (!key) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_NOT_FOUND',
+      `Assistant memory "${record.id}" was not found.`,
+    )
   }
 
-  const paths = resolveAssistantMemoryPaths(input.vault)
-  const now = input.now ?? new Date()
-  let longTermAdded = 0
-  let dailyAdded = 0
+  const nextBullets =
+    record.kind === 'long-term' && isLongTermSection(record.section)
+      ? getSectionBullets(section, record.section).filter((bullet) => bullet.key !== key)
+      : getDailySectionBullets(section).filter((bullet) => bullet.key !== key)
 
-  if (extracted.longTerm.length > 0) {
-    longTermAdded = await mergeLongTermAssistantMemory(paths, extracted.longTerm, now)
+  const currentCount =
+    record.kind === 'long-term' && isLongTermSection(record.section)
+      ? getSectionBullets(section, record.section).length
+      : getDailySectionBullets(section).length
+
+  if (nextBullets.length === currentCount) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_NOT_FOUND',
+      `Assistant memory "${record.id}" was not found.`,
+    )
   }
 
-  const dailyNotes = [
-    ...extracted.longTerm.map((entry) => entry.text),
-    ...extracted.daily,
-  ]
-
-  if (dailyNotes.length > 0) {
-    dailyAdded = await appendAssistantDailyMemory(paths, dailyNotes, now)
-  }
-
-  return {
-    dailyAdded,
-    longTermAdded,
-  }
+  section.lines = renderSectionBulletLines(nextBullets)
+  await writeTextFileAtomic(record.sourcePath, renderMarkdownDocument(document))
 }
 
 export function extractAssistantMemory(prompt: string): AssistantMemoryExtraction {
@@ -475,6 +654,7 @@ function toAssistantMemoryRecord(
   return {
     id: input.id,
     kind: input.kind,
+    provenance: input.provenance,
     section: input.section,
     text: input.text,
     recordedAt: input.recordedAt,
@@ -514,12 +694,12 @@ function parseAssistantMemoryRecords(
       continue
     }
 
-    const bullet = parseBulletLine(line)
+    const bullet = parseAssistantMemoryBullet(line)
     if (!bullet) {
       continue
     }
 
-    const text = stripMemoryBulletPrefix(bullet)
+    const text = stripMemoryBulletPrefix(bullet.rawText)
     const lookupKey =
       input.kind === 'long-term'
         ? isLongTermSection(activeSection)
@@ -534,9 +714,10 @@ function parseAssistantMemoryRecords(
     records.push({
       id: buildAssistantMemoryRecordId(input.kind, lookupKey),
       kind: input.kind,
+      provenance: bullet.provenance,
       recordedAt: extractMemoryRecordTimestampLabel(
         input.kind,
-        bullet,
+        bullet.rawText,
         input.dailyDate ?? null,
       ),
       section: activeSection,
@@ -709,9 +890,25 @@ function stripMemoryBulletPrefix(rawText: string): string {
 function normalizeAssistantMemoryUpsert(
   input: AssistantMemoryUpsertInput,
 ): NormalizedAssistantMemoryUpsert {
+  const turnContext = input.turnContext ?? null
   const scope = input.scope ?? 'long-term'
   const rawText = normalizeSentence(input.text)
-  const sourcePrompt = normalizeSentence(input.sourcePrompt ?? '')
+  const sourcePrompt = normalizeSentence(
+    turnContext?.sourcePrompt ?? input.sourcePrompt ?? '',
+  )
+  const allowSensitiveHealthContext =
+    turnContext?.allowSensitiveHealthContext ??
+    input.allowSensitiveHealthContext ??
+    true
+  const provenance = turnContext?.provenance ??
+    input.provenance ??
+    {
+      writtenBy: 'operator' as const,
+      sessionId: null,
+      turnId: null,
+    }
+  const requireSourcePromptMatch =
+    turnContext !== null ? true : input.requireSourcePromptMatch ?? false
 
   if (!rawText) {
     throw new VaultCliError(
@@ -730,11 +927,14 @@ function normalizeAssistantMemoryUpsert(
 
     return {
       dailyText: normalizeAssistantDailyMemoryText({
-        allowSensitiveHealthContext: input.allowSensitiveHealthContext ?? true,
+        allowSensitiveHealthContext,
         sourcePrompt,
         text: rawText,
       }),
       longTermEntry: null,
+      provenance,
+      requireSourcePromptMatch,
+      sourcePrompt,
       scope,
     }
   }
@@ -748,7 +948,8 @@ function normalizeAssistantMemoryUpsert(
   }
 
   const longTermText = normalizeAssistantLongTermMemoryText({
-    allowSensitiveHealthContext: input.allowSensitiveHealthContext ?? true,
+    allowSensitiveHealthContext,
+    requireSourcePromptMatch,
     section,
     sourcePrompt,
     text: rawText,
@@ -760,22 +961,52 @@ function normalizeAssistantMemoryUpsert(
       section,
       text: longTermText,
     },
+    provenance,
+    requireSourcePromptMatch,
+    sourcePrompt,
     scope,
   }
 }
 
 function normalizeAssistantLongTermMemoryText(input: {
   allowSensitiveHealthContext: boolean
+  requireSourcePromptMatch: boolean
   section: AssistantMemoryLongTermSection
   sourcePrompt: string | null
   text: string
 }): string {
-  const extractedCandidates = [
-    ...(input.sourcePrompt ? extractAssistantMemory(input.sourcePrompt).longTerm : []),
-    ...extractAssistantMemory(input.text).longTerm,
-  ].filter((entry) => entry.section === input.section)
+  const sourcePromptCandidates = input.sourcePrompt
+    ? extractAssistantMemory(input.sourcePrompt).longTerm.filter(
+        (entry) => entry.section === input.section,
+      )
+    : []
+  const textCandidates = extractAssistantMemory(input.text).longTerm.filter(
+    (entry) => entry.section === input.section,
+  )
+  const sourceCandidate = sourcePromptCandidates[0] ?? null
+  const textCandidate = textCandidates[0] ?? null
+  const resolvedCandidate = sourceCandidate ?? textCandidate
 
-  if (extractedCandidates[0]) {
+  if (input.requireSourcePromptMatch && !sourceCandidate) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_SOURCE_PROMPT_REQUIRED',
+      `Assistant memory ${input.section} writes must be grounded in the active user turn.`,
+    )
+  }
+
+  if (
+    input.requireSourcePromptMatch &&
+    sourceCandidate &&
+    textCandidate &&
+    sourceCandidate.text !== textCandidate.text
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_SOURCE_PROMPT_MISMATCH',
+      `Assistant memory ${input.section} writes must match the active user turn.`,
+    )
+  }
+
+  if (resolvedCandidate) {
     if (
       input.section === 'Health context' &&
       !hasExplicitHealthMemoryLeadIn(input.sourcePrompt ?? input.text)
@@ -793,7 +1024,7 @@ function normalizeAssistantLongTermMemoryText(input: {
       )
     }
 
-    return extractedCandidates[0].text
+    return resolvedCandidate.text
   }
 
   const sentence = toSentence(input.text)
@@ -933,6 +1164,7 @@ async function mergeLongTermAssistantMemory(
   paths: AssistantStatePaths,
   entries: AssistantLongTermMemoryEntry[],
   now: Date,
+  provenance: AssistantMemoryRecordProvenance,
 ): Promise<number> {
   const existing = await readOptionalText(paths.longTermMemoryPath)
   const document = existing
@@ -978,6 +1210,7 @@ async function mergeLongTermAssistantMemory(
         {
           key,
           rawText: `${stampedPrefix}${entry.text}`,
+          provenance,
           replaceKey,
         },
       ]
@@ -1006,6 +1239,7 @@ async function appendAssistantDailyMemory(
   paths: AssistantStatePaths,
   notes: string[],
   now: Date,
+  provenance: AssistantMemoryRecordProvenance,
 ): Promise<number> {
   const dailyPath = resolveAssistantDailyMemoryPath(paths, now)
   const existing = await readOptionalText(dailyPath)
@@ -1013,24 +1247,31 @@ async function appendAssistantDailyMemory(
     ? parseMarkdownDocument(existing)
     : createDefaultDailyMemoryDocument(now)
   const section = findOrCreateSection(document, 'Notes')
-  const seen = new Set(getSectionBulletKeys(section))
+  let bullets = getDailySectionBullets(section)
+  const seen = new Set(bullets.map((bullet) => bullet.key))
   let added = 0
 
   for (const note of notes) {
-    const key = normalizeMemoryLookup(note)
+    const key = buildDailyMemoryMapKey(note)
     if (!key || seen.has(key)) {
       continue
     }
 
-    if (section.lines.length > 0 && section.lines[section.lines.length - 1]?.trim()) {
-      section.lines.push('')
-    }
-    section.lines.push(`- ${formatLocalTime(now)}${MEMORY_TIME_SEPARATOR}${note}`)
+    bullets = [
+      ...bullets,
+      {
+        key,
+        rawText: `${formatLocalTime(now)}${MEMORY_TIME_SEPARATOR}${note}`,
+        provenance,
+        replaceKey: null,
+      },
+    ]
     seen.add(key)
     added += 1
   }
 
   if (added > 0) {
+    section.lines = renderSectionBulletLines(bullets)
     await mkdir(path.dirname(dailyPath), { recursive: true })
     await writeTextFileAtomic(dailyPath, renderMarkdownDocument(document))
   }
@@ -1614,31 +1855,44 @@ function findOrCreateSection(
   return created
 }
 
-function getSectionBulletKeys(section: MarkdownSection): string[] {
-  return section.lines
-    .map((line) => parseBulletLine(line))
-    .filter((line): line is string => Boolean(line))
-    .map((line) => normalizeMemoryLookup(line))
-    .filter((line): line is string => Boolean(line))
-}
-
 function getSectionBullets(
   section: MarkdownSection,
   sectionName: AssistantMemoryLongTermSection,
 ): AssistantMemoryBullet[] {
   return section.lines
-    .map((line) => parseBulletLine(line))
-    .filter((line): line is string => Boolean(line))
-    .map((rawText) => {
-      const key = normalizeMemoryLookup(rawText)
+    .map((line) => parseAssistantMemoryBullet(line))
+    .filter((line): line is AssistantMemoryBullet => Boolean(line))
+    .map((bullet) => {
+      const key = normalizeMemoryLookup(bullet.rawText)
       if (!key) {
         return null
       }
 
       return {
         key,
-        rawText,
-        replaceKey: deriveLongTermReplaceKey(sectionName, rawText),
+        rawText: bullet.rawText,
+        provenance: bullet.provenance,
+        replaceKey: deriveLongTermReplaceKey(sectionName, bullet.rawText),
+      }
+    })
+    .filter((bullet): bullet is AssistantMemoryBullet => Boolean(bullet))
+}
+
+function getDailySectionBullets(section: MarkdownSection): AssistantMemoryBullet[] {
+  return section.lines
+    .map((line) => parseAssistantMemoryBullet(line))
+    .filter((line): line is AssistantMemoryBullet => Boolean(line))
+    .map<AssistantMemoryBullet | null>((bullet) => {
+      const key = buildDailyMemoryMapKey(stripMemoryBulletPrefix(bullet.rawText))
+      if (!key) {
+        return null
+      }
+
+      return {
+        key,
+        rawText: bullet.rawText,
+        provenance: bullet.provenance,
+        replaceKey: null,
       }
     })
     .filter((bullet): bullet is AssistantMemoryBullet => Boolean(bullet))
@@ -1646,7 +1900,9 @@ function getSectionBullets(
 
 function renderSectionBulletLines(bullets: AssistantMemoryBullet[]): string[] {
   return bullets.flatMap((bullet, index) =>
-    index === 0 ? [`- ${bullet.rawText}`] : ['', `- ${bullet.rawText}`],
+    index === 0
+      ? [`- ${renderAssistantMemoryBulletText(bullet)}`]
+      : ['', `- ${renderAssistantMemoryBulletText(bullet)}`],
   )
 }
 
@@ -1657,6 +1913,81 @@ function parseBulletLine(line: string): string | null {
   }
 
   return normalizeNullableString(match[1])
+}
+
+function parseAssistantMemoryBullet(line: string): AssistantMemoryBullet | null {
+  const bulletLine = parseBulletLine(line)
+  if (!bulletLine) {
+    return null
+  }
+
+  const { provenance, rawText } = splitAssistantMemoryMetadata(bulletLine)
+  const key = normalizeMemoryLookup(rawText)
+  if (!key) {
+    return null
+  }
+
+  return {
+    key,
+    provenance,
+    rawText,
+    replaceKey: null,
+  }
+}
+
+function renderAssistantMemoryBulletText(bullet: AssistantMemoryBullet): string {
+  const metadataComment = renderAssistantMemoryMetadataComment(bullet.provenance)
+  return metadataComment ? `${bullet.rawText} ${metadataComment}` : bullet.rawText
+}
+
+function splitAssistantMemoryMetadata(value: string): {
+  provenance: AssistantMemoryRecordProvenance | null
+  rawText: string
+} {
+  const match = new RegExp(
+    `^(.*)\\s+<!--\\s*${ASSISTANT_MEMORY_METADATA_COMMENT_PREFIX}(.+)\\s*-->\\s*$`,
+    'u',
+  ).exec(value)
+  if (!match?.[1]) {
+    return {
+      provenance: null,
+      rawText: value,
+    }
+  }
+
+  const rawText = normalizeNullableString(match[1]) ?? value
+  const rawMetadata = normalizeNullableString(match[2])
+  if (!rawMetadata) {
+    return {
+      provenance: null,
+      rawText,
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(rawMetadata) as unknown
+    if (isAssistantMemoryRecordProvenance(parsed)) {
+      return {
+        provenance: parsed,
+        rawText,
+      }
+    }
+  } catch {}
+
+  return {
+    provenance: null,
+    rawText,
+  }
+}
+
+function renderAssistantMemoryMetadataComment(
+  provenance: AssistantMemoryRecordProvenance | null,
+): string | null {
+  if (!provenance) {
+    return null
+  }
+
+  return `<!-- ${ASSISTANT_MEMORY_METADATA_COMMENT_PREFIX}${JSON.stringify(provenance)} -->`
 }
 
 function looksLikeDurablePreferenceClause(value: string): boolean {
@@ -1773,6 +2104,252 @@ function looksLikeDurableConditionPhrase(value: string): boolean {
 
 function isLongTermSection(value: string): value is AssistantMemoryLongTermSection {
   return LONG_TERM_MEMORY_SECTIONS.includes(value as AssistantMemoryLongTermSection)
+}
+
+function isAssistantMemoryRecordProvenance(
+  value: unknown,
+): value is AssistantMemoryRecordProvenance {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'writtenBy' in value &&
+      ((value as { writtenBy?: unknown }).writtenBy === 'assistant' ||
+        (value as { writtenBy?: unknown }).writtenBy === 'operator') &&
+      'sessionId' in value &&
+      ((value as { sessionId?: unknown }).sessionId === null ||
+        typeof (value as { sessionId?: unknown }).sessionId === 'string') &&
+      'turnId' in value &&
+      ((value as { turnId?: unknown }).turnId === null ||
+        typeof (value as { turnId?: unknown }).turnId === 'string'),
+  )
+}
+
+async function withAssistantMemoryWriteLock<TResult>(
+  paths: AssistantStatePaths,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  const ownedRoots = assistantMemoryWriteOwnerStorage.getStore()
+  if (ownedRoots?.has(paths.assistantStateRoot)) {
+    const handle = await acquireAssistantMemoryWriteLock(paths)
+
+    try {
+      return await run()
+    } finally {
+      await handle.release()
+    }
+  }
+
+  const prior =
+    processAssistantMemoryWriteChains.get(paths.assistantStateRoot) ?? Promise.resolve()
+  let releaseQueue!: () => void
+  const queued = new Promise<void>((resolve) => {
+    releaseQueue = resolve
+  })
+  const tail = prior.then(
+    () => queued,
+    () => queued,
+  )
+  processAssistantMemoryWriteChains.set(paths.assistantStateRoot, tail)
+
+  await prior.catch(() => undefined)
+
+  try {
+    const nextOwnedRoots = new Set(ownedRoots ?? [])
+    nextOwnedRoots.add(paths.assistantStateRoot)
+
+    return await assistantMemoryWriteOwnerStorage.run(nextOwnedRoots, async () => {
+      const handle = await acquireAssistantMemoryWriteLock(paths)
+
+      try {
+        return await run()
+      } finally {
+        await handle.release()
+      }
+    })
+  } finally {
+    releaseQueue()
+    if (processAssistantMemoryWriteChains.get(paths.assistantStateRoot) === tail) {
+      processAssistantMemoryWriteChains.delete(paths.assistantStateRoot)
+    }
+  }
+}
+
+async function acquireAssistantMemoryWriteLock(paths: AssistantStatePaths): Promise<{
+  release(): Promise<void>
+}> {
+  const lockRoot = path.join(paths.assistantStateRoot, ASSISTANT_MEMORY_LOCK_DIRECTORY)
+  const metadataPath = path.join(paths.assistantStateRoot, ASSISTANT_MEMORY_LOCK_METADATA_PATH)
+  const existing = processAssistantMemoryLocks.get(paths.assistantStateRoot)
+
+  if (existing) {
+    existing.depth += 1
+    let released = false
+
+    return {
+      async release() {
+        if (released) {
+          return
+        }
+
+        released = true
+        existing.depth -= 1
+        if (existing.depth <= 0) {
+          processAssistantMemoryLocks.delete(paths.assistantStateRoot)
+          await rm(lockRoot, {
+            recursive: true,
+            force: true,
+            maxRetries: 3,
+            retryDelay: 10,
+          })
+        }
+      },
+    }
+  }
+
+  const metadata: AssistantMemoryWriteLockMetadata = {
+    command: formatAssistantMemoryLockCommand(),
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  }
+
+  processAssistantMemoryLocks.set(paths.assistantStateRoot, {
+    depth: 1,
+    metadata,
+  })
+
+  try {
+    await mkdir(path.dirname(lockRoot), { recursive: true })
+
+    while (true) {
+      try {
+        await mkdir(lockRoot)
+        break
+      } catch (error) {
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'EEXIST'
+        ) {
+          if (await clearStaleAssistantMemoryWriteLock(metadataPath, lockRoot)) {
+            continue
+          }
+
+          const owner = await readAssistantMemoryWriteLockMetadata(metadataPath)
+          throw new VaultCliError(
+            'ASSISTANT_MEMORY_WRITE_LOCKED',
+            owner
+              ? `Assistant memory writes are already in progress (pid=${owner.pid}, startedAt=${owner.startedAt}, command=${owner.command}).`
+              : 'Assistant memory writes are already in progress.',
+          )
+        }
+
+        throw error
+      }
+    }
+
+    await writeTextFileAtomic(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`)
+  } catch (error) {
+    processAssistantMemoryLocks.delete(paths.assistantStateRoot)
+    await rm(lockRoot, { recursive: true, force: true })
+    throw error
+  }
+
+  let released = false
+
+  return {
+    async release() {
+      if (released) {
+        return
+      }
+
+      released = true
+      const current = processAssistantMemoryLocks.get(paths.assistantStateRoot)
+      if (current) {
+        current.depth -= 1
+        if (current.depth <= 0) {
+          processAssistantMemoryLocks.delete(paths.assistantStateRoot)
+          await rm(lockRoot, {
+            recursive: true,
+            force: true,
+            maxRetries: 3,
+            retryDelay: 10,
+          })
+        }
+      }
+    },
+  }
+}
+
+async function clearStaleAssistantMemoryWriteLock(
+  metadataPath: string,
+  lockRoot: string,
+): Promise<boolean> {
+  const metadata = await readAssistantMemoryWriteLockMetadata(metadataPath)
+  if (metadata && isAssistantMemoryLockProcessRunning(metadata.pid)) {
+    return false
+  }
+
+  await rm(lockRoot, { recursive: true, force: true })
+  return true
+}
+
+async function readAssistantMemoryWriteLockMetadata(
+  metadataPath: string,
+): Promise<AssistantMemoryWriteLockMetadata | null> {
+  const raw = await readOptionalText(metadataPath)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'command' in parsed &&
+      typeof (parsed as { command?: unknown }).command === 'string' &&
+      'pid' in parsed &&
+      typeof (parsed as { pid?: unknown }).pid === 'number' &&
+      Number.isInteger((parsed as { pid: number }).pid) &&
+      'startedAt' in parsed &&
+      typeof (parsed as { startedAt?: unknown }).startedAt === 'string'
+    ) {
+      return parsed as AssistantMemoryWriteLockMetadata
+    }
+  } catch {}
+
+  return null
+}
+
+function isAssistantMemoryLockProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ESRCH'
+    ) {
+      return false
+    }
+
+    return true
+  }
+}
+
+function formatAssistantMemoryLockCommand(): string {
+  const values = [process.argv[0], process.argv[1]]
+    .map((value) =>
+      typeof value === 'string' && value.trim().length > 0
+        ? path.basename(value)
+        : '',
+    )
+    .filter(Boolean)
+
+  return values.join(' ').trim() || 'unknown'
 }
 
 async function readOptionalText(filePath: string): Promise<string | null> {
