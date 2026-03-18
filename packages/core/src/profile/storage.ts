@@ -189,6 +189,74 @@ async function stageAuditRecord(
   return { auditPath, record };
 }
 
+type StoredCurrentProfileMarkdown = Awaited<ReturnType<typeof readCurrentProfileMarkdown>>;
+type CurrentProfileRebuildAudit = Pick<
+  Parameters<typeof buildAuditRecord>[0],
+  "summary" | "occurredAt" | "targetIds" | "changes"
+>;
+
+interface StagedCurrentProfileMaterialization {
+  updated: boolean;
+  markdown: string | null;
+  rebuildAudit: CurrentProfileRebuildAudit;
+}
+
+async function stageCurrentProfileMaterialization(
+  batch: WriteBatch,
+  currentState: StoredCurrentProfileMarkdown,
+  snapshot: ProfileSnapshotRecord | null,
+): Promise<StagedCurrentProfileMaterialization> {
+  if (!snapshot) {
+    if (currentState.exists) {
+      await batch.stageDelete(PROFILE_CURRENT_DOCUMENT_PATH);
+    }
+
+    return {
+      updated: currentState.exists,
+      markdown: null,
+      rebuildAudit: {
+        summary: currentState.exists
+          ? "Removed stale current profile because no snapshots remain."
+          : "Profile current rebuild found no snapshots to materialize.",
+        targetIds: [],
+        changes: currentState.exists
+          ? [
+              {
+                path: PROFILE_CURRENT_DOCUMENT_PATH,
+                op: "update",
+              },
+            ]
+          : [],
+      },
+    };
+  }
+
+  const markdown = buildCurrentProfileMarkdown(snapshot);
+  const updated = currentState.markdown !== markdown;
+
+  if (updated) {
+    await batch.stageTextWrite(PROFILE_CURRENT_DOCUMENT_PATH, markdown, { overwrite: true });
+  }
+
+  return {
+    updated,
+    markdown,
+    rebuildAudit: {
+      summary: `Rebuilt current profile from snapshot ${snapshot.id}.`,
+      occurredAt: snapshot.recordedAt,
+      targetIds: [snapshot.id],
+      changes: updated
+        ? [
+            {
+              path: PROFILE_CURRENT_DOCUMENT_PATH,
+              op: currentState.exists ? "update" : "create",
+            },
+          ]
+        : [],
+    },
+  };
+}
+
 function buildCurrentProfileResult(
   snapshot: ProfileSnapshotRecord | null,
   markdown: string | null,
@@ -242,8 +310,6 @@ export async function appendProfileSnapshot({
   const existingSnapshots = await listProfileSnapshots({ vaultRoot });
   const latestSnapshot = findLatestAcceptedProfileSnapshot(sortProfileSnapshots([...existingSnapshots, snapshot]));
   const currentState = await readCurrentProfileMarkdown(vaultRoot);
-  const nextMarkdown = latestSnapshot ? buildCurrentProfileMarkdown(latestSnapshot) : null;
-  const updated = currentState.markdown !== nextMarkdown;
   const batch = await WriteBatch.create({
     vaultRoot,
     operationType: "profile_snapshot_append",
@@ -252,32 +318,12 @@ export async function appendProfileSnapshot({
   });
 
   await batch.stageJsonlAppend(ledgerPath, `${JSON.stringify(snapshot)}\n`);
-  if (!latestSnapshot) {
-    if (currentState.exists) {
-      await batch.stageDelete(PROFILE_CURRENT_DOCUMENT_PATH);
-    }
-  } else if (updated && nextMarkdown) {
-    await batch.stageTextWrite(PROFILE_CURRENT_DOCUMENT_PATH, nextMarkdown, { overwrite: true });
-  }
+  const currentProfile = await stageCurrentProfileMaterialization(batch, currentState, latestSnapshot);
 
   const rebuildAudit = await stageAuditRecord(batch, {
     action: "profile_current_rebuild",
     commandName: "core.rebuildCurrentProfile",
-    summary: latestSnapshot
-      ? `Rebuilt current profile from snapshot ${latestSnapshot.id}.`
-      : currentState.exists
-        ? "Removed stale current profile because no snapshots remain."
-        : "Profile current rebuild found no snapshots to materialize.",
-    occurredAt: latestSnapshot?.recordedAt,
-    targetIds: latestSnapshot ? [latestSnapshot.id] : [],
-    changes: updated
-      ? [
-          {
-            path: PROFILE_CURRENT_DOCUMENT_PATH,
-            op: latestSnapshot ? (currentState.exists ? "update" : "create") : "update",
-          },
-        ]
-      : [],
+    ...currentProfile.rebuildAudit,
   });
   const audit = await stageAuditRecord(batch, {
     action: "profile_snapshot_add",
@@ -300,9 +346,9 @@ export async function appendProfileSnapshot({
     ledgerPath,
     currentProfile: buildCurrentProfileResult(
       latestSnapshot,
-      nextMarkdown,
+      currentProfile.markdown,
       rebuildAudit.auditPath,
-      updated,
+      currentProfile.updated,
     ),
   };
 }
@@ -359,55 +405,14 @@ export async function rebuildCurrentProfile({
       : "Rebuild current profile without snapshots",
     occurredAt: snapshot?.recordedAt,
   });
-
-  if (!snapshot) {
-    if (currentState.exists) {
-      await batch.stageDelete(PROFILE_CURRENT_DOCUMENT_PATH);
-    }
-
-    const audit = await stageAuditRecord(batch, {
-      action: "profile_current_rebuild",
-      commandName: "core.rebuildCurrentProfile",
-      summary: currentState.exists
-        ? "Removed stale current profile because no snapshots remain."
-        : "Profile current rebuild found no snapshots to materialize.",
-      changes: currentState.exists
-        ? [
-            {
-              path: PROFILE_CURRENT_DOCUMENT_PATH,
-              op: "update",
-            },
-          ]
-        : [],
-    });
-    await batch.commit();
-
-    return buildCurrentProfileResult(null, null, audit.auditPath, currentState.exists);
-  }
-
-  const markdown = buildCurrentProfileMarkdown(snapshot);
-  const updated = currentState.markdown !== markdown;
-
-  if (updated) {
-    await batch.stageTextWrite(PROFILE_CURRENT_DOCUMENT_PATH, markdown, { overwrite: true });
-  }
+  const currentProfile = await stageCurrentProfileMaterialization(batch, currentState, snapshot);
 
   const audit = await stageAuditRecord(batch, {
     action: "profile_current_rebuild",
     commandName: "core.rebuildCurrentProfile",
-    summary: `Rebuilt current profile from snapshot ${snapshot.id}.`,
-    occurredAt: snapshot.recordedAt,
-    targetIds: [snapshot.id],
-    changes: updated
-      ? [
-          {
-            path: PROFILE_CURRENT_DOCUMENT_PATH,
-            op: currentState.exists ? "update" : "create",
-          },
-        ]
-      : [],
+    ...currentProfile.rebuildAudit,
   });
   await batch.commit();
 
-  return buildCurrentProfileResult(snapshot, markdown, audit.auditPath, updated);
+  return buildCurrentProfileResult(snapshot, currentProfile.markdown, audit.auditPath, currentProfile.updated);
 }
