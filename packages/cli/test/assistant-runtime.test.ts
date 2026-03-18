@@ -77,6 +77,7 @@ import {
   normalizeComposerInsertedText,
   renderComposerValue,
   resolveComposerTerminalAction,
+  resolveComposerVerticalCursorMove,
 } from '../src/assistant/ui/ink.js'
 import { LIGHT_ASSISTANT_INK_THEME } from '../src/assistant/ui/theme.js'
 
@@ -1268,6 +1269,45 @@ test('assistant Ink composer editing normalizes pasted carriage returns to newli
   )
 })
 
+test('assistant Ink composer vertical cursor movement preserves preferred columns across uneven lines', () => {
+  const firstMove = resolveComposerVerticalCursorMove({
+    cursorOffset: 5,
+    direction: 'down',
+    preferredColumn: null,
+    value: 'alpha\nbe\ncharlie',
+  })
+
+  assert.deepEqual(firstMove, {
+    cursorOffset: 8,
+    preferredColumn: 5,
+  })
+
+  const secondMove = resolveComposerVerticalCursorMove({
+    cursorOffset: firstMove.cursorOffset,
+    direction: 'down',
+    preferredColumn: firstMove.preferredColumn,
+    value: 'alpha\nbe\ncharlie',
+  })
+
+  assert.deepEqual(secondMove, {
+    cursorOffset: 14,
+    preferredColumn: 5,
+  })
+
+  assert.deepEqual(
+    resolveComposerVerticalCursorMove({
+      cursorOffset: secondMove.cursorOffset,
+      direction: 'up',
+      preferredColumn: secondMove.preferredColumn,
+      value: 'alpha\nbe\ncharlie',
+    }),
+    {
+      cursorOffset: 8,
+      preferredColumn: 5,
+    },
+  )
+})
+
 test('assistant Ink composer terminal actions treat shift+enter as a newline edit', () => {
   const action = resolveComposerTerminalAction(
     '',
@@ -1298,6 +1338,15 @@ test('assistant Ink composer terminal actions treat shift+enter as a newline edi
       value: 'hello\n',
     },
   )
+})
+
+test('assistant Ink composer terminal actions treat raw DEL bytes as backspace edits', () => {
+  const action = resolveComposerTerminalAction('\u007f', createComposerKey())
+
+  assert.equal(action.kind, 'edit')
+  assert.equal(action.input, '')
+  assert.equal(action.key.backspace, true)
+  assert.equal(action.key.delete, false)
 })
 
 test('assistant Ink composer terminal actions treat xterm-style shift+enter escape sequences as a newline edit', () => {

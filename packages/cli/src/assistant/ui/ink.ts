@@ -178,6 +178,25 @@ export function resolveComposerTerminalAction(
     return modifiedReturnAction
   }
 
+  if (
+    (input === '\u007f' || input === '\b') &&
+    !key.ctrl &&
+    !key.meta &&
+    !key.shift &&
+    !key.super &&
+    !key.hyper
+  ) {
+    return {
+      kind: 'edit',
+      input: '',
+      key: {
+        ...key,
+        backspace: true,
+        delete: false,
+      },
+    }
+  }
+
   if (key.return) {
     if (!key.shift) {
       return {
@@ -220,12 +239,24 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
   const [cursorOffset, setCursorOffset] = React.useState(props.value.length)
-  const [killBuffer, setKillBuffer] = React.useState('')
+  const valueRef = React.useRef(props.value)
+  const cursorOffsetRef = React.useRef(props.value.length)
+  const killBufferRef = React.useRef('')
+  const preferredColumnRef = React.useRef<number | null>(null)
 
   React.useEffect(() => {
-    setCursorOffset((previous) =>
-      clampComposerCursorOffset(previous, props.value.length),
+    valueRef.current = props.value
+
+    const clampedCursorOffset = clampComposerCursorOffset(
+      cursorOffsetRef.current,
+      props.value.length,
     )
+
+    if (clampedCursorOffset !== cursorOffsetRef.current) {
+      cursorOffsetRef.current = clampedCursorOffset
+    }
+
+    setCursorOffset(clampedCursorOffset)
   }, [props.value])
 
   useInput(
@@ -234,20 +265,39 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
         return
       }
 
-      if (
-        key.upArrow ||
-        key.downArrow ||
-        key.tab ||
-        (key.shift && key.tab) ||
-        (key.ctrl && input === 'c')
-      ) {
+      if (key.tab || (key.shift && key.tab) || (key.ctrl && input === 'c')) {
+        return
+      }
+
+      const currentValue = valueRef.current
+      const currentCursorOffset = cursorOffsetRef.current
+
+      if (key.upArrow || key.downArrow) {
+        const verticalMovement = resolveComposerVerticalCursorMove({
+          cursorOffset: currentCursorOffset,
+          direction: key.upArrow ? 'up' : 'down',
+          preferredColumn: preferredColumnRef.current,
+          value: currentValue,
+        })
+
+        if (verticalMovement.cursorOffset !== currentCursorOffset) {
+          cursorOffsetRef.current = verticalMovement.cursorOffset
+          preferredColumnRef.current = verticalMovement.preferredColumn
+          setCursorOffset(verticalMovement.cursorOffset)
+        }
+
         return
       }
 
       const action = resolveComposerTerminalAction(input, key)
 
       if (action.kind === 'submit') {
-        if (props.onSubmit(props.value) === 'clear') {
+        if (props.onSubmit(currentValue) === 'clear') {
+          valueRef.current = ''
+          cursorOffsetRef.current = 0
+          killBufferRef.current = ''
+          preferredColumnRef.current = null
+          setCursorOffset(0)
           props.onChange('')
         }
         return
@@ -255,24 +305,25 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
 
       const editingResult = applyComposerEditingInput(
         {
-          cursorOffset,
-          killBuffer,
-          value: props.value,
+          cursorOffset: currentCursorOffset,
+          killBuffer: killBufferRef.current,
+          value: currentValue,
         },
         action.input,
         action.key,
       )
 
       if (editingResult.handled) {
-        if (editingResult.cursorOffset !== cursorOffset) {
+        cursorOffsetRef.current = editingResult.cursorOffset
+        killBufferRef.current = editingResult.killBuffer
+        valueRef.current = editingResult.value
+        preferredColumnRef.current = null
+
+        if (editingResult.cursorOffset !== currentCursorOffset) {
           setCursorOffset(editingResult.cursorOffset)
         }
 
-        if (editingResult.killBuffer !== killBuffer) {
-          setKillBuffer(editingResult.killBuffer)
-        }
-
-        if (editingResult.value !== props.value) {
+        if (editingResult.value !== currentValue) {
           props.onChange(editingResult.value)
         }
 
@@ -283,6 +334,12 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
       isActive: !props.disabled,
     },
   )
+
+  const displayValue =
+    props.value.length < valueRef.current.length &&
+    valueRef.current.startsWith(props.value)
+      ? valueRef.current
+      : props.value
 
   return createElement(
     Box,
@@ -296,7 +353,7 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
       disabled: props.disabled,
       placeholder: props.placeholder,
       theme,
-      value: props.value,
+      value: displayValue,
     }),
   )
 }
@@ -601,6 +658,109 @@ function moveComposerCursorToEnd(state: ComposerEditingState): ComposerEditingSt
   return {
     ...state,
     cursorOffset: state.value.length,
+  }
+}
+
+function resolveComposerLineRanges(value: string): Array<{
+  end: number
+  start: number
+}> {
+  const ranges: Array<{
+    end: number
+    start: number
+  }> = []
+  let lineStart = 0
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== '\n') {
+      continue
+    }
+
+    ranges.push({
+      end: index,
+      start: lineStart,
+    })
+    lineStart = index + 1
+  }
+
+  ranges.push({
+    end: value.length,
+    start: lineStart,
+  })
+
+  return ranges
+}
+
+function resolveComposerCursorLocation(
+  value: string,
+  cursorOffset: number,
+): {
+  column: number
+  lineIndex: number
+} {
+  const clampedCursorOffset = clampComposerCursorOffset(cursorOffset, value.length)
+  let lineIndex = 0
+  let lineStart = 0
+
+  for (let index = 0; index < clampedCursorOffset; index += 1) {
+    if (value[index] !== '\n') {
+      continue
+    }
+
+    lineIndex += 1
+    lineStart = index + 1
+  }
+
+  return {
+    column: clampedCursorOffset - lineStart,
+    lineIndex,
+  }
+}
+
+export function resolveComposerVerticalCursorMove(input: {
+  cursorOffset: number
+  direction: 'down' | 'up'
+  preferredColumn: number | null
+  value: string
+}): {
+  cursorOffset: number
+  preferredColumn: number | null
+} {
+  const clampedCursorOffset = clampComposerCursorOffset(
+    input.cursorOffset,
+    input.value.length,
+  )
+  const lineRanges = resolveComposerLineRanges(input.value)
+  const currentLocation = resolveComposerCursorLocation(
+    input.value,
+    clampedCursorOffset,
+  )
+  const targetLineIndex =
+    input.direction === 'up'
+      ? currentLocation.lineIndex - 1
+      : currentLocation.lineIndex + 1
+
+  if (targetLineIndex < 0 || targetLineIndex >= lineRanges.length) {
+    return {
+      cursorOffset: clampedCursorOffset,
+      preferredColumn: input.preferredColumn,
+    }
+  }
+
+  const desiredColumn = input.preferredColumn ?? currentLocation.column
+  const targetLine = lineRanges[targetLineIndex]
+
+  if (!targetLine) {
+    return {
+      cursorOffset: clampedCursorOffset,
+      preferredColumn: input.preferredColumn,
+    }
+  }
+
+  return {
+    cursorOffset:
+      targetLine.start + Math.min(desiredColumn, targetLine.end - targetLine.start),
+    preferredColumn: desiredColumn,
   }
 }
 
