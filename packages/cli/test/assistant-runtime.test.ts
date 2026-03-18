@@ -1300,6 +1300,17 @@ test('assistant Ink composer terminal actions treat shift+enter as a newline edi
   )
 })
 
+test('assistant Ink composer terminal actions treat xterm-style shift+enter escape sequences as a newline edit', () => {
+  for (const rawInput of ['[27;2;13~', '\u001b[27;2;13~']) {
+    const action = resolveComposerTerminalAction(rawInput, createComposerKey())
+
+    assert.equal(action.kind, 'edit')
+    assert.equal(action.input, '\n')
+    assert.equal(action.key.return, false)
+    assert.equal(action.key.shift, true)
+  }
+})
+
 test('assistant Ink composer terminal actions map terminal delete keypresses to backward delete', () => {
   const action = resolveComposerTerminalAction(
     '',
@@ -1344,33 +1355,10 @@ test('assistant Ink composer render keeps newline-adjacent cursors in one wrappe
     color?: string
     wrap?: string
   }
-  const children = React.Children.toArray(renderedProps.children)
 
   assert.equal(renderedProps.wrap, 'wrap')
   assert.equal(renderedProps.color, LIGHT_ASSISTANT_INK_THEME.composerTextColor)
-  assert.deepEqual(children.length, 3)
-  assert.equal(children[0], 'alpha')
-  assert.equal(children[2], '\nbeta gamma')
-  assert.equal(React.isValidElement(children[1]), true)
-
-  if (!React.isValidElement(children[1])) {
-    throw new Error('Expected the cursor segment to render as a React element.')
-  }
-
-  const cursorProps = children[1].props as {
-    backgroundColor?: string
-    children?: React.ReactNode
-    color?: string
-  }
-  assert.equal(cursorProps.children, ' ')
-  assert.equal(
-    cursorProps.backgroundColor,
-    LIGHT_ASSISTANT_INK_THEME.composerCursorBackground,
-  )
-  assert.equal(
-    cursorProps.color,
-    LIGHT_ASSISTANT_INK_THEME.composerCursorTextColor,
-  )
+  assert.equal(renderedProps.children, 'alpha|\nbeta gamma')
 })
 
 function restoreEnvironmentVariable(

@@ -134,15 +134,50 @@ type ComposerTerminalAction =
     }
 
 const COMPOSER_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\\\|;:'\\\",.<>/?"
+const MODIFIED_RETURN_SEQUENCE = /^\u001b?\[27;(\d+);13~$/u
 
 function useAssistantInkTheme(): AssistantInkTheme {
   return React.useContext(AssistantInkThemeContext)
+}
+
+function resolveComposerModifiedReturnAction(
+  input: string,
+  key: Key,
+): ComposerTerminalAction | null {
+  const match = MODIFIED_RETURN_SEQUENCE.exec(input)
+  if (!match) {
+    return null
+  }
+
+  const modifier = Math.max(0, Number.parseInt(match[1] ?? '1', 10) - 1)
+  const shift = key.shift || (modifier & 1) === 1
+
+  if (!shift) {
+    return {
+      kind: 'submit',
+    }
+  }
+
+  return {
+    kind: 'edit',
+    input: '\n',
+    key: {
+      ...key,
+      return: false,
+      shift: true,
+    },
+  }
 }
 
 export function resolveComposerTerminalAction(
   input: string,
   key: Key,
 ): ComposerTerminalAction {
+  const modifiedReturnAction = resolveComposerModifiedReturnAction(input, key)
+  if (modifiedReturnAction) {
+    return modifiedReturnAction
+  }
+
   if (key.return) {
     if (!key.shift) {
       return {
@@ -897,31 +932,24 @@ export function normalizeComposerInsertedText(input: string): string {
 function resolveComposerCursorDisplay(input: {
   cursorOffset: number
   value: string
-}): {
-  afterCursor: string
-  beforeCursor: string
-  cursorCharacter: string
-} {
+}): string {
   const cursorOffset = clampComposerCursorOffset(input.cursorOffset, input.value.length)
   const beforeCursor = input.value.slice(0, cursorOffset)
   const rawCursorCharacter = input.value.slice(cursorOffset, cursorOffset + 1)
+  const afterCursor =
+    cursorOffset < input.value.length
+      ? input.value.slice(cursorOffset + 1)
+      : ''
 
   if (rawCursorCharacter === '\n') {
-    return {
-      afterCursor: `\n${input.value.slice(cursorOffset + 1)}`,
-      beforeCursor,
-      cursorCharacter: ' ',
-    }
+    return `${beforeCursor}|\n${input.value.slice(cursorOffset + 1)}`
   }
 
-  return {
-    afterCursor:
-      cursorOffset < input.value.length
-        ? input.value.slice(cursorOffset + 1)
-        : '',
-    beforeCursor,
-    cursorCharacter: rawCursorCharacter || ' ',
+  if (rawCursorCharacter.length === 0) {
+    return `${beforeCursor}|`
   }
+
+  return `${beforeCursor}|${rawCursorCharacter}${afterCursor}`
 }
 
 export function renderComposerValue(input: {
@@ -954,15 +982,7 @@ export function renderComposerValue(input: {
         color: input.theme.composerPlaceholderColor,
         wrap: 'wrap',
       },
-      createElement(
-        Text,
-        {
-          backgroundColor: input.theme.composerCursorBackground,
-          color: input.theme.composerCursorTextColor,
-        },
-        cursorCharacter,
-      ),
-      remainder,
+      `|${cursorCharacter}${remainder}`,
     )
   }
 
@@ -978,9 +998,7 @@ export function renderComposerValue(input: {
         color: input.theme.composerTextColor,
         wrap: 'wrap',
       },
-      cursorDisplay.beforeCursor,
-      cursorDisplay.cursorCharacter,
-      cursorDisplay.afterCursor,
+      input.value,
     )
   }
 
@@ -990,16 +1008,7 @@ export function renderComposerValue(input: {
       color: input.theme.composerTextColor,
       wrap: 'wrap',
     },
-    cursorDisplay.beforeCursor,
-    createElement(
-      Text,
-      {
-        backgroundColor: input.theme.composerCursorBackground,
-        color: input.theme.composerCursorTextColor,
-      },
-      cursorDisplay.cursorCharacter,
-    ),
-    cursorDisplay.afterCursor,
+    cursorDisplay,
   )
 }
 
