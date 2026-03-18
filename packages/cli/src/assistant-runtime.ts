@@ -18,12 +18,14 @@ export {
   upsertAssistantMemory,
 } from './assistant/memory.js'
 export type {
+  AssistantAutoReplyScanResult,
   AssistantInboxScanResult,
   AssistantRunEvent,
   RunAssistantAutomationInput,
 } from './assistant/automation.js'
 export {
   runAssistantAutomation,
+  scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
 } from './assistant/automation.js'
 

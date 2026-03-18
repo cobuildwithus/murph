@@ -16,6 +16,9 @@ export const whisperModelValues = [
 
 export const whisperModelSchema = z.enum(whisperModelValues)
 
+export const setupChannelValues = ['imessage', 'telegram'] as const
+export const setupChannelSchema = z.enum(setupChannelValues)
+
 export const setupStepKindSchema = z.enum(['install', 'download', 'configure'])
 
 export const setupStepStatusSchema = z.enum([
@@ -39,6 +42,15 @@ export const setupToolsSchema = z.object({
   whisperCommand: pathSchema.nullable(),
   whisperModelPath: pathSchema,
   paddleocrCommand: pathSchema.nullable(),
+})
+
+export const setupConfiguredChannelSchema = z.object({
+  channel: setupChannelSchema,
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  autoReply: z.boolean(),
+  connectorId: z.string().min(1).nullable(),
+  detail: z.string().min(1),
 })
 
 export const setupCommandOptionsSchema = z.object({
@@ -81,12 +93,15 @@ export const setupResultSchema = z.object({
   tools: setupToolsSchema,
   steps: z.array(setupStepResultSchema).min(1),
   bootstrap: inboxBootstrapResultSchema.nullable(),
+  channels: z.array(setupConfiguredChannelSchema),
 })
 
 export type WhisperModel = z.infer<typeof whisperModelSchema>
+export type SetupChannel = z.infer<typeof setupChannelSchema>
 export type SetupCommandOptions = z.infer<typeof setupCommandOptionsSchema>
 export type SetupStepKind = z.infer<typeof setupStepKindSchema>
 export type SetupStepStatus = z.infer<typeof setupStepStatusSchema>
 export type SetupStepResult = z.infer<typeof setupStepResultSchema>
 export type SetupTools = z.infer<typeof setupToolsSchema>
+export type SetupConfiguredChannel = z.infer<typeof setupConfiguredChannelSchema>
 export type SetupResult = z.infer<typeof setupResultSchema>

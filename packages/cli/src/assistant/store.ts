@@ -4,12 +4,14 @@ import path from 'node:path'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
+  assistantAutomationStateV1Schema,
   assistantProviderSessionOptionsSchema,
   assistantSessionSchema,
   assistantTranscriptEntrySchema,
   type AssistantAliasStore,
   type AssistantApprovalPolicy,
   type AssistantAutomationState,
+  type AssistantAutomationStateV1,
   type AssistantBindingDeliveryKind,
   type AssistantChatProvider,
   type AssistantProviderSessionOptions,
@@ -36,7 +38,7 @@ const ASSISTANT_STATE_DIRECTORY_NAME = 'assistant-state'
 const ASSISTANT_STATE_SCHEMA = 'healthybob.assistant-session.v2'
 const LEGACY_ASSISTANT_STATE_SCHEMA = 'healthybob.assistant-session.v1'
 const ASSISTANT_INDEX_STORE_VERSION = 2
-const ASSISTANT_AUTOMATION_STATE_VERSION = 1
+const ASSISTANT_AUTOMATION_STATE_VERSION = 2
 
 export interface AssistantStatePaths {
   absoluteVaultRoot: string
@@ -602,7 +604,20 @@ async function readAutomationState(
 ): Promise<AssistantAutomationState> {
   try {
     const raw = await readFile(paths.automationPath, 'utf8')
-    return assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    const parsed = JSON.parse(raw) as unknown
+    const current = assistantAutomationStateSchema.safeParse(parsed)
+    if (current.success) {
+      return current.data
+    }
+
+    const legacy = assistantAutomationStateV1Schema.safeParse(parsed)
+    if (legacy.success) {
+      const migrated = migrateLegacyAutomationState(legacy.data)
+      await writeJsonFileAtomic(paths.automationPath, migrated)
+      return migrated
+    }
+
+    throw current.error
   } catch (error) {
     if (!isMissingFileError(error)) {
       throw error
@@ -612,10 +627,26 @@ async function readAutomationState(
   const initial = assistantAutomationStateSchema.parse({
     version: ASSISTANT_AUTOMATION_STATE_VERSION,
     inboxScanCursor: null,
+    autoReplyScanCursor: null,
+    autoReplyChannels: [],
+    autoReplyPrimed: true,
     updatedAt: new Date().toISOString(),
   })
   await writeJsonFileAtomic(paths.automationPath, initial)
   return initial
+}
+
+function migrateLegacyAutomationState(
+  legacy: AssistantAutomationStateV1,
+): AssistantAutomationState {
+  return assistantAutomationStateSchema.parse({
+    version: ASSISTANT_AUTOMATION_STATE_VERSION,
+    inboxScanCursor: legacy.inboxScanCursor,
+    autoReplyScanCursor: null,
+    autoReplyChannels: [],
+    autoReplyPrimed: true,
+    updatedAt: legacy.updatedAt,
+  })
 }
 
 function bindingInputFromLocator(

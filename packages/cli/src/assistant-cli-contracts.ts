@@ -209,6 +209,10 @@ export const assistantRunResultSchema = z.object({
   noAction: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
+  replyConsidered: z.number().int().nonnegative(),
+  replied: z.number().int().nonnegative(),
+  replySkipped: z.number().int().nonnegative(),
+  replyFailed: z.number().int().nonnegative(),
   lastError: z.string().nullable(),
 })
 
@@ -217,9 +221,18 @@ export const assistantAutomationCursorSchema = z.object({
   captureId: z.string().min(1),
 })
 
-export const assistantAutomationStateSchema = z.object({
+export const assistantAutomationStateV1Schema = z.object({
   version: z.literal(1),
   inboxScanCursor: assistantAutomationCursorSchema.nullable(),
+  updatedAt: isoTimestampSchema,
+})
+
+export const assistantAutomationStateSchema = z.object({
+  version: z.literal(2),
+  inboxScanCursor: assistantAutomationCursorSchema.nullable(),
+  autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
+  autoReplyChannels: z.array(z.string().min(1)),
+  autoReplyPrimed: z.boolean(),
   updatedAt: isoTimestampSchema,
 })
 
@@ -269,6 +282,9 @@ export type AssistantMemoryUpsertResult = z.infer<
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema
+>
+export type AssistantAutomationStateV1 = z.infer<
+  typeof assistantAutomationStateV1Schema
 >
 export type AssistantAutomationState = z.infer<
   typeof assistantAutomationStateSchema

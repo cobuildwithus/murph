@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-18 (assistant local-transcript and typed Markdown memory docs including explicit `assistant memory search|get|upsert`, private-context health-memory gating, narrow fresh-session core-memory bootstrap guidance, assistant binding/delivery docs, assistant automation cursor docs, assistant Ink chat theme plan/docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned runtime-build closure checks, preserved launch-cwd semantics, webpack query-entry pinning, local device-sync control-plane docs for CLI and web auth plus localhost-default bind, bearer-authenticated control routes, optional public callback/webhook listener separation, and per-account job-serialization runtime assumptions, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
+Last verified: 2026-03-18 (assistant local-transcript and typed Markdown memory docs including explicit `assistant memory search|get|upsert`, private-context health-memory gating, narrow fresh-session core-memory bootstrap guidance, assistant binding/delivery docs, assistant automation cursor plus channel auto-reply docs, assistant Ink chat theme plan/docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned runtime-build closure checks, preserved launch-cwd semantics, webpack query-entry pinning, local device-sync control-plane docs for CLI and web auth plus localhost-default bind, bearer-authenticated control routes, optional public callback/webhook listener separation, per-account job-serialization runtime assumptions, setup/onboard wizard semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 
@@ -10,10 +10,10 @@ This index is the table of contents for durable, repository-local context that a
 
 | Path | Purpose | Source of truth | Owner | Review cadence | Criticality | Last verified |
 | --- | --- | --- | --- | --- | --- | --- |
-| `README.md` | Repo bootstrap summary, runtime-package status, and verification entrypoint for humans. | Repository bootstrap decisions | Healthy Bob Maintainer | Per bootstrap/process change | Medium | 2026-03-17 |
-| `ARCHITECTURE.md` | Top-level module map and trust-boundary summary. | Product/runtime code plus repo decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-17 |
+| `README.md` | Repo bootstrap summary, runtime-package status, and verification entrypoint for humans. | Repository bootstrap decisions | Healthy Bob Maintainer | Per bootstrap/process change | Medium | 2026-03-18 |
+| `ARCHITECTURE.md` | Top-level module map and trust-boundary summary. | Product/runtime code plus repo decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-18 |
 | `docs/architecture.md` | One-page architecture summary and target repo shape for the baseline vault plus adjunct device-sync, inbox, parser, and web layers. | Baseline vault architecture decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-17 |
-| `docs/contracts/` | Frozen contract docs for vault layout, schemas, command surface, and invariants. | Baseline vault interface decisions | Healthy Bob Maintainer | Per contract change | High | 2026-03-17 |
+| `docs/contracts/` | Frozen contract docs for vault layout, schemas, command surface, and invariants. | Baseline vault interface decisions | Healthy Bob Maintainer | Per contract change | High | 2026-03-18 |
 | `agent-docs/PLANS.md` | Execution-plan workflow and storage conventions. | `agent-docs/exec-plans/**` | Healthy Bob Maintainer | Per process change | Medium | 2026-03-12 |
 | `agent-docs/PRODUCT_SENSE.md` | Product-behavior guardrails for future implementation work. | Product specs + user-facing behavior | Healthy Bob Maintainer | Monthly | Medium | 2026-03-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Docs, checks, audits, test posture | Healthy Bob Maintainer | Bi-weekly | Medium | 2026-03-12 |

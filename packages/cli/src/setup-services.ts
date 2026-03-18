@@ -22,6 +22,8 @@ import {
   saveDefaultVaultConfig,
 } from './operator-config.js'
 import {
+  type SetupChannel,
+  type SetupConfiguredChannel,
   type SetupResult,
   type SetupStepKind,
   type SetupStepResult,
@@ -30,6 +32,10 @@ import {
   type WhisperModel,
 } from './setup-cli-contracts.js'
 import type { InboxBootstrapResult } from './inbox-cli-contracts.js'
+import {
+  readAssistantAutomationState,
+  saveAssistantAutomationState,
+} from './assistant-state.js'
 
 interface CommandRunInput {
   file: string
@@ -46,6 +52,7 @@ interface CommandRunResult {
 
 interface SetupInput {
   vault: string
+  channels?: readonly SetupChannel[] | null
   requestId?: string | null
   dryRun?: boolean
   rebuild?: boolean
@@ -66,7 +73,8 @@ interface SetupServicesDependencies {
   platform?: () => NodeJS.Platform
   resolveCliBinPath?: () => string
   runCommand?: (input: CommandRunInput) => Promise<CommandRunResult>
-  inboxServices?: Pick<InboxCliServices, 'bootstrap'>
+  inboxServices?: Pick<InboxCliServices, 'bootstrap'> &
+    Partial<Pick<InboxCliServices, 'sourceAdd' | 'sourceList'>>
   vaultServices?: Pick<VaultCliServices, 'core'>
 }
 
@@ -108,6 +116,8 @@ const BREW_INSTALL_COMMAND =
   'NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 const HEALTHYBOB_PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
 const HEALTHYBOB_PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
+const IMESSAGE_SETUP_CONNECTOR_ID = 'imessage:self'
+const IMESSAGE_SETUP_ACCOUNT_ID = 'self'
 
 const modelFileNames: Record<WhisperModel, string> = {
   tiny: 'ggml-tiny.bin',
@@ -435,12 +445,29 @@ export function createSetupServices(
       vault,
     })
 
+    const channels =
+      input.channels == null
+        ? []
+        : await configureSetupChannels({
+            channels: normalizeSetupChannels(input.channels),
+            dryRun,
+            inboxServices,
+            requestId,
+            steps,
+            vault,
+          })
+
     return {
       arch,
       bootstrap:
         bootstrap === null
           ? null
           : redactHomePathsInValue(bootstrap, homeDirectory),
+      channels: channels.map((channel) => ({
+        ...channel,
+        connectorId: channel.connectorId,
+        detail: redactHomePathInText(channel.detail, homeDirectory),
+      })),
       dryRun,
       notes: notes.map((note) => redactHomePathInText(note, homeDirectory)),
       platform,
@@ -476,7 +503,7 @@ export function isSetupInvocation(
   programName = 'vault-cli',
 ): boolean {
   const commandToken = resolveEffectiveTopLevelToken(args)
-  if (commandToken === 'setup') {
+  if (commandToken === 'setup' || commandToken === 'onboard') {
     return true
   }
 
@@ -485,6 +512,198 @@ export function isSetupInvocation(
   }
 
   return commandToken === null || commandToken === 'help'
+}
+
+function normalizeSetupChannels(
+  value: readonly SetupChannel[] | null | undefined,
+): SetupChannel[] {
+  return [...new Set(value ?? [])]
+}
+
+async function configureSetupChannels(input: {
+  channels: readonly SetupChannel[]
+  dryRun: boolean
+  inboxServices: Pick<InboxCliServices, 'bootstrap'> &
+    Partial<Pick<InboxCliServices, 'sourceAdd' | 'sourceList'>>
+  requestId: string | null
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<SetupConfiguredChannel[]> {
+  const configured: SetupConfiguredChannel[] = []
+
+  if (input.channels.includes('imessage')) {
+    configured.push(
+      await configureIMessageChannel({
+        dryRun: input.dryRun,
+        inboxServices: input.inboxServices,
+        requestId: input.requestId,
+        steps: input.steps,
+        vault: input.vault,
+      }),
+    )
+  }
+
+  if (input.channels.includes('telegram')) {
+    input.steps.push(
+      createStep({
+        detail:
+          'Telegram setup is shown in the onboarding wizard, but the Healthy Bob connector is not wired yet.',
+        id: 'channel-telegram',
+        kind: 'configure',
+        status: 'skipped',
+        title: 'Telegram channel',
+      }),
+    )
+    configured.push({
+      autoReply: false,
+      channel: 'telegram',
+      configured: false,
+      connectorId: null,
+      detail:
+        'Telegram appeared in the wizard, but the connector is still coming soon.',
+      enabled: true,
+    })
+  }
+
+  if (!input.dryRun) {
+    await updateAssistantAutoReplyChannels({
+      channels: configured
+        .filter((channel) => channel.autoReply && channel.configured)
+        .map((channel) => channel.channel),
+      vault: input.vault,
+    })
+  }
+
+  return configured
+}
+
+async function configureIMessageChannel(input: {
+  dryRun: boolean
+  inboxServices: Pick<InboxCliServices, 'bootstrap'> &
+    Partial<Pick<InboxCliServices, 'sourceAdd' | 'sourceList'>>
+  requestId: string | null
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<SetupConfiguredChannel> {
+  if (input.dryRun) {
+    input.steps.push(
+      createStep({
+        detail:
+          'Would add the imessage:self inbox connector and enable assistant auto-reply for new iMessage conversations.',
+        id: 'channel-imessage',
+        kind: 'configure',
+        status: 'planned',
+        title: 'iMessage channel',
+      }),
+    )
+
+    return {
+      autoReply: true,
+      channel: 'imessage',
+      configured: false,
+      connectorId: IMESSAGE_SETUP_CONNECTOR_ID,
+      detail:
+        'Would configure the local iMessage inbox connector and enable assistant auto-reply for new conversations.',
+      enabled: true,
+    }
+  }
+
+  const sourceList = input.inboxServices.sourceList
+  const sourceAdd = input.inboxServices.sourceAdd
+  if (!sourceList || !sourceAdd) {
+    throw new VaultCliError(
+      'runtime_unavailable',
+      'Healthy Bob setup cannot configure iMessage because the inbox source management services are unavailable in this build.',
+    )
+  }
+
+  const listed = await sourceList({
+    vault: input.vault,
+    requestId: input.requestId,
+  })
+  const existingConnector =
+    listed.connectors.find((connector) => connector.id === IMESSAGE_SETUP_CONNECTOR_ID) ??
+    listed.connectors.find(
+      (connector) =>
+        connector.source === 'imessage' && connector.accountId === IMESSAGE_SETUP_ACCOUNT_ID,
+    ) ??
+    null
+
+  if (existingConnector) {
+    input.steps.push(
+      createStep({
+        detail:
+          `Reusing the iMessage inbox connector "${existingConnector.id}" and enabling assistant auto-reply for new iMessage conversations.`,
+        id: 'channel-imessage',
+        kind: 'configure',
+        status: 'reused',
+        title: 'iMessage channel',
+      }),
+    )
+
+    return {
+      autoReply: true,
+      channel: 'imessage',
+      configured: true,
+      connectorId: existingConnector.id,
+      detail:
+        `Reused the iMessage connector "${existingConnector.id}" and enabled assistant auto-reply for new iMessage conversations.`,
+      enabled: true,
+    }
+  }
+
+  const added = await sourceAdd({
+    account: IMESSAGE_SETUP_ACCOUNT_ID,
+    id: IMESSAGE_SETUP_CONNECTOR_ID,
+    includeOwn: true,
+    requestId: input.requestId,
+    source: 'imessage',
+    vault: input.vault,
+  })
+
+  input.steps.push(
+    createStep({
+      detail:
+        `Added the iMessage inbox connector "${added.connector.id}" and enabled assistant auto-reply for new iMessage conversations.`,
+      id: 'channel-imessage',
+      kind: 'configure',
+      status: 'completed',
+      title: 'iMessage channel',
+    }),
+  )
+
+  return {
+    autoReply: true,
+    channel: 'imessage',
+    configured: true,
+    connectorId: added.connector.id,
+    detail:
+      `Configured the iMessage connector "${added.connector.id}" and enabled assistant auto-reply for new iMessage conversations.`,
+    enabled: true,
+  }
+}
+
+async function updateAssistantAutoReplyChannels(input: {
+  channels: readonly SetupChannel[]
+  vault: string
+}): Promise<void> {
+  const state = await readAssistantAutomationState(input.vault)
+  const channels = normalizeSetupChannels(input.channels).filter(
+    (channel) => channel === 'imessage',
+  )
+  const changed =
+    channels.length !== state.autoReplyChannels.length ||
+    channels.some((channel, index) => state.autoReplyChannels[index] !== channel)
+
+  await saveAssistantAutomationState(input.vault, {
+    version: 2,
+    inboxScanCursor: state.inboxScanCursor,
+    autoReplyScanCursor:
+      channels.length === 0 ? null : changed ? null : state.autoReplyScanCursor,
+    autoReplyChannels: channels,
+    autoReplyPrimed: channels.length === 0 ? true : changed ? false : state.autoReplyPrimed,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
 function createStep(input: {

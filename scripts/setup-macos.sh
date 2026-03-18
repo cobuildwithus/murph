@@ -27,7 +27,7 @@ print_install_summary() {
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model'
   printf '%s\n' '  - PaddleX OCR on Apple Silicon unless you pass --skip-ocr'
-  printf '%s\n' '  - the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob/vault-cli shims, and assistant chat'
+  printf '%s\n' '  - the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob/vault-cli shims, onboarding channel selection, and assistant automation/chat handoff'
 }
 
 has_dry_run_flag() {
@@ -66,9 +66,9 @@ print_dry_run_plan() {
   printf '%s\n' '4. Install workspace dependencies with `corepack pnpm install`.'
   printf '%s\n' '5. Build the workspace with `corepack pnpm build`.'
   if [ -n "$delegated_args" ]; then
-    printf '6. Delegate to `node packages/cli/dist/bin.js setup %s`.\n' "$delegated_args"
+    printf '6. Delegate to `node packages/cli/dist/bin.js onboard %s`.\n' "$delegated_args"
   else
-    printf '%s\n' '6. Delegate to `node packages/cli/dist/bin.js setup`.'
+    printf '%s\n' '6. Delegate to `node packages/cli/dist/bin.js onboard`.'
   fi
   printf '%s\n' 'Run the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview.'
 }
@@ -167,4 +167,4 @@ log 'Building Healthy Bob packages...'
 corepack pnpm build
 
 log 'Running Healthy Bob macOS setup...'
-node packages/cli/dist/bin.js setup "$@"
+node packages/cli/dist/bin.js onboard "$@"

@@ -16,7 +16,7 @@ pnpm onboard --vault ./vault
 ./scripts/setup-macos.sh --vault ./vault
 ```
 
-`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then opens `assistant chat`.
+`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. iMessage is enabled by default there, and if you keep it enabled the command will drop into `assistant run` so new iMessages can create or continue an assistant conversation automatically.
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
@@ -282,7 +282,7 @@ The repo also includes a Healthy Bob-native assistant layer:
 - `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider
 - `vault-cli assistant memory search|get|upsert` searches cited assistant memory snippets, fetches one memory item by id, and commits typed non-canonical memory updates under `assistant-state/`
-- `vault-cli assistant run --model <model> [--baseUrl <url>]` runs the always-on inbox triage loop and auto-applies model-routed canonical promotions
+- `vault-cli assistant run [--model <model>] [--baseUrl <url>]` runs the always-on assistant loop; with a model it also performs canonical inbox triage, and without one it can still handle channel auto-reply such as iMessage
 - `vault-cli assistant session list|show` inspects local assistant session metadata under `assistant-state/`; local transcript replay is reserved for the chat UI rather than those metadata commands
 
 Fresh assistant sessions bootstrap from a small core block in `assistant-state/<vault-bucket>/MEMORY.md`. Recent `assistant-state/<vault-bucket>/memory/YYYY-MM-DD.md` notes are now retrieved on demand through `assistant memory search|get` rather than injected wholesale into every fresh session. That continuity layer stays non-canonical, health memory only loads in private assistant contexts, and explicit `assistant memory upsert` writes still never override canonical vault records.
@@ -340,19 +340,24 @@ Noun-specific filters still exist where the underlying records justify them: `hi
 Healthy Bob now has a dedicated macOS setup surface for the local parser/runtime stack:
 
 ```bash
+healthybob onboard
+# or:
 healthybob setup
 ```
 
-That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. The built CLI shape already includes a setup-first `healthybob` alias: `healthybob`, `healthybob --help`, and `healthybob setup ...` route to that setup surface, while other commands continue through the main operator surface. On macOS it will:
+That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. The built CLI shape already includes a setup-first `healthybob` alias: `healthybob`, `healthybob --help`, `healthybob onboard ...`, and `healthybob setup ...` route to that setup surface, while other commands continue through the main operator surface. On macOS it will:
 
 - install or reuse Homebrew
 - install or reuse `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`
 - download a local whisper.cpp model into `~/.healthybob/toolchain/models/whisper/`
 - install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon unless you pass `--skipOcr`
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
+- open an interactive onboarding wizard where channel delivery surfaces can be selected with arrow keys plus Space
+- enable iMessage by default in that wizard and show Telegram as a coming-soon placeholder so the channel surface is visible from day one
 - save that vault as the default Healthy Bob CLI vault for future commands on the same machine
 - install user-level `healthybob` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
-- open `assistant chat` automatically after a successful interactive setup so the default vault is ready to use immediately
+- configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled
+- automatically launch `assistant run` after a successful interactive onboarding with iMessage enabled, or `assistant chat` when no auto-reply channel is selected
 
 Common options:
 
@@ -373,9 +378,9 @@ pnpm onboard --vault ./vault
 
 `pnpm onboard` is a thin alias for the existing macOS wrapper. `pnpm run setup --vault ./vault` works too. Plain `pnpm setup` cannot be claimed by this repo because `pnpm` reserves `setup` as its own built-in command.
 
-That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js setup ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
+That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js onboard ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
-Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, so commands such as `healthybob chat` or `healthybob assistant chat` can omit `--vault` later, and a normal interactive `healthybob setup` run drops straight into that chat surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
+Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, so commands such as `healthybob chat` or `healthybob assistant chat` can omit `--vault` later, and a normal interactive `healthybob onboard` or `healthybob setup` run opens the channel picker first and then drops into the right assistant surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
 
 ## Local Inbox Parser Bootstrap
 

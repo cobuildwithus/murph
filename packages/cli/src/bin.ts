@@ -17,37 +17,58 @@ const {
   createSetupCli,
   detectSetupProgramName,
   isSetupInvocation,
-  shouldAutoLaunchAssistantAfterSetup,
+  resolveSetupPostLaunchAction,
 } = setupCliModule
 
 type SuccessfulSetupContext = import('./setup-cli.js').SuccessfulSetupContext
 
-const argv = process.argv.slice(2)
-const setupProgramName = detectSetupProgramName(process.argv[1])
-const homeDirectory = resolveOperatorHomeDirectory()
+actionMain().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
 
-if (isSetupInvocation(argv, setupProgramName)) {
-  const successfulSetup = {
-    current: null as SuccessfulSetupContext | null,
+async function actionMain(): Promise<void> {
+  const argv = process.argv.slice(2)
+  const setupProgramName = detectSetupProgramName(process.argv[1])
+  const homeDirectory = resolveOperatorHomeDirectory()
+
+  if (isSetupInvocation(argv, setupProgramName)) {
+    const successfulSetup = {
+      current: null as SuccessfulSetupContext | null,
+    }
+    const setupCli = createSetupCli({
+      commandName: setupProgramName,
+      onSetupSuccess(context) {
+        successfulSetup.current = context
+      },
+    })
+    await setupCli.serve(argv)
+
+    const setupContext = successfulSetup.current
+    if (setupContext !== null) {
+      const launchAction = resolveSetupPostLaunchAction(setupContext)
+      if (launchAction !== null) {
+        const launchVault =
+          (await resolveDefaultVault(homeDirectory)) ??
+          expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
+
+        if (launchAction === 'assistant-run') {
+          process.stderr.write(
+            '\nStarting Healthy Bob assistant automation. Leave this terminal open while iMessage auto-reply is active. Press Ctrl+C to stop.\n\n',
+          )
+          await cli.serve(['assistant', 'run', '--vault', launchVault])
+          return
+        }
+
+        process.stderr.write(
+          '\nOpening Healthy Bob assistant chat. Type /exit to quit.\n\n',
+        )
+        await cli.serve(['assistant', 'chat', '--vault', launchVault])
+      }
+    }
+    return
   }
-  const setupCli = createSetupCli({
-    commandName: setupProgramName,
-    onSetupSuccess(context) {
-      successfulSetup.current = context
-    },
-  })
-  await setupCli.serve(argv)
 
-  const setupContext = successfulSetup.current
-  if (setupContext !== null && shouldAutoLaunchAssistantAfterSetup(setupContext)) {
-    const launchVault =
-      (await resolveDefaultVault(homeDirectory)) ??
-      expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
-
-    process.stderr.write('\nOpening Healthy Bob assistant chat. Type /exit to quit.\n\n')
-    await cli.serve(['assistant', 'chat', '--vault', launchVault])
-  }
-} else {
   const defaultVault = await resolveDefaultVault(homeDirectory)
   cli.serve(applyDefaultVaultToArgs(argv, defaultVault))
 }

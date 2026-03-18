@@ -354,9 +354,9 @@ export function registerAssistantCommands(
   assistant.command('run', {
     args: emptyArgsSchema,
     description:
-      'Start the local assistant automation loop that watches the inbox runtime and auto-applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, auto-replies over configured channels such as iMessage, and optionally applies model-routed canonical promotions.',
     hint:
-      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama; the chat surface can still use a different provider adapter.',
+      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model.',
     examples: [
       {
         options: {
@@ -381,8 +381,9 @@ export function registerAssistantCommands(
       model: z
         .string()
         .min(1)
+        .optional()
         .describe(
-          'Model id for inbox triage routing, such as gpt-oss:20b or an AI Gateway model string.',
+          'Optional model id for canonical inbox triage routing, such as gpt-oss:20b or an AI Gateway model string. Omit it when you only want channel auto-reply.',
         ),
       baseUrl: z
         .string()
@@ -439,21 +440,33 @@ export function registerAssistantCommands(
         vaultServices,
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
-        modelSpec: {
-          model: context.options.model,
-          baseUrl: context.options.baseUrl,
-          apiKey: context.options.apiKey,
-          apiKeyEnv: context.options.apiKeyEnv,
-          providerName: context.options.providerName,
-          headers: parseHeadersJsonOption(context.options.headersJson),
-        },
+        modelSpec: context.options.model
+          ? {
+              model: context.options.model,
+              baseUrl: context.options.baseUrl,
+              apiKey: context.options.apiKey,
+              apiKeyEnv: context.options.apiKeyEnv,
+              providerName: context.options.providerName,
+              headers: parseHeadersJsonOption(context.options.headersJson),
+            }
+          : undefined,
         scanIntervalMs: context.options.scanIntervalMs,
         maxPerScan: context.options.maxPerScan,
         once: context.options.once,
         startDaemon: context.options.skipDaemon ? false : true,
         onEvent(event) {
           if (event.type === 'scan.started') {
-            console.error(`[assistant] scanning inbox: ${event.details ?? ''}`)
+            console.error(`[assistant] scanning canonical inbox routing: ${event.details ?? ''}`)
+            return
+          }
+
+          if (event.type === 'reply.scan.started') {
+            console.error(`[assistant] scanning channel auto-reply: ${event.details ?? ''}`)
+            return
+          }
+
+          if (event.type === 'reply.scan.primed') {
+            console.error(`[assistant] primed channel auto-reply: ${event.details ?? ''}`)
             return
           }
 
@@ -464,8 +477,13 @@ export function registerAssistantCommands(
             return
           }
 
+          if (event.type === 'capture.replied') {
+            console.error(`[assistant] replied ${event.captureId}: ${event.details ?? ''}`)
+            return
+          }
+
           console.error(
-            `[assistant] ${event.type.replace(/^capture\./u, '')} ${event.captureId}: ${event.details ?? ''}`,
+            `[assistant] ${event.type.replace(/^(capture|reply\.scan)\./u, '')} ${event.captureId ?? ''}: ${event.details ?? ''}`.trim(),
           )
         },
       })

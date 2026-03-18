@@ -16,7 +16,9 @@ import {
   createSetupCli,
   detectSetupProgramName,
   isSetupInvocation,
+  resolveSetupPostLaunchAction,
   shouldAutoLaunchAssistantAfterSetup,
+  shouldRunSetupWizard,
   type SuccessfulSetupContext,
 } from '../src/setup-cli.js'
 import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
@@ -140,6 +142,7 @@ function makeSetupResult(vault: string): SetupResult {
   return {
     arch: 'arm64',
     bootstrap: makeBootstrapResult(vault),
+    channels: [],
     dryRun: false,
     notes: [],
     platform: 'darwin',
@@ -534,6 +537,126 @@ test.sequential('setup CLI does not report a handoff for dry-run setup', async (
   assert.equal(handoffCalls, 0)
 })
 
+test('setup wizard gating only enables interactive human onboarding runs', () => {
+  assert.equal(
+    shouldRunSetupWizard(
+      {
+        agent: false,
+        dryRun: false,
+        format: 'toon',
+      },
+      {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+    ),
+    true,
+  )
+  assert.equal(
+    shouldRunSetupWizard(
+      {
+        agent: false,
+        dryRun: true,
+        format: 'toon',
+      },
+      {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+    ),
+    false,
+  )
+  assert.equal(
+    shouldRunSetupWizard(
+      {
+        agent: false,
+        dryRun: false,
+        format: 'json',
+      },
+      {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+    ),
+    false,
+  )
+})
+
+test('onboard invokes the wizard for interactive runs and skips it for explicit JSON output', async () => {
+  let wizardCalls = 0
+  const receivedChannels: Array<string[] | null> = []
+  const cli = createSetupCli({
+    commandName: 'healthybob',
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+    services: {
+      async setupMacos(input: any) {
+        receivedChannels.push(
+          input.channels == null ? null : [...input.channels],
+        )
+        return makeSetupResult(input.vault)
+      },
+    } as ReturnType<typeof createSetupServices>,
+    wizard: {
+      async run() {
+        wizardCalls += 1
+        return {
+          channels: ['imessage'],
+        }
+      },
+    },
+  })
+
+  await cli.serve(['onboard', '--format', 'json', '--verbose'], {
+    env: process.env,
+    exit: () => {},
+    stdout() {},
+  })
+
+  assert.equal(wizardCalls, 0)
+  assert.deepEqual(receivedChannels[0], null)
+
+  await cli.serve(['onboard', '--verbose'], {
+    env: process.env,
+    exit: () => {},
+    stdout() {},
+  })
+
+  assert.equal(wizardCalls, 1)
+  assert.deepEqual(receivedChannels[1], ['imessage'])
+})
+
+test('setup handoff launches assistant automation instead of chat when auto-reply channels are enabled', () => {
+  const context = {
+    agent: false,
+    format: 'toon' as const,
+    formatExplicit: false,
+    result: {
+      ...makeSetupResult('./vault'),
+      channels: [
+        {
+          autoReply: true,
+          channel: 'imessage' as const,
+          configured: true,
+          connectorId: 'imessage:self',
+          detail: 'Configured iMessage.',
+          enabled: true,
+        },
+      ],
+    },
+  }
+
+  assert.equal(
+    resolveSetupPostLaunchAction(context, {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    }),
+    'assistant-run',
+  )
+})
+
 test('setup auto-chat gating only enables the handoff for interactive default-format runs', () => {
   const context = {
     agent: false,
@@ -553,7 +676,7 @@ test('setup auto-chat gating only enables the handoff for interactive default-fo
     shouldAutoLaunchAssistantAfterSetup(
       {
         ...context,
-        formatExplicit: true,
+        format: 'json',
       },
       {
         stdinIsTTY: true,
@@ -1225,6 +1348,10 @@ test('setup routing helpers keep the setup alias stable', () => {
     false,
   )
   assert.equal(
+    isSetupInvocation(['onboard', '--dryRun']),
+    true,
+  )
+  assert.equal(
     detectSetupProgramName('/usr/local/bin/healthybob'),
     'healthybob',
   )
@@ -1239,11 +1366,13 @@ test('setup routing helpers keep the setup alias stable', () => {
 
 test.sequential('healthybob alias routes empty and help invocations to setup help', async () => {
   const help = await runSetupAliasRaw('healthybob', ['--help'])
+  const onboardHelp = await runSetupAliasRaw('healthybob', ['onboard', '--help'])
   const emptyInvocation = await runSetupAliasRaw('healthybob', [])
   const inboxHelp = await runSetupAliasRaw('healthybob', ['inbox', 'doctor', '--help'])
 
   assert.match(help, /Healthy Bob local machine setup helpers\./u)
   assert.match(help, /setup\s+Provision the macOS parser\/runtime toolchain/u)
+  assert.match(onboardHelp, /onboard\s+[—-]\s+Alias for setup/u)
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
   assert.match(emptyInvocation, /Healthy Bob local machine setup helpers\./u)
   assert.doesNotMatch(inboxHelp, /Healthy Bob local machine setup helpers\./u)
@@ -1367,13 +1496,13 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     )
     assert.match(
       result.stdout,
-      /the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob\/vault-cli shims, and assistant chat/u,
+      /the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob\/vault-cli shims, onboarding channel selection, and assistant automation\/chat handoff/u,
     )
     assert.match(result.stdout, /Ensure Node >= 22\.16\.0/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(
       result.stdout,
-      /node packages\/cli\/dist\/bin\.js setup --dry-run --vault \.\/vault/u,
+      /node packages\/cli\/dist\/bin\.js onboard --dry-run --vault \.\/vault/u,
     )
     assert.equal(result.stderr, '')
     assert.equal(await readOptionalText(callLog), '')

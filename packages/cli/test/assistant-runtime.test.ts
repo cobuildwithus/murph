@@ -54,6 +54,7 @@ vi.mock('../src/inbox-model-harness.js', () => ({
 import {
   runAssistantAutomation,
   runAssistantChat,
+  scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '../src/assistant-runtime.js'
@@ -717,6 +718,238 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
   ])
 })
 
+test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbound iMessages', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-auto',
+    response: 'auto reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+    vault: path.resolve(input.vault),
+    message: input.message,
+    session: {
+      schema: 'healthybob.assistant-session.v2',
+      sessionId: input.sessionId,
+      provider: 'codex-cli',
+      providerSessionId: 'thread-auto',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:imessage|thread:chat-2',
+        channel: 'imessage',
+        identityId: null,
+        actorId: '+15551234567',
+        threadId: 'chat-2',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'participant',
+          target: '+15551234567',
+        },
+      },
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:01.000Z',
+      lastTurnAt: '2026-03-18T00:00:01.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'imessage',
+      target: '+15551234567',
+      targetKind: 'participant',
+      sentAt: '2026-03-18T00:00:01.000Z',
+      messageLength: input.message.length,
+    },
+  }))
+
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    primed: boolean
+  }> = []
+  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+  const listCalls: unknown[] = []
+
+  const inboxServices = {
+    async list(input: any) {
+      listCalls.push(input)
+      if (input.oldestFirst === false) {
+        return {
+          items: [
+            {
+              captureId: 'cap-backlog',
+              source: 'imessage',
+              accountId: 'self',
+              externalId: 'ext-1',
+              threadId: 'chat-1',
+              threadTitle: null,
+              actorId: '+15550001111',
+              actorName: 'Backlog',
+              actorIsSelf: false,
+              occurredAt: '2026-03-18T09:00:00Z',
+              receivedAt: null,
+              text: 'old message',
+              attachmentCount: 0,
+              envelopePath: 'raw/inbox/1.json',
+              eventId: 'evt-1',
+              promotions: [],
+            },
+          ],
+        }
+      }
+
+      return {
+        items: [
+          {
+            captureId: 'cap-new',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-2',
+            threadId: 'chat-2',
+            threadTitle: null,
+            actorId: '+15551234567',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:05:00Z',
+            receivedAt: null,
+            text: 'How are my macros today?',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/2.json',
+            eventId: 'evt-2',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      assert.equal(input.captureId, 'cap-new')
+      return {
+        capture: {
+          captureId: 'cap-new',
+          source: 'imessage',
+          threadId: 'chat-2',
+          threadIsDirect: true,
+          actorId: '+15551234567',
+        },
+      }
+    },
+  } as any
+
+  const prime = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: false,
+    enabledChannels: ['imessage'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(prime, {
+    considered: 0,
+    failed: 0,
+    replied: 0,
+    skipped: 0,
+  })
+  assert.deepEqual(stateProgress[0], {
+    cursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-backlog',
+    },
+    primed: true,
+  })
+
+  const second = await scanAssistantAutoReplyOnce({
+    afterCursor: stateProgress[0]!.cursor,
+    autoReplyPrimed: true,
+    enabledChannels: ['imessage'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(second, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 1)
+  assert.deepEqual(stateProgress[1], {
+    cursor: {
+      occurredAt: '2026-03-18T09:05:00Z',
+      captureId: 'cap-new',
+    },
+    primed: true,
+  })
+  const artifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-new',
+        'assistant',
+        'chat-result.json',
+      ),
+      'utf8',
+    ),
+  )
+  assert.equal(artifact.schema, 'healthybob.assistant-chat-result.v1')
+  assert.equal(
+    events.some(
+      (event) => event.type === 'reply.scan.primed' && event.details?.includes('cap-backlog'),
+    ),
+    true,
+  )
+  assert.equal(
+    events.some((event) => event.type === 'capture.replied' && event.captureId === 'cap-new'),
+    true,
+  )
+  assert.deepEqual(listCalls, [
+    {
+      vault: vaultRoot,
+      requestId: null,
+      limit: 1,
+      sourceId: null,
+      afterOccurredAt: null,
+      afterCaptureId: null,
+      oldestFirst: false,
+    },
+    {
+      vault: vaultRoot,
+      requestId: null,
+      limit: 50,
+      sourceId: null,
+      afterOccurredAt: '2026-03-18T09:00:00Z',
+      afterCaptureId: 'cap-backlog',
+      oldestFirst: true,
+    },
+  ])
+})
+
 test('runAssistantAutomation reports daemon failures as error results', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-daemon-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -744,6 +977,10 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   assert.equal(result.daemonStarted, true)
   assert.equal(result.lastError, 'daemon exploded')
   assert.equal(result.scans, 1)
+  assert.equal(result.replyConsidered, 0)
+  assert.equal(result.replied, 0)
+  assert.equal(result.replySkipped, 0)
+  assert.equal(result.replyFailed, 0)
 })
 
 test('runAssistantChat delegates to the Ink UI implementation', async () => {
