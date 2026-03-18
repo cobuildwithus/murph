@@ -22,8 +22,35 @@ import {
   upsertRegimenItem,
 } from "../src/bank/index.js";
 
+type AuditLikeRecord = {
+  action?: string;
+  commandName?: string;
+  changes?: Array<{
+    op?: string;
+  }>;
+};
+
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
+}
+
+function selectAuditMetadata(records: unknown[], action: string): Array<{
+  action: string | undefined;
+  commandName: string | undefined;
+  op: string | undefined;
+}> {
+  return records
+    .filter(
+      (record): record is AuditLikeRecord =>
+        typeof record === "object" &&
+        record !== null &&
+        (record as AuditLikeRecord).action === action,
+    )
+    .map((record) => ({
+      action: record.action,
+      commandName: record.commandName,
+      op: record.changes?.[0]?.op,
+    }));
 }
 
 test("goals support multiple active records and preserve relationships in markdown registries", async () => {
@@ -73,6 +100,11 @@ test("goals support multiple active records and preserve relationships in markdo
     vaultRoot,
     relativePath: updated.auditPath,
   });
+  const goalOperations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
 
   assert.equal(primary.created, true);
   assert.equal(secondary.created, true);
@@ -88,10 +120,14 @@ test("goals support multiple active records and preserve relationships in markdo
   assert.equal(read.window.startAt, "2026-03-05");
   assert.deepEqual(primary.record.domains, ["metabolic-health", "sleep"]);
   assert.match(read.markdown, /## Related Experiments/);
-  assert.equal(
-    goalAuditRecords.filter((record) => (record as { action?: string }).action === "goal_upsert").length,
-    4,
-  );
+  assert.deepEqual(selectAuditMetadata(goalAuditRecords, "goal_upsert"), [
+    { action: "goal_upsert", commandName: "core.upsertGoal", op: "create" },
+    { action: "goal_upsert", commandName: "core.upsertGoal", op: "create" },
+    { action: "goal_upsert", commandName: "core.upsertGoal", op: "update" },
+    { action: "goal_upsert", commandName: "core.upsertGoal", op: "update" },
+  ]);
+  assert.equal(goalOperations.filter((operation) => operation.operationType === "goal_upsert").length, 4);
+  assert.ok(goalOperations.every((operation) => operation.status === "committed"));
 });
 
 test("goal id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
@@ -308,6 +344,11 @@ test("regimens support medication and supplement groups plus stop handling", asy
     vaultRoot,
     relativePath: stopped.auditPath,
   });
+  const regimenOperations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
 
   assert.equal(listed.length, 2);
   assert.equal(readMedication.group, "medication");
@@ -319,12 +360,15 @@ test("regimens support medication and supplement groups plus stop handling", asy
   assert.equal(patchedSupplement.record.startedOn, "2026-02-15");
   assert.match(stopped.record.relativePath, /^bank\/regimens\/medication\//);
   assert.match(readMedication.markdown, /Stopped on: 2026-03-20/);
-  assert.equal(
-    regimenAuditRecords.filter((record) => (record as { action?: string }).action === "regimen_upsert").length,
-    3,
-  );
-  assert.equal(
-    stopAuditRecords.filter((record) => (record as { action?: string }).action === "regimen_stop").length,
-    1,
-  );
+  assert.deepEqual(selectAuditMetadata(regimenAuditRecords, "regimen_upsert"), [
+    { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "create" },
+    { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "create" },
+    { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "update" },
+  ]);
+  assert.deepEqual(selectAuditMetadata(stopAuditRecords, "regimen_stop"), [
+    { action: "regimen_stop", commandName: "core.stopRegimenItem", op: "update" },
+  ]);
+  assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_upsert").length, 3);
+  assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_stop").length, 1);
+  assert.ok(regimenOperations.every((operation) => operation.status === "committed"));
 });

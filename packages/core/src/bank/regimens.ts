@@ -1,8 +1,6 @@
-import { buildAuditRecord, resolveAuditShardPath } from "../audit.js";
 import { VaultError } from "../errors.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { generateRecordId } from "../ids.js";
-import { WriteBatch } from "../operations/write-batch.js";
 
 import {
   REGIMEN_DOC_TYPE,
@@ -34,6 +32,7 @@ import {
   normalizeId,
   normalizeSlug,
 } from "./shared.js";
+import { writeBankRecordWithAudit } from "./write-audit.js";
 
 import type { FrontmatterObject } from "../types.js";
 import type {
@@ -282,27 +281,23 @@ export async function upsertRegimenItem(
     body: buildBody(record),
   });
 
-  const batch = await WriteBatch.create({
+  const auditPath = await writeBankRecordWithAudit({
     vaultRoot: input.vaultRoot,
     operationType: "regimen_upsert",
-    summary: `Upsert regimen ${record.regimenId}`,
-  });
-  await batch.stageTextWrite(record.relativePath, markdown);
-  const audit = buildAuditRecord({
-    action: "regimen_upsert",
-    commandName: "core.upsertRegimenItem",
-    summary: `Upserted regimen ${record.regimenId}.`,
-    targetIds: [record.regimenId],
-    changes: [
+    batchSummary: `Upsert regimen ${record.regimenId}`,
+    relativePath: record.relativePath,
+    markdown,
+    auditAction: "regimen_upsert",
+    auditCommandName: "core.upsertRegimenItem",
+    auditSummary: `Upserted regimen ${record.regimenId}.`,
+    auditTargetIds: [record.regimenId],
+    auditChanges: [
       {
         path: record.relativePath,
         op: existingRecord ? "update" : "create",
       },
     ],
   });
-  const auditPath = resolveAuditShardPath(audit.occurredAt);
-  await batch.stageJsonlAppend(auditPath, `${JSON.stringify(audit)}\n`);
-  await batch.commit();
 
   return {
     created: !existingRecord,
@@ -337,27 +332,23 @@ export async function stopRegimenItem(
     body: buildBody(updatedRecord),
   });
 
-  const batch = await WriteBatch.create({
+  const auditPath = await writeBankRecordWithAudit({
     vaultRoot: input.vaultRoot,
     operationType: "regimen_stop",
-    summary: `Stop regimen ${updatedRecord.regimenId}`,
-  });
-  await batch.stageTextWrite(updatedRecord.relativePath, markdown);
-  const audit = buildAuditRecord({
-    action: "regimen_stop",
-    commandName: "core.stopRegimenItem",
-    summary: `Stopped regimen ${updatedRecord.regimenId}.`,
-    targetIds: [updatedRecord.regimenId],
-    changes: [
+    batchSummary: `Stop regimen ${updatedRecord.regimenId}`,
+    relativePath: updatedRecord.relativePath,
+    markdown,
+    auditAction: "regimen_stop",
+    auditCommandName: "core.stopRegimenItem",
+    auditSummary: `Stopped regimen ${updatedRecord.regimenId}.`,
+    auditTargetIds: [updatedRecord.regimenId],
+    auditChanges: [
       {
         path: updatedRecord.relativePath,
         op: "update",
       },
     ],
   });
-  const auditPath = resolveAuditShardPath(audit.occurredAt);
-  await batch.stageJsonlAppend(auditPath, `${JSON.stringify(audit)}\n`);
-  await batch.commit();
 
   return {
     auditPath,

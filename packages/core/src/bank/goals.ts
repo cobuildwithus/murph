@@ -1,8 +1,6 @@
-import { buildAuditRecord, resolveAuditShardPath } from "../audit.js";
 import { VaultError } from "../errors.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { generateRecordId } from "../ids.js";
-import { WriteBatch } from "../operations/write-batch.js";
 
 import {
   GOAL_DOC_TYPE,
@@ -36,6 +34,7 @@ import {
   normalizeId,
   normalizeSlug,
 } from "./shared.js";
+import { writeBankRecordWithAudit } from "./write-audit.js";
 
 import type { FrontmatterObject } from "../types.js";
 import type { GoalRecord, GoalWindow, ReadGoalInput, UpsertGoalInput, UpsertGoalResult } from "./types.js";
@@ -226,27 +225,23 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
     body: buildBody(record),
   });
 
-  const batch = await WriteBatch.create({
+  const auditPath = await writeBankRecordWithAudit({
     vaultRoot: input.vaultRoot,
     operationType: "goal_upsert",
-    summary: `Upsert goal ${record.goalId}`,
-  });
-  await batch.stageTextWrite(record.relativePath, markdown);
-  const audit = buildAuditRecord({
-    action: "goal_upsert",
-    commandName: "core.upsertGoal",
-    summary: `Upserted goal ${record.goalId}.`,
-    targetIds: [record.goalId],
-    changes: [
+    batchSummary: `Upsert goal ${record.goalId}`,
+    relativePath: record.relativePath,
+    markdown,
+    auditAction: "goal_upsert",
+    auditCommandName: "core.upsertGoal",
+    auditSummary: `Upserted goal ${record.goalId}.`,
+    auditTargetIds: [record.goalId],
+    auditChanges: [
       {
         path: record.relativePath,
         op: existingRecord ? "update" : "create",
       },
     ],
   });
-  const auditPath = resolveAuditShardPath(audit.occurredAt);
-  await batch.stageJsonlAppend(auditPath, `${JSON.stringify(audit)}\n`);
-  await batch.commit();
 
   return {
     created: !existingRecord,
