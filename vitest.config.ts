@@ -45,6 +45,7 @@ export default defineConfig({
       "packages/cli/test/assistant-codex.test.ts",
       "packages/cli/test/assistant-cli-access.test.ts",
       "packages/cli/test/assistant-channel.test.ts",
+      "packages/cli/test/assistant-chat-theme.test.ts",
       "packages/cli/test/assistant-runtime.test.ts",
       "packages/cli/test/assistant-cli.test.ts",
       "packages/cli/test/assistant-service.test.ts",

@@ -11,6 +11,8 @@ import {
 import type { AssistantChatInput } from '../service.js'
 import { sendAssistantMessage } from '../service.js'
 import {
+  appendAssistantTranscriptEntries,
+  listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
   resolveAssistantSession,
   saveAssistantSession,
@@ -32,17 +34,16 @@ import {
   type InkChatEntry,
   seedChatEntries,
 } from './view-model.js'
+import {
+  LIGHT_ASSISTANT_INK_THEME,
+  resolveAssistantInkTheme,
+  type AssistantInkTheme,
+} from './theme.js'
 
 type AssistantChatResult = ReturnType<typeof assistantChatResultSchema.parse>
 
-const COMPOSER_BACKGROUND = '#f3f4f6'
-const COMPOSER_CURSOR_BACKGROUND = '#1d4ed8'
-const COMPOSER_PLACEHOLDER_COLOR = '#6b7280'
-const COMPOSER_TEXT_COLOR = '#111827'
-const SWITCHER_ACCENT_COLOR = '#0f766e'
-const SWITCHER_BACKGROUND = '#f8fafc'
-const SWITCHER_MUTED_COLOR = '#6b7280'
-const SWITCHER_TEXT_COLOR = '#111827'
+const AssistantInkThemeContext =
+  React.createContext<AssistantInkTheme>(LIGHT_ASSISTANT_INK_THEME)
 interface ComposerInputProps {
   disabled: boolean
   onChange: (value: string) => void
@@ -124,8 +125,13 @@ interface ComposerEditingResult extends ComposerEditingState {
 
 const COMPOSER_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\\\|;:'\\\",.<>/?"
 
+function useAssistantInkTheme(): AssistantInkTheme {
+  return React.useContext(AssistantInkThemeContext)
+}
+
 function ComposerInput(props: ComposerInputProps): React.ReactElement {
   const createElement = React.createElement
+  const theme = useAssistantInkTheme()
   const [cursorOffset, setCursorOffset] = React.useState(props.value.length)
   const [killBuffer, setKillBuffer] = React.useState('')
 
@@ -198,6 +204,7 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
       cursorOffset,
       disabled: props.disabled,
       placeholder: props.placeholder,
+      theme,
       value: props.value,
     }),
   )
@@ -226,6 +233,7 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
   props: ChatHistoryProps,
 ): React.ReactElement {
   const createElement = React.createElement
+  const theme = useAssistantInkTheme()
 
   return createElement(
     Box,
@@ -258,7 +266,7 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
           createElement(
             Text,
             {
-              color: 'red',
+              color: theme.errorColor,
               wrap: 'wrap',
             },
             `Error: ${entry.text}`,
@@ -276,7 +284,7 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
         createElement(
           Box,
           {
-            backgroundColor: COMPOSER_BACKGROUND,
+            backgroundColor: theme.composerBackground,
             flexDirection: 'row',
             paddingX: 2,
             paddingY: 1,
@@ -284,7 +292,7 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
           },
           createElement(
             Text,
-            { color: COMPOSER_TEXT_COLOR },
+            { color: theme.composerTextColor },
             '› ',
           ),
           createElement(
@@ -297,7 +305,7 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
             createElement(
               Text,
               {
-                color: COMPOSER_TEXT_COLOR,
+                color: theme.composerTextColor,
                 wrap: 'wrap',
               },
               entry.text,
@@ -372,6 +380,7 @@ const ChatStatus = React.memo(function ChatStatus(
   props: ChatStatusProps,
 ): React.ReactElement | null {
   const createElement = React.createElement
+  const theme = useAssistantInkTheme()
 
   if (props.busy) {
     return createElement(
@@ -395,9 +404,9 @@ const ChatStatus = React.memo(function ChatStatus(
     createElement(
       Text,
       props.status.kind === 'error'
-        ? { color: 'red' }
+        ? { color: theme.errorColor }
         : props.status.kind === 'success'
-          ? { color: 'green' }
+          ? { color: theme.successColor }
           : { dimColor: true },
       props.status.text,
     ),
@@ -408,6 +417,7 @@ const ChatComposer = React.memo(function ChatComposer(
   props: ChatComposerProps,
 ): React.ReactElement {
   const createElement = React.createElement
+  const theme = useAssistantInkTheme()
   const [value, setValue] = React.useState('')
   const slashSuggestions =
     props.modelSwitcherActive ? [] : getMatchingSlashCommands(value)
@@ -418,7 +428,7 @@ const ChatComposer = React.memo(function ChatComposer(
     createElement(
       Box,
       {
-        backgroundColor: COMPOSER_BACKGROUND,
+        backgroundColor: theme.composerBackground,
         flexDirection: 'row',
         marginBottom: slashSuggestions.length > 0 ? 0 : 1,
         paddingX: 2,
@@ -430,7 +440,7 @@ const ChatComposer = React.memo(function ChatComposer(
         {},
         createElement(
           Text,
-          { color: COMPOSER_TEXT_COLOR },
+          { color: theme.composerTextColor },
           '› ',
         ),
         createElement(ComposerInput, {
@@ -819,6 +829,7 @@ function renderComposerValue(input: {
   cursorOffset: number
   disabled: boolean
   placeholder: string
+  theme: AssistantInkTheme
   value: string
 }): React.ReactElement[] {
   const createElement = React.createElement
@@ -830,7 +841,7 @@ function renderComposerValue(input: {
           Text,
           {
             key: 'placeholder',
-            color: COMPOSER_PLACEHOLDER_COLOR,
+            color: input.theme.composerPlaceholderColor,
           },
           input.placeholder,
         ),
@@ -845,8 +856,8 @@ function renderComposerValue(input: {
         Text,
         {
           key: 'cursor',
-          backgroundColor: COMPOSER_CURSOR_BACKGROUND,
-          color: 'white',
+          backgroundColor: input.theme.composerCursorBackground,
+          color: input.theme.composerCursorTextColor,
         },
         cursorCharacter,
       ),
@@ -854,7 +865,7 @@ function renderComposerValue(input: {
         Text,
         {
           key: 'placeholder',
-          color: COMPOSER_PLACEHOLDER_COLOR,
+          color: input.theme.composerPlaceholderColor,
         },
         remainder,
       ),
@@ -877,7 +888,7 @@ function renderComposerValue(input: {
         Text,
         {
           key: 'before',
-          color: COMPOSER_TEXT_COLOR,
+          color: input.theme.composerTextColor,
         },
         beforeCursor,
       ),
@@ -890,7 +901,7 @@ function renderComposerValue(input: {
         Text,
         {
           key: 'after-disabled',
-          color: COMPOSER_TEXT_COLOR,
+          color: input.theme.composerTextColor,
         },
         cursorCharacter + afterCursor,
       ),
@@ -903,8 +914,8 @@ function renderComposerValue(input: {
       Text,
       {
         key: 'cursor',
-        backgroundColor: COMPOSER_CURSOR_BACKGROUND,
-        color: 'white',
+        backgroundColor: input.theme.composerCursorBackground,
+        color: input.theme.composerCursorTextColor,
       },
       cursorCharacter,
     ),
@@ -916,7 +927,7 @@ function renderComposerValue(input: {
         Text,
         {
           key: 'after',
-          color: COMPOSER_TEXT_COLOR,
+          color: input.theme.composerTextColor,
         },
         afterCursor,
       ),
@@ -928,6 +939,7 @@ function renderComposerValue(input: {
 
 function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
   const createElement = React.createElement
+  const theme = useAssistantInkTheme()
 
   useInput((input, key) => {
     if (key.escape) {
@@ -958,14 +970,14 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
           createElement(
             Text,
             {
-              color: SWITCHER_TEXT_COLOR,
+              color: theme.switcherTextColor,
             },
             'Select Model and Effort',
           ),
           createElement(
             Text,
             {
-              color: SWITCHER_MUTED_COLOR,
+              color: theme.switcherMutedColor,
             },
             'Access legacy models by running codex -m <model_name> or in your config.toml',
           ),
@@ -984,6 +996,7 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
                 index,
                 label: option.value,
                 selected: index === props.modelIndex,
+                theme,
               }),
             ),
           ),
@@ -994,7 +1007,7 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
           createElement(
             Text,
             {
-              color: SWITCHER_TEXT_COLOR,
+              color: theme.switcherTextColor,
             },
             `Select Reasoning Level for ${CHAT_MODEL_OPTIONS[props.modelIndex]?.value ?? 'the current model'}`,
           ),
@@ -1014,6 +1027,7 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
                     ? `${option.label} (default)`
                     : option.label,
                 selected: index === props.reasoningIndex,
+                theme,
               }),
             ),
           ),
@@ -1025,7 +1039,7 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
             createElement(
               Text,
               {
-                color: SWITCHER_MUTED_COLOR,
+                color: theme.switcherMutedColor,
               },
               'Press enter to confirm or esc to go back',
             ),
@@ -1035,7 +1049,7 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
   return createElement(
     Box,
     {
-      backgroundColor: SWITCHER_BACKGROUND,
+      backgroundColor: theme.switcherBackground,
       flexDirection: 'column',
       marginBottom: 1,
       paddingX: 1,
@@ -1049,6 +1063,8 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
 function SlashCommandSuggestions(input: {
   commands: readonly (typeof CHAT_SLASH_COMMANDS)[number][]
 }): React.ReactElement | null {
+  const theme = useAssistantInkTheme()
+
   if (input.commands.length === 0) {
     return null
   }
@@ -1073,7 +1089,7 @@ function SlashCommandSuggestions(input: {
         createElement(
           Text,
           {
-            color: SWITCHER_ACCENT_COLOR,
+            color: theme.accentColor,
           },
           command.command,
         ),
@@ -1081,7 +1097,7 @@ function SlashCommandSuggestions(input: {
         createElement(
           Text,
           {
-            color: SWITCHER_ACCENT_COLOR,
+            color: theme.accentColor,
           },
           command.description,
         ),
@@ -1096,12 +1112,13 @@ function renderSwitcherRow(input: {
   index: number
   label: string
   selected: boolean
+  theme: AssistantInkTheme
 }): React.ReactElement {
   const createElement = React.createElement
-  const color = input.selected ? SWITCHER_ACCENT_COLOR : SWITCHER_TEXT_COLOR
+  const color = input.selected ? input.theme.accentColor : input.theme.switcherTextColor
   const descriptionColor = input.selected
-    ? SWITCHER_ACCENT_COLOR
-    : SWITCHER_MUTED_COLOR
+    ? input.theme.accentColor
+    : input.theme.switcherMutedColor
   const prefix = input.selected ? '›' : ' '
   const currentLabel = input.current ? ' (current)' : ''
 
@@ -1150,6 +1167,7 @@ export async function runAssistantChatWithInk(
 ): Promise<AssistantChatResult> {
   const startedAt = new Date().toISOString()
   const defaults = await resolveAssistantOperatorDefaults()
+  const theme = resolveAssistantInkTheme()
   const resolved = await resolveAssistantSession({
     vault: input.vault,
     sessionId: input.sessionId,
@@ -1168,6 +1186,10 @@ export async function runAssistantChatWithInk(
     profile: input.profile ?? defaults?.profile ?? null,
     reasoningEffort: input.reasoningEffort ?? defaults?.reasoningEffort ?? null,
   })
+  const transcriptEntries = await listAssistantTranscriptEntries(
+    input.vault,
+    resolved.session.sessionId,
+  )
   const redactedVault = redactAssistantDisplayPath(input.vault)
   const codexDisplay = await resolveCodexDisplayOptions({
     model:
@@ -1211,7 +1233,7 @@ export async function runAssistantChatWithInk(
       const { exit } = useApp()
       const [session, setSession] = React.useState(resolved.session)
       const [turns, setTurns] = React.useState(0)
-      const [entries, setEntries] = React.useState(seedChatEntries(resolved.session))
+      const [entries, setEntries] = React.useState(seedChatEntries(transcriptEntries))
       const [busy, setBusy] = React.useState(false)
       const [status, setStatus] = React.useState<{
         kind: 'error' | 'info' | 'success'
@@ -1458,17 +1480,28 @@ export async function runAssistantChatWithInk(
                   : null,
             )
           } catch (error) {
+            const errorText = error instanceof Error ? error.message : String(error)
             setEntries((previous: InkChatEntry[]) => [
               ...previous,
               {
                 kind: 'error',
-                text: error instanceof Error ? error.message : String(error),
+                text: errorText,
               },
             ])
             setStatus({
               kind: 'error',
               text: 'The assistant hit an error. Fix it or keep chatting.',
             })
+            void appendAssistantTranscriptEntries(
+              input.vault,
+              latestSessionRef.current.sessionId,
+              [
+                {
+                  kind: 'error',
+                  text: errorText,
+                },
+              ],
+            ).catch(() => {})
           } finally {
             setBusy(false)
             setBusyStartedAt(null)
@@ -1500,47 +1533,53 @@ export async function runAssistantChatWithInk(
       )
 
       return createElement(
-        Box,
+        AssistantInkThemeContext.Provider,
         {
-          flexDirection: 'column',
-          paddingX: 1,
-          paddingY: 1,
+          value: theme,
         },
-        createElement(ChatStaticFeed, {
-          bindingSummary,
-          entries,
-          sessionId: session.sessionId,
-        }),
         createElement(
           Box,
           {
             flexDirection: 'column',
+            paddingX: 1,
+            paddingY: 1,
           },
-          createElement(ChatStatus, {
-            busy,
-            busySeconds,
-            status,
+          createElement(ChatStaticFeed, {
+            bindingSummary,
+            entries,
+            sessionId: session.sessionId,
           }),
-          modelSwitcherState
-            ? createElement(ModelSwitcher, {
-                currentModel: activeModel,
-                currentReasoningEffort: activeReasoningEffort,
-                mode: modelSwitcherState.mode,
-                modelIndex: modelSwitcherState.modelIndex,
-                onCancel: cancelModelSwitcher,
-                onConfirm: confirmModelSwitcher,
-                onMove: moveModelSwitcherSelection,
-                reasoningIndex: modelSwitcherState.reasoningIndex,
-              })
-            : null,
-          createElement(ChatComposer, {
-            busy,
-            modelSwitcherActive: modelSwitcherState !== null,
-            onSubmit: submitPrompt,
-          }),
-          createElement(ChatFooter, {
-            metadataLine,
-          }),
+          createElement(
+            Box,
+            {
+              flexDirection: 'column',
+            },
+            createElement(ChatStatus, {
+              busy,
+              busySeconds,
+              status,
+            }),
+            modelSwitcherState
+              ? createElement(ModelSwitcher, {
+                  currentModel: activeModel,
+                  currentReasoningEffort: activeReasoningEffort,
+                  mode: modelSwitcherState.mode,
+                  modelIndex: modelSwitcherState.modelIndex,
+                  onCancel: cancelModelSwitcher,
+                  onConfirm: confirmModelSwitcher,
+                  onMove: moveModelSwitcherSelection,
+                  reasoningIndex: modelSwitcherState.reasoningIndex,
+                })
+              : null,
+            createElement(ChatComposer, {
+              busy,
+              modelSwitcherActive: modelSwitcherState !== null,
+              onSubmit: submitPrompt,
+            }),
+            createElement(ChatFooter, {
+              metadataLine,
+            }),
+          ),
         ),
       )
     }

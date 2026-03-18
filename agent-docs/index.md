@@ -1,6 +1,6 @@
 # Healthy Bob Agent Docs Index
 
-Last verified: 2026-03-17 (assistant binding/delivery and metadata-only assistant-state docs, assistant automation cursor docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned runtime-build closure checks, preserved launch-cwd semantics, webpack query-entry pinning, local device-sync control-plane docs for CLI and web auth plus localhost-default bind, bearer-authenticated control routes, optional public callback/webhook listener separation, and per-account job-serialization runtime assumptions, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
+Last verified: 2026-03-17 (assistant binding/delivery and metadata-only assistant-state docs, assistant automation cursor docs, assistant Ink chat theme plan/docs, inbox model-routing trust boundaries, local web observability docs including launcher-owned runtime-build closure checks, preserved launch-cwd semantics, webpack query-entry pinning, local device-sync control-plane docs for CLI and web auth plus localhost-default bind, bearer-authenticated control routes, optional public callback/webhook listener separation, and per-account job-serialization runtime assumptions, setup alias/wrapper semantics, smoke coverage docs, and CLI verification guardrails are aligned across process docs)
 
 ## Purpose
 
