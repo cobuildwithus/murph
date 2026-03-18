@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
-const QUERY_RUNTIME_ENTRY_RELATIVE_PATH = "../query/dist/index.js";
+const WORKSPACE_RUNTIME_ENTRY_RELATIVE_PATHS = {
+  "@healthybob/contracts": "../contracts/dist/index.js",
+  "@healthybob/runtime-state": "../runtime-state/dist/index.js",
+  "@healthybob/query": "../query/dist/index.js",
+} as const;
 
 interface ResolveConfigLike {
   alias?: Record<string, unknown> | readonly WebpackAliasLike[];
@@ -21,7 +25,16 @@ interface WebpackAliasLike {
 }
 
 export function resolveQueryRuntimeEntryPath(packageDir: string): string {
-  return path.resolve(packageDir, QUERY_RUNTIME_ENTRY_RELATIVE_PATH);
+  return resolveWorkspaceRuntimeAliases(packageDir)["@healthybob/query"];
+}
+
+export function resolveWorkspaceRuntimeAliases(packageDir: string): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(WORKSPACE_RUNTIME_ENTRY_RELATIVE_PATHS).map(([packageName, relativePath]) => [
+      packageName,
+      path.resolve(packageDir, relativePath),
+    ]),
+  );
 }
 
 export function installQueryRuntimeAlias<T extends WebpackConfigLike>(
@@ -29,20 +42,25 @@ export function installQueryRuntimeAlias<T extends WebpackConfigLike>(
   packageDir: string,
 ): T {
   const currentAlias = config.resolve?.alias;
-  const queryRuntimeEntryPath = resolveQueryRuntimeEntryPath(packageDir);
+  const workspaceRuntimeAliases = resolveWorkspaceRuntimeAliases(packageDir);
 
   const nextAlias = Array.isArray(currentAlias)
     ? [
-        ...currentAlias.filter((entry) => entry.name !== "@healthybob/query"),
-        {
-          alias: queryRuntimeEntryPath,
-          name: "@healthybob/query",
+        ...currentAlias.filter((entry) => !(entry.name in workspaceRuntimeAliases)),
+        ...Object.entries(workspaceRuntimeAliases).map(([packageName, alias]) => ({
+          alias,
+          name: packageName,
           onlyModule: true,
-        },
+        })),
       ]
     : {
         ...(currentAlias ?? {}),
-        "@healthybob/query$": queryRuntimeEntryPath,
+        ...Object.fromEntries(
+          Object.entries(workspaceRuntimeAliases).map(([packageName, alias]) => [
+            `${packageName}$`,
+            alias,
+          ]),
+        ),
       };
 
   config.resolve = {

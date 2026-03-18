@@ -3,7 +3,11 @@ import path from "node:path";
 
 import { test } from "vitest";
 
-import { installQueryRuntimeAlias, resolveQueryRuntimeEntryPath } from "../next.config";
+import {
+  installQueryRuntimeAlias,
+  resolveQueryRuntimeEntryPath,
+  resolveWorkspaceRuntimeAliases,
+} from "../next.config";
 
 test("resolveQueryRuntimeEntryPath points at the built query entry", () => {
   assert.equal(
@@ -31,11 +35,19 @@ test("installQueryRuntimeAlias pins @healthybob/query to the built package outpu
   }
 
   const aliases = config.resolve.alias as Record<string, unknown>;
+  const workspaceRuntimeAliases = resolveWorkspaceRuntimeAliases("/repo/packages/web");
 
   assert.equal(aliases.react, "/repo/node_modules/react/index.js");
-  assert.equal(
-    aliases["@healthybob/query$"],
-    path.resolve("/repo/packages/query/dist/index.js"),
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(aliases).filter(([name]) => name.startsWith("@healthybob/")),
+    ),
+    Object.fromEntries(
+      Object.entries(workspaceRuntimeAliases).map(([packageName, alias]) => [
+        `${packageName}$`,
+        alias,
+      ]),
+    ),
   );
 });
 
@@ -54,6 +66,11 @@ test("installQueryRuntimeAlias preserves webpack alias arrays", () => {
             name: "@healthybob/query",
             onlyModule: true,
           },
+          {
+            alias: "/stale/contracts.js",
+            name: "@healthybob/contracts",
+            onlyModule: true,
+          },
         ],
       },
     },
@@ -66,16 +83,18 @@ test("installQueryRuntimeAlias preserves webpack alias arrays", () => {
     assert.fail("Expected webpack aliases to remain an array.");
   }
 
+  const workspaceRuntimeAliases = resolveWorkspaceRuntimeAliases("/repo/packages/web");
+
   assert.deepEqual(config.resolve.alias, [
     {
       alias: "/repo/node_modules/react/index.js",
       name: "react",
       onlyModule: true,
     },
-    {
-      alias: path.resolve("/repo/packages/query/dist/index.js"),
-      name: "@healthybob/query",
+    ...Object.entries(workspaceRuntimeAliases).map(([packageName, alias]) => ({
+      alias,
+      name: packageName,
       onlyModule: true,
-    },
+    })),
   ]);
 });

@@ -23,6 +23,7 @@ import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operat
 import { createSetupServices } from '../src/setup-services.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
 import {
+  ensureCliRuntimeArtifacts,
   repoRoot,
   requireData,
   type CliEnvelope,
@@ -197,6 +198,8 @@ async function runSetupAliasRaw(
   aliasName: string,
   args: string[],
 ): Promise<string> {
+  await ensureCliRuntimeArtifacts()
+
   const aliasRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-alias-'))
   const aliasPath = path.join(aliasRoot, aliasName)
 

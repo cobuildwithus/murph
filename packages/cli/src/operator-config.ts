@@ -74,6 +74,16 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'vault',
 ])
 
+const NON_EXECUTING_BUILTIN_FLAGS = new Set([
+  '--help',
+  '-h',
+  '--llms',
+  '--llms-full',
+  '--mcp',
+  '--schema',
+  '--version',
+])
+
 export function resolveOperatorHomeDirectory(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -265,7 +275,7 @@ export function applyDefaultVaultToArgs(
   args: readonly string[],
   vault: string | null,
 ): string[] {
-  if (!vault || hasExplicitVaultOption(args)) {
+  if (!vault || hasExplicitVaultOption(args) || hasNonExecutingBuiltinFlag(args)) {
     return [...args]
   }
 
@@ -285,4 +295,8 @@ export function applyDefaultVaultToArgs(
     vault,
     ...args.slice(separatorIndex),
   ]
+}
+
+function hasNonExecutingBuiltinFlag(args: readonly string[]): boolean {
+  return args.some((token) => NON_EXECUTING_BUILTIN_FLAGS.has(token))
 }

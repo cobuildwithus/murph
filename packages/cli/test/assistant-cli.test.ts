@@ -226,6 +226,17 @@ test('root chat alias participates in default-vault injection', () => {
   )
 })
 
+test('default-vault injection skips non-executing builtin flags', () => {
+  assert.deepEqual(applyDefaultVaultToArgs(['chat', '--help'], '/tmp/default-vault'), [
+    'chat',
+    '--help',
+  ])
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['assistant', 'session', '--schema'], '/tmp/default-vault'),
+    ['assistant', 'session', '--schema'],
+  )
+})
+
 test('root chat prints only a resume hint after a human TTY session exits', async () => {
   runtimeMocks.runAssistantChat.mockResolvedValue(createMockChatResult('asst_human'))
 
