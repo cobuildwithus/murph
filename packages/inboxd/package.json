@@ -1,9 +1,12 @@
 {
   "name": "@healthybob/inboxd",
   "version": "0.0.0",
-  "private": true,
+  "private": false,
   "description": "Local inbox ingestion runtime for Healthy Bob.",
   "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/healthybob"
@@ -33,7 +36,7 @@
     "@healthybob/contracts": "workspace:*",
     "@healthybob/core": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
-    "@photon-ai/imessage-kit": "*",
+    "@photon-ai/imessage-kit": "2.1.2",
     "grammy": "1.41.1"
   }
 }

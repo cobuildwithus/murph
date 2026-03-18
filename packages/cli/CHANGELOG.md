@@ -1,3 +1,3 @@
 # Changelog
 
-All notable changes to `@healthybob/cli` will be documented in this file.
+All notable changes to `healthybob` will be documented in this file.

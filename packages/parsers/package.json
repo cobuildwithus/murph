@@ -1,9 +1,16 @@
 {
   "name": "@healthybob/parsers",
   "version": "0.0.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/healthybob"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

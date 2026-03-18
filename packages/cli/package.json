@@ -1,11 +1,8 @@
 {
-  "name": "@healthybob/cli",
+  "name": "healthybob",
   "version": "0.0.0",
   "private": false,
   "license": "GPL-3.0-only",
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/healthybob"
@@ -35,15 +32,7 @@
     "build": "rimraf dist && tsc -b tsconfig.build.json",
     "typecheck": "pnpm --dir ../contracts build && pnpm --dir ../runtime-state build && tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm --dir ../contracts build && pnpm --dir ../core build && pnpm --dir ../importers build && pnpm --dir ../query build && pnpm --dir ../inboxd build && pnpm --dir ../parsers build && pnpm build && tsx ./scripts/verify-package-shape.ts && pnpm --dir ../.. exec vitest run packages/cli/test/health-tail.test.ts packages/cli/test/assistant-harness.test.ts packages/cli/test/assistant-state.test.ts packages/cli/test/assistant-provider.test.ts packages/cli/test/assistant-codex.test.ts packages/cli/test/assistant-channel.test.ts packages/cli/test/assistant-runtime.test.ts packages/cli/test/assistant-cli.test.ts packages/cli/test/incur-smoke.test.ts packages/cli/test/inbox-incur-smoke.test.ts packages/cli/test/runtime.test.ts packages/cli/test/inbox-cli.test.ts packages/cli/test/inbox-model-harness.test.ts packages/cli/test/inbox-model-route.test.ts packages/cli/test/search-runtime.test.ts packages/cli/test/setup-cli.test.ts packages/cli/test/release-script-coverage-audit.test.ts packages/cli/test/release-workflow-guards.test.ts --no-coverage --maxWorkers 1",
-    "prepack": "pnpm build",
-    "changelog:update": "bash scripts/update-changelog.sh",
-    "release:notes": "bash scripts/generate-release-notes.sh",
-    "verify:release-target": "tsx ./scripts/verify-release-target.ts",
-    "release:check": "bash scripts/release-check.sh",
-    "release:dry-run": "bash scripts/release.sh patch --dry-run",
-    "release:patch": "bash scripts/release.sh patch",
-    "release:minor": "bash scripts/release.sh minor",
-    "release:major": "bash scripts/release.sh major"
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.35",
@@ -54,7 +43,7 @@
     "@healthybob/parsers": "workspace:*",
     "@healthybob/query": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
-    "@photon-ai/imessage-kit": "*",
+    "@photon-ai/imessage-kit": "2.1.2",
     "ai": "^6.0.116",
     "ink": "^6.8.0",
     "ink-text-input": "^6.0.0",

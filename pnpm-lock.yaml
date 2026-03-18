@@ -60,7 +60,7 @@ importers:
         specifier: workspace:*
         version: link:../runtime-state
       '@photon-ai/imessage-kit':
-        specifier: '*'
+        specifier: 2.1.2
         version: 2.1.2
       ai:
         specifier: ^6.0.116
@@ -97,6 +97,15 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/device-syncd:
+    dependencies:
+      '@healthybob/importers':
+        specifier: workspace:*
+        version: link:../importers
+      '@healthybob/runtime-state':
+        specifier: workspace:*
+        version: link:../runtime-state
+
   packages/importers:
     dependencies:
       '@healthybob/core':
@@ -118,7 +127,7 @@ importers:
         specifier: workspace:*
         version: link:../runtime-state
       '@photon-ai/imessage-kit':
-        specifier: '*'
+        specifier: 2.1.2
         version: 2.1.2
       grammy:
         specifier: 1.41.1

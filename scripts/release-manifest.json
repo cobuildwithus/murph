@@ -1,0 +1,42 @@
+{
+  "repositoryUrl": "https://github.com/cobuildwithus/healthybob",
+  "primaryPackage": "healthybob",
+  "releaseArtifacts": {
+    "changelogPath": "packages/cli/CHANGELOG.md",
+    "releaseNotesDir": "packages/cli/release-notes"
+  },
+  "packages": [
+    {
+      "name": "@healthybob/contracts",
+      "path": "packages/contracts"
+    },
+    {
+      "name": "@healthybob/runtime-state",
+      "path": "packages/runtime-state"
+    },
+    {
+      "name": "@healthybob/core",
+      "path": "packages/core"
+    },
+    {
+      "name": "@healthybob/query",
+      "path": "packages/query"
+    },
+    {
+      "name": "@healthybob/importers",
+      "path": "packages/importers"
+    },
+    {
+      "name": "@healthybob/inboxd",
+      "path": "packages/inboxd"
+    },
+    {
+      "name": "@healthybob/parsers",
+      "path": "packages/parsers"
+    },
+    {
+      "name": "healthybob",
+      "path": "packages/cli"
+    }
+  ]
+}

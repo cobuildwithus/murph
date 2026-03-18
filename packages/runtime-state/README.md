@@ -1,0 +1,17 @@
+# `@healthybob/runtime-state`
+
+Shared runtime-state helpers for Healthy Bob packages that need rebuildable
+machine-local storage next to a vault.
+
+## Scope
+
+- resolve canonical `.runtime` paths relative to a vault root
+- provide shared SQLite defaults for local runtime stores
+- keep inbox, query, device-sync, and CLI runtime paths aligned
+
+## Contract
+
+- runtime state is always local and rebuildable
+- canonical health truth never moves into `.runtime`
+- downstream packages should consume these helpers instead of inventing their
+  own per-package runtime path conventions

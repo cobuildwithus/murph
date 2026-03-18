@@ -52,8 +52,8 @@ const tsconfigTypecheck = JSON.parse(
 const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
 
 assert(
-  packageJson.name === '@healthybob/cli',
-  'package.json must keep the published package name @healthybob/cli.',
+  packageJson.name === 'healthybob',
+  'package.json must keep the published package name healthybob.',
 )
 assert(
   packageJson.private === false,
@@ -88,10 +88,6 @@ assert(
   'package.json exports must target dist/index.d.ts for types.',
 )
 assert(
-  packageJson.publishConfig?.access === 'public',
-  'package.json publishConfig.access must stay public.',
-)
-assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===
     'https://github.com/cobuildwithus/healthybob',
   'package.json repository.url must stay pinned to the Healthy Bob repository.',
@@ -100,15 +96,18 @@ assert(
   packageJson.scripts?.build &&
     packageJson.scripts?.typecheck &&
     packageJson.scripts?.test &&
-    packageJson.scripts?.prepack === 'pnpm build' &&
-    packageJson.scripts?.['verify:release-target'] &&
-    packageJson.scripts?.['changelog:update'] &&
-    packageJson.scripts?.['release:notes'] &&
-    packageJson.scripts?.['release:check'] === 'bash scripts/release-check.sh' &&
-    packageJson.scripts?.['release:patch'] &&
-    packageJson.scripts?.['release:minor'] &&
-    packageJson.scripts?.['release:major'],
-  'package.json must define build/test/typecheck plus the package-scoped release scripts.',
+    packageJson.scripts?.prepack === 'pnpm build',
+  'package.json must define build/test/typecheck plus prepack.',
+)
+assert(
+  !packageJson.scripts?.['verify:release-target'] &&
+    !packageJson.scripts?.['changelog:update'] &&
+    !packageJson.scripts?.['release:notes'] &&
+    !packageJson.scripts?.['release:check'] &&
+    !packageJson.scripts?.['release:patch'] &&
+    !packageJson.scripts?.['release:minor'] &&
+    !packageJson.scripts?.['release:major'],
+  'package.json must not keep package-local release scripts once the monorepo release flow is root-owned.',
 )
 assert(
   !Object.values(packageJson.scripts ?? {}).some((script) =>

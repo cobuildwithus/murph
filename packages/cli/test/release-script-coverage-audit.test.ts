@@ -1,44 +1,49 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(packageDir, '..', '..')
-const packageJson = JSON.parse(
+const rootPackageJson = JSON.parse(
+  readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+) as {
+  name?: string
+  scripts?: Record<string, string>
+}
+const cliPackageJson = JSON.parse(
   readFileSync(path.join(packageDir, 'package.json'), 'utf8'),
 ) as {
+  bin?: Record<string, string>
   files?: string[]
+  name?: string
   scripts?: Record<string, string>
 }
 
-describe('packages/cli release flow coverage audit', () => {
-  it('exposes package-scoped release metadata and scripts', () => {
-    expect(packageJson.files).toContain('CHANGELOG.md')
-    expect(packageJson.scripts?.['verify:release-target']).toBe('tsx ./scripts/verify-release-target.ts')
-    expect(packageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
-    expect(packageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
-    expect(packageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
-    expect(packageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
-    expect(packageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
+describe('monorepo release flow coverage audit', () => {
+  it('exposes root-owned release scripts', () => {
+    expect(rootPackageJson.name).toBe('healthybob-workspace')
+    expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
+    expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
+    expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
+    expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
+    expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
+    expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
   })
 
-  it('keeps release:check ordered around root verification, package readiness, and pack', () => {
-    expect(packageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
-
+  it('keeps release:check ordered around install, build, repo verification, target validation, and pnpm pack', () => {
     const releaseCheck = readFileSync(
-      path.join(packageDir, 'scripts', 'release-check.sh'),
+      path.join(repoRoot, 'scripts', 'release-check.sh'),
       'utf8',
     )
 
     const expectedOrder = [
-      'pnpm --dir "$REPO_ROOT" install --frozen-lockfile',
-      'pnpm --dir "$REPO_ROOT" verify:cli',
-      'pnpm --dir "$REPO_ROOT" docs:drift',
-      'pnpm --dir "$REPO_ROOT" docs:gardening',
-      'pnpm run verify:release-target',
+      'pnpm install --frozen-lockfile',
       'pnpm build',
-      'npm pack --dry-run',
+      'pnpm verify:repo',
+      'node scripts/verify-release-target.mjs',
+      'node scripts/pack-publishables.mjs',
     ]
 
     let previousIndex = -1
@@ -50,50 +55,53 @@ describe('packages/cli release flow coverage audit', () => {
     }
   })
 
-  it('targets package-local release artifacts instead of the workspace root', () => {
-    const releaseScript = readFileSync(path.join(packageDir, 'scripts', 'release.sh'), 'utf8')
-    const changelogScript = readFileSync(
-      path.join(packageDir, 'scripts', 'update-changelog.sh'),
-      'utf8',
-    )
-    const releaseNotesScript = readFileSync(
-      path.join(packageDir, 'scripts', 'generate-release-notes.sh'),
-      'utf8',
-    )
+  it('verifies the live release manifest and publish set', () => {
+    const summary = JSON.parse(
+      execFileSync('node', ['scripts/verify-release-target.mjs', '--json'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      }),
+    ) as {
+      packages: Array<{ name: string }>
+      primaryPackage: { name: string } | null
+      version: string
+    }
+
+    expect(summary.version).toBe('0.0.0')
+    expect(summary.primaryPackage?.name).toBe('healthybob')
+    expect(summary.packages.map((entry) => entry.name)).toEqual([
+      '@healthybob/contracts',
+      '@healthybob/runtime-state',
+      '@healthybob/core',
+      '@healthybob/query',
+      '@healthybob/importers',
+      '@healthybob/inboxd',
+      '@healthybob/parsers',
+      'healthybob',
+    ])
+  })
+
+  it('keeps packages/cli publish-ready as healthybob without package-local release scripts', () => {
+    expect(cliPackageJson.name).toBe('healthybob')
+    expect(cliPackageJson.files).toContain('CHANGELOG.md')
+    expect(cliPackageJson.bin?.healthybob).toBe('dist/bin.js')
+    expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
+    expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
+    expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
+    expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
+    expect(existsSync(path.join(packageDir, 'scripts', 'update-changelog.sh'))).toBe(false)
+    expect(existsSync(path.join(packageDir, 'scripts', 'generate-release-notes.sh'))).toBe(false)
+    expect(existsSync(path.join(packageDir, 'scripts', 'verify-release-target.ts'))).toBe(false)
+  })
+
+  it('keeps release-only docs drift allowances tied to the manifest package set', () => {
     const rootDocsDrift = readFileSync(
       path.join(repoRoot, 'scripts', 'check-agent-docs-drift.sh'),
       'utf8',
     )
 
-    expect(releaseScript).toContain("PACKAGE_JSON_PATH='packages/cli/package.json'")
-    expect(releaseScript).toContain("CHANGELOG_PATH='packages/cli/CHANGELOG.md'")
-    expect(releaseScript).toContain("NOTES_DIR='packages/cli/release-notes'")
-    expect(releaseScript).toContain("COMMIT_CMD='scripts/committer'")
-    expect(releaseScript).toContain(
-      'CHECK_CMD="${HEALTHYBOB_CLI_RELEASE_CHECK_CMD:-pnpm --dir packages/cli release:check}"',
-    )
-    expect(releaseScript).toContain("PACKAGE_NAME='@healthybob/cli'")
-    expect(releaseScript).toContain("REPOSITORY_URL='https://github.com/cobuildwithus/healthybob'")
-
-    expect(changelogScript).toContain('packages/cli/CHANGELOG.md')
-    expect(releaseNotesScript).toContain('release_tag="v$version"')
+    expect(rootDocsDrift).toContain('scripts/release-manifest.json')
     expect(rootDocsDrift).toContain('packages/cli/CHANGELOG.md')
-    expect(rootDocsDrift).toContain('packages/cli/release-notes')
-  })
-
-  it('keeps the root release wrappers as thin proxies into packages/cli', () => {
-    const rootReleaseScript = readFileSync(path.join(repoRoot, 'scripts', 'release.sh'), 'utf8')
-    const rootChangelogScript = readFileSync(
-      path.join(repoRoot, 'scripts', 'update-changelog.sh'),
-      'utf8',
-    )
-    const rootReleaseNotesScript = readFileSync(
-      path.join(repoRoot, 'scripts', 'generate-release-notes.sh'),
-      'utf8',
-    )
-
-    expect(rootReleaseScript).toContain('packages/cli/scripts/release.sh')
-    expect(rootChangelogScript).toContain('packages/cli/scripts/update-changelog.sh')
-    expect(rootReleaseNotesScript).toContain('packages/cli/scripts/generate-release-notes.sh')
+    expect(rootDocsDrift).toContain('package_jsons_version_only')
   })
 })

@@ -1,12 +1,12 @@
 # Testing And CI Map
 
-Last verified: 2026-03-17
+Last verified: 2026-03-18
 
 ## Current Repo Checks
 
 | Command | Purpose | Current coverage |
 | --- | --- | --- |
-| `pnpm typecheck` | Shell syntax validation, repo-owned TS tools typecheck, package-local no-emit typecheck scripts, and the solution-style TypeScript build. | `scripts/*.sh`, `scripts/*.ts`, `e2e/smoke/verify-fixtures.ts`, `packages/contracts/**`, `packages/runtime-state/**`, `packages/cli/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**`, `packages/inboxd/**`, `packages/parsers/**`, `packages/query/**`, `packages/web/**` |
+| `pnpm typecheck` | Shell syntax validation, root release-helper syntax checks, repo-owned TS tools typecheck, package-local no-emit typecheck scripts, and the solution-style TypeScript build. | `scripts/*.{sh,mjs,ts}`, `e2e/smoke/verify-fixtures.ts`, `packages/contracts/**`, `packages/runtime-state/**`, `packages/cli/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**`, `packages/inboxd/**`, `packages/parsers/**`, `packages/query/**`, `packages/web/**` |
 | `pnpm test` | Agent-docs drift checks plus package verification and fixture/scenario integrity validation. | `AGENTS.md`, `ARCHITECTURE.md`, `agent-docs/**`, `packages/contracts/**`, `packages/runtime-state/**`, `packages/cli/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**` including the Oura and WHOOP config/provider/service tests plus HTTP control-plane auth/listener coverage, `packages/inboxd/**`, `packages/parsers/**`, `packages/query/**`, `packages/web/**`, `fixtures/**`, `e2e/smoke/scenarios/**` |
 | `pnpm test:coverage` | Doc inventory/doc-gardening enforcement plus package verification, Vitest V8 per-file coverage gates on the directly exercised runtime modules, command-surface smoke coverage, and the source-artifact guard that rejects handwritten JS-like source files plus tracked `dist/`, `.next/`, `.test-dist/`, and `*.tsbuildinfo` residue under `packages/` and `e2e/` aside from the exact Next.js `packages/web/next-env.d.ts` stub. | `agent-docs/**`, `ARCHITECTURE.md`, `README.md`, `docs/contracts/03-command-surface.md`, `packages/contracts/**`, `packages/runtime-state/**`, `packages/cli/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**`, `packages/inboxd/**`, `packages/parsers/**`, `packages/query/**`, `packages/web/**`, `fixtures/**`, `e2e/smoke/**` |
 | `pnpm test:packages` | Direct runtime verification for executable packages plus built CLI verification without the worktree-sensitive doc-drift wrapper. Runs the local web package’s focused test/build path before the root Vitest suite. | `packages/contracts/**`, `packages/runtime-state/**`, `packages/cli/**`, `packages/core/**`, `packages/importers/**`, `packages/device-syncd/**` including Oura and WHOOP provider/config coverage plus control-plane auth and public-listener route coverage, `packages/inboxd/**`, `packages/parsers/**`, `packages/query/**`, `packages/web/**` |
@@ -19,7 +19,7 @@ Last verified: 2026-03-17
 - Fixture smoke still validates manifests and command-surface coverage, not end-to-end package orchestration.
 - No automated check hits a live AI Gateway or OpenAI-compatible endpoint; inbox model routing is currently verified through type/build/test coverage around the CLI surface and static smoke-manifest coverage only.
 - No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, and stubbed control-plane callers.
-- No CI workflow files exist yet.
+- The tag-driven release workflow is present, but it is only exercised on real `v*.*.*` tag pushes and does not run a live npm publish during ordinary repo verification.
 
 ## Update Rule
 

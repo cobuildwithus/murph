@@ -8,7 +8,7 @@ The workspace includes buildable packages for contracts, shared runtime-state he
 
 Runtime: Node >= 22.16.0. One-command setup is currently macOS-only.
 
-Healthy Bob is not publishable to npm yet because `@healthybob/cli` still depends on workspace packages. Today the recommended install path is from this repo root:
+Healthy Bob now has a fixed-version monorepo release flow that packs `healthybob` plus the direct runtime package chain for npm publication. Until a public version is actually cut, the recommended install path is still from this repo root:
 
 ```bash
 pnpm onboard --vault ./vault
@@ -368,7 +368,7 @@ Common options:
 - `--dry-run` shows the plan without mutating the machine or vault
 - `--skipOcr` disables the PaddleX OCR step even on Apple Silicon
 
-The existing operator/data-plane surface remains under `vault-cli`. The npm publish story is still intentionally blocked by `workspace:*` dependencies in `@healthybob/cli`, so the real supported onboarding path today is the repo-local wrapper below.
+The existing operator/data-plane surface remains under `vault-cli`. Published installs are expected to use the unscoped `healthybob` package plus the internal scoped runtime packages released from the same git tag, but the supported checkout bootstrap path today is still the repo-local wrapper below.
 
 ### Repo-local macOS bootstrap
 

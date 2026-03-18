@@ -7,45 +7,40 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const releaseWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'release.yml')
 
 describe('release workflow guards', () => {
-  it('validates package identity from packages/cli/package.json before publish', () => {
+  it('validates the git tag against the manifest-defined publish set', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
 
-    expect(workflow).toContain('PACKAGE_JSON_PATH: packages/cli/package.json')
-    expect(workflow).toContain('EXPECTED_PACKAGE_NAME: "@healthybob/cli"')
-    expect(workflow).toContain(
-      'EXPECTED_REPOSITORY_URL: "https://github.com/cobuildwithus/healthybob"',
-    )
-    expect(workflow).toContain(
-      'Unexpected package name ${package_name}; expected ${EXPECTED_PACKAGE_NAME}.',
-    )
-    expect(workflow).toContain(
-      'Unexpected package repository ${package_repository_url}; expected ${EXPECTED_REPOSITORY_URL}.',
-    )
-    expect(workflow).toContain(
-      'Tag ${tag_version} does not match ${PACKAGE_JSON_PATH} version ${package_version}.',
-    )
+    expect(workflow).toContain('node scripts/verify-release-target.mjs --expect-version "${tag_version}"')
+    expect(workflow).toContain("Tag '${GITHUB_REF_NAME}' is not a supported release tag.")
+    expect(workflow).not.toContain('EXPECTED_PACKAGE_NAME')
+    expect(workflow).not.toContain('EXPECTED_REPOSITORY_URL')
+    expect(workflow).not.toContain('PACKAGE_JSON_PATH')
   })
 
-  it('runs the root release checks and packs only packages/cli', () => {
+  it('runs root release checks and packs all publishable tarballs with pnpm', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
 
     expect(workflow).toContain('- name: Run release checks')
     expect(workflow).toContain('run: pnpm release:check')
-    expect(workflow).toContain('cd "${PACKAGE_DIR}"')
-    expect(workflow).toContain('npm pack --json --pack-destination "${GITHUB_WORKSPACE}/dist/npm"')
-    expect(workflow).toContain('name: npm-tarball')
-    expect(workflow).not.toContain('npm pack --json --pack-destination dist/npm')
+    expect(workflow).toContain('node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json')
+    expect(workflow).toContain('name: npm-tarballs')
+    expect(workflow).not.toContain('npm pack --json')
   })
 
-  it('keeps prerelease routing and package-local release notes generation', () => {
+  it('keeps prerelease routing, primary-package release notes, and ordered publish helper usage', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
+    const publishHelper = readFileSync(
+      path.join(repoRoot, 'scripts', 'publish-publishables.mjs'),
+      'utf8',
+    )
 
     expect(workflow).toContain('alpha')
     expect(workflow).toContain('beta')
     expect(workflow).toContain('rc')
-    expect(workflow).toContain('notes_path="${PACKAGE_DIR}/release-notes/v${{ needs.tag-check.outputs.version }}.md"')
+    expect(workflow).toContain('manifest.releaseArtifacts.releaseNotesDir')
     expect(workflow).toContain('bash scripts/generate-release-notes.sh')
-    expect(workflow).toContain('publish_cmd=(npm publish "${tarballs[0]}" --access public --provenance)')
-    expect(workflow).toContain('Package version already published; skipping.')
+    expect(workflow).toContain('node scripts/publish-publishables.mjs --pack-output dist/npm/pack-output.json --npm-tag "${{ needs.tag-check.outputs.npm_tag }}" --provenance')
+    expect(publishHelper).toContain('version already exists')
+    expect(publishHelper).toContain('Skipping ${entry.name}@${entry.version}; version already published.')
   })
 })

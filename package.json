@@ -1,5 +1,5 @@
 {
-  "name": "healthybob",
+  "name": "healthybob-workspace",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -b --pretty false",
     "clean": "rimraf packages/*/dist packages/*/.test-dist packages/*/*.tsbuildinfo",
-    "typecheck": "bash -n scripts/check-agent-docs-drift.sh scripts/doc-gardening.sh scripts/open-exec-plan.sh scripts/close-exec-plan.sh scripts/committer scripts/package-audit-context.sh scripts/repo-tools.config.sh scripts/release.sh scripts/release-check.sh scripts/setup-inbox-local.sh scripts/setup-macos.sh scripts/update-changelog.sh scripts/generate-release-notes.sh packages/cli/scripts/release.sh packages/cli/scripts/release-check.sh packages/cli/scripts/update-changelog.sh packages/cli/scripts/generate-release-notes.sh && tsc -p tsconfig.tools.json --pretty false && pnpm typecheck:packages && pnpm build",
+    "typecheck": "bash -n scripts/check-agent-docs-drift.sh scripts/doc-gardening.sh scripts/open-exec-plan.sh scripts/close-exec-plan.sh scripts/committer scripts/package-audit-context.sh scripts/repo-tools.config.sh scripts/release.sh scripts/release-check.sh scripts/setup-inbox-local.sh scripts/setup-macos.sh scripts/update-changelog.sh scripts/generate-release-notes.sh && node --check scripts/release-helpers.mjs && node --check scripts/verify-release-target.mjs && node --check scripts/pack-publishables.mjs && node --check scripts/publish-publishables.mjs && tsc -p tsconfig.tools.json --pretty false && pnpm typecheck:packages && pnpm build",
     "typecheck:packages": "pnpm --dir packages/contracts typecheck && pnpm --dir packages/runtime-state typecheck && pnpm --dir packages/core typecheck && pnpm --dir packages/importers typecheck && pnpm --dir packages/device-syncd typecheck && pnpm --dir packages/query typecheck && pnpm --dir packages/inboxd typecheck && pnpm --dir packages/parsers typecheck && pnpm --dir packages/cli typecheck && pnpm --dir packages/web typecheck",
     "test": "bash scripts/check-agent-docs-drift.sh && pnpm test:packages && tsx e2e/smoke/verify-fixtures.ts",
     "test:packages": "pnpm --dir packages/contracts test && pnpm build && tsx packages/cli/scripts/verify-package-shape.ts && pnpm --dir packages/web test && vitest run --no-coverage --maxWorkers 1",

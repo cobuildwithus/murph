@@ -1,4 +1,4 @@
-# `@healthybob/cli`
+# `healthybob` (`packages/cli`)
 
 Owns the `vault-cli` command surface. The CLI may validate inputs and format outputs, but it must delegate all canonical writes to core.
 
@@ -22,7 +22,7 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 
 ## macOS setup
 
-Once `@healthybob/cli` is publish-ready, the installed-package onboarding path will be:
+Once `healthybob` is published, the installed-package onboarding path will be:
 
 ```bash
 healthybob setup
@@ -34,24 +34,37 @@ Setup also installs user-level `healthybob` and `vault-cli` shims into `~/.local
 
 Useful flags include `--dry-run`, `--whisperModel small.en`, and `--skipOcr`.
 
-Today the supported onboarding path is still the repo-local `scripts/setup-macos.sh` wrapper, because `pnpm release:check` intentionally blocks npm publish while `@healthybob/cli` still depends on `workspace:*` packages. The wrapper is macOS-only, and `./scripts/setup-macos.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `healthybob` and `vault-cli` commands for future shells via those user-level shims.
+From a checkout, the supported onboarding path is still the repo-local `scripts/setup-macos.sh` wrapper. The wrapper is macOS-only, and `./scripts/setup-macos.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `healthybob` and `vault-cli` commands for future shells via those user-level shims.
 
 ## Release Flow
 
-Release/version/publish actions remain user-operated. Root convenience commands proxy into `packages/cli`, so the normal release entrypoints are:
+Release/version/publish actions remain user-operated. The monorepo release source of truth is `scripts/release-manifest.json`, and the normal entrypoints are root commands:
 
 ```bash
 pnpm release:check
 pnpm release:patch   # or: pnpm release:minor / pnpm release:major
 ```
 
-Pre-release and exact-version flows use the same package-scoped script:
+Pre-release and exact-version flows use the same root script:
 
 ```bash
 bash scripts/release.sh preminor --preid alpha
 bash scripts/release.sh 0.1.0-rc.1 --dry-run
 ```
 
-The release flow only mutates `packages/cli/package.json`, `packages/cli/CHANGELOG.md`, and `packages/cli/release-notes/`, then creates a repository tag so `.github/workflows/release.yml` can pack and publish the CLI tarball.
+The release flow bumps every publishable package in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish all tarballs in dependency order.
 
-`pnpm release:check` currently includes a publish-readiness guard that refuses to release while `@healthybob/cli` still depends on `workspace:*` packages. That guard is intentional: it blocks a broken npm publish until the internal package graph is publishable.
+The first publish set is:
+
+- `@healthybob/contracts`
+- `@healthybob/runtime-state`
+- `@healthybob/core`
+- `@healthybob/query`
+- `@healthybob/importers`
+- `@healthybob/inboxd`
+- `@healthybob/parsers`
+- `healthybob`
+
+`pnpm release:check` now installs with the frozen lockfile, builds the workspace, runs the repo checks, verifies that every workspace dependency in the publish set stays inside the publish set, and packs every publishable package with `pnpm pack`.
+
+Trusted publishing still has to be configured on npm for each published package entry that this workflow will publish.

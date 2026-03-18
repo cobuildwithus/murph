@@ -1,4 +1,4 @@
-name: Publish @healthybob/cli
+name: Publish Healthy Bob Packages
 
 on:
   push:
@@ -7,12 +7,6 @@ on:
 
 permissions:
   contents: read
-
-env:
-  PACKAGE_DIR: packages/cli
-  PACKAGE_JSON_PATH: packages/cli/package.json
-  EXPECTED_PACKAGE_NAME: "@healthybob/cli"
-  EXPECTED_REPOSITORY_URL: "https://github.com/cobuildwithus/healthybob"
 
 jobs:
   tag-check:
@@ -27,7 +21,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Validate release tag format and package version
+      - name: Validate release tag format and shared package version
         id: tag_metadata
         shell: bash
         run: |
@@ -38,35 +32,13 @@ jobs:
             exit 1
           }
 
-          [[ -f "${PACKAGE_JSON_PATH}" ]] || {
-            echo "Missing ${PACKAGE_JSON_PATH}."
-            exit 1
-          }
-
           [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || {
             echo "Tag '${GITHUB_REF_NAME}' is not a supported release tag."
             exit 1
           }
 
           tag_version="${GITHUB_REF_NAME#v}"
-          package_name="$(node -e "console.log(JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).name)" "${PACKAGE_JSON_PATH}")"
-          package_repository_url="$(node -e "const p=JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')); const r=p.repository; console.log(typeof r==='string' ? r : (r && typeof r.url === 'string' ? r.url : ''))" "${PACKAGE_JSON_PATH}")"
-          package_version="$(node -e "console.log(JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).version)" "${PACKAGE_JSON_PATH}")"
-
-          [[ "${package_name}" == "${EXPECTED_PACKAGE_NAME}" ]] || {
-            echo "Unexpected package name ${package_name}; expected ${EXPECTED_PACKAGE_NAME}."
-            exit 1
-          }
-
-          [[ "${package_repository_url}" == "${EXPECTED_REPOSITORY_URL}" ]] || {
-            echo "Unexpected package repository ${package_repository_url}; expected ${EXPECTED_REPOSITORY_URL}."
-            exit 1
-          }
-
-          [[ "${tag_version}" == "${package_version}" ]] || {
-            echo "Tag ${tag_version} does not match ${PACKAGE_JSON_PATH} version ${package_version}."
-            exit 1
-          }
+          node scripts/verify-release-target.mjs --expect-version "${tag_version}"
 
           npm_tag=""
           if [[ "${tag_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -92,7 +64,7 @@ jobs:
           echo "npm_tag=${npm_tag}" >> "$GITHUB_OUTPUT"
           echo "is_prerelease=${is_prerelease}" >> "$GITHUB_OUTPUT"
 
-  build-package:
+  build:
     needs: tag-check
     runs-on: ubuntu-latest
     steps:
@@ -114,18 +86,13 @@ jobs:
       - name: Run release checks
         run: pnpm release:check
 
-      - name: Validate package contents
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist/npm
-          cd "${PACKAGE_DIR}"
-          npm pack --json --pack-destination "${GITHUB_WORKSPACE}/dist/npm" > "${GITHUB_WORKSPACE}/dist/npm/pack-output.json"
+      - name: Pack publishable packages
+        run: node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json
 
-      - name: Upload npm package artifact
+      - name: Upload npm package artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: npm-tarball
+          name: npm-tarballs
           path: |
             dist/npm/*.tgz
             dist/npm/pack-output.json
@@ -133,29 +100,16 @@ jobs:
   github-release:
     needs:
       - tag-check
-      - build-package
+      - build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          registry-url: "https://registry.npmjs.org"
-          cache: pnpm
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
       - uses: actions/download-artifact@v7
         with:
-          name: npm-tarball
+          name: npm-tarballs
           path: dist/npm
 
       - name: Resolve release notes body
@@ -163,7 +117,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          notes_path="${PACKAGE_DIR}/release-notes/v${{ needs.tag-check.outputs.version }}.md"
+          release_notes_dir="$(node -e 'const fs=require("node:fs"); const manifest=JSON.parse(fs.readFileSync("scripts/release-manifest.json","utf8")); process.stdout.write(manifest.releaseArtifacts.releaseNotesDir);')"
+          notes_path="${release_notes_dir}/v${{ needs.tag-check.outputs.version }}.md"
           if [ ! -f "${notes_path}" ]; then
             bash scripts/generate-release-notes.sh "${{ needs.tag-check.outputs.version }}" "${notes_path}"
           fi
@@ -181,12 +136,14 @@ jobs:
   publish:
     needs:
       - tag-check
-      - build-package
+      - build
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v6
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -198,43 +155,8 @@ jobs:
 
       - uses: actions/download-artifact@v7
         with:
-          name: npm-tarball
+          name: npm-tarballs
           path: dist/npm
 
-      - name: Publish (idempotent)
-        shell: bash
-        env:
-          NPM_TAG: ${{ needs.tag-check.outputs.npm_tag }}
-          VERSION: ${{ needs.tag-check.outputs.version }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          tarballs=(dist/npm/*-"${VERSION}".tgz)
-          if [[ ${#tarballs[@]} -ne 1 ]]; then
-            echo "Expected exactly one tarball for ${VERSION}, found ${#tarballs[@]}"
-            ls -la dist/npm
-            exit 1
-          fi
-
-          publish_cmd=(npm publish "${tarballs[0]}" --access public --provenance)
-          if [[ -n "${NPM_TAG}" ]]; then
-            publish_cmd+=(--tag "${NPM_TAG}")
-          fi
-
-          echo "+ ${publish_cmd[*]}"
-          set +e
-          publish_output="$("${publish_cmd[@]}" 2>&1)"
-          publish_status=$?
-          set -e
-
-          echo "${publish_output}"
-          if [[ ${publish_status} -eq 0 ]]; then
-            exit 0
-          fi
-
-          if grep -qiE "previously published|cannot publish over|version already exists" <<< "${publish_output}"; then
-            echo "Package version already published; skipping."
-            exit 0
-          fi
-
-          exit "${publish_status}"
+      - name: Publish tarballs in dependency order
+        run: node scripts/publish-publishables.mjs --pack-output dist/npm/pack-output.json --npm-tag "${{ needs.tag-check.outputs.npm_tag }}" --provenance
