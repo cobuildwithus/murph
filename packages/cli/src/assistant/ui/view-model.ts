@@ -1,4 +1,7 @@
-import type { AssistantSession } from '../../assistant-cli-contracts.js'
+import type {
+  AssistantSession,
+  AssistantTranscriptEntry,
+} from '../../assistant-cli-contracts.js'
 
 export interface InkChatEntry {
   kind: 'assistant' | 'error' | 'user'
@@ -40,7 +43,7 @@ export type ChatSubmitAction =
     }
 
 export const CHAT_BANNER =
-  'Local-first chat. Provider transcripts stay with the provider when supported.'
+  'Local-first chat. Healthy Bob replays locally stored transcripts and may also resume provider-side history when supported.'
 
 export const CHAT_MODEL_OPTIONS: readonly AssistantModelOption[] = [
   {
@@ -99,8 +102,13 @@ export const CHAT_SLASH_COMMANDS: readonly AssistantSlashCommand[] = [
   },
 ] as const
 
-export function seedChatEntries(_session: AssistantSession): InkChatEntry[] {
-  return []
+export function seedChatEntries(
+  transcriptEntries: readonly AssistantTranscriptEntry[],
+): InkChatEntry[] {
+  return transcriptEntries.map((entry) => ({
+    kind: entry.kind,
+    text: entry.text,
+  }))
 }
 
 export function findAssistantModelOptionIndex(model: string | null): number {

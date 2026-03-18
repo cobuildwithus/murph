@@ -29,6 +29,11 @@ export const assistantBindingDeliveryKindValues = [
   'participant',
   'thread',
 ] as const
+export const assistantTranscriptEntryKindValues = [
+  'user',
+  'assistant',
+  'error',
+] as const
 
 export const assistantProviderSessionOptionsSchema = z.object({
   model: z.string().min(1).nullable(),
@@ -72,6 +77,13 @@ export const assistantSessionSchema = z.object({
   updatedAt: isoTimestampSchema,
   lastTurnAt: isoTimestampSchema.nullable(),
   turnCount: z.number().int().nonnegative(),
+})
+
+export const assistantTranscriptEntrySchema = z.object({
+  schema: z.literal('healthybob.assistant-transcript-entry.v1'),
+  kind: z.enum(assistantTranscriptEntryKindValues),
+  text: z.string(),
+  createdAt: isoTimestampSchema,
 })
 
 export const assistantChannelDeliverySchema = z.object({
@@ -157,6 +169,9 @@ export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
 >
 export type AssistantSession = z.infer<typeof assistantSessionSchema>
+export type AssistantTranscriptEntry = z.infer<
+  typeof assistantTranscriptEntrySchema
+>
 export type AssistantChannelDelivery = z.infer<
   typeof assistantChannelDeliverySchema
 >
@@ -192,6 +207,8 @@ export type AssistantChannelDeliveryTargetKind =
   (typeof assistantChannelDeliveryTargetKindValues)[number]
 export type AssistantBindingDeliveryKind =
   (typeof assistantBindingDeliveryKindValues)[number]
+export type AssistantTranscriptEntryKind =
+  (typeof assistantTranscriptEntryKindValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >

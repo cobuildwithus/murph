@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { Key } from 'ink'
 import { afterEach, beforeEach, test, vi } from 'vitest'
-import { resolveAssistantStatePaths } from '../src/assistant-state.js'
+import {
+  listAssistantTranscriptEntries,
+  resolveAssistantStatePaths,
+} from '../src/assistant-state.js'
 import {
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
@@ -360,7 +363,7 @@ test('sendAssistantMessage reuses saved assistant model defaults and persists re
   }
 })
 
-test('sendAssistantMessage does not persist prompt or response excerpts in assistant state', async () => {
+test('sendAssistantMessage stores prompt and response excerpts in the local assistant transcript without adding them to session metadata', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-runtime-summary-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -396,6 +399,27 @@ test('sendAssistantMessage does not persist prompt or response excerpts in assis
   ) as Record<string, unknown>
   assert.equal('lastUserMessage' in persisted, false)
   assert.equal('lastAssistantMessage' in persisted, false)
+
+  const transcript = await listAssistantTranscriptEntries(
+    vaultRoot,
+    result.session.sessionId,
+  )
+  assert.deepEqual(
+    transcript.map((entry) => ({
+      kind: entry.kind,
+      text: entry.text,
+    })),
+    [
+      {
+        kind: 'user',
+        text: longPrompt,
+      },
+      {
+        kind: 'assistant',
+        text: longResponse,
+      },
+    ],
+  )
 })
 
 test('sendAssistantMessage redacts vault paths under HOME in returned output', async () => {
@@ -790,37 +814,42 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
   )
 })
 
-test('assistant Ink view-model does not replay persisted assistant-state excerpts', () => {
-  const entries = seedChatEntries({
-    schema: 'healthybob.assistant-session.v2',
-    sessionId: 'asst_demo',
-    provider: 'codex-cli',
-    providerSessionId: null,
-    providerOptions: {
-      model: null,
-      reasoningEffort: null,
-      sandbox: 'read-only',
-      approvalPolicy: 'never',
-      profile: null,
-      oss: false,
+test('assistant Ink view-model replays persisted local transcript entries', () => {
+  const entries = seedChatEntries([
+    {
+      schema: 'healthybob.assistant-transcript-entry.v1',
+      kind: 'user',
+      text: 'hello',
+      createdAt: '2026-03-17T00:00:00.000Z',
     },
-    alias: null,
-    binding: {
-      conversationKey: null,
-      channel: null,
-      identityId: null,
-      actorId: null,
-      threadId: null,
-      threadIsDirect: null,
-      delivery: null,
+    {
+      schema: 'healthybob.assistant-transcript-entry.v1',
+      kind: 'assistant',
+      text: 'hi',
+      createdAt: '2026-03-17T00:00:01.000Z',
     },
-    createdAt: '2026-03-17T00:00:00.000Z',
-    updatedAt: '2026-03-17T00:00:00.000Z',
-    lastTurnAt: null,
-    turnCount: 0,
-  })
+    {
+      schema: 'healthybob.assistant-transcript-entry.v1',
+      kind: 'error',
+      text: 'boom',
+      createdAt: '2026-03-17T00:00:02.000Z',
+    },
+  ])
 
-  assert.deepEqual(entries, [])
+  assert.deepEqual(entries, [
+    {
+      kind: 'user',
+      text: 'hello',
+    },
+    {
+      kind: 'assistant',
+      text: 'hi',
+    },
+    {
+      kind: 'error',
+      text: 'boom',
+    },
+  ])
 })
 
 test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
@@ -853,7 +882,10 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     turnCount: 0,
   } as const
 
-  assert.equal(CHAT_BANNER, 'Local-first chat. Provider transcripts stay with the provider when supported.')
+  assert.equal(
+    CHAT_BANNER,
+    'Local-first chat. Healthy Bob replays locally stored transcripts and may also resume provider-side history when supported.',
+  )
   assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
   assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
   assert.equal(CHAT_SLASH_COMMANDS[0]?.command, '/model')

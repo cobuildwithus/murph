@@ -185,7 +185,7 @@ function createAssistantChatCommandDefinition(input?: {
     args: assistantChatArgsSchema,
     description:
       input?.description ??
-      'Open an Ink terminal chat UI backed by the chosen provider while Healthy Bob stores only session metadata.',
+      'Open an Ink terminal chat UI backed by the chosen provider while Healthy Bob stores session metadata plus a local transcript outside the canonical vault.',
     hint:
       input?.hint ??
       'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
@@ -211,9 +211,9 @@ export function registerAssistantCommands(
       prompt: z.string().min(1).describe('Prompt to send to the local assistant session.'),
     }),
     description:
-      'Send one message through the local provider-backed assistant and persist only minimal session metadata outside the canonical vault.',
+      'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
     hint:
-      'The provider owns transcript history when available; Healthy Bob stores only per-session metadata plus explicit conversation bindings under assistant-state/ and does not persist prompt/response excerpts there by default. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
+      'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
     examples: [
       {
         args: {
@@ -452,7 +452,7 @@ export function registerAssistantCommands(
 
   const session = Cli.create('session', {
     description:
-      'Inspect metadata-only Healthy Bob assistant session records stored outside the canonical vault.',
+      'Inspect Healthy Bob assistant session metadata stored outside the canonical vault.',
   })
 
   session.command('list', {
@@ -475,7 +475,7 @@ export function registerAssistantCommands(
     args: z.object({
       sessionId: z.string().min(1).describe('Healthy Bob assistant session id to inspect.'),
     }),
-    description: 'Show one metadata-only assistant session record.',
+    description: 'Show one assistant session metadata record.',
     options: withBaseOptions(),
     output: assistantSessionShowResultSchema,
     async run(context) {
