@@ -1,29 +1,35 @@
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  assistantMemoryLongTermSectionValues,
+  type AssistantMemoryLongTermSection,
+  type AssistantMemoryQueryScope,
+  type AssistantMemoryRecord,
+  type AssistantMemoryRecordKind,
+  type AssistantMemorySearchHit,
+  type AssistantMemoryVisibleSection,
+  type AssistantMemoryWriteScope,
+} from '../assistant-cli-contracts.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 import type { AssistantStatePaths } from './store.js'
-import { resolveAssistantStatePaths } from './store.js'
+import { redactAssistantDisplayPath, resolveAssistantStatePaths } from './store.js'
 import {
   isMissingFileError,
   normalizeNullableString,
   writeTextFileAtomic,
 } from './shared.js'
 
-const LONG_TERM_MEMORY_SECTIONS = [
-  'Identity',
-  'Preferences',
-  'Standing instructions',
-  'Health context',
-] as const
-
-const MEMORY_PROMPT_MAX_CHARS = 4_500
-const RECENT_DAILY_NOTE_LIMIT = 12
+const LONG_TERM_MEMORY_SECTIONS = assistantMemoryLongTermSectionValues
+const MEMORY_PROMPT_MAX_CHARS = 2_800
+const MEMORY_SEARCH_DEFAULT_LIMIT = 8
+const MEMORY_SEARCH_MAX_LIMIT = 25
 const MEMORY_TIME_SEPARATOR = ' — '
-const SENSITIVE_HEALTH_PATTERN =
-  /\b(?:a1c|allerg(?:y|ies|ic)|asthma|blood pressure|bpm|cholesterol|chronic|condition|diagnos(?:is|ed)|disease|disorder|dosage|dose|glucose|hba1c|heart rate|hdl|lab(?:s| result| results)?|ldl|medication|medicine|mg\b|mg\/dl|mmhg|mmol(?:\/l)?|prescription|resting heart rate|rx|supplement|symptom|syndrome|triglycerides)\b/iu
 const RESPONSE_CONTEXT_PATTERN =
   /\b(?:answer|answers|response|responses|reply|replies|summary|summaries)\b/iu
 const RESPONSE_STYLE_PATTERN =
   /\b(?:bullet(?: point)?s?|concise|brief|detailed|table(?:s)?|tone)\b/iu
+const SENSITIVE_HEALTH_PATTERN =
+  /\b(?:a1c|allerg(?:y|ies|ic)|asthma|blood pressure|bpm|cholesterol|chronic|condition|diagnos(?:is|ed)|disease|disorder|dosage|dose|glucose|hba1c|heart rate|hdl|lab(?:s| result| results)?|ldl|medication|medicine|mg\b|mg\/dl|mmhg|mmol(?:\/l)?|prescription|resting heart rate|rx|supplement|symptom|syndrome|triglycerides)\b/iu
 const TRANSIENT_HEALTH_CONTEXT_PATTERN =
   /\b(?:concern(?:ed)?|worr(?:y|ied)|currently|experiencing|feel(?:ing)?|felt|headache|hurt(?:ing|s)?|infection|lately|migraine|nausea|pain|painful|rash|recently|right now|sick|symptom|symptoms|today|tonight|vomit(?:ing)?|weak|worse|worsening)\b/iu
 const DURABLE_HEALTH_BASELINE_PATTERN =
@@ -36,6 +42,46 @@ const EXPLICIT_HEALTH_MEMORY_LEAD_IN_PATTERN =
 export interface AssistantMemoryPromptInput {
   now?: Date
   vault: string
+  includeSensitiveHealthContext?: boolean
+}
+
+export interface AssistantMemorySearchInput {
+  limit?: number
+  scope?: AssistantMemoryQueryScope
+  section?: AssistantMemoryVisibleSection | null
+  text?: string | null
+  vault: string
+  includeSensitiveHealthContext?: boolean
+}
+
+export interface AssistantMemorySearchResponse {
+  query: string | null
+  results: AssistantMemorySearchHit[]
+  scope: AssistantMemoryQueryScope
+  section: AssistantMemoryVisibleSection | null
+}
+
+export interface AssistantMemoryGetInput {
+  id: string
+  vault: string
+  includeSensitiveHealthContext?: boolean
+}
+
+export interface AssistantMemoryUpsertInput {
+  now?: Date
+  scope?: AssistantMemoryWriteScope
+  section?: AssistantMemoryLongTermSection | null
+  sourcePrompt?: string | null
+  text: string
+  vault: string
+  allowSensitiveHealthContext?: boolean
+}
+
+export interface AssistantMemoryUpsertWriteResult {
+  dailyAdded: number
+  longTermAdded: number
+  memories: AssistantMemoryRecord[]
+  scope: AssistantMemoryWriteScope
 }
 
 export interface AssistantMemoryWriteInput {
@@ -50,7 +96,7 @@ export interface AssistantMemoryWriteResult {
 }
 
 export interface AssistantLongTermMemoryEntry {
-  section: AssistantLongTermMemorySection
+  section: AssistantMemoryLongTermSection
   text: string
 }
 
@@ -58,9 +104,6 @@ export interface AssistantMemoryExtraction {
   daily: string[]
   longTerm: AssistantLongTermMemoryEntry[]
 }
-
-export type AssistantLongTermMemorySection =
-  (typeof LONG_TERM_MEMORY_SECTIONS)[number]
 
 interface MarkdownSection {
   heading: string
@@ -78,6 +121,29 @@ interface AssistantMemoryBullet {
   replaceKey: string | null
 }
 
+interface ParsedAssistantMemoryRecord {
+  id: string
+  kind: AssistantMemoryRecordKind
+  recordedAt: string | null
+  section: AssistantMemoryVisibleSection
+  sourceLine: number
+  text: string
+}
+
+interface MemoryRecordParseInput {
+  kind: AssistantMemoryRecordKind
+  sourcePath: string
+  text: string
+  dailyDate?: string | null
+  includeSensitiveHealthContext: boolean
+}
+
+interface NormalizedAssistantMemoryUpsert {
+  dailyText: string | null
+  longTermEntry: AssistantLongTermMemoryEntry | null
+  scope: AssistantMemoryWriteScope
+}
+
 export function resolveAssistantMemoryPaths(vault: string): AssistantStatePaths {
   return resolveAssistantStatePaths(vault)
 }
@@ -92,36 +158,126 @@ export function resolveAssistantDailyMemoryPath(
 export async function loadAssistantMemoryPromptBlock(
   input: AssistantMemoryPromptInput,
 ): Promise<string | null> {
-  const paths = resolveAssistantMemoryPaths(input.vault)
-  const longTerm = await readOptionalText(paths.longTermMemoryPath)
-  const recentNotes = await loadRecentDailyMemoryNotes(paths, input.now)
-  const blocks: string[] = []
-
-  if (longTerm) {
-    const excerpt = renderLongTermMemoryPromptExcerpt(longTerm)
-    if (excerpt) {
-      blocks.push(`Long-term assistant memory:\n${excerpt}`)
+  const records = await loadAssistantMemoryRecords({
+    vault: input.vault,
+    scope: 'long-term',
+    includeSensitiveHealthContext: input.includeSensitiveHealthContext ?? true,
+  })
+  const grouped = groupLongTermPromptRecords(records)
+  const blocks = LONG_TERM_MEMORY_SECTIONS.flatMap((section) => {
+    if (section === 'Health context' && !(input.includeSensitiveHealthContext ?? true)) {
+      return []
     }
-  }
 
-  if (recentNotes.length > 0) {
-    blocks.push(
-      `Recent daily assistant memory (yesterday + today; later bullets override earlier ones):\n${recentNotes
-        .map((note) => `- ${note}`)
-        .join('\n')}`,
-    )
-  }
+    const entries = grouped.get(section) ?? []
+    if (entries.length === 0) {
+      return []
+    }
+
+    return [`${section}:\n${entries.map((entry) => `- ${entry}`).join('\n')}`]
+  })
 
   if (blocks.length === 0) {
     return null
   }
 
-  return [
-    'Assistant memory lives outside the canonical vault and is only for conversational continuity.',
-    'Use it for naming, response preferences, standing instructions, selected health context, and recent project context. Do not treat it as canonical health data or evidence.',
-    'If assistant memory conflicts with the vault, trust the vault. Newer bullets override older bullets.',
-    ...blocks,
-  ].join('\n\n')
+  return truncateMemoryPromptText(
+    [
+      'Assistant memory lives outside the canonical vault and is only for conversational continuity.',
+      'Use this core block only for durable naming, response preferences, standing instructions, and approved private-context health memory.',
+      'If assistant memory conflicts with the vault, trust the vault.',
+      `Core assistant memory:\n${blocks.join('\n\n')}`,
+    ].join('\n\n'),
+  )
+}
+
+export async function searchAssistantMemory(
+  input: AssistantMemorySearchInput,
+): Promise<AssistantMemorySearchResponse> {
+  const scope = input.scope ?? 'all'
+  const section = input.section ?? null
+  const query = normalizeNullableString(input.text)
+  const limit = clampMemorySearchLimit(input.limit)
+  const records = await loadAssistantMemoryRecords({
+    vault: input.vault,
+    scope,
+    includeSensitiveHealthContext: input.includeSensitiveHealthContext ?? true,
+  })
+  const filtered = section
+    ? records.filter((record) => record.section === section)
+    : records
+
+  const hits = filtered
+    .map((record) => ({
+      ...record,
+      score: scoreAssistantMemoryRecord(record, query),
+    }))
+    .filter((record) => (query ? record.score > 0 : true))
+    .sort((left, right) => compareAssistantMemorySearchHits(left, right, Boolean(query)))
+    .slice(0, limit)
+
+  return {
+    query,
+    results: hits,
+    scope,
+    section,
+  }
+}
+
+export async function getAssistantMemory(
+  input: AssistantMemoryGetInput,
+): Promise<AssistantMemoryRecord> {
+  const records = await loadAssistantMemoryRecords({
+    vault: input.vault,
+    scope: 'all',
+    includeSensitiveHealthContext: input.includeSensitiveHealthContext ?? true,
+  })
+  const record = records.find((candidate) => candidate.id === input.id)
+
+  if (!record) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_NOT_FOUND',
+      `Assistant memory "${input.id}" was not found.`,
+    )
+  }
+
+  return record
+}
+
+export async function upsertAssistantMemory(
+  input: AssistantMemoryUpsertInput,
+): Promise<AssistantMemoryUpsertWriteResult> {
+  const normalized = normalizeAssistantMemoryUpsert(input)
+  const paths = resolveAssistantMemoryPaths(input.vault)
+  const now = input.now ?? new Date()
+  let longTermAdded = 0
+  let dailyAdded = 0
+
+  if (normalized.longTermEntry) {
+    longTermAdded = await mergeLongTermAssistantMemory(
+      paths,
+      [normalized.longTermEntry],
+      now,
+    )
+  }
+
+  if (normalized.dailyText) {
+    dailyAdded = await appendAssistantDailyMemory(paths, [normalized.dailyText], now)
+  }
+
+  const memories = await resolveUpsertedAssistantMemoryRecords({
+    dailyDate: normalized.dailyText ? formatLocalDate(now) : null,
+    dailyText: normalized.dailyText,
+    longTermEntry: normalized.longTermEntry,
+    paths,
+  })
+
+  return {
+    dailyAdded,
+    longTermAdded,
+    memories,
+    scope: normalized.scope,
+  }
 }
 
 export async function recordAssistantMemoryTurn(
@@ -148,6 +304,7 @@ export async function recordAssistantMemoryTurn(
     ...extracted.longTerm.map((entry) => entry.text),
     ...extracted.daily,
   ]
+
   if (dailyNotes.length > 0) {
     dailyAdded = await appendAssistantDailyMemory(paths, dailyNotes, now)
   }
@@ -209,6 +366,555 @@ export function extractAssistantMemory(prompt: string): AssistantMemoryExtractio
     longTerm: [...longTerm.values()],
     daily: [...daily.values()],
   }
+}
+
+export function redactAssistantMemoryRecord(
+  record: AssistantMemoryRecord,
+): AssistantMemoryRecord {
+  return {
+    ...record,
+    sourcePath: redactAssistantDisplayPath(record.sourcePath),
+  }
+}
+
+export function redactAssistantMemorySearchHit(
+  record: AssistantMemorySearchHit,
+): AssistantMemorySearchHit {
+  return {
+    ...record,
+    sourcePath: redactAssistantDisplayPath(record.sourcePath),
+  }
+}
+
+async function loadAssistantMemoryRecords(input: {
+  vault: string
+  scope: AssistantMemoryQueryScope
+  includeSensitiveHealthContext: boolean
+}): Promise<AssistantMemoryRecord[]> {
+  const paths = resolveAssistantMemoryPaths(input.vault)
+  const records: AssistantMemoryRecord[] = []
+
+  if (input.scope === 'all' || input.scope === 'long-term') {
+    records.push(
+      ...(await loadAssistantLongTermMemoryRecords(paths, input.includeSensitiveHealthContext)),
+    )
+  }
+
+  if (input.scope === 'all' || input.scope === 'daily') {
+    records.push(
+      ...(await loadAssistantDailyMemoryRecords(paths, input.includeSensitiveHealthContext)),
+    )
+  }
+
+  return records
+}
+
+async function loadAssistantLongTermMemoryRecords(
+  paths: AssistantStatePaths,
+  includeSensitiveHealthContext: boolean,
+): Promise<AssistantMemoryRecord[]> {
+  const text = await readOptionalText(paths.longTermMemoryPath)
+  if (!text) {
+    return []
+  }
+
+  return parseAssistantMemoryRecords({
+    kind: 'long-term',
+    sourcePath: paths.longTermMemoryPath,
+    text,
+    includeSensitiveHealthContext,
+  }).map((record) => toAssistantMemoryRecord(record, paths.longTermMemoryPath))
+}
+
+async function loadAssistantDailyMemoryRecords(
+  paths: AssistantStatePaths,
+  includeSensitiveHealthContext: boolean,
+): Promise<AssistantMemoryRecord[]> {
+  let fileNames: string[] = []
+
+  try {
+    fileNames = await readdir(paths.dailyMemoryDirectory)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+
+  const dailyFiles = fileNames
+    .filter((fileName) => fileName.endsWith('.md'))
+    .sort()
+  const records: AssistantMemoryRecord[] = []
+
+  for (const fileName of dailyFiles) {
+    const filePath = path.join(paths.dailyMemoryDirectory, fileName)
+    const text = await readOptionalText(filePath)
+    if (!text) {
+      continue
+    }
+
+    const dailyDate = fileName.replace(/\.md$/u, '')
+    records.push(
+      ...parseAssistantMemoryRecords({
+        kind: 'daily',
+        sourcePath: filePath,
+        text,
+        dailyDate,
+        includeSensitiveHealthContext,
+      }).map((record) => toAssistantMemoryRecord(record, filePath)),
+    )
+  }
+
+  return records
+}
+
+function toAssistantMemoryRecord(
+  input: ParsedAssistantMemoryRecord,
+  sourcePath: string,
+): AssistantMemoryRecord {
+  return {
+    id: input.id,
+    kind: input.kind,
+    section: input.section,
+    text: input.text,
+    recordedAt: input.recordedAt,
+    sourcePath,
+    sourceLine: input.sourceLine,
+  }
+}
+
+function parseAssistantMemoryRecords(
+  input: MemoryRecordParseInput,
+): ParsedAssistantMemoryRecord[] {
+  const records: ParsedAssistantMemoryRecord[] = []
+  const lines = input.text.replace(/\r\n/gu, '\n').split('\n')
+  let activeSection: AssistantMemoryVisibleSection | null =
+    input.kind === 'daily' ? 'Notes' : null
+
+  for (const [index, line] of lines.entries()) {
+    const sectionMatch = /^##\s+(.+)$/u.exec(line)
+    if (sectionMatch?.[1]) {
+      const heading = normalizeNullableString(sectionMatch[1])
+      if (heading && (heading === 'Notes' || isLongTermSection(heading))) {
+        activeSection = heading
+      } else {
+        activeSection = null
+      }
+      continue
+    }
+
+    if (!activeSection) {
+      continue
+    }
+
+    if (
+      activeSection === 'Health context' &&
+      !input.includeSensitiveHealthContext
+    ) {
+      continue
+    }
+
+    const bullet = parseBulletLine(line)
+    if (!bullet) {
+      continue
+    }
+
+    const text = stripMemoryBulletPrefix(bullet)
+    const lookupKey =
+      input.kind === 'long-term'
+        ? isLongTermSection(activeSection)
+          ? buildLongTermMemoryMapKey(activeSection, text)
+          : null
+        : buildDailyMemoryRecordLookupKey(input.dailyDate, text)
+
+    if (!lookupKey) {
+      continue
+    }
+
+    records.push({
+      id: buildAssistantMemoryRecordId(input.kind, lookupKey),
+      kind: input.kind,
+      recordedAt: extractMemoryRecordTimestampLabel(
+        input.kind,
+        bullet,
+        input.dailyDate ?? null,
+      ),
+      section: activeSection,
+      sourceLine: index + 1,
+      text,
+    })
+  }
+
+  return records
+}
+
+function groupLongTermPromptRecords(
+  records: AssistantMemoryRecord[],
+): Map<AssistantMemoryLongTermSection, string[]> {
+  const grouped = new Map<AssistantMemoryLongTermSection, string[]>()
+
+  for (const section of LONG_TERM_MEMORY_SECTIONS) {
+    grouped.set(section, [])
+  }
+
+  for (const record of records) {
+    if (!isLongTermSection(record.section)) {
+      continue
+    }
+
+    grouped.get(record.section)?.push(record.text)
+  }
+
+  return grouped
+}
+
+function clampMemorySearchLimit(value: number | undefined): number {
+  if (!value || Number.isNaN(value)) {
+    return MEMORY_SEARCH_DEFAULT_LIMIT
+  }
+
+  return Math.max(1, Math.min(MEMORY_SEARCH_MAX_LIMIT, Math.trunc(value)))
+}
+
+function scoreAssistantMemoryRecord(
+  record: AssistantMemoryRecord,
+  query: string | null,
+): number {
+  if (!query) {
+    return 0
+  }
+
+  const normalizedQuery = normalizeMemoryLookup(query)
+  const normalizedText = normalizeMemoryLookup(record.text)
+  const normalizedSection = normalizeMemoryLookup(record.section)
+
+  if (!normalizedQuery || !normalizedText) {
+    return 0
+  }
+
+  let score = 0
+
+  if (normalizedText.includes(normalizedQuery)) {
+    score += 12
+  }
+
+  if (normalizedSection?.includes(normalizedQuery)) {
+    score += 4
+  }
+
+  const tokens = normalizedQuery.split(/\s+/u).filter((token) => token.length > 1)
+  for (const token of tokens) {
+    if (normalizedText.includes(token)) {
+      score += 2
+    }
+
+    if (normalizedSection?.includes(token)) {
+      score += 1
+    }
+  }
+
+  return score
+}
+
+function compareAssistantMemorySearchHits(
+  left: AssistantMemorySearchHit,
+  right: AssistantMemorySearchHit,
+  scored: boolean,
+): number {
+  if (scored && right.score !== left.score) {
+    return right.score - left.score
+  }
+
+  const recordedOrder = compareNullableStringsDesc(left.recordedAt, right.recordedAt)
+  if (recordedOrder !== 0) {
+    return recordedOrder
+  }
+
+  if (left.kind !== right.kind) {
+    return left.kind === 'long-term' ? -1 : 1
+  }
+
+  const pathOrder = left.sourcePath.localeCompare(right.sourcePath)
+  if (pathOrder !== 0) {
+    return pathOrder
+  }
+
+  return left.sourceLine - right.sourceLine
+}
+
+function compareNullableStringsDesc(
+  left: string | null,
+  right: string | null,
+): number {
+  if (left === right) {
+    return 0
+  }
+
+  if (left === null) {
+    return 1
+  }
+
+  if (right === null) {
+    return -1
+  }
+
+  return right.localeCompare(left)
+}
+
+function buildAssistantMemoryRecordId(
+  kind: AssistantMemoryRecordKind,
+  lookupKey: string,
+): string {
+  return `${kind}:${encodeURIComponent(lookupKey)}`
+}
+
+function buildDailyMemoryRecordLookupKey(
+  dailyDate: string | null | undefined,
+  text: string,
+): string | null {
+  const noteKey = buildDailyMemoryMapKey(text)
+  if (!noteKey || !dailyDate) {
+    return null
+  }
+
+  return `${dailyDate}|${noteKey}`
+}
+
+function extractMemoryRecordTimestampLabel(
+  kind: AssistantMemoryRecordKind,
+  rawText: string,
+  dailyDate: string | null,
+): string | null {
+  const longTermMatch = /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+—\s+/u.exec(rawText)
+  if (longTermMatch?.[1]) {
+    return longTermMatch[1]
+  }
+
+  const dailyMatch = /^(\d{2}:\d{2})\s+—\s+/u.exec(rawText)
+  if (dailyMatch?.[1] && kind === 'daily' && dailyDate) {
+    return `${dailyDate} ${dailyMatch[1]}`
+  }
+
+  return null
+}
+
+function stripMemoryBulletPrefix(rawText: string): string {
+  return normalizeNullableString(
+    rawText
+      .replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+—\s+/u, '')
+      .replace(/^\d{2}:\d{2}\s+—\s+/u, ''),
+  ) ?? rawText
+}
+
+function normalizeAssistantMemoryUpsert(
+  input: AssistantMemoryUpsertInput,
+): NormalizedAssistantMemoryUpsert {
+  const scope = input.scope ?? 'long-term'
+  const rawText = normalizeSentence(input.text)
+  const sourcePrompt = normalizeSentence(input.sourcePrompt ?? '')
+
+  if (!rawText) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_TEXT_REQUIRED',
+      'Assistant memory upsert requires non-empty text.',
+    )
+  }
+
+  if (scope === 'daily') {
+    if (input.section) {
+      throw new VaultCliError(
+        'ASSISTANT_MEMORY_SECTION_NOT_ALLOWED',
+        'Daily assistant memory upserts must not include a long-term section.',
+      )
+    }
+
+    return {
+      dailyText: normalizeAssistantDailyMemoryText({
+        allowSensitiveHealthContext: input.allowSensitiveHealthContext ?? true,
+        sourcePrompt,
+        text: rawText,
+      }),
+      longTermEntry: null,
+      scope,
+    }
+  }
+
+  const section = input.section
+  if (!section) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_SECTION_REQUIRED',
+      'Long-term assistant memory upserts require a section.',
+    )
+  }
+
+  const longTermText = normalizeAssistantLongTermMemoryText({
+    allowSensitiveHealthContext: input.allowSensitiveHealthContext ?? true,
+    section,
+    sourcePrompt,
+    text: rawText,
+  })
+
+  return {
+    dailyText: scope === 'both' ? longTermText : null,
+    longTermEntry: {
+      section,
+      text: longTermText,
+    },
+    scope,
+  }
+}
+
+function normalizeAssistantLongTermMemoryText(input: {
+  allowSensitiveHealthContext: boolean
+  section: AssistantMemoryLongTermSection
+  sourcePrompt: string | null
+  text: string
+}): string {
+  const extractedCandidates = [
+    ...(input.sourcePrompt ? extractAssistantMemory(input.sourcePrompt).longTerm : []),
+    ...extractAssistantMemory(input.text).longTerm,
+  ].filter((entry) => entry.section === input.section)
+
+  if (extractedCandidates[0]) {
+    if (
+      input.section === 'Health context' &&
+      !hasExplicitHealthMemoryLeadIn(input.sourcePrompt ?? input.text)
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_MEMORY_HEALTH_EXPLICIT_REMEMBER_REQUIRED',
+        'Health-context assistant memory requires an explicit remember request.',
+      )
+    }
+
+    if (input.section === 'Health context' && !input.allowSensitiveHealthContext) {
+      throw new VaultCliError(
+        'ASSISTANT_MEMORY_HEALTH_PRIVATE_CONTEXT_REQUIRED',
+        'Health-context assistant memory is only available in private assistant contexts.',
+      )
+    }
+
+    return extractedCandidates[0].text
+  }
+
+  const sentence = toSentence(input.text)
+
+  switch (input.section) {
+    case 'Identity': {
+      if (/^call the user\s+.+$/iu.test(sentence)) {
+        return sentence
+      }
+      break
+    }
+
+    case 'Preferences':
+    case 'Standing instructions': {
+      if (looksLikeAssistantBehavior(sentence) && !looksLikeSensitiveHealthFact(sentence)) {
+        return sentence
+      }
+      break
+    }
+
+    case 'Health context': {
+      if (!input.allowSensitiveHealthContext) {
+        throw new VaultCliError(
+          'ASSISTANT_MEMORY_HEALTH_PRIVATE_CONTEXT_REQUIRED',
+          'Health-context assistant memory is only available in private assistant contexts.',
+        )
+      }
+
+      if (!hasExplicitHealthMemoryLeadIn(input.sourcePrompt ?? input.text)) {
+        throw new VaultCliError(
+          'ASSISTANT_MEMORY_HEALTH_EXPLICIT_REMEMBER_REQUIRED',
+          'Health-context assistant memory requires an explicit remember request.',
+        )
+      }
+
+      if (
+        looksLikeSensitiveHealthFact(sentence) &&
+        !TRANSIENT_HEALTH_CONTEXT_PATTERN.test(sentence)
+      ) {
+        return sentence
+      }
+
+      break
+    }
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_MEMORY_INVALID_UPSERT',
+    `Assistant memory text does not match the ${input.section} section policy.`,
+  )
+}
+
+function normalizeAssistantDailyMemoryText(input: {
+  allowSensitiveHealthContext: boolean
+  sourcePrompt: string | null
+  text: string
+}): string {
+  const extracted = input.sourcePrompt
+    ? extractAssistantMemory(input.sourcePrompt)
+    : {
+        daily: [],
+        longTerm: [],
+      }
+
+  if (extracted.daily[0]) {
+    return extracted.daily[0]
+  }
+
+  const sentence = toSentence(input.text)
+  if (
+    looksLikeSensitiveHealthFact(sentence) &&
+    (!input.allowSensitiveHealthContext ||
+      !hasExplicitHealthMemoryLeadIn(input.sourcePrompt ?? input.text))
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_MEMORY_DAILY_HEALTH_REJECTED',
+      'Daily assistant memory cannot store sensitive health context without an explicit remember request in a private context.',
+    )
+  }
+
+  return sentence
+}
+
+async function resolveUpsertedAssistantMemoryRecords(input: {
+  dailyDate: string | null
+  dailyText: string | null
+  longTermEntry: AssistantLongTermMemoryEntry | null
+  paths: AssistantStatePaths
+}): Promise<AssistantMemoryRecord[]> {
+  const records: AssistantMemoryRecord[] = []
+  const longTermRecords = input.longTermEntry
+    ? await loadAssistantLongTermMemoryRecords(input.paths, true)
+    : []
+  const dailyRecords = input.dailyText
+    ? await loadAssistantDailyMemoryRecords(input.paths, true)
+    : []
+
+  if (input.longTermEntry) {
+    const record = longTermRecords.find(
+      (candidate) =>
+        candidate.section === input.longTermEntry?.section &&
+        candidate.text === input.longTermEntry?.text,
+    )
+    if (record) {
+      records.push(record)
+    }
+  }
+
+  if (input.dailyText) {
+    const record = dailyRecords.find(
+      (candidate) =>
+        candidate.section === 'Notes' &&
+        candidate.text === input.dailyText &&
+        (!input.dailyDate || candidate.recordedAt?.startsWith(input.dailyDate) === true),
+    )
+    if (record) {
+      records.push(record)
+    }
+  }
+
+  return records
 }
 
 function setLongTermMemoryEntry(
@@ -332,68 +1038,6 @@ async function appendAssistantDailyMemory(
   return added
 }
 
-async function loadRecentDailyMemoryNotes(
-  paths: AssistantStatePaths,
-  now = new Date(),
-): Promise<string[]> {
-  const dates = [shiftDate(now, -1), now]
-  const notes = new Map<string, string>()
-
-  for (const date of dates) {
-    const dailyPath = resolveAssistantDailyMemoryPath(paths, date)
-    const text = await readOptionalText(dailyPath)
-    if (!text) {
-      continue
-    }
-
-    const document = parseMarkdownDocument(text)
-    const section = document.sections.find((candidate) => candidate.heading === 'Notes')
-    if (!section) {
-      continue
-    }
-
-    for (const line of section.lines) {
-      const bullet = parseBulletLine(line)
-      if (bullet) {
-        const key = buildDailyMemoryMapKey(bullet)
-        if (!key) {
-          continue
-        }
-
-        notes.delete(key)
-        notes.set(key, bullet)
-      }
-    }
-  }
-
-  return [...notes.values()].slice(-RECENT_DAILY_NOTE_LIMIT)
-}
-
-function renderLongTermMemoryPromptExcerpt(text: string): string | null {
-  const document = parseMarkdownDocument(text)
-  const sections = document.sections
-    .map((section) => {
-      const visibleLines = section.lines
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-      if (visibleLines.length === 0) {
-        return null
-      }
-      return `${section.heading}:\n${visibleLines.join('\n')}`
-    })
-    .filter((section): section is string => Boolean(section))
-
-  if (sections.length === 0) {
-    const fallback = normalizeNullableString(text)
-    if (!fallback) {
-      return null
-    }
-    return truncateMemoryPromptText(fallback)
-  }
-
-  return truncateMemoryPromptText(sections.join('\n\n'))
-}
-
 function truncateMemoryPromptText(text: string): string {
   if (text.length <= MEMORY_PROMPT_MAX_CHARS) {
     return text
@@ -495,14 +1139,18 @@ function extractStandingInstructionMemory(sentence: string): string | null {
 
   if (
     /\b(?:always|never)\b/iu.test(trimmed) &&
-    /\b(?:answer|response|reply|recommend|write|format|mention|summari(?:ze|zing)|ask)\b/iu.test(trimmed)
+    /\b(?:answer|response|reply|recommend|write|format|mention|summari(?:ze|zing)|ask)\b/iu.test(
+      trimmed,
+    )
   ) {
     return toSentence(trimmed.replace(/^please\s+/iu, ''))
   }
 
   if (
     /^when\b/iu.test(trimmed) &&
-    /\b(?:answer|response|reply|recommend|write|format|summari(?:ze|zing)|show|use)\b/iu.test(trimmed)
+    /\b(?:answer|response|reply|recommend|write|format|summari(?:ze|zing)|show|use)\b/iu.test(
+      trimmed,
+    )
   ) {
     return toSentence(trimmed.replace(/^please\s+/iu, ''))
   }
@@ -708,12 +1356,6 @@ function stripTrailingPunctuation(value: string): string {
   return value.trim().replace(/[\s,;:]+$/u, '').replace(/[.!?]+$/u, '')
 }
 
-function shiftDate(value: Date, days: number): Date {
-  const copy = new Date(value)
-  copy.setDate(copy.getDate() + days)
-  return copy
-}
-
 function formatLocalDate(value: Date): string {
   const year = value.getFullYear()
   const month = String(value.getMonth() + 1).padStart(2, '0')
@@ -743,7 +1385,7 @@ function normalizeMemoryLookup(value: string): string | null {
 }
 
 function buildLongTermMemoryMapKey(
-  section: AssistantLongTermMemorySection,
+  section: AssistantMemoryLongTermSection,
   text: string,
 ): string | null {
   const normalized = normalizeMemoryLookup(text)
@@ -772,7 +1414,7 @@ function buildDailyMemoryMapKey(text: string): string | null {
 }
 
 function deriveLongTermReplaceKey(
-  section: AssistantLongTermMemorySection,
+  section: AssistantMemoryLongTermSection,
   text: string,
 ): string | null {
   const normalized = normalizeMemoryLookup(text)
@@ -982,7 +1624,7 @@ function getSectionBulletKeys(section: MarkdownSection): string[] {
 
 function getSectionBullets(
   section: MarkdownSection,
-  sectionName: AssistantLongTermMemorySection,
+  sectionName: AssistantMemoryLongTermSection,
 ): AssistantMemoryBullet[] {
   return section.lines
     .map((line) => parseBulletLine(line))
@@ -1127,6 +1769,10 @@ function looksLikeDurableConditionPhrase(value: string): boolean {
   }
 
   return DURABLE_HEALTH_CONDITION_PATTERN.test(normalized)
+}
+
+function isLongTermSection(value: string): value is AssistantMemoryLongTermSection {
+  return LONG_TERM_MEMORY_SECTIONS.includes(value as AssistantMemoryLongTermSection)
 }
 
 async function readOptionalText(filePath: string): Promise<string | null> {

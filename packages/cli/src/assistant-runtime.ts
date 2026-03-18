@@ -4,6 +4,20 @@ export type {
 } from './assistant/service.js'
 export { sendAssistantMessage } from './assistant/service.js'
 export type {
+  AssistantMemoryGetInput,
+  AssistantMemoryPromptInput,
+  AssistantMemorySearchInput,
+  AssistantMemorySearchResponse,
+  AssistantMemoryUpsertInput,
+  AssistantMemoryUpsertWriteResult,
+} from './assistant/memory.js'
+export {
+  getAssistantMemory,
+  loadAssistantMemoryPromptBlock,
+  searchAssistantMemory,
+  upsertAssistantMemory,
+} from './assistant/memory.js'
+export type {
   AssistantInboxScanResult,
   AssistantRunEvent,
   RunAssistantAutomationInput,

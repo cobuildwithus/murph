@@ -5,6 +5,13 @@ import {
   assistantChatProviderValues,
   assistantChatResultSchema,
   assistantDeliverResultSchema,
+  assistantMemoryGetResultSchema,
+  assistantMemoryLongTermSectionValues,
+  assistantMemoryQueryScopeValues,
+  assistantMemorySearchResultSchema,
+  assistantMemoryUpsertResultSchema,
+  assistantMemoryVisibleSectionValues,
+  assistantMemoryWriteScopeValues,
   assistantRunResultSchema,
   assistantSandboxValues,
   assistantSessionListResultSchema,
@@ -16,6 +23,21 @@ import {
   runAssistantChat,
   sendAssistantMessage,
 } from '../assistant-runtime.js'
+import {
+  getAssistantMemory,
+  redactAssistantMemoryRecord,
+  redactAssistantMemorySearchHit,
+  resolveAssistantMemoryPaths,
+  searchAssistantMemory,
+  upsertAssistantMemory,
+} from '../assistant/memory.js'
+import {
+  assertAssistantMemoryBridgeVault,
+  getAssistantMemoryViaBridge,
+  resolveAssistantMemoryBridgeEnv,
+  searchAssistantMemoryViaBridge,
+  upsertAssistantMemoryViaBridge,
+} from '../assistant/memory-bridge.js'
 import {
   redactAssistantDisplayPath,
   getAssistantSession,
@@ -449,6 +471,208 @@ export function registerAssistantCommands(
       })
     },
   })
+
+  const memory = Cli.create('memory', {
+    description:
+      'Inspect and update non-canonical assistant memory stored outside the vault under assistant-state/.',
+  })
+
+  memory.command('search', {
+    args: emptyArgsSchema,
+    description:
+      'Search assistant memory across durable long-term notes and short-lived daily notes.',
+    hint:
+      'Use --scope long-term for durable identity/preferences/instructions and --scope daily for recent project context.',
+    examples: [
+      {
+        options: {
+          vault: './vault',
+          scope: 'long-term',
+          text: 'concise answers',
+        },
+        description: 'Search durable assistant response preferences.',
+      },
+      {
+        options: {
+          vault: './vault',
+          scope: 'daily',
+          limit: 5,
+        },
+        description: 'List the latest recent-context notes.',
+      },
+    ],
+    options: withBaseOptions({
+      text: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional lexical query for assistant memory search.'),
+      scope: z
+        .enum(assistantMemoryQueryScopeValues)
+        .default('all')
+        .describe('Choose long-term memory, daily notes, or both.'),
+      section: z
+        .enum(assistantMemoryVisibleSectionValues)
+        .optional()
+        .describe('Optional section filter such as Identity or Notes.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(25)
+        .default(8)
+        .describe('Maximum number of assistant memory hits to return.'),
+    }),
+    output: assistantMemorySearchResultSchema,
+    async run(context) {
+      const bridge = resolveAssistantMemoryBridgeEnv()
+      if (bridge) {
+        assertAssistantMemoryBridgeVault(bridge, context.options.vault)
+      }
+
+      const result = bridge
+        ? await searchAssistantMemoryViaBridge({
+            bridge,
+            text: context.options.text,
+            scope: context.options.scope,
+            section: context.options.section,
+            limit: context.options.limit,
+          })
+        : await searchAssistantMemory({
+            vault: context.options.vault,
+            text: context.options.text,
+            scope: context.options.scope,
+            section: context.options.section,
+            limit: context.options.limit,
+          })
+      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
+        query: result.query,
+        scope: result.scope,
+        section: result.section,
+        results: result.results.map(redactAssistantMemorySearchHit),
+      }
+    },
+  })
+
+  memory.command('get', {
+    args: z.object({
+      memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
+    }),
+    description: 'Fetch one assistant memory record by id.',
+    options: withBaseOptions(),
+    output: assistantMemoryGetResultSchema,
+    async run(context) {
+      const bridge = resolveAssistantMemoryBridgeEnv()
+      if (bridge) {
+        assertAssistantMemoryBridgeVault(bridge, context.options.vault)
+      }
+
+      const memoryRecord = bridge
+        ? await getAssistantMemoryViaBridge({
+            bridge,
+            id: context.args.memoryId,
+          })
+        : await getAssistantMemory({
+            vault: context.options.vault,
+            id: context.args.memoryId,
+          })
+      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
+        memory: redactAssistantMemoryRecord(memoryRecord),
+      }
+    },
+  })
+
+  memory.command('upsert', {
+    args: z.object({
+      text: z.string().min(1).describe('Assistant memory text to persist.'),
+    }),
+    description:
+      'Create or update assistant memory through the typed memory commit layer.',
+    hint:
+      'Use --scope both to mirror durable long-term memory into today\'s daily note, and pass --sourcePrompt when the original user wording matters for validation.',
+    examples: [
+      {
+        args: {
+          text: 'Call me Alex.',
+        },
+        options: {
+          vault: './vault',
+          scope: 'both',
+          section: 'Identity',
+          sourcePrompt: 'Call me Alex from now on.',
+        },
+        description: 'Persist a durable naming preference and mirror it into the daily note.',
+      },
+      {
+        args: {
+          text: 'We are working on assistant memory tools.',
+        },
+        options: {
+          vault: './vault',
+          scope: 'daily',
+        },
+        description: 'Store short-lived project context only in the daily memory log.',
+      },
+    ],
+    options: withBaseOptions({
+      scope: z
+        .enum(assistantMemoryWriteScopeValues)
+        .default('long-term')
+        .describe('Persist long-term memory, a daily note, or both.'),
+      section: z
+        .enum(assistantMemoryLongTermSectionValues)
+        .optional()
+        .describe('Required for long-term memory writes; ignored for daily-only notes.'),
+      sourcePrompt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional source user wording used for assistant-memory validation.'),
+    }),
+    output: assistantMemoryUpsertResultSchema,
+    async run(context) {
+      const bridge = resolveAssistantMemoryBridgeEnv()
+      if (bridge) {
+        assertAssistantMemoryBridgeVault(bridge, context.options.vault)
+      }
+
+      const result = bridge
+        ? await upsertAssistantMemoryViaBridge({
+            bridge,
+            text: context.args.text,
+            scope: context.options.scope,
+            section: context.options.section,
+            sourcePrompt: context.options.sourcePrompt,
+          })
+        : await upsertAssistantMemory({
+            vault: context.options.vault,
+            text: context.args.text,
+            scope: context.options.scope,
+            section: context.options.section,
+            sourcePrompt: context.options.sourcePrompt,
+          })
+      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
+        scope: result.scope,
+        longTermAdded: result.longTermAdded,
+        dailyAdded: result.dailyAdded,
+        memories: result.memories.map(redactAssistantMemoryRecord),
+      }
+    },
+  })
+
+  assistant.command(memory)
 
   const session = Cli.create('session', {
     description:

@@ -32,6 +32,10 @@ vi.mock('../src/chat-provider.js', async () => {
 })
 
 import { sendAssistantMessage } from '../src/assistant/service.js'
+import {
+  resolveAssistantMemoryBridgeEnv,
+  upsertAssistantMemoryViaBridge,
+} from '../src/assistant/memory-bridge.js'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 
 const cleanupPaths: string[] = []
@@ -53,7 +57,7 @@ beforeEach(() => {
   serviceMocks.executeAssistantProviderTurn.mockReset()
 })
 
-test('sendAssistantMessage gives the first provider turn direct Incur-backed CLI guidance and PATH access', async () => {
+test('sendAssistantMessage gives the first provider turn direct Incur-backed CLI guidance, PATH access, and a memory bridge', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
@@ -85,14 +89,15 @@ test('sendAssistantMessage gives the first provider turn direct Incur-backed CLI
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const expectedUserBinDirectory = path.join(homeRoot, '.local', 'bin')
+  const bridge = resolveAssistantMemoryBridgeEnv(firstCall?.env)
 
   assert.equal(firstCall?.workingDirectory, vaultRoot)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
-  assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --schema --format json/u)
-  assert.match(firstCall?.systemPrompt ?? '', /vault-cli --llms/u)
-  assert.match(firstCall?.systemPrompt ?? '', /vault-cli --llms-full/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant memory search/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant memory upsert/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
+  assert.equal(bridge?.vault, path.resolve(vaultRoot))
   assert.equal(
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],
     expectedUserBinDirectory,
@@ -111,7 +116,7 @@ function restoreEnvironmentVariable(
   process.env[key] = value
 }
 
-test('sendAssistantMessage loads vault-scoped assistant memory into new sessions after prior preference turns', async () => {
+test('sendAssistantMessage loads only explicit bridge-written core memory into fresh sessions', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -119,13 +124,37 @@ test('sendAssistantMessage loads vault-scoped assistant memory into new sessions
   await mkdir(vaultRoot, { recursive: true })
 
   serviceMocks.executeAssistantProviderTurn
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-memory-1',
-      response: 'Noted.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
+    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
+      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
+      if (!bridge) {
+        throw new Error('Expected assistant memory bridge env on the first provider turn.')
+      }
+
+      await Promise.all([
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Call me Chris.',
+          scope: 'both',
+          section: 'Identity',
+          sourcePrompt: 'Call me Chris from now on.',
+        }),
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Keep answers concise.',
+          scope: 'long-term',
+          section: 'Standing instructions',
+          sourcePrompt: 'Going forward, keep answers concise.',
+        }),
+      ])
+
+      return {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-memory-1',
+        response: 'Noted.',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      }
     })
     .mockResolvedValueOnce({
       provider: 'codex-cli',
@@ -139,7 +168,7 @@ test('sendAssistantMessage loads vault-scoped assistant memory into new sessions
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:one',
-    prompt: 'Call me Chris. Going forward, keep answers concise. We are working on the assistant memory implementation.',
+    prompt: 'Call me Chris. Going forward, keep answers concise.',
   })
 
   await sendAssistantMessage({
@@ -154,14 +183,14 @@ test('sendAssistantMessage loads vault-scoped assistant memory into new sessions
 
   assert.match(longTermMemory, /Call the user Chris\./u)
   assert.match(longTermMemory, /keep answers concise\./iu)
-  assert.match(secondCall?.systemPrompt ?? '', /Long-term assistant memory:/u)
+  assert.match(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
   assert.match(secondCall?.systemPrompt ?? '', /Call the user Chris\./u)
   assert.match(secondCall?.systemPrompt ?? '', /keep answers concise\./iu)
-  assert.match(secondCall?.systemPrompt ?? '', /Recent daily assistant memory/u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Recent daily assistant memory/u)
 })
 
-test('sendAssistantMessage bootstraps only the latest mutable long-term memory on fresh sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-upsert-'))
+test('sendAssistantMessage no longer auto-persists memory without explicit assistant upserts', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-no-auto-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -170,19 +199,122 @@ test('sendAssistantMessage bootstraps only the latest mutable long-term memory o
   serviceMocks.executeAssistantProviderTurn
     .mockResolvedValueOnce({
       provider: 'codex-cli',
-      providerSessionId: 'thread-upsert-1',
-      response: 'Noted.',
+      providerSessionId: 'thread-no-auto-1',
+      response: 'I can do that.',
       stderr: '',
       stdout: '',
       rawEvents: [],
     })
     .mockResolvedValueOnce({
       provider: 'codex-cli',
-      providerSessionId: 'thread-upsert-2',
-      response: 'Updated.',
+      providerSessionId: 'thread-no-auto-2',
+      response: 'There is nothing stored yet.',
       stderr: '',
       stdout: '',
       rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:no-auto-one',
+    prompt: 'Call me Chris. Going forward, keep answers concise.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:no-auto-two',
+    prompt: 'What should you remember?',
+  })
+
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
+})
+
+test('sendAssistantMessage bootstraps only the latest mutable long-term memory written through bridge upserts', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-upsert-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
+      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
+      if (!bridge) {
+        throw new Error('Expected assistant memory bridge env on the first provider turn.')
+      }
+
+      await Promise.all([
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Call me Chris.',
+          scope: 'both',
+          section: 'Identity',
+          sourcePrompt: 'Call me Chris from now on.',
+        }),
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Keep answers concise.',
+          scope: 'long-term',
+          section: 'Standing instructions',
+          sourcePrompt: 'Going forward, keep answers concise.',
+        }),
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Use imperial units.',
+          scope: 'long-term',
+          section: 'Preferences',
+          sourcePrompt: 'Use imperial units.',
+        }),
+      ])
+
+      return {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-upsert-1',
+        response: 'Noted.',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      }
+    })
+    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
+      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
+      if (!bridge) {
+        throw new Error('Expected assistant memory bridge env on the second provider turn.')
+      }
+
+      await Promise.all([
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Call me Alex.',
+          scope: 'both',
+          section: 'Identity',
+          sourcePrompt: 'Actually, call me Alex from now on.',
+        }),
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Keep answers detailed.',
+          scope: 'long-term',
+          section: 'Standing instructions',
+          sourcePrompt: 'From now on, keep answers detailed.',
+        }),
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'Use metric units.',
+          scope: 'long-term',
+          section: 'Preferences',
+          sourcePrompt: 'Use metric units.',
+        }),
+      ])
+
+      return {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-upsert-2',
+        response: 'Updated.',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      }
     })
     .mockResolvedValueOnce({
       provider: 'codex-cli',
@@ -196,14 +328,13 @@ test('sendAssistantMessage bootstraps only the latest mutable long-term memory o
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:upsert-one',
-    prompt: 'Call me Chris. Going forward, keep answers concise. Use imperial units.',
+    prompt: 'Remember the current assistant defaults.',
   })
 
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:upsert-two',
-    prompt:
-      'Actually, call me Alex from now on. From now on, keep answers detailed. Use metric units.',
+    prompt: 'Update the saved defaults.',
   })
 
   await sendAssistantMessage({
@@ -230,7 +361,7 @@ test('sendAssistantMessage bootstraps only the latest mutable long-term memory o
   assert.doesNotMatch(thirdCall?.systemPrompt ?? '', /Use imperial units\./u)
 })
 
-test('sendAssistantMessage can persist selected health context into assistant memory for future sessions', async () => {
+test('sendAssistantMessage can persist selected health context into assistant memory for private future sessions', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-sensitive-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -238,13 +369,28 @@ test('sendAssistantMessage can persist selected health context into assistant me
   await mkdir(vaultRoot, { recursive: true })
 
   serviceMocks.executeAssistantProviderTurn
-    .mockResolvedValueOnce({
-      provider: 'codex-cli',
-      providerSessionId: 'thread-sensitive-1',
-      response: 'Noted.',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
+    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
+      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
+      if (!bridge) {
+        throw new Error('Expected assistant memory bridge env on the first provider turn.')
+      }
+
+      await upsertAssistantMemoryViaBridge({
+        bridge,
+        text: "User's blood pressure is 120 over 80.",
+        scope: 'both',
+        section: 'Health context',
+        sourcePrompt: 'Remember that my blood pressure is 120 over 80.',
+      })
+
+      return {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-sensitive-1',
+        response: 'Noted.',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      }
     })
     .mockResolvedValueOnce({
       provider: 'codex-cli',
@@ -273,7 +419,73 @@ test('sendAssistantMessage can persist selected health context into assistant me
 
   assert.match(longTermMemory, /## Health context/u)
   assert.match(longTermMemory, /User's blood pressure is 120 over 80\./u)
-  assert.match(secondCall?.systemPrompt ?? '', /Long-term assistant memory:/u)
+  assert.match(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
   assert.match(secondCall?.systemPrompt ?? '', /User's blood pressure is 120 over 80\./u)
-  assert.match(secondCall?.systemPrompt ?? '', /Recent daily assistant memory/u)
+})
+
+test('sendAssistantMessage blocks health-memory upserts in non-private assistant contexts', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-group-health-memory-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockImplementationOnce(async (input: { env?: NodeJS.ProcessEnv }) => {
+      const bridge = resolveAssistantMemoryBridgeEnv(input.env)
+      if (!bridge) {
+        throw new Error('Expected assistant memory bridge env on the first provider turn.')
+      }
+
+      await assert.rejects(
+        upsertAssistantMemoryViaBridge({
+          bridge,
+          text: 'User has diabetes.',
+          scope: 'long-term',
+          section: 'Health context',
+          sourcePrompt: 'Remember that I have diabetes.',
+        }),
+        /private assistant contexts/u,
+      )
+
+      return {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-group-health-1',
+        response: 'I should not store that here.',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      }
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-group-health-2',
+      response: 'No private health memory is available here.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:group-health-one',
+    channel: 'imessage',
+    participantId: 'contact:group',
+    sourceThreadId: 'thread-group',
+    threadIsDirect: false,
+    prompt: 'Remember that I have diabetes.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:group-health-two',
+    channel: 'imessage',
+    participantId: 'contact:group',
+    sourceThreadId: 'thread-group-2',
+    threadIsDirect: false,
+    prompt: 'What private health context is available?',
+  })
+
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Health context/u)
 })

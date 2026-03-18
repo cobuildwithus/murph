@@ -278,13 +278,14 @@ The repo also includes local-first inbox parser controls:
 The repo also includes a Healthy Bob-native assistant layer:
 
 - `vault-cli chat [prompt]` is a root-level shorthand for `vault-cli assistant chat [prompt]`
-- `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores session metadata plus local transcript entries and distilled Markdown memory outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel
+- `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores session metadata plus local transcript entries outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel
 - `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider
+- `vault-cli assistant memory search|get|upsert` searches cited assistant memory snippets, fetches one memory item by id, and commits typed non-canonical memory updates under `assistant-state/`
 - `vault-cli assistant run --model <model> [--baseUrl <url>]` runs the always-on inbox triage loop and auto-applies model-routed canonical promotions
 - `vault-cli assistant session list|show` inspects local assistant session metadata under `assistant-state/`; local transcript replay is reserved for the chat UI rather than those metadata commands
 
-Fresh assistant sessions bootstrap from `assistant-state/<vault-bucket>/MEMORY.md` plus recent `assistant-state/<vault-bucket>/memory/YYYY-MM-DD.md` notes. That continuity layer may retain selected non-canonical health context for future conversations, but it never overrides canonical vault records.
+Fresh assistant sessions bootstrap from a small core block in `assistant-state/<vault-bucket>/MEMORY.md`. Recent `assistant-state/<vault-bucket>/memory/YYYY-MM-DD.md` notes are now retrieved on demand through `assistant memory search|get` rather than injected wholesale into every fresh session. That continuity layer stays non-canonical, health memory only loads in private assistant contexts, and explicit `assistant memory upsert` writes still never override canonical vault records.
 
 The first installed chat provider adapter is Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Outbound channel delivery is also adapter-backed, with iMessage as the first send path. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
 

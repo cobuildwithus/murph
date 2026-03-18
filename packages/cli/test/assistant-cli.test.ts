@@ -11,11 +11,18 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from '../src/operator-config.js'
+import { withAssistantMemoryBridge } from '../src/assistant/memory-bridge.js'
 import { resolveAssistantSession } from '../src/assistant-state.js'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
-import { ensureCliRuntimeArtifacts, repoRoot, requireData, runCli } from './cli-test-helpers.js'
+import {
+  ensureCliRuntimeArtifacts,
+  rebuildCliRuntimeArtifacts,
+  repoRoot,
+  requireData,
+  runCli,
+} from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
 const execFileAsync = promisify(execFile)
@@ -210,6 +217,174 @@ test.sequential(
     } finally {
       restoreEnvironmentVariable('HOME', originalHome)
     }
+  },
+  20000,
+)
+
+test.sequential(
+  'assistant memory search/get/upsert expose typed memory records through the CLI',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    await rebuildCliRuntimeArtifacts()
+
+    const upserted = requireData(
+      await runCli<{
+        scope: string
+        longTermAdded: number
+        dailyAdded: number
+        memories: Array<{
+          id: string
+          kind: string
+          section: string
+          text: string
+        }>
+      }>([
+        'assistant',
+        'memory',
+        'upsert',
+        'Call me Alex.',
+        '--vault',
+        vaultRoot,
+        '--scope',
+        'both',
+        '--section',
+        'Identity',
+        '--sourcePrompt',
+        'Call me Alex from now on.',
+      ]),
+    )
+
+    assert.equal(upserted.scope, 'both')
+    assert.equal(upserted.longTermAdded, 1)
+    assert.equal(upserted.dailyAdded, 1)
+    assert.equal(upserted.memories.some((memory) => memory.kind === 'long-term'), true)
+
+    const search = requireData(
+      await runCli<{
+        query: string | null
+        scope: string
+        results: Array<{
+          id: string
+          section: string
+          text: string
+        }>
+      }>([
+        'assistant',
+        'memory',
+        'search',
+        '--vault',
+        vaultRoot,
+        '--scope',
+        'long-term',
+        '--text',
+        'Alex',
+      ]),
+    )
+    assert.equal(search.query, 'Alex')
+    assert.equal(search.scope, 'long-term')
+    assert.equal(search.results[0]?.section, 'Identity')
+    assert.equal(search.results[0]?.text, 'Call the user Alex.')
+
+    const fetched = requireData(
+      await runCli<{
+        memory: {
+          id: string
+          section: string
+          text: string
+        }
+      }>([
+        'assistant',
+        'memory',
+        'get',
+        search.results[0]?.id ?? '',
+        '--vault',
+        vaultRoot,
+      ]),
+    )
+    assert.equal(fetched.memory.id, search.results[0]?.id)
+    assert.equal(fetched.memory.section, 'Identity')
+    assert.equal(fetched.memory.text, 'Call the user Alex.')
+  },
+  20000,
+)
+
+test.sequential(
+  'assistant memory CLI commands can proxy through the in-session memory bridge',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-bridge-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    await rebuildCliRuntimeArtifacts()
+
+    await withAssistantMemoryBridge(
+      {
+        allowSensitiveHealthContext: true,
+        vault: vaultRoot,
+      },
+      async (bridgeEnv) => {
+        const upserted = requireData(
+          await runCli<{
+            longTermAdded: number
+            memories: Array<{
+              section: string
+              text: string
+            }>
+          }>(
+            [
+              'assistant',
+              'memory',
+              'upsert',
+              'Keep answers concise.',
+              '--vault',
+              vaultRoot,
+              '--scope',
+              'long-term',
+              '--section',
+              'Standing instructions',
+              '--sourcePrompt',
+              'Going forward, keep answers concise.',
+            ],
+            {
+              env: bridgeEnv,
+            },
+          ),
+        )
+        assert.equal(upserted.longTermAdded, 1)
+        assert.equal(upserted.memories[0]?.text, 'keep answers concise.')
+
+        const search = requireData(
+          await runCli<{
+            results: Array<{
+              section: string
+              text: string
+            }>
+          }>(
+            [
+              'assistant',
+              'memory',
+              'search',
+              '--vault',
+              vaultRoot,
+              '--scope',
+              'long-term',
+              '--text',
+              'concise',
+            ],
+            {
+              env: bridgeEnv,
+            },
+          ),
+        )
+        assert.equal(search.results[0]?.section, 'Standing instructions')
+        assert.equal(search.results[0]?.text, 'keep answers concise.')
+      },
+    )
   },
   20000,
 )

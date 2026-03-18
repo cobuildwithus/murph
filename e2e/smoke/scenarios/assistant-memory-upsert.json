@@ -1,0 +1,10 @@
+{
+  "id": "assistant-memory-upsert",
+  "command": "vault-cli assistant memory upsert <text> --vault <path> [--scope long-term|daily|both] [--section <section>] [--sourcePrompt <text>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents typed assistant-memory writes that persist non-canonical conversational continuity outside the canonical vault."
+}

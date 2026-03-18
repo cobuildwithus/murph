@@ -1,13 +1,16 @@
 declare module 'incur' {
   interface Register {
     commands: {
-      'allergy list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
+      'allergy list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'allergy scaffold': { args: {}; options: { vault: string; requestId: string } }
       'allergy show': { args: { id: string }; options: { vault: string; requestId: string } }
       'allergy upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'assistant ask': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli"; codexCommand: string; model: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean; deliverResponse: boolean; deliveryTarget: string } }
       'assistant chat': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli"; codexCommand: string; model: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean } }
       'assistant deliver': { args: { message: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; deliveryTarget: string } }
+      'assistant memory get': { args: { memoryId: string }; options: { vault: string; requestId: string } }
+      'assistant memory search': { args: {}; options: { vault: string; requestId: string; text: string; scope: "long-term" | "daily" | "all"; section: "Identity" | "Preferences" | "Standing instructions" | "Health context" | "Notes"; limit: number } }
+      'assistant memory upsert': { args: { text: string }; options: { vault: string; requestId: string; scope: "long-term" | "daily" | "both"; section: "Identity" | "Preferences" | "Standing instructions" | "Health context"; sourcePrompt: string } }
       'assistant run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; once: boolean; skipDaemon: boolean } }
       'assistant session list': { args: {}; options: { vault: string; requestId: string } }
       'assistant session show': { args: { sessionId: string }; options: { vault: string; requestId: string } }
@@ -15,7 +18,7 @@ declare module 'incur' {
       'audit show': { args: { id: string }; options: { vault: string; requestId: string } }
       'audit tail': { args: {}; options: { vault: string; requestId: string; limit: number } }
       'chat': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli"; codexCommand: string; model: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean } }
-      'condition list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
+      'condition list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'condition scaffold': { args: {}; options: { vault: string; requestId: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId: string } }
       'condition upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
@@ -44,19 +47,19 @@ declare module 'incur' {
       'export pack materialize': { args: { id: string }; options: { vault: string; requestId: string; out: string } }
       'export pack prune': { args: { id: string }; options: { vault: string; requestId: string } }
       'export pack show': { args: { id: string }; options: { vault: string; requestId: string } }
-      'family list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
+      'family list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'family scaffold': { args: {}; options: { vault: string; requestId: string } }
       'family show': { args: { id: string }; options: { vault: string; requestId: string } }
       'family upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'genetics list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
+      'genetics list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'genetics scaffold': { args: {}; options: { vault: string; requestId: string } }
       'genetics show': { args: { id: string }; options: { vault: string; requestId: string } }
       'genetics upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'goal list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
+      'goal list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'goal scaffold': { args: {}; options: { vault: string; requestId: string } }
       'goal show': { args: { id: string }; options: { vault: string; requestId: string } }
       'goal upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'history list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string; from: string; to: string; kind: string } }
+      'history list': { args: {}; options: { vault: string; requestId: string; status: string; kind: string; from: string; to: string; limit: number } }
       'history scaffold': { args: {}; options: { vault: string; requestId: string } }
       'history show': { args: { id: string }; options: { vault: string; requestId: string } }
       'history upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
@@ -106,7 +109,7 @@ declare module 'incur' {
       'meal manifest': { args: { id: string }; options: { vault: string; requestId: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId: string } }
       'profile current rebuild': { args: {}; options: { vault: string; requestId: string } }
-      'profile list': { args: {}; options: { vault: string; requestId: string; limit: number; from: string; to: string } }
+      'profile list': { args: {}; options: { vault: string; requestId: string; from: string; to: string; limit: number } }
       'profile scaffold': { args: {}; options: { vault: string; requestId: string } }
       'profile show': { args: { id: string }; options: { vault: string; requestId: string } }
       'profile upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
@@ -114,7 +117,7 @@ declare module 'incur' {
       'provider scaffold': { args: {}; options: { vault: string; requestId: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId: string } }
       'provider upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'regimen list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
+      'regimen list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'regimen scaffold': { args: {}; options: { vault: string; requestId: string } }
       'regimen show': { args: { id: string }; options: { vault: string; requestId: string } }
       'regimen stop': { args: { regimenId: string }; options: { vault: string; requestId: string; stoppedOn: string } }

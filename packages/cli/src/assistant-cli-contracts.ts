@@ -34,6 +34,30 @@ export const assistantTranscriptEntryKindValues = [
   'assistant',
   'error',
 ] as const
+export const assistantMemoryRecordKindValues = [
+  'long-term',
+  'daily',
+] as const
+export const assistantMemoryQueryScopeValues = [
+  'long-term',
+  'daily',
+  'all',
+] as const
+export const assistantMemoryWriteScopeValues = [
+  'long-term',
+  'daily',
+  'both',
+] as const
+export const assistantMemoryLongTermSectionValues = [
+  'Identity',
+  'Preferences',
+  'Standing instructions',
+  'Health context',
+] as const
+export const assistantMemoryVisibleSectionValues = [
+  ...assistantMemoryLongTermSectionValues,
+  'Notes',
+] as const
 
 export const assistantProviderSessionOptionsSchema = z.object({
   model: z.string().min(1).nullable(),
@@ -99,6 +123,20 @@ export const assistantDeliveryErrorSchema = z.object({
   message: z.string().min(1),
 })
 
+export const assistantMemoryRecordSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(assistantMemoryRecordKindValues),
+  section: z.enum(assistantMemoryVisibleSectionValues),
+  text: z.string().min(1),
+  recordedAt: z.string().min(1).nullable(),
+  sourcePath: pathSchema,
+  sourceLine: z.number().int().positive(),
+})
+
+export const assistantMemorySearchHitSchema = assistantMemoryRecordSchema.extend({
+  score: z.number().int().nonnegative(),
+})
+
 export const assistantAskResultSchema = z.object({
   vault: pathSchema,
   prompt: z.string().min(1),
@@ -133,6 +171,30 @@ export const assistantSessionShowResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
   session: assistantSessionSchema,
+})
+
+export const assistantMemorySearchResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  query: z.string().min(1).nullable(),
+  scope: z.enum(assistantMemoryQueryScopeValues),
+  section: z.enum(assistantMemoryVisibleSectionValues).nullable(),
+  results: z.array(assistantMemorySearchHitSchema),
+})
+
+export const assistantMemoryGetResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  memory: assistantMemoryRecordSchema,
+})
+
+export const assistantMemoryUpsertResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  scope: z.enum(assistantMemoryWriteScopeValues),
+  longTermAdded: z.number().int().nonnegative(),
+  dailyAdded: z.number().int().nonnegative(),
+  memories: z.array(assistantMemoryRecordSchema),
 })
 
 export const assistantRunResultSchema = z.object({
@@ -189,6 +251,21 @@ export type AssistantSessionListResult = z.infer<
 export type AssistantSessionShowResult = z.infer<
   typeof assistantSessionShowResultSchema
 >
+export type AssistantMemoryRecord = z.infer<
+  typeof assistantMemoryRecordSchema
+>
+export type AssistantMemorySearchHit = z.infer<
+  typeof assistantMemorySearchHitSchema
+>
+export type AssistantMemorySearchResult = z.infer<
+  typeof assistantMemorySearchResultSchema
+>
+export type AssistantMemoryGetResult = z.infer<
+  typeof assistantMemoryGetResultSchema
+>
+export type AssistantMemoryUpsertResult = z.infer<
+  typeof assistantMemoryUpsertResultSchema
+>
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema
@@ -209,6 +286,16 @@ export type AssistantBindingDeliveryKind =
   (typeof assistantBindingDeliveryKindValues)[number]
 export type AssistantTranscriptEntryKind =
   (typeof assistantTranscriptEntryKindValues)[number]
+export type AssistantMemoryRecordKind =
+  (typeof assistantMemoryRecordKindValues)[number]
+export type AssistantMemoryQueryScope =
+  (typeof assistantMemoryQueryScopeValues)[number]
+export type AssistantMemoryWriteScope =
+  (typeof assistantMemoryWriteScopeValues)[number]
+export type AssistantMemoryLongTermSection =
+  (typeof assistantMemoryLongTermSectionValues)[number]
+export type AssistantMemoryVisibleSection =
+  (typeof assistantMemoryVisibleSectionValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >

@@ -16,9 +16,12 @@ import {
 } from '../src/assistant-state.js'
 import {
   extractAssistantMemory,
+  getAssistantMemory,
   loadAssistantMemoryPromptBlock,
   recordAssistantMemoryTurn,
   resolveAssistantDailyMemoryPath,
+  searchAssistantMemory,
+  upsertAssistantMemory,
 } from '../src/assistant/memory.js'
 
 const cleanupPaths: string[] = []
@@ -469,4 +472,108 @@ test('recordAssistantMemoryTurn replaces mutable long-term identity and response
   assert.doesNotMatch(promptBlock ?? '', /keep answers concise\./iu)
   assert.match(promptBlock ?? '', /Use metric units\./u)
   assert.doesNotMatch(promptBlock ?? '', /Use imperial units\./u)
+})
+
+test('upsertAssistantMemory exposes typed search/get results with cited file locations', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-search-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const now = new Date('2026-03-18T09:45:00.000Z')
+  const upserted = await upsertAssistantMemory({
+    vault: vaultRoot,
+    now,
+    text: 'Call me Alex.',
+    scope: 'both',
+    section: 'Identity',
+    sourcePrompt: 'Call me Alex from now on.',
+  })
+
+  const search = await searchAssistantMemory({
+    vault: vaultRoot,
+    scope: 'all',
+    text: 'Alex',
+  })
+  const longTermMemory = upserted.memories.find((memory) => memory.kind === 'long-term')
+  const dailyMemory = upserted.memories.find((memory) => memory.kind === 'daily')
+
+  assert.equal(upserted.longTermAdded, 1)
+  assert.equal(upserted.dailyAdded, 1)
+  assert.equal(search.results.length >= 1, true)
+  assert.equal(longTermMemory?.section, 'Identity')
+  assert.equal(longTermMemory?.text, 'Call the user Alex.')
+  assert.equal(longTermMemory?.sourceLine !== undefined, true)
+  assert.equal(longTermMemory?.sourcePath.endsWith('MEMORY.md'), true)
+  assert.equal(dailyMemory?.sourcePath.endsWith(path.join('memory', '2026-03-18.md')), true)
+
+  const fetched = await getAssistantMemory({
+    vault: vaultRoot,
+    id: longTermMemory?.id ?? '',
+  })
+  assert.equal(fetched.id, longTermMemory?.id)
+  assert.equal(fetched.text, 'Call the user Alex.')
+})
+
+test('loadAssistantMemoryPromptBlock keeps daily notes out of the core bootstrap prompt and gates health memory by privacy', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-core-prompt-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  await upsertAssistantMemory({
+    vault: vaultRoot,
+    now: new Date('2026-03-18T09:00:00.000Z'),
+    text: 'Keep answers concise.',
+    scope: 'long-term',
+    section: 'Standing instructions',
+    sourcePrompt: 'Going forward, keep answers concise.',
+  })
+  await upsertAssistantMemory({
+    vault: vaultRoot,
+    now: new Date('2026-03-18T09:05:00.000Z'),
+    text: 'We are working on assistant memory tools.',
+    scope: 'daily',
+  })
+  await upsertAssistantMemory({
+    vault: vaultRoot,
+    now: new Date('2026-03-18T09:10:00.000Z'),
+    text: 'User has asthma.',
+    scope: 'long-term',
+    section: 'Health context',
+    sourcePrompt: 'Remember that I have asthma.',
+  })
+
+  const privatePrompt = await loadAssistantMemoryPromptBlock({
+    vault: vaultRoot,
+    includeSensitiveHealthContext: true,
+  })
+  const sharedPrompt = await loadAssistantMemoryPromptBlock({
+    vault: vaultRoot,
+    includeSensitiveHealthContext: false,
+  })
+
+  assert.match(privatePrompt ?? '', /Core assistant memory:/u)
+  assert.match(privatePrompt ?? '', /keep answers concise\./iu)
+  assert.match(privatePrompt ?? '', /User has asthma\./u)
+  assert.doesNotMatch(privatePrompt ?? '', /assistant memory tools/u)
+  assert.match(sharedPrompt ?? '', /keep answers concise\./iu)
+  assert.doesNotMatch(sharedPrompt ?? '', /User has asthma\./u)
+})
+
+test('upsertAssistantMemory requires explicit remember intent for health context', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-health-policy-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  await assert.rejects(
+    upsertAssistantMemory({
+      vault: vaultRoot,
+      text: 'User has diabetes.',
+      scope: 'long-term',
+      section: 'Health context',
+    }),
+    /explicit remember request/u,
+  )
 })

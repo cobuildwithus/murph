@@ -21,8 +21,8 @@ import {
 } from './store.js'
 import {
   loadAssistantMemoryPromptBlock,
-  recordAssistantMemoryTurn,
 } from './memory.js'
+import { withAssistantMemoryBridge } from './memory-bridge.js'
 
 export interface AssistantMessageInput {
   actorId?: string | null
@@ -109,8 +109,12 @@ export async function sendAssistantMessage(
     resolved.created ||
     resolved.session.turnCount === 0 ||
     resolved.session.providerSessionId === null
+  const allowSensitiveHealthContext = shouldExposeSensitiveHealthContext(
+    resolved.session.binding,
+  )
   const assistantMemoryPrompt = shouldInjectBootstrapContext
     ? await loadAssistantMemoryPromptBlock({
+        includeSensitiveHealthContext: allowSensitiveHealthContext,
         vault: input.vault,
       })
     : null
@@ -122,28 +126,38 @@ export async function sendAssistantMessage(
     },
   ])
 
-  const providerResult = await executeAssistantProviderTurn({
-    provider: input.provider ?? defaults?.provider ?? resolved.session.provider,
-    workingDirectory: input.workingDirectory ?? input.vault,
-    env: cliAccess.env,
-    userPrompt: input.prompt,
-    systemPrompt: shouldInjectBootstrapContext
-      ? buildAssistantSystemPrompt(cliAccess, assistantMemoryPrompt)
-      : null,
-    sessionContext: shouldInjectBootstrapContext
-      ? {
-          binding: resolved.session.binding,
-        }
-      : undefined,
-    resumeProviderSessionId: resolved.session.providerSessionId,
-    codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
-    model: providerOptions.model,
-    reasoningEffort: providerOptions.reasoningEffort,
-    sandbox: providerOptions.sandbox,
-    approvalPolicy: providerOptions.approvalPolicy,
-    profile: providerOptions.profile,
-    oss: providerOptions.oss,
-  })
+  const providerResult = await withAssistantMemoryBridge(
+    {
+      allowSensitiveHealthContext,
+      vault: input.vault,
+    },
+    async (memoryBridgeEnv) =>
+      executeAssistantProviderTurn({
+        provider: input.provider ?? defaults?.provider ?? resolved.session.provider,
+        workingDirectory: input.workingDirectory ?? input.vault,
+        env: {
+          ...cliAccess.env,
+          ...memoryBridgeEnv,
+        },
+        userPrompt: input.prompt,
+        systemPrompt: shouldInjectBootstrapContext
+          ? buildAssistantSystemPrompt(cliAccess, assistantMemoryPrompt)
+          : null,
+        sessionContext: shouldInjectBootstrapContext
+          ? {
+              binding: resolved.session.binding,
+            }
+          : undefined,
+        resumeProviderSessionId: resolved.session.providerSessionId,
+        codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
+        model: providerOptions.model,
+        reasoningEffort: providerOptions.reasoningEffort,
+        sandbox: providerOptions.sandbox,
+        approvalPolicy: providerOptions.approvalPolicy,
+        profile: providerOptions.profile,
+        oss: providerOptions.oss,
+      }),
+  )
 
   await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
     {
@@ -163,15 +177,6 @@ export async function sendAssistantMessage(
     lastTurnAt: updatedAt,
     turnCount: resolved.session.turnCount + 1,
   })
-
-  try {
-    await recordAssistantMemoryTurn({
-      vault: input.vault,
-      prompt: input.prompt,
-    })
-  } catch {
-    // assistant memory is best-effort and must not fail the chat turn
-  }
 
   let delivery: AssistantAskResult['delivery'] = null
   let deliveryError: AssistantDeliveryError | null = null
@@ -230,11 +235,37 @@ function buildAssistantSystemPrompt(
     'Use the workspace files as the source of truth when relevant.',
     'Default to read-only analysis and conversational answers.',
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
-    'Do not modify files unless the user explicitly asks you to propose changes.',
+    'Do not modify vault files unless the user explicitly asks you to propose changes. Typed assistant-memory upserts through the CLI are the only exception for conversational continuity.',
     'When you reference evidence from the vault, mention relative file paths when practical.',
     assistantMemoryPrompt,
+    buildAssistantMemoryGuidanceText(cliAccess),
     buildAssistantCliGuidanceText(cliAccess),
   ]
     .filter((value): value is string => Boolean(value))
     .join('\n\n')
+}
+
+function buildAssistantMemoryGuidanceText(
+  cliAccess: {
+    rawCommand: 'vault-cli'
+  },
+): string {
+  return [
+    'Assistant memory is available through explicit CLI tool calls. Do not edit `assistant-state/` files directly.',
+    `Use \`${cliAccess.rawCommand} assistant memory search --scope long-term --limit 5\` for durable naming/preferences/instructions, \`${cliAccess.rawCommand} assistant memory search --scope daily --limit 5\` for recent project context, and \`${cliAccess.rawCommand} assistant memory get <memoryId>\` when you need one cited memory item.`,
+    `Use \`${cliAccess.rawCommand} assistant memory upsert <text> --scope long-term|daily|both --section ... --sourcePrompt ...\` only when the user wants something remembered or when a stable identity/preference/instruction clearly should persist.`,
+    'If several memory lookups or writes are independent, you may run those assistant-memory CLI calls in parallel.',
+    'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
+  ].join('\n\n')
+}
+
+function shouldExposeSensitiveHealthContext(binding: {
+  channel: string | null
+  threadIsDirect: boolean | null
+}): boolean {
+  if (binding.channel === null) {
+    return true
+  }
+
+  return binding.threadIsDirect === true
 }

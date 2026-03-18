@@ -1,0 +1,10 @@
+{
+  "id": "assistant-memory-get",
+  "command": "vault-cli assistant memory get <memoryId> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents fetching one assistant-memory record by id from the local assistant-state store outside the canonical vault."
+}
