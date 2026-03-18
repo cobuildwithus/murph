@@ -105,6 +105,10 @@
       "path": "fixtures/golden-outputs/meal-add"
     },
     {
+      "id": "workout-add",
+      "path": "fixtures/golden-outputs/workout-add"
+    },
+    {
       "id": "samples-import-csv",
       "path": "fixtures/golden-outputs/samples-import-csv"
     },

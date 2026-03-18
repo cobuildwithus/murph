@@ -1,0 +1,237 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { Cli } from 'incur'
+import { test } from 'vitest'
+import { registerVaultCommands } from '../src/commands/vault.js'
+import { registerWorkoutCommands } from '../src/commands/workout.js'
+import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
+import type { CliEnvelope } from './cli-test-helpers.js'
+import { requireData, runCli } from './cli-test-helpers.js'
+
+interface SchemaEnvelope {
+  options: {
+    properties: Record<string, unknown>
+    required?: string[]
+  }
+}
+
+interface WorkoutAddEnvelope {
+  eventId: string
+  lookupId: string
+  ledgerFile: string
+  created: boolean
+  occurredAt: string
+  kind: 'activity_session'
+  title: string
+  activityType: string
+  durationMinutes: number
+  distanceKm: number | null
+  note: string
+}
+
+interface ShowEnvelope {
+  entity: {
+    id: string
+    kind: string
+    title: string | null
+    occurredAt: string | null
+    data: Record<string, unknown>
+  }
+}
+
+function createSliceCli() {
+  const cli = Cli.create('vault-cli', {
+    description: 'workout slice test cli',
+    version: '0.0.0-test',
+  })
+  const services = createIntegratedVaultCliServices()
+
+  registerVaultCommands(cli, services)
+  registerWorkoutCommands(cli, services)
+
+  return cli
+}
+
+async function runSliceCli<TData>(args: string[]): Promise<CliEnvelope<TData>> {
+  const cli = createSliceCli()
+  const output: string[] = []
+
+  await cli.serve([...args, '--verbose', '--format', 'json'], {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
+}
+
+async function runSliceCliRaw(args: string[]) {
+  const cli = createSliceCli()
+  const output: string[] = []
+
+  await cli.serve([...args, '--format', 'json'], {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return output.join('').trim()
+}
+
+test('workout add schema exposes the freeform workout capture surface', async () => {
+  const schema = JSON.parse(
+    await runSliceCliRaw(['workout', 'add', '--schema']),
+  ) as SchemaEnvelope
+
+  assert.equal('duration' in schema.options.properties, true)
+  assert.equal('type' in schema.options.properties, true)
+  assert.equal('distanceKm' in schema.options.properties, true)
+  assert.equal('occurredAt' in schema.options.properties, true)
+  assert.equal('source' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
+})
+
+test('workout add help uses a positional text argument', async () => {
+  const help = await runSliceCliRaw(['workout', 'add', '--help'])
+
+  assert.match(help, /Usage: vault-cli workout add <text> \[options\]/u)
+})
+
+test.sequential(
+  'workout add captures activity_session events and fails fast on ambiguous durations',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-'))
+
+    try {
+      const initResult = await runSliceCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const runWorkout = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        'Went for a 30-minute run around the neighborhood.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(runWorkout.ok, true)
+      assert.equal(runWorkout.meta?.command, 'workout add')
+      assert.match(requireData(runWorkout).eventId, /^evt_/u)
+      assert.equal(
+        requireData(runWorkout).lookupId,
+        requireData(runWorkout).eventId,
+      )
+      assert.equal(requireData(runWorkout).kind, 'activity_session')
+      assert.equal(requireData(runWorkout).activityType, 'running')
+      assert.equal(requireData(runWorkout).durationMinutes, 30)
+      assert.equal(requireData(runWorkout).distanceKm, null)
+      assert.equal(requireData(runWorkout).title, '30-minute run')
+      assert.equal(
+        requireData(runWorkout).note,
+        'Went for a 30-minute run around the neighborhood.',
+      )
+
+      const showWorkout = await runCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(runWorkout).lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(showWorkout.ok, true)
+      assert.equal(
+        requireData(showWorkout).entity.id,
+        requireData(runWorkout).lookupId,
+      )
+      assert.equal(requireData(showWorkout).entity.kind, 'activity_session')
+      assert.equal(requireData(showWorkout).entity.title, '30-minute run')
+      assert.equal(requireData(showWorkout).entity.data.activityType, 'running')
+      assert.equal(requireData(showWorkout).entity.data.durationMinutes, 30)
+      assert.equal(
+        requireData(showWorkout).entity.data.note,
+        'Went for a 30-minute run around the neighborhood.',
+      )
+
+      const ambiguous = await runCli([
+        'workout',
+        'add',
+        'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(ambiguous.ok, false)
+      assert.equal(ambiguous.error.code, 'invalid_option')
+      assert.match(
+        ambiguous.error.message ?? '',
+        /Pass --duration <minutes> to record it explicitly/u,
+      )
+
+      const strengthWorkout = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
+        '--duration',
+        '30',
+        '--type',
+        'strength training',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(strengthWorkout.ok, true)
+      assert.equal(
+        requireData(strengthWorkout).activityType,
+        'strength-training',
+      )
+      assert.equal(requireData(strengthWorkout).durationMinutes, 30)
+      assert.equal(
+        requireData(strengthWorkout).title,
+        '30-minute strength training',
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'workout add surfaces invalid timestamps without needing a custom workout read surface',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const invalidTimestamp = await runCli([
+        'workout',
+        'add',
+        'Went for a 30-minute run.',
+        '--occurred-at',
+        'not-a-timestamp',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(invalidTimestamp.ok, false)
+      assert.equal(invalidTimestamp.error.code, 'VALIDATION_ERROR')
+      assert.match(invalidTimestamp.error.message ?? '', /Invalid ISO datetime/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)

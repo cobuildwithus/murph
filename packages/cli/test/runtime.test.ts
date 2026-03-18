@@ -10,6 +10,7 @@ import './cli-expansion-experiment-journal-vault-phase2.test.js'
 import './cli-expansion-inbox-attachments.test.js'
 import './cli-expansion-provider-event-samples.test.js'
 import './cli-expansion-samples-audit.test.js'
+import './cli-expansion-workout.test.js'
 import './device-cli.test.js'
 
 interface FixtureVault {

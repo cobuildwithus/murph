@@ -247,6 +247,7 @@ HEALTHYBOB_VAULT=../../fixtures/demo-web-vault pnpm dev
 | `vault-cli document show|list|manifest` | Lets operators follow `doc_*`/`evt_*` ids back to the event record and immutable raw manifest. |
 | `vault-cli meal add` | Copies meal attachments into `raw/meals/...`, writes an immutable raw manifest, and appends a meal event. |
 | `vault-cli meal show|list|manifest` | Lets operators follow `meal_*`/`evt_*` ids back to the event record and immutable raw manifest. |
+| `vault-cli workout add <text>` | Captures a freeform workout note as a canonical `activity_session` event with minimal structured inference plus optional overrides. |
 | `vault-cli samples add` | Appends one or more manually curated sample records from a JSON payload without going through CSV import. |
 | `vault-cli samples import-csv <file>` | Copies a CSV into `raw/samples/...`, writes an immutable batch manifest, and appends sample records into sharded sample ledgers. |
 | `vault-cli samples show|list|batch show|batch list` | Adds first-class sample follow-up reads plus `xfm_*` import-batch inspection. |
@@ -393,7 +394,7 @@ The query layer distinguishes between the primary lookup id used for follow-on r
 
 - `show` accepts query-layer ids such as `journal:2026-03-12`, `evt_*`, `smp_*`, `exp_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
 - `provider show` accepts either the canonical `prov_*` id or the provider slug from `bank/providers/<slug>.md`
-- `event show` accepts `evt_*`; specialized nouns such as `document`, `meal`, `history`, and `experiment` remain the preferred follow-up surface when they exist
+- `event show` accepts `evt_*`; specialized nouns such as `document`, `meal`, `workout`, `history`, and `experiment` remain the preferred capture surface when they exist, but workout follow-on reads still use the returned `lookupId` or `eventId` through `event show` or generic `show`
 - generic `show` still expects query-layer ids for event-backed records, but `document show` and `meal show` also accept `doc_*` and `meal_*`
 - `samples batch show` and `samples batch list` are the follow-up surface for `xfm_*`; generic `show` still does not accept import-batch ids
 - `intake manifest` and `intake raw` are the follow-up surface for immutable assessment artifacts under `raw/assessments/**`
@@ -411,6 +412,8 @@ The main write flows map cleanly onto the vault:
   copies a source file into `raw/documents/...`, writes an immutable raw manifest with checksum/provenance, appends an `event` record with `kind: "document"`, and appends an audit record
 - `meal add`
   copies photo/audio attachments into `raw/meals/...`, writes an immutable raw manifest with checksums/provenance, appends a `kind: "meal"` event, and appends an audit record
+- `workout add`
+  parses one freeform workout note into the minimum canonical `activity_session` fields, preserves the original note text verbatim on the event, and appends one `evt_*` event record without introducing a separate workout ledger
 - `samples import-csv`
   copies the CSV into `raw/samples/...`, writes an immutable batch manifest with checksum/import config/row provenance, returns an `xfm_*` batch id, and appends `smp_*` records to stream-specific sample ledgers
 - `samples add`
@@ -491,6 +494,7 @@ Run the built CLI directly:
 ```bash
 node packages/cli/dist/bin.js init --vault ./tmp/my-vault --format json
 node packages/cli/dist/bin.js document import fixtures/sample-imports/documents/visit-summary.md --vault ./tmp/my-vault --format json
+node packages/cli/dist/bin.js workout add "Went for a 30-minute run" --vault ./tmp/my-vault --format json
 node packages/cli/dist/bin.js samples import-csv fixtures/sample-imports/samples/glucose.csv --stream glucose --ts-column recorded_at --value-column mg_dl --unit mg_dL --vault ./tmp/my-vault --format json
 node packages/cli/dist/bin.js profile current rebuild --vault ./tmp/my-vault --format json
 ```

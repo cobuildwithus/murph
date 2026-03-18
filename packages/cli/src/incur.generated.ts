@@ -135,6 +135,7 @@ declare module 'incur' {
       'vault show': { args: {}; options: { vault: string; requestId: string } }
       'vault stats': { args: {}; options: { vault: string; requestId: string } }
       'vault update': { args: {}; options: { vault: string; requestId: string; title: string; timezone: string } }
+      'workout add': { args: { text: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
     }
   }
 }

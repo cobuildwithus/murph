@@ -13,7 +13,7 @@ Last verified: 2026-03-17
 - `packages/parsers`: local-first attachment parsing, parser-service helpers, and derived artifact publication under `derived/inbox/**`
 - `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
 - `packages/web`: local-only Next.js observability app that reads vault data on the server through the query package and may initiate device-auth control-plane actions against `packages/device-syncd`
-- `packages/cli`: `vault-cli`, an incur-backed typed operator surface over core/importers/query/inboxd plus parser-toolchain queue controls, inbox model-routing helpers, provider-backed assistant session orchestration, out-of-vault assistant memory docs, outbound channel adapters, and local setup commands
+- `packages/cli`: `vault-cli`, an incur-backed typed operator surface over core/importers/query/inboxd plus parser-toolchain queue controls, quick workout capture atop canonical `activity_session` events, inbox model-routing helpers, provider-backed assistant session orchestration, out-of-vault assistant memory docs, outbound channel adapters, and local setup commands
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
 ## Trust Boundaries

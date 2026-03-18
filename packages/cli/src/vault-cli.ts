@@ -10,6 +10,7 @@ import { registerIntakeCommands } from './commands/intake.js'
 import { registerInboxCommands } from './commands/inbox.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMealCommands } from './commands/meal.js'
+import { registerWorkoutCommands } from './commands/workout.js'
 import { registerProfileCommands } from './commands/profile.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerReadCommands } from './commands/read.js'
@@ -59,6 +60,7 @@ export function createVaultCli(
   registerDocumentCommands(cli, services)
   registerDeviceCommands(cli, services)
   registerMealCommands(cli, services)
+  registerWorkoutCommands(cli, services)
   registerProviderCommands(cli, services)
   registerEventCommands(cli, services)
   registerSamplesCommands(cli, services)

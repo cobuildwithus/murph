@@ -7,13 +7,14 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
 ## Required Coverage
 
 - One minimal vault scaffold with stable locations for `CORE.md`, journal pages, experiment pages, and the raw/ledger/audit/export directories referenced by smoke scenarios.
-- Sample-import inputs for document import, meal add, and CSV sample import flows.
+- Sample-import inputs for document import, meal add, and CSV sample import flows. Workout capture does not require a separate file fixture because it records one freeform text argument directly.
 - Assessment-import inputs with stable `raw/assessments/YYYY/MM/<assessmentId>/source.json` locations and matching `ledger/assessments/YYYY/YYYY-MM.jsonl` shards.
 - Profile snapshot fixtures that rebuild a deterministic `bank/profile/current.md`.
 - One Markdown fixture each for goals, conditions, allergies, regimens, family members, and genetic variants.
 - One golden-output directory per documented baseline command.
 - Smoke expectations that describe:
   - document and meal writes returning `lookupId` plus stable related ids
+  - workout quick capture returning one queryable `evt_*` id for an `activity_session` event while preserving the freeform note text
   - sample imports returning `lookupIds` plus an `xfm_*` batch id
   - intake import returning an `asmt_*` id and intake project returning deterministic proposal payloads
   - profile snapshot append plus `profile current rebuild`

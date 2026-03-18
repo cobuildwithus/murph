@@ -1,0 +1,8 @@
+{
+  "id": "workout-add",
+  "command": "vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/workout-add",
+  "purpose": "Covers freeform workout capture where the CLI infers or accepts the minimum canonical activity_session fields and follow-on reads use the returned evt_* lookup id."
+}

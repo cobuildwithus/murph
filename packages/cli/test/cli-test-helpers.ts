@@ -51,6 +51,7 @@ const execFileAsync = promisify(execFile)
 
 const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
+  path.join(repoRoot, 'packages/contracts/dist/command-capabilities.js'),
   path.join(repoRoot, 'packages/runtime-state/dist/index.js'),
   path.join(repoRoot, 'packages/core/dist/index.js'),
   path.join(repoRoot, 'packages/importers/dist/index.js'),
@@ -58,6 +59,8 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/inboxd/dist/index.js'),
   path.join(repoRoot, 'packages/parsers/dist/index.js'),
   binPath,
+  path.join(repoRoot, 'packages/cli/dist/vault-cli-contracts.js'),
+  path.join(repoRoot, 'packages/cli/dist/inbox-cli-contracts.js'),
 ]
 
 const runtimeBuildSteps: Array<{ cwd: string; args: string[] }> = [
@@ -143,6 +146,11 @@ export function commandOutputFromError(error: unknown): string | null {
 }
 
 export async function ensureCliRuntimeArtifacts(): Promise<void> {
+  if (cliRuntimeArtifactsPromise !== null) {
+    await cliRuntimeArtifactsPromise
+    return
+  }
+
   if (requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))) {
     return
   }
@@ -261,7 +269,7 @@ function shouldRetryCliExecution(error: unknown): boolean {
 
   return (
     output.includes('ERR_MODULE_NOT_FOUND') &&
-    output.includes('@healthybob/') &&
-    output.includes('/dist/index.js')
+    output.includes('/packages/') &&
+    output.includes('/dist/')
   )
 }
