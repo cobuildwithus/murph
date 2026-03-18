@@ -1560,6 +1560,7 @@ export function createIntegratedInboxCliServices(
         ),
       )
 
+      const connectorIds = enabledConnectors.map((connector) => connector.id)
       const startedAt = clock().toISOString()
       const signalBridge = options?.signal
         ? { cleanup: () => {}, signal: options.signal }
@@ -1567,19 +1568,16 @@ export function createIntegratedInboxCliServices(
       const runSignal = signalBridge.signal
       const shouldReportSignal = runSignal.aborted === false
 
-      await writeDaemonState(paths, {
-        running: true,
-        stale: false,
-        pid: getPid(),
-        startedAt,
-        stoppedAt: null,
-        status: 'running',
-        connectorIds: enabledConnectors.map((connector) => connector.id),
-        statePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxStatePath),
-        configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-        databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
-        message: null,
-      })
+      await writeDaemonState(
+        paths,
+        buildDaemonState(paths, {
+          running: true,
+          pid: getPid(),
+          startedAt,
+          status: 'running',
+          connectorIds,
+        }),
+      )
 
       let reason: InboxRunResult['reason'] = 'completed'
 
@@ -1597,19 +1595,17 @@ export function createIntegratedInboxCliServices(
         })
       } catch (error) {
         reason = runSignal.aborted ? 'signal' : 'error'
-        await writeDaemonState(paths, {
-          running: false,
-          stale: false,
-          pid: getPid(),
-          startedAt,
-          stoppedAt: clock().toISOString(),
-          status: 'failed',
-          connectorIds: enabledConnectors.map((connector) => connector.id),
-          statePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxStatePath),
-          configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-          databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
-          message: errorMessage(error),
-        })
+        await writeDaemonState(
+          paths,
+          buildDaemonState(paths, {
+            pid: getPid(),
+            startedAt,
+            stoppedAt: clock().toISOString(),
+            status: 'failed',
+            connectorIds,
+            message: errorMessage(error),
+          }),
+        )
         throw error
       } finally {
         signalBridge.cleanup()
@@ -1620,22 +1616,20 @@ export function createIntegratedInboxCliServices(
       }
 
       const stoppedAt = clock().toISOString()
-      await writeDaemonState(paths, {
-        running: false,
-        stale: false,
-        pid: getPid(),
-        startedAt,
-        stoppedAt,
-        status: 'stopped',
-        connectorIds: enabledConnectors.map((connector) => connector.id),
-        statePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxStatePath),
-        configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-        databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
-        message:
-          reason === 'signal' && shouldReportSignal
-            ? 'Inbox daemon stopped by signal.'
-            : null,
-      })
+      await writeDaemonState(
+        paths,
+        buildDaemonState(paths, {
+          pid: getPid(),
+          startedAt,
+          stoppedAt,
+          status: 'stopped',
+          connectorIds,
+          message:
+            reason === 'signal' && shouldReportSignal
+              ? 'Inbox daemon stopped by signal.'
+              : null,
+        }),
+      )
 
       return {
         vault: paths.absoluteVaultRoot,
@@ -3137,31 +3131,41 @@ async function normalizeDaemonState(
     return state
   }
 
-  const staleState: InboxDaemonState = {
+  const staleState = buildDaemonState(paths, {
     ...state,
     running: false,
     stale: true,
     status: 'stale',
     stoppedAt: state.stoppedAt ?? clock().toISOString(),
     message: 'Stale daemon state found; recorded PID is no longer running.',
-  }
+  })
   await writeDaemonState(paths, staleState)
   return staleState
 }
 
 function idleState(paths: InboxPaths): InboxDaemonState {
+  return buildDaemonState(paths, { status: 'idle' })
+}
+
+function buildDaemonState(
+  paths: InboxPaths,
+  overrides: Partial<InboxDaemonState> & Pick<InboxDaemonState, 'status'>,
+): InboxDaemonState {
+  const { status, ...rest } = overrides
+
   return {
     running: false,
     stale: false,
     pid: null,
     startedAt: null,
     stoppedAt: null,
-    status: 'idle',
+    status,
     connectorIds: [],
+    message: null,
+    ...rest,
     statePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxStatePath),
     configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
     databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
-    message: null,
   }
 }
 
