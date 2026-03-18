@@ -42,6 +42,32 @@ async function writeExecutable(
   await chmod(absolutePath, 0o755)
 }
 
+function buildExpectedCliShimScript(cliBinPath: string): string {
+  const cliSourceBinPath = path.resolve(path.dirname(cliBinPath), '..', 'src', 'bin.ts')
+  const repoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -f '${cliBinPath}' ]; then
+  exec node '${cliBinPath}' "$@"
+fi
+
+if [ -f '${cliSourceBinPath}' ]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    exec pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+  fi
+
+  if command -v corepack >/dev/null 2>&1; then
+    exec corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+  fi
+fi
+
+printf '%s\n' 'Healthy Bob CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
+exit 1
+`
+}
+
 function makeBootstrapResult(vault: string, options?: {
   parserToolchainPath?: string
   whisperModelPath?: string
@@ -921,9 +947,8 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     const shellProfile = await readFile(shellProfilePath, 'utf8')
     assert.equal(modelText, 'model')
     assert.equal(operatorConfig.defaultVault, '~/vault')
-    assert.match(healthybobShim, /exec node/u)
-    assert.match(healthybobShim, new RegExp(escapeRegExp(cliBinPath)))
-    assert.match(vaultCliShim, new RegExp(escapeRegExp(cliBinPath)))
+    assert.equal(healthybobShim, buildExpectedCliShimScript(cliBinPath))
+    assert.equal(vaultCliShim, buildExpectedCliShimScript(cliBinPath))
     assert.match(shellProfile, /export PATH="\$HOME\/\.local\/bin:\$PATH"/u)
     assert.equal(
       runCalls.some(
@@ -965,19 +990,11 @@ test.sequential('setup service reuses existing Healthy Bob shims and PATH wiring
   await mkdir(userBinDirectory, { recursive: true })
   await writeExecutable(
     path.join(userBinDirectory, 'healthybob'),
-    `#!/usr/bin/env bash
-set -euo pipefail
-
-exec node '${cliBinPath}' "$@"
-`,
+    buildExpectedCliShimScript(cliBinPath),
   )
   await writeExecutable(
     path.join(userBinDirectory, 'vault-cli'),
-    `#!/usr/bin/env bash
-set -euo pipefail
-
-exec node '${cliBinPath}' "$@"
-`,
+    buildExpectedCliShimScript(cliBinPath),
   )
   await writeFile(
     shellProfilePath,

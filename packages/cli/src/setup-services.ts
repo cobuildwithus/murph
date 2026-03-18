@@ -1515,11 +1515,37 @@ ${HEALTHYBOB_PATH_BLOCK_END}
 }
 
 function buildCliShimScript(cliBinPath: string): string {
+  const cliSourceBinPath = resolveRepoCliSourceBinPath(cliBinPath)
+  const repoRoot = resolveRepoRootFromCliBinPath(cliBinPath)
+
   return `#!/usr/bin/env bash
 set -euo pipefail
 
-exec node ${quoteShellArgument(cliBinPath)} "$@"
+if [ -f ${quoteShellArgument(cliBinPath)} ]; then
+  exec node ${quoteShellArgument(cliBinPath)} "$@"
+fi
+
+if [ -f ${quoteShellArgument(cliSourceBinPath)} ]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    exec pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+  fi
+
+  if command -v corepack >/dev/null 2>&1; then
+    exec corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+  fi
+fi
+
+printf '%s\n' 'Healthy Bob CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
+exit 1
 `
+}
+
+function resolveRepoCliSourceBinPath(cliBinPath: string): string {
+  return path.resolve(path.dirname(cliBinPath), '..', 'src', 'bin.ts')
+}
+
+function resolveRepoRootFromCliBinPath(cliBinPath: string): string {
+  return path.resolve(path.dirname(cliBinPath), '..', '..', '..')
 }
 
 function quoteShellArgument(value: string): string {
