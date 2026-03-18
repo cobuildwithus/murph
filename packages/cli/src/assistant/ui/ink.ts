@@ -431,6 +431,7 @@ const ChatComposer = React.memo(function ChatComposer(
         flexDirection: 'row',
         marginBottom: slashSuggestions.length > 0 ? 0 : 1,
         paddingX: 2,
+        paddingY: 1,
         width: '100%',
       },
       createElement(
