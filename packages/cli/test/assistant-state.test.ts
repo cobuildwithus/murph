@@ -15,6 +15,8 @@ import {
   saveAssistantSession,
 } from '../src/assistant-state.js'
 import {
+  extractAssistantMemory,
+  loadAssistantMemoryPromptBlock,
   recordAssistantMemoryTurn,
   resolveAssistantDailyMemoryPath,
 } from '../src/assistant/memory.js'
@@ -351,6 +353,56 @@ test('recordAssistantMemoryTurn writes vault-scoped Markdown memory without usin
   assert.equal(dailyMemory.includes(vaultRoot), false)
 })
 
+test('extractAssistantMemory strips identity tail text and ignores one-off formatting requests', () => {
+  const extracted = extractAssistantMemory(
+    'Actually, call me Alex from now on. Show me a table comparing these two meds.',
+  )
+
+  assert.deepEqual(extracted.longTerm, [
+    {
+      section: 'Identity',
+      text: 'Call the user Alex.',
+    },
+  ])
+  assert.equal(extracted.daily.length, 0)
+})
+
+test('extractAssistantMemory only keeps durable health context by default', () => {
+  const extracted = extractAssistantMemory(
+    [
+      'My blood pressure is 120 over 80.',
+      "I'm concerned about my blood pressure lately.",
+      'I track blood pressure and glucose.',
+      "I'm allergic to penicillin.",
+      'I have asthma.',
+      'I have diabetes.',
+      "I'm experiencing headaches today.",
+    ].join(' '),
+  )
+
+  assert.deepEqual(
+    extracted.longTerm.filter((entry) => entry.section === 'Health context'),
+    [
+      {
+        section: 'Health context',
+        text: 'User tracks blood pressure and glucose.',
+      },
+      {
+        section: 'Health context',
+        text: 'User is allergic to penicillin.',
+      },
+      {
+        section: 'Health context',
+        text: 'User has asthma.',
+      },
+      {
+        section: 'Health context',
+        text: 'User has diabetes.',
+      },
+    ],
+  )
+})
+
 test('recordAssistantMemoryTurn can persist selected health context into out-of-vault memory', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-health-memory-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -374,4 +426,47 @@ test('recordAssistantMemoryTurn can persist selected health context into out-of-
   assert.match(longTermMemory, /## Health context/u)
   assert.match(longTermMemory, /User's blood pressure is 120 over 80\./u)
   assert.match(dailyMemory, /User's blood pressure is 120 over 80\./u)
+})
+
+test('recordAssistantMemoryTurn replaces mutable long-term identity and response-style memory', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-upsert-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const firstNow = new Date('2026-03-17T09:15:00.000Z')
+  const secondNow = new Date('2026-03-17T11:45:00.000Z')
+
+  await recordAssistantMemoryTurn({
+    vault: vaultRoot,
+    now: firstNow,
+    prompt: 'Call me Chris. Going forward, keep answers concise. Use imperial units.',
+  })
+
+  await recordAssistantMemoryTurn({
+    vault: vaultRoot,
+    now: secondNow,
+    prompt:
+      'Actually, call me Alex from now on. From now on, keep answers detailed. Use metric units.',
+  })
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
+  const promptBlock = await loadAssistantMemoryPromptBlock({
+    now: secondNow,
+    vault: vaultRoot,
+  })
+
+  assert.match(longTermMemory, /Call the user Alex\./u)
+  assert.doesNotMatch(longTermMemory, /Call the user Chris\./u)
+  assert.match(longTermMemory, /keep answers detailed\./iu)
+  assert.doesNotMatch(longTermMemory, /keep answers concise\./iu)
+  assert.match(longTermMemory, /Use metric units\./u)
+  assert.doesNotMatch(longTermMemory, /Use imperial units\./u)
+  assert.match(promptBlock ?? '', /Call the user Alex\./u)
+  assert.doesNotMatch(promptBlock ?? '', /Call the user Chris\./u)
+  assert.match(promptBlock ?? '', /keep answers detailed\./iu)
+  assert.doesNotMatch(promptBlock ?? '', /keep answers concise\./iu)
+  assert.match(promptBlock ?? '', /Use metric units\./u)
+  assert.doesNotMatch(promptBlock ?? '', /Use imperial units\./u)
 })

@@ -158,6 +158,76 @@ test('sendAssistantMessage loads vault-scoped assistant memory into new sessions
   assert.match(secondCall?.systemPrompt ?? '', /Recent daily assistant memory/u)
 })
 
+test('sendAssistantMessage bootstraps only the latest mutable long-term memory on fresh sessions', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-upsert-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-upsert-1',
+      response: 'Noted.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-upsert-2',
+      response: 'Updated.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-upsert-3',
+      response: 'I remember the latest preferences.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:upsert-one',
+    prompt: 'Call me Chris. Going forward, keep answers concise. Use imperial units.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:upsert-two',
+    prompt:
+      'Actually, call me Alex from now on. From now on, keep answers detailed. Use metric units.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:upsert-three',
+    prompt: 'What should you remember across sessions now?',
+  })
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const longTermMemory = await readFile(statePaths.longTermMemoryPath, 'utf8')
+  const thirdCall = serviceMocks.executeAssistantProviderTurn.mock.calls[2]?.[0]
+
+  assert.match(longTermMemory, /Call the user Alex\./u)
+  assert.doesNotMatch(longTermMemory, /Call the user Chris\./u)
+  assert.match(longTermMemory, /keep answers detailed\./iu)
+  assert.doesNotMatch(longTermMemory, /keep answers concise\./iu)
+  assert.match(longTermMemory, /Use metric units\./u)
+  assert.doesNotMatch(longTermMemory, /Use imperial units\./u)
+  assert.match(thirdCall?.systemPrompt ?? '', /Call the user Alex\./u)
+  assert.doesNotMatch(thirdCall?.systemPrompt ?? '', /Call the user Chris\./u)
+  assert.match(thirdCall?.systemPrompt ?? '', /keep answers detailed\./iu)
+  assert.doesNotMatch(thirdCall?.systemPrompt ?? '', /keep answers concise\./iu)
+  assert.match(thirdCall?.systemPrompt ?? '', /Use metric units\./u)
+  assert.doesNotMatch(thirdCall?.systemPrompt ?? '', /Use imperial units\./u)
+})
+
 test('sendAssistantMessage can persist selected health context into assistant memory for future sessions', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-sensitive-memory-'))
   const vaultRoot = path.join(parent, 'vault')
