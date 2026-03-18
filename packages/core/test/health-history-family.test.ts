@@ -96,7 +96,7 @@ test("health history appends to the shared event ledger and supports list/read f
   assert.ok(historyOperations.every((operation) => operation.status === "committed"));
 });
 
-test("history test-event normalization keeps write behavior strict while reading legacy status aliases", async () => {
+test("history test-event normalization keeps writes canonical and ignores legacy status aliases on read", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-history-test-aliases");
   await initializeVault({ vaultRoot });
 
@@ -156,7 +156,7 @@ test("history test-event normalization keeps write behavior strict while reading
   });
 
   assert.equal(readLegacy.record.kind, "test");
-  assert.equal(readLegacy.record.resultStatus, "abnormal");
+  assert.equal(readLegacy.record.resultStatus, "unknown");
   assert.equal(readLegacy.record.summary, "Legacy payload used status.");
   assert.deepEqual(
     listed.map((record) => ({
@@ -165,7 +165,7 @@ test("history test-event normalization keeps write behavior strict while reading
     })),
     [
       { id: appended.record.id, resultStatus: "unknown" },
-      { id: legacyEventId, resultStatus: "abnormal" },
+      { id: legacyEventId, resultStatus: "unknown" },
     ],
   );
 });

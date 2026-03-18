@@ -11,7 +11,9 @@ import {
 } from "@healthybob/runtime-state";
 
 import {
+  ID_FAMILY_REGISTRY,
   buildExportPack,
+  isQueryableLookupId,
   buildTimeline,
   getExperiment,
   getJournalEntry,
@@ -86,6 +88,20 @@ title broken
 `),
     /Expected "key: value" frontmatter at line 1\./,
   );
+});
+
+test("id-family helpers no longer register the hard-cut legacy colon-prefixed families", () => {
+  assert.deepEqual(
+    ID_FAMILY_REGISTRY.filter((family) => family.family.endsWith("_legacy")).map(
+      (family) => family.family,
+    ),
+    [],
+  );
+  assert.equal(isQueryableLookupId("audit:2026-03"), false);
+  assert.equal(isQueryableLookupId("event:legacy"), false);
+  assert.equal(isQueryableLookupId("experiment:focus"), false);
+  assert.equal(isQueryableLookupId("sample:path:12"), false);
+  assert.equal(isQueryableLookupId("aud_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
 });
 
 test(

@@ -86,10 +86,6 @@ const HISTORY_KIND_DEFINITIONS: Record<
       normalize: (value, fieldName) => requireString(value, fieldName, 120),
     },
     location: {
-      sources: {
-        build: ["location", "facility"],
-        parse: ["location", "facility"],
-      },
       normalize: (value, fieldName) => optionalString(value, fieldName, 160),
     },
     providerId: {
@@ -98,10 +94,6 @@ const HISTORY_KIND_DEFINITIONS: Record<
   },
   procedure: {
     procedure: {
-      sources: {
-        build: ["procedure", "procedureName"],
-        parse: ["procedure", "procedureName"],
-      },
       normalize: (value, fieldName) => requireString(value, fieldName, 160),
     },
     status: {
@@ -117,10 +109,6 @@ const HISTORY_KIND_DEFINITIONS: Record<
       normalize: (value, fieldName) => requireString(value, fieldName, 160),
     },
     resultStatus: {
-      sources: {
-        build: ["resultStatus"],
-        parse: ["resultStatus", "status"],
-      },
       defaults: {
         build: "unknown",
         parse: "unknown",
@@ -128,10 +116,6 @@ const HISTORY_KIND_DEFINITIONS: Record<
       normalize: (value, fieldName) => optionalEnum(value, TEST_STATUSES, fieldName) ?? "unknown",
     },
     summary: {
-      sources: {
-        build: ["summary", "resultSummary"],
-        parse: ["summary", "resultSummary"],
-      },
       normalize: (value, fieldName) => optionalString(value, fieldName, 1000),
     },
   },
@@ -153,10 +137,6 @@ const HISTORY_KIND_DEFINITIONS: Record<
   },
   exposure: {
     exposureType: {
-      sources: {
-        build: ["exposureType", "route"],
-        parse: ["exposureType", "route"],
-      },
       defaults: {
         build: "unspecified",
         parse: "unspecified",
@@ -164,17 +144,9 @@ const HISTORY_KIND_DEFINITIONS: Record<
       normalize: (value, fieldName) => requireString(value, fieldName, 120),
     },
     substance: {
-      sources: {
-        build: ["substance", "agent"],
-        parse: ["substance", "agent"],
-      },
       normalize: (value, fieldName) => requireString(value, fieldName, 160),
     },
     duration: {
-      sources: {
-        build: ["duration", "durationText"],
-        parse: ["duration", "durationText"],
-      },
       normalize: (value, fieldName) => optionalString(value, fieldName, 120),
     },
   },

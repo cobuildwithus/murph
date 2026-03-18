@@ -190,8 +190,8 @@ Schema version policy:
 
 - every canonical record family and raw-manifest sidecar carries an explicit `schemaVersion`
 - existing version strings are immutable once published
-- new versions must be additive at the vault level: introduce a new version string, keep old data readable, and document the compatibility rule before emitting the new version in writes
-- migration logic belongs in `packages/core`; query and CLI code may validate or branch on versions but must not silently rewrite stored records during reads
+- incompatible schema changes require an explicit cutover plan: either ship a one-time migration in `packages/core` or deliberately drop old read support before emitting the new version in writes
+- query and CLI code may validate or branch on versions but must not silently preserve or rewrite legacy stored records during reads
 
 Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
 

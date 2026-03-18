@@ -86,5 +86,5 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 
 - Stored documents and ledgers use explicit `schemaVersion` fields; raw import sidecars also carry a versioned manifest shape.
 - Published version strings are immutable.
-- Any incompatible change must mint a new version string and preserve read compatibility for older stored data until a documented core migration exists.
-- `packages/core` owns migrations and versioned write behavior. Query/CLI paths may validate or branch on versions but must not rewrite stored records during reads.
+- Any incompatible change must mint a new version string and come with an explicit cutover decision: ship a one-time core migration or intentionally drop older read support.
+- `packages/core` owns migrations and versioned write behavior. Query/CLI paths may validate or branch on versions but must not keep legacy reads alive by silently rewriting stored records during reads.

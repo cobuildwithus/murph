@@ -4,14 +4,12 @@ import path from 'node:path'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
-  assistantAutomationStateV1Schema,
   assistantProviderSessionOptionsSchema,
   assistantSessionSchema,
   assistantTranscriptEntrySchema,
   type AssistantAliasStore,
   type AssistantApprovalPolicy,
   type AssistantAutomationState,
-  type AssistantAutomationStateV1,
   type AssistantBindingDeliveryKind,
   type AssistantChatProvider,
   type AssistantProviderSessionOptions,
@@ -36,7 +34,6 @@ import {
 
 const ASSISTANT_STATE_DIRECTORY_NAME = 'assistant-state'
 const ASSISTANT_STATE_SCHEMA = 'healthybob.assistant-session.v2'
-const LEGACY_ASSISTANT_STATE_SCHEMA = 'healthybob.assistant-session.v1'
 const ASSISTANT_INDEX_STORE_VERSION = 2
 const ASSISTANT_AUTOMATION_STATE_VERSION = 2
 
@@ -46,7 +43,6 @@ export interface AssistantStatePaths {
   automationPath: string
   dailyMemoryDirectory: string
   indexesPath: string
-  legacyAliasesPath: string
   longTermMemoryPath: string
   sessionsDirectory: string
   transcriptsDirectory: string
@@ -112,7 +108,6 @@ export function resolveAssistantStatePaths(
     automationPath: path.join(assistantStateRoot, 'automation.json'),
     dailyMemoryDirectory: path.join(assistantStateRoot, 'memory'),
     indexesPath: path.join(assistantStateRoot, 'indexes.json'),
-    legacyAliasesPath: path.join(assistantStateRoot, 'aliases.json'),
     longTermMemoryPath: path.join(assistantStateRoot, 'MEMORY.md'),
     sessionsDirectory: path.join(assistantStateRoot, 'sessions'),
     transcriptsDirectory: path.join(assistantStateRoot, 'transcripts'),
@@ -404,26 +399,7 @@ async function readAssistantSession(input: {
 
   try {
     const raw = await readFile(sessionPath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    const current = assistantSessionSchema.safeParse(parsed)
-    if (current.success) {
-      if (hasLegacyAssistantTurnExcerpts(parsed)) {
-        await migrateLegacyAssistantTurnExcerpts(input.paths, current.data.sessionId, parsed)
-        await writeAssistantSession(input.paths, current.data)
-        await synchronizeAssistantIndexes(input.paths, current.data, null)
-      }
-      return current.data
-    }
-
-    const legacy = parseLegacyAssistantSession(parsed)
-    if (!legacy) {
-      throw current.error
-    }
-
-    await migrateLegacyAssistantTurnExcerpts(input.paths, legacy.sessionId, parsed)
-    await writeAssistantSession(input.paths, legacy)
-    await synchronizeAssistantIndexes(input.paths, legacy, null)
-    return legacy
+    return assistantSessionSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -469,31 +445,6 @@ function resolveAssistantTranscriptPath(
   return path.join(paths.transcriptsDirectory, `${sessionId}.jsonl`)
 }
 
-async function migrateLegacyAssistantTurnExcerpts(
-  paths: AssistantStatePaths,
-  sessionId: string,
-  value: unknown,
-): Promise<void> {
-  const transcriptEntries = extractLegacyAssistantTurnExcerpts(value)
-  if (transcriptEntries.length === 0) {
-    return
-  }
-
-  const existingEntries = await readAssistantTranscriptEntries(paths, sessionId)
-  if (existingEntries.length > 0) {
-    return
-  }
-
-  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
-  const serialized =
-    `${transcriptEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`
-
-  await mkdir(path.dirname(transcriptPath), {
-    recursive: true,
-  })
-  await appendFile(transcriptPath, serialized, 'utf8')
-}
-
 async function persistResolvedSession(
   paths: AssistantStatePaths,
   session: AssistantSession,
@@ -528,24 +479,6 @@ async function readAssistantIndexStore(
   try {
     const raw = await readFile(paths.indexesPath, 'utf8')
     return assistantAliasStoreSchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
-    }
-  }
-
-  try {
-    const raw = await readFile(paths.legacyAliasesPath, 'utf8')
-    const parsed = parseLegacyAliasStore(JSON.parse(raw) as unknown)
-    if (parsed) {
-      const migrated = assistantAliasStoreSchema.parse({
-        version: ASSISTANT_INDEX_STORE_VERSION,
-        aliases: parsed.aliases,
-        conversationKeys: {},
-      })
-      await writeJsonFileAtomic(paths.indexesPath, migrated)
-      return migrated
-    }
   } catch (error) {
     if (!isMissingFileError(error)) {
       throw error
@@ -604,20 +537,7 @@ async function readAutomationState(
 ): Promise<AssistantAutomationState> {
   try {
     const raw = await readFile(paths.automationPath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    const current = assistantAutomationStateSchema.safeParse(parsed)
-    if (current.success) {
-      return current.data
-    }
-
-    const legacy = assistantAutomationStateV1Schema.safeParse(parsed)
-    if (legacy.success) {
-      const migrated = migrateLegacyAutomationState(legacy.data)
-      await writeJsonFileAtomic(paths.automationPath, migrated)
-      return migrated
-    }
-
-    throw current.error
+    return assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
     if (!isMissingFileError(error)) {
       throw error
@@ -634,19 +554,6 @@ async function readAutomationState(
   })
   await writeJsonFileAtomic(paths.automationPath, initial)
   return initial
-}
-
-function migrateLegacyAutomationState(
-  legacy: AssistantAutomationStateV1,
-): AssistantAutomationState {
-  return assistantAutomationStateSchema.parse({
-    version: ASSISTANT_AUTOMATION_STATE_VERSION,
-    inboxScanCursor: legacy.inboxScanCursor,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    autoReplyPrimed: true,
-    updatedAt: legacy.updatedAt,
-  })
 }
 
 function bindingInputFromLocator(
@@ -691,161 +598,6 @@ function bindingPatchFromLocator(
   return patch
 }
 
-function parseLegacyAssistantSession(value: unknown): AssistantSession | null {
-  const parsed = parseLegacySessionJson(value)
-  if (!parsed) {
-    return null
-  }
-
-  return assistantSessionSchema.parse({
-    schema: ASSISTANT_STATE_SCHEMA,
-    sessionId: parsed.sessionId,
-    provider: parsed.provider,
-    providerSessionId: parsed.providerSessionId,
-    providerOptions: parsed.providerOptions,
-    alias: parsed.alias,
-    binding: createAssistantBinding({
-      channel: parsed.channel,
-      identityId: parsed.identityId,
-      actorId: parsed.participantId,
-      threadId: parsed.sourceThreadId,
-    }),
-    createdAt: parsed.createdAt,
-    updatedAt: parsed.updatedAt,
-    lastTurnAt: parsed.lastTurnAt,
-    turnCount: parsed.turnCount,
-  })
-}
-
-function hasLegacyAssistantTurnExcerpts(value: unknown): boolean {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const candidate = value as Record<string, unknown>
-  return 'lastUserMessage' in candidate || 'lastAssistantMessage' in candidate
-}
-
-function extractLegacyAssistantTurnExcerpts(
-  value: unknown,
-): AssistantTranscriptEntry[] {
-  if (!value || typeof value !== 'object') {
-    return []
-  }
-
-  const candidate = value as Record<string, unknown>
-  const createdAt =
-    normalizeLegacyString(candidate.lastTurnAt) ??
-    normalizeLegacyString(candidate.updatedAt) ??
-    new Date().toISOString()
-  const entries: AssistantTranscriptEntry[] = []
-  const lastUserMessage = normalizeLegacyString(candidate.lastUserMessage)
-  const lastAssistantMessage = normalizeLegacyString(candidate.lastAssistantMessage)
-
-  if (lastUserMessage) {
-    entries.push(
-      assistantTranscriptEntrySchema.parse({
-        schema: 'healthybob.assistant-transcript-entry.v1',
-        kind: 'user',
-        text: lastUserMessage,
-        createdAt,
-      }),
-    )
-  }
-
-  if (lastAssistantMessage) {
-    entries.push(
-      assistantTranscriptEntrySchema.parse({
-        schema: 'healthybob.assistant-transcript-entry.v1',
-        kind: 'assistant',
-        text: lastAssistantMessage,
-        createdAt,
-      }),
-    )
-  }
-
-  return entries
-}
-
-function parseLegacySessionJson(
-  value: unknown,
-): {
-  alias: string | null
-  channel: string | null
-  createdAt: string
-  identityId: string | null
-  lastTurnAt: string | null
-  participantId: string | null
-  provider: AssistantChatProvider
-  providerOptions: AssistantProviderSessionOptions
-  providerSessionId: string | null
-  schema: typeof LEGACY_ASSISTANT_STATE_SCHEMA
-  sessionId: string
-  sourceThreadId: string | null
-  turnCount: number
-  updatedAt: string
-} | null {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-
-  const candidate = value as Record<string, unknown>
-  if (candidate.schema !== LEGACY_ASSISTANT_STATE_SCHEMA) {
-    return null
-  }
-
-  return {
-    schema: LEGACY_ASSISTANT_STATE_SCHEMA,
-    sessionId: normalizeLegacyString(candidate.sessionId) ?? '',
-    provider: (normalizeLegacyString(candidate.provider) ??
-      'codex-cli') as AssistantChatProvider,
-    providerSessionId: normalizeLegacyString(candidate.providerSessionId),
-    providerOptions: assistantProviderSessionOptionsSchema.parse(
-      candidate.providerOptions ?? {
-        model: null,
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
-      },
-    ),
-    alias: normalizeLegacyString(candidate.alias),
-    channel: normalizeLegacyString(candidate.channel),
-    identityId: normalizeLegacyString(candidate.identityId),
-    participantId: normalizeLegacyString(candidate.participantId),
-    sourceThreadId: normalizeLegacyString(candidate.sourceThreadId),
-    createdAt: String(candidate.createdAt),
-    updatedAt: String(candidate.updatedAt),
-    lastTurnAt: normalizeLegacyString(candidate.lastTurnAt),
-    turnCount: Number(candidate.turnCount ?? 0),
-  }
-}
-
-function parseLegacyAliasStore(value: unknown): { aliases: Record<string, string> } | null {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-
-  const candidate = value as Record<string, unknown>
-  if (candidate.version !== 1) {
-    return null
-  }
-
-  const aliases = candidate.aliases
-  if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) {
-    return null
-  }
-
-  return {
-    aliases: Object.fromEntries(
-      Object.entries(aliases).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[0] === 'string' && typeof entry[1] === 'string',
-      ),
-    ),
-  }
-}
 
 function normalizeProviderOptions(input: {
   approvalPolicy?: AssistantApprovalPolicy | null
@@ -863,10 +615,6 @@ function normalizeProviderOptions(input: {
     profile: normalizeNullableString(input.profile),
     oss: input.oss ?? false,
   })
-}
-
-function normalizeLegacyString(value: unknown): string | null {
-  return typeof value === 'string' ? normalizeNullableString(value) : null
 }
 
 function createAssistantSessionId(): string {
