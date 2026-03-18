@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import type { Key } from 'ink'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 import {
@@ -67,8 +68,35 @@ import {
   seedChatEntries,
   shouldClearComposerForSubmitAction,
 } from '../src/assistant/ui/view-model.js'
+import { applyComposerEditingInput } from '../src/assistant/ui/ink.js'
 
 const cleanupPaths: string[] = []
+
+function createComposerKey(overrides: Partial<Key> = {}): Key {
+  return {
+    upArrow: false,
+    downArrow: false,
+    leftArrow: false,
+    rightArrow: false,
+    pageDown: false,
+    pageUp: false,
+    home: false,
+    end: false,
+    return: false,
+    escape: false,
+    ctrl: false,
+    shift: false,
+    tab: false,
+    backspace: false,
+    delete: false,
+    meta: false,
+    super: false,
+    hyper: false,
+    capsLock: false,
+    numLock: false,
+    ...overrides,
+  }
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -949,6 +977,231 @@ test('assistant Ink view-model falls back to default model labels when needed', 
     'codex-cli · ~/vault',
   )
   assert.equal(formatSessionBinding(defaultSession), null)
+})
+
+test('assistant Ink composer editing supports line kills and yank', () => {
+  const afterKillEnd = applyComposerEditingInput(
+    {
+      cursorOffset: 5,
+      killBuffer: '',
+      value: 'hello there',
+    },
+    'k',
+    createComposerKey({
+      ctrl: true,
+    }),
+  )
+
+  assert.deepEqual(afterKillEnd, {
+    cursorOffset: 5,
+    handled: true,
+    killBuffer: ' there',
+    value: 'hello',
+  })
+
+  const afterYank = applyComposerEditingInput(
+    afterKillEnd,
+    'y',
+    createComposerKey({
+      ctrl: true,
+    }),
+  )
+
+  assert.deepEqual(afterYank, {
+    cursorOffset: 11,
+    handled: true,
+    killBuffer: ' there',
+    value: 'hello there',
+  })
+
+  const afterKillStart = applyComposerEditingInput(
+    {
+      cursorOffset: 5,
+      killBuffer: '',
+      value: 'hello there',
+    },
+    'u',
+    createComposerKey({
+      ctrl: true,
+    }),
+  )
+
+  assert.deepEqual(afterKillStart, {
+    cursorOffset: 0,
+    handled: true,
+    killBuffer: 'hello',
+    value: ' there',
+  })
+})
+
+test('assistant Ink composer editing supports word movement and word deletion', () => {
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 16,
+        killBuffer: '',
+        value: 'alpha beta gamma',
+      },
+      '',
+      createComposerKey({
+        leftArrow: true,
+        meta: true,
+      }),
+    ),
+    {
+      cursorOffset: 11,
+      handled: true,
+      killBuffer: '',
+      value: 'alpha beta gamma',
+    },
+  )
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 0,
+        killBuffer: '',
+        value: 'alpha beta gamma',
+      },
+      '',
+      createComposerKey({
+        rightArrow: true,
+        ctrl: true,
+      }),
+    ),
+    {
+      cursorOffset: 5,
+      handled: true,
+      killBuffer: '',
+      value: 'alpha beta gamma',
+    },
+  )
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 10,
+        killBuffer: '',
+        value: 'alpha beta gamma',
+      },
+      '',
+      createComposerKey({
+        backspace: true,
+        meta: true,
+      }),
+    ),
+    {
+      cursorOffset: 6,
+      handled: true,
+      killBuffer: 'beta',
+      value: 'alpha  gamma',
+    },
+  )
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 6,
+        killBuffer: '',
+        value: 'alpha beta gamma',
+      },
+      'd',
+      createComposerKey({
+        meta: true,
+      }),
+    ),
+    {
+      cursorOffset: 6,
+      handled: true,
+      killBuffer: 'beta',
+      value: 'alpha  gamma',
+    },
+  )
+})
+
+test('assistant Ink composer editing supports forward delete and best-effort super shortcuts', () => {
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 5,
+        killBuffer: '',
+        value: 'alpha beta',
+      },
+      '',
+      createComposerKey({
+        delete: true,
+      }),
+    ),
+    {
+      cursorOffset: 5,
+      handled: true,
+      killBuffer: '',
+      value: 'alphabeta',
+    },
+  )
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 0,
+        killBuffer: '',
+        value: 'alpha beta',
+      },
+      '',
+      createComposerKey({
+        rightArrow: true,
+        super: true,
+      }),
+    ),
+    {
+      cursorOffset: 10,
+      handled: true,
+      killBuffer: '',
+      value: 'alpha beta',
+    },
+  )
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 10,
+        killBuffer: '',
+        value: 'alpha beta',
+      },
+      '',
+      createComposerKey({
+        backspace: true,
+        super: true,
+      }),
+    ),
+    {
+      cursorOffset: 0,
+      handled: true,
+      killBuffer: 'alpha beta',
+      value: '',
+    },
+  )
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 6,
+        killBuffer: '',
+        value: 'alpha beta',
+      },
+      '',
+      createComposerKey({
+        delete: true,
+        super: true,
+      }),
+    ),
+    {
+      cursorOffset: 6,
+      handled: true,
+      killBuffer: 'beta',
+      value: 'alpha ',
+    },
+  )
 })
 
 function restoreEnvironmentVariable(
