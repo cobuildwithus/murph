@@ -932,7 +932,10 @@ export function normalizeComposerInsertedText(input: string): string {
 function resolveComposerCursorDisplay(input: {
   cursorOffset: number
   value: string
-}): string {
+}): {
+  afterCursor: string
+  beforeCursor: string
+} {
   const cursorOffset = clampComposerCursorOffset(input.cursorOffset, input.value.length)
   const beforeCursor = input.value.slice(0, cursorOffset)
   const rawCursorCharacter = input.value.slice(cursorOffset, cursorOffset + 1)
@@ -942,14 +945,23 @@ function resolveComposerCursorDisplay(input: {
       : ''
 
   if (rawCursorCharacter === '\n') {
-    return `${beforeCursor}|\n${input.value.slice(cursorOffset + 1)}`
+    return {
+      afterCursor: `\n${input.value.slice(cursorOffset + 1)}`,
+      beforeCursor,
+    }
   }
 
   if (rawCursorCharacter.length === 0) {
-    return `${beforeCursor}|`
+    return {
+      afterCursor: '',
+      beforeCursor,
+    }
   }
 
-  return `${beforeCursor}|${rawCursorCharacter}${afterCursor}`
+  return {
+    afterCursor: `${rawCursorCharacter}${afterCursor}`,
+    beforeCursor,
+  }
 }
 
 export function renderComposerValue(input: {
@@ -982,7 +994,15 @@ export function renderComposerValue(input: {
         color: input.theme.composerPlaceholderColor,
         wrap: 'wrap',
       },
-      `|${cursorCharacter}${remainder}`,
+      createElement(
+        Text,
+        {
+          backgroundColor: input.theme.composerCursorBackground,
+          color: input.theme.composerCursorTextColor,
+        },
+        ' ',
+      ),
+      cursorCharacter + remainder,
     )
   }
 
@@ -1008,7 +1028,16 @@ export function renderComposerValue(input: {
       color: input.theme.composerTextColor,
       wrap: 'wrap',
     },
-    cursorDisplay,
+    cursorDisplay.beforeCursor,
+    createElement(
+      Text,
+      {
+        backgroundColor: input.theme.composerCursorBackground,
+        color: input.theme.composerCursorTextColor,
+      },
+      ' ',
+    ),
+    cursorDisplay.afterCursor,
   )
 }
 

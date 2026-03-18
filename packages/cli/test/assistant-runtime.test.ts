@@ -1355,10 +1355,33 @@ test('assistant Ink composer render keeps newline-adjacent cursors in one wrappe
     color?: string
     wrap?: string
   }
+  const children = React.Children.toArray(renderedProps.children)
 
   assert.equal(renderedProps.wrap, 'wrap')
   assert.equal(renderedProps.color, LIGHT_ASSISTANT_INK_THEME.composerTextColor)
-  assert.equal(renderedProps.children, 'alpha|\nbeta gamma')
+  assert.deepEqual(children.length, 3)
+  assert.equal(children[0], 'alpha')
+  assert.equal(children[2], '\nbeta gamma')
+  assert.equal(React.isValidElement(children[1]), true)
+
+  if (!React.isValidElement(children[1])) {
+    throw new Error('Expected the cursor segment to render as a React element.')
+  }
+
+  const cursorProps = children[1].props as {
+    backgroundColor?: string
+    children?: React.ReactNode
+    color?: string
+  }
+  assert.equal(cursorProps.children, ' ')
+  assert.equal(
+    cursorProps.backgroundColor,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorBackground,
+  )
+  assert.equal(
+    cursorProps.color,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorTextColor,
+  )
 })
 
 function restoreEnvironmentVariable(
