@@ -373,6 +373,14 @@ export function registerAssistantCommands(
         },
         description: 'Run a single inbox scan without starting the foreground daemon.',
       },
+      {
+        options: {
+          vault: './vault',
+          allowSelfAuthored: true,
+          sessionRolloverHours: 48,
+        },
+        description: 'Run dedicated iMessage self-chat mode with two-day session rollover.',
+      },
     ],
     options: withBaseOptions({
       model: z
@@ -421,6 +429,21 @@ export function registerAssistantCommands(
         .max(200)
         .default(50)
         .describe('Maximum inbox captures to inspect during each assistant scan.'),
+      allowSelfAuthored: z
+        .boolean()
+        .optional()
+        .describe(
+          'Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Healthy Bob.',
+        ),
+      sessionRolloverHours: z
+        .number()
+        .int()
+        .positive()
+        .max(24 * 30)
+        .optional()
+        .describe(
+          'Optional maximum age for a reused assistant session in hours before Healthy Bob starts a new one for the same channel thread.',
+        ),
       once: z
         .boolean()
         .optional()
@@ -449,6 +472,11 @@ export function registerAssistantCommands(
           : undefined,
         scanIntervalMs: context.options.scanIntervalMs,
         maxPerScan: context.options.maxPerScan,
+        allowSelfAuthored: context.options.allowSelfAuthored,
+        sessionMaxAgeMs:
+          typeof context.options.sessionRolloverHours === 'number'
+            ? context.options.sessionRolloverHours * 60 * 60 * 1000
+            : null,
         once: context.options.once,
         startDaemon: context.options.skipDaemon ? false : true,
         onEvent(event) {

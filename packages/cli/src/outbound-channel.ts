@@ -1,6 +1,4 @@
-import path from 'node:path'
 import { IMessageSDK } from '@photon-ai/imessage-kit'
-import { openSqliteRuntimeDatabase } from '@healthybob/runtime-state'
 import {
   assistantChannelDeliverySchema,
   assistantDeliverResultSchema,
@@ -11,11 +9,12 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
 } from './assistant/store.js'
-import { errorMessage, normalizeNullableString, normalizeRequiredText } from './assistant/shared.js'
+import { normalizeRequiredText } from './assistant/shared.js'
+import {
+  ensureImessageMessagesDbReadable,
+  mapImessageMessagesDbRuntimeError,
+} from './imessage-readiness.js'
 import { VaultCliError } from './vault-cli-errors.js'
-
-const IMESSAGE_MESSAGES_DB_DISPLAY_PATH = '~/Library/Messages/chat.db'
-const IMESSAGE_MESSAGES_DB_RELATIVE_PATH = ['Library', 'Messages', 'chat.db'] as const
 
 interface ImessageSdkLike {
   close?: () => Promise<void> | void
@@ -187,7 +186,7 @@ export async function sendImessageMessage(input: {
   message: string
   target: string
 }, dependencies: ImessageRuntimeDependencies = {}): Promise<void> {
-  await ensureImessageMessagesDbReadable(dependencies)
+  await ensureImessageRuntimeReady(dependencies)
   let sdk: ImessageSdkLike
 
   try {
@@ -214,96 +213,25 @@ export async function sendImessageMessage(input: {
   }
 }
 
-async function ensureImessageMessagesDbReadable(
+async function ensureImessageRuntimeReady(
   dependencies: ImessageRuntimeDependencies,
 ): Promise<void> {
-  const platform = dependencies.platform ?? process.platform
-  if (platform !== 'darwin') {
-    throw new VaultCliError(
-      'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      'Outbound iMessage delivery requires macOS.',
-    )
-  }
-
-  const homeDirectory = normalizeNullableString(
-    dependencies.homeDirectory ?? process.env.HOME,
-  )
-  if (!homeDirectory) {
-    throw new VaultCliError(
-      'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      `Outbound iMessage delivery could not resolve ${IMESSAGE_MESSAGES_DB_DISPLAY_PATH} because HOME is not set.`,
-    )
-  }
-
-  const messagesDbPath = path.join(homeDirectory, ...IMESSAGE_MESSAGES_DB_RELATIVE_PATH)
-
-  try {
-    await (dependencies.probeMessagesDb ?? probeImessageMessagesDb)(messagesDbPath)
-  } catch (error) {
-    throw createImessageMessagesDbAccessError(error)
-  }
-}
-
-async function probeImessageMessagesDb(targetPath: string): Promise<void> {
-  const database = openSqliteRuntimeDatabase(targetPath, {
-    create: false,
-    foreignKeys: false,
-    readOnly: true,
+  await ensureImessageMessagesDbReadable(dependencies, {
+    unavailableCode: 'ASSISTANT_IMESSAGE_UNAVAILABLE',
+    unavailableMessage: 'Outbound iMessage delivery requires macOS.',
+    permissionCode: 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
+    permissionMessage:
+      'Outbound iMessage delivery requires read access to ~/Library/Messages/chat.db. Grant Full Disk Access to the terminal or app running Healthy Bob, fully restart it, and retry.',
   })
-
-  try {
-    database.prepare('SELECT 1').get()
-  } finally {
-    database.close()
-  }
 }
 
 function mapImessageRuntimeError(error: unknown): VaultCliError {
-  if (isImessageMessagesDbError(error)) {
-    return createImessageMessagesDbAccessError(error)
-  }
-
-  return new VaultCliError(
-    'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
-    'Outbound iMessage delivery failed inside @photon-ai/imessage-kit.',
-  )
-}
-
-function createImessageMessagesDbAccessError(error: unknown): VaultCliError {
-  return new VaultCliError(
-    'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
-    `Outbound iMessage delivery requires read access to ${IMESSAGE_MESSAGES_DB_DISPLAY_PATH}. Grant Full Disk Access to the terminal or app running Healthy Bob, fully restart it, and retry.`,
-    {
-      causeCode: errorCode(error),
-      reason: 'messages_db_unreadable',
-      path: IMESSAGE_MESSAGES_DB_DISPLAY_PATH,
-    },
-  )
-}
-
-function isImessageMessagesDbError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false
-  }
-
-  const code =
-    'code' in error && typeof (error as { code?: unknown }).code === 'string'
-      ? (error as { code: string }).code
-      : null
-  if (code === 'DATABASE') {
-    return true
-  }
-
-  const message = errorMessage(error)
-  return /authorization denied|unable to open database file|chat\.db/iu.test(message)
-}
-
-function errorCode(error: unknown): string | null {
-  if (!error || typeof error !== 'object') {
-    return null
-  }
-
-  return 'code' in error && typeof (error as { code?: unknown }).code === 'string'
-    ? (error as { code: string }).code
-    : null
+  return mapImessageMessagesDbRuntimeError(error, {
+    permissionCode: 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
+    permissionMessage:
+      'Outbound iMessage delivery requires read access to ~/Library/Messages/chat.db. Grant Full Disk Access to the terminal or app running Healthy Bob, fully restart it, and retry.',
+    fallbackCode: 'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
+    fallbackMessage:
+      'Outbound iMessage delivery failed inside @photon-ai/imessage-kit.',
+  })
 }

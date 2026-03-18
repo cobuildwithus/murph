@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { Errors } from 'incur'
+
 installSqliteExperimentalWarningFilter()
 
 const cliModule = await import('./index.js')
@@ -23,7 +25,11 @@ const {
 type SuccessfulSetupContext = import('./setup-cli.js').SuccessfulSetupContext
 
 actionMain().catch((error) => {
-  console.error(error)
+  if (error instanceof Errors.IncurError) {
+    console.error(error.message)
+  } else {
+    console.error(error)
+  }
   process.exitCode = 1
 })
 

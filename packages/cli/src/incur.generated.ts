@@ -12,7 +12,7 @@ declare module 'incur' {
       'assistant memory get': { args: { memoryId: string }; options: { vault: string; requestId: string } }
       'assistant memory search': { args: {}; options: { vault: string; requestId: string; text: string; scope: "long-term" | "daily" | "all"; section: "Identity" | "Preferences" | "Standing instructions" | "Health context" | "Notes"; limit: number } }
       'assistant memory upsert': { args: { text: string }; options: { vault: string; requestId: string; scope: "long-term" | "daily" | "both"; section: "Identity" | "Preferences" | "Standing instructions" | "Health context"; sourcePrompt: string } }
-      'assistant run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; once: boolean; skipDaemon: boolean } }
+      'assistant run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; allowSelfAuthored: boolean; sessionRolloverHours: number; once: boolean; skipDaemon: boolean } }
       'assistant session list': { args: {}; options: { vault: string; requestId: string } }
       'assistant session show': { args: { sessionId: string }; options: { vault: string; requestId: string } }
       'audit list': { args: {}; options: { vault: string; requestId: string; action: string; actor: string; status: string; from: string; to: string; sort: "asc" | "desc"; limit: number } }

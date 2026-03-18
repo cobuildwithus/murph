@@ -36,6 +36,7 @@ interface AssistantSessionResolutionFields {
   channel?: string | null
   identityId?: string | null
   model?: string | null
+  maxSessionAgeMs?: number | null
   oss?: boolean
   participantId?: string | null
   profile?: string | null

@@ -3,7 +3,10 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
-import { resolveRuntimePaths } from '@healthybob/runtime-state'
+import {
+  openSqliteRuntimeDatabase,
+  resolveRuntimePaths,
+} from '@healthybob/runtime-state'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
@@ -30,8 +33,11 @@ async function makeVaultFixture(prefix: string): Promise<{
     createdAt: '2026-03-13T12:00:00.000Z',
   })
   await writeFile(photoPath, 'photo', 'utf8')
-  await mkdir(path.dirname(messagesDbPath), { recursive: true })
-  await writeFile(messagesDbPath, 'messages', 'utf8')
+  const messagesDb = openSqliteRuntimeDatabase(messagesDbPath, {
+    create: true,
+    foreignKeys: false,
+  })
+  messagesDb.close()
 
   return {
     homeRoot,
@@ -1413,6 +1419,46 @@ test.sequential('run forwards the configured connector id and account namespace 
     assert.equal(createdConnectorAccountId, 'work')
     assert.equal(seenDaemonConnectorId, 'imessage:work')
     assert.equal(seenDaemonConnectorAccountId, 'work')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('run surfaces iMessage permission failures before starting the daemon', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-run-imessage-permissions')
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadParsersModule: async () => createFakeParsersRuntimeModule(),
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+      }),
+    probeImessageMessagesDb: async () => {
+      const error = new Error('unable to open database file') as Error & {
+        code?: string
+      }
+      error.code = 'DATABASE'
+      throw error
+    },
+  })
+
+  try {
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    await expectVaultCliError(
+      services.run({
+        vault: fixture.vaultRoot,
+        requestId: null,
+      }),
+      'INBOX_IMESSAGE_PERMISSION_REQUIRED',
+    )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

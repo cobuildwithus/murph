@@ -237,6 +237,59 @@ test('resolveAssistantSession prefers alias matches over conversation-key matche
   assert.equal(persisted.binding.threadId, 'thread-conversation')
 })
 
+test('resolveAssistantSession rotates conversation-key sessions after the max age threshold', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-rotate-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const first = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'imessage',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    now: new Date('2026-03-16T00:00:00.000Z'),
+  })
+
+  await saveAssistantSession(vaultRoot, {
+    ...first.session,
+    updatedAt: '2026-03-16T00:00:00.000Z',
+    lastTurnAt: '2026-03-16T00:00:00.000Z',
+    turnCount: 4,
+  })
+
+  const rotated = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'imessage',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    now: new Date('2026-03-19T00:00:00.000Z'),
+    maxSessionAgeMs: 48 * 60 * 60 * 1000,
+  })
+
+  assert.equal(rotated.created, true)
+  assert.notEqual(rotated.session.sessionId, first.session.sessionId)
+  assert.equal(
+    rotated.session.binding.conversationKey,
+    first.session.binding.conversationKey,
+  )
+
+  const reused = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'imessage',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    now: new Date('2026-03-19T01:00:00.000Z'),
+    maxSessionAgeMs: 48 * 60 * 60 * 1000,
+  })
+
+  assert.equal(reused.created, false)
+  assert.equal(reused.session.sessionId, rotated.session.sessionId)
+
+  const listed = await listAssistantSessions(vaultRoot)
+  assert.equal(listed.length, 2)
+})
+
 test('assistant transcripts are stored separately from session metadata', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-transcript-'))
   const vaultRoot = path.join(parent, 'vault')

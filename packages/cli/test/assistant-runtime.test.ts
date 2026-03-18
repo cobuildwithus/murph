@@ -839,9 +839,15 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
         capture: {
           captureId: 'cap-new',
           source: 'imessage',
+          threadTitle: null,
           threadId: 'chat-2',
           threadIsDirect: true,
           actorId: '+15551234567',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:05:00Z',
+          text: 'How are my macros today?',
+          attachments: [],
         },
       }
     },
@@ -948,6 +954,255 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
       oldestFirst: true,
     },
   ])
+})
+
+test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and suppress recent assistant echoes', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-03-18T00:00:00.000Z'))
+
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-self-auto-reply-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  try {
+    runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-self',
+      response: 'auto reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+      vault: path.resolve(input.vault),
+      message: input.message,
+      session: {
+        schema: 'healthybob.assistant-session.v2',
+        sessionId: input.sessionId,
+        provider: 'codex-cli',
+        providerSessionId: 'thread-self',
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+        alias: null,
+        binding: {
+          conversationKey: 'channel:imessage|thread:self-chat',
+          channel: 'imessage',
+          identityId: null,
+          actorId: '+15550000000',
+          threadId: 'self-chat',
+          threadIsDirect: true,
+          delivery: {
+            kind: 'participant',
+            target: '+15550000000',
+          },
+        },
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+        lastTurnAt: '2026-03-18T00:00:00.000Z',
+        turnCount: 1,
+      },
+      delivery: {
+        channel: 'imessage',
+        target: '+15550000000',
+        targetKind: 'participant',
+        sentAt: '2026-03-18T00:00:00.000Z',
+        messageLength: input.message.length,
+      },
+    }))
+
+    let phase: 'prompt' | 'echo' = 'prompt'
+    const stateProgress: Array<{
+      cursor: { occurredAt: string; captureId: string } | null
+      primed: boolean
+    }> = []
+
+    const inboxServices = {
+      async list() {
+        if (phase === 'prompt') {
+          return {
+            items: [
+              {
+                captureId: 'cap-self',
+                source: 'imessage',
+                accountId: 'self',
+                externalId: 'ext-self',
+                threadId: 'self-chat',
+                threadTitle: 'Self',
+                actorId: '+15550000000',
+                actorName: 'Self User',
+                actorIsSelf: true,
+                occurredAt: '2026-03-18T00:00:00.000Z',
+                receivedAt: null,
+                text: null,
+                attachmentCount: 1,
+                envelopePath: 'raw/inbox/self.json',
+                eventId: 'evt-self',
+                promotions: [],
+              },
+            ],
+          }
+        }
+
+        return {
+          items: [
+            {
+              captureId: 'cap-echo',
+              source: 'imessage',
+              accountId: 'self',
+              externalId: 'ext-echo',
+              threadId: 'self-chat',
+              threadTitle: 'Self',
+              actorId: '+15550000000',
+              actorName: 'Self User',
+              actorIsSelf: true,
+              occurredAt: '2026-03-18T00:00:05.000Z',
+              receivedAt: null,
+              text: 'auto reply',
+              attachmentCount: 0,
+              envelopePath: 'raw/inbox/echo.json',
+              eventId: 'evt-echo',
+              promotions: [],
+            },
+          ],
+        }
+      },
+      async show(input: any) {
+        if (input.captureId === 'cap-self') {
+          return {
+            capture: {
+              captureId: 'cap-self',
+              source: 'imessage',
+              accountId: 'self',
+              externalId: 'ext-self',
+              threadId: 'self-chat',
+              threadTitle: 'Self',
+              threadIsDirect: true,
+              actorId: '+15550000000',
+              actorName: 'Self User',
+              actorIsSelf: true,
+              occurredAt: '2026-03-18T00:00:00.000Z',
+              receivedAt: null,
+              text: null,
+              attachmentCount: 1,
+              envelopePath: 'raw/inbox/self.json',
+              eventId: 'evt-self',
+              createdAt: '2026-03-18T00:00:00.000Z',
+              promotions: [],
+              attachments: [
+                {
+                  ordinal: 1,
+                  kind: 'audio',
+                  fileName: 'voice.m4a',
+                  transcriptText: 'Remember eggs and yogurt.',
+                  extractedText: null,
+                  parseState: 'succeeded',
+                },
+              ],
+            },
+          }
+        }
+
+        return {
+          capture: {
+            captureId: 'cap-echo',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-echo',
+            threadId: 'self-chat',
+            threadTitle: 'Self',
+            threadIsDirect: true,
+            actorId: '+15550000000',
+            actorName: 'Self User',
+            actorIsSelf: true,
+            occurredAt: '2026-03-18T00:00:05.000Z',
+            receivedAt: null,
+            text: 'auto reply',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/echo.json',
+            eventId: 'evt-echo',
+            createdAt: '2026-03-18T00:00:05.000Z',
+            promotions: [],
+            attachments: [],
+          },
+        }
+      },
+    } as any
+
+    const first = await scanAssistantAutoReplyOnce({
+      afterCursor: null,
+      autoReplyPrimed: true,
+      allowSelfAuthored: true,
+      enabledChannels: ['imessage'],
+      inboxServices,
+      vault: vaultRoot,
+      async onStateProgress(next) {
+        stateProgress.push(next)
+      },
+    })
+
+    assert.deepEqual(first, {
+      considered: 1,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+    const prompt =
+      runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]?.userPrompt
+    assert.match(prompt ?? '', /Remember eggs and yogurt\./u)
+    assert.match(prompt ?? '', /Attachment context:/u)
+
+    phase = 'echo'
+    const second = await scanAssistantAutoReplyOnce({
+      afterCursor: stateProgress[0]?.cursor ?? null,
+      autoReplyPrimed: true,
+      allowSelfAuthored: true,
+      enabledChannels: ['imessage'],
+      inboxServices,
+      vault: vaultRoot,
+      async onStateProgress(next) {
+        stateProgress.push(next)
+      },
+    })
+
+    assert.deepEqual(second, {
+      considered: 1,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+    })
+    assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+
+    const sessionId = JSON.parse(
+      await readFile(
+        path.join(
+          vaultRoot,
+          'derived',
+          'inbox',
+          'cap-self',
+          'assistant',
+          'chat-result.json',
+        ),
+        'utf8',
+      ),
+    ).sessionId as string
+    const transcript = await listAssistantTranscriptEntries(vaultRoot, sessionId)
+    assert.equal(
+      transcript.some(
+        (entry) => entry.kind === 'assistant' && entry.text === 'auto reply',
+      ),
+      true,
+    )
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 test('runAssistantAutomation reports daemon failures as error results', async () => {

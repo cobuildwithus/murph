@@ -5,17 +5,24 @@ import {
   type AssistantAutomationCursor,
   type AssistantRunResult,
 } from '../assistant-cli-contracts.js'
+import type { InboxShowResult } from '../inbox-cli-contracts.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import { routeInboxCaptureWithModel } from '../inbox-model-harness.js'
 import type { AssistantModelSpec } from '../model-harness.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import { sendAssistantMessage } from './service.js'
 import {
+  listAssistantTranscriptEntries,
   readAssistantAutomationState,
   redactAssistantDisplayPath,
+  resolveAssistantSession,
   saveAssistantAutomationState,
 } from './store.js'
-import { errorMessage, writeJsonFileAtomic } from './shared.js'
+import {
+  errorMessage,
+  normalizeNullableString,
+  writeJsonFileAtomic,
+} from './shared.js'
 
 export interface AssistantRunEvent {
   captureId?: string
@@ -50,6 +57,7 @@ export interface AssistantAutoReplyScanResult {
 }
 
 export interface RunAssistantAutomationInput {
+  allowSelfAuthored?: boolean
   inboxServices: InboxCliServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
@@ -59,6 +67,7 @@ export interface RunAssistantAutomationInput {
   scanIntervalMs?: number
   signal?: AbortSignal
   startDaemon?: boolean
+  sessionMaxAgeMs?: number | null
   vault: string
   vaultServices?: VaultCliServices
 }
@@ -146,6 +155,8 @@ export async function runAssistantAutomation(
           onEvent: input.onEvent,
           requestId: input.requestId,
           signal: controller.signal,
+          allowSelfAuthored: input.allowSelfAuthored ?? false,
+          sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
           vault: input.vault,
           async onStateProgress(next) {
             state = await saveAssistantAutomationState(input.vault, {
@@ -355,6 +366,7 @@ export async function scanAssistantInboxOnce(input: {
 
 export async function scanAssistantAutoReplyOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
+  allowSelfAuthored?: boolean
   autoReplyPrimed?: boolean
   enabledChannels: readonly string[]
   inboxServices: InboxCliServices
@@ -366,6 +378,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   }) => Promise<void> | void
   requestId?: string | null
   signal?: AbortSignal
+  sessionMaxAgeMs?: number | null
   vault: string
 }): Promise<AssistantAutoReplyScanResult> {
   const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
@@ -440,7 +453,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   })
 
   const summary: AssistantAutoReplyScanResult = {
-    considered: captures.length,
+    considered: 0,
     failed: 0,
     replied: 0,
     skipped: 0,
@@ -451,6 +464,8 @@ export async function scanAssistantAutoReplyOnce(input: {
     if (input.signal?.aborted) {
       break
     }
+
+    summary.considered += 1
 
     try {
       if (!enabledChannels.includes(capture.source)) {
@@ -464,25 +479,13 @@ export async function scanAssistantAutoReplyOnce(input: {
         continue
       }
 
-      if (capture.actorIsSelf) {
+      if (capture.actorIsSelf && !(input.allowSelfAuthored ?? false)) {
         summary.skipped += 1
         cursor = cursorFromCapture(capture)
         input.onEvent?.({
           type: 'capture.reply-skipped',
           captureId: capture.captureId,
           details: 'capture is self-authored',
-        })
-        continue
-      }
-
-      const prompt = capture.text?.trim() ?? ''
-      if (prompt.length === 0) {
-        summary.skipped += 1
-        cursor = cursorFromCapture(capture)
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: capture.captureId,
-          details: 'capture has no text payload',
         })
         continue
       }
@@ -507,14 +510,51 @@ export async function scanAssistantAutoReplyOnce(input: {
         requestId: input.requestId ?? null,
         captureId: capture.captureId,
       })
+      const prompt = buildAssistantAutoReplyPrompt(shown.capture)
+      if (prompt.kind === 'defer') {
+        summary.skipped += 1
+        input.onEvent?.({
+          type: 'capture.reply-skipped',
+          captureId: capture.captureId,
+          details: prompt.reason,
+        })
+        break
+      }
+      if (prompt.kind === 'skip') {
+        summary.skipped += 1
+        cursor = cursorFromCapture(capture)
+        input.onEvent?.({
+          type: 'capture.reply-skipped',
+          captureId: capture.captureId,
+          details: prompt.reason,
+        })
+        continue
+      }
+      if (
+        capture.actorIsSelf &&
+        (await isRecentSelfAuthoredAssistantEcho({
+          vault: input.vault,
+          capture: shown.capture,
+        }))
+      ) {
+        summary.skipped += 1
+        cursor = cursorFromCapture(capture)
+        input.onEvent?.({
+          type: 'capture.reply-skipped',
+          captureId: capture.captureId,
+          details: 'capture matches a recent assistant delivery',
+        })
+        continue
+      }
       const result = await sendAssistantMessage({
         vault: input.vault,
         channel: shown.capture.source,
         participantId: shown.capture.actorId ?? undefined,
         sourceThreadId: shown.capture.threadId,
         threadIsDirect: shown.capture.threadIsDirect,
-        prompt,
+        prompt: prompt.prompt,
         deliverResponse: true,
+        maxSessionAgeMs: input.sessionMaxAgeMs ?? null,
       })
 
       if (result.deliveryError || result.delivery === null) {
@@ -554,6 +594,164 @@ export async function scanAssistantAutoReplyOnce(input: {
   })
 
   return summary
+}
+
+const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+
+type AssistantAutoReplyPrompt =
+  | { kind: 'defer'; reason: string }
+  | { kind: 'ready'; prompt: string }
+  | { kind: 'skip'; reason: string }
+
+function buildAssistantAutoReplyPrompt(
+  capture: InboxShowResult['capture'],
+): AssistantAutoReplyPrompt {
+  if (
+    capture.attachments.some(
+      (attachment) =>
+        attachment.parseState === 'pending' ||
+        attachment.parseState === 'running',
+    )
+  ) {
+    return {
+      kind: 'defer',
+      reason: 'waiting for parser completion',
+    }
+  }
+
+  const sections: string[] = []
+  const captureText = normalizeNullableString(capture.text)
+  if (captureText) {
+    sections.push(`Message text:
+${captureText}`)
+  }
+
+  const attachmentSections = capture.attachments
+    .map((attachment) => renderAttachmentPromptSection(attachment))
+    .filter((section): section is string => section !== null)
+
+  if (attachmentSections.length > 0) {
+    sections.push(`Attachment context:
+${attachmentSections.join('\n\n')}`)
+  }
+
+  if (sections.length === 0) {
+    return {
+      kind: 'skip',
+      reason: 'capture has no text or parsed attachment content',
+    }
+  }
+
+  const contextLines = [
+    `Source: ${capture.source}`,
+    `Occurred at: ${capture.occurredAt}`,
+    `Thread: ${capture.threadId}${capture.threadTitle ? ` (${capture.threadTitle})` : ''}`,
+    `Actor: ${capture.actorName ?? capture.actorId ?? 'unknown'} | self=${String(capture.actorIsSelf)}`,
+  ]
+
+  return {
+    kind: 'ready',
+    prompt: [...contextLines, '', ...sections].join('\n'),
+  }
+}
+
+function renderAttachmentPromptSection(
+  attachment: InboxShowResult['capture']['attachments'][number],
+): string | null {
+  const transcript = normalizeNullableString(attachment.transcriptText)
+  const extractedText = normalizeNullableString(attachment.extractedText)
+  const chunks: string[] = []
+
+  if (transcript) {
+    chunks.push(`Transcript:
+${transcript}`)
+  }
+  if (extractedText) {
+    chunks.push(`Extracted text:
+${extractedText}`)
+  }
+
+  if (chunks.length === 0) {
+    return null
+  }
+
+  const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
+  return `${label}\n${chunks.join('\n\n')}`
+}
+
+async function isRecentSelfAuthoredAssistantEcho(input: {
+  capture: InboxShowResult['capture']
+  vault: string
+}): Promise<boolean> {
+  const captureText = normalizeNullableString(input.capture.text)
+  if (!captureText) {
+    return false
+  }
+
+  let resolved: Awaited<ReturnType<typeof resolveAssistantSession>>
+  try {
+    resolved = await resolveAssistantSession({
+      vault: input.vault,
+      createIfMissing: false,
+      channel: input.capture.source,
+      participantId: input.capture.actorId ?? undefined,
+      sourceThreadId: input.capture.threadId,
+      threadIsDirect: input.capture.threadIsDirect,
+    })
+  } catch (error) {
+    const code =
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : null
+    if (code === 'ASSISTANT_SESSION_NOT_FOUND') {
+      return false
+    }
+    throw error
+  }
+
+  const referenceTimestamp =
+    normalizeNullableString(resolved.session.lastTurnAt) ??
+    normalizeNullableString(resolved.session.updatedAt) ??
+    normalizeNullableString(resolved.session.createdAt)
+  if (!referenceTimestamp) {
+    return false
+  }
+
+  const referenceTime = Date.parse(referenceTimestamp)
+  const captureTime = Date.parse(input.capture.occurredAt)
+  if (!Number.isFinite(referenceTime) || !Number.isFinite(captureTime)) {
+    return false
+  }
+
+  if (
+    captureTime < referenceTime ||
+    captureTime - referenceTime > SELF_AUTHORED_ECHO_WINDOW_MS
+  ) {
+    return false
+  }
+
+  const transcript = await listAssistantTranscriptEntries(
+    input.vault,
+    resolved.session.sessionId,
+  )
+  const lastAssistantEntry = [...transcript]
+    .reverse()
+    .find((entry) => entry.kind === 'assistant')
+  if (!lastAssistantEntry) {
+    return false
+  }
+
+  return (
+    normalizeComparableText(lastAssistantEntry.text) ===
+    normalizeComparableText(captureText)
+  )
+}
+
+function normalizeComparableText(text: string): string {
+  return text.replace(/\s+/gu, ' ').trim()
 }
 
 async function assistantResultArtifactExists(

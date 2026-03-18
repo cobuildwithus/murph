@@ -5,6 +5,7 @@ import path from 'node:path'
 import { experimentFrontmatterSchema } from '@healthybob/contracts'
 import { resolveRuntimePaths, type RuntimePaths } from '@healthybob/runtime-state'
 import { z } from 'incur'
+import { ensureImessageMessagesDbReadable } from './imessage-readiness.js'
 import { loadRuntimeModule } from './runtime-import.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
@@ -544,6 +545,7 @@ interface InboxServicesDependencies {
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
+  probeImessageMessagesDb?: (targetPath: string) => Promise<void>
   getEnvironment?: () => NodeJS.ProcessEnv
 }
 
@@ -769,6 +771,23 @@ export function createIntegratedInboxCliServices(
       apiBaseUrl: resolveTelegramApiBaseUrl(env) ?? undefined,
       fileBaseUrl: resolveTelegramFileBaseUrl(env) ?? undefined,
     })
+  }
+
+  const ensureConfiguredImessageReady = async (): Promise<void> => {
+    await ensureImessageMessagesDbReadable(
+      {
+        homeDirectory: getHomeDirectory(),
+        platform: getPlatform(),
+        probeMessagesDb: dependencies.probeImessageMessagesDb,
+      },
+      {
+        unavailableCode: 'INBOX_IMESSAGE_UNAVAILABLE',
+        unavailableMessage: 'The iMessage inbox connector requires macOS.',
+        permissionCode: 'INBOX_IMESSAGE_PERMISSION_REQUIRED',
+        permissionMessage:
+          'The iMessage inbox connector requires read access to ~/Library/Messages/chat.db. Grant Full Disk Access to the terminal or app running Healthy Bob, fully restart it, and retry.',
+      },
+    )
   }
 
   const journalPromotionEnabled =
@@ -1121,7 +1140,7 @@ export function createIntegratedInboxCliServices(
       }
 
       try {
-        await access(path.join(getHomeDirectory(), IMESSAGE_MESSAGES_DB_RELATIVE_PATH))
+        await ensureConfiguredImessageReady()
         checks.push(
           passCheck(
             'messages-db',
@@ -1459,6 +1478,7 @@ export function createIntegratedInboxCliServices(
           inputLimit: input.limit,
           loadImessageDriver: loadConfiguredImessageDriver,
           loadTelegramDriver: loadConfiguredTelegramDriver,
+          ensureImessageReady: ensureConfiguredImessageReady,
           loadInbox,
         })
         let importedCount = 0
@@ -1555,6 +1575,7 @@ export function createIntegratedInboxCliServices(
             connector,
             loadImessageDriver: loadConfiguredImessageDriver,
             loadTelegramDriver: loadConfiguredTelegramDriver,
+            ensureImessageReady: ensureConfiguredImessageReady,
             loadInbox,
           }),
         ),
@@ -2394,11 +2415,13 @@ async function instantiateConnector(input: {
   loadInbox: () => Promise<InboxRuntimeModule>
   loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
+  ensureImessageReady?: () => Promise<void>
 }) {
   const inboxd = await input.loadInbox()
 
   switch (input.connector.source) {
     case 'imessage': {
+      await input.ensureImessageReady?.()
       const driver = await input.loadImessageDriver(input.connector)
       return inboxd.createImessageConnector({
         driver,
