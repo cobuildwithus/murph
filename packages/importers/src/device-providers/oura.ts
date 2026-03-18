@@ -3,13 +3,20 @@ import {
   stripEmptyObject,
   stripUndefined,
 } from "../shared.js";
+import {
+  createRawArtifact,
+  finiteNumber,
+  pushObservationEvent,
+  pushRawArtifact,
+  pushSample,
+  trimToLength,
+} from "./shared-normalization.js";
 
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
-  DeviceSampleValuePayload,
 } from "../core-port.js";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.js";
 
@@ -58,23 +65,6 @@ function stringId(value: unknown): string | undefined {
   return undefined;
 }
 
-function finiteNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string" && value.trim()) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : undefined;
-  }
-
-  return undefined;
-}
-
-function trimToLength(value: string, maxLength: number): string {
-  return value.trim().slice(0, maxLength);
-}
-
 function slugify(value: unknown, fallback: string): string {
   const candidate = String(value ?? "")
     .trim()
@@ -113,46 +103,6 @@ function minutesBetween(startAt: string | undefined, endAt: string | undefined):
   return Math.max(1, Math.round(durationMs / 60000));
 }
 
-function createRawArtifact(
-  role: string,
-  fileName: string,
-  content: unknown,
-): DeviceRawArtifactPayload | null {
-  if (content === undefined || content === null) {
-    return null;
-  }
-
-  if (Array.isArray(content) && content.length === 0) {
-    return null;
-  }
-
-  if (
-    !Array.isArray(content) &&
-    typeof content === "object" &&
-    Object.keys(content as Record<string, unknown>).length === 0
-  ) {
-    return null;
-  }
-
-  return {
-    role,
-    fileName,
-    mediaType: "application/json",
-    content,
-  };
-}
-
-function pushRawArtifact(
-  rawArtifacts: DeviceRawArtifactPayload[],
-  artifact: DeviceRawArtifactPayload | null,
-): void {
-  if (!artifact) {
-    return;
-  }
-
-  rawArtifacts.push(artifact);
-}
-
 function makeExternalRef(
   resourceType: string,
   resourceId: string,
@@ -166,80 +116,6 @@ function makeExternalRef(
     version,
     facet,
   });
-}
-
-function pushObservationEvent(
-  events: DeviceEventPayload[],
-  options: {
-    metric: string;
-    value: unknown;
-    unit: string;
-    occurredAt?: string;
-    recordedAt?: string;
-    title: string;
-    note?: string;
-    rawArtifactRoles?: string[];
-    externalRef: DeviceExternalRefPayload;
-  },
-): void {
-  const numeric = finiteNumber(options.value);
-  const occurredAt = options.occurredAt ?? options.recordedAt;
-
-  if (numeric === undefined || !occurredAt) {
-    return;
-  }
-
-  events.push(
-    stripUndefined({
-      kind: "observation",
-      occurredAt,
-      recordedAt: options.recordedAt,
-      source: "device",
-      title: trimToLength(options.title, 160),
-      note: options.note ? trimToLength(options.note, 4000) : undefined,
-      rawArtifactRoles: options.rawArtifactRoles,
-      externalRef: options.externalRef,
-      fields: {
-        metric: options.metric,
-        value: numeric,
-        unit: options.unit,
-      },
-    }),
-  );
-}
-
-function pushSample(
-  samples: DeviceSamplePayload[],
-  options: {
-    stream: string;
-    value: unknown;
-    unit: string;
-    recordedAt?: string;
-    externalRef: DeviceExternalRefPayload;
-  },
-): void {
-  const numeric = finiteNumber(options.value);
-
-  if (numeric === undefined || !options.recordedAt) {
-    return;
-  }
-
-  const sample: DeviceSampleValuePayload = {
-    recordedAt: options.recordedAt,
-    value: numeric,
-  };
-
-  samples.push(
-    stripUndefined({
-      stream: options.stream,
-      recordedAt: options.recordedAt,
-      source: "device",
-      quality: "normalized",
-      unit: options.unit,
-      externalRef: options.externalRef,
-      sample,
-    }),
-  );
 }
 
 function firstIso(...candidates: unknown[]): string | undefined {

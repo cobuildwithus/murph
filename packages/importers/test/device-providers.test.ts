@@ -288,6 +288,103 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.equal(workoutEvent?.fields?.distanceKm, 6.8);
 });
 
+test("prepareDeviceProviderSnapshotImport handles Oura string numerics through shared observation and sample helpers", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "oura",
+    snapshot: {
+      accountId: 202,
+      dailyActivity: [
+        {
+          day: "2026-03-15",
+          score: "82",
+          steps: "12034",
+          active_calories: "510",
+          total_calories: "2400",
+          equivalent_walking_distance: "9200",
+          non_wear_time: "1200",
+        },
+      ],
+      dailyReadiness: [
+        {
+          day: "2026-03-15",
+          score: "77",
+          temperature_deviation: "-0.12",
+          temperature_trend_deviation: "0.05",
+        },
+      ],
+      dailySpO2: [
+        {
+          day: "2026-03-15",
+          spo2_percentage: {
+            average: "97.4",
+          },
+          breathing_disturbance_index: "2",
+        },
+      ],
+      sleeps: [
+        {
+          id: 5,
+          type: "sleep",
+          bedtime_start: "2026-03-14T22:30:00.000Z",
+          bedtime_end: "2026-03-15T06:45:00.000Z",
+          timestamp: "2026-03-15T06:50:00.000Z",
+          average_breath: "13.8",
+          average_hrv: "41.2",
+          average_heart_rate: "56",
+          efficiency: "91",
+          total_sleep_duration: "27000",
+          time_in_bed: "29700",
+          awake_time: "1200",
+          deep_sleep_duration: "5400",
+          light_sleep_duration: "14400",
+          rem_sleep_duration: "7200",
+          latency: "600",
+          lowest_heart_rate: "49",
+          sleep_score_delta: "5",
+          readiness_score_delta: "4",
+        },
+      ],
+      heartrate: [
+        {
+          timestamp: "2026-03-15T12:00:00.000Z",
+          bpm: "64",
+          source: "live",
+        },
+      ],
+    },
+  });
+
+  assert.equal(payload.accountId, "202");
+  assert.ok(
+    payload.events?.some(
+      (event) =>
+        event.kind === "observation" &&
+        event.fields?.metric === "activity-score" &&
+        event.fields?.value === 82,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) =>
+        event.kind === "observation" &&
+        event.fields?.metric === "readiness-score" &&
+        event.fields?.value === 77,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "spo2" && event.fields?.value === 97.4,
+    ),
+  );
+  assert.ok(
+    payload.samples?.some(
+      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.8,
+    ),
+  );
+  assert.ok(payload.samples?.some((sample) => sample.stream === "hrv" && sample.sample.value === 41.2));
+  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 64));
+});
+
 test("importDeviceProviderSnapshot uses the default Oura adapter registry", async () => {
   const calls: DeviceBatchImportPayload[] = [];
 
@@ -612,6 +709,59 @@ test("prepareDeviceProviderSnapshotImport handles WHOOP fallbacks and string num
   assert.equal(payload.events?.some((event) => event.kind === "sleep_session"), false);
   assert.equal(payload.events?.some((event) => event.kind === "activity_session"), false);
   assert.equal(payload.provenance?.whoopUserId, undefined);
+});
+
+test("prepareDeviceProviderSnapshotImport preserves shared raw-artifact omission and text trimming across Oura and WHOOP", async () => {
+  const longResourceType = `resource-${"x".repeat(200)}`;
+  const longSourceEventType = "y".repeat(5000);
+
+  const ouraPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "oura",
+    snapshot: {
+      personalInfo: {},
+      heartrate: [],
+      deletions: [
+        {
+          resource_type: longResourceType,
+          resource_id: "oura-deleted-1",
+          occurred_at: "2026-03-16T10:00:00.000Z",
+          source_event_type: longSourceEventType,
+        },
+      ],
+    },
+  });
+
+  const whoopPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "whoop",
+    snapshot: {
+      profile: {},
+      bodyMeasurements: {},
+      deletions: [
+        {
+          resource_type: longResourceType,
+          resource_id: "whoop-deleted-1",
+          occurred_at: "2026-03-16T10:00:00.000Z",
+          source_event_type: longSourceEventType,
+        },
+      ],
+    },
+  });
+
+  const ouraDeletion = ouraPayload.events?.find(
+    (event) => event.externalRef?.resourceId === "oura-deleted-1",
+  );
+  const whoopDeletion = whoopPayload.events?.find(
+    (event) => event.externalRef?.resourceId === "whoop-deleted-1",
+  );
+
+  assert.equal(ouraPayload.rawArtifacts?.some((artifact) => artifact.role === "personal-info"), false);
+  assert.equal(ouraPayload.rawArtifacts?.some((artifact) => artifact.role === "heartrate"), false);
+  assert.equal(whoopPayload.rawArtifacts?.some((artifact) => artifact.role === "profile"), false);
+  assert.equal(whoopPayload.rawArtifacts?.some((artifact) => artifact.role === "body-measurement"), false);
+  assert.equal(ouraDeletion?.title?.length, 160);
+  assert.equal(ouraDeletion?.note?.length, 4000);
+  assert.equal(whoopDeletion?.title?.length, 160);
+  assert.equal(whoopDeletion?.note?.length, 4000);
 });
 
 test("prepareDeviceProviderSnapshotImport covers WHOOP fallback ids and workout distance fallbacks", async () => {
