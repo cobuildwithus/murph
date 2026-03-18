@@ -1,1 +1,1 @@
-export * from './assistant/ui/ink.js'
+export { runAssistantChatWithInk } from './assistant/ui/ink.js'

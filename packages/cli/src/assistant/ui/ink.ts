@@ -123,10 +123,62 @@ interface ComposerEditingResult extends ComposerEditingState {
   handled: boolean
 }
 
+type ComposerTerminalAction =
+  | {
+      kind: 'edit'
+      input: string
+      key: Key
+    }
+  | {
+      kind: 'submit'
+    }
+
 const COMPOSER_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\\\|;:'\\\",.<>/?"
 
 function useAssistantInkTheme(): AssistantInkTheme {
   return React.useContext(AssistantInkThemeContext)
+}
+
+export function resolveComposerTerminalAction(
+  input: string,
+  key: Key,
+): ComposerTerminalAction {
+  if (key.return) {
+    if (!key.shift) {
+      return {
+        kind: 'submit',
+      }
+    }
+
+    return {
+      kind: 'edit',
+      input: '\n',
+      key: {
+        ...key,
+        return: false,
+      },
+    }
+  }
+
+  if (key.delete) {
+    // Many terminals report the primary delete/backspace key as `delete`.
+    // Preserve an actual forward-delete path via Ctrl+D inside the editor helpers.
+    return {
+      kind: 'edit',
+      input,
+      key: {
+        ...key,
+        backspace: true,
+        delete: false,
+      },
+    }
+  }
+
+  return {
+    kind: 'edit',
+    input,
+    key,
+  }
 }
 
 function ComposerInput(props: ComposerInputProps): React.ReactElement {
@@ -157,7 +209,9 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
         return
       }
 
-      if (key.return) {
+      const action = resolveComposerTerminalAction(input, key)
+
+      if (action.kind === 'submit') {
         if (props.onSubmit(props.value) === 'clear') {
           props.onChange('')
         }
@@ -170,8 +224,8 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
           killBuffer,
           value: props.value,
         },
-        input,
-        key,
+        action.input,
+        action.key,
       )
 
       if (editingResult.handled) {
@@ -198,9 +252,11 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
   return createElement(
     Box,
     {
-      flexDirection: 'row',
+      flexDirection: 'column',
+      flexGrow: 1,
+      flexShrink: 1,
     },
-    ...renderComposerValue({
+    renderComposerValue({
       cursorOffset,
       disabled: props.disabled,
       placeholder: props.placeholder,
@@ -278,16 +334,17 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
         Box,
         {
           key,
+          backgroundColor: theme.composerBackground,
+          flexDirection: 'column',
           marginBottom: 1,
           width: '100%',
         },
+        createElement(Text, {}, ' '),
         createElement(
           Box,
           {
-            backgroundColor: theme.composerBackground,
             flexDirection: 'row',
             paddingX: 2,
-            width: '100%',
           },
           createElement(
             Text,
@@ -311,6 +368,7 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
             ),
           ),
         ),
+        createElement(Text, {}, ' '),
       )
     }),
   )
@@ -812,6 +870,14 @@ export function applyComposerEditingInput(
     }
   }
 
+  const insertionText = normalizeComposerInsertedText(input)
+  if (insertionText.length === 0) {
+    return {
+      ...currentState,
+      handled: false,
+    }
+  }
+
   return finalizeComposerEditingResult(
     replaceComposerRange(
       currentState,
@@ -819,121 +885,122 @@ export function applyComposerEditingInput(
         end: currentState.cursorOffset,
         start: currentState.cursorOffset,
       },
-      input,
+      insertionText,
     ),
   )
 }
 
-function renderComposerValue(input: {
+export function normalizeComposerInsertedText(input: string): string {
+  return input.replace(/\r\n?/gu, '\n')
+}
+
+function resolveComposerCursorDisplay(input: {
+  cursorOffset: number
+  value: string
+}): {
+  afterCursor: string
+  beforeCursor: string
+  cursorCharacter: string
+} {
+  const cursorOffset = clampComposerCursorOffset(input.cursorOffset, input.value.length)
+  const beforeCursor = input.value.slice(0, cursorOffset)
+  const rawCursorCharacter = input.value.slice(cursorOffset, cursorOffset + 1)
+
+  if (rawCursorCharacter === '\n') {
+    return {
+      afterCursor: `\n${input.value.slice(cursorOffset + 1)}`,
+      beforeCursor,
+      cursorCharacter: ' ',
+    }
+  }
+
+  return {
+    afterCursor:
+      cursorOffset < input.value.length
+        ? input.value.slice(cursorOffset + 1)
+        : '',
+    beforeCursor,
+    cursorCharacter: rawCursorCharacter || ' ',
+  }
+}
+
+export function renderComposerValue(input: {
   cursorOffset: number
   disabled: boolean
   placeholder: string
   theme: AssistantInkTheme
   value: string
-}): React.ReactElement[] {
+}): React.ReactElement {
   const createElement = React.createElement
 
   if (input.value.length === 0) {
     if (input.disabled) {
-      return [
-        createElement(
-          Text,
-          {
-            key: 'placeholder',
-            color: input.theme.composerPlaceholderColor,
-          },
-          input.placeholder,
-        ),
-      ]
+      return createElement(
+        Text,
+        {
+          color: input.theme.composerPlaceholderColor,
+          wrap: 'wrap',
+        },
+        input.placeholder,
+      )
     }
 
     const cursorCharacter = input.placeholder.slice(0, 1) || ' '
     const remainder = input.placeholder.slice(1)
 
-    return [
+    return createElement(
+      Text,
+      {
+        color: input.theme.composerPlaceholderColor,
+        wrap: 'wrap',
+      },
       createElement(
         Text,
         {
-          key: 'cursor',
           backgroundColor: input.theme.composerCursorBackground,
           color: input.theme.composerCursorTextColor,
         },
         cursorCharacter,
       ),
-      createElement(
-        Text,
-        {
-          key: 'placeholder',
-          color: input.theme.composerPlaceholderColor,
-        },
-        remainder,
-      ),
-    ]
-  }
-
-  const cursorOffset = clampComposerCursorOffset(input.cursorOffset, input.value.length)
-  const beforeCursor = input.value.slice(0, cursorOffset)
-  const cursorCharacter = input.value.slice(cursorOffset, cursorOffset + 1) || ' '
-  const afterCursor =
-    cursorOffset < input.value.length
-      ? input.value.slice(cursorOffset + 1)
-      : ''
-
-  const segments: React.ReactElement[] = []
-
-  if (beforeCursor.length > 0) {
-    segments.push(
-      createElement(
-        Text,
-        {
-          key: 'before',
-          color: input.theme.composerTextColor,
-        },
-        beforeCursor,
-      ),
+      remainder,
     )
   }
+
+  const cursorDisplay = resolveComposerCursorDisplay({
+    cursorOffset: input.cursorOffset,
+    value: input.value,
+  })
 
   if (input.disabled) {
-    segments.push(
-      createElement(
-        Text,
-        {
-          key: 'after-disabled',
-          color: input.theme.composerTextColor,
-        },
-        cursorCharacter + afterCursor,
-      ),
+    return createElement(
+      Text,
+      {
+        color: input.theme.composerTextColor,
+        wrap: 'wrap',
+      },
+      cursorDisplay.beforeCursor,
+      cursorDisplay.cursorCharacter,
+      cursorDisplay.afterCursor,
     )
-    return segments
   }
 
-  segments.push(
+  return createElement(
+    Text,
+    {
+      color: input.theme.composerTextColor,
+      wrap: 'wrap',
+    },
+    cursorDisplay.beforeCursor,
     createElement(
       Text,
       {
-        key: 'cursor',
         backgroundColor: input.theme.composerCursorBackground,
         color: input.theme.composerCursorTextColor,
       },
-      cursorCharacter,
+      cursorDisplay.cursorCharacter,
     ),
+    cursorDisplay.afterCursor,
   )
-
-  if (afterCursor.length > 0) {
-    segments.push(
-      createElement(
-        Text,
-        {
-          key: 'after',
-          color: input.theme.composerTextColor,
-        },
-        afterCursor,
-      ),
-    )
-  }
-
-  return segments
 }
 
 function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {

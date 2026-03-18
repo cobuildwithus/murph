@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { Key } from 'ink'
+import * as React from 'react'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
   listAssistantTranscriptEntries,
@@ -71,7 +72,13 @@ import {
   seedChatEntries,
   shouldClearComposerForSubmitAction,
 } from '../src/assistant/ui/view-model.js'
-import { applyComposerEditingInput } from '../src/assistant/ui/ink.js'
+import {
+  applyComposerEditingInput,
+  normalizeComposerInsertedText,
+  renderComposerValue,
+  resolveComposerTerminalAction,
+} from '../src/assistant/ui/ink.js'
+import { LIGHT_ASSISTANT_INK_THEME } from '../src/assistant/ui/theme.js'
 
 const cleanupPaths: string[] = []
 
@@ -1233,6 +1240,136 @@ test('assistant Ink composer editing supports forward delete and best-effort sup
       killBuffer: 'beta',
       value: 'alpha ',
     },
+  )
+})
+
+test('assistant Ink composer editing normalizes pasted carriage returns to newlines', () => {
+  assert.equal(
+    normalizeComposerInsertedText('alpha\r\nbeta\rgamma'),
+    'alpha\nbeta\ngamma',
+  )
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 0,
+        killBuffer: '',
+        value: '',
+      },
+      'alpha\r\nbeta\rgamma',
+      createComposerKey(),
+    ),
+    {
+      cursorOffset: 16,
+      handled: true,
+      killBuffer: '',
+      value: 'alpha\nbeta\ngamma',
+    },
+  )
+})
+
+test('assistant Ink composer terminal actions treat shift+enter as a newline edit', () => {
+  const action = resolveComposerTerminalAction(
+    '',
+    createComposerKey({
+      return: true,
+      shift: true,
+    }),
+  )
+
+  assert.equal(action.kind, 'edit')
+  assert.equal(action.input, '\n')
+  assert.equal(action.key.return, false)
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 5,
+        killBuffer: '',
+        value: 'hello',
+      },
+      action.input,
+      action.key,
+    ),
+    {
+      cursorOffset: 6,
+      handled: true,
+      killBuffer: '',
+      value: 'hello\n',
+    },
+  )
+})
+
+test('assistant Ink composer terminal actions map terminal delete keypresses to backward delete', () => {
+  const action = resolveComposerTerminalAction(
+    '',
+    createComposerKey({
+      delete: true,
+    }),
+  )
+
+  assert.equal(action.kind, 'edit')
+  assert.equal(action.key.backspace, true)
+  assert.equal(action.key.delete, false)
+
+  assert.deepEqual(
+    applyComposerEditingInput(
+      {
+        cursorOffset: 5,
+        killBuffer: '',
+        value: 'hello',
+      },
+      action.input,
+      action.key,
+    ),
+    {
+      cursorOffset: 4,
+      handled: true,
+      killBuffer: '',
+      value: 'hell',
+    },
+  )
+})
+
+test('assistant Ink composer render keeps newline-adjacent cursors in one wrapped text flow', () => {
+  const rendered = renderComposerValue({
+    cursorOffset: 5,
+    disabled: false,
+    placeholder: 'Type a message',
+    theme: LIGHT_ASSISTANT_INK_THEME,
+    value: 'alpha\nbeta gamma',
+  })
+  const renderedProps = rendered.props as {
+    children?: React.ReactNode
+    color?: string
+    wrap?: string
+  }
+  const children = React.Children.toArray(renderedProps.children)
+
+  assert.equal(renderedProps.wrap, 'wrap')
+  assert.equal(renderedProps.color, LIGHT_ASSISTANT_INK_THEME.composerTextColor)
+  assert.deepEqual(children.length, 3)
+  assert.equal(children[0], 'alpha')
+  assert.equal(children[2], '\nbeta gamma')
+  assert.equal(React.isValidElement(children[1]), true)
+
+  if (!React.isValidElement(children[1])) {
+    throw new Error('Expected the cursor segment to render as a React element.')
+  }
+
+  const cursorProps = children[1].props as {
+    backgroundColor?: string
+    children?: React.ReactNode
+    color?: string
+  }
+  assert.equal(cursorProps.children, ' ')
+  assert.equal(
+    cursorProps.backgroundColor,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorBackground,
+  )
+  assert.equal(
+    cursorProps.color,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorTextColor,
   )
 })
 
