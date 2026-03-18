@@ -4,14 +4,20 @@ import { deviceSyncError } from "../errors.js";
 import {
   addMilliseconds,
   coerceRecord,
-  computeRetryDelayMs,
   normalizeIdentifier,
   normalizeString,
   normalizeStringList,
-  sha256Text,
-  sleep,
   subtractDays,
 } from "../shared.js";
+import {
+  buildOAuthConnectUrl,
+  buildProviderApiError,
+  buildScheduledReconcileJobs,
+  fetchBearerJson,
+  parseResponseBody,
+  postOAuthTokenRequest,
+  requestWithRefreshAndRetry,
+} from "./shared-oauth.js";
 
 import type {
   DeviceSyncAccount,
@@ -183,14 +189,6 @@ function parseWhoopWebhookPayload(rawBody: Buffer): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-async function parseResponseBody(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
 function buildWhoopApiError(
   code: string,
   message: string,
@@ -201,17 +199,7 @@ function buildWhoopApiError(
     accountStatus?: "reauthorization_required" | "disconnected" | null;
   } = {},
 ) {
-  return deviceSyncError({
-    code,
-    message,
-    retryable: options.retryable ?? (response.status === 429 || response.status >= 500),
-    httpStatus: response.status,
-    accountStatus: options.accountStatus ?? null,
-    details: {
-      status: response.status,
-      bodySnippet: body.slice(0, 500),
-    },
-  });
+  return buildProviderApiError(code, message, response, body, options);
 }
 
 export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncProvider {
@@ -225,29 +213,17 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   async function postTokenRequest(parameters: Record<string, string>): Promise<WhoopTokenResponse> {
-    const response = await fetchImpl(`${baseUrl}${WHOOP_TOKEN_PATH}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams(parameters),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (!response.ok) {
-      throw buildWhoopApiError(
-        "WHOOP_TOKEN_REQUEST_FAILED",
-        "WHOOP token request failed.",
-        response,
-        await parseResponseBody(response),
-        {
+    return postOAuthTokenRequest<WhoopTokenResponse>({
+      fetchImpl,
+      url: `${baseUrl}${WHOOP_TOKEN_PATH}`,
+      timeoutMs,
+      parameters,
+      buildError: (response, body) =>
+        buildWhoopApiError("WHOOP_TOKEN_REQUEST_FAILED", "WHOOP token request failed.", response, body, {
           retryable: response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
-        },
-      );
-    }
-
-    return (await response.json()) as WhoopTokenResponse;
+        }),
+    });
   }
 
   async function fetchWhoopJson<T>(input: {
@@ -255,34 +231,18 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     accessToken: string;
     optional?: boolean;
   }): Promise<T | null> {
-    const response = await fetchImpl(`${baseUrl}${WHOOP_API_PREFIX}${input.path}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${input.accessToken}`,
-        Accept: "application/json",
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (response.status === 404 && input.optional) {
-      return null;
-    }
-
-    if (!response.ok) {
-      const body = await parseResponseBody(response);
-      throw buildWhoopApiError(
-        "WHOOP_API_REQUEST_FAILED",
-        `WHOOP API request failed for ${input.path}.`,
-        response,
-        body,
-        {
+    return fetchBearerJson<T>({
+      fetchImpl,
+      url: `${baseUrl}${WHOOP_API_PREFIX}${input.path}`,
+      accessToken: input.accessToken,
+      timeoutMs,
+      optional: input.optional,
+      buildError: (response, body) =>
+        buildWhoopApiError("WHOOP_API_REQUEST_FAILED", `WHOOP API request failed for ${input.path}.`, response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
-        },
-      );
-    }
-
-    return (await response.json()) as T;
+        }),
+    });
   }
 
   async function fetchPagedCollection(
@@ -346,58 +306,16 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     }
 
     async function requestJson<T>(path: string, options: { optional?: boolean } = {}): Promise<T | null> {
-      let attempt = 0;
-
-      while (true) {
-        if (isTokenNearExpiry(currentAccount)) {
-          await refresh();
-        }
-
-        try {
-          return await fetchWhoopJson<T>({
+      return requestWithRefreshAndRetry({
+        shouldRefresh: () => isTokenNearExpiry(currentAccount),
+        refresh,
+        request: () =>
+          fetchWhoopJson<T>({
             path,
             accessToken: currentAccount.accessToken,
             optional: options.optional,
-          });
-        } catch (error) {
-          const retryable =
-            typeof error === "object" &&
-            error !== null &&
-            "retryable" in error &&
-            Boolean((error as { retryable?: boolean }).retryable);
-          const accountStatus =
-            typeof error === "object" &&
-            error !== null &&
-            "accountStatus" in error
-              ? ((error as { accountStatus?: "reauthorization_required" | "disconnected" | null }).accountStatus ??
-                null)
-              : null;
-          const httpStatus =
-            typeof error === "object" &&
-            error !== null &&
-            "httpStatus" in error
-              ? Number((error as { httpStatus?: number }).httpStatus)
-              : undefined;
-
-          if (httpStatus === 401 && attempt === 0) {
-            await refresh();
-            attempt += 1;
-            continue;
-          }
-
-          if (retryable && attempt < 3) {
-            attempt += 1;
-            await sleep(computeRetryDelayMs(attempt));
-            continue;
-          }
-
-          if (accountStatus === "reauthorization_required") {
-            throw error;
-          }
-
-          throw error;
-        }
-      }
+          }),
+      });
     }
 
     return {
@@ -569,15 +487,14 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     webhookPath: WHOOP_WEBHOOK_PATH,
     defaultScopes: scopes,
     buildConnectUrl(context) {
-      const search = new URLSearchParams({
-        client_id: config.clientId,
-        response_type: "code",
-        redirect_uri: context.callbackUrl,
-        scope: context.scopes.join(" "),
+      return buildOAuthConnectUrl({
+        baseUrl,
+        authorizePath: WHOOP_AUTH_PATH,
+        clientId: config.clientId,
+        callbackUrl: context.callbackUrl,
+        scopes: context.scopes,
         state: context.state,
       });
-
-      return `${baseUrl}${WHOOP_AUTH_PATH}?${search.toString()}`;
     },
     async exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult> {
       const tokenPayload = await postTokenRequest({
@@ -693,23 +610,17 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       }
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
-      const dedupeKey = `reconcile:${sha256Text(`${account.id}:${account.nextReconcileAt ?? now}`)}`;
-      return {
-        jobs: [
-          {
-            kind: "reconcile",
-            dedupeKey,
-            priority: 25,
-            payload: {
-              windowStart: subtractDays(now, reconcileDays),
-              windowEnd: now,
-              includeProfile: false,
-              includeBodyMeasurement: false,
-            },
-          },
-        ],
-        nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
-      };
+      return buildScheduledReconcileJobs({
+        accountId: account.id,
+        nextReconcileAt: account.nextReconcileAt,
+        now,
+        reconcileDays,
+        reconcileIntervalMs,
+        payload: {
+          includeProfile: false,
+          includeBodyMeasurement: false,
+        },
+      });
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
       const signature = context.headers.get("x-whoop-signature");

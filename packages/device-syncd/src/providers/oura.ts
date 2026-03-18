@@ -2,13 +2,18 @@ import { deviceSyncError } from "../errors.js";
 import {
   addMilliseconds,
   coerceRecord,
-  computeRetryDelayMs,
   normalizeIdentifier,
   normalizeString,
-  sha256Text,
-  sleep,
   subtractDays,
 } from "../shared.js";
+import {
+  buildOAuthConnectUrl,
+  buildProviderApiError,
+  buildScheduledReconcileJobs,
+  fetchBearerJson,
+  postOAuthTokenRequest,
+  requestWithRefreshAndRetry,
+} from "./shared-oauth.js";
 
 import type {
   DeviceSyncAccount,
@@ -129,14 +134,6 @@ function tokenResponseToAuthTokens(payload: OuraTokenResponse): ProviderAuthToke
   };
 }
 
-async function parseResponseBody(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
 function buildOuraApiError(
   code: string,
   message: string,
@@ -147,17 +144,7 @@ function buildOuraApiError(
     accountStatus?: "reauthorization_required" | "disconnected" | null;
   } = {},
 ) {
-  return deviceSyncError({
-    code,
-    message,
-    retryable: options.retryable ?? (response.status === 429 || response.status >= 500),
-    httpStatus: response.status,
-    accountStatus: options.accountStatus ?? null,
-    details: {
-      status: response.status,
-      bodySnippet: body.slice(0, 500),
-    },
-  });
+  return buildProviderApiError(code, message, response, body, options);
 }
 
 export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfig): DeviceSyncProvider {
@@ -171,29 +158,17 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   async function postTokenRequest(parameters: Record<string, string>): Promise<OuraTokenResponse> {
-    const response = await fetchImpl(`${apiBaseUrl}${OURA_TOKEN_PATH}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams(parameters),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (!response.ok) {
-      throw buildOuraApiError(
-        "OURA_TOKEN_REQUEST_FAILED",
-        "Oura token request failed.",
-        response,
-        await parseResponseBody(response),
-        {
+    return postOAuthTokenRequest<OuraTokenResponse>({
+      fetchImpl,
+      url: `${apiBaseUrl}${OURA_TOKEN_PATH}`,
+      timeoutMs,
+      parameters,
+      buildError: (response, body) =>
+        buildOuraApiError("OURA_TOKEN_REQUEST_FAILED", "Oura token request failed.", response, body, {
           retryable: response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
-        },
-      );
-    }
-
-    return (await response.json()) as OuraTokenResponse;
+        }),
+    });
   }
 
   async function fetchOuraJson<T>(input: {
@@ -201,34 +176,18 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     accessToken: string;
     optional?: boolean;
   }): Promise<T | null> {
-    const response = await fetchImpl(`${apiBaseUrl}${input.path}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${input.accessToken}`,
-        Accept: "application/json",
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (response.status === 404 && input.optional) {
-      return null;
-    }
-
-    if (!response.ok) {
-      const body = await parseResponseBody(response);
-      throw buildOuraApiError(
-        "OURA_API_REQUEST_FAILED",
-        `Oura API request failed for ${input.path}.`,
-        response,
-        body,
-        {
+    return fetchBearerJson<T>({
+      fetchImpl,
+      url: `${apiBaseUrl}${input.path}`,
+      accessToken: input.accessToken,
+      timeoutMs,
+      optional: input.optional,
+      buildError: (response, body) =>
+        buildOuraApiError("OURA_API_REQUEST_FAILED", `Oura API request failed for ${input.path}.`, response, body, {
           retryable: response.status === 429 || response.status >= 500,
           accountStatus: response.status === 401 ? "reauthorization_required" : null,
-        },
-      );
-    }
-
-    return (await response.json()) as T;
+        }),
+    });
   }
 
   async function fetchPagedCollection(
@@ -284,58 +243,16 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     }
 
     async function requestJson<T>(path: string, options: { optional?: boolean } = {}): Promise<T | null> {
-      let attempt = 0;
-
-      while (true) {
-        if (isTokenNearExpiry(currentAccount)) {
-          await refresh();
-        }
-
-        try {
-          return await fetchOuraJson<T>({
+      return requestWithRefreshAndRetry({
+        shouldRefresh: () => isTokenNearExpiry(currentAccount),
+        refresh,
+        request: () =>
+          fetchOuraJson<T>({
             path,
             accessToken: currentAccount.accessToken,
             optional: options.optional,
-          });
-        } catch (error) {
-          const retryable =
-            typeof error === "object" &&
-            error !== null &&
-            "retryable" in error &&
-            Boolean((error as { retryable?: boolean }).retryable);
-          const accountStatus =
-            typeof error === "object" &&
-            error !== null &&
-            "accountStatus" in error
-              ? ((error as { accountStatus?: "reauthorization_required" | "disconnected" | null }).accountStatus ??
-                null)
-              : null;
-          const httpStatus =
-            typeof error === "object" &&
-            error !== null &&
-            "httpStatus" in error
-              ? Number((error as { httpStatus?: number }).httpStatus)
-              : undefined;
-
-          if (httpStatus === 401 && attempt === 0) {
-            await refresh();
-            attempt += 1;
-            continue;
-          }
-
-          if (retryable && attempt < 3) {
-            attempt += 1;
-            await sleep(computeRetryDelayMs(attempt));
-            continue;
-          }
-
-          if (accountStatus === "reauthorization_required") {
-            throw error;
-          }
-
-          throw error;
-        }
-      }
+          }),
+      });
     }
 
     return {
@@ -434,15 +351,14 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     callbackPath: OURA_CALLBACK_PATH,
     defaultScopes: scopes,
     buildConnectUrl(context) {
-      const search = new URLSearchParams({
-        client_id: config.clientId,
-        response_type: "code",
-        redirect_uri: context.callbackUrl,
-        scope: context.scopes.join(" "),
+      return buildOAuthConnectUrl({
+        baseUrl: authBaseUrl,
+        authorizePath: OURA_AUTHORIZE_PATH,
+        clientId: config.clientId,
+        callbackUrl: context.callbackUrl,
+        scopes: context.scopes,
         state: context.state,
       });
-
-      return `${authBaseUrl}${OURA_AUTHORIZE_PATH}?${search.toString()}`;
     },
     async exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult> {
       const tokenPayload = await postTokenRequest({
@@ -547,22 +463,16 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       return tokens;
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
-      const dedupeKey = `reconcile:${sha256Text(`${account.id}:${account.nextReconcileAt ?? now}`)}`;
-      return {
-        jobs: [
-          {
-            kind: "reconcile",
-            dedupeKey,
-            priority: 25,
-            payload: {
-              windowStart: subtractDays(now, reconcileDays),
-              windowEnd: now,
-              includePersonalInfo: false,
-            },
-          },
-        ],
-        nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
-      };
+      return buildScheduledReconcileJobs({
+        accountId: account.id,
+        nextReconcileAt: account.nextReconcileAt,
+        now,
+        reconcileDays,
+        reconcileIntervalMs,
+        payload: {
+          includePersonalInfo: false,
+        },
+      });
     },
     async executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {
       if (job.kind === "backfill") {

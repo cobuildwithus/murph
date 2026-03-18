@@ -31,6 +31,7 @@ export default defineConfig({
       "packages/device-syncd/test/http.test.ts",
       "packages/device-syncd/test/oura-provider.test.ts",
       "packages/device-syncd/test/service.test.ts",
+      "packages/device-syncd/test/whoop-provider.test.ts",
       "packages/inboxd/test/connectors-daemon.test.ts",
       "packages/inboxd/test/idempotency-rebuild.test.ts",
       "packages/inboxd/test/inboxd.test.ts",
