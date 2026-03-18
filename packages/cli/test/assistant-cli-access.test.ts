@@ -22,15 +22,17 @@ test('resolveAssistantCliAccessContext prepends the Healthy Bob shim directory t
   )
 })
 
-test('buildAssistantCliGuidanceText points the assistant at Incur discovery instead of a handwritten command map', () => {
+test('buildAssistantCliGuidanceText tells the assistant to escalate from help to schema to llms discovery', () => {
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
     setupCommand: 'healthybob',
   })
 
   assert.match(guidance, /raw Healthy Bob CLI/u)
+  assert.match(guidance, /vault-cli <command> --help/u)
+  assert.match(guidance, /vault-cli <command> --schema --format json/u)
   assert.match(guidance, /vault-cli --llms/u)
-  assert.match(guidance, /vault-cli <command> --schema/u)
-  assert.match(guidance, /--format json/u)
+  assert.match(guidance, /vault-cli --llms-full/u)
+  assert.match(guidance, /broad CLI discovery/u)
   assert.match(guidance, /healthybob/u)
 })

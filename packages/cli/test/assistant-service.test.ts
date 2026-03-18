@@ -87,9 +87,11 @@ test('sendAssistantMessage gives the first provider turn direct Incur-backed CLI
   const expectedUserBinDirectory = path.join(homeRoot, '.local', 'bin')
 
   assert.equal(firstCall?.workingDirectory, vaultRoot)
+  assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --schema --format json/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli --llms/u)
-  assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --schema/u)
-  assert.match(firstCall?.systemPrompt ?? '', /--format json/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli --llms-full/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
   assert.equal(
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],

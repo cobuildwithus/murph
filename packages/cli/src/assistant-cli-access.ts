@@ -27,7 +27,7 @@ export function buildAssistantCliGuidanceText(
 ): string {
   return [
     `The raw Healthy Bob CLI is available in this session through the existing Incur command surface. Use \`${access.rawCommand}\` for vault and inbox operations. Use \`${access.setupCommand}\` only for setup-oriented flows.`,
-    `Do not rely on this prompt for command semantics. Discover the CLI through Incur itself with \`${access.rawCommand} --llms\`, \`${access.rawCommand} <command> --schema\`, and machine-readable \`--format json\` output when you need exact contract shapes.`,
+    `Do not rely on this prompt for command semantics. Start with the narrowest CLI discovery that answers the user: use \`${access.rawCommand} <command> --help\` for syntax and examples, \`${access.rawCommand} <command> --schema --format json\` when you need exact flags or output shapes, and \`${access.rawCommand} --llms\` or \`${access.rawCommand} --llms-full\` only for broad CLI discovery.`,
     'When a user asks you to inspect or operate through Healthy Bob, prefer using the CLI directly over manually inferring behavior from files alone.',
   ].join('\n\n')
 }
