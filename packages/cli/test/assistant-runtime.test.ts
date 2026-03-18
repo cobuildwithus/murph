@@ -1506,6 +1506,89 @@ test('assistant Ink composer editing normalizes pasted carriage returns to newli
   )
 })
 
+test('assistant Ink composer render highlights the active character instead of inserting a spacer', () => {
+  const rendered = renderComposerValue({
+    cursorOffset: 2,
+    disabled: false,
+    placeholder: 'Type a message',
+    theme: LIGHT_ASSISTANT_INK_THEME,
+    value: 'alpha',
+  })
+  const renderedProps = rendered.props as {
+    children?: React.ReactNode
+    color?: string
+    wrap?: string
+  }
+  const children = React.Children.toArray(renderedProps.children)
+
+  assert.equal(renderedProps.wrap, 'wrap')
+  assert.equal(renderedProps.color, LIGHT_ASSISTANT_INK_THEME.composerTextColor)
+  assert.deepEqual(children.length, 3)
+  assert.equal(children[0], 'al')
+  assert.equal(children[2], 'ha')
+  assert.equal(React.isValidElement(children[1]), true)
+
+  if (!React.isValidElement(children[1])) {
+    throw new Error('Expected the cursor segment to render as a React element.')
+  }
+
+  const cursorProps = children[1].props as {
+    backgroundColor?: string
+    children?: React.ReactNode
+    color?: string
+  }
+  assert.equal(cursorProps.children, 'p')
+  assert.equal(
+    cursorProps.backgroundColor,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorBackground,
+  )
+  assert.equal(
+    cursorProps.color,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorTextColor,
+  )
+})
+
+test('assistant Ink composer render highlights the first placeholder character when empty', () => {
+  const rendered = renderComposerValue({
+    cursorOffset: 0,
+    disabled: false,
+    placeholder: 'Type a message',
+    theme: LIGHT_ASSISTANT_INK_THEME,
+    value: '',
+  })
+  const renderedProps = rendered.props as {
+    children?: React.ReactNode
+    color?: string
+    wrap?: string
+  }
+  const children = React.Children.toArray(renderedProps.children)
+
+  assert.equal(renderedProps.wrap, 'wrap')
+  assert.equal(renderedProps.color, LIGHT_ASSISTANT_INK_THEME.composerPlaceholderColor)
+  assert.deepEqual(children.length, 2)
+  assert.equal(children[1], 'ype a message')
+  assert.equal(React.isValidElement(children[0]), true)
+
+  if (!React.isValidElement(children[0])) {
+    throw new Error('Expected the placeholder cursor segment to render as a React element.')
+  }
+
+  const cursorProps = children[0].props as {
+    backgroundColor?: string
+    children?: React.ReactNode
+    color?: string
+  }
+  assert.equal(cursorProps.children, 'T')
+  assert.equal(
+    cursorProps.backgroundColor,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorBackground,
+  )
+  assert.equal(
+    cursorProps.color,
+    LIGHT_ASSISTANT_INK_THEME.composerCursorTextColor,
+  )
+})
+
 test('assistant Ink composer vertical cursor movement preserves preferred columns across uneven lines', () => {
   const firstMove = resolveComposerVerticalCursorMove({
     cursorOffset: 5,

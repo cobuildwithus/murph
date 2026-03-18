@@ -474,6 +474,9 @@ const ChatStaticFeed = React.memo(function ChatStaticFeed(input: {
   const ChatStatic = Static as React.ComponentType<{
     children: (item: ChatStaticItem, index: number) => React.ReactNode
     items: ChatStaticItem[]
+    style?: {
+      width?: string
+    }
   }>
   // Keep the non-editing chat surface on Ink static output so old turns do not
   // participate in future keystroke renders.
@@ -496,6 +499,9 @@ const ChatStaticFeed = React.memo(function ChatStaticFeed(input: {
     ChatStatic,
     {
       items: staticItems,
+      style: {
+        width: '100%',
+      },
       children: (item: ChatStaticItem, index: number) => {
         if (item.kind === 'header') {
           return React.createElement(ChatHeader, {
@@ -1095,6 +1101,7 @@ function resolveComposerCursorDisplay(input: {
 }): {
   afterCursor: string
   beforeCursor: string
+  cursorCharacter: string
 } {
   const cursorOffset = clampComposerCursorOffset(input.cursorOffset, input.value.length)
   const beforeCursor = input.value.slice(0, cursorOffset)
@@ -1108,6 +1115,7 @@ function resolveComposerCursorDisplay(input: {
     return {
       afterCursor: `\n${input.value.slice(cursorOffset + 1)}`,
       beforeCursor,
+      cursorCharacter: ' ',
     }
   }
 
@@ -1115,12 +1123,14 @@ function resolveComposerCursorDisplay(input: {
     return {
       afterCursor: '',
       beforeCursor,
+      cursorCharacter: ' ',
     }
   }
 
   return {
-    afterCursor: `${rawCursorCharacter}${afterCursor}`,
+    afterCursor,
     beforeCursor,
+    cursorCharacter: rawCursorCharacter,
   }
 }
 
@@ -1160,9 +1170,9 @@ export function renderComposerValue(input: {
           backgroundColor: input.theme.composerCursorBackground,
           color: input.theme.composerCursorTextColor,
         },
-        ' ',
+        cursorCharacter,
       ),
-      cursorCharacter + remainder,
+      remainder,
     )
   }
 
@@ -1195,7 +1205,7 @@ export function renderComposerValue(input: {
         backgroundColor: input.theme.composerCursorBackground,
         color: input.theme.composerCursorTextColor,
       },
-      ' ',
+      cursorDisplay.cursorCharacter,
     ),
     cursorDisplay.afterCursor,
   )
@@ -1807,6 +1817,7 @@ export async function runAssistantChatWithInk(
             flexDirection: 'column',
             paddingX: 1,
             paddingY: 1,
+            width: '100%',
           },
           createElement(ChatStaticFeed, {
             bindingSummary,
@@ -1817,6 +1828,7 @@ export async function runAssistantChatWithInk(
             Box,
             {
               flexDirection: 'column',
+              width: '100%',
             },
             createElement(ChatStatus, {
               busy,
