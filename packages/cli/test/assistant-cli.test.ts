@@ -11,8 +11,14 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from '../src/operator-config.js'
-import { createAssistantMemoryTurnContextEnv } from '../src/assistant/memory.js'
-import { resolveAssistantSession } from '../src/assistant-state.js'
+import {
+  createAssistantMemoryTurnContextEnv,
+  resolveAssistantMemoryStoragePaths,
+} from '../src/assistant/memory.js'
+import {
+  resolveAssistantSession,
+  resolveAssistantStatePaths,
+} from '../src/assistant-state.js'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
@@ -55,6 +61,27 @@ afterEach(async () => {
 
 beforeEach(() => {
   runtimeMocks.runAssistantChat.mockReset()
+})
+
+test('assistant memory path resolver exposes only the memory path subset', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-paths-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const memoryPaths = resolveAssistantMemoryStoragePaths(vaultRoot)
+
+  assert.deepEqual(memoryPaths, {
+    assistantStateRoot: statePaths.assistantStateRoot,
+    dailyMemoryDirectory: statePaths.dailyMemoryDirectory,
+    longTermMemoryPath: statePaths.longTermMemoryPath,
+  })
+  assert.deepEqual(Object.keys(memoryPaths).sort(), [
+    'assistantStateRoot',
+    'dailyMemoryDirectory',
+    'longTermMemoryPath',
+  ])
 })
 
 test.sequential(
@@ -233,6 +260,7 @@ test.sequential(
 
     const upserted = requireData(
       await runCli<{
+        stateRoot: string
         scope: string
         longTermAdded: number
         dailyAdded: number
@@ -261,6 +289,7 @@ test.sequential(
       ]),
     )
 
+    assert.equal(upserted.stateRoot.includes(path.join(parent, 'assistant-state')), true)
     assert.equal(upserted.scope, 'both')
     assert.equal(upserted.longTermAdded, 1)
     assert.equal(upserted.dailyAdded, 1)
@@ -269,6 +298,7 @@ test.sequential(
 
     const search = requireData(
       await runCli<{
+        stateRoot: string
         query: string | null
         scope: string
         results: Array<{
@@ -288,6 +318,7 @@ test.sequential(
         'Alex',
       ]),
     )
+    assert.equal(search.stateRoot, upserted.stateRoot)
     assert.equal(search.query, 'Alex')
     assert.equal(search.scope, 'long-term')
     assert.equal(search.results[0]?.section, 'Identity')
@@ -295,6 +326,7 @@ test.sequential(
 
     const fetched = requireData(
       await runCli<{
+        stateRoot: string
         memory: {
           id: string
           section: string
@@ -309,12 +341,14 @@ test.sequential(
         vaultRoot,
       ]),
     )
+    assert.equal(fetched.stateRoot, upserted.stateRoot)
     assert.equal(fetched.memory.id, search.results[0]?.id)
     assert.equal(fetched.memory.section, 'Identity')
     assert.equal(fetched.memory.text, 'Call the user Alex.')
 
     const forgotten = requireData(
       await runCli<{
+        stateRoot: string
         removed: {
           id: string
         }
@@ -327,6 +361,7 @@ test.sequential(
         vaultRoot,
       ]),
     )
+    assert.equal(forgotten.stateRoot, upserted.stateRoot)
     assert.equal(forgotten.removed.id, search.results[0]?.id)
   },
   20000,

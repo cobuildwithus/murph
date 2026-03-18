@@ -202,12 +202,38 @@ const processAssistantMemoryLocks = new Map<string, ProcessAssistantMemoryLockSt
 const processAssistantMemoryWriteChains = new Map<string, Promise<void>>()
 const assistantMemoryWriteOwnerStorage = new AsyncLocalStorage<Set<string>>()
 
+export type AssistantMemoryPaths = Pick<
+  AssistantStatePaths,
+  'assistantStateRoot' | 'dailyMemoryDirectory' | 'longTermMemoryPath'
+>
+
+function pickAssistantMemoryPaths(
+  paths: AssistantStatePaths,
+): AssistantMemoryPaths {
+  return {
+    assistantStateRoot: paths.assistantStateRoot,
+    dailyMemoryDirectory: paths.dailyMemoryDirectory,
+    longTermMemoryPath: paths.longTermMemoryPath,
+  }
+}
+
+export function resolveAssistantMemoryStoragePaths(
+  vault: string,
+): AssistantMemoryPaths {
+  return pickAssistantMemoryPaths(resolveAssistantStatePaths(vault))
+}
+
+/**
+ * @deprecated Use `resolveAssistantMemoryStoragePaths` for memory-only operations
+ * or `resolveAssistantStatePaths` when non-memory assistant-state paths are
+ * intentionally required.
+ */
 export function resolveAssistantMemoryPaths(vault: string): AssistantStatePaths {
   return resolveAssistantStatePaths(vault)
 }
 
 export function resolveAssistantDailyMemoryPath(
-  paths: Pick<AssistantStatePaths, 'dailyMemoryDirectory'>,
+  paths: Pick<AssistantMemoryPaths, 'dailyMemoryDirectory'>,
   now = new Date(),
 ): string {
   return path.join(paths.dailyMemoryDirectory, `${formatLocalDate(now)}.md`)
@@ -350,7 +376,7 @@ export async function getAssistantMemory(
 export async function forgetAssistantMemory(
   input: AssistantMemoryForgetInput,
 ): Promise<AssistantMemoryForgetWriteResult> {
-  const paths = resolveAssistantMemoryPaths(input.vault)
+  const paths = resolveAssistantMemoryStoragePaths(input.vault)
   const removed = await withAssistantMemoryWriteLock(paths, async () => {
     const target = await requireAssistantMemoryRecord({
       id: input.id,
@@ -370,7 +396,7 @@ export async function upsertAssistantMemory(
   input: AssistantMemoryUpsertInput,
 ): Promise<AssistantMemoryUpsertWriteResult> {
   const normalized = normalizeAssistantMemoryUpsert(input)
-  const paths = resolveAssistantMemoryPaths(input.vault)
+  const paths = resolveAssistantMemoryStoragePaths(input.vault)
   const now = input.now ?? new Date()
   const { dailyAdded, longTermAdded, memories } = await withAssistantMemoryWriteLock(
     paths,
@@ -442,7 +468,7 @@ async function requireAssistantMemoryRecord(input: {
 }
 
 async function removeAssistantMemoryRecord(
-  paths: AssistantStatePaths,
+  paths: AssistantMemoryPaths,
   record: AssistantMemoryRecord,
 ): Promise<void> {
   const existing = await readOptionalText(record.sourcePath)
@@ -570,7 +596,7 @@ async function loadAssistantMemoryRecords(input: {
   scope: AssistantMemoryQueryScope
   includeSensitiveHealthContext: boolean
 }): Promise<AssistantMemoryRecord[]> {
-  const paths = resolveAssistantMemoryPaths(input.vault)
+  const paths = resolveAssistantMemoryStoragePaths(input.vault)
   const records: AssistantMemoryRecord[] = []
 
   if (input.scope === 'all' || input.scope === 'long-term') {
@@ -589,7 +615,7 @@ async function loadAssistantMemoryRecords(input: {
 }
 
 async function loadAssistantLongTermMemoryRecords(
-  paths: AssistantStatePaths,
+  paths: AssistantMemoryPaths,
   includeSensitiveHealthContext: boolean,
 ): Promise<AssistantMemoryRecord[]> {
   const text = await readOptionalText(paths.longTermMemoryPath)
@@ -606,7 +632,7 @@ async function loadAssistantLongTermMemoryRecords(
 }
 
 async function loadAssistantDailyMemoryRecords(
-  paths: AssistantStatePaths,
+  paths: AssistantMemoryPaths,
   includeSensitiveHealthContext: boolean,
 ): Promise<AssistantMemoryRecord[]> {
   let fileNames: string[] = []
@@ -1112,7 +1138,7 @@ async function resolveUpsertedAssistantMemoryRecords(input: {
   dailyDate: string | null
   dailyText: string | null
   longTermEntry: AssistantLongTermMemoryEntry | null
-  paths: AssistantStatePaths
+  paths: AssistantMemoryPaths
 }): Promise<AssistantMemoryRecord[]> {
   const records: AssistantMemoryRecord[] = []
   const longTermRecords = input.longTermEntry
@@ -1161,7 +1187,7 @@ function setLongTermMemoryEntry(
 }
 
 async function mergeLongTermAssistantMemory(
-  paths: AssistantStatePaths,
+  paths: AssistantMemoryPaths,
   entries: AssistantLongTermMemoryEntry[],
   now: Date,
   provenance: AssistantMemoryRecordProvenance,
@@ -1236,7 +1262,7 @@ async function mergeLongTermAssistantMemory(
 }
 
 async function appendAssistantDailyMemory(
-  paths: AssistantStatePaths,
+  paths: AssistantMemoryPaths,
   notes: string[],
   now: Date,
   provenance: AssistantMemoryRecordProvenance,
@@ -2125,7 +2151,7 @@ function isAssistantMemoryRecordProvenance(
 }
 
 async function withAssistantMemoryWriteLock<TResult>(
-  paths: AssistantStatePaths,
+  paths: AssistantMemoryPaths,
   run: () => Promise<TResult>,
 ): Promise<TResult> {
   const ownedRoots = assistantMemoryWriteOwnerStorage.getStore()
@@ -2174,7 +2200,7 @@ async function withAssistantMemoryWriteLock<TResult>(
   }
 }
 
-async function acquireAssistantMemoryWriteLock(paths: AssistantStatePaths): Promise<{
+async function acquireAssistantMemoryWriteLock(paths: AssistantMemoryPaths): Promise<{
   release(): Promise<void>
 }> {
   const lockRoot = path.join(paths.assistantStateRoot, ASSISTANT_MEMORY_LOCK_DIRECTORY)

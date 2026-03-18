@@ -30,8 +30,8 @@ import {
   getAssistantMemory,
   redactAssistantMemoryRecord,
   redactAssistantMemorySearchHit,
+  resolveAssistantMemoryStoragePaths,
   resolveAssistantMemoryTurnContext,
-  resolveAssistantMemoryPaths,
   searchAssistantMemory,
   upsertAssistantMemory,
 } from '../assistant/memory.js'
@@ -554,7 +554,7 @@ export function registerAssistantCommands(
         includeSensitiveHealthContext:
           turnContext?.allowSensitiveHealthContext ?? true,
       })
-      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
 
       return {
         vault: redactAssistantDisplayPath(context.options.vault),
@@ -586,7 +586,7 @@ export function registerAssistantCommands(
         includeSensitiveHealthContext:
           turnContext?.allowSensitiveHealthContext ?? true,
       })
-      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
 
       return {
         vault: redactAssistantDisplayPath(context.options.vault),
@@ -658,7 +658,7 @@ export function registerAssistantCommands(
         sourcePrompt: context.options.sourcePrompt,
         turnContext,
       })
-      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
 
       return {
         vault: redactAssistantDisplayPath(context.options.vault),
@@ -690,7 +690,7 @@ export function registerAssistantCommands(
         vault: context.options.vault,
         id: context.args.memoryId,
       })
-      const statePaths = resolveAssistantMemoryPaths(context.options.vault)
+      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
 
       return {
         vault: redactAssistantDisplayPath(context.options.vault),
