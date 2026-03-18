@@ -286,7 +286,7 @@ const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
           {
             backgroundColor: theme.composerBackground,
             flexDirection: 'row',
-            paddingX: 1,
+            paddingX: 2,
             width: '100%',
           },
           createElement(
@@ -430,7 +430,7 @@ const ChatComposer = React.memo(function ChatComposer(
         backgroundColor: theme.composerBackground,
         flexDirection: 'row',
         marginBottom: slashSuggestions.length > 0 ? 0 : 1,
-        paddingX: 1,
+        paddingX: 2,
         width: '100%',
       },
       createElement(
