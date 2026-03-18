@@ -2,6 +2,7 @@ import type {
   AssistantSession,
   AssistantTranscriptEntry,
 } from '../../assistant-cli-contracts.js'
+import { normalizeNullableString } from '../shared.js'
 
 export interface InkChatEntry {
   kind: 'assistant' | 'error' | 'user'
@@ -232,13 +233,4 @@ function formatModelSummary(input: {
   }
 
   return input.provider
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }

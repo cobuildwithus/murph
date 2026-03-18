@@ -79,8 +79,8 @@ interface ChatHeaderProps {
   sessionId: string
 }
 
-interface ChatHistoryProps {
-  entries: readonly InkChatEntry[]
+interface ChatEntryRowProps {
+  entry: InkChatEntry
 }
 
 type ChatStaticItem =
@@ -99,7 +99,7 @@ type ChatStaticItem =
 
 interface ChatStatusProps {
   busy: boolean
-  busySeconds: number
+  busyStartedAt: number | null
   status: {
     kind: 'error' | 'info' | 'success'
     text: string
@@ -107,7 +107,6 @@ interface ChatStatusProps {
 }
 
 interface ChatComposerProps {
-  busy: boolean
   modelSwitcherActive: boolean
   onSubmit: (value: string) => ComposerSubmitDisposition
 }
@@ -246,6 +245,13 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
   const cursorOffsetRef = React.useRef(props.value.length)
   const killBufferRef = React.useRef('')
   const preferredColumnRef = React.useRef<number | null>(null)
+  const onChangeRef = React.useRef(props.onChange)
+  const onSubmitRef = React.useRef(props.onSubmit)
+  const disabledRef = React.useRef(props.disabled)
+
+  onChangeRef.current = props.onChange
+  onSubmitRef.current = props.onSubmit
+  disabledRef.current = props.disabled
 
   React.useEffect(() => {
     valueRef.current = props.value
@@ -262,81 +268,80 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
     setCursorOffset(clampedCursorOffset)
   }, [props.value])
 
-  useInput(
-    (input, key) => {
-      if (props.disabled) {
-        return
+  const handleComposerInput = React.useCallback((input: string, key: Key) => {
+    if (disabledRef.current) {
+      return
+    }
+
+    if (key.tab || (key.shift && key.tab) || (key.ctrl && input === 'c')) {
+      return
+    }
+
+    const currentValue = valueRef.current
+    const currentCursorOffset = cursorOffsetRef.current
+
+    if (key.upArrow || key.downArrow) {
+      const verticalMovement = resolveComposerVerticalCursorMove({
+        cursorOffset: currentCursorOffset,
+        direction: key.upArrow ? 'up' : 'down',
+        preferredColumn: preferredColumnRef.current,
+        value: currentValue,
+      })
+
+      if (verticalMovement.cursorOffset !== currentCursorOffset) {
+        cursorOffsetRef.current = verticalMovement.cursorOffset
+        preferredColumnRef.current = verticalMovement.preferredColumn
+        setCursorOffset(verticalMovement.cursorOffset)
       }
 
-      if (key.tab || (key.shift && key.tab) || (key.ctrl && input === 'c')) {
-        return
-      }
+      return
+    }
 
-      const currentValue = valueRef.current
-      const currentCursorOffset = cursorOffsetRef.current
+    const action = resolveComposerTerminalAction(input, key)
 
-      if (key.upArrow || key.downArrow) {
-        const verticalMovement = resolveComposerVerticalCursorMove({
-          cursorOffset: currentCursorOffset,
-          direction: key.upArrow ? 'up' : 'down',
-          preferredColumn: preferredColumnRef.current,
-          value: currentValue,
-        })
-
-        if (verticalMovement.cursorOffset !== currentCursorOffset) {
-          cursorOffsetRef.current = verticalMovement.cursorOffset
-          preferredColumnRef.current = verticalMovement.preferredColumn
-          setCursorOffset(verticalMovement.cursorOffset)
-        }
-
-        return
-      }
-
-      const action = resolveComposerTerminalAction(input, key)
-
-      if (action.kind === 'submit') {
-        if (props.onSubmit(currentValue) === 'clear') {
-          valueRef.current = ''
-          cursorOffsetRef.current = 0
-          killBufferRef.current = ''
-          preferredColumnRef.current = null
-          setCursorOffset(0)
-          props.onChange('')
-        }
-        return
-      }
-
-      const editingResult = applyComposerEditingInput(
-        {
-          cursorOffset: currentCursorOffset,
-          killBuffer: killBufferRef.current,
-          value: currentValue,
-        },
-        action.input,
-        action.key,
-      )
-
-      if (editingResult.handled) {
-        cursorOffsetRef.current = editingResult.cursorOffset
-        killBufferRef.current = editingResult.killBuffer
-        valueRef.current = editingResult.value
+    if (action.kind === 'submit') {
+      if (onSubmitRef.current(currentValue) === 'clear') {
+        valueRef.current = ''
+        cursorOffsetRef.current = 0
+        killBufferRef.current = ''
         preferredColumnRef.current = null
-
-        if (editingResult.cursorOffset !== currentCursorOffset) {
-          setCursorOffset(editingResult.cursorOffset)
-        }
-
-        if (editingResult.value !== currentValue) {
-          props.onChange(editingResult.value)
-        }
-
-        return
+        setCursorOffset(0)
+        onChangeRef.current('')
       }
-    },
-    {
-      isActive: !props.disabled,
-    },
-  )
+      return
+    }
+
+    const editingResult = applyComposerEditingInput(
+      {
+        cursorOffset: currentCursorOffset,
+        killBuffer: killBufferRef.current,
+        value: currentValue,
+      },
+      action.input,
+      action.key,
+    )
+
+    if (!editingResult.handled) {
+      return
+    }
+
+    cursorOffsetRef.current = editingResult.cursorOffset
+    killBufferRef.current = editingResult.killBuffer
+    valueRef.current = editingResult.value
+    preferredColumnRef.current = null
+
+    if (editingResult.cursorOffset !== currentCursorOffset) {
+      setCursorOffset(editingResult.cursorOffset)
+    }
+
+    if (editingResult.value !== currentValue) {
+      onChangeRef.current(editingResult.value)
+    }
+  }, [])
+
+  useInput(handleComposerInput, {
+    isActive: !props.disabled,
+  })
 
   const displayValue =
     props.value.length < valueRef.current.length &&
@@ -380,92 +385,78 @@ const ChatHeader = React.memo(function ChatHeader(
   )
 })
 
-const ChatTranscriptRow = React.memo(function ChatTranscriptRow(
-  props: ChatHistoryProps,
+const ChatEntryRow = React.memo(function ChatEntryRow(
+  props: ChatEntryRowProps,
 ): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
 
+  if (props.entry.kind === 'assistant') {
+    return createElement(
+      Box,
+      {
+        marginBottom: 1,
+        width: '100%',
+      },
+      createElement(Text, { wrap: 'wrap' }, props.entry.text),
+    )
+  }
+
+  if (props.entry.kind === 'error') {
+    return createElement(
+      Box,
+      {
+        marginBottom: 1,
+        width: '100%',
+      },
+      createElement(
+        Text,
+        {
+          color: theme.errorColor,
+          wrap: 'wrap',
+        },
+        `Error: ${props.entry.text}`,
+      ),
+    )
+  }
+
   return createElement(
     Box,
     {
+      backgroundColor: theme.composerBackground,
       flexDirection: 'column',
+      marginBottom: 1,
+      paddingY: 1,
+      width: '100%',
     },
-    props.entries.map((entry: InkChatEntry, index: number) => {
-      const key = `${entry.kind}:${index}:${entry.text.slice(0, 24)}`
-
-      if (entry.kind === 'assistant') {
-        return createElement(
-          Box,
-          {
-            key,
-            marginBottom: 1,
-            width: '100%',
-          },
-          createElement(Text, { wrap: 'wrap' }, entry.text),
-        )
-      }
-
-      if (entry.kind === 'error') {
-        return createElement(
-          Box,
-          {
-            key,
-            marginBottom: 1,
-            width: '100%',
-          },
-          createElement(
-            Text,
-            {
-              color: theme.errorColor,
-              wrap: 'wrap',
-            },
-            `Error: ${entry.text}`,
-          ),
-        )
-      }
-
-      return createElement(
+    createElement(
+      Box,
+      {
+        flexDirection: 'row',
+        paddingX: 2,
+      },
+      createElement(
+        Text,
+        { color: theme.composerTextColor },
+        '› ',
+      ),
+      createElement(
         Box,
         {
-          key,
-          backgroundColor: theme.composerBackground,
           flexDirection: 'column',
-          marginBottom: 1,
-          width: '100%',
+          flexGrow: 1,
+          flexShrink: 1,
         },
-        createElement(Text, {}, ' '),
         createElement(
-          Box,
+          Text,
           {
-            flexDirection: 'row',
-            paddingX: 2,
+            color: theme.composerTextColor,
+            wrap: 'wrap',
           },
-          createElement(
-            Text,
-            { color: theme.composerTextColor },
-            '› ',
-          ),
-          createElement(
-            Box,
-            {
-              flexDirection: 'column',
-              flexGrow: 1,
-              flexShrink: 1,
-            },
-            createElement(
-              Text,
-              {
-                color: theme.composerTextColor,
-                wrap: 'wrap',
-              },
-              entry.text,
-            ),
-          ),
+          props.entry.text,
         ),
-        createElement(Text, {}, ' '),
-      )
-    }),
+      ),
+    ),
   )
 })
 
@@ -525,9 +516,9 @@ const ChatStaticFeed = React.memo(function ChatStaticFeed(input: {
           )
         }
 
-        return React.createElement(ChatTranscriptRow, {
+        return React.createElement(ChatEntryRow, {
           key: `entry:${index}:${item.entry.kind}:${item.entry.text.slice(0, 24)}`,
-          entries: [item.entry],
+          entry: item.entry,
         })
       },
     },
@@ -539,6 +530,22 @@ const ChatStatus = React.memo(function ChatStatus(
 ): React.ReactElement | null {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const [busySeconds, setBusySeconds] = React.useState(0)
+
+  React.useEffect(() => {
+    if (!props.busy || props.busyStartedAt === null) {
+      setBusySeconds(0)
+      return
+    }
+
+    const busyStartedAt = props.busyStartedAt
+    setBusySeconds(Math.max(0, Math.floor((Date.now() - busyStartedAt) / 1000)))
+    const timer = setInterval(() => {
+      setBusySeconds(Math.max(0, Math.floor((Date.now() - busyStartedAt) / 1000)))
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [props.busy, props.busyStartedAt])
 
   if (props.busy) {
     return createElement(
@@ -546,7 +553,7 @@ const ChatStatus = React.memo(function ChatStatus(
       {
         marginBottom: 1,
       },
-      createElement(Text, { dimColor: true }, formatBusyStatus(props.busySeconds)),
+      createElement(Text, { dimColor: true }, formatBusyStatus(busySeconds)),
     )
   }
 
@@ -577,8 +584,9 @@ const ChatComposer = React.memo(function ChatComposer(
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
   const [value, setValue] = React.useState('')
-  const slashSuggestions =
-    props.modelSwitcherActive ? [] : getMatchingSlashCommands(value)
+  const slashSuggestions = props.modelSwitcherActive
+    ? []
+    : getMatchingSlashCommands(value)
 
   return createElement(
     React.Fragment,
@@ -1217,27 +1225,36 @@ export function renderComposerValue(input: {
 function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const onCancelRef = React.useRef(props.onCancel)
+  const onConfirmRef = React.useRef(props.onConfirm)
+  const onMoveRef = React.useRef(props.onMove)
 
-  useInput((input, key) => {
+  onCancelRef.current = props.onCancel
+  onConfirmRef.current = props.onConfirm
+  onMoveRef.current = props.onMove
+
+  const handleModelSwitcherInput = React.useCallback((input: string, key: Key) => {
     if (key.escape) {
-      props.onCancel()
+      onCancelRef.current()
       return
     }
 
     if (key.upArrow || input === 'k') {
-      props.onMove(-1)
+      onMoveRef.current(-1)
       return
     }
 
     if (key.downArrow || input === 'j') {
-      props.onMove(1)
+      onMoveRef.current(1)
       return
     }
 
     if (key.return) {
-      props.onConfirm()
+      onConfirmRef.current()
     }
-  })
+  }, [])
+
+  useInput(handleModelSwitcherInput)
 
   const content =
     props.mode === 'model'
@@ -1502,7 +1519,6 @@ export async function runAssistantChatWithInk(
         text: string
       } | null>(null)
       const [busyStartedAt, setBusyStartedAt] = React.useState<number | null>(null)
-      const [busySeconds, setBusySeconds] = React.useState(0)
       const [activeModel, setActiveModel] = React.useState<string | null>(
         normalizeNullableString(input.model) ??
           normalizeNullableString(defaults?.model) ??
@@ -1544,20 +1560,6 @@ export async function runAssistantChatWithInk(
         },
         [],
       )
-
-      React.useEffect(() => {
-        if (!busy || busyStartedAt === null) {
-          setBusySeconds(0)
-          return
-        }
-
-        setBusySeconds(Math.max(0, Math.floor((Date.now() - busyStartedAt) / 1000)))
-        const timer = setInterval(() => {
-          setBusySeconds(Math.max(0, Math.floor((Date.now() - busyStartedAt) / 1000)))
-        }, 1000)
-
-        return () => clearInterval(timer)
-      }, [busy, busyStartedAt])
 
       const openModelSwitcher = () => {
         setModelSwitcherState({
@@ -1820,7 +1822,7 @@ export async function runAssistantChatWithInk(
             },
             createElement(ChatStatus, {
               busy,
-              busySeconds,
+              busyStartedAt,
               status,
             }),
             modelSwitcherState
@@ -1836,7 +1838,6 @@ export async function runAssistantChatWithInk(
                 })
               : null,
             createElement(ChatComposer, {
-              busy,
               modelSwitcherActive: modelSwitcherState !== null,
               onSubmit: submitPrompt,
             }),
