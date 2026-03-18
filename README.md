@@ -8,7 +8,7 @@ The workspace includes buildable packages for contracts, shared runtime-state he
 
 Runtime: Node >= 22.16.0. One-command setup is currently macOS-only.
 
-Healthy Bob now has a fixed-version monorepo release flow that packs `healthybob` plus the direct runtime package chain for npm publication. Until a public version is actually cut, the recommended install path is still from this repo root:
+Healthy Bob now has a fixed-version monorepo release flow that packs `healthybob` plus the supporting runtime packages, including `@healthybob/device-syncd`, for npm publication. Until a public version is actually cut, the recommended install path is still from this repo root:
 
 ```bash
 pnpm onboard --vault ./vault
@@ -21,6 +21,15 @@ pnpm onboard --vault ./vault
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
 After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout, and installed shims can use `healthybob chat` or `vault-cli chat`.
+
+Device sync is also packaged as part of the overall Healthy Bob release. The normal operator path is:
+
+```bash
+healthybob device daemon start --vault ./vault
+healthybob device provider list --vault ./vault
+```
+
+For ordinary `healthybob device ...` usage, the CLI can start and reuse that local daemon automatically when it owns the selected vault context.
 
 ## Quick Start (TL;DR)
 
@@ -203,6 +212,7 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | `packages/runtime-state` | Canonical `.runtime` path resolution and shared SQLite defaults for rebuildable local state. |
 | `packages/core` | Canonical vault initialization, filesystem rules, audit emission, raw-copy rules, and all write mutations. |
 | `packages/importers` | Adapters that normalize external inputs and then call `core`. |
+| `packages/device-syncd` | Local wearable OAuth/webhook/reconcile daemon that Healthy Bob can launch and manage for a vault. |
 | `packages/inboxd` | Source-agnostic inbox capture, raw evidence persistence, runtime indexing, and attachment parse-job orchestration. |
 | `packages/parsers` | Local-first attachment parsing, provider selection, and derived artifact publication under `derived/inbox/**`. |
 | `packages/query` | Read model assembly, lookups, list filters, summaries, and export-pack generation. |

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
+import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@healthybob/runtime-state";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -200,5 +201,5 @@ export function joinUrl(base: string, relativePath: string): string {
 }
 
 export function defaultStateDatabasePath(vaultRoot: string): string {
-  return path.join(path.resolve(vaultRoot), ".runtime", "device-syncd.sqlite");
+  return path.join(path.resolve(vaultRoot), DEVICE_SYNC_DB_RELATIVE_PATH);
 }

@@ -1,6 +1,8 @@
 # @healthybob/device-syncd
 
-Standalone device sync runtime for HealthyBob.
+Published local device sync runtime for Healthy Bob.
+
+Healthy Bob's CLI can install, start, reuse, and stop this daemon for the selected vault through `healthybob device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
 
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
@@ -78,6 +80,12 @@ Oura settings:
 ## Run
 
 ```bash
+healthybob device daemon start --vault ./vault
+```
+
+Manual direct execution remains available:
+
+```bash
 node packages/device-syncd/dist/bin.js
 ```
 
@@ -85,7 +93,7 @@ The published bin name is also `healthybob-device-syncd`.
 
 ## Control-plane clients
 
-- `vault-cli device ...` uses this daemon through `HEALTHYBOB_DEVICE_SYNC_BASE_URL` or `http://127.0.0.1:8788`
+- `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `HEALTHYBOB_DEVICE_SYNC_BASE_URL`
 - `vault-cli` and `packages/web` authenticate local control routes with `HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN` (or, for local bootstrap compatibility, `HEALTHYBOB_DEVICE_SYNC_SECRET`)
 - `packages/web` can show provider/account status and redirect through this daemon for one-click auth
 - cross-origin `returnTo` URLs are accepted only when their origin appears in `HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`; relative paths remain allowed by default

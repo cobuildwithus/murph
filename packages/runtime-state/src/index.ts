@@ -10,6 +10,15 @@ export const INBOX_CONFIG_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PA
 export const INBOX_STATE_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/state.json`;
 export const INBOX_PROMOTIONS_RELATIVE_PATH =
   `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/promotions.json`;
+export const DEVICE_SYNC_DB_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_PATH}/device-syncd.sqlite`;
+export const DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH =
+  `${RUNTIME_ROOT_RELATIVE_PATH}/device-syncd`;
+export const DEVICE_SYNC_LAUNCHER_STATE_RELATIVE_PATH =
+  `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/launcher.json`;
+export const DEVICE_SYNC_STDOUT_LOG_RELATIVE_PATH =
+  `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/stdout.log`;
+export const DEVICE_SYNC_STDERR_LOG_RELATIVE_PATH =
+  `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/stderr.log`;
 export const DEFAULT_SQLITE_TIMEOUT_MS = 5_000;
 
 export interface RuntimePaths {
@@ -21,6 +30,11 @@ export interface RuntimePaths {
   inboxConfigPath: string;
   inboxStatePath: string;
   inboxPromotionsPath: string;
+  deviceSyncDbPath: string;
+  deviceSyncRuntimeRoot: string;
+  deviceSyncLauncherStatePath: string;
+  deviceSyncStdoutLogPath: string;
+  deviceSyncStderrLogPath: string;
 }
 
 export interface OpenSqliteRuntimeDatabaseOptions {
@@ -36,6 +50,10 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
   const absoluteVaultRoot = path.resolve(vaultRoot);
   const runtimeRoot = path.join(absoluteVaultRoot, RUNTIME_ROOT_RELATIVE_PATH);
   const inboxRuntimeRoot = path.join(absoluteVaultRoot, INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH);
+  const deviceSyncRuntimeRoot = path.join(
+    absoluteVaultRoot,
+    DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH,
+  );
 
   return {
     absoluteVaultRoot,
@@ -46,6 +64,20 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
     inboxConfigPath: path.join(absoluteVaultRoot, INBOX_CONFIG_RELATIVE_PATH),
     inboxStatePath: path.join(absoluteVaultRoot, INBOX_STATE_RELATIVE_PATH),
     inboxPromotionsPath: path.join(absoluteVaultRoot, INBOX_PROMOTIONS_RELATIVE_PATH),
+    deviceSyncDbPath: path.join(absoluteVaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
+    deviceSyncRuntimeRoot,
+    deviceSyncLauncherStatePath: path.join(
+      absoluteVaultRoot,
+      DEVICE_SYNC_LAUNCHER_STATE_RELATIVE_PATH,
+    ),
+    deviceSyncStdoutLogPath: path.join(
+      absoluteVaultRoot,
+      DEVICE_SYNC_STDOUT_LOG_RELATIVE_PATH,
+    ),
+    deviceSyncStderrLogPath: path.join(
+      absoluteVaultRoot,
+      DEVICE_SYNC_STDERR_LOG_RELATIVE_PATH,
+    ),
   };
 }
 

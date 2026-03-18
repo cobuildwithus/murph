@@ -8,6 +8,7 @@ machine-local storage next to a vault.
 - resolve canonical `.runtime` paths relative to a vault root
 - provide shared SQLite defaults for local runtime stores
 - keep inbox, query, device-sync, and CLI runtime paths aligned
+- reserve `.runtime/device-syncd/` for CLI-owned daemon launcher state and local logs
 
 ## Contract
 

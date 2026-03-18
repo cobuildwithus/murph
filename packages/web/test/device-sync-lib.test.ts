@@ -96,7 +96,7 @@ test("loadDeviceSyncOverviewFromEnv returns an unavailable summary when the daem
   }
 
   assert.match(result.message, /offline/u);
-  assert.match(result.suggestedCommand, /device-syncd/u);
+  assert.match(result.suggestedCommand, /device daemon start/u);
 });
 
 test("loadDeviceSyncOverviewFromEnv explains missing control-plane auth", async () => {

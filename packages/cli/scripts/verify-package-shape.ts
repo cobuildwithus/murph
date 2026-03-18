@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 interface PackageJsonShape {
   name?: string
   private?: boolean
+  dependencies?: Record<string, string | undefined>
   main?: string
   types?: string
   files?: string[]
@@ -58,6 +59,10 @@ assert(
 assert(
   packageJson.private === false,
   'package.json must be marked publishable (private: false).',
+)
+assert(
+  packageJson.dependencies?.['@healthybob/device-syncd'] === 'workspace:*',
+  'package.json must depend on @healthybob/device-syncd so the published healthybob package installs the managed device daemon.',
 )
 assert(
   packageJson.main === './dist/index.js',

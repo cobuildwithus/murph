@@ -159,8 +159,8 @@ test("HomePage renders the setup state when no vault is configured", async () =>
     status: "unavailable",
     baseUrl: "http://127.0.0.1:8788",
     message: "Device sync is offline.",
-    hint: "Start the local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
-    suggestedCommand: "node packages/device-syncd/dist/bin.js",
+    hint: "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+    suggestedCommand: "healthybob device daemon start --vault <your-vault>",
   });
 
   const markup = renderToStaticMarkup(await HomePage());
@@ -187,8 +187,8 @@ test("HomePage renders the unreadable-vault error state", async () => {
     status: "unavailable",
     baseUrl: "http://127.0.0.1:8788",
     message: "Device sync is offline.",
-    hint: "Start the local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
-    suggestedCommand: "node packages/device-syncd/dist/bin.js",
+    hint: "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+    suggestedCommand: "healthybob device daemon start --vault <your-vault>",
   });
 
   const markup = renderToStaticMarkup(await HomePage());

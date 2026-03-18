@@ -16,6 +16,7 @@ const cliPackageJson = JSON.parse(
   readFileSync(path.join(packageDir, 'package.json'), 'utf8'),
 ) as {
   bin?: Record<string, string>
+  dependencies?: Record<string, string>
   files?: string[]
   name?: string
   scripts?: Record<string, string>
@@ -75,6 +76,7 @@ describe('monorepo release flow coverage audit', () => {
       '@healthybob/core',
       '@healthybob/query',
       '@healthybob/importers',
+      '@healthybob/device-syncd',
       '@healthybob/inboxd',
       '@healthybob/parsers',
       'healthybob',
@@ -86,6 +88,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(cliPackageJson.files).toContain('CHANGELOG.md')
     expect(cliPackageJson.bin?.healthybob).toBe('dist/bin.js')
     expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
+    expect(cliPackageJson.dependencies?.['@healthybob/device-syncd']).toBe('workspace:*')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)

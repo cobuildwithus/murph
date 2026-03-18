@@ -1,11 +1,14 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema } from '../command-helpers.js'
+import { emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
 import {
   deviceAccountDisconnectResultSchema,
   deviceAccountListResultSchema,
   deviceAccountReconcileResultSchema,
   deviceAccountShowResultSchema,
   deviceConnectResultSchema,
+  deviceDaemonStartResultSchema,
+  deviceDaemonStatusResultSchema,
+  deviceDaemonStopResultSchema,
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
 } from '../device-cli-contracts.js'
@@ -21,12 +24,22 @@ const accountIdSchema = z
   .min(1)
   .describe('Device sync account id returned by the control plane.')
 
-const deviceOptionsSchema = z.object({
+const deviceControlOptionsSchema = withBaseOptions({
   baseUrl: deviceSyncBaseUrlSchema
     .optional()
     .describe(
-      'Override the reachable device sync control-plane URL. Defaults to HEALTHYBOB_DEVICE_SYNC_BASE_URL or the local daemon default; authenticate with HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN.',
+      'Override the reachable device sync control-plane URL. When omitted, Healthy Bob manages the local daemon for the selected vault. When set, Healthy Bob talks to the explicit control-plane target instead.',
     ),
+})
+
+const deviceDaemonOptionsSchema = withBaseOptions({
+  baseUrl: deviceSyncBaseUrlSchema
+    .optional()
+    .describe(
+      'Override the loopback control-plane URL that Healthy Bob should manage for this vault.',
+    ),
+}).partial({
+  requestId: true,
 })
 
 export function registerDeviceCommands(
@@ -35,22 +48,23 @@ export function registerDeviceCommands(
 ) {
   const device = Cli.create('device', {
     description:
-      'Device sync commands for local authenticated provider OAuth, account inspection, and reconcile control.',
+      'Device sync commands for provider auth, account inspection, and the Healthy Bob-managed local device daemon.',
   })
 
   const provider = Cli.create('provider', {
     description:
-      'List the provider connectors currently registered in device-syncd.',
+      'List the provider connectors currently registered in the local device sync control plane.',
   })
 
   provider.command('list', {
     description:
       'List device sync providers and their callback/webhook descriptors.',
     args: emptyArgsSchema,
-    options: deviceOptionsSchema,
+    options: deviceControlOptionsSchema,
     output: deviceProviderListResultSchema,
     async run({ options }) {
       return services.devices.listProviders({
+        vault: options.vault,
         baseUrl: options.baseUrl,
       })
     },
@@ -58,11 +72,11 @@ export function registerDeviceCommands(
 
   device.command('connect', {
     description:
-      'Start a browser-based OAuth connection for one device provider through device-syncd.',
+      'Start a browser-based OAuth connection for one device provider through the Healthy Bob-managed device daemon.',
     args: z.object({
       provider: providerNameSchema,
     }),
-    options: deviceOptionsSchema.extend({
+    options: deviceControlOptionsSchema.extend({
       returnTo: z
         .string()
         .url()
@@ -80,6 +94,7 @@ export function registerDeviceCommands(
     output: deviceConnectResultSchema,
     async run({ args, options }) {
       return services.devices.connect({
+        vault: options.vault,
         provider: args.provider,
         baseUrl: options.baseUrl,
         returnTo: options.returnTo,
@@ -97,12 +112,13 @@ export function registerDeviceCommands(
     description:
       'List known device sync accounts, optionally filtered to one provider.',
     args: emptyArgsSchema,
-    options: deviceOptionsSchema.extend({
+    options: deviceControlOptionsSchema.extend({
       provider: providerNameSchema.optional(),
     }),
     output: deviceAccountListResultSchema,
     async run({ options }) {
       return services.devices.listAccounts({
+        vault: options.vault,
         baseUrl: options.baseUrl,
         provider: options.provider,
       })
@@ -114,10 +130,11 @@ export function registerDeviceCommands(
     args: z.object({
       accountId: accountIdSchema,
     }),
-    options: deviceOptionsSchema,
+    options: deviceControlOptionsSchema,
     output: deviceAccountShowResultSchema,
     async run({ args, options }) {
       return services.devices.showAccount({
+        vault: options.vault,
         baseUrl: options.baseUrl,
         accountId: args.accountId,
       })
@@ -130,10 +147,11 @@ export function registerDeviceCommands(
     args: z.object({
       accountId: accountIdSchema,
     }),
-    options: deviceOptionsSchema,
+    options: deviceControlOptionsSchema,
     output: deviceAccountReconcileResultSchema,
     async run({ args, options }) {
       return services.devices.reconcileAccount({
+        vault: options.vault,
         baseUrl: options.baseUrl,
         accountId: args.accountId,
       })
@@ -146,17 +164,66 @@ export function registerDeviceCommands(
     args: z.object({
       accountId: accountIdSchema,
     }),
-    options: deviceOptionsSchema,
+    options: deviceControlOptionsSchema,
     output: deviceAccountDisconnectResultSchema,
     async run({ args, options }) {
       return services.devices.disconnectAccount({
+        vault: options.vault,
         baseUrl: options.baseUrl,
         accountId: args.accountId,
       })
     },
   })
 
+  const daemon = Cli.create('daemon', {
+    description:
+      'Start, inspect, and stop the Healthy Bob-managed local device sync daemon for one vault.',
+  })
+
+  daemon.command('status', {
+    description:
+      'Show whether Healthy Bob is managing a local device sync daemon for this vault.',
+    args: emptyArgsSchema,
+    options: deviceDaemonOptionsSchema,
+    output: deviceDaemonStatusResultSchema,
+    async run({ options }) {
+      return await services.devices.daemonStatus({
+        vault: options.vault,
+        baseUrl: options.baseUrl,
+      })
+    },
+  })
+
+  daemon.command('start', {
+    description:
+      'Start the local device sync daemon for this vault if Healthy Bob is not already managing one.',
+    args: emptyArgsSchema,
+    options: deviceDaemonOptionsSchema,
+    output: deviceDaemonStartResultSchema,
+    async run({ options }) {
+      return await services.devices.daemonStart({
+        vault: options.vault,
+        baseUrl: options.baseUrl,
+      })
+    },
+  })
+
+  daemon.command('stop', {
+    description:
+      'Stop the local device sync daemon that Healthy Bob is managing for this vault.',
+    args: emptyArgsSchema,
+    options: deviceDaemonOptionsSchema,
+    output: deviceDaemonStopResultSchema,
+    async run({ options }) {
+      return await services.devices.daemonStop({
+        vault: options.vault,
+        baseUrl: options.baseUrl,
+      })
+    },
+  })
+
   device.command(provider)
   device.command(account)
+  device.command(daemon)
   cli.command(device)
 }

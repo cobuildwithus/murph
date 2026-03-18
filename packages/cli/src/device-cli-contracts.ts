@@ -1,5 +1,5 @@
 import { z } from 'incur'
-import { isoTimestampSchema } from './vault-cli-contracts.js'
+import { isoTimestampSchema, pathSchema } from './vault-cli-contracts.js'
 
 export const deviceSyncBaseUrlSchema = z
   .string()
@@ -101,9 +101,33 @@ export const deviceAccountDisconnectResultSchema = z.object({
   account: deviceSyncAccountSchema,
 })
 
+export const deviceDaemonStatusResultSchema = z.object({
+  baseUrl: deviceSyncBaseUrlSchema,
+  statePath: pathSchema,
+  stdoutLogPath: pathSchema,
+  stderrLogPath: pathSchema,
+  managed: z.boolean(),
+  running: z.boolean(),
+  healthy: z.boolean(),
+  pid: z.number().int().positive().nullable(),
+  startedAt: isoTimestampSchema.nullable(),
+  message: z.string().min(1).nullable(),
+})
+
+export const deviceDaemonStartResultSchema = deviceDaemonStatusResultSchema.extend({
+  started: z.boolean(),
+})
+
+export const deviceDaemonStopResultSchema = deviceDaemonStatusResultSchema.extend({
+  stopped: z.boolean(),
+})
+
 export type DeviceProviderListResult = z.infer<typeof deviceProviderListResultSchema>
 export type DeviceConnectResult = z.infer<typeof deviceConnectResultSchema>
 export type DeviceAccountListResult = z.infer<typeof deviceAccountListResultSchema>
 export type DeviceAccountShowResult = z.infer<typeof deviceAccountShowResultSchema>
 export type DeviceAccountReconcileResult = z.infer<typeof deviceAccountReconcileResultSchema>
 export type DeviceAccountDisconnectResult = z.infer<typeof deviceAccountDisconnectResultSchema>
+export type DeviceDaemonStatusResult = z.infer<typeof deviceDaemonStatusResultSchema>
+export type DeviceDaemonStartResult = z.infer<typeof deviceDaemonStartResultSchema>
+export type DeviceDaemonStopResult = z.infer<typeof deviceDaemonStopResultSchema>

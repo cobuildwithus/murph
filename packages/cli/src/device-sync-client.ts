@@ -136,7 +136,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
     } catch (error) {
       throw new VaultCliError(
         'device_sync_unavailable',
-        `Device sync service is unavailable at ${baseUrl}. Start healthybob-device-syncd and retry.`,
+        `Device sync service is unavailable at ${baseUrl}. Run \`healthybob device daemon start --vault <path>\` or start \`healthybob-device-syncd\` manually and retry.`,
         {
           baseUrl,
           cause: error instanceof Error ? error.message : String(error),
@@ -152,7 +152,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
       throw new VaultCliError(
         errorPayload.code ?? 'device_sync_request_failed',
         response.status === 401 && !controlToken
-          ? 'Device sync control plane requires HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN.'
+          ? 'Device sync control plane requires HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
           : errorPayload.message ??
               `Device sync request failed with HTTP ${response.status}.`,
         {

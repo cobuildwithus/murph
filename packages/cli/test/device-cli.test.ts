@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 
 import { test } from 'vitest'
 
-import { requireData, runCli } from './cli-test-helpers.js'
+import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 
 interface DeviceTestState {
   lastConnectBody: Record<string, unknown> | null
@@ -37,9 +40,40 @@ const connectedAccount = {
   updatedAt: '2026-03-17T12:00:00.000Z',
 } as const
 
+test.sequential('device daemon commands stay in the generated CLI schema', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-cli-'))
+
+  try {
+    const schema = JSON.parse(
+      await runRawCli([
+        'device',
+        'daemon',
+        'start',
+        '--vault',
+        vaultRoot,
+        '--schema',
+        '--format',
+        'json',
+      ]),
+    ) as {
+      options: {
+        properties: Record<string, unknown>
+        required?: string[]
+      }
+    }
+
+    assert.equal('vault' in schema.options.properties, true)
+    assert.equal('baseUrl' in schema.options.properties, true)
+    assert.deepEqual(schema.options.required, ['vault'])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential(
   'device CLI commands route through the local device sync control plane',
   async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-cli-'))
     const state: DeviceTestState = {
       lastConnectBody: null,
       lastAccountQuery: null,
@@ -172,7 +206,7 @@ test.sequential(
         await runCli<{
           baseUrl: string
           providers: Array<{ provider: string }>
-        }>(['device', 'provider', 'list'], { env }),
+        }>(['device', 'provider', 'list', '--vault', vaultRoot], { env }),
       )
       assert.equal(providers.baseUrl, baseUrl)
       assert.deepEqual(
@@ -191,6 +225,8 @@ test.sequential(
             'device',
             'connect',
             'whoop',
+            '--vault',
+            vaultRoot,
             '--return-to',
             'http://127.0.0.1:3000/devices',
           ],
@@ -209,7 +245,7 @@ test.sequential(
         await runCli<{
           provider: string | null
           accounts: Array<{ id: string }>
-        }>(['device', 'account', 'list', '--provider', 'whoop'], { env }),
+        }>(['device', 'account', 'list', '--vault', vaultRoot, '--provider', 'whoop'], { env }),
       )
       assert.equal(accounts.provider, 'whoop')
       assert.deepEqual(accounts.accounts.map((account) => account.id), [
@@ -220,7 +256,7 @@ test.sequential(
       const show = requireData(
         await runCli<{
           account: { id: string; provider: string }
-        }>(['device', 'account', 'show', 'acct_whoop_01'], { env }),
+        }>(['device', 'account', 'show', 'acct_whoop_01', '--vault', vaultRoot], { env }),
       )
       assert.equal(show.account.id, 'acct_whoop_01')
       assert.equal(show.account.provider, 'whoop')
@@ -229,7 +265,7 @@ test.sequential(
         await runCli<{
           account: { id: string }
           job: { kind: string; status: string }
-        }>(['device', 'account', 'reconcile', 'acct_whoop_01'], { env }),
+        }>(['device', 'account', 'reconcile', 'acct_whoop_01', '--vault', vaultRoot], { env }),
       )
       assert.equal(reconcile.account.id, 'acct_whoop_01')
       assert.equal(reconcile.job.kind, 'reconcile')
@@ -238,7 +274,7 @@ test.sequential(
       const disconnect = requireData(
         await runCli<{
           account: { id: string; status: string }
-        }>(['device', 'account', 'disconnect', 'acct_whoop_01'], { env }),
+        }>(['device', 'account', 'disconnect', 'acct_whoop_01', '--vault', vaultRoot], { env }),
       )
       assert.equal(disconnect.account.id, 'acct_whoop_01')
       assert.equal(disconnect.account.status, 'disconnected')
@@ -260,6 +296,7 @@ test.sequential(
           resolve()
         })
       })
+      await rm(vaultRoot, { recursive: true, force: true })
     }
   },
 )

@@ -161,10 +161,10 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
       message,
       hint: isAuthError
         ? "Set HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
-        : "Start the local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+        : "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
       suggestedCommand: isAuthError
         ? "HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
-        : "node packages/device-syncd/dist/bin.js",
+        : "healthybob device daemon start --vault <your-vault>",
     };
   }
 }

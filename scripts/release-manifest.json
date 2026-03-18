@@ -27,6 +27,10 @@
       "path": "packages/importers"
     },
     {
+      "name": "@healthybob/device-syncd",
+      "path": "packages/device-syncd"
+    },
+    {
       "name": "@healthybob/inboxd",
       "path": "packages/inboxd"
     },

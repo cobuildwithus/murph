@@ -23,12 +23,15 @@ declare module 'incur' {
       'condition scaffold': { args: {}; options: { vault: string; requestId: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId: string } }
       'condition upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'device account disconnect': { args: { accountId: string }; options: { baseUrl: string } }
-      'device account list': { args: {}; options: { baseUrl: string; provider: string } }
-      'device account reconcile': { args: { accountId: string }; options: { baseUrl: string } }
-      'device account show': { args: { accountId: string }; options: { baseUrl: string } }
-      'device connect': { args: { provider: string }; options: { baseUrl: string; returnTo: string; open: boolean } }
-      'device provider list': { args: {}; options: { baseUrl: string } }
+      'device account disconnect': { args: { accountId: string }; options: { vault: string; requestId: string; baseUrl: string } }
+      'device account list': { args: {}; options: { vault: string; requestId: string; baseUrl: string; provider: string } }
+      'device account reconcile': { args: { accountId: string }; options: { vault: string; requestId: string; baseUrl: string } }
+      'device account show': { args: { accountId: string }; options: { vault: string; requestId: string; baseUrl: string } }
+      'device connect': { args: { provider: string }; options: { vault: string; requestId: string; baseUrl: string; returnTo: string; open: boolean } }
+      'device daemon start': { args: {}; options: { vault: string; requestId: string; baseUrl: string } }
+      'device daemon status': { args: {}; options: { vault: string; requestId: string; baseUrl: string } }
+      'device daemon stop': { args: {}; options: { vault: string; requestId: string; baseUrl: string } }
+      'device provider list': { args: {}; options: { vault: string; requestId: string; baseUrl: string } }
       'document import': { args: { file: string }; options: { vault: string; requestId: string; title: string; occurredAt: string; note: string; source: "manual" | "import" | "device" | "derived" } }
       'document list': { args: {}; options: { vault: string; requestId: string; from: string; to: string } }
       'document manifest': { args: { id: string }; options: { vault: string; requestId: string } }

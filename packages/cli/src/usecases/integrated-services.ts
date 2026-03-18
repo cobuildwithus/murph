@@ -1,4 +1,10 @@
 import { VaultCliError } from "../vault-cli-errors.js"
+import {
+  ensureManagedDeviceSyncControlPlane,
+  getManagedDeviceSyncDaemonStatus,
+  startManagedDeviceSyncDaemon,
+  stopManagedDeviceSyncDaemon,
+} from "../device-daemon.js"
 import { createDeviceSyncClient } from "../device-sync-client.js"
 
 import type {
@@ -550,11 +556,24 @@ function createIntegratedQueryServices(): QueryServices {
 }
 
 function createIntegratedDeviceSyncServices(): DeviceSyncServices {
+  async function createControlPlaneClient(input: {
+    vault?: string
+    baseUrl?: string
+  }) {
+    const controlPlane = await ensureManagedDeviceSyncControlPlane({
+      vault: input.vault,
+      baseUrl: input.baseUrl,
+    })
+
+    return createDeviceSyncClient({
+      baseUrl: controlPlane.baseUrl,
+      controlToken: controlPlane.controlToken,
+    })
+  }
+
   return {
     async listProviders(input) {
-      const client = createDeviceSyncClient({
-        baseUrl: input.baseUrl,
-      })
+      const client = await createControlPlaneClient(input)
       const result = await client.listProviders()
 
       return {
@@ -563,9 +582,7 @@ function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async connect(input) {
-      const client = createDeviceSyncClient({
-        baseUrl: input.baseUrl,
-      })
+      const client = await createControlPlaneClient(input)
       const result = await client.beginConnection({
         provider: input.provider,
         returnTo: input.returnTo,
@@ -582,9 +599,7 @@ function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async listAccounts(input) {
-      const client = createDeviceSyncClient({
-        baseUrl: input.baseUrl,
-      })
+      const client = await createControlPlaneClient(input)
       const result = await client.listAccounts({
         provider: input.provider,
       })
@@ -596,9 +611,7 @@ function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async showAccount(input) {
-      const client = createDeviceSyncClient({
-        baseUrl: input.baseUrl,
-      })
+      const client = await createControlPlaneClient(input)
       const result = await client.showAccount(input.accountId)
 
       return {
@@ -607,9 +620,7 @@ function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async reconcileAccount(input) {
-      const client = createDeviceSyncClient({
-        baseUrl: input.baseUrl,
-      })
+      const client = await createControlPlaneClient(input)
       const result = await client.reconcileAccount(input.accountId)
 
       return {
@@ -619,15 +630,31 @@ function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async disconnectAccount(input) {
-      const client = createDeviceSyncClient({
-        baseUrl: input.baseUrl,
-      })
+      const client = await createControlPlaneClient(input)
       const result = await client.disconnectAccount(input.accountId)
 
       return {
         baseUrl: client.baseUrl,
         account: result.account,
       }
+    },
+    async daemonStatus(input) {
+      return await getManagedDeviceSyncDaemonStatus({
+        vault: input.vault,
+        baseUrl: input.baseUrl,
+      })
+    },
+    async daemonStart(input) {
+      return await startManagedDeviceSyncDaemon({
+        vault: input.vault,
+        baseUrl: input.baseUrl,
+      })
+    },
+    async daemonStop(input) {
+      return await stopManagedDeviceSyncDaemon({
+        vault: input.vault,
+        baseUrl: input.baseUrl,
+      })
     },
   } satisfies DeviceSyncServices
 }
@@ -694,6 +721,9 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
       ...createUnwiredHealthMethodSet(healthQueryServiceMethodNames, "query"),
     } satisfies QueryServices,
     devices: {
+      daemonStatus: createUnwiredMethod("devices.daemonStatus"),
+      daemonStart: createUnwiredMethod("devices.daemonStart"),
+      daemonStop: createUnwiredMethod("devices.daemonStop"),
       listProviders: createUnwiredMethod("devices.listProviders"),
       connect: createUnwiredMethod("devices.connect"),
       listAccounts: createUnwiredMethod("devices.listAccounts"),

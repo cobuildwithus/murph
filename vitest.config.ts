@@ -50,6 +50,7 @@ export default defineConfig({
       "packages/cli/test/assistant-runtime.test.ts",
       "packages/cli/test/assistant-cli.test.ts",
       "packages/cli/test/assistant-service.test.ts",
+      "packages/cli/test/device-daemon.test.ts",
       "packages/cli/test/device-sync-client.test.ts",
       "packages/cli/test/json-input.test.ts",
       "packages/cli/test/incur-smoke.test.ts",
