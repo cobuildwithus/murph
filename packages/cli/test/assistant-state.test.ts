@@ -144,6 +144,99 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal('lastAssistantMessage' in fetched, false)
 })
 
+test('resolveAssistantSession prefers explicit sessionId over conversation-key matches', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-id-precedence-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sessionIdMatch = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:session-id',
+  })
+  const conversationMatch = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:conversation',
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    participantId: 'contact:conversation',
+    sourceThreadId: 'thread-conversation',
+  })
+
+  assert.notEqual(
+    sessionIdMatch.session.sessionId,
+    conversationMatch.session.sessionId,
+  )
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: sessionIdMatch.session.sessionId,
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    participantId: 'contact:conversation',
+    sourceThreadId: 'thread-conversation',
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.sessionId, sessionIdMatch.session.sessionId)
+  assert.equal(resolved.session.binding.channel, 'imessage')
+  assert.equal(resolved.session.binding.actorId, 'contact:conversation')
+  assert.equal(resolved.session.binding.threadId, 'thread-conversation')
+
+  const persisted = await getAssistantSession(vaultRoot, sessionIdMatch.session.sessionId)
+  assert.equal(persisted.binding.threadId, 'thread-conversation')
+})
+
+test('resolveAssistantSession prefers alias matches over conversation-key matches', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-alias-precedence-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const aliasMatch = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:alias',
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    participantId: 'contact:alias',
+    sourceThreadId: 'thread-alias',
+  })
+  const conversationMatch = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:conversation',
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    participantId: 'contact:conversation',
+    sourceThreadId: 'thread-conversation',
+  })
+
+  assert.notEqual(
+    aliasMatch.session.sessionId,
+    conversationMatch.session.sessionId,
+  )
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:alias',
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    participantId: 'contact:conversation',
+    sourceThreadId: 'thread-conversation',
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.sessionId, aliasMatch.session.sessionId)
+  assert.equal(resolved.session.alias, 'chat:alias')
+  assert.equal(resolved.session.binding.actorId, 'contact:conversation')
+  assert.equal(resolved.session.binding.threadId, 'thread-conversation')
+
+  const persisted = await getAssistantSession(vaultRoot, aliasMatch.session.sessionId)
+  assert.equal(persisted.alias, 'chat:alias')
+  assert.equal(persisted.binding.threadId, 'thread-conversation')
+})
+
 test('assistant transcripts are stored separately from session metadata', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-transcript-'))
   const vaultRoot = path.join(parent, 'vault')

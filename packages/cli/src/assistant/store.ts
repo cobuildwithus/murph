@@ -76,6 +76,7 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
 export interface ResolveAssistantSessionInput
   extends CreateAssistantSessionInput {
   createIfMissing?: boolean
+  maxSessionAgeMs?: number | null
 }
 
 export interface ResolvedAssistantSession {
@@ -158,30 +159,25 @@ export async function resolveAssistantSession(
 
   const manualAlias = normalizeNullableString(input.alias)
   const bindingPatch = bindingPatchFromLocator(input)
+  const persistenceInput = {
+    alias: manualAlias,
+    bindingPatch,
+  }
   const conversationKey = resolveAssistantConversationLookupKey(input)
 
   if (input.sessionId) {
-    const existing = await readAssistantSession({
+    const resolved = await loadAndPersistResolvedSession({
       paths,
       sessionId: input.sessionId,
+      persistenceInput,
     })
-
-    if (!existing) {
+    if (!resolved) {
       throw new VaultCliError(
         'ASSISTANT_SESSION_NOT_FOUND',
         `Assistant session "${input.sessionId}" was not found.`,
       )
     }
-
-    const updated = await persistResolvedSession(paths, existing, {
-      alias: manualAlias,
-      bindingPatch,
-    })
-    return {
-      created: false,
-      paths,
-      session: updated,
-    }
+    return resolved
   }
 
   const indexes = await readAssistantIndexStore(paths)
@@ -189,17 +185,13 @@ export async function resolveAssistantSession(
   if (manualAlias) {
     const sessionId = indexes.aliases[manualAlias]
     if (sessionId) {
-      const existing = await readAssistantSession({ paths, sessionId })
-      if (existing) {
-        const updated = await persistResolvedSession(paths, existing, {
-          alias: manualAlias,
-          bindingPatch,
-        })
-        return {
-          created: false,
-          paths,
-          session: updated,
-        }
+      const resolved = await loadAndPersistResolvedSession({
+        paths,
+        sessionId,
+        persistenceInput,
+      })
+      if (resolved) {
+        return resolved
       }
     }
   }
@@ -207,17 +199,16 @@ export async function resolveAssistantSession(
   if (conversationKey) {
     const sessionId = indexes.conversationKeys[conversationKey]
     if (sessionId) {
-      const existing = await readAssistantSession({ paths, sessionId })
-      if (existing) {
-        const updated = await persistResolvedSession(paths, existing, {
-          alias: manualAlias,
-          bindingPatch,
-        })
-        return {
-          created: false,
-          paths,
-          session: updated,
-        }
+      const resolved = await loadAndPersistResolvedSession({
+        paths,
+        sessionId,
+        persistenceInput,
+        skipIfExpired: true,
+        maxSessionAgeMs: input.maxSessionAgeMs,
+        now: input.now,
+      })
+      if (resolved) {
+        return resolved
       }
     }
   }
@@ -471,6 +462,74 @@ async function persistResolvedSession(
   await writeAssistantSession(paths, updated)
   await synchronizeAssistantIndexes(paths, updated, session)
   return updated
+}
+
+async function loadAndPersistResolvedSession(input: {
+  paths: AssistantStatePaths
+  sessionId: string
+  persistenceInput: {
+    alias: string | null
+    bindingPatch: AssistantBindingPatch
+  }
+  skipIfExpired?: boolean
+  maxSessionAgeMs?: number | null
+  now?: Date
+}): Promise<ResolvedAssistantSession | null> {
+  const existing = await readAssistantSession({
+    paths: input.paths,
+    sessionId: input.sessionId,
+  })
+  if (!existing) {
+    return null
+  }
+  if (
+    input.skipIfExpired &&
+    isAssistantSessionExpired(existing, input.maxSessionAgeMs, input.now)
+  ) {
+    return null
+  }
+
+  const updated = await persistResolvedSession(
+    input.paths,
+    existing,
+    input.persistenceInput,
+  )
+  return {
+    created: false,
+    paths: input.paths,
+    session: updated,
+  }
+}
+
+function isAssistantSessionExpired(
+  session: AssistantSession,
+  maxSessionAgeMs: number | null | undefined,
+  now?: Date,
+): boolean {
+  if (!Number.isFinite(maxSessionAgeMs) || typeof maxSessionAgeMs !== 'number') {
+    return false
+  }
+
+  const normalizedMaxAgeMs = Math.max(Math.trunc(maxSessionAgeMs), 0)
+  if (normalizedMaxAgeMs === 0) {
+    return false
+  }
+
+  const referenceTimestamp =
+    normalizeNullableString(session.lastTurnAt) ??
+    normalizeNullableString(session.updatedAt) ??
+    normalizeNullableString(session.createdAt)
+  if (!referenceTimestamp) {
+    return false
+  }
+
+  const referenceTime = Date.parse(referenceTimestamp)
+  const nowTime = (now ?? new Date()).getTime()
+  if (!Number.isFinite(referenceTime) || !Number.isFinite(nowTime)) {
+    return false
+  }
+
+  return nowTime - referenceTime >= normalizedMaxAgeMs
 }
 
 async function readAssistantIndexStore(

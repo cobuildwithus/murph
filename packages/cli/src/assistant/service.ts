@@ -13,32 +13,32 @@ import {
 } from '../assistant-cli-access.js'
 import { executeAssistantProviderTurn, resolveAssistantProviderOptions } from '../chat-provider.js'
 import { deliverAssistantMessage } from '../outbound-channel.js'
-import { resolveAssistantOperatorDefaults } from '../operator-config.js'
+import {
+  resolveAssistantOperatorDefaults,
+  type AssistantOperatorDefaults,
+} from '../operator-config.js'
 import {
   appendAssistantTranscriptEntries,
   redactAssistantDisplayPath,
   resolveAssistantSession,
   saveAssistantSession,
+  type ResolveAssistantSessionInput,
 } from './store.js'
 import {
   createAssistantMemoryTurnContextEnv,
   loadAssistantMemoryPromptBlock,
 } from './memory.js'
 
-export interface AssistantMessageInput {
+interface AssistantSessionResolutionFields {
   actorId?: string | null
   alias?: string | null
   approvalPolicy?: AssistantApprovalPolicy | null
   channel?: string | null
-  codexCommand?: string
-  deliverResponse?: boolean
-  deliveryTarget?: string | null
   identityId?: string | null
   model?: string | null
   oss?: boolean
   participantId?: string | null
   profile?: string | null
-  prompt: string
   provider?: AssistantChatProvider
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
@@ -47,6 +47,14 @@ export interface AssistantMessageInput {
   threadId?: string | null
   threadIsDirect?: boolean | null
   vault: string
+}
+
+export interface AssistantMessageInput extends AssistantSessionResolutionFields {
+  codexCommand?: string
+  deliverResponse?: boolean
+  deliveryTarget?: string | null
+  maxSessionAgeMs?: number | null
+  prompt: string
   workingDirectory?: string
 }
 
@@ -55,12 +63,11 @@ export interface AssistantChatInput
   initialPrompt?: string | null
 }
 
-export async function sendAssistantMessage(
-  input: AssistantMessageInput,
-): Promise<AssistantAskResult> {
-  const defaults = await resolveAssistantOperatorDefaults()
-  const cliAccess = resolveAssistantCliAccessContext()
-  const resolved = await resolveAssistantSession({
+export function buildResolveAssistantSessionInput(
+  input: AssistantSessionResolutionFields,
+  defaults: AssistantOperatorDefaults | null,
+): ResolveAssistantSessionInput {
+  return {
     vault: input.vault,
     sessionId: input.sessionId,
     alias: input.alias,
@@ -80,7 +87,18 @@ export async function sendAssistantMessage(
       input.reasoningEffort ??
       defaults?.reasoningEffort ??
       null,
-  })
+    maxSessionAgeMs: input.maxSessionAgeMs ?? null,
+  }
+}
+
+export async function sendAssistantMessage(
+  input: AssistantMessageInput,
+): Promise<AssistantAskResult> {
+  const defaults = await resolveAssistantOperatorDefaults()
+  const cliAccess = resolveAssistantCliAccessContext()
+  const resolved = await resolveAssistantSession(
+    buildResolveAssistantSessionInput(input, defaults),
+  )
 
   const providerOptions = resolveAssistantProviderOptions({
     model: input.model ?? resolved.session.providerOptions.model ?? defaults?.model,

@@ -31,7 +31,10 @@ vi.mock('../src/chat-provider.js', async () => {
   }
 })
 
-import { sendAssistantMessage } from '../src/assistant/service.js'
+import {
+  buildResolveAssistantSessionInput,
+  sendAssistantMessage,
+} from '../src/assistant/service.js'
 import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
@@ -55,6 +58,88 @@ afterEach(async () => {
 beforeEach(() => {
   serviceMocks.deliverAssistantMessage.mockReset()
   serviceMocks.executeAssistantProviderTurn.mockReset()
+})
+
+test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
+  const defaults = {
+    provider: 'codex-cli' as const,
+    codexCommand: '/opt/bin/codex',
+    model: 'gpt-5.4-mini',
+    reasoningEffort: 'high',
+    identityId: 'assistant:primary',
+    sandbox: 'workspace-write' as const,
+    approvalPolicy: 'on-request' as const,
+    profile: 'ops',
+    oss: true,
+  }
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
+        alias: 'chat:bob',
+        channel: 'imessage',
+        participantId: 'contact:bob',
+        sourceThreadId: 'thread-1',
+      },
+      defaults,
+    ),
+    {
+      vault: '/tmp/vault',
+      sessionId: undefined,
+      alias: 'chat:bob',
+      channel: 'imessage',
+      identityId: 'assistant:primary',
+      actorId: 'contact:bob',
+      threadId: 'thread-1',
+      threadIsDirect: undefined,
+      provider: 'codex-cli',
+      model: 'gpt-5.4-mini',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      oss: true,
+      profile: 'ops',
+      reasoningEffort: 'high',
+    },
+  )
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
+        actorId: 'actor:override',
+        participantId: 'contact:bob',
+        identityId: 'assistant:override',
+        threadId: 'thread-explicit',
+        sourceThreadId: 'thread-ignored',
+        provider: 'codex-cli',
+        model: 'gpt-oss:20b',
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: 'private',
+        oss: false,
+        reasoningEffort: 'low',
+      },
+      defaults,
+    ),
+    {
+      vault: '/tmp/vault',
+      sessionId: undefined,
+      alias: undefined,
+      channel: undefined,
+      identityId: 'assistant:override',
+      actorId: 'actor:override',
+      threadId: 'thread-explicit',
+      threadIsDirect: undefined,
+      provider: 'codex-cli',
+      model: 'gpt-oss:20b',
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      oss: false,
+      profile: 'private',
+      reasoningEffort: 'low',
+    },
+  )
 })
 
 test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and MCP-backed memory tools', async () => {

@@ -8,8 +8,11 @@ import {
   resolveAssistantOperatorDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '../../operator-config.js'
-import type { AssistantChatInput } from '../service.js'
-import { sendAssistantMessage } from '../service.js'
+import {
+  buildResolveAssistantSessionInput,
+  sendAssistantMessage,
+  type AssistantChatInput,
+} from '../service.js'
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
@@ -1442,24 +1445,9 @@ export async function runAssistantChatWithInk(
   const startedAt = new Date().toISOString()
   const defaults = await resolveAssistantOperatorDefaults()
   const theme = resolveAssistantInkTheme()
-  const resolved = await resolveAssistantSession({
-    vault: input.vault,
-    sessionId: input.sessionId,
-    alias: input.alias,
-    channel: input.channel,
-    identityId: input.identityId ?? defaults?.identityId ?? null,
-    actorId: input.actorId ?? input.participantId,
-    threadId: input.threadId ?? input.sourceThreadId,
-    threadIsDirect: input.threadIsDirect,
-    provider: input.provider ?? defaults?.provider ?? undefined,
-    model: input.model ?? defaults?.model ?? null,
-    sandbox: input.sandbox ?? defaults?.sandbox ?? 'workspace-write',
-    approvalPolicy:
-      input.approvalPolicy ?? defaults?.approvalPolicy ?? 'on-request',
-    oss: input.oss ?? defaults?.oss ?? false,
-    profile: input.profile ?? defaults?.profile ?? null,
-    reasoningEffort: input.reasoningEffort ?? defaults?.reasoningEffort ?? null,
-  })
+  const resolved = await resolveAssistantSession(
+    buildResolveAssistantSessionInput(input, defaults),
+  )
   const transcriptEntries = await listAssistantTranscriptEntries(
     input.vault,
     resolved.session.sessionId,
