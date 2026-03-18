@@ -1,3 +1,8 @@
+import {
+  IMessageSDK,
+  type ChatSummary as PhotonImessageChatSummary,
+  type Message as PhotonImessageMessage,
+} from "@photon-ai/imessage-kit";
 import { createNormalizedChatPollConnector, type ChatPollDriver } from "../chat/poll.js";
 import {
   type ImessageKitChatLike,
@@ -22,6 +27,7 @@ export interface ImessageWatchOptions {
 export interface ImessageWatcherHandle {
   close?(): Promise<void> | void;
   stop?(): Promise<void> | void;
+  done?: Promise<void>;
 }
 
 export interface ImessagePollDriver extends ChatPollDriver<ImessageKitMessageLike> {
@@ -86,29 +92,139 @@ export function createImessageConnector({
 }
 
 export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
-  const specifier = "@photon-ai/imessage-kit";
-  const module = (await import(specifier)) as Record<string, unknown>;
-  const getMessages = module.getMessages;
-  const listChats = module.listChats;
-  const startWatching = module.startWatching;
-
-  if (typeof getMessages !== "function" || typeof startWatching !== "function") {
-    throw new TypeError(
-      "@photon-ai/imessage-kit did not expose the expected getMessages/startWatching functions.",
-    );
-  }
-
   return {
     getMessages(input) {
-      return (getMessages as ImessagePollDriver["getMessages"])(input);
+      return withIMessageSdk(async (sdk) => {
+        const result = await sdk.getMessages({
+          limit: input.limit,
+          excludeOwnMessages: input.includeOwnMessages === false,
+        });
+
+        return result.messages.map(toImessageKitMessageLike);
+      });
     },
-    listChats:
-      typeof listChats === "function"
-        ? () => (listChats as NonNullable<ImessagePollDriver["listChats"]>)()
-        : undefined,
-    startWatching(options) {
-      return (startWatching as ImessagePollDriver["startWatching"])(options);
+    listChats() {
+      return withIMessageSdk(async (sdk) => {
+        const chats = await sdk.listChats();
+        return chats.map(toImessageKitChatLike);
+      });
     },
+    async startWatching(options) {
+      if (options.signal.aborted) {
+        return;
+      }
+
+      const sdk = new IMessageSDK();
+      let closed = false;
+      let resolveDone!: () => void;
+      let rejectDone!: (error: Error) => void;
+      const done = new Promise<void>((resolve, reject) => {
+        resolveDone = resolve;
+        rejectDone = reject;
+      });
+
+      const close = async () => {
+        if (closed) {
+          return;
+        }
+
+        closed = true;
+        options.signal.removeEventListener("abort", onAbort);
+        sdk.stopWatching();
+        await closeIMessageSdk(sdk);
+        resolveDone();
+      };
+
+      const onAbort = () => {
+        void close();
+      };
+
+      options.signal.addEventListener("abort", onAbort, { once: true });
+
+      try {
+        await sdk.startWatching({
+          onMessage: async (message) => {
+            if (options.signal.aborted) {
+              return;
+            }
+
+            if (options.includeOwnMessages === false && message.isFromMe) {
+              return;
+            }
+
+            await options.onMessage(toImessageKitMessageLike(message));
+          },
+          onError(error) {
+            rejectDone(error);
+            void close();
+          },
+        });
+      } catch (error) {
+        options.signal.removeEventListener("abort", onAbort);
+        await closeIMessageSdk(sdk);
+        throw error;
+      }
+
+      return {
+        close,
+        stop: close,
+        done,
+      };
+    },
+  };
+}
+
+async function withIMessageSdk<TResult>(
+  run: (sdk: IMessageSDK) => Promise<TResult>,
+): Promise<TResult> {
+  const sdk = new IMessageSDK();
+
+  try {
+    return await run(sdk);
+  } finally {
+    await closeIMessageSdk(sdk);
+  }
+}
+
+async function closeIMessageSdk(sdk: IMessageSDK): Promise<void> {
+  try {
+    await sdk.close();
+  } catch {}
+}
+
+function toImessageKitMessageLike(
+  message: PhotonImessageMessage,
+): ImessageKitMessageLike {
+  return {
+    guid: message.guid,
+    id: message.id,
+    text: message.text,
+    date: message.date,
+    chatId: message.chatId,
+    handleId: message.sender,
+    sender: message.sender,
+    displayName: message.senderName,
+    senderName: message.senderName,
+    isFromMe: message.isFromMe,
+    attachments: message.attachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      path: attachment.path,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+    })),
+  };
+}
+
+function toImessageKitChatLike(
+  chat: PhotonImessageChatSummary,
+): ImessageKitChatLike {
+  return {
+    id: chat.chatId,
+    displayName: chat.displayName,
+    title: chat.displayName,
+    isGroup: chat.isGroup,
+    participantCount: chat.isGroup ? 3 : 1,
   };
 }
 

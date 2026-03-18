@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, test } from 'vitest'
+import { afterEach, test, vi } from 'vitest'
 import {
   deliverAssistantMessage,
   resolveImessageDeliveryCandidates,
+  sendImessageMessage,
 } from '../src/outbound-channel.js'
+import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
 
@@ -158,6 +160,86 @@ test('deliverAssistantMessage redacts HOME-based vault paths in its result paylo
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
+})
+
+test('sendImessageMessage fails before constructing the adapter when the Messages database is unreadable', async () => {
+  const createSdk = vi.fn(() => ({
+    send: async () => {},
+  }))
+
+  await assert.rejects(
+    () =>
+      sendImessageMessage(
+        {
+          message: 'Smoke test',
+          target: '+15551234567',
+        },
+        {
+          platform: 'darwin',
+          homeDirectory: '/Users/tester',
+          probeMessagesDb: async () => {
+            const error = new Error('authorization denied') as Error & {
+              code?: string
+            }
+            error.code = 'EPERM'
+            throw error
+          },
+          createSdk,
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultCliError, true)
+      assert.equal((error as VaultCliError).code, 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED')
+      assert.match(
+        (error as VaultCliError).message,
+        /Full Disk Access.*restart it, and retry/iu,
+      )
+      assert.equal(
+        (error as VaultCliError).context?.path,
+        '~/Library/Messages/chat.db',
+      )
+      return true
+    },
+  )
+
+  assert.equal(createSdk.mock.calls.length, 0)
+})
+
+test('sendImessageMessage maps adapter database-open failures to permission guidance', async () => {
+  await assert.rejects(
+    () =>
+      sendImessageMessage(
+        {
+          message: 'Smoke test',
+          target: '+15551234567',
+        },
+        {
+          platform: 'darwin',
+          homeDirectory: '/Users/tester',
+          probeMessagesDb: async () => {},
+          createSdk: () => {
+            const error = new Error('unable to open database file') as Error & {
+              code?: string
+            }
+            error.code = 'DATABASE'
+            throw error
+          },
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultCliError, true)
+      assert.equal((error as VaultCliError).code, 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED')
+      assert.match(
+        (error as VaultCliError).message,
+        /read access to ~\/Library\/Messages\/chat\.db/iu,
+      )
+      assert.equal(
+        (error as VaultCliError).context?.causeCode,
+        'DATABASE',
+      )
+      return true
+    },
+  )
 })
 
 function restoreEnvironmentVariable(

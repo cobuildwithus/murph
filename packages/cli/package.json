@@ -54,20 +54,13 @@
     "@healthybob/parsers": "workspace:*",
     "@healthybob/query": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
+    "@photon-ai/imessage-kit": "*",
     "ai": "^6.0.116",
     "ink": "^6.8.0",
     "ink-text-input": "^6.0.0",
     "incur": "0.3.4",
     "react": "^19.2.4",
     "zod": "^4.1.8"
-  },
-  "peerDependencies": {
-    "@photon-ai/imessage-kit": "*"
-  },
-  "peerDependenciesMeta": {
-    "@photon-ai/imessage-kit": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@types/react": "^19.2.14"

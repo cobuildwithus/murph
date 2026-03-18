@@ -63,24 +63,23 @@ The Telegram connector is local-first and poll-first by default.
 
 ## iMessage adapter contract
 
-The iMessage connector is optional and macOS-only. `@healthybob/inboxd` keeps
-the adapter behind a dynamic import so non-iMessage consumers do not need the
-dependency at all.
+The iMessage connector is macOS-only. `@healthybob/inboxd` now depends directly
+on `@photon-ai/imessage-kit`, and `loadImessageKitDriver()` adapts its
+`IMessageSDK` surface onto the inboxd polling driver contract.
 
-- Install `@photon-ai/imessage-kit` only in the same project/workspace that
-  runs `@healthybob/inboxd` or `vault-cli`.
-- The runtime imports that package only when `loadImessageKitDriver()` or an
-  iMessage-backed CLI flow is exercised.
-- If the package is missing or incompatible, `vault-cli inbox doctor` fails the
-  `driver-import` check and reports the import error directly.
-- Other inbox connectors can use this package without installing the iMessage
-  adapter.
+- Any workspace that runs `@healthybob/inboxd` or `vault-cli` must install the
+  package dependency tree, including the native SQLite dependency chain that
+  `@photon-ai/imessage-kit` expects at runtime.
+- `vault-cli inbox doctor` still separates adapter wiring from the live probe:
+  `driver-import` confirms the driver boundary is available, while `probe`
+  exercises the actual SDK/database access.
+- Other inbox connectors remain source-agnostic, but the package install now
+  always includes the iMessage adapter.
 
 ## Operator notes
 
 - Use `vault-cli inbox doctor --source-id imessage:self` before `backfill` or
   `run` to confirm macOS access, Messages database readability, and adapter
   importability.
-- A `driver-import` failure usually means `@photon-ai/imessage-kit` is not
-  installed where the runtime is executing, or it does not expose the expected
-  `getMessages` and `startWatching` functions.
+- A `probe` failure usually means macOS denied Messages database access or the
+  underlying SQLite/native dependency stack failed to initialize cleanly.

@@ -45,6 +45,7 @@ export interface ImessageKitChatLike {
   id?: string | null;
   displayName?: string | null;
   title?: string | null;
+  isGroup?: boolean | null;
   participants?: Array<{ id?: string | null } | string> | null;
   participantCount?: number | null;
   [key: string]: unknown;
@@ -123,6 +124,10 @@ export function normalizeImessageMessage({
 function inferDirectChat(chat: ImessageKitChatLike | null): boolean {
   if (!chat) {
     return true;
+  }
+
+  if (typeof chat.isGroup === "boolean") {
+    return !chat.isGroup;
   }
 
   if (Array.isArray(chat.participants)) {

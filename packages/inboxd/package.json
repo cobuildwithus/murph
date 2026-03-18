@@ -29,18 +29,11 @@
     "typecheck": "pnpm --dir ../contracts build && pnpm --dir ../core build && tsc -p tsconfig.json --noEmit --pretty false",
     "test": "pnpm --dir ../.. exec vitest run --config packages/inboxd/vitest.config.ts --no-coverage"
   },
-  "peerDependencies": {
-    "@photon-ai/imessage-kit": "*"
-  },
-  "peerDependenciesMeta": {
-    "@photon-ai/imessage-kit": {
-      "optional": true
-    }
-  },
   "dependencies": {
     "@healthybob/contracts": "workspace:*",
     "@healthybob/core": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
+    "@photon-ai/imessage-kit": "*",
     "grammy": "1.41.1"
   }
 }

@@ -17,6 +17,7 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - The inbox CLI runtime now resolves `.runtime` paths through `@healthybob/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
 - The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion via `src/inbox-services.ts`.
 - The CLI now also owns an `assistant` command group for provider-backed local chat turns, Ink-backed local chat UI fallback, assistant-session metadata plus local transcripts outside the vault, outbound channel delivery, and an always-on inbox triage loop via `src/assistant-runtime.ts`.
+- iMessage-backed inbox and assistant delivery flows now depend directly on `@photon-ai/imessage-kit` instead of late-loading that package at call time.
 - The built CLI package shape exposes both `vault-cli` and a setup-focused `healthybob` alias from the same entrypoint; `healthybob`, `healthybob --help`, and `healthybob setup ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
 
 ## macOS setup
