@@ -303,46 +303,13 @@ test("buildExportPack sanitizes explicit pack ids before deriving output paths",
   }
 });
 
-test("readVault tolerates missing optional files and normalizes alias-heavy fixtures", async () => {
+test("readVault rejects alias-heavy fixtures once query reads go canonical-only", async () => {
   const vaultRoot = await createSparseVault();
 
   try {
-    const vault = await readVault(vaultRoot);
-
-    assert.equal(vault.metadata, null);
-    assert.equal(vault.coreDocument, null);
-    assert.equal(vault.audits.length, 0);
-    assert.equal(vault.experiments.length, 1);
-    assert.equal(vault.experiments[0]?.experimentSlug, "recovery-plan");
-    assert.equal(vault.experiments[0]?.title, "recovery-plan");
-    assert.equal(vault.journalEntries[0]?.title, "2026-03-09");
-    assert.deepEqual(vault.journalEntries[0]?.data.eventIds, [
-      "evt_01JNV4ALT000000000000001",
-    ]);
-    assert.deepEqual(vault.journalEntries[0]?.data.sampleStreams, ["glucose"]);
-    assert.equal(vault.samples[0]?.stream, "glucose");
-    assert.match(String(vault.samples[0]?.id), /^sample:/);
-    assert.equal(lookupRecordById(vault, "   "), null);
-    assert.deepEqual(
-      listRecords(vault, {
-        recordTypes: ["sample"],
-        streams: ["glucose"],
-      }).map((record) => record.id),
-      [vault.samples[0]?.id],
-    );
-    assert.deepEqual(
-      listExperiments(vault, { slug: "recovery-plan", text: "hydration" }).map(
-        (record) => record.experimentSlug,
-      ),
-      ["recovery-plan"],
-    );
-    assert.deepEqual(
-      listJournalEntries(vault, {
-        experimentSlug: "recovery-plan",
-        tags: ["focus"],
-        text: "steady",
-      }).map((record) => record.id),
-      ["journal:2026-03-09"],
+    await assert.rejects(
+      () => readVault(vaultRoot),
+      /Missing canonical "experimentId" in experiment frontmatter at bank\/experiments\/recovery-plan\.md\./u,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -1481,7 +1448,7 @@ experimentId: exp_01JNV4EXP000000000000001
 slug: low-carb
 status: active
 title: Low Carb Trial
-started_on: 2026-03-01
+startedOn: 2026-03-01
 tags:
   - nutrition
   - glucose
@@ -1516,9 +1483,9 @@ Fasted longer than usual. Steady energy through the afternoon.
 schemaVersion: hb.frontmatter.journal-day.v1
 docType: journal_day
 dayKey: 2026-03-11
-event_ids:
+eventIds:
   - evt_01JNV4NOTE000000000000001
-sample_streams:
+sampleStreams:
   - heart_rate
 ---
 # March 11
@@ -1560,16 +1527,16 @@ Light walk and early bedtime.
         schemaVersion: "hb.event.v1",
         id: "evt_01JNV4DOC000000000000001",
         kind: "document",
-        occurred_at: "2026-03-12T14:00:00Z",
-        recorded_at: "2026-03-12T14:02:00Z",
-        day_key: "2026-03-12",
+        occurredAt: "2026-03-12T14:00:00Z",
+        recordedAt: "2026-03-12T14:02:00Z",
+        dayKey: "2026-03-12",
         source: "import",
         title: "Lab report",
-        related_ids: ["doc_01JNV4DOC0000000000000001"],
-        document_id: "doc_01JNV4DOC0000000000000001",
-        document_path:
+        relatedIds: ["doc_01JNV4DOC0000000000000001"],
+        documentId: "doc_01JNV4DOC0000000000000001",
+        documentPath:
           "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
-        mime_type: "application/pdf",
+        mimeType: "application/pdf",
       }),
       "",
     ].join("\n"),
@@ -1975,7 +1942,7 @@ test("getSqliteSearchStatus ignores an inbox runtime copy when the canonical sea
       `---
 schemaVersion: hb.frontmatter.journal-day.v1
 docType: journal_day
-day_key: 2026-03-10
+dayKey: 2026-03-10
 title: March 10
 tags:
   - energy
@@ -2130,16 +2097,15 @@ test("searchVaultRuntime auto switches from scan results to stale sqlite state a
       `---
 schemaVersion: hb.frontmatter.journal-day.v1
 docType: journal_day
-day_key: 2026-03-10
+dayKey: 2026-03-10
 title: March 10
 tags:
   - focus
   - hydration
-experiment_slug: low-carb
-event_ids:
+eventIds:
   - evt_01JNV4MEAL000000000000001
   - evt_01JNV4DOC000000000000001
-sample_streams:
+sampleStreams:
   - glucose
   - heart_rate
 ---
@@ -2162,16 +2128,15 @@ Steady energy after electrolyte drink.
       `---
 schemaVersion: hb.frontmatter.journal-day.v1
 docType: journal_day
-day_key: 2026-03-10
+dayKey: 2026-03-10
 title: March 10
 tags:
   - focus
   - hydration
-experiment_slug: low-carb
-event_ids:
+eventIds:
   - evt_01JNV4MEAL000000000000001
   - evt_01JNV4DOC000000000000001
-sample_streams:
+sampleStreams:
   - glucose
   - heart_rate
 ---

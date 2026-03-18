@@ -411,7 +411,7 @@ export function projectRegistryEntity(
     frontmatter: attributes,
     relatedIds,
     stream: null,
-    experimentSlug: firstString(attributes, ["experimentSlug", "experiment_slug"]),
+    experimentSlug: firstString(attributes, ["experimentSlug"]),
     tags: normalizeTags(attributes.tags),
   };
 }

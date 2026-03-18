@@ -21,7 +21,7 @@ import {
 
 import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.js";
 import {
-  buildLegacyAttachmentId,
+  buildAttachmentId,
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
   assertVaultPathOnDisk,
@@ -82,7 +82,7 @@ export async function persistRawCapture({
 
   for (const [index, attachment] of input.attachments.entries()) {
     const ordinal = index + 1;
-    const attachmentId = buildLegacyAttachmentId(captureId, ordinal);
+    const attachmentId = buildAttachmentId(captureId, ordinal);
     const sanitizedAttachment = stripEphemeralAttachmentFields(attachment);
 
     if (!attachment.originalPath && !attachment.data) {
@@ -483,6 +483,7 @@ async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCa
   try {
     return normalizeStoredCaptureEnvelope(
       JSON.parse(await readFile(absolutePath, "utf8")) as StoredCaptureEnvelope,
+      absolutePath,
     );
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -493,12 +494,33 @@ async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCa
   }
 }
 
-function normalizeStoredCaptureEnvelope(envelope: StoredCaptureEnvelope): StoredCaptureEnvelope {
+function normalizeStoredCaptureEnvelope(
+  envelope: StoredCaptureEnvelope,
+  absolutePath: string,
+): StoredCaptureEnvelope {
+  if (!envelope || typeof envelope !== "object") {
+    throw new TypeError(`Expected stored inbox envelope object at ${absolutePath}.`);
+  }
+
+  if (!envelope.stored || typeof envelope.stored !== "object") {
+    throw new TypeError(`Missing canonical "stored" payload in stored inbox envelope at ${absolutePath}.`);
+  }
+
+  if (!Array.isArray(envelope.stored.attachments)) {
+    throw new TypeError(
+      `Missing canonical "stored.attachments" array in stored inbox envelope at ${absolutePath}.`,
+    );
+  }
+
   return {
     ...envelope,
     stored: {
       ...envelope.stored,
-      attachments: normalizeStoredAttachments(envelope.captureId, envelope.stored.attachments),
+      attachments: normalizeStoredAttachments(
+        envelope.captureId,
+        envelope.stored.attachments,
+        `stored inbox envelope at ${absolutePath}`,
+      ),
     },
   };
 }

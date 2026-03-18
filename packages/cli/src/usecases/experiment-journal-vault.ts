@@ -1010,8 +1010,7 @@ function buildEntityData(entity: QueryCanonicalEntity) {
         ? entity.attributes.status
         : entity.status,
     experimentSlug:
-      typeof entity.attributes.experimentSlug === 'string' ||
-      typeof entity.attributes.experiment_slug === 'string'
+      typeof entity.attributes.experimentSlug === 'string'
         ? undefined
         : entity.experimentSlug,
     relatedIds:

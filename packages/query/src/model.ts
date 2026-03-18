@@ -435,10 +435,7 @@ async function readOptionalCoreEntity(
     const document = parseMarkdownDocument(source);
     const attributes = normalizeFrontmatterAttributes("core", document.attributes);
     const title = pickString(attributes, ["title"]) ?? extractMarkdownHeading(document.body);
-    const id =
-      pickString(attributes, ["vaultId", "vault_id", "id"]) ??
-      pickString(metadata, ["vaultId", "vault_id"]) ??
-      "core";
+    const id = pickString(attributes, ["vaultId"]) ?? pickString(metadata, ["vaultId"]) ?? "core";
 
     return {
       entityId: id,
@@ -447,7 +444,7 @@ async function readOptionalCoreEntity(
       family: "core",
       kind: "core_document",
       status: null,
-      occurredAt: pickString(attributes, ["updatedAt", "updated_at"]),
+      occurredAt: pickString(attributes, ["updatedAt"]),
       date: null,
       path: "CORE.md",
       title,
@@ -460,7 +457,7 @@ async function readOptionalCoreEntity(
       relatedIds: [],
       stream: null,
       experimentSlug: null,
-      tags: normalizeTags(document.attributes.tags),
+      tags: normalizeTags(attributes.tags),
     };
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -478,19 +475,28 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
   const pages = await Promise.all(
     fileEntries.filter(hasMarkdownExtension).map(async (entry) => {
       const filePath = path.join(experimentDir, entry);
+      const relativePath = path.posix.join("bank/experiments", entry);
       const source = await readFile(filePath, "utf8");
       const document = parseMarkdownDocument(source);
       const attributes = normalizeFrontmatterAttributes(
         "experiment",
         document.attributes,
       );
-      const slug = pickString(attributes, ["slug"]) ?? path.basename(entry, ".md");
+      const id = requireCanonicalString(
+        attributes,
+        "experimentId",
+        `experiment frontmatter at ${relativePath}`,
+      );
+      const slug = requireCanonicalString(
+        attributes,
+        "slug",
+        `experiment frontmatter at ${relativePath}`,
+      );
+      const startedOn = pickString(attributes, ["startedOn"]);
       const title =
         pickString(attributes, ["title"]) ??
         extractMarkdownHeading(document.body) ??
         slug;
-      const startedOn = pickString(attributes, ["startedOn", "started_on"]);
-      const id = pickString(attributes, ["experimentId", "id"]) ?? `experiment:${slug}`;
 
       return {
         entityId: id,
@@ -499,9 +505,9 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         family: "experiment",
         kind: "experiment",
         status: pickString(attributes, ["status"]),
-        occurredAt: pickString(attributes, ["updatedAt", "updated_at"]) ?? startedOn,
+        occurredAt: pickString(attributes, ["updatedAt"]) ?? startedOn,
         date: normalizeCanonicalDate(startedOn),
-        path: path.posix.join("bank/experiments", entry),
+        path: relativePath,
         title,
         body: document.body,
         attributes: {
@@ -540,12 +546,12 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
       const source = await readFile(filePath, "utf8");
       const document = parseMarkdownDocument(source);
       const attributes = normalizeFrontmatterAttributes("journal", document.attributes);
-      const date = pickString(attributes, ["dayKey", "date"]) ?? path.basename(dayEntry, ".md");
+      const date = pickString(attributes, ["dayKey"]) ?? path.basename(dayEntry, ".md");
       const title =
         pickString(attributes, ["title"]) ??
         extractMarkdownHeading(document.body) ??
         date;
-      const id = pickString(attributes, ["id"]) ?? `journal:${date}`;
+      const id = `journal:${date}`;
       const relatedIds = uniqueStrings([
         ...normalizeUniqueStringArray(attributes.relatedIds),
         ...normalizeUniqueStringArray(attributes.eventIds),
@@ -558,7 +564,7 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
         family: "journal",
         kind: "journal_day",
         status: pickString(attributes, ["status"]),
-        occurredAt: pickString(attributes, ["updatedAt", "updated_at"]),
+        occurredAt: pickString(attributes, ["updatedAt"]),
         date,
         path: path.posix.join("journal", yearEntry, dayEntry),
         title,
@@ -569,7 +575,7 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
         frontmatter: attributes,
         relatedIds,
         stream: null,
-        experimentSlug: pickString(attributes, ["experimentSlug", "experiment_slug"]),
+        experimentSlug: pickString(attributes, ["experimentSlug"]),
         tags: normalizeTags(attributes.tags),
       });
     }
@@ -589,22 +595,28 @@ async function readJsonlRecordFamily(
     (sourcePath, lineNumber, rawPayload) => {
       const payload = normalizeJsonRecordPayload(recordType, rawPayload);
       const kind =
-        pickString(payload, ["kind"]) ?? (recordType === "audit" ? "audit" : recordType);
+        recordType === "audit"
+          ? pickString(payload, ["kind"]) ?? "audit"
+          : requireCanonicalString(
+              payload,
+              "kind",
+              `${recordType} record at ${sourcePath}:${lineNumber}`,
+            );
 
-      if (recordType === "event" && kind && HEALTH_HISTORY_KINDS.has(kind as never)) {
+      if (recordType === "event" && HEALTH_HISTORY_KINDS.has(kind as never)) {
         return null;
       }
 
-      const rawRecordId =
-        pickString(payload, ["id"]) ??
-        `${recordType}:${sourcePath}:${lineNumber}`;
-      const occurredAt = pickString(payload, [
+      const rawRecordId = requireCanonicalString(
+        payload,
+        "id",
+        `${recordType} record at ${sourcePath}:${lineNumber}`,
+      );
+      const occurredAt = requireCanonicalString(
+        payload,
         "occurredAt",
-        "recordedAt",
-        "occurred_at",
-        "recorded_at",
-        "timestamp",
-      ]);
+        `${recordType} record at ${sourcePath}:${lineNumber}`,
+      );
       const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
       const relatedIds = uniqueStrings([
         ...normalizeUniqueStringArray(payload.relatedIds),
@@ -624,7 +636,7 @@ async function readJsonlRecordFamily(
         kind,
         status: pickString(payload, ["status"]),
         occurredAt,
-        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey", "day_key"]),
+        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey"]),
         path: sourcePath,
         title: pickString(payload, ["title", "summary"]),
         body: pickString(payload, ["note", "summary"]),
@@ -637,7 +649,7 @@ async function readJsonlRecordFamily(
         frontmatter: null,
         relatedIds,
         stream: null,
-        experimentSlug: pickString(payload, ["experimentSlug", "experiment_slug"]),
+        experimentSlug: pickString(payload, ["experimentSlug"]),
         tags: normalizeTags(payload.tags),
       };
     },
@@ -649,18 +661,22 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
     vaultRoot,
     "ledger/samples",
     (sourcePath, lineNumber, rawPayload) => {
-      const streamFromPath = inferSampleStreamFromPath(sourcePath);
       const payload = normalizeJsonRecordPayload("sample", rawPayload);
-      const rawRecordId =
-        pickString(payload, ["id"]) ?? `sample:${sourcePath}:${lineNumber}`;
-      const occurredAt = pickString(payload, [
+      const rawRecordId = requireCanonicalString(
+        payload,
+        "id",
+        `sample record at ${sourcePath}:${lineNumber}`,
+      );
+      const occurredAt = requireCanonicalString(
+        payload,
         "recordedAt",
-        "occurredAt",
-        "recorded_at",
-        "occurred_at",
-        "timestamp",
-      ]);
-      const stream = pickString(payload, ["stream"]) ?? streamFromPath;
+        `sample record at ${sourcePath}:${lineNumber}`,
+      );
+      const stream = requireCanonicalString(
+        payload,
+        "stream",
+        `sample record at ${sourcePath}:${lineNumber}`,
+      );
 
       return {
         entityId: rawRecordId,
@@ -670,15 +686,15 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         kind: "sample",
         status: pickString(payload, ["quality"]),
         occurredAt,
-        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey", "day_key"]),
+        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey"]),
         path: sourcePath,
-        title: stream ? `${stream} sample` : "sample",
+        title: `${stream} sample`,
         body: null,
         attributes: payload,
         frontmatter: null,
         relatedIds: uniqueStrings(normalizeUniqueStringArray(payload.relatedIds)),
         stream,
-        experimentSlug: pickString(payload, ["experimentSlug", "experiment_slug"]),
+        experimentSlug: pickString(payload, ["experimentSlug"]),
         tags: normalizeTags(payload.tags),
       };
     },
@@ -1052,17 +1068,6 @@ function pickString(
   return null;
 }
 
-function inferSampleStreamFromPath(sourcePath: string): string | null {
-  const segments = sourcePath.split("/");
-  const sampleIndex = segments.indexOf("samples");
-
-  if (sampleIndex === -1) {
-    return null;
-  }
-
-  return segments[sampleIndex + 1] ?? null;
-}
-
 function normalizeFrontmatterAttributes(
   recordType: FrontmatterRecordType,
   attributes: QueryRecordData,
@@ -1071,32 +1076,35 @@ function normalizeFrontmatterAttributes(
 
   switch (recordType) {
     case "core":
-      assignCanonicalStrings(normalized, attributes, [
-        ["vaultId", ["vaultId", "vault_id", "id"]],
-        ["updatedAt", ["updatedAt", "updated_at"]],
-      ]);
-      normalized.tags = normalizeUniqueStringArray(normalized.tags);
+      removeKeys(normalized, ["id", "vault_id", "updated_at"]);
+      normalizeArrayField(normalized, "tags");
       return normalized;
     case "experiment":
-      assignCanonicalStrings(normalized, attributes, [
-        ["experimentId", ["experimentId", "experiment_id", "id"]],
-        ["slug", ["slug", "experimentSlug", "experiment_slug"]],
-        ["startedOn", ["startedOn", "started_on"]],
-        ["updatedAt", ["updatedAt", "updated_at"]],
+      removeKeys(normalized, [
+        "id",
+        "experiment_id",
+        "experimentSlug",
+        "experiment_slug",
+        "started_on",
+        "updated_at",
       ]);
-      normalized.tags = normalizeUniqueStringArray(normalized.tags);
+      normalizeArrayField(normalized, "tags");
+      normalizeArrayField(normalized, "relatedIds");
+      normalizeArrayField(normalized, "eventIds");
       return normalized;
     case "journal":
-      assignCanonicalStrings(normalized, attributes, [
-        ["dayKey", ["dayKey", "day_key", "date"]],
-        ["experimentSlug", ["experimentSlug", "experiment_slug"]],
-        ["updatedAt", ["updatedAt", "updated_at"]],
+      removeKeys(normalized, [
+        "day_key",
+        "date",
+        "event_ids",
+        "sample_streams",
+        "experiment_slug",
+        "updated_at",
       ]);
-      assignCanonicalArrays(normalized, attributes, [
-        ["eventIds", ["eventIds", "event_ids"]],
-        ["sampleStreams", ["sampleStreams", "sample_streams"]],
-      ]);
-      normalized.tags = normalizeUniqueStringArray(normalized.tags);
+      normalizeArrayField(normalized, "tags");
+      normalizeArrayField(normalized, "eventIds");
+      normalizeArrayField(normalized, "sampleStreams");
+      normalizeArrayField(normalized, "relatedIds");
       return normalized;
     default:
       return normalized;
@@ -1104,46 +1112,35 @@ function normalizeFrontmatterAttributes(
 }
 
 function normalizeJsonRecordPayload(
-  recordType: JsonRecordType,
+  _recordType: JsonRecordType,
   payload: QueryRecordData,
 ): QueryRecordData {
   const normalized = cloneRecordData(payload);
 
-  assignCanonicalStrings(normalized, payload, [
-    ["id", ["id"]],
-    ["kind", ["kind"]],
-    ["stream", ["stream"]],
-    ["source", ["source"]],
-    ["title", ["title"]],
-    ["summary", ["summary"]],
-    ["note", ["note"]],
-    ["occurredAt", ["occurredAt", "occurred_at"]],
-    ["recordedAt", ["recordedAt", "recorded_at", "timestamp"]],
-    ["dayKey", ["dayKey", "day_key"]],
-    ["experimentId", ["experimentId", "experiment_id"]],
-    ["experimentSlug", ["experimentSlug", "experiment_slug"]],
-    ["documentId", ["documentId", "document_id"]],
-    ["documentPath", ["documentPath", "document_path"]],
-    ["mimeType", ["mimeType", "mime_type"]],
-    ["mealId", ["mealId", "meal_id"]],
-    ["transformId", ["transformId", "transform_id"]],
-    ["status", ["status"]],
+  removeKeys(normalized, [
+    "occurred_at",
+    "recorded_at",
+    "timestamp",
+    "day_key",
+    "experiment_id",
+    "experiment_slug",
+    "document_id",
+    "document_path",
+    "mime_type",
+    "meal_id",
+    "transform_id",
+    "related_ids",
+    "raw_refs",
+    "event_ids",
+    "photo_paths",
+    "audio_paths",
   ]);
-  assignCanonicalArrays(normalized, payload, [
-    ["tags", ["tags"]],
-    ["relatedIds", ["relatedIds", "related_ids"]],
-    ["rawRefs", ["rawRefs", "raw_refs"]],
-    ["eventIds", ["eventIds", "event_ids"]],
-    ["photoPaths", ["photoPaths", "photo_paths"]],
-    ["audioPaths", ["audioPaths", "audio_paths"]],
-  ]);
-
-  if (recordType === "sample") {
-    assignCanonicalStrings(normalized, payload, [
-      ["quality", ["quality"]],
-      ["unit", ["unit"]],
-    ]);
-  }
+  normalizeArrayField(normalized, "tags");
+  normalizeArrayField(normalized, "relatedIds");
+  normalizeArrayField(normalized, "rawRefs");
+  normalizeArrayField(normalized, "eventIds");
+  normalizeArrayField(normalized, "photoPaths");
+  normalizeArrayField(normalized, "audioPaths");
 
   return normalized;
 }
@@ -1180,66 +1177,29 @@ function cloneRecordData(
   return value && typeof value === "object" ? { ...value } : {};
 }
 
-function assignCanonicalString(
-  target: QueryRecordData,
-  source: QueryRecordData | null | undefined,
-  key: string,
-  aliases: readonly string[],
-): void {
-  const value = pickString(source, aliases);
-  if (value) {
-    target[key] = value;
-  }
-}
-
-function assignCanonicalArray(
-  target: QueryRecordData,
-  source: QueryRecordData | null | undefined,
-  key: string,
-  aliases: readonly string[],
-): void {
-  const value = pickFirstArray(source, aliases);
-  if (value) {
-    target[key] = normalizeUniqueStringArray(value);
-  }
-}
-
-function assignCanonicalStrings(
-  target: QueryRecordData,
-  source: QueryRecordData | null | undefined,
-  entries: ReadonlyArray<readonly [string, readonly string[]]>,
-): void {
-  for (const [key, aliases] of entries) {
-    assignCanonicalString(target, source, key, aliases);
-  }
-}
-
-function assignCanonicalArrays(
-  target: QueryRecordData,
-  source: QueryRecordData | null | undefined,
-  entries: ReadonlyArray<readonly [string, readonly string[]]>,
-): void {
-  for (const [key, aliases] of entries) {
-    assignCanonicalArray(target, source, key, aliases);
-  }
-}
-
-function pickFirstArray(
+function requireCanonicalString(
   object: QueryRecordData | null | undefined,
-  keys: readonly string[],
-): unknown[] | null {
-  if (!object || typeof object !== "object") {
-    return null;
+  key: string,
+  context: string,
+): string {
+  const value = pickString(object, [key]);
+  if (value) {
+    return value;
   }
 
+  throw new Error(`Missing canonical "${key}" in ${context}.`);
+}
+
+function removeKeys(target: QueryRecordData, keys: readonly string[]): void {
   for (const key of keys) {
-    const value = object[key];
-    if (Array.isArray(value)) {
-      return value;
-    }
+    delete target[key];
   }
+}
 
-  return null;
+function normalizeArrayField(target: QueryRecordData, key: string): void {
+  if (key in target) {
+    target[key] = normalizeUniqueStringArray(target[key]);
+  }
 }
 
 function hasMarkdownExtension(entry: string): boolean {

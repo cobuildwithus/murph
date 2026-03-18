@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
+import { openSqliteRuntimeDatabase } from '@healthybob/runtime-state'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
@@ -28,7 +29,11 @@ async function makeVaultFixture(prefix: string): Promise<{
   })
   await writeFile(photoPath, 'photo', 'utf8')
   await mkdir(path.dirname(messagesDbPath), { recursive: true })
-  await writeFile(messagesDbPath, 'messages', 'utf8')
+  const messagesDb = openSqliteRuntimeDatabase(messagesDbPath, {
+    create: true,
+    foreignKeys: false,
+  })
+  messagesDb.close()
 
   return {
     homeRoot,

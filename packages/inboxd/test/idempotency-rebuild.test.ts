@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
 import { initializeVault, readJsonlRecords } from "@healthybob/core";
+import { resolveRuntimePaths } from "@healthybob/runtime-state";
 
 import {
   appendImportAudit,
@@ -16,7 +17,7 @@ import {
   rebuildRuntimeFromVault,
 } from "../src/index.js";
 import { findStoredCaptureEnvelope } from "../src/indexing/persist.js";
-import { buildLegacyAttachmentId, createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.js";
+import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.js";
 import type { InboundCapture } from "../src/contracts/capture.js";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -417,18 +418,18 @@ test("rebuildRuntimeFromVault repairs captures missing only the audit record", a
   runtime.close();
 });
 
-test("rebuildRuntimeFromVault backfills legacy attachment ids and keeps parse jobs idempotent", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-legacy-envelope-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-legacy-envelope-source");
+test("rebuildRuntimeFromVault rejects envelopes missing canonical attachment metadata", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-invalid-envelope-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-inbox-invalid-envelope-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "voice-note.wav", "audio");
   const inbound = createCapture({
-    externalId: "msg-legacy-envelope-1",
+    externalId: "msg-invalid-envelope-1",
     occurredAt: "2026-03-13T11:30:00.000Z",
     attachments: [
       {
-        externalId: "att-legacy",
+        externalId: "att-invalid",
         kind: "audio",
         mime: "audio/wav",
         originalPath: attachmentPath,
@@ -455,27 +456,158 @@ test("rebuildRuntimeFromVault backfills legacy attachment ids and keeps parse jo
   await fs.writeFile(envelopePath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
 
   const runtime = await openInboxRuntime({ vaultRoot });
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
 
-  const expectedAttachmentId = buildLegacyAttachmentId(captureId, 1);
-  const rebuilt = runtime.getCapture(captureId);
-  assert.ok(rebuilt);
-  assert.equal(rebuilt.attachments.length, 1);
-  assert.equal(rebuilt.attachments[0]?.attachmentId, expectedAttachmentId);
+  try {
+    await assert.rejects(
+      () => rebuildRuntimeFromVault({ vaultRoot, runtime }),
+      /Missing canonical "attachmentId" in stored inbox envelope at .*envelope\.json at index 0\./u,
+    );
+    assert.equal(runtime.getCapture(captureId), null);
+    assert.equal(countRows(runtime.databasePath, "capture"), 0);
+    assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
+  } finally {
+    runtime.close();
+  }
+});
 
-  const firstJobs = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
-  assert.equal(firstJobs.length, 1);
-  assert.equal(firstJobs[0]?.attachmentId, expectedAttachmentId);
-  assert.equal(firstJobs[0]?.state, "pending");
+test("openInboxRuntime rejects runtime rows missing canonical attachment ids", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-legacy-runtime-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+  const databasePath = resolveRuntimePaths(vaultRoot).inboxDbPath;
+  const database = new DatabaseSync(databasePath);
 
-  const secondJobs = runtime.listAttachmentParseJobs({ captureId, limit: 10 });
-  assert.equal(secondJobs.length, 1);
-  assert.equal(secondJobs[0]?.attachmentId, expectedAttachmentId);
-  assert.equal(runtime.getCapture(captureId)?.attachments[0]?.attachmentId, expectedAttachmentId);
+  try {
+    database.exec(`
+      create table if not exists capture (
+        capture_id text primary key,
+        source text not null,
+        account_id text not null default '',
+        external_id text not null,
+        thread_id text not null,
+        thread_title text,
+        thread_is_direct integer not null,
+        actor_id text,
+        actor_name text,
+        actor_is_self integer not null,
+        occurred_at text not null,
+        received_at text,
+        text_content text,
+        raw_json text not null,
+        vault_event_id text not null,
+        envelope_path text not null,
+        created_at text not null,
+        unique (source, account_id, external_id)
+      );
 
-  runtime.close();
+      create table if not exists capture_attachment (
+        id integer primary key autoincrement,
+        capture_id text not null references capture(capture_id) on delete cascade,
+        attachment_id text,
+        ordinal integer not null,
+        external_id text,
+        kind text not null,
+        mime text,
+        original_path text,
+        stored_path text,
+        file_name text,
+        sha256 text,
+        size_bytes integer,
+        extracted_text text,
+        transcript_text text,
+        created_at text not null
+      );
+    `);
+
+    database
+      .prepare(
+        `
+          insert into capture (
+            capture_id,
+            source,
+            account_id,
+            external_id,
+            thread_id,
+            thread_title,
+            thread_is_direct,
+            actor_id,
+            actor_name,
+            actor_is_self,
+            occurred_at,
+            received_at,
+            text_content,
+            raw_json,
+            vault_event_id,
+            envelope_path,
+            created_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "cap_legacy_attach",
+        "imessage",
+        "self",
+        "msg-legacy-attachment-row",
+        "thread-legacy",
+        null,
+        0,
+        null,
+        null,
+        0,
+        "2026-03-13T11:30:00.000Z",
+        null,
+        "legacy row",
+        "{}",
+        "evt_legacy_attachment_row",
+        "raw/inbox/imessage/self/2026/03/cap_legacy_attach/envelope.json",
+        "2026-03-13T11:31:00.000Z",
+      );
+
+    database
+      .prepare(
+        `
+          insert into capture_attachment (
+            capture_id,
+            attachment_id,
+            ordinal,
+            external_id,
+            kind,
+            mime,
+            original_path,
+            stored_path,
+            file_name,
+            sha256,
+            size_bytes,
+            extracted_text,
+            transcript_text,
+            created_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "cap_legacy_attach",
+        null,
+        1,
+        null,
+        "document",
+        "text/plain",
+        null,
+        "raw/inbox/imessage/self/2026/03/cap_legacy_attach/attachments/01__legacy.txt",
+        "legacy.txt",
+        null,
+        6,
+        null,
+        null,
+        "2026-03-13T11:31:00.000Z",
+      );
+  } finally {
+    database.close();
+  }
+
+  await assert.rejects(
+    () => openInboxRuntime({ vaultRoot }),
+    /Inbox runtime requires canonical attachment metadata; capture_attachment row for capture "cap_legacy_attach" ordinal 1 is missing "attachment_id"\./u,
+  );
 });
 
 test("rebuildRuntimeFromVault chooses one canonical envelope for duplicate external ids", async () => {

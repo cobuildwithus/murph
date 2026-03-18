@@ -58,22 +58,62 @@ export function generatePrefixedId(prefix: string, now = Date.now()): string {
   return `${sanitizeObjectKey(prefix, "rec")}_${generateUlid(now)}`;
 }
 
-export function buildLegacyAttachmentId(captureId: string, ordinal: number): string {
+export function buildAttachmentId(captureId: string, ordinal: number): string {
   return `att_${captureId}_${String(ordinal).padStart(2, "0")}`;
 }
 
 export function normalizeStoredAttachments(
   captureId: string,
   attachments: ReadonlyArray<StoredAttachment>,
+  context = `stored attachments for capture "${captureId}"`,
 ): StoredAttachment[] {
-  return attachments.map((attachment, index) => ({
-    ...attachment,
-    attachmentId:
-      typeof attachment.attachmentId === "string" && attachment.attachmentId.length > 0
+  if (!Array.isArray(attachments)) {
+    throw new TypeError(`Expected canonical attachment array in ${context}.`);
+  }
+
+  const normalized: StoredAttachment[] = [];
+  const seenAttachmentIds = new Set<string>();
+  const seenOrdinals = new Set<number>();
+
+  for (const [index, attachment] of attachments.entries()) {
+    const attachmentContext = `${context} at index ${index}`;
+    const attachmentId =
+      typeof attachment?.attachmentId === "string" && attachment.attachmentId.length > 0
         ? attachment.attachmentId
-        : buildLegacyAttachmentId(captureId, attachment.ordinal ?? index + 1),
-    ordinal: attachment.ordinal ?? index + 1,
-  }));
+        : null;
+    const ordinal =
+      typeof attachment?.ordinal === "number" &&
+      Number.isSafeInteger(attachment.ordinal) &&
+      attachment.ordinal > 0
+        ? attachment.ordinal
+        : null;
+
+    if (!attachmentId) {
+      throw new TypeError(`Missing canonical "attachmentId" in ${attachmentContext}.`);
+    }
+
+    if (!ordinal) {
+      throw new TypeError(`Missing canonical "ordinal" in ${attachmentContext}.`);
+    }
+
+    if (seenAttachmentIds.has(attachmentId)) {
+      throw new TypeError(`Duplicate canonical "attachmentId" "${attachmentId}" in ${context}.`);
+    }
+
+    if (seenOrdinals.has(ordinal)) {
+      throw new TypeError(`Duplicate canonical "ordinal" ${ordinal} in ${context}.`);
+    }
+
+    seenAttachmentIds.add(attachmentId);
+    seenOrdinals.add(ordinal);
+    normalized.push({
+      ...attachment,
+      attachmentId,
+      ordinal,
+    });
+  }
+
+  return normalized;
 }
 
 export function sanitizeObjectKey(value: unknown, fallback = "field"): string {

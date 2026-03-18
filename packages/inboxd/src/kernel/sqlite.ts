@@ -24,7 +24,6 @@ import type {
 } from "../contracts/capture.js";
 import {
   buildFtsQuery,
-  buildLegacyAttachmentId,
   buildSnippet,
   generatePrefixedId,
   normalizeAccountKey,
@@ -114,7 +113,7 @@ export async function openInboxRuntime({
     create table if not exists capture_attachment (
       id integer primary key autoincrement,
       capture_id text not null references capture(capture_id) on delete cascade,
-      attachment_id text,
+      attachment_id text not null,
       ordinal integer not null,
       external_id text,
       kind text not null,
@@ -162,14 +161,10 @@ export async function openInboxRuntime({
   ensureColumn(database, "capture_attachment", "parse_updated_at", "text");
 
   database.exec(`
-    update capture_attachment
-    set attachment_id = ('att_' || capture_id || '_' || printf('%02d', ordinal))
-    where attachment_id is null or attachment_id = '';
-  `);
-  database.exec(`
     create unique index if not exists capture_attachment_attachment_id_idx
     on capture_attachment (attachment_id);
   `);
+  assertCanonicalAttachmentRows(database);
   database.exec(`
     create table if not exists attachment_parse_job (
       job_id text primary key,
@@ -438,7 +433,11 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
         input.externalId,
       ) as { capture_id: string } | undefined;
       const effectiveCaptureId = existing?.capture_id ?? captureId;
-      const normalizedAttachments = normalizeStoredAttachments(effectiveCaptureId, stored.attachments);
+      const normalizedAttachments = normalizeStoredAttachments(
+        effectiveCaptureId,
+        stored.attachments,
+        `runtime capture ${effectiveCaptureId}`,
+      );
 
       withTransaction(database, () => {
         upsertCaptureStatement.run(
@@ -499,7 +498,11 @@ function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): 
       return effectiveCaptureId;
     },
     enqueueDerivedJobs({ captureId, stored }) {
-      const normalizedAttachments = normalizeStoredAttachments(captureId, stored.attachments);
+      const normalizedAttachments = normalizeStoredAttachments(
+        captureId,
+        stored.attachments,
+        `runtime capture ${captureId}`,
+      );
 
       if (normalizedAttachments.length === 0) {
         return;
@@ -881,7 +884,7 @@ interface CaptureRow {
 
 interface AttachmentRow {
   capture_id: string;
-  attachment_id: string | null;
+  attachment_id: string;
   ordinal: number;
   external_id: string | null;
   kind: StoredAttachment["kind"];
@@ -961,7 +964,7 @@ function decodeAttachmentRows(rows: ReadonlyArray<Record<string, unknown>>): Att
 function decodeAttachmentRow(row: Record<string, unknown>): AttachmentRow {
   return {
     capture_id: expectString(row.capture_id, "capture_attachment.capture_id"),
-    attachment_id: expectNullableString(row.attachment_id, "capture_attachment.attachment_id"),
+    attachment_id: expectString(row.attachment_id, "capture_attachment.attachment_id"),
     ordinal: expectNumber(row.ordinal, "capture_attachment.ordinal"),
     external_id: expectNullableString(row.external_id, "capture_attachment.external_id"),
     kind: expectString(row.kind, "capture_attachment.kind") as StoredAttachment["kind"],
@@ -1035,6 +1038,43 @@ function hydrateCaptureRows(database: DatabaseSync, rows: CaptureRow[]): InboxCa
   return rows.map((row) => hydrateCaptureRow(row, attachmentsByCapture));
 }
 
+function assertCanonicalAttachmentRows(database: DatabaseSync): void {
+  const row = database
+    .prepare(
+      `
+        select capture_id, attachment_id, ordinal
+        from capture_attachment
+        where attachment_id is null
+          or attachment_id = ''
+          or ordinal is null
+          or ordinal < 1
+        limit 1
+      `,
+    )
+    .get() as { attachment_id?: string | null; capture_id?: string; ordinal?: number | null } | undefined;
+
+  if (!row) {
+    return;
+  }
+
+  const captureId =
+    typeof row.capture_id === "string" && row.capture_id.length > 0 ? row.capture_id : "<unknown>";
+  const ordinal =
+    typeof row.ordinal === "number" && Number.isSafeInteger(row.ordinal)
+      ? String(row.ordinal)
+      : "<unknown>";
+
+  if (typeof row.attachment_id !== "string" || row.attachment_id.length === 0) {
+    throw new TypeError(
+      `Inbox runtime requires canonical attachment metadata; capture_attachment row for capture "${captureId}" ordinal ${ordinal} is missing "attachment_id".`,
+    );
+  }
+
+  throw new TypeError(
+    `Inbox runtime requires canonical attachment metadata; capture_attachment row for capture "${captureId}" has invalid "ordinal" value ${ordinal}.`,
+  );
+}
+
 function loadAttachmentRows(database: DatabaseSync, captureIds: string[]): AttachmentRow[] {
   if (captureIds.length === 0) {
     return [];
@@ -1060,10 +1100,7 @@ function hydrateCaptureAttachments(rows: AttachmentRow[]): Map<string, IndexedAt
   for (const row of rows) {
     const attachments = attachmentsByCapture.get(row.capture_id) ?? [];
     attachments.push({
-      attachmentId:
-        typeof row.attachment_id === "string" && row.attachment_id.length > 0
-          ? row.attachment_id
-          : buildLegacyAttachmentId(row.capture_id, row.ordinal),
+      attachmentId: row.attachment_id,
       ordinal: row.ordinal,
       externalId: row.external_id,
       kind: row.kind,

@@ -26,12 +26,12 @@ const EVENT_DISPLAY_IDENTITY_RULES = Object.freeze<EventDisplayIdentityRule[]>([
   {
     eventKind: "document",
     displayKind: "document",
-    payloadKeys: ["documentId", "document_id"],
+    payloadKeys: ["documentId"],
   },
   {
     eventKind: "meal",
     displayKind: "meal",
-    payloadKeys: ["mealId", "meal_id"],
+    payloadKeys: ["mealId"],
   },
 ]);
 
