@@ -20,6 +20,7 @@ import {
   normalizeNullableString,
   writeTextFileAtomic,
 } from './shared.js'
+import { HEALTHYBOB_VAULT_ENV } from '../operator-config.js'
 
 const LONG_TERM_MEMORY_SECTIONS = assistantMemoryLongTermSectionValues
 const MEMORY_PROMPT_MAX_CHARS = 2_800
@@ -40,6 +41,7 @@ const ASSISTANT_MEMORY_TURN_SESSION_ID_ENV =
 const ASSISTANT_MEMORY_TURN_ID_ENV =
   'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_TURN_ID'
 export const assistantMemoryTurnEnvKeys = [
+  HEALTHYBOB_VAULT_ENV,
   ASSISTANT_MEMORY_TURN_VAULT_ENV,
   ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV,
   ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV,
@@ -242,14 +244,17 @@ export function resolveAssistantDailyMemoryPath(
 export function createAssistantMemoryTurnContextEnv(
   input: AssistantMemoryTurnContextInput,
 ): NodeJS.ProcessEnv {
+  const resolvedVault = path.resolve(input.vault)
+
   return {
+    [HEALTHYBOB_VAULT_ENV]: resolvedVault,
     [ASSISTANT_MEMORY_TURN_ID_ENV]: input.turnId,
     [ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV]: input.allowSensitiveHealthContext
       ? '1'
       : '0',
     [ASSISTANT_MEMORY_TURN_SESSION_ID_ENV]: input.sessionId,
     [ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV]: input.sourcePrompt,
-    [ASSISTANT_MEMORY_TURN_VAULT_ENV]: path.resolve(input.vault),
+    [ASSISTANT_MEMORY_TURN_VAULT_ENV]: resolvedVault,
   }
 }
 

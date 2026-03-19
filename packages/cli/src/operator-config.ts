@@ -18,6 +18,7 @@ export {
 const OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
 const OPERATOR_CONFIG_DIRECTORY = '.healthybob'
 const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
+export const HEALTHYBOB_VAULT_ENV = 'HEALTHYBOB_VAULT'
 
 const assistantOperatorDefaultsSchema = z.object({
   provider: z.enum(assistantChatProviderValues).nullable(),
@@ -215,7 +216,13 @@ function buildOperatorConfig(
 
 export async function resolveDefaultVault(
   homeDirectory = resolveOperatorHomeDirectory(),
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
+  const envVault = env[HEALTHYBOB_VAULT_ENV]?.trim()
+  if (envVault) {
+    return expandConfiguredVaultPath(envVault, homeDirectory)
+  }
+
   const config = await readOperatorConfig(homeDirectory)
   if (!config?.defaultVault) {
     return null

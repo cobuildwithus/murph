@@ -39,6 +39,7 @@ import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
+import { HEALTHYBOB_VAULT_ENV } from '../src/operator-config.js'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 
 const cleanupPaths: string[] = []
@@ -184,6 +185,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
+  assert.equal(firstCall?.env?.[HEALTHYBOB_VAULT_ENV], path.resolve(vaultRoot))
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
