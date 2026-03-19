@@ -1,29 +1,31 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 @source "../app";
 @source "../src";
 
-@theme {
-  --color-bg: #f6f1e8;
-  --color-card: rgba(255, 252, 246, 0.9);
-  --color-card-strong: #fffaf2;
-  --color-ink: #1f1c18;
-  --color-muted: rgba(31, 28, 24, 0.66);
-  --color-line: rgba(31, 28, 24, 0.12);
-  --color-accent: #264653;
-  --color-accent-soft: rgba(38, 70, 83, 0.1);
-  --color-warm: #a35c3a;
-  --color-paper: rgba(255, 252, 246, 0.72);
-  --color-rhr-ink: #191512;
-  --color-rhr-muted: rgba(25, 21, 18, 0.58);
-  --color-rhr-line: rgba(25, 21, 18, 0.1);
-  --color-rhr-accent: #0f4c3a;
-  --color-rhr-accent-soft: rgba(15, 76, 58, 0.08);
-  --color-rhr-warm: #a04e2a;
-  --color-rhr-paper: rgba(255, 252, 246, 0.72);
+@theme inline {
+  --color-bg: var(--bg);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-strong: var(--card-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-warm: var(--warm);
+  --color-paper: var(--paper);
+  --color-rhr-ink: var(--rhr-ink);
+  --color-rhr-muted: var(--rhr-muted);
+  --color-rhr-line: var(--rhr-line);
+  --color-rhr-accent: var(--rhr-accent);
+  --color-rhr-accent-soft: var(--rhr-accent-soft);
+  --color-rhr-warm: var(--rhr-warm);
+  --color-rhr-paper: var(--rhr-paper);
 
-  --shadow-card: 0 14px 40px rgba(35, 24, 17, 0.08);
-
+  --shadow-card: var(--surface-shadow);
   --font-display: "Avenir Next", "Helvetica Neue", sans-serif;
   --font-body: Charter, "Iowan Old Style", Georgia, serif;
   --font-mono: "SFMono-Regular", Menlo, Consolas, monospace;
@@ -31,6 +33,58 @@
 
   --animate-settle: settle 260ms ease both;
   --animate-settle-slow: settle 300ms ease both;
+}
+
+:root {
+  color-scheme: light;
+  --bg: #f6f1e8;
+  --foreground: #1f1c18;
+  --card: rgba(255, 252, 246, 0.9);
+  --card-strong: #fffaf2;
+  --ink: #1f1c18;
+  --muted: rgba(31, 28, 24, 0.66);
+  --line: rgba(31, 28, 24, 0.12);
+  --accent: #264653;
+  --accent-soft: rgba(38, 70, 83, 0.1);
+  --warm: #a35c3a;
+  --paper: rgba(255, 252, 246, 0.72);
+  --rhr-ink: #191512;
+  --rhr-muted: rgba(25, 21, 18, 0.58);
+  --rhr-line: rgba(25, 21, 18, 0.1);
+  --rhr-accent: #0f4c3a;
+  --rhr-accent-soft: rgba(15, 76, 58, 0.08);
+  --rhr-warm: #a04e2a;
+  --rhr-paper: rgba(255, 252, 246, 0.72);
+  --surface-shadow: 0 14px 40px rgba(35, 24, 17, 0.08);
+  --grid-line-horizontal: rgba(31, 28, 24, 0.03);
+  --grid-line-vertical: rgba(31, 28, 24, 0.02);
+  --bg-glow: rgba(163, 92, 58, 0.08);
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #11151a;
+  --foreground: #f2ecdf;
+  --card: rgba(28, 33, 39, 0.9);
+  --card-strong: rgba(36, 41, 47, 0.96);
+  --ink: #06090d;
+  --muted: rgba(242, 236, 223, 0.72);
+  --line: rgba(242, 236, 223, 0.12);
+  --accent: #93c2d1;
+  --accent-soft: rgba(147, 194, 209, 0.16);
+  --warm: #f0a27d;
+  --paper: rgba(18, 23, 28, 0.86);
+  --rhr-ink: #070a0d;
+  --rhr-muted: rgba(242, 236, 223, 0.66);
+  --rhr-line: rgba(242, 236, 223, 0.1);
+  --rhr-accent: #79c9a7;
+  --rhr-accent-soft: rgba(121, 201, 167, 0.16);
+  --rhr-warm: #ee9c73;
+  --rhr-paper: rgba(18, 23, 28, 0.82);
+  --surface-shadow: 0 20px 56px rgba(0, 0, 0, 0.38);
+  --grid-line-horizontal: rgba(242, 236, 223, 0.05);
+  --grid-line-vertical: rgba(242, 236, 223, 0.04);
+  --bg-glow: rgba(147, 194, 209, 0.14);
 }
 
 @keyframes settle {
@@ -51,18 +105,17 @@
 
   html {
     background:
-      linear-gradient(rgba(31, 28, 24, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(31, 28, 24, 0.02) 1px, transparent 1px),
-      radial-gradient(circle at top, rgba(163, 92, 58, 0.08), transparent 32%),
-      var(--color-bg);
+      linear-gradient(var(--grid-line-horizontal) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line-vertical) 1px, transparent 1px),
+      radial-gradient(circle at top, var(--bg-glow), transparent 32%),
+      var(--bg);
     background-size: 100% 34px, 34px 100%, 100% 100%, 100% 100%;
-    color: var(--color-ink);
+    color: var(--foreground);
   }
 
   body {
     margin: 0;
     min-height: 100vh;
-    font-family: var(--font-body);
   }
 
   code,

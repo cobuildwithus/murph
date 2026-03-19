@@ -244,7 +244,7 @@ function DeviceProviderCard({
           </p>
         </div>
         <a
-          className="inline-flex items-center justify-center rounded-full bg-accent px-4 py-2 font-display text-[0.8rem] font-bold tracking-[0.12em] uppercase text-[#f7f1e9] transition-colors hover:bg-ink"
+          className="inline-flex items-center justify-center rounded-full bg-accent px-4 py-2 font-display text-[0.8rem] font-bold tracking-[0.12em] uppercase text-bg transition-colors hover:bg-ink hover:text-[#f7f1e9]"
           href={`/devices/connect/${encodeURIComponent(provider.provider)}`}
         >
           {connectLabel}
@@ -284,7 +284,7 @@ function DeviceAccountRow({ account }: { account: DeviceSyncAccountRecord }) {
         <div className="flex flex-wrap items-center gap-2">
           <form action={`/devices/accounts/${encodeURIComponent(account.id)}/reconcile?returnTo=/`} method="post">
             <button
-              className="inline-flex items-center justify-center rounded-full border border-line bg-paper px-3 py-1.5 font-display text-[0.72rem] font-bold tracking-[0.12em] uppercase text-ink transition-colors hover:border-accent hover:text-accent"
+              className="inline-flex items-center justify-center rounded-full border border-line bg-paper px-3 py-1.5 font-display text-[0.72rem] font-bold tracking-[0.12em] uppercase text-foreground transition-colors hover:border-accent hover:text-accent"
               type="submit"
             >
               Reconcile
