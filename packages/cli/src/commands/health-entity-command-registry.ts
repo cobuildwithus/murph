@@ -27,7 +27,9 @@ function requireHealthCommandDescriptor(commandName: string): HealthCommandDescr
   return descriptor;
 }
 
-function createHealthUpsertResultSchema(descriptor: HealthCommandDescriptorEntry) {
+export function createHealthUpsertResultSchema(
+  descriptor: HealthCommandDescriptorEntry,
+) {
   if (
     healthCoreHasResultCapability(descriptor, "current-profile-path") ||
     healthCoreHasResultCapability(descriptor, "profile-payload")

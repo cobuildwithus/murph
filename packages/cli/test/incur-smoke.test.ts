@@ -3,7 +3,16 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { Cli } from 'incur'
 import { test } from 'vitest'
+import {
+  collectVaultCliDescriptorRootCommandNames,
+  collectVaultCliDirectServiceBindings,
+  vaultCliCommandDescriptors,
+} from '../src/vault-cli-command-manifest.js'
+import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
+import { createVaultCli } from '../src/vault-cli.js'
 import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 
 const require = createRequire(import.meta.url)
@@ -42,6 +51,71 @@ test('root help lists the simple health CRUD command groups', async () => {
   for (const command of commands) {
     const position = help.search(new RegExp(`^\\s+${command}\\s+`, 'mu'))
     assert.notEqual(position, -1, `expected root help to list ${command}`)
+  }
+})
+
+test('descriptor manifest stays aligned with the live root command topology', async () => {
+  const cli = createVaultCli(
+    createUnwiredVaultCliServices(),
+    createIntegratedInboxCliServices(),
+  )
+  const registeredCommands = Cli.toCommands.get(cli)
+
+  assert.notEqual(registeredCommands, undefined, 'expected createVaultCli to register commands')
+
+  const actualRootCommands = [...(registeredCommands?.keys() ?? [])]
+
+  assert.deepEqual(actualRootCommands, collectVaultCliDescriptorRootCommandNames())
+})
+
+test('descriptor direct service bindings resolve against the declared service surfaces', () => {
+  const descriptorBindings = collectVaultCliDirectServiceBindings()
+  const vaultServices = createUnwiredVaultCliServices()
+  const inboxServices = createIntegratedInboxCliServices()
+
+  for (const descriptor of vaultCliCommandDescriptors) {
+    if (descriptor.bindingMode !== 'direct') {
+      continue
+    }
+
+    const directVaultServiceBindings =
+      'directVaultServiceBindings' in descriptor
+        ? descriptor.directVaultServiceBindings
+        : undefined
+    const directInboxServiceBindings =
+      'directInboxServiceBindings' in descriptor
+        ? descriptor.directInboxServiceBindings
+        : undefined
+    const hasVaultBindings = Object.keys(directVaultServiceBindings ?? {}).length > 0
+    const hasInboxBindings = (directInboxServiceBindings?.length ?? 0) > 0
+
+    assert.equal(
+      hasVaultBindings || hasInboxBindings,
+      true,
+      `expected direct descriptor ${descriptor.id} to declare at least one service binding`,
+    )
+  }
+
+  for (const [groupName, methodNames] of Object.entries(descriptorBindings.vault) as Array<
+    [keyof typeof descriptorBindings.vault, readonly string[]]
+  >) {
+    const serviceGroup = vaultServices[groupName]
+
+    for (const methodName of methodNames) {
+      assert.equal(
+        typeof serviceGroup[methodName as keyof typeof serviceGroup],
+        'function',
+        `expected vault service binding ${String(groupName)}.${methodName} to exist`,
+      )
+    }
+  }
+
+  for (const methodName of descriptorBindings.inbox) {
+    assert.equal(
+      typeof inboxServices[methodName],
+      'function',
+      `expected inbox service binding ${methodName} to exist`,
+    )
   }
 })
 

@@ -26,10 +26,7 @@ import {
   createHealthQueryServices,
 } from "./health-services.js"
 import {
-  createUnwiredHealthMethodSet,
   createUnwiredMethod,
-  healthCoreServiceMethodNames,
-  healthQueryServiceMethodNames,
   loadImporterRuntime,
   loadIntegratedRuntime,
 } from "./runtime.js"
@@ -659,7 +656,7 @@ function createIntegratedDeviceSyncServices(): DeviceSyncServices {
   } satisfies DeviceSyncServices
 }
 
-export function createIntegratedVaultCliServices(): VaultCliServices {
+function createIntegratedVaultCliServiceGroups(): VaultCliServices {
   return {
     core: createIntegratedCoreServices(),
     importers: createIntegratedImporterServices(),
@@ -668,68 +665,31 @@ export function createIntegratedVaultCliServices(): VaultCliServices {
   }
 }
 
+function createUnwiredServiceGroup<
+  TServiceGroup extends object,
+>(
+  groupName: string,
+  integratedServices: TServiceGroup,
+): TServiceGroup {
+  return Object.fromEntries(
+    Object.keys(integratedServices).map((methodName) => [
+      methodName,
+      createUnwiredMethod(`${groupName}.${methodName}`),
+    ]),
+  ) as unknown as TServiceGroup
+}
+
+export function createIntegratedVaultCliServices(): VaultCliServices {
+  return createIntegratedVaultCliServiceGroups()
+}
+
 export function createUnwiredVaultCliServices(): VaultCliServices {
+  const integratedServices = createIntegratedVaultCliServiceGroups()
+
   return {
-    core: {
-      init: createUnwiredMethod("core.init"),
-      validate: createUnwiredMethod("core.validate"),
-      addMeal: createUnwiredMethod("core.addMeal"),
-      createExperiment: createUnwiredMethod("core.createExperiment"),
-      updateExperiment: createUnwiredMethod("core.updateExperiment"),
-      checkpointExperiment: createUnwiredMethod("core.checkpointExperiment"),
-      stopExperiment: createUnwiredMethod("core.stopExperiment"),
-      ensureJournal: createUnwiredMethod("core.ensureJournal"),
-      appendJournal: createUnwiredMethod("core.appendJournal"),
-      linkJournalEvents: createUnwiredMethod("core.linkJournalEvents"),
-      unlinkJournalEvents: createUnwiredMethod("core.unlinkJournalEvents"),
-      linkJournalStreams: createUnwiredMethod("core.linkJournalStreams"),
-      unlinkJournalStreams: createUnwiredMethod("core.unlinkJournalStreams"),
-      scaffoldProvider: createUnwiredMethod("core.scaffoldProvider"),
-      upsertProvider: createUnwiredMethod("core.upsertProvider"),
-      scaffoldEvent: createUnwiredMethod("core.scaffoldEvent"),
-      upsertEvent: createUnwiredMethod("core.upsertEvent"),
-      addSamples: createUnwiredMethod("core.addSamples"),
-      updateVault: createUnwiredMethod("core.updateVault"),
-      projectAssessment: createUnwiredMethod("core.projectAssessment"),
-      ...createUnwiredHealthMethodSet(healthCoreServiceMethodNames, "core"),
-      rebuildCurrentProfile: createUnwiredMethod("core.rebuildCurrentProfile"),
-      stopRegimen: createUnwiredMethod("core.stopRegimen"),
-    } satisfies CoreWriteServices,
-    importers: {
-      importDocument: createUnwiredMethod("importers.importDocument"),
-      importSamplesCsv: createUnwiredMethod("importers.importSamplesCsv"),
-      importAssessmentResponse: createUnwiredMethod("importers.importAssessmentResponse"),
-    } satisfies ImporterServices,
-    query: {
-      showDocument: createUnwiredMethod("query.showDocument"),
-      listDocuments: createUnwiredMethod("query.listDocuments"),
-      showDocumentManifest: createUnwiredMethod("query.showDocumentManifest"),
-      showProvider: createUnwiredMethod("query.showProvider"),
-      listProviders: createUnwiredMethod("query.listProviders"),
-      showEvent: createUnwiredMethod("query.showEvent"),
-      listEvents: createUnwiredMethod("query.listEvents"),
-      showExperiment: createUnwiredMethod("query.showExperiment"),
-      listExperiments: createUnwiredMethod("query.listExperiments"),
-      showJournal: createUnwiredMethod("query.showJournal"),
-      listJournals: createUnwiredMethod("query.listJournals"),
-      showVault: createUnwiredMethod("query.showVault"),
-      showVaultPaths: createUnwiredMethod("query.showVaultPaths"),
-      showVaultStats: createUnwiredMethod("query.showVaultStats"),
-      show: createUnwiredMethod("query.show"),
-      list: createUnwiredMethod("query.list"),
-      exportPack: createUnwiredMethod("query.exportPack"),
-      ...createUnwiredHealthMethodSet(healthQueryServiceMethodNames, "query"),
-    } satisfies QueryServices,
-    devices: {
-      daemonStatus: createUnwiredMethod("devices.daemonStatus"),
-      daemonStart: createUnwiredMethod("devices.daemonStart"),
-      daemonStop: createUnwiredMethod("devices.daemonStop"),
-      listProviders: createUnwiredMethod("devices.listProviders"),
-      connect: createUnwiredMethod("devices.connect"),
-      listAccounts: createUnwiredMethod("devices.listAccounts"),
-      showAccount: createUnwiredMethod("devices.showAccount"),
-      reconcileAccount: createUnwiredMethod("devices.reconcileAccount"),
-      disconnectAccount: createUnwiredMethod("devices.disconnectAccount"),
-    } satisfies DeviceSyncServices,
+    core: createUnwiredServiceGroup("core", integratedServices.core),
+    importers: createUnwiredServiceGroup("importers", integratedServices.importers),
+    query: createUnwiredServiceGroup("query", integratedServices.query),
+    devices: createUnwiredServiceGroup("devices", integratedServices.devices),
   }
 }
