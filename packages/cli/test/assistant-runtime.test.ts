@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { Key } from 'ink'
+import { Box, type Key } from 'ink'
 import * as React from 'react'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
@@ -76,6 +76,7 @@ import {
 import {
   applyComposerEditingInput,
   normalizeComposerInsertedText,
+  renderChatTranscriptFeed,
   renderComposerValue,
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
@@ -1801,6 +1802,34 @@ test('assistant Ink composer render highlights the active character instead of i
     cursorProps.color,
     LIGHT_ASSISTANT_INK_THEME.composerCursorTextColor,
   )
+})
+
+test('assistant Ink transcript feed stays in one dynamic width-aware container instead of static terminal rows', () => {
+  const rendered = renderChatTranscriptFeed({
+    bindingSummary: 'imessage · assistant:primary · chat-123',
+    entries: [
+      {
+        kind: 'user',
+        text: 'whats good legend',
+      },
+      {
+        kind: 'assistant',
+        text: 'All good.',
+      },
+    ],
+    sessionId: 'asst_test_session',
+  })
+  const renderedProps = rendered.props as {
+    children?: React.ReactNode
+    flexDirection?: string
+    width?: string
+  }
+  const children = React.Children.toArray(renderedProps.children)
+
+  assert.equal(rendered.type, Box)
+  assert.equal(renderedProps.flexDirection, 'column')
+  assert.equal(renderedProps.width, '100%')
+  assert.equal(children.length, 4)
 })
 
 test('assistant Ink composer render highlights the first placeholder character when empty', () => {

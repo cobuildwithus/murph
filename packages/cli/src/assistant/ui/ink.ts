@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Box, Static, Text, render, useApp, useInput, type Key } from 'ink'
+import { Box, Text, render, useApp, useInput, type Key } from 'ink'
 import {
   assistantChatResultSchema,
 } from '../../assistant-cli-contracts.js'
@@ -82,20 +82,6 @@ interface ChatHeaderProps {
 interface ChatEntryRowProps {
   entry: InkChatEntry
 }
-
-type ChatStaticItem =
-  | {
-      kind: 'banner'
-    }
-  | {
-      kind: 'entry'
-      entry: InkChatEntry
-    }
-  | {
-      bindingSummary: string | null
-      kind: 'header'
-      sessionId: string
-    }
 
 interface ChatStatusProps {
   busy: boolean
@@ -460,69 +446,47 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
   )
 })
 
-const ChatStaticFeed = React.memo(function ChatStaticFeed(input: {
+export function renderChatTranscriptFeed(input: {
   bindingSummary: string | null
   entries: readonly InkChatEntry[]
   sessionId: string
 }): React.ReactElement {
-  const ChatStatic = Static as React.ComponentType<{
-    children: (item: ChatStaticItem, index: number) => React.ReactNode
-    items: ChatStaticItem[]
-    style?: {
-      width?: string
-    }
-  }>
-  // Keep the non-editing chat surface on Ink static output so old turns do not
-  // participate in future keystroke renders.
-  const staticItems: ChatStaticItem[] = [
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
     {
-      kind: 'header',
+      flexDirection: 'column',
+      width: '100%',
+    },
+    createElement(ChatHeader, {
+      key: `header:${input.sessionId}`,
       bindingSummary: input.bindingSummary,
       sessionId: input.sessionId,
-    },
-    {
-      kind: 'banner',
-    },
-    ...input.entries.map((entry) => ({
-      kind: 'entry' as const,
-      entry,
-    })),
-  ]
-
-  return React.createElement(
-    ChatStatic,
-    {
-      items: staticItems,
-      style: {
-        width: '100%',
+    }),
+    createElement(
+      Box,
+      {
+        key: 'banner',
+        marginBottom: 1,
       },
-      children: (item: ChatStaticItem, index: number) => {
-        if (item.kind === 'header') {
-          return React.createElement(ChatHeader, {
-            key: `header:${item.sessionId}`,
-            bindingSummary: item.bindingSummary,
-            sessionId: item.sessionId,
-          })
-        }
-
-        if (item.kind === 'banner') {
-          return React.createElement(
-            Box,
-            {
-              key: `banner:${index}`,
-              marginBottom: 1,
-            },
-            React.createElement(Text, { dimColor: true }, CHAT_BANNER),
-          )
-        }
-
-        return React.createElement(ChatEntryRow, {
-          key: `entry:${index}:${item.entry.kind}:${item.entry.text.slice(0, 24)}`,
-          entry: item.entry,
-        })
-      },
-    },
+      createElement(Text, { dimColor: true }, CHAT_BANNER),
+    ),
+    ...input.entries.map((entry, index) =>
+      createElement(ChatEntryRow, {
+        key: `entry:${index}`,
+        entry,
+      }),
+    ),
   )
+}
+
+const ChatTranscriptFeed = React.memo(function ChatTranscriptFeed(input: {
+  bindingSummary: string | null
+  entries: readonly InkChatEntry[]
+  sessionId: string
+}): React.ReactElement {
+  return renderChatTranscriptFeed(input)
 })
 
 const ChatStatus = React.memo(function ChatStatus(
@@ -1809,7 +1773,7 @@ export async function runAssistantChatWithInk(
             paddingY: 1,
             width: '100%',
           },
-          createElement(ChatStaticFeed, {
+          createElement(ChatTranscriptFeed, {
             bindingSummary,
             entries,
             sessionId: session.sessionId,
