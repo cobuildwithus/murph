@@ -77,6 +77,15 @@ export const mealAddResultSchema = z.object({
   note: z.string().nullable(),
 })
 
+const strengthExerciseResultSchema = z.object({
+  exercise: z.string().min(1),
+  setCount: z.number().int().positive(),
+  repsPerSet: z.number().int().positive(),
+  load: z.number().nonnegative().optional(),
+  loadUnit: z.enum(['lb', 'kg']).optional(),
+  loadDescription: z.string().min(1).optional(),
+})
+
 export const workoutAddResultSchema = z.object({
   vault: pathSchema,
   eventId: z.string().min(1),
@@ -89,6 +98,7 @@ export const workoutAddResultSchema = z.object({
   activityType: z.string().min(1),
   durationMinutes: z.number().int().positive(),
   distanceKm: z.number().positive().nullable(),
+  strengthExercises: z.array(strengthExerciseResultSchema).nullable(),
   note: z.string().min(1),
 })
 

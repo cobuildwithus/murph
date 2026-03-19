@@ -14,7 +14,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
 - One golden-output directory per documented baseline command.
 - Smoke expectations that describe:
   - document and meal writes returning `lookupId` plus stable related ids
-  - workout quick capture returning one queryable `evt_*` id for an `activity_session` event while preserving the freeform note text
+  - workout quick capture returning one queryable `evt_*` id for an `activity_session` event while preserving the freeform note text and any explicit structured strength exercise details
   - sample imports returning `lookupIds` plus an `xfm_*` batch id
   - intake import returning an `asmt_*` id and intake project returning deterministic proposal payloads
   - profile snapshot append plus `profile current rebuild`

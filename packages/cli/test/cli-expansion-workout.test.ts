@@ -28,6 +28,14 @@ interface WorkoutAddEnvelope {
   activityType: string
   durationMinutes: number
   distanceKm: number | null
+  strengthExercises: Array<{
+    exercise: string
+    setCount: number
+    repsPerSet: number
+    load?: number
+    loadUnit?: 'lb' | 'kg'
+    loadDescription?: string
+  }> | null
   note: string
 }
 
@@ -135,6 +143,7 @@ test.sequential(
       assert.equal(requireData(runWorkout).activityType, 'running')
       assert.equal(requireData(runWorkout).durationMinutes, 30)
       assert.equal(requireData(runWorkout).distanceKm, null)
+      assert.equal(requireData(runWorkout).strengthExercises, null)
       assert.equal(requireData(runWorkout).title, '30-minute run')
       assert.equal(
         requireData(runWorkout).note,
@@ -160,6 +169,62 @@ test.sequential(
       assert.equal(
         requireData(showWorkout).entity.data.note,
         'Went for a 30-minute run around the neighborhood.',
+      )
+
+      const structuredStrengthWorkout = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(structuredStrengthWorkout.ok, true)
+      assert.equal(
+        requireData(structuredStrengthWorkout).activityType,
+        'strength-training',
+      )
+      assert.equal(requireData(structuredStrengthWorkout).durationMinutes, 20)
+      assert.deepEqual(requireData(structuredStrengthWorkout).strengthExercises, [
+        {
+          exercise: 'pushups',
+          setCount: 4,
+          repsPerSet: 20,
+        },
+        {
+          exercise: 'incline bench',
+          setCount: 4,
+          repsPerSet: 12,
+          load: 65,
+          loadUnit: 'lb',
+          loadDescription: '45 lb bar plus 10 lb plates on both sides',
+        },
+      ])
+
+      const showStructuredStrengthWorkout = await runCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(structuredStrengthWorkout).lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(showStructuredStrengthWorkout.ok, true)
+      assert.deepEqual(
+        requireData(showStructuredStrengthWorkout).entity.data.strengthExercises,
+        [
+          {
+            exercise: 'pushups',
+            setCount: 4,
+            repsPerSet: 20,
+          },
+          {
+            exercise: 'incline bench',
+            setCount: 4,
+            repsPerSet: 12,
+            load: 65,
+            loadUnit: 'lb',
+            loadDescription: '45 lb bar plus 10 lb plates on both sides',
+          },
+        ],
       )
 
       const ambiguous = await runCli([
@@ -193,6 +258,7 @@ test.sequential(
         'strength-training',
       )
       assert.equal(requireData(strengthWorkout).durationMinutes, 30)
+      assert.equal(requireData(strengthWorkout).strengthExercises, null)
       assert.equal(
         requireData(strengthWorkout).title,
         '30-minute strength training',

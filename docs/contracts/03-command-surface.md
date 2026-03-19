@@ -324,15 +324,30 @@ The examples below are the full successful non-verbose `--format json` response 
   "created": true,
   "occurredAt": "2026-03-12T17:30:00Z",
   "kind": "activity_session",
-  "title": "30-minute run",
-  "activityType": "running",
-  "durationMinutes": 30,
+  "title": "20-minute strength training",
+  "activityType": "strength-training",
+  "durationMinutes": 20,
   "distanceKm": null,
-  "note": "Went for a 30-minute run around the neighborhood."
+  "strengthExercises": [
+    {
+      "exercise": "pushups",
+      "setCount": 4,
+      "repsPerSet": 20
+    },
+    {
+      "exercise": "incline bench",
+      "setCount": 4,
+      "repsPerSet": 12,
+      "load": 65,
+      "loadUnit": "lb",
+      "loadDescription": "45 lb bar plus 10 lb plates on both sides"
+    }
+  ],
+  "note": "20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides."
 }
 ```
 
-The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `activity_session` event plus optional duration, type, and distance overrides when the note alone is not specific enough.
+The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `activity_session` event plus optional duration, type, and distance fields for general workouts, and optional `strengthExercises` only when an explicit lifting note clearly names exercises, sets, reps, or load.
 
 ### `samples import-csv`
 

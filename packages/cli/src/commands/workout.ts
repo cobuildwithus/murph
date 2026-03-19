@@ -20,7 +20,7 @@ export function registerWorkoutCommands(
 
   workout.command('add', {
     description:
-      'Record one workout from a freeform note with minimal structured inference.',
+      'Record one workout from a freeform note with lightweight structured inference.',
     args: z.object({
       text: z
         .string()
@@ -42,19 +42,17 @@ export function registerWorkoutCommands(
       },
       {
         description:
-          'Capture an ambiguous strength note with explicit overrides.',
+          'Capture strength-session exercise details from one note.',
         args: {
-          text: 'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
+          text: '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
         },
         options: {
-          duration: 30,
-          type: 'strength training',
           vault: './vault',
         },
       },
     ],
     hint:
-      'The freeform note is stored on the canonical activity_session event. Pass --duration or --type when the note is ambiguous.',
+      'The freeform note is stored on the canonical activity_session event. Explicit strength notes can also capture exercise/set/load structure; pass --duration or --type when the note is ambiguous.',
     options: withBaseOptions({
       duration: z
         .number()

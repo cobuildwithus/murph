@@ -240,6 +240,30 @@ export const externalRefSchema = z
   })
   .strict();
 
+const activityStrengthExerciseBaseShape = {
+  exercise: boundedString(1, 160),
+  setCount: integerSchema(1),
+  repsPerSet: integerSchema(1),
+  loadDescription: boundedString(1, 240).optional(),
+} satisfies z.ZodRawShape;
+
+const activityStrengthExerciseWithoutLoadSchema = z
+  .object(activityStrengthExerciseBaseShape)
+  .strict();
+
+const activityStrengthExerciseWithLoadSchema = z
+  .object({
+    ...activityStrengthExerciseBaseShape,
+    load: numberSchema(0),
+    loadUnit: z.enum(["lb", "kg"]),
+  })
+  .strict();
+
+export const activityStrengthExerciseSchema = z.union([
+  activityStrengthExerciseWithoutLoadSchema,
+  activityStrengthExerciseWithLoadSchema,
+]);
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
@@ -437,6 +461,7 @@ export const eventRecordSchema = withContractMetadata(
       activityType: patternedString(SLUG_PATTERN),
       durationMinutes: integerSchema(1),
       distanceKm: numberSchema(0).optional(),
+      strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
     }),
     eventSchema("sleep_session", {
       startAt: isoDateTimeString(),
@@ -804,6 +829,7 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 );
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
+export type ActivityStrengthExercise = z.infer<typeof activityStrengthExerciseSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;
