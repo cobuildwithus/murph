@@ -60,15 +60,20 @@ import {
 } from '../src/assistant-runtime.js'
 import {
   CHAT_BANNER,
+  CHAT_COMPOSER_HINT,
   CHAT_MODEL_OPTIONS,
   CHAT_REASONING_OPTIONS,
   CHAT_SLASH_COMMANDS,
+  CHAT_STARTER_SUGGESTIONS,
+  applyInkChatTraceUpdates,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatBusyStatus,
   formatChatMetadata,
+  formatElapsedClock,
   formatSessionBinding,
   getMatchingSlashCommands,
+  resolveChatMetadataBadges,
   resolveChatSubmitAction,
   seedChatEntries,
   shouldClearComposerForSubmitAction,
@@ -1552,6 +1557,72 @@ test('assistant Ink view-model replays persisted local transcript entries', () =
   ])
 })
 
+
+test('assistant Ink view-model merges streaming trace updates by stream key', () => {
+  const entries = applyInkChatTraceUpdates(
+    [
+      {
+        kind: 'user',
+        text: 'hello',
+      },
+    ],
+    [
+      {
+        kind: 'thinking',
+        mode: 'append',
+        streamKey: 'turn-1:thinking:main',
+        text: 'Checking files',
+      },
+      {
+        kind: 'thinking',
+        mode: 'append',
+        streamKey: 'turn-1:thinking:main',
+        text: '…',
+      },
+      {
+        kind: 'assistant',
+        mode: 'replace',
+        streamKey: 'turn-1:assistant:main',
+        text: 'Hi there.',
+      },
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'turn-1:status:connection',
+        text: 'Reconnecting…',
+      },
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'turn-1:status:connection',
+        text: 'Reconnected.',
+      },
+    ],
+  )
+
+  assert.deepEqual(entries, [
+    {
+      kind: 'user',
+      text: 'hello',
+    },
+    {
+      kind: 'thinking',
+      streamKey: 'turn-1:thinking:main',
+      text: 'Checking files…',
+    },
+    {
+      kind: 'assistant',
+      streamKey: 'turn-1:assistant:main',
+      text: 'Hi there.',
+    },
+    {
+      kind: 'status',
+      streamKey: 'turn-1:status:connection',
+      text: 'Reconnected.',
+    },
+  ])
+})
+
 test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
   const session = {
     schema: 'healthybob.assistant-session.v2',
@@ -1584,8 +1655,17 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
 
   assert.equal(
     CHAT_BANNER,
-    'Local-first chat. Healthy Bob replays locally stored transcripts and may also resume provider-side history when supported.',
+    'Local-first chat backed by transcript history and resumable provider sessions when available.',
   )
+  assert.equal(
+    CHAT_COMPOSER_HINT,
+    'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit',
+  )
+  assert.deepEqual(CHAT_STARTER_SUGGESTIONS, [
+    'Summarize the current codebase',
+    'Continue the last session',
+    'Find likely issues in this area',
+  ])
   assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
   assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
   assert.equal(CHAT_SLASH_COMMANDS[0]?.command, '/model')
@@ -1597,8 +1677,10 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     ['/model'],
   )
   assert.equal(getMatchingSlashCommands('hello').length, 0)
-  assert.equal(formatBusyStatus(0), 'Working')
-  assert.equal(formatBusyStatus(13), 'Working (13s)')
+  assert.equal(formatElapsedClock(0), '0:00')
+  assert.equal(formatElapsedClock(73), '1:13')
+  assert.equal(formatBusyStatus(0), 'Working · 0:00')
+  assert.equal(formatBusyStatus(13), 'Working · 0:13')
   assert.equal(
     formatChatMetadata(
       {
@@ -1609,6 +1691,33 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
       '~/vault',
     ),
     'gpt-5.4 xhigh · ~/vault',
+  )
+  assert.deepEqual(
+    resolveChatMetadataBadges(
+      {
+        provider: session.provider,
+        model: 'gpt-5.4',
+        reasoningEffort: 'xhigh',
+      },
+      '~/vault',
+    ),
+    [
+      {
+        key: 'model',
+        label: 'model',
+        value: 'gpt-5.4',
+      },
+      {
+        key: 'reasoning',
+        label: 'reasoning',
+        value: 'xhigh',
+      },
+      {
+        key: 'vault',
+        label: 'vault',
+        value: '~/vault',
+      },
+    ],
   )
   assert.equal(
     formatSessionBinding(session),
@@ -2028,7 +2137,21 @@ test('assistant Ink transcript feed stays in one dynamic width-aware container i
   assert.equal(rendered.type, Box)
   assert.equal(renderedProps.flexDirection, 'column')
   assert.equal(renderedProps.width, '100%')
-  assert.equal(children.length, 4)
+  assert.equal(children.length, 3)
+})
+
+test('assistant Ink transcript feed keeps the intro banner only for empty chats', () => {
+  const rendered = renderChatTranscriptFeed({
+    bindingSummary: null,
+    entries: [],
+    sessionId: 'asst_empty_session',
+  })
+  const renderedProps = rendered.props as {
+    children?: React.ReactNode
+  }
+  const children = React.Children.toArray(renderedProps.children)
+
+  assert.equal(children.length, 2)
 })
 
 test('assistant Ink link helpers split markdown links and map absolute file paths to file URLs', () => {

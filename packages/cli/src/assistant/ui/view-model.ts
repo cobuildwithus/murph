@@ -5,7 +5,15 @@ import type {
 import { normalizeNullableString } from '../shared.js'
 
 export interface InkChatEntry {
-  kind: 'assistant' | 'error' | 'user'
+  kind: 'assistant' | 'error' | 'status' | 'thinking' | 'user'
+  streamKey?: string | null
+  text: string
+}
+
+export interface InkChatTraceUpdate {
+  kind: 'assistant' | 'error' | 'status' | 'thinking'
+  mode?: 'append' | 'replace'
+  streamKey?: string | null
   text: string
 }
 
@@ -23,6 +31,12 @@ export interface AssistantReasoningOption {
 export interface AssistantSlashCommand {
   command: string
   description: string
+}
+
+export interface ChatMetadataBadge {
+  key: 'model' | 'reasoning' | 'vault'
+  label: string
+  value: string
 }
 
 export type ChatSubmitAction =
@@ -44,7 +58,16 @@ export type ChatSubmitAction =
     }
 
 export const CHAT_BANNER =
-  'Local-first chat. Healthy Bob replays locally stored transcripts and may also resume provider-side history when supported.'
+  'Local-first chat backed by transcript history and resumable provider sessions when available.'
+
+export const CHAT_COMPOSER_HINT =
+  'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit'
+
+export const CHAT_STARTER_SUGGESTIONS = [
+  'Summarize the current codebase',
+  'Continue the last session',
+  'Find likely issues in this area',
+] as const
 
 export const CHAT_MODEL_OPTIONS: readonly AssistantModelOption[] = [
   {
@@ -91,7 +114,7 @@ export const CHAT_REASONING_OPTIONS: readonly AssistantReasoningOption[] = [
 export const CHAT_SLASH_COMMANDS: readonly AssistantSlashCommand[] = [
   {
     command: '/model',
-    description: 'choose what model and reasoning effort to use',
+    description: 'switch model and reasoning',
   },
   {
     command: '/session',
@@ -110,6 +133,63 @@ export function seedChatEntries(
     kind: entry.kind,
     text: entry.text,
   }))
+}
+
+export function applyInkChatTraceUpdates(
+  entries: readonly InkChatEntry[],
+  updates: readonly InkChatTraceUpdate[],
+): InkChatEntry[] {
+  if (updates.length === 0) {
+    return [...entries]
+  }
+
+  const nextEntries = [...entries]
+
+  for (const update of updates) {
+    const normalizedText = normalizeTraceText(update.text)
+    if (!normalizedText) {
+      continue
+    }
+
+    const streamKey = normalizeNullableString(update.streamKey) ?? null
+    if (!streamKey) {
+      nextEntries.push({
+        kind: update.kind,
+        text: normalizedText,
+      })
+      continue
+    }
+
+    const existingEntryIndex = findInkChatEntryIndexByStreamKey(
+      nextEntries,
+      streamKey,
+      update.kind,
+    )
+
+    if (existingEntryIndex < 0) {
+      nextEntries.push({
+        kind: update.kind,
+        streamKey,
+        text: normalizedText,
+      })
+      continue
+    }
+
+    const existingEntry = nextEntries[existingEntryIndex]
+    if (!existingEntry) {
+      continue
+    }
+
+    nextEntries[existingEntryIndex] = {
+      ...existingEntry,
+      text:
+        update.mode === 'append'
+          ? `${existingEntry.text}${normalizedText}`
+          : normalizedText,
+    }
+  }
+
+  return nextEntries
 }
 
 export function findAssistantModelOptionIndex(model: string | null): number {
@@ -142,12 +222,15 @@ export function getMatchingSlashCommands(
   )
 }
 
-export function formatBusyStatus(elapsedSeconds: number): string {
-  if (elapsedSeconds <= 0) {
-    return 'Working'
-  }
+export function formatElapsedClock(elapsedSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(elapsedSeconds))
+  const minutes = Math.floor(safeSeconds / 60)
+  const seconds = safeSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
 
-  return `Working (${elapsedSeconds}s)`
+export function formatBusyStatus(elapsedSeconds: number): string {
+  return `Working · ${formatElapsedClock(elapsedSeconds)}`
 }
 
 export function resolveChatSubmitAction(
@@ -206,6 +289,40 @@ export function formatChatMetadata(
   ].join(' · ')
 }
 
+export function resolveChatMetadataBadges(
+  input: {
+    model: string | null
+    provider: AssistantSession['provider']
+    reasoningEffort: string | null
+  },
+  redactedVault: string,
+): ChatMetadataBadge[] {
+  const normalizedModel = normalizeNullableString(input.model) ?? input.provider
+  const normalizedReasoningEffort = normalizeNullableString(input.reasoningEffort)
+
+  return [
+    {
+      key: 'model',
+      label: 'model',
+      value: normalizedModel,
+    },
+    ...(normalizedReasoningEffort
+      ? [
+          {
+            key: 'reasoning' as const,
+            label: 'reasoning',
+            value: normalizedReasoningEffort,
+          },
+        ]
+      : []),
+    {
+      key: 'vault',
+      label: 'vault',
+      value: redactedVault,
+    },
+  ]
+}
+
 export function formatSessionBinding(session: AssistantSession): string | null {
   const parts = [
     session.binding.channel,
@@ -214,6 +331,26 @@ export function formatSessionBinding(session: AssistantSession): string | null {
   ].filter((value): value is string => Boolean(value))
 
   return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function findInkChatEntryIndexByStreamKey(
+  entries: readonly InkChatEntry[],
+  streamKey: string,
+  kind: InkChatEntry['kind'],
+): number {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (entry?.streamKey === streamKey && entry.kind === kind) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function normalizeTraceText(value: string): string | null {
+  const normalized = value.replace(/\r\n?/gu, '\n')
+  return normalized.length > 0 ? normalized : null
 }
 
 function formatModelSummary(input: {

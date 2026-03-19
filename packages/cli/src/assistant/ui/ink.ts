@@ -5,6 +5,10 @@ import { Box, Text, render, useApp, useInput, type Key } from 'ink'
 import {
   assistantChatResultSchema,
 } from '../../assistant-cli-contracts.js'
+import type {
+  AssistantProviderTraceEvent,
+  AssistantProviderTraceUpdate,
+} from '../provider-traces.js'
 import { resolveCodexDisplayOptions } from '../../assistant-codex.js'
 import {
   resolveAssistantOperatorDefaults,
@@ -25,17 +29,21 @@ import {
 import { normalizeNullableString } from '../shared.js'
 import {
   CHAT_BANNER,
+  CHAT_COMPOSER_HINT,
   CHAT_MODEL_OPTIONS,
   CHAT_REASONING_OPTIONS,
   CHAT_SLASH_COMMANDS,
+  CHAT_STARTER_SUGGESTIONS,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatBusyStatus,
-  formatChatMetadata,
   formatSessionBinding,
+  applyInkChatTraceUpdates,
   getMatchingSlashCommands,
+  resolveChatMetadataBadges,
   resolveChatSubmitAction,
   shouldClearComposerForSubmitAction,
+  type ChatMetadataBadge,
   type InkChatEntry,
   seedChatEntries,
 } from './view-model.js'
@@ -104,7 +112,17 @@ interface ChatComposerProps {
 }
 
 interface ChatFooterProps {
-  metadataLine: string
+  badges: readonly ChatMetadataBadge[]
+}
+
+interface ChromePanelProps {
+  backgroundColor?: string
+  borderColor?: string
+  children?: React.ReactNode
+  marginBottom?: number
+  paddingX?: number
+  paddingY?: number
+  width?: string
 }
 
 interface ComposerEditingState {
@@ -133,6 +151,130 @@ const MODIFIED_RETURN_SEQUENCE = /^\u001b?\[27;(\d+);13~$/u
 function useAssistantInkTheme(): AssistantInkTheme {
   return React.useContext(AssistantInkThemeContext)
 }
+
+const BUSY_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+const ChromePanel = React.memo(function ChromePanel(
+  props: ChromePanelProps,
+): React.ReactElement {
+  const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+
+  return createElement(
+    Box,
+    {
+      backgroundColor: props.backgroundColor,
+      borderColor: props.borderColor ?? theme.borderColor,
+      borderStyle: 'round',
+      flexDirection: 'column',
+      marginBottom: props.marginBottom ?? 1,
+      paddingX: props.paddingX ?? 1,
+      paddingY: props.paddingY ?? 0,
+      width: props.width ?? '100%',
+    },
+    props.children,
+  )
+})
+
+const BusySpinner = React.memo(function BusySpinner(): React.ReactElement {
+  const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+  const [frameIndex, setFrameIndex] = React.useState(0)
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setFrameIndex((previous) => (previous + 1) % BUSY_SPINNER_FRAMES.length)
+    }, 80)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  return createElement(
+    Text,
+    {
+      color: theme.accentColor,
+    },
+    BUSY_SPINNER_FRAMES[frameIndex],
+  )
+})
+
+const MessageRoleLabel = React.memo(function MessageRoleLabel(input: {
+  kind: InkChatEntry['kind']
+}): React.ReactElement {
+  const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+  const label =
+    input.kind === 'assistant'
+      ? 'healthy bob'
+      : input.kind === 'error'
+        ? 'error'
+        : 'you'
+  const color =
+    input.kind === 'assistant'
+      ? theme.assistantLabelColor
+      : input.kind === 'error'
+        ? theme.errorColor
+        : theme.userLabelColor
+
+  return createElement(
+    Box,
+    {
+      marginBottom: 1,
+    },
+    createElement(
+      Text,
+      {
+        bold: true,
+        color,
+      },
+      label,
+    ),
+  )
+})
+
+const FooterBadge = React.memo(function FooterBadge(input: {
+  badge: ChatMetadataBadge
+}): React.ReactElement {
+  const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+  const backgroundColor =
+    input.badge.key === 'model' ? theme.accentColor : theme.footerBadgeBackground
+  const color =
+    input.badge.key === 'model'
+      ? theme.composerCursorTextColor
+      : input.badge.key === 'vault'
+        ? theme.mutedColor
+        : theme.footerBadgeTextColor
+
+  return createElement(
+    Text,
+    {
+      backgroundColor,
+      color,
+    },
+    ` ${input.badge.label}: ${input.badge.value} `,
+  )
+})
+
+const ChatBanner = React.memo(function ChatBanner(): React.ReactElement {
+  const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+
+  return createElement(
+    ChromePanel,
+    {
+      marginBottom: 1,
+    },
+    createElement(
+      Text,
+      {
+        color: theme.mutedColor,
+        wrap: 'wrap',
+      },
+      CHAT_BANNER,
+    ),
+  )
+})
 
 export function splitAssistantMarkdownLinks(input: string): Array<
   | {
@@ -291,6 +433,7 @@ export function renderAssistantMessageText(
         {
           color: theme.accentColor,
           key: `link:${index}:${segment.label}`,
+          underline: true,
         },
         displayedLabel,
       )
@@ -526,18 +669,87 @@ const ChatHeader = React.memo(function ChatHeader(
   props: ChatHeaderProps,
 ): React.ReactElement {
   const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+  const terminalColumns = process.stderr.columns ?? 80
+  const terminalRows = process.stderr.rows ?? 24
+  const compactHeader = terminalColumns < 72 || terminalRows < 18
+
+  if (compactHeader) {
+    return createElement(
+      ChromePanel,
+      {
+        marginBottom: 1,
+      },
+      createElement(
+        Text,
+        {
+          wrap: 'wrap',
+        },
+        createElement(Text, { color: theme.accentColor }, '●'),
+        ' ',
+        createElement(Text, { bold: true }, 'Healthy Bob'),
+        createElement(Text, { color: theme.mutedColor }, ` · session ${props.sessionId}`),
+      ),
+      props.bindingSummary
+        ? createElement(
+            Text,
+            {
+              color: theme.mutedColor,
+              wrap: 'wrap',
+            },
+            props.bindingSummary,
+          )
+        : null,
+    )
+  }
 
   return createElement(
     Box,
     {
       flexDirection: 'column',
       marginBottom: 1,
+      width: '100%',
     },
-    createElement(Text, {}, 'Healthy Bob'),
-    createElement(Text, { dimColor: true }, `session ${props.sessionId}`),
-    props.bindingSummary
-      ? createElement(Text, { dimColor: true }, props.bindingSummary)
-      : null,
+    createElement(
+      ChromePanel,
+      {
+        marginBottom: 1,
+      },
+      createElement(
+        Text,
+        {
+          wrap: 'wrap',
+        },
+        createElement(Text, { color: theme.accentColor }, '●'),
+        ' ',
+        createElement(Text, { bold: true }, 'Healthy Bob'),
+        ' ',
+        createElement(Text, { color: theme.mutedColor }, 'interactive chat'),
+      ),
+    ),
+    createElement(
+      ChromePanel,
+      {
+        marginBottom: 0,
+      },
+      createElement(
+        Text,
+        {
+          wrap: 'wrap',
+        },
+        createElement(Text, { color: theme.mutedColor }, 'session '),
+        createElement(Text, { color: theme.accentColor }, props.sessionId),
+      ),
+      createElement(
+        Text,
+        {
+          color: theme.mutedColor,
+          wrap: 'wrap',
+        },
+        createElement(Text, { color: theme.accentColor }, '↳'),
+        ` ${props.bindingSummary ?? 'local transcript-backed session'}`,
+      ),
+    ),
   )
 })
 
@@ -549,16 +761,39 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
 
   if (props.entry.kind === 'assistant') {
     return createElement(
-      Box,
+      ChromePanel,
       {
         marginBottom: 1,
-        width: '100%',
       },
+      createElement(MessageRoleLabel, {
+        kind: 'assistant',
+      }),
       createElement(AssistantMessageText, { text: props.entry.text }),
     )
   }
 
   if (props.entry.kind === 'error') {
+    return createElement(
+      ChromePanel,
+      {
+        borderColor: theme.errorColor,
+        marginBottom: 1,
+      },
+      createElement(MessageRoleLabel, {
+        kind: 'error',
+      }),
+      createElement(
+        Text,
+        {
+          color: theme.errorColor,
+          wrap: 'wrap',
+        },
+        props.entry.text,
+      ),
+    )
+  }
+
+  if (props.entry.kind === 'thinking' || props.entry.kind === 'status') {
     return createElement(
       Box,
       {
@@ -566,52 +801,53 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
         width: '100%',
       },
       createElement(
-        Text,
+        Box,
         {
-          color: theme.errorColor,
-          wrap: 'wrap',
+          flexDirection: 'row',
+          width: '100%',
         },
-        `Error: ${props.entry.text}`,
+        createElement(
+          Text,
+          { dimColor: true },
+          props.entry.kind === 'thinking' ? '· ' : '↻ ',
+        ),
+        createElement(
+          Box,
+          {
+            flexDirection: 'column',
+            flexGrow: 1,
+            flexShrink: 1,
+          },
+          createElement(
+            Text,
+            {
+              dimColor: true,
+              wrap: 'wrap',
+            },
+            props.entry.text,
+          ),
+        ),
       ),
     )
   }
 
   return createElement(
-    Box,
+    ChromePanel,
     {
       backgroundColor: theme.composerBackground,
-      flexDirection: 'column',
+      borderColor: theme.composerBorderColor,
       marginBottom: 1,
-      paddingY: 1,
-      width: '100%',
     },
+    createElement(MessageRoleLabel, {
+      kind: 'user',
+    }),
     createElement(
-      Box,
+      Text,
       {
-        flexDirection: 'row',
-        paddingX: 2,
+        color: theme.composerTextColor,
+        wrap: 'wrap',
       },
-      createElement(
-        Text,
-        { color: theme.composerTextColor },
-        '› ',
-      ),
-      createElement(
-        Box,
-        {
-          flexDirection: 'column',
-          flexGrow: 1,
-          flexShrink: 1,
-        },
-        createElement(
-          Text,
-          {
-            color: theme.composerTextColor,
-            wrap: 'wrap',
-          },
-          props.entry.text,
-        ),
-      ),
+      props.entry.text,
     ),
   )
 })
@@ -640,14 +876,11 @@ export function renderChatTranscriptFeed(input: {
       bindingSummary: input.bindingSummary,
       sessionId: input.sessionId,
     }),
-    createElement(
-      Box,
-      {
-        key: 'banner',
-        marginBottom: 1,
-      },
-      createElement(Text, { dimColor: true }, CHAT_BANNER),
-    ),
+    input.entries.length === 0
+      ? createElement(ChatBanner, {
+          key: 'banner',
+        })
+      : null,
     ...input.entries.map((entry, index) =>
       createElement(ChatEntryRow, {
         key: `entry:${index}`,
@@ -688,12 +921,43 @@ const ChatStatus = React.memo(function ChatStatus(
   }, [props.busy, props.busyStartedAt])
 
   if (props.busy) {
+    const busyColor =
+      props.status?.kind === 'error'
+        ? theme.errorColor
+        : props.status?.kind === 'success'
+          ? theme.successColor
+          : theme.infoColor
+    const busyDetail = props.status?.text ?? 'You can keep typing while the assistant works.'
+
     return createElement(
-      Box,
+      ChromePanel,
       {
+        borderColor: busyColor,
         marginBottom: 1,
       },
-      createElement(Text, { dimColor: true }, formatBusyStatus(busySeconds)),
+      createElement(
+        Box,
+        {
+          flexDirection: 'row',
+        },
+        createElement(BusySpinner, {}),
+        createElement(Text, {}, ' '),
+        createElement(
+          Text,
+          {
+            color: theme.composerTextColor,
+          },
+          formatBusyStatus(busySeconds),
+        ),
+      ),
+      createElement(
+        Text,
+        {
+          color: theme.mutedColor,
+          wrap: 'wrap',
+        },
+        busyDetail,
+      ),
     )
   }
 
@@ -701,19 +965,42 @@ const ChatStatus = React.memo(function ChatStatus(
     return null
   }
 
+  const statusColor =
+    props.status.kind === 'error'
+      ? theme.errorColor
+      : props.status.kind === 'success'
+        ? theme.successColor
+        : theme.infoColor
+  const statusIcon =
+    props.status.kind === 'error'
+      ? '!'
+      : props.status.kind === 'success'
+        ? '✓'
+        : 'ℹ'
+
   return createElement(
-    Box,
+    ChromePanel,
     {
+      borderColor: statusColor,
       marginBottom: 1,
     },
     createElement(
       Text,
-      props.status.kind === 'error'
-        ? { color: theme.errorColor }
-        : props.status.kind === 'success'
-          ? { color: theme.successColor }
-          : { dimColor: true },
-      props.status.text,
+      {
+        wrap: 'wrap',
+      },
+      createElement(Text, { color: statusColor }, statusIcon),
+      ' ',
+      createElement(
+        Text,
+        {
+          color:
+            props.status.kind === 'info'
+              ? theme.composerTextColor
+              : statusColor,
+        },
+        props.status.text,
+      ),
     ),
   )
 })
@@ -727,23 +1014,28 @@ const ChatComposer = React.memo(function ChatComposer(
   const slashSuggestions = props.modelSwitcherActive
     ? []
     : getMatchingSlashCommands(value)
+  const showStarterSuggestions =
+    !props.modelSwitcherActive && value.trim().length === 0
 
   return createElement(
     React.Fragment,
     {},
     createElement(
-      Box,
+      ChromePanel,
       {
         backgroundColor: theme.composerBackground,
-        flexDirection: 'row',
+        borderColor: theme.composerBorderColor,
         marginBottom: slashSuggestions.length > 0 ? 0 : 1,
-        paddingX: 2,
-        paddingY: 1,
-        width: '100%',
       },
+      createElement(MessageRoleLabel, {
+        kind: 'user',
+      }),
       createElement(
-        React.Fragment,
-        {},
+        Box,
+        {
+          flexDirection: 'row',
+          width: '100%',
+        },
         createElement(
           Text,
           { color: theme.composerTextColor },
@@ -757,6 +1049,55 @@ const ChatComposer = React.memo(function ChatComposer(
           onSubmit: props.onSubmit,
         }),
       ),
+      createElement(
+        Box,
+        {
+          marginTop: 1,
+        },
+        createElement(
+          Text,
+          {
+            color: theme.mutedColor,
+            wrap: 'wrap',
+          },
+          CHAT_COMPOSER_HINT,
+        ),
+      ),
+      showStarterSuggestions
+        ? createElement(
+            Box,
+            {
+              marginTop: 1,
+            },
+            createElement(
+              Text,
+              {
+                wrap: 'wrap',
+              },
+              createElement(Text, { color: theme.mutedColor }, 'try: '),
+              ...CHAT_STARTER_SUGGESTIONS.flatMap((suggestion, index) => [
+                index > 0
+                  ? createElement(
+                      Text,
+                      {
+                        color: theme.mutedColor,
+                        key: `starter-separator:${index}`,
+                      },
+                      ' · ',
+                    )
+                  : null,
+                createElement(
+                  Text,
+                  {
+                    color: theme.accentColor,
+                    key: `starter:${suggestion}`,
+                  },
+                  suggestion,
+                ),
+              ]),
+            ),
+          )
+        : null,
     ),
     createElement(SlashCommandSuggestions, {
       commands: slashSuggestions,
@@ -773,8 +1114,21 @@ const ChatFooter = React.memo(function ChatFooter(
     Box,
     {
       flexDirection: 'column',
+      width: '100%',
     },
-    createElement(Text, { dimColor: true }, props.metadataLine),
+    createElement(
+      Text,
+      {
+        wrap: 'wrap',
+      },
+      ...props.badges.flatMap((badge, index) => [
+        index > 0 ? ' ' : '',
+        createElement(FooterBadge, {
+          badge,
+          key: `badge:${badge.key}`,
+        }),
+      ]),
+    ),
   )
 })
 
@@ -1396,101 +1750,99 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
 
   useInput(handleModelSwitcherInput)
 
-  const content =
+  const title =
     props.mode === 'model'
-      ? createElement(
-          React.Fragment,
-          {},
-          createElement(
-            Text,
-            {
-              color: theme.switcherTextColor,
-            },
-            'Select Model and Effort',
-          ),
-          createElement(
-            Text,
-            {
-              color: theme.switcherMutedColor,
-            },
-            'Access additional models by running codex -m <model_name> or in your config.toml',
-          ),
-          createElement(
-            Box,
-            {
-              flexDirection: 'column',
-              marginTop: 1,
-            },
-            CHAT_MODEL_OPTIONS.map((option, index) =>
-              renderSwitcherRow({
-                current:
-                  normalizeNullableString(option.value) ===
-                  normalizeNullableString(props.currentModel),
-                description: option.description,
-                index,
-                label: option.value,
-                selected: index === props.modelIndex,
-                theme,
-              }),
-            ),
-          ),
+      ? 'Choose a model'
+      : `Choose reasoning for ${CHAT_MODEL_OPTIONS[props.modelIndex]?.value ?? 'the current model'}`
+  const subtitle =
+    props.mode === 'model'
+      ? 'Step 1 of 2. Enter continues to reasoning depth.'
+      : 'Step 2 of 2. Enter confirms the active reasoning depth.'
+  const helpText =
+    props.mode === 'model'
+      ? '↑/↓ move · Enter next · Esc close'
+      : '↑/↓ move · Enter confirm · Esc back'
+  const options =
+    props.mode === 'model'
+      ? CHAT_MODEL_OPTIONS.map((option, index) =>
+          renderSwitcherRow({
+            current:
+              normalizeNullableString(option.value) ===
+              normalizeNullableString(props.currentModel),
+            description: option.description,
+            index,
+            label: option.value,
+            selected: index === props.modelIndex,
+            theme,
+          }),
         )
-      : createElement(
-          React.Fragment,
-          {},
-          createElement(
-            Text,
-            {
-              color: theme.switcherTextColor,
-            },
-            `Select Reasoning Level for ${CHAT_MODEL_OPTIONS[props.modelIndex]?.value ?? 'the current model'}`,
-          ),
-          createElement(
-            Box,
-            {
-              flexDirection: 'column',
-              marginTop: 1,
-            },
-            CHAT_REASONING_OPTIONS.map((option, index) =>
-              renderSwitcherRow({
-                current: isCurrentReasoningOption(option.value, props.currentReasoningEffort),
-                description: option.description,
-                index,
-                label:
-                  option.value === 'medium'
-                    ? `${option.label} (default)`
-                    : option.label,
-                selected: index === props.reasoningIndex,
-                theme,
-              }),
-            ),
-          ),
-          createElement(
-            Box,
-            {
-              marginTop: 1,
-            },
-            createElement(
-              Text,
-              {
-                color: theme.switcherMutedColor,
-              },
-              'Press enter to confirm or esc to go back',
-            ),
-          ),
+      : CHAT_REASONING_OPTIONS.map((option, index) =>
+          renderSwitcherRow({
+            current: isCurrentReasoningOption(option.value, props.currentReasoningEffort),
+            description: option.description,
+            index,
+            label:
+              option.value === 'medium'
+                ? `${option.label} (default)`
+                : option.label,
+            selected: index === props.reasoningIndex,
+            theme,
+          }),
         )
 
   return createElement(
-    Box,
+    ChromePanel,
     {
       backgroundColor: theme.switcherBackground,
-      flexDirection: 'column',
+      borderColor: theme.switcherBorderColor,
       marginBottom: 1,
-      paddingX: 1,
-      paddingY: 1,
-      width: '100%',
     },
-    content,
+    createElement(
+      Text,
+      {
+        color: theme.switcherMutedColor,
+      },
+      props.mode === 'model' ? 'step 1/2' : 'step 2/2',
+    ),
+    createElement(
+      Text,
+      {
+        bold: true,
+        color: theme.switcherTextColor,
+        wrap: 'wrap',
+      },
+      title,
+    ),
+    createElement(
+      Text,
+      {
+        color: theme.switcherMutedColor,
+        wrap: 'wrap',
+      },
+      subtitle,
+    ),
+    createElement(
+      Box,
+      {
+        flexDirection: 'column',
+        marginTop: 1,
+        width: '100%',
+      },
+      ...options,
+    ),
+    createElement(
+      Box,
+      {
+        marginTop: 1,
+      },
+      createElement(
+        Text,
+        {
+          color: theme.switcherMutedColor,
+        },
+        helpText,
+      ),
+    ),
   )
 }
 
@@ -1506,19 +1858,25 @@ function SlashCommandSuggestions(input: {
   const createElement = React.createElement
 
   return createElement(
-    Box,
+    ChromePanel,
     {
-      flexDirection: 'column',
+      borderColor: theme.composerBorderColor,
       marginBottom: 1,
-      paddingX: 1,
-      width: '100%',
     },
-    input.commands.map((command) =>
+    createElement(
+      Text,
+      {
+        bold: true,
+        color: theme.mutedColor,
+      },
+      'commands',
+    ),
+    ...input.commands.map((command) =>
       createElement(
-        Box,
+        Text,
         {
           key: command.command,
-          flexDirection: 'row',
+          wrap: 'wrap',
         },
         createElement(
           Text,
@@ -1527,13 +1885,12 @@ function SlashCommandSuggestions(input: {
           },
           command.command,
         ),
-        createElement(Text, {}, '  '),
         createElement(
           Text,
           {
-            color: theme.accentColor,
+            color: theme.mutedColor,
           },
-          command.description,
+          `  ${command.description}`,
         ),
       ),
     ),
@@ -1549,35 +1906,98 @@ function renderSwitcherRow(input: {
   theme: AssistantInkTheme
 }): React.ReactElement {
   const createElement = React.createElement
-  const color = input.selected ? input.theme.accentColor : input.theme.switcherTextColor
+  const textColor = input.selected
+    ? input.theme.switcherSelectionTextColor
+    : input.theme.switcherTextColor
   const descriptionColor = input.selected
-    ? input.theme.accentColor
+    ? input.theme.switcherSelectionTextColor
     : input.theme.switcherMutedColor
-  const prefix = input.selected ? '›' : ' '
-  const currentLabel = input.current ? ' (current)' : ''
 
   return createElement(
     Box,
     {
+      backgroundColor: input.selected
+        ? input.theme.switcherSelectionBackground
+        : input.theme.switcherBackground,
+      borderColor: input.selected
+        ? input.theme.accentColor
+        : input.theme.switcherBorderColor,
+      borderStyle: 'round',
       key: `${input.label}:${input.index}`,
-      flexDirection: 'row',
+      flexDirection: 'column',
+      marginBottom: 1,
+      paddingX: 1,
+      width: '100%',
     },
     createElement(
       Text,
       {
-        color,
+        color: textColor,
       },
-      `${prefix} ${input.index + 1}. ${input.label}${currentLabel}`,
+      createElement(Text, { color: textColor }, input.selected ? '●' : '○'),
+      ` ${input.index + 1}. ${input.label}`,
+      input.current
+        ? createElement(
+            Text,
+            {
+              color: input.selected ? textColor : input.theme.accentColor,
+            },
+            ' · current',
+          )
+        : null,
     ),
-    createElement(Text, {}, '  '),
     createElement(
       Text,
       {
         color: descriptionColor,
+        wrap: 'wrap',
       },
       input.description,
     ),
   )
+}
+
+function namespaceTurnTraceUpdates(
+  updates: readonly AssistantProviderTraceUpdate[],
+  turnTracePrefix: string,
+): AssistantProviderTraceUpdate[] {
+  return updates.map((update) => ({
+    ...update,
+    streamKey: update.streamKey
+      ? `${turnTracePrefix}:${update.streamKey}`
+      : update.streamKey,
+  }))
+}
+
+function extractRecoverableTraceErrorContext(error: unknown): {
+  providerSessionId: string | null
+  recoverableConnectionLoss: boolean
+} {
+  if (!error || typeof error !== 'object' || !('context' in error)) {
+    return {
+      providerSessionId: null,
+      recoverableConnectionLoss: false,
+    }
+  }
+
+  const context = (error as { context?: unknown }).context
+  if (!context || typeof context !== 'object') {
+    return {
+      providerSessionId: null,
+      recoverableConnectionLoss: false,
+    }
+  }
+
+  const providerSessionId =
+    typeof (context as { providerSessionId?: unknown }).providerSessionId === 'string'
+      ? ((context as { providerSessionId: string }).providerSessionId.trim() || null)
+      : null
+
+  return {
+    providerSessionId,
+    recoverableConnectionLoss:
+      (context as { recoverableConnectionLoss?: unknown }).recoverableConnectionLoss === true,
+  }
 }
 
 function isCurrentReasoningOption(
@@ -1850,26 +2270,74 @@ export async function runAssistantChatWithInk(
         setBusyStartedAt(Date.now())
         setStatus(null)
 
+        const turnTracePrefix = `turn:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+
         void (async () => {
+          let streamedAssistantEntryKey: string | null = null
+
+          const handleTraceEvent = (event: AssistantProviderTraceEvent) => {
+            const namespacedUpdates = namespaceTurnTraceUpdates(
+              event.updates,
+              turnTracePrefix,
+            )
+            if (namespacedUpdates.length === 0) {
+              return
+            }
+
+            for (const update of namespacedUpdates) {
+              if (update.kind === 'assistant' && update.streamKey) {
+                streamedAssistantEntryKey = streamedAssistantEntryKey ?? update.streamKey
+              }
+            }
+
+            setEntries((previous: InkChatEntry[]) =>
+              applyInkChatTraceUpdates(previous, namespacedUpdates),
+            )
+
+            const latestStatusUpdate = [...namespacedUpdates]
+              .reverse()
+              .find((update) => update.kind === 'error' || update.kind === 'status')
+
+            if (latestStatusUpdate) {
+              setStatus({
+                kind: latestStatusUpdate.kind === 'error' ? 'error' : 'info',
+                text: latestStatusUpdate.text,
+              })
+            }
+          }
+
           try {
             const result = await sendAssistantMessage({
               ...input,
               model: activeModel,
+              onTraceEvent: handleTraceEvent,
               prompt: action.prompt,
               reasoningEffort: activeReasoningEffort,
               sessionId: latestSessionRef.current.sessionId,
+              showThinkingTraces: true,
             })
 
             latestSessionRef.current = result.session
             setSession(result.session)
             setTurns((previous: number) => previous + 1)
-            setEntries((previous: InkChatEntry[]) => [
-              ...previous,
-              {
-                kind: 'assistant',
-                text: result.response,
-              },
-            ])
+            setEntries((previous: InkChatEntry[]) =>
+              streamedAssistantEntryKey
+                ? applyInkChatTraceUpdates(previous, [
+                    {
+                      kind: 'assistant',
+                      mode: 'replace',
+                      streamKey: streamedAssistantEntryKey,
+                      text: result.response,
+                    },
+                  ])
+                : [
+                    ...previous,
+                    {
+                      kind: 'assistant',
+                      text: result.response,
+                    },
+                  ],
+            )
             setStatus(
               result.delivery
                 ? {
@@ -1885,6 +2353,7 @@ export async function runAssistantChatWithInk(
             )
           } catch (error) {
             const errorText = error instanceof Error ? error.message : String(error)
+            const traceErrorContext = extractRecoverableTraceErrorContext(error)
             setEntries((previous: InkChatEntry[]) => [
               ...previous,
               {
@@ -1892,10 +2361,17 @@ export async function runAssistantChatWithInk(
                 text: errorText,
               },
             ])
-            setStatus({
-              kind: 'error',
-              text: 'The assistant hit an error. Fix it or keep chatting.',
-            })
+            setStatus(
+              traceErrorContext.recoverableConnectionLoss && traceErrorContext.providerSessionId
+                ? {
+                    kind: 'error',
+                    text: `Connection lost before the turn finished. Session ${traceErrorContext.providerSessionId} was preserved, so your next message will resume it.`,
+                  }
+                : {
+                    kind: 'error',
+                    text: 'The assistant hit an error. Fix it or keep chatting.',
+                  },
+            )
             void appendAssistantTranscriptEntries(
               input.vault,
               latestSessionRef.current.sessionId,
@@ -1927,7 +2403,7 @@ export async function runAssistantChatWithInk(
       }, [])
 
       const bindingSummary = formatSessionBinding(session)
-      const metadataLine = formatChatMetadata(
+      const metadataBadges = resolveChatMetadataBadges(
         {
           provider: session.provider,
           model: activeModel ?? session.providerOptions.model ?? codexDisplay.model,
@@ -1982,7 +2458,7 @@ export async function runAssistantChatWithInk(
               onSubmit: submitPrompt,
             }),
             createElement(ChatFooter, {
-              metadataLine,
+              badges: metadataBadges,
             }),
           ),
         ),
