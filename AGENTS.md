@@ -45,6 +45,7 @@ If instructions still conflict after applying this order, ask the user before ac
 - Before implementation, do a quick assumptions check; ask only for high-impact clarifications.
 - Continue working in the current tree even when unrelated external dirty changes appear.
 - Never revert, delete, or rewrite existing edits you did not make unless the user explicitly asks.
+- Keep files under roughly 500 lines when practical; only introduce or preserve larger files when there is a clear reason they need to stay that large.
 - Prefer narrow ledger rows and symbol claims. If you need temporary exclusive control of a file or symbol cluster, say so explicitly in the row notes and explain why overlap is unsafe.
 - If architecture-significant behavior changes, update matching docs in `agent-docs/` and `ARCHITECTURE.md`.
 - For multi-file or high-risk work, add an execution plan in `agent-docs/exec-plans/active/`.
