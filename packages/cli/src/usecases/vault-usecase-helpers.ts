@@ -94,6 +94,37 @@ export function generateContractId(prefix: string) {
   return `${prefix}_${generateUlid()}`
 }
 
+interface VaultErrorMapping {
+  code: string
+  message?: string
+  details?: Record<string, unknown> | ((details: Record<string, unknown>) => Record<string, unknown>)
+}
+
+export function toVaultCliError(
+  error: unknown,
+  mappings: Record<string, VaultErrorMapping> = {},
+) {
+  if (error instanceof VaultCliError || !isVaultError(error)) {
+    return error
+  }
+
+  const mapping = mappings[error.code]
+  const mappedDetails =
+    typeof mapping?.details === 'function'
+      ? mapping.details(error.details)
+      : mapping?.details
+
+  return new VaultCliError(
+    mapping?.code ?? 'vault_error',
+    mapping?.message ?? error.message,
+    {
+      vaultCode: error.code,
+      ...error.details,
+      ...mappedDetails,
+    },
+  )
+}
+
 function generateUlid() {
   return `${encodeTime(Date.now(), 10)}${encodeRandom(16)}`
 }

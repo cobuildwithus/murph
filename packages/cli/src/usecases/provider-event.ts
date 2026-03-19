@@ -1,10 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
-  CONTRACT_SCHEMA_VERSION,
   EVENT_KINDS,
-  ID_PREFIXES,
-  eventRecordSchema,
   providerFrontmatterSchema,
   type ProviderFrontmatter,
 } from '@healthybob/contracts'
@@ -20,74 +17,50 @@ import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   compactObject,
-  generateContractId,
   inferVaultLinkKind,
   isVaultQueryableRecordId,
   normalizeIsoTimestamp,
   normalizeOptionalText,
-  normalizeStringArray,
   resolveVaultRelativePath,
+  toVaultCliError,
   stringArray,
   uniqueStrings,
 } from './vault-usecase-helpers.js'
 
 type JsonObject = Record<string, unknown>
 
-interface CanonicalWriteLockHandle {
-  release(): Promise<void>
-}
-
-interface CanonicalTextWriteInput {
-  relativePath: string
-  content: string
-  overwrite?: boolean
-  allowExistingMatch?: boolean
-}
-
-interface CanonicalJsonlAppendInput {
-  relativePath: string
-  record: JsonObject
-}
-
-interface CanonicalDeleteInput {
-  relativePath: string
-}
-
-interface FrontmatterDocument {
-  attributes: JsonObject
-  body: string
-}
-
 interface ProviderEventCoreRuntime {
-  acquireCanonicalWriteLock(vaultRoot: string): Promise<CanonicalWriteLockHandle>
-  applyCanonicalWriteBatch(input: {
-    vaultRoot: string
-    operationType: string
-    summary: string
-    occurredAt?: string | Date
-    textWrites?: CanonicalTextWriteInput[]
-    jsonlAppends?: CanonicalJsonlAppendInput[]
-    deletes?: CanonicalDeleteInput[]
-  }): Promise<{
-    textWrites: string[]
-    jsonlAppends: string[]
-    deletes: string[]
-  }>
-  appendJsonlRecord<TRecord extends object>(input: {
-    vaultRoot: string
-    relativePath: string
-    record: TRecord
-  }): Promise<TRecord>
-  parseFrontmatterDocument(markdown: string): FrontmatterDocument
-  stringifyFrontmatterDocument(input: {
-    attributes: JsonObject
+  parseFrontmatterDocument(markdown: string): {
+    attributes: Record<string, unknown>
     body: string
-  }): string
-  toMonthlyShardRelativePath(
-    relativeDirectory: string,
-    occurredAt: string,
-    fieldName: string,
-  ): string
+  }
+  upsertProvider(input: {
+    vaultRoot: string
+    providerId?: string
+    slug?: string
+    title: string
+    status?: string
+    specialty?: string
+    organization?: string
+    location?: string
+    website?: string
+    phone?: string
+    note?: string
+    aliases?: string[]
+    body?: string
+  }): Promise<{
+    providerId: string
+    relativePath: string
+    created: boolean
+  }>
+  upsertEvent(input: {
+    vaultRoot: string
+    payload: JsonObject
+  }): Promise<{
+    eventId: string
+    ledgerFile: string
+    created: boolean
+  }>
   importSamples(input: {
     vaultRoot: string
     stream: string
@@ -106,7 +79,6 @@ interface ProviderEventCoreRuntime {
   }>
 }
 
-const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u
 const providerStatusSchema = z.string().min(1)
 const slugSchema = z
   .string()
@@ -145,22 +117,6 @@ const EVENT_WRITE_KINDS = [
 ] as const
 
 export const eventScaffoldKindSchema = z.enum(EVENT_WRITE_KINDS)
-
-const reservedEventKeys = new Set([
-  'schemaVersion',
-  'id',
-  'eventId',
-  'kind',
-  'occurredAt',
-  'recordedAt',
-  'dayKey',
-  'source',
-  'title',
-  'note',
-  'tags',
-  'relatedIds',
-  'rawRefs',
-])
 
 const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
   adverse_effect: {
@@ -331,98 +287,42 @@ export async function upsertProviderRecord(input: {
   payload: ProviderPayload
 }) {
   const core = await loadProviderEventCoreRuntime()
-  const lock = await core.acquireCanonicalWriteLock(input.vault)
-
   try {
-    const existingEntries = await readProviderEntries(input.vault)
-    const normalizedTitle = input.payload.title.trim()
-    const desiredSlug = normalizeProviderSlug(input.payload.slug ?? normalizedTitle)
-    const requestedId = normalizeOptionalText(input.payload.providerId)
-    const existingById =
-      requestedId
-        ? existingEntries.find(
-            (entry) => entry.attributes.providerId === requestedId,
-          )
-        : undefined
-    const slugOwner = existingEntries.find(
-      (entry) => entry.attributes.slug === desiredSlug,
-    )
-
-    if (
-      slugOwner &&
-      requestedId &&
-      slugOwner.attributes.providerId !== requestedId
-    ) {
-      throw new VaultCliError(
-        'conflict',
-        `Provider slug "${desiredSlug}" is already owned by "${slugOwner.attributes.providerId}".`,
-        {
-          conflictingProviderId: slugOwner.attributes.providerId,
-          providerId: requestedId,
-          slug: desiredSlug,
-        },
-      )
-    }
-
-    const existing = existingById ?? slugOwner
-    const providerId = requestedId ?? existing?.attributes.providerId ?? generateContractId(ID_PREFIXES.provider)
-    const relativePath = providerRelativePath(desiredSlug)
-    const previousPath = existing?.relativePath ?? null
-    const nextAttributes = validateProviderFrontmatter(compactObject({
-      schemaVersion: CONTRACT_SCHEMA_VERSION.providerFrontmatter,
-      docType: 'provider',
-      providerId,
-      slug: desiredSlug,
-      title: normalizedTitle,
-      status: input.payload.status,
-      specialty: normalizeOptionalText(input.payload.specialty) ?? undefined,
-      organization: normalizeOptionalText(input.payload.organization) ?? undefined,
-      location: normalizeOptionalText(input.payload.location) ?? undefined,
-      website: normalizeOptionalText(input.payload.website) ?? undefined,
-      phone: normalizeOptionalText(input.payload.phone) ?? undefined,
-      note: normalizeOptionalText(input.payload.note) ?? undefined,
-      aliases: normalizeStringArray(input.payload.aliases) ?? undefined,
-    }))
-    const body = normalizeProviderBody(
-      input.payload.body,
-      existing?.body ?? null,
-      nextAttributes.title,
-      nextAttributes.note,
-    )
-    await core.applyCanonicalWriteBatch({
+    const result = await core.upsertProvider({
       vaultRoot: input.vault,
-      operationType: 'provider_upsert',
-      summary: `Upsert provider ${providerId}`,
-      occurredAt: new Date(),
-      textWrites: [
-        {
-          relativePath,
-          content: core.stringifyFrontmatterDocument({
-            attributes: nextAttributes,
-            body,
-          }),
-          overwrite: true,
-        },
-      ],
-      deletes:
-        previousPath && previousPath !== relativePath
-          ? [
-              {
-                relativePath: previousPath,
-              },
-            ]
-          : [],
+      providerId: input.payload.providerId,
+      slug: input.payload.slug,
+      title: input.payload.title,
+      status: input.payload.status,
+      specialty: input.payload.specialty,
+      organization: input.payload.organization,
+      location: input.payload.location,
+      website: input.payload.website,
+      phone: input.payload.phone,
+      note: input.payload.note,
+      aliases: input.payload.aliases,
+      body: input.payload.body,
     })
 
     return {
       vault: input.vault,
-      providerId,
-      lookupId: providerId,
-      path: relativePath,
-      created: existing === undefined,
+      providerId: result.providerId,
+      lookupId: result.providerId,
+      path: result.relativePath,
+      created: result.created,
     }
-  } finally {
-    await lock.release()
+  } catch (error) {
+    throw toVaultCliError(error, {
+      HB_PROVIDER_CONFLICT: {
+        code: 'conflict',
+      },
+      HB_PROVIDER_SLUG_INVALID: {
+        code: 'contract_invalid',
+      },
+      HB_PROVIDER_FRONTMATTER_INVALID: {
+        code: 'contract_invalid',
+      },
+    })
   }
 }
 
@@ -503,38 +403,37 @@ export async function upsertEventRecord(input: {
   payload: JsonObject
 }) {
   const core = await loadProviderEventCoreRuntime()
-  const query = await loadProviderEventQueryRuntime()
-  const eventRecord = buildEventRecord(input.payload)
-  const readModel = await query.readVault(input.vault)
-  const existing = query.lookupRecordById(readModel, eventRecord.id)
-  const ledgerFile = core.toMonthlyShardRelativePath(
-    'ledger/events',
-    eventRecord.occurredAt,
-    'occurredAt',
-  )
+  try {
+    const result = await core.upsertEvent({
+      vaultRoot: input.vault,
+      payload: input.payload,
+    })
 
-  if (existing && existing.recordType === 'event') {
     return {
       vault: input.vault,
-      eventId: eventRecord.id,
-      lookupId: eventRecord.id,
-      ledgerFile: existing.sourcePath,
-      created: false,
+      eventId: result.eventId,
+      lookupId: result.eventId,
+      ledgerFile: result.ledgerFile,
+      created: result.created,
     }
-  }
-
-  await core.appendJsonlRecord({
-    vaultRoot: input.vault,
-    relativePath: ledgerFile,
-    record: eventRecord,
-  })
-
-  return {
-    vault: input.vault,
-    eventId: eventRecord.id,
-    lookupId: eventRecord.id,
-    ledgerFile,
-    created: true,
+  } catch (error) {
+    throw toVaultCliError(error, {
+      HB_EVENT_KIND_INVALID: {
+        code: 'contract_invalid',
+      },
+      HB_EVENT_OCCURRED_AT_MISSING: {
+        code: 'invalid_timestamp',
+      },
+      HB_EVENT_CONTRACT_INVALID: {
+        code: 'contract_invalid',
+      },
+      HB_INVALID_TIMESTAMP: {
+        code: 'invalid_timestamp',
+      },
+      HB_INVALID_INPUT: {
+        code: 'contract_invalid',
+      },
+    })
   }
 }
 
@@ -673,64 +572,6 @@ export async function addSampleRecordsFromInput(input: {
   })
 }
 
-function buildEventRecord(payload: JsonObject) {
-  const kind = eventScaffoldKindSchema.safeParse(payload.kind)
-  if (!kind.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      'Event payload requires a supported kind.',
-      { errors: kind.error.flatten() },
-    )
-  }
-
-  const occurredAt = normalizeTimestampInput(payload.occurredAt)
-  if (!occurredAt) {
-    throw new VaultCliError(
-      'invalid_timestamp',
-      'Event payload requires occurredAt.',
-    )
-  }
-  const title = normalizeRequiredText(payload.title, 'Event payload requires a title.')
-  const eventId = normalizeOptionalText(
-    typeof payload.id === 'string' ? payload.id : valueAsString(payload.eventId),
-  )
-  const source = normalizeOptionalText(valueAsString(payload.source)) ?? 'manual'
-  const record = compactObject({
-    schemaVersion: CONTRACT_SCHEMA_VERSION.event,
-    id: eventId ?? generateContractId(ID_PREFIXES.event),
-    kind: kind.data,
-    occurredAt,
-    recordedAt: normalizeTimestampInput(payload.recordedAt) ?? new Date().toISOString(),
-    dayKey:
-      normalizeLocalDate(valueAsString(payload.dayKey)) ??
-      occurredAt.slice(0, 10),
-    source,
-    title,
-    note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
-    tags: normalizeStringArray(payload.tags) ?? undefined,
-    relatedIds: normalizeStringArray(payload.relatedIds) ?? undefined,
-    rawRefs: normalizeStringArray(payload.rawRefs) ?? undefined,
-    ...eventSpecificFields(payload),
-  })
-  const result = eventRecordSchema.safeParse(record)
-
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `Event payload for kind "${kind.data}" is invalid.`,
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-function eventSpecificFields(payload: JsonObject) {
-  return Object.fromEntries(
-    Object.entries(payload).filter(([key, value]) => !reservedEventKeys.has(key) && value !== undefined),
-  )
-}
-
 async function requireProviderRecord(vault: string, lookup: string) {
   const entries = await readProviderEntries(vault)
   const normalizedLookup = lookup.trim()
@@ -782,55 +623,6 @@ function validateProviderFrontmatter(value: unknown) {
     throw new VaultCliError(
       'contract_invalid',
       'Provider frontmatter is invalid.',
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-function normalizeProviderBody(
-  nextBody: string | undefined,
-  existingBody: string | null,
-  title: string,
-  note: string | undefined,
-) {
-  if (typeof nextBody === 'string' && nextBody.trim().length > 0) {
-    return ensureMarkdownHeading(nextBody, title)
-  }
-
-  if (typeof existingBody === 'string' && existingBody.trim().length > 0) {
-    return ensureMarkdownHeading(existingBody, title)
-  }
-
-  const noteBlock = note ? `${note}\n` : ''
-  return `# ${title}\n\n## Notes\n\n${noteBlock}`
-}
-
-function ensureMarkdownHeading(body: string, title: string) {
-  const trimmed = body.trimStart()
-  if (trimmed.startsWith('# ')) {
-    return body.replace(/^# .*(?:\r?\n)?/u, `# ${title}\n`)
-  }
-
-  return `# ${title}\n\n${body.trimStart()}`
-}
-
-function providerRelativePath(slug: string) {
-  return `bank/providers/${slug}.md`
-}
-
-function normalizeProviderSlug(value: string) {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-  const result = slugSchema.safeParse(normalized)
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      'Provider payload requires a valid slug or title-derived slug.',
       { errors: result.error.flatten() },
     )
   }
@@ -901,30 +693,6 @@ function normalizeRequiredText(value: unknown, message: string) {
   }
 
   return normalized
-}
-
-function normalizeTimestampInput(value: unknown) {
-  if (typeof value !== 'string' && !(value instanceof Date)) {
-    return undefined
-  }
-
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    throw new VaultCliError(
-      'invalid_timestamp',
-      `Invalid timestamp "${String(value)}".`,
-    )
-  }
-
-  return date.toISOString()
-}
-
-function normalizeLocalDate(value: string | undefined) {
-  if (typeof value !== 'string') {
-    return undefined
-  }
-
-  return LOCAL_DATE_PATTERN.test(value) ? value : undefined
 }
 
 async function loadProviderEventQueryRuntime(): Promise<QueryRuntimeModule> {

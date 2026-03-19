@@ -28,8 +28,10 @@ import {
 import {
   addMeal,
   applyCanonicalWriteBatch,
+  appendJournal,
   appendProfileSnapshot,
   appendJsonlRecord,
+  checkpointExperiment,
   copyRawArtifact,
   createExperiment,
   ensureJournalDay,
@@ -37,11 +39,22 @@ import {
   importAssessmentResponse,
   importSamples,
   initializeVault,
+  linkJournalEventIds,
+  linkJournalStreams,
+  promoteInboxExperimentNote,
+  promoteInboxJournal,
   parseFrontmatterDocument,
   projectAssessmentResponse,
   readJsonlRecords,
+  stopExperiment,
   stringifyFrontmatterDocument,
   toMonthlyShardRelativePath,
+  unlinkJournalEventIds,
+  unlinkJournalStreams,
+  updateExperiment,
+  updateVaultSummary,
+  upsertEvent,
+  upsertProvider,
   validateVault,
   VaultError,
 } from "../src/index.js";
@@ -2083,4 +2096,300 @@ test("importSamples retries repair partial shard state without minting new ids",
   assert.equal(manifest.importId, first.transformId);
   assert.equal(manifest.provenance?.importedCount, 2);
   assert.deepEqual(manifest.provenance?.sampleIds, first.records.map((record) => record.id));
+});
+
+test("public core exports include the high-level canonical mutation ports", () => {
+  assert.equal(typeof appendJournal, "function");
+  assert.equal(typeof checkpointExperiment, "function");
+  assert.equal(typeof linkJournalEventIds, "function");
+  assert.equal(typeof linkJournalStreams, "function");
+  assert.equal(typeof promoteInboxExperimentNote, "function");
+  assert.equal(typeof promoteInboxJournal, "function");
+  assert.equal(typeof stopExperiment, "function");
+  assert.equal(typeof unlinkJournalEventIds, "function");
+  assert.equal(typeof unlinkJournalStreams, "function");
+  assert.equal(typeof updateExperiment, "function");
+  assert.equal(typeof updateVaultSummary, "function");
+  assert.equal(typeof upsertEvent, "function");
+  assert.equal(typeof upsertProvider, "function");
+});
+
+test("high-level canonical mutation ports own experiment and journal mutation semantics", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "focus-sprint",
+    title: "Focus Sprint",
+    startedOn: "2026-03-10",
+  });
+  const relativePath = created.experiment.relativePath;
+
+  const updated = await updateExperiment({
+    vaultRoot,
+    relativePath,
+    title: "Focus Sprint Updated",
+    hypothesis: "Walking after lunch improves the afternoon energy dip.",
+    status: "paused",
+    body: "# Focus Sprint Updated\n\n## Plan\n\nKeep the walks short and consistent.\n",
+    tags: ["energy", "walking"],
+  });
+  const checkpoint = await checkpointExperiment({
+    vaultRoot,
+    relativePath,
+    occurredAt: "2026-03-12T14:30:00.000Z",
+    title: "Midpoint",
+    note: "Energy improved after lunch and the afternoon dip arrived later.",
+  });
+  const stopped = await stopExperiment({
+    vaultRoot,
+    relativePath,
+    occurredAt: "2026-03-13T18:45:00.000Z",
+    title: "Stopped",
+    note: "The sprint is complete and the updated routine is stable enough to keep.",
+  });
+
+  assert.equal(updated.status, "paused");
+  assert.equal(checkpoint.status, "paused");
+  assert.equal(stopped.status, "completed");
+
+  const experimentDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, relativePath), "utf8"),
+  );
+  assert.equal(experimentDocument.attributes.title, "Focus Sprint Updated");
+  assert.equal(
+    experimentDocument.attributes.hypothesis,
+    "Walking after lunch improves the afternoon energy dip.",
+  );
+  assert.equal(experimentDocument.attributes.status, "completed");
+  assert.equal(experimentDocument.attributes.endedOn, "2026-03-13");
+  assert.deepEqual(experimentDocument.attributes.tags, ["energy", "walking"]);
+  assert.match(experimentDocument.body, /Midpoint/u);
+  assert.match(
+    experimentDocument.body,
+    /The sprint is complete and the updated routine is stable enough to keep\./u,
+  );
+
+  const lifecycleRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: checkpoint.ledgerFile,
+  });
+  const phases = lifecycleRecords
+    .filter(
+      (record): record is ExperimentEventRecord =>
+        expectRecord<{ kind?: string; experimentId?: string }>(record).kind === "experiment_event" &&
+        expectRecord<{ experimentId?: string }>(record).experimentId === created.experiment.id,
+    )
+    .map((record) => record.phase);
+  assert.deepEqual(phases, ["start", "checkpoint", "stop"]);
+
+  const appended = await appendJournal({
+    vaultRoot,
+    date: "2026-03-13",
+    text: "Evening note from the canonical journal append port.",
+  });
+  const linkedEventIds = await linkJournalEventIds({
+    vaultRoot,
+    date: "2026-03-13",
+    values: [checkpoint.eventId, stopped.eventId],
+  });
+  const linkedStreams = await linkJournalStreams({
+    vaultRoot,
+    date: "2026-03-13",
+    values: ["heart_rate", "glucose"],
+  });
+  const unlinkedEventIds = await unlinkJournalEventIds({
+    vaultRoot,
+    date: "2026-03-13",
+    values: [checkpoint.eventId],
+  });
+  const unlinkedStreams = await unlinkJournalStreams({
+    vaultRoot,
+    date: "2026-03-13",
+    values: ["glucose"],
+  });
+
+  assert.equal(appended.created, true);
+  assert.deepEqual(linkedEventIds.eventIds, [checkpoint.eventId, stopped.eventId].sort());
+  assert.deepEqual(linkedStreams.sampleStreams, ["glucose", "heart_rate"]);
+  assert.deepEqual(unlinkedEventIds.eventIds, [stopped.eventId]);
+  assert.deepEqual(unlinkedStreams.sampleStreams, ["heart_rate"]);
+
+  const journalDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, appended.relativePath), "utf8"),
+  );
+  assert.deepEqual(journalDocument.attributes.eventIds, [stopped.eventId]);
+  assert.deepEqual(journalDocument.attributes.sampleStreams, ["heart_rate"]);
+  assert.match(
+    journalDocument.body,
+    /Evening note from the canonical journal append port\./u,
+  );
+});
+
+test("high-level canonical mutation ports own provider, event, and vault summary semantics", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const summary = await updateVaultSummary({
+    vaultRoot,
+    title: "Health Ops Vault",
+    timezone: "America/Los_Angeles",
+  });
+  assert.equal(summary.title, "Health Ops Vault");
+  assert.equal(summary.timezone, "America/Los_Angeles");
+
+  const vaultMetadata = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, "vault.json"), "utf8"),
+  ) as {
+    title: string;
+    timezone: string;
+  };
+  const coreDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8"),
+  );
+  assert.equal(vaultMetadata.title, "Health Ops Vault");
+  assert.equal(vaultMetadata.timezone, "America/Los_Angeles");
+  assert.equal(coreDocument.attributes.title, "Health Ops Vault");
+  assert.equal(coreDocument.attributes.timezone, "America/Los_Angeles");
+  assert.match(coreDocument.body, /^# Health Ops Vault/mu);
+
+  const createdProvider = await upsertProvider({
+    vaultRoot,
+    title: "Labcorp",
+    slug: "labcorp",
+    note: "Primary lab partner.",
+    body: "# Labcorp\n\nPrimary lab partner.\n",
+  });
+  const renamedProvider = await upsertProvider({
+    vaultRoot,
+    providerId: createdProvider.providerId,
+    slug: "labcorp-west",
+    title: "Labcorp West",
+    note: "Primary lab partner.",
+    body: "# Labcorp West\n\nPrimary lab partner.\n",
+  });
+
+  assert.equal(createdProvider.created, true);
+  assert.equal(renamedProvider.created, false);
+  assert.equal(renamedProvider.relativePath, "bank/providers/labcorp-west.md");
+  await assert.rejects(() => fs.access(path.join(vaultRoot, "bank/providers/labcorp.md")));
+
+  const providerDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, renamedProvider.relativePath), "utf8"),
+  );
+  assert.equal(providerDocument.attributes.providerId, createdProvider.providerId);
+  assert.equal(providerDocument.attributes.slug, "labcorp-west");
+  assert.equal(providerDocument.attributes.title, "Labcorp West");
+
+  const eventPayload = {
+    id: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    kind: "note",
+    occurredAt: "2026-03-12T08:15:00.000Z",
+    title: "Morning note",
+    note: "Provider follow-up scheduled.",
+    relatedIds: [createdProvider.providerId],
+  } satisfies Record<string, unknown>;
+  const firstEvent = await upsertEvent({
+    vaultRoot,
+    payload: eventPayload,
+  });
+  const secondEvent = await upsertEvent({
+    vaultRoot,
+    payload: eventPayload,
+  });
+
+  assert.equal(firstEvent.created, true);
+  assert.equal(secondEvent.created, false);
+  assert.equal(secondEvent.ledgerFile, firstEvent.ledgerFile);
+
+  const ledgerRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: firstEvent.ledgerFile,
+  });
+  const eventRecord = ledgerRecords.find(
+    (record) => expectRecord<{ id?: string }>(record).id === eventPayload.id,
+  ) as EventRecord | undefined;
+  assert.ok(eventRecord);
+  assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
+  assert.equal(eventRecord.kind, "note");
+});
+
+test("high-level canonical mutation ports own inbox journal and experiment-note promotions", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "focus-sprint",
+    title: "Focus Sprint",
+    startedOn: "2026-03-10",
+  });
+  const capture = {
+    captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB2",
+    source: "imessage",
+    occurredAt: "2026-03-13T08:00:00.000Z",
+    text: "Breakfast note from inbox",
+    thread: {
+      id: "thread-1",
+      title: "Breakfast Thread",
+    },
+    actor: {
+      id: "contact-1",
+      displayName: "Breakfast Buddy",
+    },
+    attachments: [],
+  };
+
+  const firstJournalPromotion = await promoteInboxJournal({
+    vaultRoot,
+    date: "2026-03-13",
+    capture,
+  });
+  const secondJournalPromotion = await promoteInboxJournal({
+    vaultRoot,
+    date: "2026-03-13",
+    capture,
+  });
+  const firstExperimentPromotion = await promoteInboxExperimentNote({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    capture,
+  });
+  const secondExperimentPromotion = await promoteInboxExperimentNote({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    capture,
+  });
+
+  assert.equal(firstJournalPromotion.created, true);
+  assert.equal(firstJournalPromotion.appended, true);
+  assert.equal(firstJournalPromotion.linked, true);
+  assert.equal(secondJournalPromotion.created, false);
+  assert.equal(secondJournalPromotion.appended, false);
+  assert.equal(secondJournalPromotion.linked, false);
+  assert.equal(firstExperimentPromotion.appended, true);
+  assert.equal(secondExperimentPromotion.appended, false);
+
+  const journalMarkdown = await fs.readFile(
+    path.join(vaultRoot, firstJournalPromotion.journalPath),
+    "utf8",
+  );
+  assert.equal(
+    journalMarkdown.split(`<!-- inbox-capture:${capture.captureId} -->`).length - 1,
+    1,
+  );
+  assert.match(journalMarkdown, /Breakfast note from inbox/u);
+
+  const experimentMarkdown = await fs.readFile(
+    path.join(vaultRoot, created.experiment.relativePath),
+    "utf8",
+  );
+  assert.equal(
+    experimentMarkdown.split(`<!-- inbox-capture:${capture.captureId} -->`).length - 1,
+    1,
+  );
+  assert.match(experimentMarkdown, /## Inbox Experiment Notes/u);
+  assert.match(experimentMarkdown, /Breakfast note from inbox/u);
 });

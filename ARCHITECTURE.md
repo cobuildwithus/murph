@@ -36,7 +36,7 @@ Last verified: 2026-03-18
 ## Control Flow
 
 1. Operators, automations, and future agent layers call `vault-cli` or package APIs.
-2. CLI commands stay thin, validate input, and delegate to internal CLI use-case modules that coordinate `packages/core`, `packages/importers`, `packages/query`, `packages/inboxd`, and parser-toolchain helpers from `packages/parsers`.
+2. CLI commands stay thin, validate input, and delegate to internal CLI use-case modules that coordinate `packages/core`, `packages/importers`, `packages/query`, `packages/inboxd`, and parser-toolchain helpers from `packages/parsers`. Canonical mutation flows for experiments, journal pages, providers, events, vault summary updates, and inbox journal/experiment-note promotions must route through typed `packages/core` mutation ports; CLI may keep read-side lookup/orchestration, but it must not parse/stringify canonical frontmatter or assemble canonical write batches for those write paths.
 3. Inbox capture persists raw evidence, indexes attachments, and enqueues parse jobs in rebuildable local runtime state.
 4. Parser workers or parsed-pipeline wrappers consume those attachment jobs and publish only derived artifacts.
 5. Inbox model routing can materialize a normalized bundle, attach supported stored images for multimodal routing when available, and write audited bundle/plan/result artifacts before any optional apply step.

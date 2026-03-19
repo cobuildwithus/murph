@@ -1,11 +1,12 @@
-import { createHash } from 'node:crypto'
-import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { experimentFrontmatterSchema } from '@healthybob/contracts'
 import { resolveRuntimePaths, type RuntimePaths } from '@healthybob/runtime-state'
 import { z } from 'incur'
 import { ensureImessageMessagesDbReadable } from './imessage-readiness.js'
+import {
+  loadQueryRuntime,
+  type QueryRuntimeModule,
+} from './query-runtime.js'
 import { loadRuntimeModule } from './runtime-import.js'
 import {
   resolveTelegramApiBaseUrl,
@@ -13,26 +14,23 @@ import {
   resolveTelegramFileBaseUrl,
 } from './telegram-runtime.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import { toVaultCliError } from './usecases/vault-usecase-helpers.js'
 import {
   type InboxAttachmentListResult,
   type InboxAttachmentParseResult,
   type InboxAttachmentReparseResult,
   type InboxAttachmentShowResult,
   type InboxAttachmentStatusResult,
-  inboxDaemonStateSchema,
-  inboxDoctorCheckSchema,
+  type InboxDaemonState,
   inboxPromotionStoreSchema,
-  inboxRuntimeConfigSchema,
   type InboxBackfillResult,
   type InboxBootstrapResult,
   type InboxConnectorConfig,
-  type InboxDaemonState,
   type InboxDoctorCheck,
   type InboxDoctorResult,
   type InboxInitResult,
   type InboxListResult,
   type InboxParseResult,
-  type InboxParserToolStatus,
   type InboxParserToolchainStatus,
   type InboxPromotionEntry,
   type InboxPromoteExperimentNoteResult,
@@ -49,8 +47,82 @@ import {
   type InboxSourceListResult,
   type InboxSourceRemoveResult,
 } from './inbox-cli-contracts.js'
+import {
+  instantiateConnector,
+} from './inbox-services/connectors.js'
+import {
+  buildDaemonState,
+  createProcessSignalBridge,
+  normalizeDaemonState,
+  writeDaemonState,
+} from './inbox-services/daemon.js'
+import {
+  createParserServiceContext,
+  buildAttachmentParseStatus,
+  isParseableAttachment,
+  requireAttachmentParseJobs,
+  requireAttachmentReparseSupport,
+  summarizeParserDrain,
+  toCliParserToolchain,
+  toParserToolChecks,
+  assertBootstrapStrictReady,
+} from './inbox-services/parser.js'
+import {
+  documentCanonicalPromotionSpec,
+  mealCanonicalPromotionSpec,
+  persistPromotionEntry,
+  promoteCanonicalAttachmentImport,
+  readExperimentPromotionEntries,
+  readPromotionsByCapture,
+  requireExperimentPromotionCore,
+  requireExperimentPromotionEntry,
+  requireJournalPromotionCore,
+  resolveAttachmentSha256,
+  resolveExperimentPromotionTarget,
+  withPromotionScope,
+} from './inbox-services/promotions.js'
+import {
+  buildCaptureCursor,
+  detailCapture,
+  isStoredAudioAttachment,
+  isStoredDocumentAttachment,
+  isStoredImageAttachment,
+  requireAttachmentRecord,
+  requireCapture,
+  resolveSourceFilter,
+  summarizeCapture,
+  toCliAttachment,
+} from './inbox-services/query.js'
+import {
+  ensureConfigFile,
+  ensureConnectorNamespaceAvailable,
+  ensureDirectory,
+  ensureInitialized,
+  findConnector,
+  readConfig,
+  rebuildRuntime,
+  sortConnectors,
+  withInitializedInboxRuntime,
+  writeConfig,
+  requireConnector,
+} from './inbox-services/state.js'
+import {
+  errorMessage,
+  failCheck,
+  fileExists,
+  normalizeBackfillLimit,
+  normalizeConnectorAccountId,
+  normalizeLimit,
+  normalizeNullableString,
+  normalizeOptionalCommandLimit,
+  occurredDayFromCapture,
+  passCheck,
+  relativeToVault,
+  runtimeNamespaceAccountId,
+  warnCheck,
+} from './inbox-services/shared.js'
 
-interface RuntimeAttachmentRecord {
+export interface RuntimeAttachmentRecord {
   attachmentId?: string | null
   ordinal: number
   externalId?: string | null
@@ -68,31 +140,7 @@ interface RuntimeAttachmentRecord {
   parseState?: 'pending' | 'running' | 'succeeded' | 'failed' | null
 }
 
-function hasStoredPath(
-  attachment: RuntimeAttachmentRecord,
-): attachment is RuntimeAttachmentRecord & { storedPath: string } {
-  return typeof attachment.storedPath === 'string' && attachment.storedPath.length > 0
-}
-
-function isStoredImageAttachment(
-  attachment: RuntimeAttachmentRecord,
-): attachment is RuntimeAttachmentRecord & { kind: 'image'; storedPath: string } {
-  return attachment.kind === 'image' && hasStoredPath(attachment)
-}
-
-function isStoredAudioAttachment(
-  attachment: RuntimeAttachmentRecord,
-): attachment is RuntimeAttachmentRecord & { kind: 'audio'; storedPath: string } {
-  return attachment.kind === 'audio' && hasStoredPath(attachment)
-}
-
-function isStoredDocumentAttachment(
-  attachment: RuntimeAttachmentRecord,
-): attachment is RuntimeAttachmentRecord & { kind: 'document'; storedPath: string } {
-  return attachment.kind === 'document' && hasStoredPath(attachment)
-}
-
-interface RuntimeCaptureRecord {
+export interface RuntimeCaptureRecord {
   captureId: string
   eventId: string
   source: string
@@ -117,7 +165,7 @@ interface RuntimeCaptureRecord {
   createdAt: string
 }
 
-interface RuntimeSearchHit {
+export interface RuntimeSearchHit {
   captureId: string
   source: string
   accountId?: string | null
@@ -130,7 +178,7 @@ interface RuntimeSearchHit {
   envelopePath: string
 }
 
-interface RuntimeAttachmentParseJobRecord {
+export interface RuntimeAttachmentParseJobRecord {
   jobId: string
   captureId: string
   attachmentId: string
@@ -146,18 +194,17 @@ interface RuntimeAttachmentParseJobRecord {
   finishedAt?: string | null
 }
 
-type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>
-type PromotionStore = z.infer<typeof inboxPromotionStoreSchema>
-type PromotionTarget = InboxPromotionEntry['target']
-type CanonicalPromotionLookupTarget = Extract<PromotionTarget, 'meal' | 'document'>
+export type PromotionStore = z.infer<typeof inboxPromotionStoreSchema>
+export type PromotionTarget = InboxPromotionEntry['target']
+export type CanonicalPromotionLookupTarget = Extract<PromotionTarget, 'meal' | 'document'>
 
-interface CanonicalPromotionMatch {
+export interface CanonicalPromotionMatch {
   lookupId: string
   promotedAt: string
   relatedId: string
 }
 
-interface CanonicalPromotionManifest {
+export interface CanonicalPromotionManifest {
   importId: string
   importedAt: string
   source: string | null
@@ -168,7 +215,7 @@ interface CanonicalPromotionManifest {
   provenance: Record<string, unknown>
 }
 
-interface CanonicalPromotionLookupSpec<
+export interface CanonicalPromotionLookupSpec<
   TManifest extends CanonicalPromotionManifest,
   TContext,
 > {
@@ -178,25 +225,14 @@ interface CanonicalPromotionLookupSpec<
   matchesManifest(manifest: TManifest, context: TContext): boolean
 }
 
-interface PromotionMarkdownTargetSpec<TContext> {
-  sectionHeading: string
-  sectionStartMarker: string
-  sectionEndMarker: string
-  blockHeading(capture: RuntimeCaptureRecord, context: TContext): string
-  blockExtraLines?(
-    capture: RuntimeCaptureRecord,
-    context: TContext,
-  ): string[]
-}
-
-type CanonicalAttachmentPromotionResult<
+export type CanonicalAttachmentPromotionResult<
   TTarget extends CanonicalPromotionLookupTarget,
 > = Extract<
   InboxPromoteMealResult | InboxPromoteDocumentResult,
   { target: TTarget }
 >
 
-interface RuntimeStore {
+export interface RuntimeStore {
   close(): void
   getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
   setCursor(
@@ -232,12 +268,12 @@ interface RuntimeStore {
   getCapture(captureId: string): RuntimeCaptureRecord | null
 }
 
-interface PersistedCapture {
+export interface PersistedCapture {
   captureId?: string
   deduped: boolean
 }
 
-interface PollConnector {
+export interface PollConnector {
   id: string
   source: string
   accountId?: string | null
@@ -267,7 +303,7 @@ interface PollConnector {
   close?(): Promise<void> | void
 }
 
-interface RuntimeCaptureRecordInput {
+export interface RuntimeCaptureRecordInput {
   source: string
   externalId: string
   accountId?: string | null
@@ -275,13 +311,13 @@ interface RuntimeCaptureRecordInput {
   receivedAt?: string | null
 }
 
-interface InboxPipeline {
+export interface InboxPipeline {
   runtime: RuntimeStore
   processCapture(input: RuntimeCaptureRecordInput): Promise<PersistedCapture>
   close(): void
 }
 
-interface ImessageDriver {
+export interface ImessageDriver {
   getMessages(input: {
     cursor?: Record<string, unknown> | null
     limit?: number
@@ -290,7 +326,7 @@ interface ImessageDriver {
   listChats?(): Promise<unknown[]>
 }
 
-interface TelegramDriver {
+export interface TelegramDriver {
   getMe(signal?: AbortSignal): Promise<unknown>
   getMessages(input: {
     cursor?: Record<string, unknown> | null
@@ -310,7 +346,7 @@ interface TelegramDriver {
   getWebhookInfo?(signal?: AbortSignal): Promise<{ url?: string } | null>
 }
 
-interface InboxRuntimeModule {
+export interface InboxRuntimeModule {
   ensureInboxVault(vaultRoot: string): Promise<void>
   openInboxRuntime(input: { vaultRoot: string }): Promise<RuntimeStore>
   createInboxPipeline(input: {
@@ -352,7 +388,7 @@ interface InboxRuntimeModule {
   }): Promise<void>
 }
 
-interface ParserToolRuntimeStatus {
+export interface ParserToolRuntimeStatus {
   available: boolean
   command: string | null
   modelPath?: string | null
@@ -360,7 +396,7 @@ interface ParserToolRuntimeStatus {
   reason: string
 }
 
-interface ParserDoctorRuntimeReport {
+export interface ParserDoctorRuntimeReport {
   configPath: string
   discoveredAt: string
   tools: {
@@ -373,7 +409,7 @@ interface ParserDoctorRuntimeReport {
   }
 }
 
-interface ConfiguredParserRegistryRuntime {
+export interface ConfiguredParserRegistryRuntime {
   doctor: ParserDoctorRuntimeReport
   registry: unknown
   ffmpeg?: {
@@ -382,7 +418,7 @@ interface ConfiguredParserRegistryRuntime {
   }
 }
 
-interface ParserRuntimeDrainResult {
+export interface ParserRuntimeDrainResult {
   status: 'failed' | 'succeeded'
   job: {
     attachmentId: string
@@ -394,7 +430,7 @@ interface ParserRuntimeDrainResult {
   errorMessage?: string
 }
 
-interface InboxParserServiceRuntime {
+export interface InboxParserServiceRuntime {
   drain(input?: {
     attachmentId?: string
     captureId?: string
@@ -402,7 +438,7 @@ interface InboxParserServiceRuntime {
   }): Promise<ParserRuntimeDrainResult[]>
 }
 
-interface ParsersRuntimeModule {
+export interface ParsersRuntimeModule {
   createConfiguredParserRegistry(input: {
     vaultRoot: string
   }): Promise<ConfiguredParserRegistryRuntime>
@@ -443,7 +479,7 @@ interface ParsersRuntimeModule {
   }>
 }
 
-interface ImportersRuntimeModule {
+export interface ImportersRuntimeModule {
   createImporters(input?: {
     corePort?: CoreRuntimeModule
   }): {
@@ -467,7 +503,7 @@ interface ImportersRuntimeModule {
   }
 }
 
-interface CoreRuntimeModule {
+export interface CoreRuntimeModule {
   addMeal(input: {
     vaultRoot: string
     occurredAt?: string
@@ -482,44 +518,32 @@ interface CoreRuntimeModule {
     }
     manifestPath: string
   }>
-  ensureJournalDay?(input: {
+  promoteInboxJournal?(input: {
     vaultRoot: string
     date: string
+    capture: RuntimeCaptureRecord
   }): Promise<{
+    lookupId: string
+    relatedId: string
+    journalPath: string
     created: boolean
+    appended: boolean
+    linked: boolean
+  }>
+  promoteInboxExperimentNote?(input: {
+    vaultRoot: string
     relativePath: string
-    auditPath?: string
-  }>
-  parseFrontmatterDocument?(documentText: string): {
-    attributes: Record<string, unknown>
-    body: string
-  }
-  stringifyFrontmatterDocument?(input: {
-    attributes?: Record<string, unknown>
-    body?: string
-  }): string
-  acquireCanonicalWriteLock?(vaultRoot: string): Promise<{
-    release(): Promise<void>
+    capture: RuntimeCaptureRecord
+  }): Promise<{
+    experimentId: string
+    relatedId: string
+    experimentPath: string
+    experimentSlug: string
+    appended: boolean
   }>
 }
 
-interface MarkdownPromotionCore {
-  parseFrontmatterDocument: NonNullable<
-    CoreRuntimeModule['parseFrontmatterDocument']
-  >
-  stringifyFrontmatterDocument: NonNullable<
-    CoreRuntimeModule['stringifyFrontmatterDocument']
-  >
-  acquireCanonicalWriteLock: NonNullable<
-    CoreRuntimeModule['acquireCanonicalWriteLock']
-  >
-}
-
-interface JournalPromotionCore extends MarkdownPromotionCore {
-  ensureJournalDay: NonNullable<CoreRuntimeModule['ensureJournalDay']>
-}
-
-interface PromotionScope<TPrepared, TDerived> {
+export interface PromotionScope<TPrepared, TDerived> {
   input: PromoteInput
   paths: InboxPaths
   capture: RuntimeCaptureRecord
@@ -534,7 +558,7 @@ interface CommandContext {
   requestId: string | null
 }
 
-type InboxPaths = RuntimePaths
+export type InboxPaths = RuntimePaths
 
 interface InboxServicesDependencies {
   clock?: () => Date
@@ -548,6 +572,7 @@ interface InboxServicesDependencies {
   loadImportersModule?: () => Promise<ImportersRuntimeModule>
   loadInboxModule?: () => Promise<InboxRuntimeModule>
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
+  loadQueryModule?: () => Promise<QueryRuntimeModule>
   loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   probeImessageMessagesDb?: (targetPath: string) => Promise<void>
@@ -670,15 +695,6 @@ const IMESSAGE_MESSAGES_DB_RELATIVE_PATH = path.join(
   'Messages',
   'chat.db',
 )
-const CONFIG_VERSION = 1
-const PROMOTION_STORE_VERSION = 1
-const RAW_MEALS_DIRECTORY = path.posix.join('raw', 'meals')
-const RAW_DOCUMENTS_DIRECTORY = path.posix.join('raw', 'documents')
-const JOURNAL_PROMOTION_SECTION_START = '<!-- inbox-promotions:start -->'
-const JOURNAL_PROMOTION_SECTION_END = '<!-- inbox-promotions:end -->'
-const EXPERIMENT_NOTE_SECTION_START = '<!-- inbox-experiment-notes:start -->'
-const EXPERIMENT_NOTE_SECTION_END = '<!-- inbox-experiment-notes:end -->'
-
 function createParserRuntimeUnavailableError(
   operation: string,
   cause: unknown,
@@ -731,6 +747,9 @@ export function createIntegratedInboxCliServices(
   const loadParsers =
     dependencies.loadParsersModule ??
     (() => loadRuntimeModule<ParsersRuntimeModule>('@healthybob/parsers'))
+  const loadQuery =
+    dependencies.loadQueryModule ??
+    (() => loadQueryRuntime())
 
   const requireParsers = async (
     operation: string,
@@ -1559,9 +1578,11 @@ export function createIntegratedInboxCliServices(
 
       const existingState = await normalizeDaemonState(
         paths,
-        dependencies,
-        clock,
-        getPid,
+        {
+          clock,
+          getPid,
+          killProcess: dependencies.killProcess,
+        },
       )
       if (existingState.running && existingState.pid !== getPid()) {
         throw new VaultCliError(
@@ -1669,12 +1690,20 @@ export function createIntegratedInboxCliServices(
 
     async status(input) {
       const paths = await ensureInitialized(loadInbox, input.vault)
-      return normalizeDaemonState(paths, dependencies, clock, getPid)
+      return normalizeDaemonState(paths, {
+        clock,
+        getPid,
+        killProcess: dependencies.killProcess,
+      })
     },
 
     async stop(input) {
       const paths = await ensureInitialized(loadInbox, input.vault)
-      const state = await normalizeDaemonState(paths, dependencies, clock, getPid)
+      const state = await normalizeDaemonState(paths, {
+        clock,
+        getPid,
+        killProcess: dependencies.killProcess,
+      })
 
       if (!state.running || !state.pid) {
         throw new VaultCliError(
@@ -1689,9 +1718,11 @@ export function createIntegratedInboxCliServices(
         await sleep(100)
         const nextState = await normalizeDaemonState(
           paths,
-          dependencies,
-          clock,
-          getPid,
+          {
+            clock,
+            getPid,
+            killProcess: dependencies.killProcess,
+          },
         )
         if (!nextState.running) {
           return nextState
@@ -2078,21 +2109,20 @@ export function createIntegratedInboxCliServices(
         target: 'journal',
         loadInbox,
         prepare: async () => ({
-          core: await loadCore(),
+          core: requireJournalPromotionCore(await loadCore()),
         }),
-        deriveBeforePromotionStore: ({ capture, prepared }) => {
-          const promotionCore = requireJournalPromotionCore(prepared.core)
+        deriveBeforePromotionStore: ({ capture }) => {
           const journalDate = occurredDayFromCapture(capture)
 
           return {
             journalDate,
             lookupId: `journal:${journalDate}`,
-            promotionCore,
           }
         },
         run: async ({
           paths,
           capture,
+          prepared,
           derived,
           promotionStore,
           existing,
@@ -2108,67 +2138,39 @@ export function createIntegratedInboxCliServices(
             )
           }
 
-          return withCanonicalWriteLock(
-            derived.promotionCore,
-            paths.absoluteVaultRoot,
-            async () => {
-              const ensured = await derived.promotionCore.ensureJournalDay({
-                vaultRoot: paths.absoluteVaultRoot,
-                date: derived.journalDate,
-              })
-              const journalUpdate = await updatePromotionMarkdownDocument({
-                core: derived.promotionCore,
-                absoluteVaultRoot: paths.absoluteVaultRoot,
-                relativePath: ensured.relativePath,
-                capture,
-                spec: journalPromotionMarkdownSpec,
-                resolveUpdate: ({ attributes }) => {
-                  const currentEventIds = frontmatterStringArray(
-                    attributes.eventIds,
-                  )
+          let result: Awaited<ReturnType<typeof prepared.core.promoteInboxJournal>>
+          try {
+            result = await prepared.core.promoteInboxJournal({
+              vaultRoot: paths.absoluteVaultRoot,
+              date: derived.journalDate,
+              capture,
+            })
+          } catch (error) {
+            throw toVaultCliError(error)
+          }
 
-                  return {
-                    context: undefined,
-                    resolved: {
-                      currentEventIds,
-                    },
-                    nextAttributes: {
-                      ...attributes,
-                      eventIds: uniqueStrings([
-                        ...currentEventIds,
-                        capture.eventId,
-                      ]),
-                    },
-                  }
-                },
-              })
+          await persistPromotionEntry({
+            paths,
+            promotionStore,
+            captureId: input.captureId,
+            target: 'journal',
+            lookupId: derived.lookupId,
+            promotedAt: clock().toISOString(),
+            relatedId: capture.eventId,
+            note: capture.text ?? null,
+          })
 
-              await persistPromotionEntry({
-                paths,
-                promotionStore,
-                captureId: input.captureId,
-                target: 'journal',
-                lookupId: derived.lookupId,
-                promotedAt: clock().toISOString(),
-                relatedId: capture.eventId,
-                note: capture.text ?? null,
-              })
-
-              return {
-                vault: paths.absoluteVaultRoot,
-                captureId: input.captureId,
-                target: 'journal',
-                lookupId: derived.lookupId,
-                relatedId: capture.eventId,
-                journalPath: ensured.relativePath,
-                created: ensured.created,
-                appended: journalUpdate.appended,
-                linked: !journalUpdate.resolved.currentEventIds.includes(
-                  capture.eventId,
-                ),
-              }
-            },
-          )
+          return {
+            vault: paths.absoluteVaultRoot,
+            captureId: input.captureId,
+            target: 'journal',
+            lookupId: derived.lookupId,
+            relatedId: capture.eventId,
+            journalPath: result.journalPath,
+            created: result.created,
+            appended: result.appended,
+            linked: result.linked,
+          }
         },
       })
     },
@@ -2179,21 +2181,20 @@ export function createIntegratedInboxCliServices(
         target: 'experiment-note',
         loadInbox,
         prepare: async () => ({
-          core: await loadCore(),
+          core: requireExperimentPromotionCore(await loadCore()),
+          query: await loadQuery(),
         }),
-        deriveBeforePromotionStore: ({ prepared }) => ({
-          promotionCore: requireExperimentPromotionCore(prepared.core),
-        }),
+        deriveBeforePromotionStore: () => undefined,
         run: async ({
           paths,
           capture,
-          derived,
+          prepared,
           promotionStore,
           existing,
         }) => {
-          const experimentEntries = await readExperimentEntries(
+          const experimentEntries = await readExperimentPromotionEntries(
             paths.absoluteVaultRoot,
-            derived.promotionCore,
+            prepared.query,
           )
           const target = existing
             ? requireExperimentPromotionEntry(
@@ -2204,1863 +2205,42 @@ export function createIntegratedInboxCliServices(
               )
             : resolveExperimentPromotionTarget(experimentEntries)
 
-          return withCanonicalWriteLock(
-            derived.promotionCore,
-            paths.absoluteVaultRoot,
-            async () => {
-              const experimentUpdate = await updatePromotionMarkdownDocument({
-                core: derived.promotionCore,
-                absoluteVaultRoot: paths.absoluteVaultRoot,
-                relativePath: target.relativePath,
-                capture,
-                spec: experimentPromotionMarkdownSpec,
-                resolveUpdate: ({ attributes }) => {
-                  const experimentAttributes =
-                    validateExperimentFrontmatter(attributes)
-
-                  return {
-                    context: {
-                      experimentSlug: experimentAttributes.slug,
-                    },
-                    resolved: experimentAttributes,
-                    nextAttributes: experimentAttributes,
-                  }
-                },
-              })
-
-              await persistPromotionEntry({
-                paths,
-                promotionStore,
-                captureId: input.captureId,
-                target: 'experiment-note',
-                lookupId: experimentUpdate.resolved.experimentId,
-                promotedAt: clock().toISOString(),
-                relatedId: capture.eventId,
-                note: capture.text ?? null,
-              })
-
-              return {
-                vault: paths.absoluteVaultRoot,
-                captureId: input.captureId,
-                target: 'experiment-note',
-                lookupId: experimentUpdate.resolved.experimentId,
-                relatedId: capture.eventId,
-                experimentPath: target.relativePath,
-                experimentSlug: experimentUpdate.resolved.slug,
-                appended: experimentUpdate.appended,
-              }
-            },
-          )
-        },
-      })
-    },
-  }
-}
-
-async function ensureInitialized(
-  loadInbox: () => Promise<InboxRuntimeModule>,
-  vaultRoot: string,
-): Promise<InboxPaths> {
-  return ensureInitializedWithInbox(await loadInbox(), vaultRoot)
-}
-
-async function ensureInitializedWithInbox(
-  inboxd: InboxRuntimeModule,
-  vaultRoot: string,
-): Promise<InboxPaths> {
-  const paths = resolveRuntimePaths(vaultRoot)
-  await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
-
-  if (!(await fileExists(paths.inboxConfigPath))) {
-    throw new VaultCliError(
-      'INBOX_NOT_INITIALIZED',
-      'Inbox runtime is not initialized. Run `vault-cli inbox init` first.',
-    )
-  }
-
-  await readConfig(paths)
-  return paths
-}
-
-async function withInitializedInboxRuntime<TResult>(
-  loadInbox: () => Promise<InboxRuntimeModule>,
-  vaultRoot: string,
-  fn: (input: {
-    paths: InboxPaths
-    runtime: RuntimeStore
-  }) => Promise<TResult>,
-): Promise<TResult> {
-  const inboxd = await loadInbox()
-  const paths = await ensureInitializedWithInbox(inboxd, vaultRoot)
-  const runtime = await inboxd.openInboxRuntime({
-    vaultRoot: paths.absoluteVaultRoot,
-  })
-
-  try {
-    return await fn({ paths, runtime })
-  } finally {
-    runtime.close()
-  }
-}
-
-async function ensureDirectory(
-  absolutePath: string,
-  createdPaths: string[],
-  vaultRoot: string,
-): Promise<void> {
-  if (!(await fileExists(absolutePath))) {
-    createdPaths.push(relativeToVault(vaultRoot, absolutePath))
-  }
-  await mkdir(absolutePath, { recursive: true })
-}
-
-async function ensureConfigFile(
-  paths: InboxPaths,
-  createdPaths: string[],
-): Promise<void> {
-  if (await fileExists(paths.inboxConfigPath)) {
-    return
-  }
-
-  const emptyConfig: InboxRuntimeConfig = {
-    version: CONFIG_VERSION,
-    connectors: [],
-  }
-  await writeJsonFile(paths.inboxConfigPath, emptyConfig)
-  createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath))
-}
-
-async function readConfig(paths: InboxPaths): Promise<InboxRuntimeConfig> {
-  return readJsonWithSchema(
-    paths.inboxConfigPath,
-    inboxRuntimeConfigSchema,
-    'INBOX_CONFIG_INVALID',
-    'Inbox runtime config is invalid.',
-  )
-}
-
-async function writeConfig(
-  paths: InboxPaths,
-  config: InboxRuntimeConfig,
-): Promise<void> {
-  await writeJsonFile(paths.inboxConfigPath, inboxRuntimeConfigSchema.parse(config))
-}
-
-async function rebuildRuntime(
-  paths: InboxPaths,
-  inboxd: InboxRuntimeModule,
-): Promise<number> {
-  const runtime = await inboxd.openInboxRuntime({
-    vaultRoot: paths.absoluteVaultRoot,
-  })
-
-  try {
-    await inboxd.rebuildRuntimeFromVault({
-      vaultRoot: paths.absoluteVaultRoot,
-      runtime,
-    })
-
-    return countRuntimeCaptures(runtime)
-  } finally {
-    runtime.close()
-  }
-}
-
-function sortConnectors(config: InboxRuntimeConfig): void {
-  config.connectors.sort((left, right) => left.id.localeCompare(right.id))
-}
-
-function findConnector(
-  config: InboxRuntimeConfig,
-  sourceId: string,
-): InboxConnectorConfig | null {
-  return config.connectors.find((connector) => connector.id === sourceId) ?? null
-}
-
-function requireConnector(
-  config: InboxRuntimeConfig,
-  sourceId: string,
-): InboxConnectorConfig {
-  const connector = findConnector(config, sourceId)
-  if (!connector) {
-    throw new VaultCliError(
-      'INBOX_SOURCE_NOT_FOUND',
-      `Inbox source "${sourceId}" is not configured.`,
-    )
-  }
-
-  return connector
-}
-
-function ensureConnectorNamespaceAvailable(
-  config: InboxRuntimeConfig,
-  candidate: InboxConnectorConfig,
-): void {
-  const namespace = connectorNamespaceKey(candidate)
-  const conflict = config.connectors.find(
-    (connector) => connectorNamespaceKey(connector) === namespace,
-  )
-  if (!conflict) {
-    return
-  }
-
-  throw new VaultCliError(
-    'INBOX_SOURCE_NAMESPACE_EXISTS',
-    `Inbox source "${candidate.id}" aliases the same runtime namespace as "${conflict.id}".`,
-    {
-      accountId: candidate.accountId ?? null,
-      source: candidate.source,
-    },
-  )
-}
-
-async function instantiateConnector(input: {
-  connector: InboxConnectorConfig
-  inputLimit?: number
-  loadInbox: () => Promise<InboxRuntimeModule>
-  loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
-  loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
-  ensureImessageReady?: () => Promise<void>
-}) {
-  const inboxd = await input.loadInbox()
-
-  switch (input.connector.source) {
-    case 'imessage': {
-      await input.ensureImessageReady?.()
-      const driver = await input.loadImessageDriver(input.connector)
-      return inboxd.createImessageConnector({
-        driver,
-        id: input.connector.id,
-        accountId: input.connector.accountId ?? 'self',
-        includeOwnMessages:
-          input.connector.options.includeOwnMessages ?? true,
-        backfillLimit:
-          normalizeBackfillLimit(input.inputLimit) ??
-          input.connector.options.backfillLimit ??
-          500,
-      })
-    }
-    case 'telegram': {
-      const driver = await input.loadTelegramDriver(input.connector)
-      return inboxd.createTelegramPollConnector({
-        driver,
-        id: input.connector.id,
-        accountId: input.connector.accountId ?? 'bot',
-        backfillLimit:
-          normalizeBackfillLimit(input.inputLimit) ??
-          input.connector.options.backfillLimit ??
-          500,
-        downloadAttachments: true,
-        resetWebhookOnStart: true,
-      })
-    }
-  }
-}
-
-function buildCaptureCursor(capture: {
-  occurredAt: string
-  externalId: string
-  receivedAt?: string | null
-}): Record<string, unknown> {
-  return {
-    occurredAt: capture.occurredAt,
-    externalId: capture.externalId,
-    receivedAt: capture.receivedAt ?? null,
-  }
-}
-
-function summarizeCapture(capture: RuntimeCaptureRecord, promotions: InboxPromotionEntry[]) {
-  return {
-    captureId: capture.captureId,
-    source: capture.source,
-    accountId: capture.accountId ?? null,
-    externalId: capture.externalId,
-    threadId: capture.thread.id,
-    threadTitle: capture.thread.title ?? null,
-    actorId: capture.actor.id ?? null,
-    actorName: capture.actor.displayName ?? null,
-    actorIsSelf: capture.actor.isSelf,
-    occurredAt: capture.occurredAt,
-    receivedAt: capture.receivedAt ?? null,
-    text: capture.text,
-    attachmentCount: capture.attachments.length,
-    envelopePath: capture.envelopePath,
-    eventId: capture.eventId,
-    promotions,
-  }
-}
-
-function detailCapture(capture: RuntimeCaptureRecord, promotions: InboxPromotionEntry[]) {
-  return {
-    ...summarizeCapture(capture, promotions),
-    createdAt: capture.createdAt,
-    threadIsDirect: capture.thread.isDirect ?? false,
-    attachments: capture.attachments.map(toCliAttachment),
-  }
-}
-
-function toCliAttachment(attachment: RuntimeAttachmentRecord) {
-  return {
-    attachmentId: attachment.attachmentId ?? null,
-    ordinal: attachment.ordinal,
-    externalId: attachment.externalId ?? null,
-    kind: attachment.kind,
-    mime: attachment.mime ?? null,
-    originalPath: attachment.originalPath ?? null,
-    storedPath: attachment.storedPath ?? null,
-    fileName: attachment.fileName ?? null,
-    byteSize: attachment.byteSize ?? null,
-    sha256: attachment.sha256 ?? null,
-    extractedText: attachment.extractedText ?? null,
-    transcriptText: attachment.transcriptText ?? null,
-    derivedPath: attachment.derivedPath ?? null,
-    parserProviderId: attachment.parserProviderId ?? null,
-    parseState: attachment.parseState ?? null,
-  }
-}
-
-function toCliAttachmentParseJob(job: RuntimeAttachmentParseJobRecord) {
-  return {
-    jobId: job.jobId,
-    captureId: job.captureId,
-    attachmentId: job.attachmentId,
-    pipeline: job.pipeline,
-    state: job.state,
-    attempts: job.attempts,
-    providerId: job.providerId ?? null,
-    resultPath: job.resultPath ?? null,
-    errorCode: job.errorCode ?? null,
-    errorMessage: job.errorMessage ?? null,
-    createdAt: job.createdAt,
-    startedAt: job.startedAt ?? null,
-    finishedAt: job.finishedAt ?? null,
-  }
-}
-
-function requireCapture(
-  runtime: RuntimeStore,
-  captureId: string,
-): RuntimeCaptureRecord {
-  const capture = runtime.getCapture(captureId)
-  if (!capture) {
-    throw new VaultCliError(
-      'INBOX_CAPTURE_NOT_FOUND',
-      `Inbox capture "${captureId}" was not found.`,
-    )
-  }
-
-  return capture
-}
-
-function requireAttachmentRecord(
-  runtime: RuntimeStore,
-  attachmentId: string,
-): {
-  capture: RuntimeCaptureRecord
-  attachment: RuntimeAttachmentRecord
-} {
-  for (const capture of listAllCaptures(runtime)) {
-    const detailedCapture = runtime.getCapture(capture.captureId) ?? capture
-    const attachment = detailedCapture.attachments.find(
-      (candidate) => candidate.attachmentId === attachmentId,
-    )
-    if (attachment) {
-      return {
-        capture: detailedCapture,
-        attachment,
-      }
-    }
-  }
-
-  throw new VaultCliError(
-    'INBOX_ATTACHMENT_NOT_FOUND',
-    `Inbox attachment "${attachmentId}" was not found.`,
-  )
-}
-
-function requireAttachmentParseJobs(
-  runtime: RuntimeStore,
-  action: 'show status' | 'parse' | 'reparse',
-): NonNullable<RuntimeStore['listAttachmentParseJobs']> {
-  if (!runtime.listAttachmentParseJobs) {
-    throw unsupportedAttachmentParse(action)
-  }
-
-  return runtime.listAttachmentParseJobs
-}
-
-function requireAttachmentReparseSupport(
-  runtime: RuntimeStore,
-): {
-  listAttachmentParseJobs: NonNullable<RuntimeStore['listAttachmentParseJobs']>
-  requeueAttachmentParseJobs: NonNullable<RuntimeStore['requeueAttachmentParseJobs']>
-} {
-  if (!runtime.listAttachmentParseJobs || !runtime.requeueAttachmentParseJobs) {
-    throw unsupportedAttachmentParse('reparse')
-  }
-
-  return {
-    listAttachmentParseJobs: runtime.listAttachmentParseJobs,
-    requeueAttachmentParseJobs: runtime.requeueAttachmentParseJobs,
-  }
-}
-
-function refreshAttachmentForCapture(
-  runtime: RuntimeStore,
-  captureId: string,
-  attachmentId: string,
-  fallbackAttachment: RuntimeAttachmentRecord,
-): RuntimeAttachmentRecord {
-  return (
-    runtime
-      .getCapture(captureId)
-      ?.attachments.find(
-        (attachment) => attachment.attachmentId === attachmentId,
-      ) ?? fallbackAttachment
-  )
-}
-
-function buildAttachmentParseStatus(input: {
-  runtime: RuntimeStore
-  listAttachmentParseJobs: NonNullable<RuntimeStore['listAttachmentParseJobs']>
-  captureId: string
-  attachmentId: string
-  fallbackAttachment: RuntimeAttachmentRecord
-}) {
-  const jobs = input.listAttachmentParseJobs({
-    attachmentId: input.attachmentId,
-    limit: 20,
-  })
-  const attachment = refreshAttachmentForCapture(
-    input.runtime,
-    input.captureId,
-    input.attachmentId,
-    input.fallbackAttachment,
-  )
-
-  return {
-    currentState: resolveAttachmentParseState(attachment, jobs),
-    jobs: jobs.map(toCliAttachmentParseJob),
-  }
-}
-
-function resolveSourceFilter(
-  config: InboxRuntimeConfig,
-  sourceId: string | null,
-): { source: string; accountId: string | null } | null {
-  if (!sourceId) {
-    return null
-  }
-
-  const connector = requireConnector(config, sourceId)
-  return {
-    source: connector.source,
-    accountId: runtimeNamespaceAccountId(connector),
-  }
-}
-
-async function readPromotionsByCapture(
-  paths: InboxPaths,
-): Promise<Map<string, InboxPromotionEntry[]>> {
-  const store = await readPromotionStore(paths)
-  const byCapture = new Map<string, InboxPromotionEntry[]>()
-
-  for (const entry of store.entries) {
-    const entries = byCapture.get(entry.captureId) ?? []
-    entries.push(entry)
-    byCapture.set(entry.captureId, entries)
-  }
-
-  return byCapture
-}
-
-async function readPromotionStore(
-  paths: InboxPaths,
-): Promise<PromotionStore> {
-  if (!(await fileExists(paths.inboxPromotionsPath))) {
-    return {
-      version: PROMOTION_STORE_VERSION,
-      entries: [],
-    } satisfies PromotionStore
-  }
-
-  return readJsonWithSchema(
-    paths.inboxPromotionsPath,
-    inboxPromotionStoreSchema,
-    'INBOX_PROMOTIONS_INVALID',
-    'Inbox promotion state is invalid.',
-  )
-}
-
-async function writePromotionStore(
-  paths: InboxPaths,
-  store: PromotionStore,
-): Promise<void> {
-  await writeJsonFile(
-    paths.inboxPromotionsPath,
-    inboxPromotionStoreSchema.parse(store),
-  )
-}
-
-function findAppliedPromotionEntry(
-  store: PromotionStore,
-  captureId: string,
-  target: PromotionTarget,
-): InboxPromotionEntry | undefined {
-  return store.entries.find(
-    (entry) =>
-      entry.captureId === captureId &&
-      entry.target === target &&
-      entry.status === 'applied',
-  )
-}
-
-function assertCanonicalPromotionStateMatches(
-  existing: InboxPromotionEntry | undefined,
-  canonicalPromotion: CanonicalPromotionMatch,
-  target: CanonicalPromotionLookupTarget,
-): void {
-  if (
-    existing &&
-    existing.lookupId &&
-    existing.relatedId &&
-    (existing.lookupId !== canonicalPromotion.lookupId ||
-      existing.relatedId !== canonicalPromotion.relatedId)
-  ) {
-    throw new VaultCliError(
-      'INBOX_PROMOTION_STATE_INVALID',
-      `Local ${target} promotion state does not match the canonical vault record.`,
-    )
-  }
-}
-
-function throwMissingCanonicalPromotionState(
-  existing: InboxPromotionEntry,
-  target: CanonicalPromotionLookupTarget,
-): never {
-  if (!existing.lookupId || !existing.relatedId) {
-    throw new VaultCliError(
-      'INBOX_PROMOTION_STATE_INVALID',
-      `Stored ${target} promotion state is missing canonical ids.`,
-    )
-  }
-
-  throw new VaultCliError(
-    'INBOX_PROMOTION_CANONICAL_MISSING',
-    `Local ${target} promotion state exists, but no canonical ${target} record could be verified.`,
-  )
-}
-
-async function findCanonicalPromotionMatch<
-  TManifest extends CanonicalPromotionManifest,
-  TContext,
->(input: {
-  capture: RuntimeCaptureRecord
-  absoluteVaultRoot: string
-  context: TContext
-  spec: CanonicalPromotionLookupSpec<TManifest, TContext>
-}): Promise<CanonicalPromotionMatch | null> {
-  const note = normalizeNullableString(input.capture.text)
-  const matches = (
-    await Promise.all(
-      (
-        await listCanonicalManifestPaths(
-          input.absoluteVaultRoot,
-          input.spec.manifestDirectory,
-        )
-      ).map(
-        async (manifestPath) => {
-          const manifest = await readCanonicalManifest(
-            input.absoluteVaultRoot,
-            manifestPath,
-            input.spec.manifestSchema,
-          )
-          if (!manifest) {
-            return null
+          let result: Awaited<ReturnType<typeof prepared.core.promoteInboxExperimentNote>>
+          try {
+            result = await prepared.core.promoteInboxExperimentNote({
+              vaultRoot: paths.absoluteVaultRoot,
+              relativePath: target.relativePath,
+              capture,
+            })
+          } catch (error) {
+            throw toVaultCliError(error)
           }
 
-          if (!input.spec.matchesManifest(manifest, input.context)) {
-            return null
-          }
-          if (normalizeNullableString(manifest.source) !== 'import') {
-            return null
-          }
-
-          const occurredAt = extractCanonicalString(
-            manifest.provenance,
-            'occurredAt',
-          )
-          if (occurredAt !== input.capture.occurredAt) {
-            return null
-          }
-
-          if (
-            normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
-            note
-          ) {
-            return null
-          }
-
-          const lookupId =
-            normalizeNullableString(
-              extractCanonicalString(manifest.provenance, 'lookupId'),
-            ) ??
-            normalizeNullableString(
-              extractCanonicalString(manifest.provenance, 'eventId'),
-            )
-          if (!lookupId) {
-            return null
-          }
+          await persistPromotionEntry({
+            paths,
+            promotionStore,
+            captureId: input.captureId,
+            target: 'experiment-note',
+            lookupId: result.experimentId,
+            promotedAt: clock().toISOString(),
+            relatedId: capture.eventId,
+            note: capture.text ?? null,
+          })
 
           return {
-            lookupId,
-            promotedAt: manifest.importedAt,
-            relatedId: manifest.importId,
+            vault: paths.absoluteVaultRoot,
+            captureId: input.captureId,
+            target: 'experiment-note',
+            lookupId: result.experimentId,
+            relatedId: capture.eventId,
+            experimentPath: result.experimentPath,
+            experimentSlug: result.experimentSlug,
+            appended: result.appended,
           }
         },
-      ),
-    )
-  ).filter(
-    (
-      match,
-    ): match is CanonicalPromotionMatch => match !== null,
-  )
-
-  if (matches.length === 0) {
-    return null
-  }
-
-  if (matches.length > 1) {
-    throw new VaultCliError(
-      'INBOX_PROMOTION_DUPLICATE_CANONICAL',
-      `Multiple canonical ${input.spec.target} records match this inbox capture.`,
-      {
-        captureId: input.capture.captureId,
-        relatedIds: matches.map((match) => match.relatedId),
-      },
-    )
-  }
-
-  return matches[0]
-}
-
-function upsertPromotionEntry(
-  store: PromotionStore,
-  input: {
-    captureId: string
-    target: PromotionTarget
-    lookupId: string
-    note: string | null
-    promotedAt: string
-    relatedId: string
-  },
-): void {
-  const existingIndex = store.entries.findIndex(
-    (entry) => entry.captureId === input.captureId && entry.target === input.target,
-  )
-  const nextEntry = {
-    captureId: input.captureId,
-    target: input.target,
-    status: 'applied',
-    promotedAt: input.promotedAt,
-    lookupId: input.lookupId,
-    relatedId: input.relatedId,
-    note: input.note,
-  } satisfies InboxPromotionEntry
-
-  if (existingIndex === -1) {
-    store.entries.push(nextEntry)
-    return
-  }
-
-  store.entries[existingIndex] = nextEntry
-}
-
-function requirePromotionCapture(
-  runtime: RuntimeStore,
-  captureId: string,
-): RuntimeCaptureRecord {
-  const capture = runtime.getCapture(captureId)
-  if (!capture) {
-    throw new VaultCliError(
-      'INBOX_CAPTURE_NOT_FOUND',
-      `Inbox capture "${captureId}" was not found.`,
-    )
-  }
-
-  return capture
-}
-
-async function persistPromotionEntry(input: {
-  paths: InboxPaths
-  promotionStore: PromotionStore
-  captureId: string
-  target: PromotionTarget
-  lookupId: string
-  promotedAt: string
-  relatedId: string
-  note: string | null
-}): Promise<void> {
-  upsertPromotionEntry(input.promotionStore, {
-    captureId: input.captureId,
-    target: input.target,
-    lookupId: input.lookupId,
-    note: input.note,
-    promotedAt: input.promotedAt,
-    relatedId: input.relatedId,
-  })
-  await writePromotionStore(input.paths, input.promotionStore)
-}
-
-async function reconcileCanonicalImportPromotion(input: {
-  paths: InboxPaths
-  promotionStore: PromotionStore
-  existing: InboxPromotionEntry | undefined
-  capture: RuntimeCaptureRecord
-  clock: () => Date
-  target: CanonicalPromotionLookupTarget
-  canonicalPromotion: CanonicalPromotionMatch | null
-  createPromotion(): Promise<{
-    lookupId: string
-    relatedId: string
-  }>
-}): Promise<{
-  lookupId: string
-  relatedId: string
-  created: boolean
-}> {
-  if (input.canonicalPromotion) {
-    assertCanonicalPromotionStateMatches(
-      input.existing,
-      input.canonicalPromotion,
-      input.target,
-    )
-    await persistPromotionEntry({
-      paths: input.paths,
-      promotionStore: input.promotionStore,
-      captureId: input.capture.captureId,
-      target: input.target,
-      lookupId: input.canonicalPromotion.lookupId,
-      promotedAt: input.canonicalPromotion.promotedAt,
-      relatedId: input.canonicalPromotion.relatedId,
-      note: input.capture.text ?? null,
-    })
-
-    return {
-      lookupId: input.canonicalPromotion.lookupId,
-      relatedId: input.canonicalPromotion.relatedId,
-      created: false,
-    }
-  }
-
-  if (input.existing) {
-    throwMissingCanonicalPromotionState(input.existing, input.target)
-  }
-
-  const createdPromotion = await input.createPromotion()
-  await persistPromotionEntry({
-    paths: input.paths,
-    promotionStore: input.promotionStore,
-    captureId: input.capture.captureId,
-    target: input.target,
-    lookupId: createdPromotion.lookupId,
-    promotedAt: input.clock().toISOString(),
-    relatedId: createdPromotion.relatedId,
-    note: input.capture.text ?? null,
-  })
-
-  return {
-    lookupId: createdPromotion.lookupId,
-    relatedId: createdPromotion.relatedId,
-    created: true,
-  }
-}
-
-async function withPromotionScope<TPrepared, TDerived, TResult>(input: {
-  input: PromoteInput
-  target: PromotionTarget
-  loadInbox: () => Promise<InboxRuntimeModule>
-  prepare(paths: InboxPaths): Promise<TPrepared>
-  deriveBeforePromotionStore(input: {
-    paths: InboxPaths
-    capture: RuntimeCaptureRecord
-    prepared: TPrepared
-  }): Promise<TDerived> | TDerived
-  run(scope: PromotionScope<TPrepared, TDerived>): Promise<TResult>
-}): Promise<TResult> {
-  const paths = await ensureInitialized(input.loadInbox, input.input.vault)
-  const inboxd = await input.loadInbox()
-  const prepared = await input.prepare(paths)
-  const runtime = await inboxd.openInboxRuntime({
-    vaultRoot: paths.absoluteVaultRoot,
-  })
-
-  try {
-    const capture = requirePromotionCapture(runtime, input.input.captureId)
-    const derived = await input.deriveBeforePromotionStore({
-      paths,
-      capture,
-      prepared,
-    })
-    const promotionStore = await readPromotionStore(paths)
-    const existing = findAppliedPromotionEntry(
-      promotionStore,
-      input.input.captureId,
-      input.target,
-    )
-
-    return input.run({
-      input: input.input,
-      paths,
-      capture,
-      prepared,
-      derived,
-      promotionStore,
-      existing,
-    })
-  } finally {
-    runtime.close()
-  }
-}
-
-async function promoteCanonicalAttachmentImport<
-  TPrepared,
-  TAttachment extends RuntimeAttachmentRecord & { storedPath: string },
-  TManifest extends CanonicalPromotionManifest,
-  TContext,
-  TTarget extends CanonicalPromotionLookupTarget,
->(input: {
-  input: PromoteInput
-  target: TTarget
-  clock: () => Date
-  loadInbox: () => Promise<InboxRuntimeModule>
-  prepare(paths: InboxPaths): Promise<TPrepared>
-  findRequiredAttachment(
-    capture: RuntimeCaptureRecord,
-  ): TAttachment | undefined
-  missingAttachmentError(): VaultCliError
-  canonicalPromotionSpec: CanonicalPromotionLookupSpec<TManifest, TContext>
-  buildCanonicalMatchContext(input: {
-    paths: InboxPaths
-    capture: RuntimeCaptureRecord
-    prepared: TPrepared
-    attachment: TAttachment
-  }): Promise<TContext> | TContext
-  createPromotion(input: {
-    paths: InboxPaths
-    capture: RuntimeCaptureRecord
-    prepared: TPrepared
-    attachment: TAttachment
-  }): Promise<{
-    lookupId: string
-    relatedId: string
-  }>
-}): Promise<CanonicalAttachmentPromotionResult<TTarget>> {
-  return withPromotionScope<TPrepared, undefined, CanonicalAttachmentPromotionResult<TTarget>>(
-    {
-      input: input.input,
-      target: input.target,
-      loadInbox: input.loadInbox,
-      prepare: input.prepare,
-      deriveBeforePromotionStore: () => undefined,
-      run: async ({
-        paths,
-        capture,
-        prepared,
-        promotionStore,
-        existing,
-      }) => {
-        const attachment = input.findRequiredAttachment(capture)
-        if (!attachment) {
-          throw input.missingAttachmentError()
-        }
-
-        const canonicalPromotion = await findCanonicalPromotionMatch({
-          capture,
-          absoluteVaultRoot: paths.absoluteVaultRoot,
-          spec: input.canonicalPromotionSpec,
-          context: await input.buildCanonicalMatchContext({
-            paths,
-            capture,
-            prepared,
-            attachment,
-          }),
-        })
-        const promotion = await reconcileCanonicalImportPromotion({
-          paths,
-          promotionStore,
-          existing,
-          capture,
-          clock: input.clock,
-          target: input.target,
-          canonicalPromotion,
-          createPromotion: () =>
-            input.createPromotion({
-              paths,
-              capture,
-              prepared,
-              attachment,
-            }),
-        })
-
-        return {
-          vault: paths.absoluteVaultRoot,
-          captureId: input.input.captureId,
-          target: input.target,
-          lookupId: promotion.lookupId,
-          relatedId: promotion.relatedId,
-          created: promotion.created,
-        } as CanonicalAttachmentPromotionResult<TTarget>
-      },
-    },
-  )
-}
-
-async function withCanonicalWriteLock<TResult>(
-  core: Pick<MarkdownPromotionCore, 'acquireCanonicalWriteLock'>,
-  vaultRoot: string,
-  run: () => Promise<TResult>,
-): Promise<TResult> {
-  const lock = await core.acquireCanonicalWriteLock(vaultRoot)
-
-  try {
-    return await run()
-  } finally {
-    await lock.release()
-  }
-}
-
-async function normalizeDaemonState(
-  paths: InboxPaths,
-  dependencies: InboxServicesDependencies,
-  clock: () => Date,
-  getPid: () => number,
-): Promise<InboxDaemonState> {
-  if (!(await fileExists(paths.inboxStatePath))) {
-    return idleState(paths)
-  }
-
-  const state = await readJsonWithSchema(
-    paths.inboxStatePath,
-    inboxDaemonStateSchema,
-    'INBOX_STATE_INVALID',
-    'Inbox daemon state is invalid.',
-  )
-
-  if (!state.running || !state.pid) {
-    return state
-  }
-
-  if (state.pid === getPid()) {
-    return state
-  }
-
-  if (isProcessAlive(state.pid, dependencies.killProcess)) {
-    return state
-  }
-
-  const staleState = buildDaemonState(paths, {
-    ...state,
-    running: false,
-    stale: true,
-    status: 'stale',
-    stoppedAt: state.stoppedAt ?? clock().toISOString(),
-    message: 'Stale daemon state found; recorded PID is no longer running.',
-  })
-  await writeDaemonState(paths, staleState)
-  return staleState
-}
-
-function idleState(paths: InboxPaths): InboxDaemonState {
-  return buildDaemonState(paths, { status: 'idle' })
-}
-
-function buildDaemonState(
-  paths: InboxPaths,
-  overrides: Partial<InboxDaemonState> & Pick<InboxDaemonState, 'status'>,
-): InboxDaemonState {
-  const { status, ...rest } = overrides
-
-  return {
-    running: false,
-    stale: false,
-    pid: null,
-    startedAt: null,
-    stoppedAt: null,
-    status,
-    connectorIds: [],
-    message: null,
-    ...rest,
-    statePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxStatePath),
-    configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-    databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
-  }
-}
-
-async function writeDaemonState(
-  paths: InboxPaths,
-  state: InboxDaemonState,
-): Promise<void> {
-  await writeJsonFile(paths.inboxStatePath, inboxDaemonStateSchema.parse(state))
-}
-
-function isProcessAlive(
-  pid: number,
-  killProcess: InboxServicesDependencies['killProcess'],
-): boolean {
-  try {
-    if (!killProcess) {
-      process.kill(pid, 0)
-    } else {
-      killProcess(pid, 0)
-    }
-    return true
-  } catch (error) {
-    const code =
-      error && typeof error === 'object' && 'code' in error
-        ? String((error as { code?: string }).code ?? '')
-        : ''
-    return code !== 'ESRCH'
-  }
-}
-
-function createProcessSignalBridge(): {
-  cleanup(): void
-  signal: AbortSignal
-} {
-  const controller = new AbortController()
-  const abort = () => {
-    controller.abort()
-    cleanup()
-  }
-  const cleanup = () => {
-    process.off('SIGINT', abort)
-    process.off('SIGTERM', abort)
-  }
-
-  process.on('SIGINT', abort)
-  process.on('SIGTERM', abort)
-  return {
-    cleanup,
-    signal: controller.signal,
-  }
-}
-
-async function readJsonWithSchema<T>(
-  absolutePath: string,
-  schema: z.ZodType<T>,
-  code: string,
-  message: string,
-): Promise<T> {
-  try {
-    const raw = await readFile(absolutePath, 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    return schema.parse(parsed)
-  } catch (error) {
-    throw new VaultCliError(code, message, { error: errorMessage(error) })
-  }
-}
-
-async function writeJsonFile(
-  absolutePath: string,
-  value: unknown,
-): Promise<void> {
-  await mkdir(path.dirname(absolutePath), { recursive: true })
-  await writeFile(absolutePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-}
-
-async function fileExists(absolutePath: string): Promise<boolean> {
-  try {
-    await access(absolutePath)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
-}
-
-function runtimeNamespaceAccountId(
-  connector: Pick<InboxConnectorConfig, 'accountId'>,
-): string | null {
-  return connector.accountId ?? null
-}
-
-function connectorNamespaceKey(
-  connector: Pick<InboxConnectorConfig, 'source' | 'accountId'>,
-): string {
-  return `${connector.source}::${runtimeNamespaceAccountId(connector) ?? 'default'}`
-}
-
-function normalizeConnectorAccountId(
-  source: InboxConnectorConfig['source'],
-  value: string | null | undefined,
-): string | null {
-  const normalized = normalizeNullableString(value)
-
-  switch (source) {
-    case 'imessage':
-      return normalized ?? 'self'
-    case 'telegram':
-      return normalized ?? 'bot'
-  }
-}
-
-function normalizeBackfillLimit(value: number | undefined): number | undefined {
-  if (value === undefined) {
-    return undefined
-  }
-
-  if (!Number.isInteger(value) || value < 1 || value > 5000) {
-    throw new VaultCliError(
-      'INBOX_INVALID_LIMIT',
-      'Backfill limit must be an integer between 1 and 5000.',
-    )
-  }
-
-  return value
-}
-
-function normalizeLimit(
-  value: number | undefined,
-  fallback: number,
-  max: number,
-): number {
-  if (value === undefined) {
-    return fallback
-  }
-
-  if (!Number.isInteger(value) || value < 1 || value > max) {
-    throw new VaultCliError(
-      'INBOX_INVALID_LIMIT',
-      `Limit must be an integer between 1 and ${max}.`,
-    )
-  }
-
-  return value
-}
-
-function relativeToVault(vaultRoot: string, absolutePath: string): string {
-  const relativePath = path.relative(vaultRoot, absolutePath)
-  return relativePath.length > 0 ? relativePath.replace(/\\/g, '/') : '.'
-}
-
-function normalizeOptionalCommandLimit(
-  value: number | undefined,
-  max: number,
-): number | undefined {
-  if (value === undefined) {
-    return undefined
-  }
-
-  if (!Number.isInteger(value) || value < 1 || value > max) {
-    throw new VaultCliError(
-      'INBOX_INVALID_LIMIT',
-      `Limit must be an integer between 1 and ${max}.`,
-    )
-  }
-
-  return value
-}
-
-async function createParserServiceContext(
-  vaultRoot: string,
-  runtime: RuntimeStore,
-  parsers: ParsersRuntimeModule,
-): Promise<InboxParserServiceRuntime> {
-  const configured = await parsers.createConfiguredParserRegistry({
-    vaultRoot,
-  })
-
-  return parsers.createInboxParserService({
-    vaultRoot,
-    runtime,
-    registry: configured.registry,
-    ffmpeg: configured.ffmpeg,
-  })
-}
-
-function summarizeParserDrain(
-  vaultRoot: string,
-  results: ParserRuntimeDrainResult[],
-): NonNullable<InboxBackfillResult['parse']> {
-  return {
-    attempted: results.length,
-    succeeded: results.filter((result) => result.status === 'succeeded').length,
-    failed: results.filter((result) => result.status === 'failed').length,
-    results: results.map((result) => ({
-      captureId: result.job.captureId,
-      attachmentId: result.job.attachmentId,
-      status: result.status,
-      providerId: result.providerId ?? null,
-      manifestPath: result.manifestPath
-        ? normalizeVaultPathOutput(vaultRoot, result.manifestPath)
-        : null,
-      errorCode: result.errorCode ?? null,
-      errorMessage: result.errorMessage ?? null,
-    })),
-  }
-}
-
-function assertBootstrapStrictReady(doctor: InboxDoctorResult): void {
-  const blockingChecks = doctor.checks.filter((check) => {
-    if (check.status === 'fail') {
-      return true
-    }
-
-    return check.name === 'parser-runtime'
-  })
-  const unavailableConfiguredTools = doctor.parserToolchain
-    ? Object.entries(doctor.parserToolchain.tools).flatMap(([name, tool]) =>
-        tool.source === 'config' && !tool.available
-          ? [`${name}: ${tool.reason}`]
-          : [],
-      )
-    : ['parser toolchain discovery did not return structured tool status']
-
-  if (blockingChecks.length === 0 && unavailableConfiguredTools.length === 0) {
-    return
-  }
-
-  throw new VaultCliError(
-    'INBOX_BOOTSTRAP_STRICT_FAILED',
-    'Inbox bootstrap strict readiness checks failed.',
-    {
-      blockingChecks: blockingChecks.map((check) => ({
-        name: check.name,
-        status: check.status,
-        message: check.message,
-      })),
-      unavailableConfiguredTools,
-    },
-  )
-}
-
-function toCliParserToolchain(
-  vaultRoot: string,
-  doctor: ParserDoctorRuntimeReport,
-): InboxParserToolchainStatus {
-  return {
-    configPath: relativeToVault(vaultRoot, doctor.configPath),
-    discoveredAt: doctor.discoveredAt,
-    tools: {
-      ffmpeg: toCliParserToolStatus(doctor.tools.ffmpeg),
-      pdftotext: toCliParserToolStatus(doctor.tools.pdftotext),
-      whisper: {
-        ...toCliParserToolStatus(doctor.tools.whisper),
-        modelPath: redactSensitivePath(doctor.tools.whisper.modelPath),
-      },
-      paddleocr: toCliParserToolStatus(doctor.tools.paddleocr),
+      })
     },
   }
-}
-
-function toCliParserToolStatus(
-  tool: ParserToolRuntimeStatus,
-): InboxParserToolStatus {
-  return {
-    available: tool.available,
-    command: redactSensitivePath(tool.command),
-    modelPath:
-      tool.modelPath === undefined ? undefined : redactSensitivePath(tool.modelPath),
-    source: tool.source,
-    reason: tool.reason,
-  }
-}
-
-function toParserToolChecks(
-  tools: ParserDoctorRuntimeReport['tools'],
-): InboxDoctorCheck[] {
-  return [
-    toParserToolCheck('ffmpeg', tools.ffmpeg),
-    toParserToolCheck('pdftotext', tools.pdftotext),
-    toParserToolCheck('whisper', tools.whisper),
-    toParserToolCheck('paddleocr', tools.paddleocr),
-  ]
-}
-
-function toParserToolCheck(
-  name: keyof ParserDoctorRuntimeReport['tools'],
-  tool: ParserToolRuntimeStatus,
-): InboxDoctorCheck {
-  const details: Record<string, unknown> = {
-    source: tool.source,
-  }
-
-  const command = redactSensitivePath(tool.command)
-  if (command) {
-    details.command = command
-  }
-
-  if (tool.modelPath !== undefined) {
-    details.modelPath = redactSensitivePath(tool.modelPath)
-  }
-
-  return tool.available
-    ? passCheck(`parser-${name}`, tool.reason, details)
-    : warnCheck(`parser-${name}`, tool.reason, details)
-}
-
-function redactSensitivePath(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return null
-  }
-
-  if (
-    /^\/Users\/[^/]+/u.test(trimmed) ||
-    /^\/home\/[^/]+/u.test(trimmed) ||
-    /^[A-Za-z]:\\Users\\[^\\]+/u.test(trimmed)
-  ) {
-    return '<REDACTED_PATH>'
-  }
-
-  return trimmed
-}
-
-function normalizeVaultPathOutput(
-  vaultRoot: string,
-  filePath: string,
-): string {
-  return path.isAbsolute(filePath)
-    ? relativeToVault(vaultRoot, filePath)
-    : filePath.replace(/\\/g, '/')
-}
-
-function countRuntimeCaptures(runtime: RuntimeStore): number {
-  let limit = 200
-
-  while (true) {
-    const count = runtime.listCaptures({ limit }).length
-    if (count < limit) {
-      return count
-    }
-    limit *= 2
-  }
-}
-
-function listAllCaptures(runtime: RuntimeStore): RuntimeCaptureRecord[] {
-  return runtime.listCaptures({ limit: countRuntimeCaptures(runtime) || 1 })
-}
-
-function isParseableAttachment(
-  attachment: RuntimeAttachmentRecord,
-): boolean {
-  return (
-    attachment.kind === 'audio' ||
-    attachment.kind === 'document' ||
-    attachment.kind === 'image' ||
-    attachment.kind === 'video'
-  )
-}
-
-function resolveAttachmentParseState(
-  attachment: RuntimeAttachmentRecord,
-  jobs: RuntimeAttachmentParseJobRecord[],
-): 'pending' | 'running' | 'succeeded' | 'failed' | null {
-  return attachment.parseState ?? jobs[0]?.state ?? null
-}
-
-function frontmatterStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.filter((entry): entry is string => typeof entry === 'string')
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return Array.from(new Set(values))
-}
-
-function occurredDayFromCapture(capture: RuntimeCaptureRecord): string {
-  const day = capture.occurredAt.slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-    throw new VaultCliError(
-      'INBOX_CAPTURE_OCCURRED_AT_INVALID',
-      `Inbox capture "${capture.captureId}" has an invalid occurredAt timestamp.`,
-      { occurredAt: capture.occurredAt },
-    )
-  }
-
-  return day
-}
-
-function requireJournalPromotionCore(core: CoreRuntimeModule): JournalPromotionCore {
-  if (
-    !core.ensureJournalDay ||
-    !core.parseFrontmatterDocument ||
-    !core.stringifyFrontmatterDocument ||
-    !core.acquireCanonicalWriteLock
-  ) {
-    throw unsupportedPromotion('journal')
-  }
-
-  return {
-    ensureJournalDay: core.ensureJournalDay,
-    parseFrontmatterDocument: core.parseFrontmatterDocument,
-    stringifyFrontmatterDocument: core.stringifyFrontmatterDocument,
-    acquireCanonicalWriteLock: core.acquireCanonicalWriteLock,
-  }
-}
-
-function requireExperimentPromotionCore(
-  core: CoreRuntimeModule,
-): MarkdownPromotionCore {
-  if (
-    !core.parseFrontmatterDocument ||
-    !core.stringifyFrontmatterDocument ||
-    !core.acquireCanonicalWriteLock
-  ) {
-    throw unsupportedPromotion('experiment-note')
-  }
-
-  return {
-    parseFrontmatterDocument: core.parseFrontmatterDocument,
-    stringifyFrontmatterDocument: core.stringifyFrontmatterDocument,
-    acquireCanonicalWriteLock: core.acquireCanonicalWriteLock,
-  }
-}
-
-function upsertPromotionBody<TContext>(input: {
-  body: string
-  capture: RuntimeCaptureRecord
-  context: TContext
-  spec: PromotionMarkdownTargetSpec<TContext>
-}): {
-  body: string
-  appended: boolean
-} {
-  const { body, capture, context, spec } = input
-  const marker = `<!-- inbox-capture:${capture.captureId} -->`
-  if (body.includes(marker)) {
-    return {
-      body,
-      appended: false,
-    }
-  }
-
-  const block = buildCapturePromotionBlock({
-    capture,
-    marker,
-    context,
-    spec,
-  })
-  return upsertMarkdownSectionBlock(body, block, spec)
-}
-
-function buildCapturePromotionBlock<TContext>(input: {
-  capture: RuntimeCaptureRecord
-  marker: string
-  context: TContext
-  spec: PromotionMarkdownTargetSpec<TContext>
-}): string {
-  const { capture, marker, context, spec } = input
-  const lines = [
-    marker,
-    spec.blockHeading(capture, context),
-    ...(spec.blockExtraLines?.(capture, context) ?? []),
-    `Occurred at: ${capture.occurredAt}`,
-    `Source: ${capture.source}`,
-    `Thread: ${capture.thread.title ?? capture.thread.id}`,
-    `Event: ${capture.eventId}`,
-  ]
-
-  const actorName = normalizeNullableString(capture.actor.displayName)
-  const actorId = normalizeNullableString(capture.actor.id)
-  if (actorName || actorId) {
-    lines.push(`Actor: ${actorName ?? actorId ?? 'unknown'}`)
-  }
-
-  if (capture.attachments.length > 0) {
-    lines.push('Attachments:')
-    for (const attachment of capture.attachments) {
-      const attachmentLabel =
-        attachment.fileName ??
-        attachment.storedPath ??
-        attachment.originalPath ??
-        attachment.externalId ??
-        `attachment-${attachment.ordinal}`
-      lines.push(
-        `- ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`} | ${attachment.kind} | ${attachmentLabel}`,
-      )
-    }
-  }
-
-  const text = normalizeNullableString(capture.text)
-  if (text) {
-    lines.push('', text)
-  }
-
-  return lines.join('\n')
-}
-
-function upsertMarkdownSectionBlock<TContext>(
-  body: string,
-  block: string,
-  spec: PromotionMarkdownTargetSpec<TContext>,
-): {
-  body: string
-  appended: boolean
-} {
-  const normalizedBody = body.replace(/\s*$/, '')
-
-  if (
-    normalizedBody.includes(spec.sectionStartMarker) &&
-    normalizedBody.includes(spec.sectionEndMarker)
-  ) {
-    return {
-      body: normalizedBody.replace(
-        spec.sectionEndMarker,
-        `${block}\n\n${spec.sectionEndMarker}`,
-      ),
-      appended: true,
-    }
-  }
-
-  const separator = normalizedBody.length > 0 ? '\n\n' : ''
-  return {
-    body:
-      `${normalizedBody}${separator}${spec.sectionHeading}\n\n` +
-      `${spec.sectionStartMarker}\n\n${block}\n\n${spec.sectionEndMarker}\n`,
-    appended: true,
-  }
-}
-
-async function updatePromotionMarkdownDocument<TResolved, TContext>(input: {
-  core: MarkdownPromotionCore
-  absoluteVaultRoot: string
-  relativePath: string
-  capture: RuntimeCaptureRecord
-  spec: PromotionMarkdownTargetSpec<TContext>
-  resolveUpdate(input: {
-    attributes: Record<string, unknown>
-  }): {
-    context: TContext
-    resolved: TResolved
-    nextAttributes: Record<string, unknown>
-  }
-}): Promise<{
-  appended: boolean
-  resolved: TResolved
-}> {
-  const absolutePath = path.join(input.absoluteVaultRoot, input.relativePath)
-  const rawDocument = await readFile(absolutePath, 'utf8')
-  const parsedDocument = input.core.parseFrontmatterDocument(rawDocument)
-  const resolvedUpdate = input.resolveUpdate({
-    attributes: parsedDocument.attributes,
-  })
-  const nextBody = upsertPromotionBody({
-    body: parsedDocument.body,
-    capture: input.capture,
-    context: resolvedUpdate.context,
-    spec: input.spec,
-  })
-  const nextDocument = input.core.stringifyFrontmatterDocument({
-    attributes: resolvedUpdate.nextAttributes,
-    body: nextBody.body,
-  })
-
-  if (nextDocument !== rawDocument) {
-    await writeFile(absolutePath, nextDocument, 'utf8')
-  }
-
-  return {
-    appended: nextBody.appended,
-    resolved: resolvedUpdate.resolved,
-  }
-}
-
-async function readExperimentEntries(
-  vaultRoot: string,
-  core: Pick<MarkdownPromotionCore, 'parseFrontmatterDocument'>,
-): Promise<
-  Array<{
-    relativePath: string
-    markdown: string
-    body: string
-    attributes: ExperimentFrontmatter
-  }>
-> {
-  const experimentsRoot = path.join(vaultRoot, 'bank', 'experiments')
-  const files = await safeReadMarkdownFiles(experimentsRoot)
-  const entries: Array<{
-    relativePath: string
-    markdown: string
-    body: string
-    attributes: ExperimentFrontmatter
-  }> = []
-
-  for (const fileName of files) {
-    const relativePath = path.posix.join('bank/experiments', fileName)
-    const markdown = await readFile(path.join(vaultRoot, relativePath), 'utf8')
-    const document = core.parseFrontmatterDocument(markdown)
-    entries.push({
-      relativePath,
-      markdown,
-      body: document.body,
-      attributes: validateExperimentFrontmatter(document.attributes),
-    })
-  }
-
-  return entries
-}
-
-function validateExperimentFrontmatter(value: unknown): ExperimentFrontmatter {
-  const result = experimentFrontmatterSchema.safeParse(value)
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      'Experiment frontmatter is invalid.',
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-function resolveExperimentPromotionTarget(
-  entries: Array<{
-    relativePath: string
-    attributes: ExperimentFrontmatter
-  }>,
-) {
-  const openEntries = entries.filter(
-    (entry) =>
-      entry.attributes.status !== 'completed' &&
-      entry.attributes.status !== 'abandoned',
-  )
-
-  if (openEntries.length === 1) {
-    return openEntries[0]
-  }
-
-  if (entries.length === 1) {
-    return entries[0]
-  }
-
-  const candidates = openEntries.length > 0 ? openEntries : entries
-  if (candidates.length === 0) {
-    throw new VaultCliError(
-      'INBOX_EXPERIMENT_TARGET_MISSING',
-      'Experiment-note promotion requires at least one experiment document in bank/experiments.',
-    )
-  }
-
-  throw new VaultCliError(
-    'INBOX_EXPERIMENT_TARGET_AMBIGUOUS',
-    'Experiment-note promotion needs exactly one unambiguous experiment target.',
-    {
-      candidates: candidates.map((entry) => ({
-        experimentId: entry.attributes.experimentId,
-        slug: entry.attributes.slug,
-        status: entry.attributes.status,
-      })),
-    },
-  )
-}
-
-function requireExperimentPromotionEntry(
-  entries: Array<{
-    relativePath: string
-    attributes: ExperimentFrontmatter
-  }>,
-  lookupId: string | null,
-  relatedId: string | null,
-  capture: RuntimeCaptureRecord,
-) {
-  if (!lookupId || !relatedId) {
-    throw new VaultCliError(
-      'INBOX_PROMOTION_STATE_INVALID',
-      'Stored experiment-note promotion state is missing canonical ids.',
-    )
-  }
-
-  if (relatedId !== capture.eventId) {
-    throw new VaultCliError(
-      'INBOX_PROMOTION_STATE_INVALID',
-      'Stored experiment-note promotion state does not match the capture event.',
-    )
-  }
-
-  const existing = entries.find(
-    (entry) =>
-      entry.attributes.experimentId === lookupId ||
-      entry.attributes.slug === lookupId,
-  )
-  if (!existing) {
-    throw new VaultCliError(
-      'INBOX_PROMOTION_CANONICAL_MISSING',
-      'Local experiment-note promotion state exists, but the target experiment could not be verified.',
-      {
-        captureId: capture.captureId,
-        lookupId,
-      },
-    )
-  }
-
-  return existing
-}
-
-async function listCanonicalManifestPaths(
-  absoluteVaultRoot: string,
-  manifestDirectory: string,
-): Promise<string[]> {
-  return walkRelativeFiles(absoluteVaultRoot, manifestDirectory, 'manifest.json')
-}
-
-async function walkRelativeFiles(
-  absoluteVaultRoot: string,
-  relativeDirectory: string,
-  fileName: string,
-): Promise<string[]> {
-  const absoluteDirectory = path.join(absoluteVaultRoot, relativeDirectory)
-  if (!(await fileExists(absoluteDirectory))) {
-    return []
-  }
-
-  const matches: string[] = []
-  const stack = [absoluteDirectory]
-
-  while (stack.length > 0) {
-    const current = stack.pop()
-    if (!current) {
-      continue
-    }
-
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const absoluteEntry = path.join(current, entry.name)
-      if (entry.isDirectory()) {
-        stack.push(absoluteEntry)
-        continue
-      }
-      if (entry.isFile() && entry.name === fileName) {
-        matches.push(relativeToVault(absoluteVaultRoot, absoluteEntry))
-      }
-    }
-  }
-
-  return matches.sort((left, right) => left.localeCompare(right))
-}
-
-async function safeReadMarkdownFiles(directory: string): Promise<string[]> {
-  try {
-    const entries = await readdir(directory, { withFileTypes: true })
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-      .map((entry) => entry.name)
-      .sort((left, right) => left.localeCompare(right))
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      String((error as { code?: string }).code) === 'ENOENT'
-    ) {
-      return []
-    }
-
-    throw error
-  }
-}
-
-async function readCanonicalManifest<TManifest>(
-  absoluteVaultRoot: string,
-  relativePath: string,
-  schema: z.ZodType<TManifest>,
-): Promise<TManifest | null> {
-  try {
-    const raw = await readFile(path.join(absoluteVaultRoot, relativePath), 'utf8')
-    return schema.parse(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-function extractCanonicalString(
-  record: Record<string, unknown>,
-  key: string,
-): string | null {
-  const value = record[key]
-  return typeof value === 'string' ? value : null
-}
-
-async function resolveAttachmentSha256(
-  absoluteVaultRoot: string,
-  attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
-): Promise<string> {
-  if (typeof attachment.sha256 === 'string' && attachment.sha256.length > 0) {
-    return attachment.sha256
-  }
-  if (!attachment.storedPath) {
-    throw new VaultCliError(
-      'INBOX_ATTACHMENT_HASH_MISSING',
-      'Attachment hash could not be resolved from the stored inbox artifact.',
-    )
-  }
-
-  const content = await readFile(
-    path.join(absoluteVaultRoot, attachment.storedPath),
-  )
-  return createHash('sha256').update(content).digest('hex')
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
-
-function passCheck(
-  name: string,
-  message: string,
-  details?: Record<string, unknown>,
-): InboxDoctorCheck {
-  return inboxDoctorCheckSchema.parse({
-    name,
-    status: 'pass',
-    message,
-    details,
-  })
-}
-
-function warnCheck(
-  name: string,
-  message: string,
-  details?: Record<string, unknown>,
-): InboxDoctorCheck {
-  return inboxDoctorCheckSchema.parse({
-    name,
-    status: 'warn',
-    message,
-    details,
-  })
-}
-
-function failCheck(
-  name: string,
-  message: string,
-  details?: Record<string, unknown>,
-): InboxDoctorCheck {
-  return inboxDoctorCheckSchema.parse({
-    name,
-    status: 'fail',
-    message,
-    details,
-  })
 }
 
 function unsupportedPromotion(target: 'journal' | 'experiment-note'): VaultCliError {
@@ -4069,133 +2249,3 @@ function unsupportedPromotion(target: 'journal' | 'experiment-note'): VaultCliEr
     `Canonical ${target} promotion is not available yet through a safe shared runtime boundary.`,
   )
 }
-
-function unsupportedAttachmentParse(
-  action: 'show status' | 'parse' | 'reparse',
-): VaultCliError {
-  return new VaultCliError(
-    'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
-    `Attachment parse ${action} is not available through the current inbox runtime boundary.`,
-  )
-}
-
-const canonicalMealManifestSchema = z.object({
-  importId: z.string().min(1),
-  importKind: z.literal('meal'),
-  importedAt: z.string().min(1),
-  source: z.string().nullable(),
-  artifacts: z.array(
-    z.object({
-      role: z.string().min(1),
-      sha256: z.string().min(1),
-    }),
-  ),
-  provenance: z.record(z.string(), z.unknown()),
-})
-
-const canonicalDocumentManifestSchema = z.object({
-  importId: z.string().min(1),
-  importKind: z.literal('document'),
-  importedAt: z.string().min(1),
-  source: z.string().nullable(),
-  artifacts: z.array(
-    z.object({
-      role: z.string().min(1),
-      sha256: z.string().min(1),
-    }),
-  ),
-  provenance: z.record(z.string(), z.unknown()),
-})
-
-type CanonicalMealManifest = z.infer<typeof canonicalMealManifestSchema>
-type CanonicalDocumentManifest = z.infer<typeof canonicalDocumentManifestSchema>
-
-const mealCanonicalPromotionSpec = {
-  target: 'meal',
-  manifestDirectory: RAW_MEALS_DIRECTORY,
-  manifestSchema: canonicalMealManifestSchema,
-  matchesManifest(
-    manifest: CanonicalMealManifest,
-    context: {
-      photoSha256: string
-      audioSha256: string | null
-    },
-  ): boolean {
-    const manifestPhoto = manifest.artifacts.find(
-      (artifact) => artifact.role === 'photo',
-    )
-    const manifestAudio = manifest.artifacts.find(
-      (artifact) => artifact.role === 'audio',
-    )
-    if (!manifestPhoto || manifestPhoto.sha256 !== context.photoSha256) {
-      return false
-    }
-
-    return (manifestAudio?.sha256 ?? null) === context.audioSha256
-  },
-} satisfies CanonicalPromotionLookupSpec<
-  CanonicalMealManifest,
-  {
-    photoSha256: string
-    audioSha256: string | null
-  }
->
-
-const documentCanonicalPromotionSpec = {
-  target: 'document',
-  manifestDirectory: RAW_DOCUMENTS_DIRECTORY,
-  manifestSchema: canonicalDocumentManifestSchema,
-  matchesManifest(
-    manifest: CanonicalDocumentManifest,
-    context: {
-      documentSha256: string
-      title: string | null
-    },
-  ): boolean {
-    const manifestDocument = manifest.artifacts.find(
-      (artifact) => artifact.role === 'source_document',
-    )
-    if (!manifestDocument || manifestDocument.sha256 !== context.documentSha256) {
-      return false
-    }
-
-    return (
-      normalizeNullableString(extractCanonicalString(manifest.provenance, 'title')) ===
-      context.title
-    )
-  },
-} satisfies CanonicalPromotionLookupSpec<
-  CanonicalDocumentManifest,
-  {
-    documentSha256: string
-    title: string | null
-  }
->
-
-const journalPromotionMarkdownSpec = {
-  sectionHeading: '## Inbox Captures',
-  sectionStartMarker: JOURNAL_PROMOTION_SECTION_START,
-  sectionEndMarker: JOURNAL_PROMOTION_SECTION_END,
-  blockHeading(capture: RuntimeCaptureRecord): string {
-    return `### Inbox Capture ${capture.captureId}`
-  },
-} satisfies PromotionMarkdownTargetSpec<undefined>
-
-const experimentPromotionMarkdownSpec = {
-  sectionHeading: '## Inbox Experiment Notes',
-  sectionStartMarker: EXPERIMENT_NOTE_SECTION_START,
-  sectionEndMarker: EXPERIMENT_NOTE_SECTION_END,
-  blockHeading(capture: RuntimeCaptureRecord): string {
-    return `### Inbox Note ${capture.captureId}`
-  },
-  blockExtraLines(
-    _capture: RuntimeCaptureRecord,
-    context: {
-      experimentSlug: string
-    },
-  ): string[] {
-    return [`Experiment: ${context.experimentSlug}`]
-  },
-} satisfies PromotionMarkdownTargetSpec<{
-  experimentSlug: string
-}>

@@ -1,14 +1,4 @@
-import { readFile } from 'node:fs/promises'
-import {
-  CONTRACT_SCHEMA_VERSION,
-  EXPERIMENT_STATUSES,
-  ID_PREFIXES,
-  coreFrontmatterSchema,
-  eventRecordSchema,
-  experimentFrontmatterSchema,
-  journalDayFrontmatterSchema,
-  vaultMetadataSchema,
-} from '@healthybob/contracts'
+import { EXPERIMENT_STATUSES } from '@healthybob/contracts'
 import { z } from 'incur'
 import {
   loadQueryRuntime,
@@ -26,64 +16,19 @@ import {
 import { readJsonPayload } from './shared.js'
 import {
   compactObject,
-  generateContractId,
   inferVaultLinkKind,
   isVaultQueryableRecordId,
   normalizeIsoTimestamp,
   normalizeOptionalText,
-  normalizeStringArray,
-  resolveVaultRelativePath,
+  toVaultCliError,
   stringArray,
   uniqueStrings,
 } from './vault-usecase-helpers.js'
 
 type JsonObject = Record<string, unknown>
-
 type EntityFamily = 'experiment' | 'journal'
-type ExperimentStatus = (typeof EXPERIMENT_STATUSES)[number]
-
-interface CanonicalWriteLockHandle {
-  release(): Promise<void>
-}
-
-interface CanonicalTextWriteInput {
-  relativePath: string
-  content: string
-  overwrite?: boolean
-  allowExistingMatch?: boolean
-}
-
-interface CanonicalJsonlAppendInput {
-  relativePath: string
-  record: JsonObject
-}
-
-interface CanonicalDeleteInput {
-  relativePath: string
-}
-
-interface FrontmatterDocument {
-  attributes: JsonObject
-  body: string
-}
 
 interface ExperimentJournalVaultCoreRuntime {
-  acquireCanonicalWriteLock(
-    vaultRoot: string,
-  ): Promise<CanonicalWriteLockHandle>
-  applyCanonicalWriteBatch(input: {
-    vaultRoot: string
-    operationType: string
-    summary: string
-    occurredAt?: string | Date
-    textWrites?: CanonicalTextWriteInput[]
-    jsonlAppends?: CanonicalJsonlAppendInput[]
-    deletes?: CanonicalDeleteInput[]
-  }): Promise<{
-    textWrites: string[]
-    jsonlAppends: string[]
-    deletes: string[]
-  }>
   createExperiment(input: {
     vaultRoot: string
     slug: string
@@ -99,6 +44,52 @@ interface ExperimentJournalVaultCoreRuntime {
       relativePath: string
     }
   }>
+  updateExperiment(input: {
+    vaultRoot: string
+    relativePath: string
+    title?: string
+    hypothesis?: string
+    startedOn?: string
+    status?: string
+    body?: string
+    tags?: string[]
+  }): Promise<{
+    experimentId: string
+    slug: string
+    relativePath: string
+    status: string
+    updated: true
+  }>
+  checkpointExperiment(input: {
+    vaultRoot: string
+    relativePath: string
+    occurredAt?: string
+    title: string
+    note?: string
+  }): Promise<{
+    experimentId: string
+    slug: string
+    relativePath: string
+    status: string
+    eventId: string
+    ledgerFile: string
+    updated: true
+  }>
+  stopExperiment(input: {
+    vaultRoot: string
+    relativePath: string
+    occurredAt?: string
+    title: string
+    note?: string
+  }): Promise<{
+    experimentId: string
+    slug: string
+    relativePath: string
+    status: string
+    eventId: string
+    ledgerFile: string
+    updated: true
+  }>
   ensureJournalDay(input: {
     vaultRoot: string
     date?: string
@@ -106,16 +97,71 @@ interface ExperimentJournalVaultCoreRuntime {
     created: boolean
     relativePath: string
   }>
-  parseFrontmatterDocument(markdown: string): FrontmatterDocument
-  stringifyFrontmatterDocument(input: {
-    attributes: JsonObject
-    body: string
-  }): string
-  toMonthlyShardRelativePath(
-    relativeDirectory: string,
-    occurredAt: string,
-    fieldName: string,
-  ): string
+  appendJournal(input: {
+    vaultRoot: string
+    date: string
+    text: string
+  }): Promise<{
+    relativePath: string
+    created: boolean
+    updated: true
+  }>
+  linkJournalEventIds(input: {
+    vaultRoot: string
+    date: string
+    values: string[]
+  }): Promise<{
+    relativePath: string
+    created: boolean
+    changed: number
+    eventIds: string[]
+    sampleStreams: string[]
+  }>
+  unlinkJournalEventIds(input: {
+    vaultRoot: string
+    date: string
+    values: string[]
+  }): Promise<{
+    relativePath: string
+    created: boolean
+    changed: number
+    eventIds: string[]
+    sampleStreams: string[]
+  }>
+  linkJournalStreams(input: {
+    vaultRoot: string
+    date: string
+    values: string[]
+  }): Promise<{
+    relativePath: string
+    created: boolean
+    changed: number
+    eventIds: string[]
+    sampleStreams: string[]
+  }>
+  unlinkJournalStreams(input: {
+    vaultRoot: string
+    date: string
+    values: string[]
+  }): Promise<{
+    relativePath: string
+    created: boolean
+    changed: number
+    eventIds: string[]
+    sampleStreams: string[]
+  }>
+  updateVaultSummary(input: {
+    vaultRoot: string
+    title?: string
+    timezone?: string
+  }): Promise<{
+    metadataFile: string
+    corePath: string
+    title: string
+    timezone: string
+    updatedAt: string
+    updated: true
+  }>
 }
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
@@ -206,58 +252,29 @@ export async function updateExperimentRecord(input: {
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
   const entity = await requireEntityFamily(input.vault, input.lookup, 'experiment')
-  const relativePath = entity.path
-  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
-  const lock = await core.acquireCanonicalWriteLock(input.vault)
-
   try {
-    const markdown = await readFile(absolutePath, 'utf8')
-    const parsed = parseExperimentDocument(core, markdown, relativePath)
-    const existing = parsed.attributes
-    const nextAttributes = compactObject({
-      ...existing,
-      title: normalizeOptionalText(input.title) ?? existing.title,
-      hypothesis:
-        input.hypothesis === undefined
-          ? existing.hypothesis
-          : normalizeOptionalText(input.hypothesis) ?? undefined,
-      startedOn: input.startedOn ?? existing.startedOn,
-      status: input.status ?? existing.status,
-      tags:
-        input.tags === undefined
-          ? existing.tags
-          : normalizeStringArray(input.tags) ?? undefined,
-    })
-    const validated = validateExperimentFrontmatter(nextAttributes, relativePath)
-    const nextMarkdown = core.stringifyFrontmatterDocument({
-      attributes: validated,
-      body: input.body ?? parsed.body,
-    })
-    await core.applyCanonicalWriteBatch({
+    const result = await core.updateExperiment({
       vaultRoot: input.vault,
-      operationType: 'experiment_update',
-      summary: `Update experiment ${validated.experimentId}`,
-      occurredAt: new Date(),
-      textWrites: [
-        {
-          relativePath,
-          content: nextMarkdown,
-          overwrite: true,
-        },
-      ],
+      relativePath: entity.path,
+      title: input.title,
+      hypothesis: input.hypothesis,
+      startedOn: input.startedOn,
+      status: input.status,
+      body: input.body,
+      tags: input.tags,
     })
 
     return {
       vault: input.vault,
-      experimentId: validated.experimentId,
-      lookupId: validated.experimentId,
-      slug: validated.slug,
-      experimentPath: relativePath,
-      status: validated.status,
-      updated: true,
+      experimentId: result.experimentId,
+      lookupId: result.experimentId,
+      slug: result.slug,
+      experimentPath: result.relativePath,
+      status: result.status,
+      updated: result.updated,
     }
-  } finally {
-    await lock.release()
+  } catch (error) {
+    throw toVaultCliError(error)
   }
 }
 
@@ -271,12 +288,10 @@ export async function checkpointExperimentRecord(input: {
   return appendExperimentLifecycleEvent({
     vault: input.vault,
     lookup: input.lookup,
-    phase: 'checkpoint',
+    mode: 'checkpoint',
     occurredAt: input.occurredAt,
     title: input.title ?? 'Checkpoint',
     note: input.note,
-    nextStatus: undefined,
-    endedOn: undefined,
   })
 }
 
@@ -303,17 +318,13 @@ export async function stopExperimentRecord(input: {
   occurredAt?: string
   note?: string
 }) {
-  const occurredAt = normalizeTimestampInput(input.occurredAt ?? new Date())
-
   return appendExperimentLifecycleEvent({
     vault: input.vault,
     lookup: input.lookup,
-    phase: 'stop',
-    occurredAt,
+    mode: 'stop',
+    occurredAt: input.occurredAt,
     title: 'Stopped',
     note: input.note,
-    nextStatus: 'completed',
-    endedOn: occurredAt.slice(0, 10),
   })
 }
 
@@ -382,60 +393,27 @@ export async function appendJournalText(input: {
   text: string
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
-  const ensured = await core.ensureJournalDay({
-    vaultRoot: input.vault,
-    date: input.date,
-  })
-  const relativePath = ensured.relativePath
-  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
-  const lock = await core.acquireCanonicalWriteLock(input.vault)
-
   try {
-    const markdown = await readExistingJournalMarkdown(absolutePath, input.date)
-    const parsed = parseJournalDocument(core, markdown, relativePath)
-    const nextMarkdown = core.stringifyFrontmatterDocument({
-      attributes: parsed.attributes,
-      body: appendMarkdownParagraph(parsed.body, input.text),
-    })
-    await core.applyCanonicalWriteBatch({
+    const result = await core.appendJournal({
       vaultRoot: input.vault,
-      operationType: 'journal_append_text',
-      summary: `Append journal text for ${input.date}`,
-      occurredAt: `${input.date}T00:00:00.000Z`,
-      textWrites: [
-        {
-          relativePath,
-          content: nextMarkdown,
-          overwrite: true,
-        },
-      ],
+      date: input.date,
+      text: input.text,
     })
 
     return {
       vault: input.vault,
       date: input.date,
       lookupId: `journal:${input.date}`,
-      journalPath: relativePath,
-      created: ensured.created,
-      updated: true,
+      journalPath: result.relativePath,
+      created: result.created,
+      updated: result.updated,
     }
-  } finally {
-    await lock.release()
-  }
-}
-
-async function readExistingJournalMarkdown(
-  absolutePath: string,
-  date: string,
-) {
-  try {
-    return await readFile(absolutePath, 'utf8')
   } catch (error) {
-    if ((error as { code?: unknown }).code === 'ENOENT') {
-      throw new VaultCliError('not_found', `No journal day found for "${date}".`)
-    }
-
-    throw error
+    throw toVaultCliError(error, {
+      HB_JOURNAL_DAY_MISSING: {
+        code: 'not_found',
+      },
+    })
   }
 }
 
@@ -447,8 +425,7 @@ export async function linkJournalEventIds(input: {
   return mutateJournalLinks({
     vault: input.vault,
     date: input.date,
-    createdMessage: true,
-    key: 'eventIds',
+    kind: 'eventIds',
     values: input.eventIds,
     operation: 'link',
   })
@@ -462,8 +439,7 @@ export async function unlinkJournalEventIds(input: {
   return mutateJournalLinks({
     vault: input.vault,
     date: input.date,
-    createdMessage: false,
-    key: 'eventIds',
+    kind: 'eventIds',
     values: input.eventIds,
     operation: 'unlink',
   })
@@ -477,8 +453,7 @@ export async function linkJournalStreams(input: {
   return mutateJournalLinks({
     vault: input.vault,
     date: input.date,
-    createdMessage: true,
-    key: 'sampleStreams',
+    kind: 'sampleStreams',
     values: input.sampleStreams,
     operation: 'link',
   })
@@ -492,8 +467,7 @@ export async function unlinkJournalStreams(input: {
   return mutateJournalLinks({
     vault: input.vault,
     date: input.date,
-    createdMessage: false,
-    key: 'sampleStreams',
+    kind: 'sampleStreams',
     values: input.sampleStreams,
     operation: 'unlink',
   })
@@ -562,68 +536,24 @@ export async function updateVaultSummary(input: {
   timezone?: string
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
-  const metadataPath = 'vault.json'
-  const corePath = 'CORE.md'
-  const absoluteMetadataPath = await resolveVaultRelativePath(input.vault, metadataPath)
-  const absoluteCorePath = await resolveVaultRelativePath(input.vault, corePath)
-  const lock = await core.acquireCanonicalWriteLock(input.vault)
-
   try {
-    const metadata = validateVaultMetadata(
-      JSON.parse(await readFile(absoluteMetadataPath, 'utf8')),
-    )
-    const coreDocument = parseCoreDocument(
-      core,
-      await readFile(absoluteCorePath, 'utf8'),
-      corePath,
-    )
-    const nextTitle = normalizeOptionalText(input.title) ?? metadata.title
-    const nextTimezone = normalizeOptionalText(input.timezone) ?? metadata.timezone
-    const updatedAt = new Date().toISOString()
-    const nextMetadata = validateVaultMetadata({
-      ...metadata,
-      title: nextTitle,
-      timezone: nextTimezone,
-    })
-    const nextCoreAttributes = validateCoreFrontmatter(compactObject({
-      ...coreDocument.attributes,
-      title: nextTitle,
-      timezone: nextTimezone,
-      updatedAt,
-    }))
-    await core.applyCanonicalWriteBatch({
+    const result = await core.updateVaultSummary({
       vaultRoot: input.vault,
-      operationType: 'vault_summary_update',
-      summary: 'Update vault summary',
-      occurredAt: updatedAt,
-      textWrites: [
-        {
-          relativePath: metadataPath,
-          content: `${JSON.stringify(nextMetadata, null, 2)}\n`,
-          overwrite: true,
-        },
-        {
-          relativePath: corePath,
-          content: core.stringifyFrontmatterDocument({
-            attributes: nextCoreAttributes,
-            body: replaceMarkdownTitle(coreDocument.body, nextTitle),
-          }),
-          overwrite: true,
-        },
-      ],
+      title: input.title,
+      timezone: input.timezone,
     })
 
     return {
       vault: input.vault,
-      metadataFile: metadataPath,
-      corePath,
-      title: nextTitle,
-      timezone: nextTimezone,
-      updatedAt,
-      updated: true,
+      metadataFile: result.metadataFile,
+      corePath: result.corePath,
+      title: result.title,
+      timezone: result.timezone,
+      updatedAt: result.updatedAt,
+      updated: result.updated,
     }
-  } finally {
-    await lock.release()
+  } catch (error) {
+    throw toVaultCliError(error)
   }
 }
 
@@ -674,164 +604,102 @@ export async function showVaultStats(vault: string) {
 async function appendExperimentLifecycleEvent(input: {
   vault: string
   lookup: string
-  phase: 'checkpoint' | 'stop'
   occurredAt?: string
   title: string
   note?: string
-  nextStatus?: ExperimentStatus
-  endedOn?: string
+  mode: 'checkpoint' | 'stop'
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
   const entity = await requireEntityFamily(input.vault, input.lookup, 'experiment')
-  const relativePath = entity.path
-  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
-  const lock = await core.acquireCanonicalWriteLock(input.vault)
-  const occurredAt = normalizeTimestampInput(input.occurredAt ?? new Date())
 
   try {
-    const markdown = await readFile(absolutePath, 'utf8')
-    const parsed = parseExperimentDocument(core, markdown, relativePath)
-    const attributes = parsed.attributes
-    const nextAttributes = validateExperimentFrontmatter(compactObject({
-      ...attributes,
-      endedOn: input.endedOn ?? attributes.endedOn,
-      status: input.nextStatus ?? attributes.status,
-    }), relativePath)
-    const nextMarkdown = core.stringifyFrontmatterDocument({
-      attributes: nextAttributes,
-      body: appendExperimentNoteBlock(parsed.body, {
-        occurredAt,
-        title: input.title,
-        note: input.note,
-      }),
-    })
-    const eventRecord = buildEventRecord({
-      kind: 'experiment_event',
-      occurredAt,
-      title: `${attributes.title} ${input.title}`.trim(),
-      note: input.note,
-      relatedIds: [attributes.experimentId],
-      fields: {
-        experimentId: attributes.experimentId,
-        experimentSlug: attributes.slug,
-        phase: input.phase,
-      },
-    })
-    const ledgerFile = core.toMonthlyShardRelativePath(
-      'ledger/events',
-      occurredAt,
-      'occurredAt',
-    )
-    await core.applyCanonicalWriteBatch({
-      vaultRoot: input.vault,
-      operationType: 'experiment_lifecycle_event',
-      summary: `Append ${input.phase} lifecycle event for ${attributes.experimentId}`,
-      occurredAt,
-      textWrites: [
-        {
-          relativePath,
-          content: nextMarkdown,
-          overwrite: true,
-        },
-      ],
-      jsonlAppends: [
-        {
-          relativePath: ledgerFile,
-          record: eventRecord,
-        },
-      ],
-    })
+    const result =
+      input.mode === 'checkpoint'
+        ? await core.checkpointExperiment({
+            vaultRoot: input.vault,
+            relativePath: entity.path,
+            occurredAt: input.occurredAt,
+            title: input.title,
+            note: input.note,
+          })
+        : await core.stopExperiment({
+            vaultRoot: input.vault,
+            relativePath: entity.path,
+            occurredAt: input.occurredAt,
+            title: input.title,
+            note: input.note,
+          })
 
     return {
       vault: input.vault,
-      experimentId: attributes.experimentId,
-      lookupId: attributes.experimentId,
-      slug: attributes.slug,
-      experimentPath: relativePath,
-      status: nextAttributes.status,
-      eventId: eventRecord.id,
-      ledgerFile,
-      updated: true,
+      experimentId: result.experimentId,
+      lookupId: result.experimentId,
+      slug: result.slug,
+      experimentPath: result.relativePath,
+      status: result.status,
+      eventId: result.eventId,
+      ledgerFile: result.ledgerFile,
+      updated: result.updated,
     }
-  } finally {
-    await lock.release()
+  } catch (error) {
+    throw toVaultCliError(error, {
+      HB_INVALID_TIMESTAMP: {
+        code: 'invalid_timestamp',
+      },
+    })
   }
 }
 
 async function mutateJournalLinks(input: {
   vault: string
   date: string
-  createdMessage: boolean
-  key: 'eventIds' | 'sampleStreams'
+  kind: 'eventIds' | 'sampleStreams'
   values: string[]
   operation: 'link' | 'unlink'
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
-  const ensured =
-    input.operation === 'link'
-      ? await core.ensureJournalDay({
-          vaultRoot: input.vault,
-          date: input.date,
-        })
-      : null
-  const relativePath =
-    ensured?.relativePath ?? `journal/${input.date.slice(0, 4)}/${input.date}.md`
-  const absolutePath = await resolveVaultRelativePath(input.vault, relativePath)
-  const lock = await core.acquireCanonicalWriteLock(input.vault)
-
   try {
-    const markdown = await readExistingJournalMarkdown(absolutePath, input.date)
-    const parsed = parseJournalDocument(core, markdown, relativePath)
-    const currentValues = new Set(parsed.attributes[input.key])
-    let changed = 0
-
-    for (const value of normalizeStringArray(input.values) ?? []) {
-      if (input.operation === 'link') {
-        if (!currentValues.has(value)) {
-          currentValues.add(value)
-          changed += 1
-        }
-        continue
-      }
-
-      if (currentValues.delete(value)) {
-        changed += 1
-      }
-    }
-
-    const nextAttributes = validateJournalFrontmatter({
-      ...parsed.attributes,
-      [input.key]: [...currentValues].sort((left, right) => left.localeCompare(right)),
-    }, relativePath)
-    await core.applyCanonicalWriteBatch({
-      vaultRoot: input.vault,
-      operationType: input.operation === 'link' ? 'journal_link' : 'journal_unlink',
-      summary: `${input.operation === 'link' ? 'Link' : 'Unlink'} journal ${input.key} for ${input.date}`,
-      occurredAt: `${input.date}T00:00:00.000Z`,
-      textWrites: [
-        {
-          relativePath,
-          content: core.stringifyFrontmatterDocument({
-            attributes: nextAttributes,
-            body: parsed.body,
-          }),
-          overwrite: true,
-        },
-      ],
-    })
+    const result =
+      input.kind === 'eventIds'
+        ? input.operation === 'link'
+          ? await core.linkJournalEventIds({
+              vaultRoot: input.vault,
+              date: input.date,
+              values: input.values,
+            })
+          : await core.unlinkJournalEventIds({
+              vaultRoot: input.vault,
+              date: input.date,
+              values: input.values,
+            })
+        : input.operation === 'link'
+          ? await core.linkJournalStreams({
+              vaultRoot: input.vault,
+              date: input.date,
+              values: input.values,
+            })
+          : await core.unlinkJournalStreams({
+              vaultRoot: input.vault,
+              date: input.date,
+              values: input.values,
+            })
 
     return {
       vault: input.vault,
       date: input.date,
       lookupId: `journal:${input.date}`,
-      journalPath: relativePath,
-      created: ensured?.created ?? false,
-      changed,
-      eventIds: nextAttributes.eventIds,
-      sampleStreams: nextAttributes.sampleStreams,
+      journalPath: result.relativePath,
+      created: result.created,
+      changed: result.changed,
+      eventIds: result.eventIds,
+      sampleStreams: result.sampleStreams,
     }
-  } finally {
-    await lock.release()
+  } catch (error) {
+    throw toVaultCliError(error, {
+      HB_JOURNAL_DAY_MISSING: {
+        code: 'not_found',
+      },
+    })
   }
 }
 
@@ -852,137 +720,6 @@ async function requireEntityFamily(
   }
 
   return entity
-}
-
-function parseExperimentDocument(
-  core: ExperimentJournalVaultCoreRuntime,
-  markdown: string,
-  relativePath: string,
-) {
-  const document = core.parseFrontmatterDocument(markdown)
-  return {
-    attributes: validateExperimentFrontmatter(document.attributes, relativePath),
-    body: document.body,
-  }
-}
-
-function parseJournalDocument(
-  core: ExperimentJournalVaultCoreRuntime,
-  markdown: string,
-  relativePath: string,
-) {
-  const document = core.parseFrontmatterDocument(markdown)
-  return {
-    attributes: validateJournalFrontmatter(document.attributes, relativePath),
-    body: document.body,
-  }
-}
-
-function parseCoreDocument(
-  core: ExperimentJournalVaultCoreRuntime,
-  markdown: string,
-  relativePath: string,
-) {
-  const document = core.parseFrontmatterDocument(markdown)
-  return {
-    attributes: validateCoreFrontmatter(document.attributes, relativePath),
-    body: document.body,
-  }
-}
-
-function validateExperimentFrontmatter(
-  value: unknown,
-  relativePath = 'experiment',
-) {
-  const result = experimentFrontmatterSchema.safeParse(value)
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `Experiment frontmatter for "${relativePath}" is invalid.`,
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-function validateJournalFrontmatter(
-  value: unknown,
-  relativePath = 'journal',
-) {
-  const result = journalDayFrontmatterSchema.safeParse(value)
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `Journal frontmatter for "${relativePath}" is invalid.`,
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-function validateCoreFrontmatter(
-  value: unknown,
-  relativePath = 'CORE.md',
-) {
-  const result = coreFrontmatterSchema.safeParse(value)
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `CORE frontmatter for "${relativePath}" is invalid.`,
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-function validateVaultMetadata(value: unknown) {
-  const result = vaultMetadataSchema.safeParse(value)
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      'Vault metadata is invalid.',
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-function buildEventRecord(input: {
-  kind: 'experiment_event'
-  occurredAt: string
-  title: string
-  note?: string
-  relatedIds?: string[]
-  fields: JsonObject
-}) {
-  const record = compactObject({
-    schemaVersion: CONTRACT_SCHEMA_VERSION.event,
-    id: generateContractId(ID_PREFIXES.event),
-    kind: input.kind,
-    occurredAt: normalizeTimestampInput(input.occurredAt),
-    recordedAt: new Date().toISOString(),
-    dayKey: normalizeTimestampInput(input.occurredAt).slice(0, 10),
-    source: 'manual',
-    title: input.title.trim(),
-    note: normalizeOptionalText(input.note) ?? undefined,
-    relatedIds: normalizeStringArray(input.relatedIds),
-    ...input.fields,
-  })
-  const result = eventRecordSchema.safeParse(record)
-
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `Event payload for kind "${input.kind}" is invalid.`,
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data as JsonObject & { id: string }
 }
 
 function toShowEntity(entity: QueryCanonicalEntity) {
@@ -1040,66 +777,6 @@ async function loadExperimentJournalVaultQueryRuntime(): Promise<QueryRuntimeMod
 
 async function loadExperimentJournalVaultCoreRuntime(): Promise<ExperimentJournalVaultCoreRuntime> {
   return loadRuntimeModule<ExperimentJournalVaultCoreRuntime>('@healthybob/core')
-}
-
-function appendMarkdownParagraph(body: string, text: string) {
-  const trimmedBody = body.trimEnd()
-  const trimmedText = text.trim()
-
-  if (trimmedBody.length === 0) {
-    return `${trimmedText}\n`
-  }
-
-  return `${trimmedBody}\n\n${trimmedText}\n`
-}
-
-function appendExperimentNoteBlock(
-  body: string,
-  input: {
-    occurredAt: string
-    title: string
-    note?: string
-  },
-) {
-  const trimmedBody = body.trimEnd()
-  const lines = [`### ${input.title} (${input.occurredAt})`]
-  const note = normalizeOptionalText(input.note)
-
-  if (note) {
-    lines.push('', note)
-  }
-
-  const block = `${lines.join('\n')}\n`
-  if (trimmedBody.length === 0) {
-    return `## Notes\n\n${block}`
-  }
-
-  if (trimmedBody.includes('\n## Notes\n')) {
-    return `${trimmedBody}\n\n${block}`
-  }
-
-  return `${trimmedBody}\n\n## Notes\n\n${block}`
-}
-
-function replaceMarkdownTitle(body: string, title: string) {
-  const trimmedBody = body.trimStart()
-  if (trimmedBody.startsWith('# ')) {
-    return body.replace(/^# .*(?:\r?\n)?/u, `# ${title}\n`)
-  }
-
-  return `# ${title}\n\n${body.trimStart()}`
-}
-
-function normalizeTimestampInput(value: string | Date) {
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    throw new VaultCliError(
-      'invalid_timestamp',
-      `Invalid timestamp "${String(value)}".`,
-    )
-  }
-
-  return date.toISOString()
 }
 
 function latestIsoTimestamp(records: readonly QueryVaultRecord[]) {

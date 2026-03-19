@@ -8,6 +8,21 @@ import {
   importSamples as importSamplesInternal,
 } from "./mutations.js";
 import {
+  appendJournal as appendJournalInternal,
+  checkpointExperiment as checkpointExperimentInternal,
+  linkJournalEventIds as linkJournalEventIdsInternal,
+  linkJournalStreams as linkJournalStreamsInternal,
+  promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
+  promoteInboxJournal as promoteInboxJournalInternal,
+  stopExperiment as stopExperimentInternal,
+  unlinkJournalEventIds as unlinkJournalEventIdsInternal,
+  unlinkJournalStreams as unlinkJournalStreamsInternal,
+  updateExperiment as updateExperimentInternal,
+  updateVaultSummary as updateVaultSummaryInternal,
+  upsertEvent as upsertEventInternal,
+  upsertProvider as upsertProviderInternal,
+} from "./canonical-mutations.js";
+import {
   acquireCanonicalWriteLock,
   inspectCanonicalWriteLock,
 } from "./operations/canonical-write-lock.js";
@@ -198,10 +213,58 @@ export async function ensureJournalDay(
   return withCanonicalWriteLock(input.vaultRoot, () => ensureJournalDayInternal(input));
 }
 
+export async function appendJournal(
+  input: Parameters<typeof appendJournalInternal>[0],
+): ReturnType<typeof appendJournalInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => appendJournalInternal(input));
+}
+
+export async function linkJournalEventIds(
+  input: Parameters<typeof linkJournalEventIdsInternal>[0],
+): ReturnType<typeof linkJournalEventIdsInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => linkJournalEventIdsInternal(input));
+}
+
+export async function unlinkJournalEventIds(
+  input: Parameters<typeof unlinkJournalEventIdsInternal>[0],
+): ReturnType<typeof unlinkJournalEventIdsInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => unlinkJournalEventIdsInternal(input));
+}
+
+export async function linkJournalStreams(
+  input: Parameters<typeof linkJournalStreamsInternal>[0],
+): ReturnType<typeof linkJournalStreamsInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => linkJournalStreamsInternal(input));
+}
+
+export async function unlinkJournalStreams(
+  input: Parameters<typeof unlinkJournalStreamsInternal>[0],
+): ReturnType<typeof unlinkJournalStreamsInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => unlinkJournalStreamsInternal(input));
+}
+
 export async function createExperiment(
   input: Parameters<typeof createExperimentInternal>[0],
 ): ReturnType<typeof createExperimentInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => createExperimentInternal(input));
+}
+
+export async function updateExperiment(
+  input: Parameters<typeof updateExperimentInternal>[0],
+): ReturnType<typeof updateExperimentInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => updateExperimentInternal(input));
+}
+
+export async function checkpointExperiment(
+  input: Parameters<typeof checkpointExperimentInternal>[0],
+): ReturnType<typeof checkpointExperimentInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => checkpointExperimentInternal(input));
+}
+
+export async function stopExperiment(
+  input: Parameters<typeof stopExperimentInternal>[0],
+): ReturnType<typeof stopExperimentInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => stopExperimentInternal(input));
 }
 
 export async function importDocument(
@@ -222,6 +285,36 @@ export async function importSamples(
   input: Parameters<typeof importSamplesInternal>[0],
 ): ReturnType<typeof importSamplesInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => importSamplesInternal(input));
+}
+
+export async function upsertProvider(
+  input: Parameters<typeof upsertProviderInternal>[0],
+): ReturnType<typeof upsertProviderInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => upsertProviderInternal(input));
+}
+
+export async function upsertEvent(
+  input: Parameters<typeof upsertEventInternal>[0],
+): ReturnType<typeof upsertEventInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => upsertEventInternal(input));
+}
+
+export async function updateVaultSummary(
+  input: Parameters<typeof updateVaultSummaryInternal>[0],
+): ReturnType<typeof updateVaultSummaryInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => updateVaultSummaryInternal(input));
+}
+
+export async function promoteInboxJournal(
+  input: Parameters<typeof promoteInboxJournalInternal>[0],
+): ReturnType<typeof promoteInboxJournalInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => promoteInboxJournalInternal(input));
+}
+
+export async function promoteInboxExperimentNote(
+  input: Parameters<typeof promoteInboxExperimentNoteInternal>[0],
+): ReturnType<typeof promoteInboxExperimentNoteInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => promoteInboxExperimentNoteInternal(input));
 }
 
 export async function importDeviceBatch(

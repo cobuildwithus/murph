@@ -19,6 +19,7 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 15000,
     include: [
+      "packages/core/test/canonical-mutations-boundary.test.ts",
       "packages/core/test/core.test.ts",
       "packages/core/test/device-import.test.ts",
       "packages/core/test/health-bank.test.ts",
@@ -54,6 +55,7 @@ export default defineConfig({
       "packages/cli/test/device-sync-client.test.ts",
       "packages/cli/test/json-input.test.ts",
       "packages/cli/test/incur-smoke.test.ts",
+      "packages/cli/test/canonical-mutation-boundary.test.ts",
       "packages/cli/test/inbox-incur-smoke.test.ts",
       "packages/cli/test/inbox-cli.test.ts",
       "packages/cli/test/inbox-model-harness.test.ts",
