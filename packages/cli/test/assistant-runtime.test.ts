@@ -75,11 +75,15 @@ import {
 } from '../src/assistant/ui/view-model.js'
 import {
   applyComposerEditingInput,
+  formatAssistantTerminalHyperlink,
   normalizeComposerInsertedText,
   renderChatTranscriptFeed,
   renderComposerValue,
+  resolveAssistantHyperlinkTarget,
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
+  splitAssistantMarkdownLinks,
+  supportsAssistantTerminalHyperlinks,
 } from '../src/assistant/ui/ink.js'
 import { LIGHT_ASSISTANT_INK_THEME } from '../src/assistant/ui/theme.js'
 
@@ -1830,6 +1834,88 @@ test('assistant Ink transcript feed stays in one dynamic width-aware container i
   assert.equal(renderedProps.flexDirection, 'column')
   assert.equal(renderedProps.width, '100%')
   assert.equal(children.length, 4)
+})
+
+test('assistant Ink link helpers split markdown links and map absolute file paths to file URLs', () => {
+  const fileTarget = '/tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10'
+
+  assert.deepEqual(
+    splitAssistantMarkdownLinks(
+      `See [workout.ts](${fileTarget}) and [docs](https://example.com/reference).`,
+    ),
+    [
+      {
+        kind: 'text',
+        text: 'See ',
+      },
+      {
+        kind: 'link',
+        label: 'workout.ts',
+        target: fileTarget,
+      },
+      {
+        kind: 'text',
+        text: ' and ',
+      },
+      {
+        kind: 'link',
+        label: 'docs',
+        target: 'https://example.com/reference',
+      },
+      {
+        kind: 'text',
+        text: '.',
+      },
+    ],
+  )
+
+  assert.equal(
+    resolveAssistantHyperlinkTarget(fileTarget),
+    'file:///tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10',
+  )
+  assert.equal(
+    resolveAssistantHyperlinkTarget('https://example.com/reference'),
+    'https://example.com/reference',
+  )
+  assert.equal(resolveAssistantHyperlinkTarget('packages/cli/src/usecases/workout.ts'), null)
+  assert.equal(
+    formatAssistantTerminalHyperlink(
+      'workout.ts',
+      'file:///tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10',
+    ),
+    '\u001B]8;;file:///tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10\u0007workout.ts\u001B]8;;\u0007',
+  )
+})
+
+test('assistant Ink hyperlink support only enables terminal links on supported tty environments', () => {
+  assert.equal(
+    supportsAssistantTerminalHyperlinks({
+      env: {
+        TERM_PROGRAM: 'Apple_Terminal',
+      },
+      isTTY: true,
+    }),
+    true,
+  )
+  assert.equal(
+    supportsAssistantTerminalHyperlinks({
+      env: {
+        TERM_PROGRAM: 'Apple_Terminal',
+      },
+      isTTY: false,
+    }),
+    false,
+  )
+  assert.equal(
+    supportsAssistantTerminalHyperlinks({
+      env: {
+        CI: 'true',
+        TERM_PROGRAM: 'Apple_Terminal',
+      },
+      isTTY: true,
+    }),
+    false,
+  )
 })
 
 test('assistant Ink composer render highlights the first placeholder character when empty', () => {

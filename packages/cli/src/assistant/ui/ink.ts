@@ -1,3 +1,5 @@
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput, type Key } from 'ink'
 import {
@@ -83,6 +85,10 @@ interface ChatEntryRowProps {
   entry: InkChatEntry
 }
 
+interface AssistantMessageTextProps {
+  text: string
+}
+
 interface ChatStatusProps {
   busy: boolean
   busyStartedAt: number | null
@@ -126,6 +132,170 @@ const MODIFIED_RETURN_SEQUENCE = /^\u001b?\[27;(\d+);13~$/u
 
 function useAssistantInkTheme(): AssistantInkTheme {
   return React.useContext(AssistantInkThemeContext)
+}
+
+export function splitAssistantMarkdownLinks(input: string): Array<
+  | {
+      kind: 'link'
+      label: string
+      target: string
+    }
+  | {
+      kind: 'text'
+      text: string
+    }
+> {
+  const segments: Array<
+    | {
+        kind: 'link'
+        label: string
+        target: string
+      }
+    | {
+        kind: 'text'
+        text: string
+      }
+  > = []
+  const markdownLinkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/gu
+  let lastIndex = 0
+
+  for (const match of input.matchAll(markdownLinkPattern)) {
+    const matchedText = match[0]
+    const label = match[1]
+    const target = match[2]
+    const start = match.index ?? -1
+
+    if (
+      typeof matchedText !== 'string' ||
+      typeof label !== 'string' ||
+      typeof target !== 'string' ||
+      start < 0
+    ) {
+      continue
+    }
+
+    if (start > lastIndex) {
+      segments.push({
+        kind: 'text',
+        text: input.slice(lastIndex, start),
+      })
+    }
+
+    segments.push({
+      kind: 'link',
+      label,
+      target,
+    })
+    lastIndex = start + matchedText.length
+  }
+
+  if (lastIndex < input.length) {
+    segments.push({
+      kind: 'text',
+      text: input.slice(lastIndex),
+    })
+  }
+
+  return segments.length > 0
+    ? segments
+    : [
+        {
+          kind: 'text',
+          text: input,
+        },
+      ]
+}
+
+export function resolveAssistantHyperlinkTarget(target: string): string | null {
+  if (/^(https?|mailto):/iu.test(target)) {
+    return target
+  }
+
+  const fragmentIndex = target.indexOf('#')
+  const pathPart =
+    fragmentIndex >= 0
+      ? target.slice(0, fragmentIndex)
+      : target
+  const fragment =
+    fragmentIndex >= 0
+      ? target.slice(fragmentIndex)
+      : ''
+
+  if (!path.isAbsolute(pathPart)) {
+    return null
+  }
+
+  return `${pathToFileURL(pathPart).href}${fragment}`
+}
+
+export function formatAssistantTerminalHyperlink(
+  label: string,
+  target: string,
+): string {
+  return `\u001B]8;;${target}\u0007${label}\u001B]8;;\u0007`
+}
+
+export function supportsAssistantTerminalHyperlinks(input: {
+  env?: NodeJS.ProcessEnv
+  isTTY?: boolean
+} = {}): boolean {
+  const env = input.env ?? process.env
+  const isTTY = input.isTTY ?? process.stderr.isTTY ?? false
+
+  if (!isTTY || env.CI === 'true') {
+    return false
+  }
+
+  if (env.FORCE_HYPERLINK === '1') {
+    return true
+  }
+
+  return Boolean(
+    env.KITTY_WINDOW_ID ||
+      env.ITERM_SESSION_ID ||
+      env.WT_SESSION ||
+      env.WEZTERM_PANE ||
+      env.VSCODE_INJECTION ||
+      env.TERM_PROGRAM === 'Apple_Terminal' ||
+      env.TERM_PROGRAM === 'WarpTerminal' ||
+      env.TERM_PROGRAM === 'vscode',
+  )
+}
+
+export function renderAssistantMessageText(
+  input: AssistantMessageTextProps,
+): React.ReactElement {
+  const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+  const enableHyperlinks = supportsAssistantTerminalHyperlinks()
+  const segments = splitAssistantMarkdownLinks(input.text)
+
+  return createElement(
+    Text,
+    {
+      wrap: 'wrap',
+    },
+    ...segments.map((segment, index) => {
+      if (segment.kind === 'text') {
+        return segment.text
+      }
+
+      const hyperlinkTarget = resolveAssistantHyperlinkTarget(segment.target)
+      const displayedLabel =
+        hyperlinkTarget && enableHyperlinks
+          ? formatAssistantTerminalHyperlink(segment.label, hyperlinkTarget)
+          : segment.label
+
+      return createElement(
+        Text,
+        {
+          color: theme.accentColor,
+          key: `link:${index}:${segment.label}`,
+        },
+        displayedLabel,
+      )
+    }),
+  )
 }
 
 function resolveComposerModifiedReturnAction(
@@ -384,7 +554,7 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
         marginBottom: 1,
         width: '100%',
       },
-      createElement(Text, { wrap: 'wrap' }, props.entry.text),
+      createElement(AssistantMessageText, { text: props.entry.text }),
     )
   }
 
@@ -444,6 +614,12 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
       ),
     ),
   )
+})
+
+const AssistantMessageText = React.memo(function AssistantMessageText(
+  props: AssistantMessageTextProps,
+): React.ReactElement {
+  return renderAssistantMessageText(props)
 })
 
 export function renderChatTranscriptFeed(input: {
