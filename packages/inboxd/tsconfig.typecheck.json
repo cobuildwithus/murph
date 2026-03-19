@@ -1,0 +1,48 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "disableSourceOfProjectReferenceRedirect": true,
+    "noEmit": true,
+    "paths": {
+      "@healthybob/contracts": [
+        "packages/contracts/dist/index.d.ts"
+      ],
+      "@healthybob/contracts/*": [
+        "packages/contracts/dist/*"
+      ],
+      "@healthybob/core": [
+        "packages/core/dist/index.d.ts"
+      ],
+      "@healthybob/core/*": [
+        "packages/core/dist/*"
+      ],
+      "@healthybob/runtime-state": [
+        "packages/runtime-state/dist/index.d.ts"
+      ],
+      "@healthybob/runtime-state/*": [
+        "packages/runtime-state/dist/*"
+      ]
+    },
+    "rootDir": ".",
+    "composite": false,
+    "incremental": false
+  },
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../runtime-state"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    ".test-dist"
+  ]
+}

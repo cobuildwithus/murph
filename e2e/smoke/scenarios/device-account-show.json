@@ -1,6 +1,6 @@
 {
   "id": "device-account-show",
-  "command": "vault-cli device account show <accountId> [--baseUrl <url>]",
+  "command": "vault-cli device account show <accountId> --vault <path> [--baseUrl <url>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

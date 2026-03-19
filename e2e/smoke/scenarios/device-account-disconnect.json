@@ -1,6 +1,6 @@
 {
   "id": "device-account-disconnect",
-  "command": "vault-cli device account disconnect <accountId> [--baseUrl <url>]",
+  "command": "vault-cli device account disconnect <accountId> --vault <path> [--baseUrl <url>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

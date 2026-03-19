@@ -1,6 +1,6 @@
 {
   "id": "device-provider-list",
-  "command": "vault-cli device provider list [--baseUrl <url>]",
+  "command": "vault-cli device provider list --vault <path> [--baseUrl <url>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

@@ -1,0 +1,10 @@
+{
+  "id": "device-daemon-start",
+  "command": "vault-cli device daemon start --vault <path> [--baseUrl <url>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/raw/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/device-sync",
+  "purpose": "Documents starting or reusing the Healthy Bob-managed local device-sync daemon for one vault."
+}

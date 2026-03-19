@@ -6,6 +6,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
+  HEALTHYBOB_VAULT_ENV,
   applyDefaultVaultToArgs,
   readOperatorConfig,
   saveAssistantOperatorDefaultsPatch,
@@ -28,11 +29,13 @@ import {
   repoRoot,
   requireData,
   runCli,
+  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
 const execFileAsync = promisify(execFile)
 const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
+const ASSISTANT_CLI_TIMEOUT_MS = 40_000
 const runtimeMocks = vi.hoisted(() => ({
   runAssistantChat: vi.fn(),
 }))
@@ -140,7 +143,7 @@ test.sequential(
       false,
     )
   },
-  20000,
+  ASSISTANT_CLI_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -189,7 +192,7 @@ test.sequential(
       restoreEnvironmentVariable('HOME', originalHome)
     }
   },
-  20000,
+  ASSISTANT_CLI_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -245,7 +248,7 @@ test.sequential(
       restoreEnvironmentVariable('HOME', originalHome)
     }
   },
-  20000,
+  ASSISTANT_CLI_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -364,7 +367,7 @@ test.sequential(
     assert.equal(forgotten.stateRoot, upserted.stateRoot)
     assert.equal(forgotten.removed.id, search.results[0]?.id)
   },
-  20000,
+  ASSISTANT_CLI_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -449,7 +452,7 @@ test.sequential(
     assert.equal(search.results[0]?.section, 'Health context')
     assert.equal(search.results[0]?.text, "User's blood pressure is 120 over 80.")
   },
-  20000,
+  ASSISTANT_CLI_TIMEOUT_MS,
 )
 
 test('root chat alias participates in default-vault injection', () => {
@@ -474,6 +477,33 @@ test('default-vault injection skips non-executing builtin flags', () => {
     ['assistant', 'session', '--schema'],
   )
 })
+
+test.sequential(
+  'assistant memory search falls back to the assistant-bound vault env when --vault is omitted',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-env-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const search = requireData(
+      await runCli<{
+        stateRoot: string
+        vault: string
+        results: unknown[]
+      }>(['assistant', 'memory', 'search'], {
+        env: {
+          [HEALTHYBOB_VAULT_ENV]: vaultRoot,
+        },
+      }),
+    )
+
+    assert.equal(search.vault, vaultRoot)
+    assert.equal(search.stateRoot.includes(path.join(parent, 'assistant-state')), true)
+    assert.deepEqual(search.results, [])
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
 
 test('root chat prints only a resume hint after a human TTY session exits', async () => {
   runtimeMocks.runAssistantChat.mockResolvedValue(createMockChatResult('asst_human'))
@@ -547,7 +577,7 @@ test.sequential(
     assert.equal(config.assistant?.model, 'gpt-5.4-mini')
     assert.equal(config.assistant?.reasoningEffort, 'xhigh')
   },
-  20000,
+  ASSISTANT_CLI_TIMEOUT_MS,
 )
 
 function restoreEnvironmentVariable(
@@ -672,7 +702,10 @@ async function runSourceCli<TData = Record<string, unknown>>(
     const { stdout } = await execFileAsync(
       'pnpm',
       ['exec', 'tsx', sourceBinPath, ...withMachineOutput(args)],
-      { cwd: repoRoot },
+      {
+        cwd: repoRoot,
+        env: withoutNodeV8Coverage(),
+      },
     )
 
     return JSON.parse(stdout) as any

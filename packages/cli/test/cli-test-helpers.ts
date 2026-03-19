@@ -51,14 +51,23 @@ const execFileAsync = promisify(execFile)
 
 const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
+  path.join(repoRoot, 'packages/contracts/dist/index.d.ts'),
   path.join(repoRoot, 'packages/contracts/dist/command-capabilities.js'),
+  path.join(repoRoot, 'packages/contracts/dist/command-capabilities.d.ts'),
   path.join(repoRoot, 'packages/runtime-state/dist/index.js'),
+  path.join(repoRoot, 'packages/runtime-state/dist/index.d.ts'),
   path.join(repoRoot, 'packages/core/dist/index.js'),
+  path.join(repoRoot, 'packages/core/dist/index.d.ts'),
   path.join(repoRoot, 'packages/importers/dist/index.js'),
+  path.join(repoRoot, 'packages/importers/dist/index.d.ts'),
   path.join(repoRoot, 'packages/device-syncd/dist/index.js'),
+  path.join(repoRoot, 'packages/device-syncd/dist/index.d.ts'),
   path.join(repoRoot, 'packages/query/dist/index.js'),
+  path.join(repoRoot, 'packages/query/dist/index.d.ts'),
   path.join(repoRoot, 'packages/inboxd/dist/index.js'),
+  path.join(repoRoot, 'packages/inboxd/dist/index.d.ts'),
   path.join(repoRoot, 'packages/parsers/dist/index.js'),
+  path.join(repoRoot, 'packages/parsers/dist/index.d.ts'),
   binPath,
   path.join(repoRoot, 'packages/cli/dist/vault-cli-contracts.js'),
   path.join(repoRoot, 'packages/cli/dist/inbox-cli-contracts.js'),
@@ -77,6 +86,14 @@ const runtimeBuildSteps: Array<{ cwd: string; args: string[] }> = [
 ]
 
 let cliRuntimeArtifactsPromise: Promise<void> | null = null
+
+export function withoutNodeV8Coverage(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const nextEnv = { ...env }
+  delete nextEnv.NODE_V8_COVERAGE
+  return nextEnv
+}
 
 export async function runCli<TData = Record<string, unknown>>(
   args: string[],
@@ -171,6 +188,7 @@ export async function rebuildCliRuntimeArtifacts(): Promise<void> {
       await execFileAsync('pnpm', step.args, {
         cwd: step.cwd,
         encoding: 'utf8',
+        env: withoutNodeV8Coverage(),
       })
     }
   })().finally(() => {
@@ -242,10 +260,10 @@ async function execCliProcess(
       {
         cwd: repoRoot,
         encoding: 'utf8',
-        env: {
+        env: withoutNodeV8Coverage({
           ...process.env,
           ...options?.env,
-        },
+        }),
       },
       (error, stdout, stderr) => {
         if (error) {

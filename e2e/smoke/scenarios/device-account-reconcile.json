@@ -1,6 +1,6 @@
 {
   "id": "device-account-reconcile",
-  "command": "vault-cli device account reconcile <accountId> [--baseUrl <url>]",
+  "command": "vault-cli device account reconcile <accountId> --vault <path> [--baseUrl <url>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

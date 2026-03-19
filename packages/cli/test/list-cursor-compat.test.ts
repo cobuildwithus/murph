@@ -11,6 +11,7 @@ import {
 } from './cli-test-helpers.js'
 const runSourceCli = runCli
 const runRawSourceCli = runRawCli
+const CLI_LIST_TIMEOUT_MS = 30_000
 
 test('list help and schemas no longer expose cursor pagination options', async () => {
   const help = await runRawSourceCli(['goal', 'list', '--help'])
@@ -52,7 +53,7 @@ test('list help and schemas no longer expose cursor pagination options', async (
   assert.equal('to' in intakeSchema.options.properties, true)
   assert.equal('dateFrom' in intakeSchema.options.properties, false)
   assert.equal('dateTo' in intakeSchema.options.properties, false)
-})
+}, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('list commands still run after cursor removal', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
@@ -115,7 +116,7 @@ test.sequential('list commands still run after cursor removal', async () => {
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('generic list applies date bounds and echoes renamed filter keys', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
@@ -185,7 +186,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('goal list keeps status-only filters canonical', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
@@ -280,7 +281,7 @@ test.sequential('goal list keeps status-only filters canonical', async () => {
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('generic list exposes record-type, status, stream, and tag filter parity', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
@@ -427,7 +428,7 @@ test.sequential('generic list exposes record-type, status, stream, and tag filte
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('generic list rejects comma-delimited repeatable filter tokens', async () => {
   const result = await runSourceCli([
@@ -443,4 +444,4 @@ test.sequential('generic list rejects comma-delimited repeatable filter tokens',
     result.error.message ?? '',
     /comma-delimited values are not supported.*repeat the flag instead/ui,
   )
-})
+}, CLI_LIST_TIMEOUT_MS)

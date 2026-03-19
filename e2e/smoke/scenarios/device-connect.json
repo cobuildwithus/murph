@@ -1,6 +1,6 @@
 {
   "id": "device-connect",
-  "command": "vault-cli device connect <provider> [--baseUrl <url>] [--returnTo <url>] [--open]",
+  "command": "vault-cli device connect <provider> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

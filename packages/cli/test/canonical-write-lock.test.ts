@@ -16,7 +16,7 @@ import {
   validateVault,
   VaultError,
 } from "@healthybob/core";
-import { repoRoot } from "./cli-test-helpers.js";
+import { repoRoot, withoutNodeV8Coverage } from "./cli-test-helpers.js";
 
 async function makeVaultRoot(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "healthybob-lock-test-"));
@@ -36,6 +36,7 @@ async function holdCanonicalWriteLock(vaultRoot: string) {
   `;
   const child = spawn(process.execPath, ["--input-type=module", "--eval", script, vaultRoot], {
     cwd: repoRoot,
+    env: withoutNodeV8Coverage(),
     stdio: ["pipe", "pipe", "pipe"],
   });
 

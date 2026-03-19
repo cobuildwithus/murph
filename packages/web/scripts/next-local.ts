@@ -16,16 +16,29 @@ const WORKSPACE_RUNTIME_BUILD_TARGETS = [
     buildDir: "../contracts",
     entryRelativePath: "../contracts/dist/index.js",
     packageName: "@healthybob/contracts",
+    requiredRelativePaths: ["../contracts/dist/index.js"],
   },
   {
     buildDir: "../runtime-state",
     entryRelativePath: "../runtime-state/dist/index.js",
     packageName: "@healthybob/runtime-state",
+    requiredRelativePaths: ["../runtime-state/dist/index.js"],
   },
   {
     buildDir: "../query",
     entryRelativePath: "../query/dist/index.js",
     packageName: "@healthybob/query",
+    requiredRelativePaths: [
+      "../query/dist/index.js",
+      "../query/dist/canonical-entities.js",
+      "../query/dist/export-pack.js",
+      "../query/dist/export-pack-health.js",
+      "../query/dist/health-library.js",
+      "../query/dist/health/canonical-collector.js",
+      "../query/dist/health/comparators.js",
+      "../query/dist/health/loaders.js",
+      "../query/dist/health/shared.js",
+    ],
   },
 ] as const;
 
@@ -33,6 +46,7 @@ interface RuntimeBuildTarget {
   buildDir: string;
   entryPath: string;
   packageName: string;
+  requiredPaths: string[];
 }
 
 export function buildNextCliArgs(argv: readonly string[]): string[] {
@@ -60,6 +74,9 @@ export function resolveRuntimeBuildTargets(packageDir: string): RuntimeBuildTarg
     buildDir: target.buildDir,
     entryPath: path.resolve(packageDir, target.entryRelativePath),
     packageName: target.packageName,
+    requiredPaths: target.requiredRelativePaths.map((relativePath) =>
+      path.resolve(packageDir, relativePath),
+    ),
   }));
 }
 
@@ -211,7 +228,7 @@ async function findMissingRuntimeBuildTargets(packageDir: string): Promise<Runti
   const targets = resolveRuntimeBuildTargets(packageDir);
   const checks = await Promise.all(
     targets.map(async (target) => ({
-      missing: !(await pathExists(target.entryPath)),
+      missing: !(await Promise.all(target.requiredPaths.map(pathExists))).every(Boolean),
       target,
     })),
   );
