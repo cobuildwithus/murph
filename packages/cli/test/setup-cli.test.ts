@@ -733,6 +733,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
   const sourceAddCalls: Array<Record<string, unknown>> = []
+  const doctorCalls: Array<Record<string, unknown>> = []
 
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
@@ -755,6 +756,30 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
     inboxServices: {
       async bootstrap() {
         return makeBootstrapResult(vaultRoot)
+      },
+      async doctor(input) {
+        doctorCalls.push(input as unknown as Record<string, unknown>)
+        return {
+          vault: input.vault,
+          configPath: '.runtime/inboxd/config.json',
+          databasePath: '.runtime/inboxd.sqlite',
+          target: input.sourceId ?? null,
+          ok: true,
+          checks: [
+            {
+              name: 'driver-import',
+              status: 'pass' as const,
+              message: 'The Telegram poll driver initialized successfully.',
+            },
+            {
+              name: 'probe',
+              status: 'pass' as const,
+              message: 'The Telegram bot token authenticated successfully.',
+            },
+          ],
+          connectors: [],
+          parserToolchain: null,
+        }
       },
       async sourceAdd(input) {
         sourceAddCalls.push(input as unknown as Record<string, unknown>)
@@ -829,6 +854,13 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
     })
 
     assert.equal(sourceAddCalls.length, 1)
+    assert.deepEqual(doctorCalls, [
+      {
+        requestId: null,
+        sourceId: 'telegram:bot',
+        vault: vaultRoot,
+      },
+    ])
     assert.deepEqual(sourceAddCalls[0], {
       account: 'bot',
       id: 'telegram:bot',
@@ -850,6 +882,155 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
 
     const automationState = await readAssistantAutomationState(vaultRoot)
     assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup service keeps Telegram configured but disables auto-reply when the bot token fails readiness checks', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-telegram-fail-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
+  const formulaPrefixes = {
+    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
+    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
+    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
+  }
+  const brewCommand = path.join(homebrewBin, 'brew')
+  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
+  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
+  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
+  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+
+  await mkdir(vaultRoot, { recursive: true })
+  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+  await writeExecutable(brewCommand)
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperCommand)
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    downloadFile: async (_url, destinationPath) => {
+      await mkdir(path.dirname(destinationPath), { recursive: true })
+      await writeFile(destinationPath, 'model', 'utf8')
+    },
+    env: () => ({
+      HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+      PATH: homebrewBin,
+    }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap() {
+        return makeBootstrapResult(vaultRoot)
+      },
+      async doctor(input) {
+        return {
+          vault: input.vault,
+          configPath: '.runtime/inboxd/config.json',
+          databasePath: '.runtime/inboxd.sqlite',
+          target: input.sourceId ?? null,
+          ok: false,
+          checks: [
+            {
+              name: 'driver-import',
+              status: 'pass' as const,
+              message: 'The Telegram poll driver initialized successfully.',
+            },
+            {
+              name: 'probe',
+              status: 'fail' as const,
+              message: 'The Telegram bot token could not authenticate with getMe.',
+            },
+          ],
+          connectors: [],
+          parserToolchain: null,
+        }
+      },
+      async sourceAdd(input) {
+        return {
+          configPath: '.runtime/inboxd/config.json',
+          connector: {
+            accountId: input.account ?? null,
+            enabled: true,
+            id: input.id,
+            options: {},
+            source: input.source,
+          },
+          connectorCount: 1,
+          vault: input.vault,
+        }
+      },
+      async sourceList(input) {
+        return {
+          configPath: '.runtime/inboxd/config.json',
+          connectors: [],
+          vault: input.vault,
+        }
+      },
+    },
+    log() {},
+    platform: () => 'darwin',
+    resolveCliBinPath: () => cliBinPath,
+    runCommand: async ({ file, args }) => {
+      const baseName = path.basename(file)
+
+      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
+        const formula = args[2] ?? ''
+        return installedFormulas.has(formula)
+          ? {
+              exitCode: 0,
+              stderr: '',
+              stdout: `${formula} 1.0.0\n`,
+            }
+          : {
+              exitCode: 1,
+              stderr: '',
+              stdout: '',
+            }
+      }
+
+      if (baseName === 'brew' && args[0] === '--prefix') {
+        const formula = args[1] as keyof typeof formulaPrefixes
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: `${formulaPrefixes[formula]}\n`,
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+    vaultServices: {
+      core: {
+        async init() {
+          throw new Error('init should not be called for an existing vault')
+        },
+      },
+    } as any,
+  })
+
+  try {
+    const result = await services.setupMacos({
+      channels: ['telegram'],
+      skipOcr: true,
+      vault: vaultRoot,
+      whisperModel: 'base.en',
+    })
+
+    assert.equal(result.channels[0]?.channel, 'telegram')
+    assert.equal(result.channels[0]?.configured, false)
+    assert.equal(result.channels[0]?.autoReply, false)
+    assert.equal(result.channels[0]?.connectorId, 'telegram:bot')
+    assert.match(
+      result.channels[0]?.detail ?? '',
+      /could not authenticate|getMe/u,
+    )
+
+    const automationState = await readAssistantAutomationState(vaultRoot)
+    assert.deepEqual(automationState.autoReplyChannels, [])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

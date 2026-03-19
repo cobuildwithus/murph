@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   DEFAULT_TELEGRAM_ALLOWED_UPDATES,
@@ -120,6 +120,26 @@ test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-be
           first_name: "Alice",
           api_key: "<API_KEY>",
         },
+        business_connection_id: "biz-42",
+        direct_messages_topic: {
+          topic_id: 8,
+          title: "Priority",
+          secret: "<DM_TOPIC_SECRET>",
+        },
+        media_group_id: "album-7",
+        reply_to_message: {
+          message_id: 17,
+          text: "Earlier message",
+          chat: {
+            id: 42,
+            type: "private",
+            first_name: "Alice",
+          },
+          from: {
+            id: 111,
+            first_name: "Alice",
+          },
+        },
         photo: [
           {
             file_id: "photo-2",
@@ -140,6 +160,12 @@ test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-be
   assert.ok(messageRaw);
   assert.equal(messageRaw.text, "Secret-free update");
   assert.equal("cookie" in messageRaw, false);
+  assert.equal(messageRaw.business_connection_id, "biz-42");
+  assert.equal(messageRaw.media_group_id, "album-7");
+  assert.deepEqual(messageRaw.direct_messages_topic, {
+    topic_id: 8,
+    title: "Priority",
+  });
   assert.deepEqual(messageRaw.chat, {
     id: 42,
     type: "private",
@@ -158,6 +184,118 @@ test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-be
       height: 64,
     },
   ]);
+  assert.deepEqual(messageRaw.reply_to_message, {
+    message_id: 17,
+    text: "Earlier message",
+    chat: {
+      id: 42,
+      type: "private",
+      first_name: "Alice",
+    },
+    from: {
+      id: 111,
+      first_name: "Alice",
+    },
+    sender_chat: null,
+    sender_business_bot: null,
+    quote: null,
+    contact: null,
+    location: null,
+    venue: null,
+    poll: null,
+  });
+});
+
+test("normalizeTelegramUpdate supports business chats, direct-message topics, and fallback non-text payloads", async () => {
+  const businessCapture = await normalizeTelegramUpdate({
+    update: {
+      update_id: 125,
+      business_message: {
+        message_id: 19,
+        business_connection_id: "biz-42",
+        date: 1_773_397_202,
+        text: "Business hello",
+        chat: {
+          id: 42,
+          type: "private",
+          first_name: "Alice",
+        },
+        from: {
+          id: 111,
+          first_name: "Alice",
+        },
+      },
+    },
+  });
+
+  assert.equal(businessCapture.thread.id, "42:business:biz-42");
+  assert.equal(businessCapture.thread.isDirect, true);
+  assert.equal(businessCapture.text, "Business hello");
+
+  const directMessagesCapture = await normalizeTelegramUpdate({
+    update: {
+      update_id: 126,
+      message: {
+        message_id: 20,
+        date: 1_773_397_203,
+        chat: {
+          id: -100555,
+          type: "supergroup",
+          title: "Channel inbox",
+          is_direct_messages: true,
+        },
+        direct_messages_topic: {
+          topic_id: 9,
+          title: "Priority",
+        },
+        from: {
+          id: 222,
+          first_name: "Bob",
+        },
+        poll: {
+          question: "How are you feeling?",
+          options: [
+            { text: "Great" },
+            { text: "Tired" },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(directMessagesCapture.thread.id, "-100555:dm-topic:9");
+  assert.equal(directMessagesCapture.thread.title, "Channel inbox / Priority");
+  assert.equal(directMessagesCapture.thread.isDirect, true);
+  assert.equal(
+    directMessagesCapture.text,
+    "Shared poll: How are you feeling? [Great | Tired]",
+  );
+});
+
+test("normalizeTelegramUpdate rejects unsupported edited Telegram updates", async () => {
+  await assert.rejects(
+    () =>
+      normalizeTelegramUpdate({
+        update: {
+          update_id: 127,
+          edited_message: {
+            message_id: 21,
+            date: 1_773_397_204,
+            text: "typo fix",
+            chat: {
+              id: 42,
+              type: "private",
+              first_name: "Alice",
+            },
+            from: {
+              id: 111,
+              first_name: "Alice",
+            },
+          } as TelegramUpdateLike["message"],
+        } as TelegramUpdateLike,
+      }),
+    /supported message payload/u,
+  );
 });
 
 test("createTelegramPollConnector backfills in update order and emits Telegram update checkpoints", async () => {
@@ -374,7 +512,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
       offset: 43,
       limit: 1,
       timeout: 0,
-      allowed_updates: [...DEFAULT_TELEGRAM_ALLOWED_UPDATES],
+      allowed_updates: ["message", "business_message"],
     },
   ]);
 
@@ -393,6 +531,73 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
   assert.equal(getMeCalls, 1);
   assert.equal(getFileCalls, 1);
   assert.equal(getWebhookInfoCalls, 1);
+});
+
+test("createTelegramApiPollDriver retries transient polling failures before resuming the watch loop", async () => {
+  vi.useFakeTimers();
+
+  let attempts = 0;
+  const deliveredUpdateIds: number[] = [];
+  const driver = createTelegramApiPollDriver({
+    api: {
+      token: "bot-token",
+      async getMe() {
+        return {
+          id: 999,
+          username: "healthybob_bot",
+        };
+      },
+      async getUpdates() {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("429 Too Many Requests: retry after 1");
+        }
+
+        return [
+          {
+            update_id: 88,
+            message: {
+              message_id: 8,
+              date: 1_773_397_240,
+              text: "after retry",
+              chat: {
+                id: 10,
+                type: "private",
+                first_name: "Bob",
+              },
+              from: {
+                id: 111,
+                first_name: "Bob",
+              },
+            },
+          },
+        ];
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+    } as unknown as TelegramApiClient,
+  });
+
+  const controller = new AbortController();
+  const watcher = await driver.startWatching({
+    cursor: null,
+    onMessage: async (update) => {
+      deliveredUpdateIds.push(update.update_id);
+      controller.abort();
+    },
+    signal: controller.signal,
+  });
+
+  try {
+    await vi.advanceTimersByTimeAsync(1000);
+    await watcher.done;
+
+    assert.equal(attempts, 2);
+    assert.deepEqual(deliveredUpdateIds, [88]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("createTelegramPollConnector backfills page-by-page so cursors advance after persisted captures", async () => {

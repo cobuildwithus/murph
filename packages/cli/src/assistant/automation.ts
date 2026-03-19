@@ -1,11 +1,11 @@
-import { access } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantRunResultSchema,
   type AssistantAutomationCursor,
   type AssistantRunResult,
 } from '../assistant-cli-contracts.js'
-import type { InboxShowResult } from '../inbox-cli-contracts.js'
+import type { InboxListResult, InboxShowResult } from '../inbox-cli-contracts.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import { routeInboxCaptureWithModel } from '../inbox-model-harness.js'
 import { shouldBypassParserWaitForRouting } from '../inbox-routing-vision.js'
@@ -466,98 +466,137 @@ export async function scanAssistantAutoReplyOnce(input: {
   }
   let cursor = input.afterCursor ?? null
 
-  for (const capture of captures) {
+  for (let index = 0; index < captures.length; index += 1) {
     if (input.signal?.aborted) {
       break
     }
 
-    summary.considered += 1
+    const group = await collectAssistantAutoReplyGroup({
+      captures,
+      startIndex: index,
+      vault: input.vault,
+    })
+    index = group.endIndex
+    summary.considered += group.items.length
+
+    const firstItem = group.items[0]
+    const lastItem = group.items[group.items.length - 1]
+    if (!firstItem || !lastItem) {
+      continue
+    }
 
     try {
-      if (!enabledChannels.includes(capture.source)) {
-        summary.skipped += 1
-        cursor = cursorFromCapture(capture)
+      if (!enabledChannels.includes(firstItem.summary.source)) {
+        summary.skipped += group.items.length
+        cursor = cursorFromCapture(lastItem.summary)
         input.onEvent?.({
           type: 'capture.reply-skipped',
-          captureId: capture.captureId,
+          captureId: firstItem.summary.captureId,
           details: 'channel not enabled for assistant auto-reply',
         })
         continue
       }
 
-      if (capture.actorIsSelf && !(input.allowSelfAuthored ?? false)) {
-        summary.skipped += 1
-        cursor = cursorFromCapture(capture)
+      if (firstItem.summary.actorIsSelf && !(input.allowSelfAuthored ?? false)) {
+        summary.skipped += group.items.length
+        cursor = cursorFromCapture(lastItem.summary)
         input.onEvent?.({
           type: 'capture.reply-skipped',
-          captureId: capture.captureId,
+          captureId: firstItem.summary.captureId,
           details: 'capture is self-authored',
         })
         continue
       }
 
-      const existingArtifact = await assistantChatResultArtifactExists(
-        input.vault,
-        capture.captureId,
+      const existingArtifact = await Promise.all(
+        group.items.map((item) =>
+          assistantChatReplyArtifactExists(input.vault, item.summary.captureId),
+        ),
       )
-      if (existingArtifact) {
-        summary.skipped += 1
-        cursor = cursorFromCapture(capture)
+      if (existingArtifact.some(Boolean)) {
+        summary.skipped += group.items.length
+        cursor = cursorFromCapture(lastItem.summary)
         input.onEvent?.({
           type: 'capture.reply-skipped',
-          captureId: capture.captureId,
+          captureId: firstItem.summary.captureId,
           details: 'assistant reply already exists',
         })
         continue
       }
 
-      const shown = await input.inboxServices.show({
-        vault: input.vault,
-        requestId: input.requestId ?? null,
-        captureId: capture.captureId,
-      })
-      const prompt = buildAssistantAutoReplyPrompt(shown.capture)
-      if (prompt.kind === 'defer') {
-        summary.skipped += 1
+      const shownGroup = await Promise.all(
+        group.items.map(async (item) => ({
+          capture: (
+            await input.inboxServices.show({
+              vault: input.vault,
+              requestId: input.requestId ?? null,
+              captureId: item.summary.captureId,
+            })
+          ).capture,
+          telegramMetadata: item.telegramMetadata,
+        })),
+      )
+      const primaryCapture = shownGroup[0]?.capture
+      if (!primaryCapture) {
+        continue
+      }
+
+      const telegramSkipReason = resolveTelegramAutoReplySkipReason(
+        primaryCapture,
+      )
+      if (telegramSkipReason) {
+        summary.skipped += group.items.length
+        cursor = cursorFromCapture(lastItem.summary)
         input.onEvent?.({
           type: 'capture.reply-skipped',
-          captureId: capture.captureId,
+          captureId: firstItem.summary.captureId,
+          details: telegramSkipReason,
+        })
+        continue
+      }
+
+      const prompt = buildAssistantAutoReplyPrompt(shownGroup)
+      if (prompt.kind === 'defer') {
+        summary.skipped += group.items.length
+        input.onEvent?.({
+          type: 'capture.reply-skipped',
+          captureId: firstItem.summary.captureId,
           details: prompt.reason,
         })
         break
       }
       if (prompt.kind === 'skip') {
-        summary.skipped += 1
-        cursor = cursorFromCapture(capture)
+        summary.skipped += group.items.length
+        cursor = cursorFromCapture(lastItem.summary)
         input.onEvent?.({
           type: 'capture.reply-skipped',
-          captureId: capture.captureId,
+          captureId: firstItem.summary.captureId,
           details: prompt.reason,
         })
         continue
       }
       if (
-        capture.actorIsSelf &&
+        firstItem.summary.actorIsSelf &&
         (await isRecentSelfAuthoredAssistantEcho({
           vault: input.vault,
-          capture: shown.capture,
+          capture: primaryCapture,
         }))
       ) {
-        summary.skipped += 1
-        cursor = cursorFromCapture(capture)
+        summary.skipped += group.items.length
+        cursor = cursorFromCapture(lastItem.summary)
         input.onEvent?.({
           type: 'capture.reply-skipped',
-          captureId: capture.captureId,
+          captureId: firstItem.summary.captureId,
           details: 'capture matches a recent assistant delivery',
         })
         continue
       }
       const result = await sendAssistantMessage({
         vault: input.vault,
-        channel: shown.capture.source,
-        participantId: shown.capture.actorId ?? undefined,
-        sourceThreadId: shown.capture.threadId,
-        threadIsDirect: shown.capture.threadIsDirect,
+        channel: primaryCapture.source,
+        participantId: primaryCapture.actorId ?? undefined,
+        sourceThreadId: primaryCapture.threadId,
+        threadIsDirect: primaryCapture.threadIsDirect,
         prompt: prompt.prompt,
         deliverResponse: true,
         maxSessionAgeMs: input.sessionMaxAgeMs ?? null,
@@ -570,27 +609,33 @@ export async function scanAssistantAutoReplyOnce(input: {
         )
       }
 
-      await writeAssistantChatResultArtifact({
-        captureId: capture.captureId,
+      await writeAssistantChatResultArtifacts({
+        captureIds: group.items.map((item) => item.summary.captureId),
         respondedAt: result.delivery.sentAt,
         result,
         vault: input.vault,
       })
       summary.replied += 1
-      cursor = cursorFromCapture(capture)
+      cursor = cursorFromCapture(lastItem.summary)
       input.onEvent?.({
         type: 'capture.replied',
-        captureId: capture.captureId,
+        captureId: firstItem.summary.captureId,
         details: `${result.delivery.channel} -> ${result.delivery.target}`,
       })
     } catch (error) {
       summary.failed += 1
+      cursor = cursorFromCapture(lastItem.summary)
+      await writeAssistantChatErrorArtifacts({
+        captureIds: group.items.map((item) => item.summary.captureId),
+        error,
+        vault: input.vault,
+      }).catch(() => {})
       input.onEvent?.({
         type: 'capture.reply-failed',
-        captureId: capture.captureId,
+        captureId: firstItem.summary.captureId,
         details: errorMessage(error),
       })
-      break
+      continue
     }
   }
 
@@ -604,19 +649,112 @@ export async function scanAssistantAutoReplyOnce(input: {
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 
+interface TelegramAutoReplyMetadata {
+  mediaGroupId: string | null
+  replyContext: string | null
+}
+
+interface AssistantAutoReplyGroupItem {
+  summary: InboxListResult['items'][number]
+  telegramMetadata: TelegramAutoReplyMetadata | null
+}
+
+interface AssistantAutoReplyPromptCapture {
+  capture: InboxShowResult['capture']
+  telegramMetadata: TelegramAutoReplyMetadata | null
+}
+
 type AssistantAutoReplyPrompt =
   | { kind: 'defer'; reason: string }
   | { kind: 'ready'; prompt: string }
   | { kind: 'skip'; reason: string }
 
+async function collectAssistantAutoReplyGroup(input: {
+  captures: InboxListResult['items']
+  startIndex: number
+  vault: string
+}): Promise<{
+  endIndex: number
+  items: AssistantAutoReplyGroupItem[]
+}> {
+  const first = input.captures[input.startIndex]
+  if (!first) {
+    return {
+      endIndex: input.startIndex,
+      items: [],
+    }
+  }
+
+  const firstMetadata = await loadTelegramAutoReplyMetadata(
+    input.vault,
+    first.source === 'telegram' ? first.envelopePath : null,
+  )
+  if (
+    first.source !== 'telegram' ||
+    firstMetadata === null ||
+    firstMetadata?.mediaGroupId === null
+  ) {
+    return {
+      endIndex: input.startIndex,
+      items: [
+        {
+          summary: first,
+          telegramMetadata: firstMetadata,
+        },
+      ],
+    }
+  }
+
+  const items: AssistantAutoReplyGroupItem[] = [
+    {
+      summary: first,
+      telegramMetadata: firstMetadata,
+    },
+  ]
+  let endIndex = input.startIndex
+
+  for (let index = input.startIndex + 1; index < input.captures.length; index += 1) {
+    const candidate = input.captures[index]
+    if (
+      !candidate ||
+      candidate.source !== first.source ||
+      candidate.threadId !== first.threadId ||
+      candidate.actorId !== first.actorId
+    ) {
+      break
+    }
+
+    const candidateMetadata = await loadTelegramAutoReplyMetadata(
+      input.vault,
+      candidate.envelopePath,
+    )
+    if (candidateMetadata?.mediaGroupId !== firstMetadata.mediaGroupId) {
+      break
+    }
+
+    items.push({
+      summary: candidate,
+      telegramMetadata: candidateMetadata,
+    })
+    endIndex = index
+  }
+
+  return {
+    endIndex,
+    items,
+  }
+}
+
 function buildAssistantAutoReplyPrompt(
-  capture: InboxShowResult['capture'],
+  captures: readonly AssistantAutoReplyPromptCapture[],
 ): AssistantAutoReplyPrompt {
   if (
-    capture.attachments.some(
+    captures.some(({ capture }) =>
+      capture.attachments.some(
       (attachment) =>
         attachment.parseState === 'pending' ||
         attachment.parseState === 'running',
+      ),
     )
   ) {
     return {
@@ -625,14 +763,66 @@ function buildAssistantAutoReplyPrompt(
     }
   }
 
+  const sections = captures
+    .map((entry, index) =>
+      renderAssistantAutoReplyCaptureSection(entry, index, captures.length),
+    )
+    .filter((section): section is string => section !== null)
+
+  if (sections.length === 0) {
+    return {
+      kind: 'skip',
+      reason: 'capture has no text or parsed attachment content',
+    }
+  }
+
+  const firstCapture = captures[0]?.capture
+  const lastCapture = captures[captures.length - 1]?.capture
+  if (!firstCapture || !lastCapture) {
+    return {
+      kind: 'skip',
+      reason: 'capture has no text or parsed attachment content',
+    }
+  }
+
+  const mediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
+
+  const contextLines = [
+    `Source: ${firstCapture.source}`,
+    `Occurred at: ${
+      firstCapture.occurredAt === lastCapture.occurredAt
+        ? firstCapture.occurredAt
+        : `${firstCapture.occurredAt} -> ${lastCapture.occurredAt}`
+    }`,
+    `Thread: ${firstCapture.threadId}${firstCapture.threadTitle ? ` (${firstCapture.threadTitle})` : ''}`,
+    `Actor: ${firstCapture.actorName ?? firstCapture.actorId ?? 'unknown'} | self=${String(firstCapture.actorIsSelf)}`,
+    captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
+    mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
+  ]
+
+  return {
+    kind: 'ready',
+    prompt: [...contextLines.filter((line): line is string => line !== null), '', ...sections].join('\n'),
+  }
+}
+
+function renderAssistantAutoReplyCaptureSection(
+  entry: AssistantAutoReplyPromptCapture,
+  index: number,
+  totalCaptures: number,
+): string | null {
   const sections: string[] = []
-  const captureText = normalizeNullableString(capture.text)
+  const captureText = normalizeNullableString(entry.capture.text)
+  if (entry.telegramMetadata?.replyContext) {
+    sections.push(`Reply context:
+${entry.telegramMetadata.replyContext}`)
+  }
   if (captureText) {
     sections.push(`Message text:
 ${captureText}`)
   }
 
-  const attachmentSections = capture.attachments
+  const attachmentSections = entry.capture.attachments
     .map((attachment) => renderAttachmentPromptSection(attachment))
     .filter((section): section is string => section !== null)
 
@@ -642,23 +832,15 @@ ${attachmentSections.join('\n\n')}`)
   }
 
   if (sections.length === 0) {
-    return {
-      kind: 'skip',
-      reason: 'capture has no text or parsed attachment content',
-    }
+    return null
   }
 
-  const contextLines = [
-    `Source: ${capture.source}`,
-    `Occurred at: ${capture.occurredAt}`,
-    `Thread: ${capture.threadId}${capture.threadTitle ? ` (${capture.threadTitle})` : ''}`,
-    `Actor: ${capture.actorName ?? capture.actorId ?? 'unknown'} | self=${String(capture.actorIsSelf)}`,
-  ]
-
-  return {
-    kind: 'ready',
-    prompt: [...contextLines, '', ...sections].join('\n'),
+  if (totalCaptures === 1) {
+    return sections.join('\n\n')
   }
+
+  return `Capture ${index + 1}:
+${sections.join('\n\n')}`
 }
 
 function renderAttachmentPromptSection(
@@ -683,6 +865,243 @@ ${extractedText}`)
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${chunks.join('\n\n')}`
+}
+
+function resolveTelegramAutoReplySkipReason(
+  capture: InboxShowResult['capture'],
+): string | null {
+  if (capture.source !== 'telegram') {
+    return null
+  }
+
+  if (capture.threadIsDirect !== true) {
+    return 'Telegram auto-reply only runs for direct chats'
+  }
+
+  return null
+}
+
+async function loadTelegramAutoReplyMetadata(
+  vaultRoot: string,
+  envelopePath: string | null,
+): Promise<TelegramAutoReplyMetadata | null> {
+  const normalizedEnvelopePath = normalizeNullableString(envelopePath)
+  if (!normalizedEnvelopePath) {
+    return null
+  }
+
+  try {
+    const absoluteEnvelopePath = path.isAbsolute(normalizedEnvelopePath)
+      ? normalizedEnvelopePath
+      : path.join(vaultRoot, normalizedEnvelopePath)
+    const parsed = JSON.parse(
+      await readFile(absoluteEnvelopePath, 'utf8'),
+    ) as unknown
+    const envelope = asRecord(parsed)
+    const input = asRecord(envelope?.input)
+    const raw = asRecord(input?.raw)
+    const message = extractTelegramRawMessage(raw)
+
+    return {
+      mediaGroupId: normalizeNullableString(
+        typeof message?.media_group_id === 'string'
+          ? message.media_group_id
+          : null,
+      ),
+      replyContext: buildTelegramReplyContext(message),
+    }
+  } catch {
+    return null
+  }
+}
+
+function extractTelegramRawMessage(
+  raw: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return asRecord(raw?.business_message) ?? asRecord(raw?.message)
+}
+
+function buildTelegramReplyContext(
+  message: Record<string, unknown> | null,
+): string | null {
+  if (!message) {
+    return null
+  }
+
+  const replyToMessage = asRecord(message.reply_to_message)
+  const quote = asRecord(message.quote)
+  const lines: string[] = []
+
+  if (replyToMessage) {
+    const actor = buildTelegramRawActorDisplayName(replyToMessage)
+    const text = summarizeTelegramRawMessageText(replyToMessage)
+    if (actor && text) {
+      lines.push(`Replying to ${actor}: ${text}`)
+    } else if (text) {
+      lines.push(`Replying to: ${text}`)
+    } else if (actor) {
+      lines.push(`Replying to ${actor}`)
+    } else {
+      lines.push('Replying to an earlier Telegram message')
+    }
+  }
+
+  const quoteText =
+    typeof quote?.text === 'string' ? normalizeNullableString(quote.text) : null
+  if (quoteText) {
+    lines.push(`Quoted text: ${summarizeTelegramText(quoteText)}`)
+  }
+
+  return lines.length > 0 ? lines.join('\n') : null
+}
+
+function summarizeTelegramRawMessageText(
+  message: Record<string, unknown>,
+): string | null {
+  const text =
+    stringFromRecord(message, 'text') ??
+    stringFromRecord(message, 'caption') ??
+    buildTelegramRawContactText(asRecord(message.contact)) ??
+    buildTelegramRawVenueText(asRecord(message.venue)) ??
+    buildTelegramRawLocationText(asRecord(message.location)) ??
+    buildTelegramRawPollText(asRecord(message.poll)) ??
+    null
+
+  return text ? summarizeTelegramText(text) : null
+}
+
+function buildTelegramRawActorDisplayName(
+  message: Record<string, unknown>,
+): string | null {
+  return (
+    buildTelegramRawDisplayName(asRecord(message.from)) ??
+    buildTelegramRawDisplayName(asRecord(message.sender_chat)) ??
+    buildTelegramRawDisplayName(asRecord(message.chat)) ??
+    null
+  )
+}
+
+function buildTelegramRawDisplayName(
+  record: Record<string, unknown> | null,
+): string | null {
+  if (!record) {
+    return null
+  }
+
+  const parts = [
+    stringFromRecord(record, 'first_name'),
+    stringFromRecord(record, 'last_name'),
+  ].filter((value): value is string => value !== null)
+
+  if (parts.length > 0) {
+    return parts.join(' ')
+  }
+
+  const username = stringFromRecord(record, 'username')
+  if (username) {
+    return username.startsWith('@') ? username : `@${username}`
+  }
+
+  return stringFromRecord(record, 'title')
+}
+
+function buildTelegramRawContactText(
+  contact: Record<string, unknown> | null,
+): string | null {
+  if (!contact) {
+    return null
+  }
+
+  const name = [
+    stringFromRecord(contact, 'first_name'),
+    stringFromRecord(contact, 'last_name'),
+  ]
+    .filter((value): value is string => value !== null)
+    .join(' ')
+  const phoneNumber = stringFromRecord(contact, 'phone_number')
+
+  if (!name && !phoneNumber) {
+    return null
+  }
+
+  return phoneNumber ? `Shared contact ${name || 'unknown'} (${phoneNumber})` : `Shared contact ${name}`
+}
+
+function buildTelegramRawLocationText(
+  location: Record<string, unknown> | null,
+): string | null {
+  if (!location) {
+    return null
+  }
+
+  const latitude =
+    typeof location.latitude === 'number' ? location.latitude : null
+  const longitude =
+    typeof location.longitude === 'number' ? location.longitude : null
+  if (latitude === null || longitude === null) {
+    return null
+  }
+
+  return `Shared location ${latitude}, ${longitude}`
+}
+
+function buildTelegramRawVenueText(
+  venue: Record<string, unknown> | null,
+): string | null {
+  if (!venue) {
+    return null
+  }
+
+  const parts = [
+    stringFromRecord(venue, 'title'),
+    stringFromRecord(venue, 'address'),
+    buildTelegramRawLocationText(asRecord(venue.location)),
+  ].filter((value): value is string => value !== null)
+
+  return parts.length > 0 ? `Shared venue ${parts.join(' | ')}` : null
+}
+
+function buildTelegramRawPollText(
+  poll: Record<string, unknown> | null,
+): string | null {
+  if (!poll) {
+    return null
+  }
+
+  const question = stringFromRecord(poll, 'question')
+  const options = Array.isArray(poll.options)
+    ? poll.options
+        .map((option) => stringFromRecord(asRecord(option), 'text'))
+        .filter((value): value is string => value !== null)
+    : []
+
+  if (!question && options.length === 0) {
+    return null
+  }
+
+  return `Shared poll ${question ?? 'untitled poll'}${options.length > 0 ? ` [${options.join(' | ')}]` : ''}`
+}
+
+function summarizeTelegramText(text: string): string {
+  const normalized = text.replace(/\s+/gu, ' ').trim()
+  return normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized
+}
+
+function stringFromRecord(
+  record: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  if (!record) {
+    return null
+  }
+
+  return typeof record[key] === 'string'
+    ? normalizeNullableString(record[key] as string)
+    : null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
 }
 
 async function isRecentSelfAuthoredAssistantEcho(input: {
@@ -781,9 +1200,29 @@ async function assistantResultArtifactExists(
   }
 }
 
-async function assistantChatResultArtifactExists(
+async function assistantChatReplyArtifactExists(
   vaultRoot: string,
   captureId: string,
+): Promise<boolean> {
+  return (
+    await assistantArtifactExists(
+      vaultRoot,
+      captureId,
+      'chat-result.json',
+    )
+  ) || (
+    await assistantArtifactExists(
+      vaultRoot,
+      captureId,
+      'chat-error.json',
+    )
+  )
+}
+
+async function assistantArtifactExists(
+  vaultRoot: string,
+  captureId: string,
+  fileName: string,
 ): Promise<boolean> {
   try {
     await access(
@@ -793,7 +1232,7 @@ async function assistantChatResultArtifactExists(
         'inbox',
         captureId,
         'assistant',
-        'chat-result.json',
+        fileName,
       ),
     )
     return true
@@ -802,30 +1241,73 @@ async function assistantChatResultArtifactExists(
   }
 }
 
-async function writeAssistantChatResultArtifact(input: {
-  captureId: string
+async function writeAssistantChatResultArtifacts(input: {
+  captureIds: readonly string[]
   respondedAt: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
   vault: string
 }): Promise<void> {
-  await writeJsonFileAtomic(
-    path.join(
-      input.vault,
-      'derived',
-      'inbox',
-      input.captureId,
-      'assistant',
-      'chat-result.json',
+  await Promise.all(
+    input.captureIds.map((captureId) =>
+      writeJsonFileAtomic(
+        path.join(
+          input.vault,
+          'derived',
+          'inbox',
+          captureId,
+          'assistant',
+          'chat-result.json',
+        ),
+        {
+          schema: 'healthybob.assistant-chat-result.v1',
+          captureId,
+          groupCaptureIds: [...input.captureIds],
+          sessionId: input.result.session.sessionId,
+          channel: input.result.delivery?.channel ?? null,
+          target: input.result.delivery?.target ?? null,
+          respondedAt: input.respondedAt,
+          response: input.result.response,
+        },
+      ),
     ),
-    {
-      schema: 'healthybob.assistant-chat-result.v1',
-      captureId: input.captureId,
-      sessionId: input.result.session.sessionId,
-      channel: input.result.delivery?.channel ?? null,
-      target: input.result.delivery?.target ?? null,
-      respondedAt: input.respondedAt,
-      response: input.result.response,
-    },
+  )
+}
+
+async function writeAssistantChatErrorArtifacts(input: {
+  captureIds: readonly string[]
+  error: unknown
+  vault: string
+}): Promise<void> {
+  const message = errorMessage(input.error)
+  const code =
+    typeof input.error === 'object' &&
+    input.error !== null &&
+    'code' in input.error &&
+    typeof (input.error as { code?: unknown }).code === 'string'
+      ? (input.error as { code: string }).code
+      : null
+
+  await Promise.all(
+    input.captureIds.map((captureId) =>
+      writeJsonFileAtomic(
+        path.join(
+          input.vault,
+          'derived',
+          'inbox',
+          captureId,
+          'assistant',
+          'chat-error.json',
+        ),
+        {
+          schema: 'healthybob.assistant-chat-error.v1',
+          captureId,
+          groupCaptureIds: [...input.captureIds],
+          code,
+          failedAt: new Date().toISOString(),
+          message,
+        },
+      ),
+    ),
   )
 }
 

@@ -1410,6 +1410,600 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
   }
 })
 
+test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-scope-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-telegram-scope',
+    response: 'direct reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+    vault: path.resolve(input.vault),
+    message: input.message,
+    session: {
+      schema: 'healthybob.assistant-session.v2',
+      sessionId: input.sessionId,
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-scope',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:telegram|thread:123',
+        channel: 'telegram',
+        identityId: null,
+        actorId: input.actorId ?? null,
+        threadId: input.threadId,
+        threadIsDirect: input.threadIsDirect,
+        delivery: {
+          kind: 'thread',
+          target: input.threadId,
+        },
+      },
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:01.000Z',
+      lastTurnAt: '2026-03-18T00:00:01.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'telegram',
+      target: input.threadId,
+      targetKind: 'thread',
+      sentAt: '2026-03-18T00:00:01.000Z',
+      messageLength: input.message.length,
+    },
+  }))
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-group',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:1',
+            threadId: '-1001',
+            threadTitle: 'Group',
+            actorId: '111',
+            actorName: 'Group Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: 'hello group',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/group.json',
+            eventId: 'evt-group',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-direct',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:2',
+            threadId: '123',
+            threadTitle: 'Direct',
+            actorId: '222',
+            actorName: 'Direct Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:01:00Z',
+            receivedAt: null,
+            text: 'hello direct',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/direct.json',
+            eventId: 'evt-direct',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      if (input.captureId === 'cap-group') {
+        return {
+          capture: {
+            captureId: 'cap-group',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:1',
+            threadId: '-1001',
+            threadTitle: 'Group',
+            threadIsDirect: false,
+            actorId: '111',
+            actorName: 'Group Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: 'hello group',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/group.json',
+            eventId: 'evt-group',
+            createdAt: '2026-03-18T09:00:00Z',
+            promotions: [],
+            attachments: [],
+          },
+        }
+      }
+
+      return {
+        capture: {
+          captureId: 'cap-direct',
+          source: 'telegram',
+          accountId: 'bot',
+          externalId: 'update:2',
+          threadId: '123',
+          threadTitle: 'Direct',
+          threadIsDirect: true,
+          actorId: '222',
+          actorName: 'Direct Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:01:00Z',
+          receivedAt: null,
+          text: 'hello direct',
+          attachmentCount: 0,
+          envelopePath: 'raw/inbox/direct.json',
+          eventId: 'evt-direct',
+          createdAt: '2026-03-18T09:01:00Z',
+          promotions: [],
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 2,
+    failed: 0,
+    replied: 1,
+    skipped: 1,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(
+    runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]?.userPrompt.includes('hello direct'),
+    true,
+  )
+})
+
+test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery and records the failure artifact', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-failure-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-failure',
+      response: 'first reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-failure',
+      response: 'second reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+  runtimeMocks.deliverAssistantMessage
+    .mockRejectedValueOnce(new Error('Telegram delivery failed'))
+    .mockImplementationOnce(async (input: any) => ({
+      vault: path.resolve(input.vault),
+      message: input.message,
+      session: {
+        schema: 'healthybob.assistant-session.v2',
+        sessionId: input.sessionId,
+        provider: 'codex-cli',
+        providerSessionId: 'thread-telegram-failure',
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+        alias: null,
+        binding: {
+          conversationKey: `channel:telegram|thread:${input.threadId}`,
+          channel: 'telegram',
+          identityId: null,
+          actorId: input.actorId ?? null,
+          threadId: input.threadId,
+          threadIsDirect: input.threadIsDirect,
+          delivery: {
+            kind: 'thread',
+            target: input.threadId,
+          },
+        },
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:01.000Z',
+        lastTurnAt: '2026-03-18T00:00:01.000Z',
+        turnCount: 1,
+      },
+      delivery: {
+        channel: 'telegram',
+        target: input.threadId,
+        targetKind: 'thread',
+        sentAt: '2026-03-18T00:00:01.000Z',
+        messageLength: input.message.length,
+      },
+    }))
+
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    primed: boolean
+  }> = []
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-fail',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:1',
+            threadId: '123',
+            threadTitle: 'Direct',
+            actorId: '111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: 'first question',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/fail.json',
+            eventId: 'evt-fail',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-pass',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:2',
+            threadId: '456',
+            threadTitle: 'Direct',
+            actorId: '222',
+            actorName: 'Alice',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:01:00Z',
+            receivedAt: null,
+            text: 'second question',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/pass.json',
+            eventId: 'evt-pass',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      const directThreadId = input.captureId === 'cap-fail' ? '123' : '456'
+      const actorId = input.captureId === 'cap-fail' ? '111' : '222'
+      const actorName = input.captureId === 'cap-fail' ? 'Bob' : 'Alice'
+      const text = input.captureId === 'cap-fail' ? 'first question' : 'second question'
+      const captureId = input.captureId
+
+      return {
+        capture: {
+          captureId,
+          source: 'telegram',
+          accountId: 'bot',
+          externalId: captureId === 'cap-fail' ? 'update:1' : 'update:2',
+          threadId: directThreadId,
+          threadTitle: 'Direct',
+          threadIsDirect: true,
+          actorId,
+          actorName,
+          actorIsSelf: false,
+          occurredAt: captureId === 'cap-fail' ? '2026-03-18T09:00:00Z' : '2026-03-18T09:01:00Z',
+          receivedAt: null,
+          text,
+          attachmentCount: 0,
+          envelopePath: captureId === 'cap-fail' ? 'raw/inbox/fail.json' : 'raw/inbox/pass.json',
+          eventId: captureId === 'cap-fail' ? 'evt-fail' : 'evt-pass',
+          createdAt: captureId === 'cap-fail' ? '2026-03-18T09:00:00Z' : '2026-03-18T09:01:00Z',
+          promotions: [],
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    vault: vaultRoot,
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+  })
+
+  assert.deepEqual(result, {
+    considered: 2,
+    failed: 1,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.deepEqual(stateProgress.at(-1), {
+    cursor: {
+      occurredAt: '2026-03-18T09:01:00Z',
+      captureId: 'cap-pass',
+    },
+    primed: true,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 2)
+
+  const errorArtifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-fail',
+        'assistant',
+        'chat-error.json',
+      ),
+      'utf8',
+    ),
+  )
+  assert.equal(errorArtifact.schema, 'healthybob.assistant-chat-error.v1')
+
+  const successArtifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-pass',
+        'assistant',
+        'chat-result.json',
+      ),
+      'utf8',
+    ),
+  )
+  assert.equal(successArtifact.captureId, 'cap-pass')
+})
+
+test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant reply', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-album-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(path.join(vaultRoot, 'raw', 'inbox'), {
+    recursive: true,
+  })
+  cleanupPaths.push(parent)
+
+  await writeFile(
+    path.join(vaultRoot, 'raw', 'inbox', 'album-1.json'),
+    JSON.stringify({
+      input: {
+        raw: {
+          message: {
+            media_group_id: 'album-7',
+          },
+        },
+      },
+    }),
+    'utf8',
+  )
+  await writeFile(
+    path.join(vaultRoot, 'raw', 'inbox', 'album-2.json'),
+    JSON.stringify({
+      input: {
+        raw: {
+          message: {
+            media_group_id: 'album-7',
+          },
+        },
+      },
+    }),
+    'utf8',
+  )
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-telegram-album',
+    response: 'album reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+    vault: path.resolve(input.vault),
+    message: input.message,
+    session: {
+      schema: 'healthybob.assistant-session.v2',
+      sessionId: input.sessionId,
+      provider: 'codex-cli',
+      providerSessionId: 'thread-telegram-album',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:telegram|thread:123',
+        channel: 'telegram',
+        identityId: null,
+        actorId: '111',
+        threadId: '123',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: '123',
+        },
+      },
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:01.000Z',
+      lastTurnAt: '2026-03-18T00:00:01.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'telegram',
+      target: '123',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T00:00:01.000Z',
+      messageLength: input.message.length,
+    },
+  }))
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-album-1',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:1',
+            threadId: '123',
+            threadTitle: 'Direct',
+            actorId: '111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: 'photo set',
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/album-1.json',
+            eventId: 'evt-album-1',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-album-2',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:2',
+            threadId: '123',
+            threadTitle: 'Direct',
+            actorId: '111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:01Z',
+            receivedAt: null,
+            text: null,
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/album-2.json',
+            eventId: 'evt-album-2',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      const first = input.captureId === 'cap-album-1'
+      return {
+        capture: {
+          captureId: input.captureId,
+          source: 'telegram',
+          accountId: 'bot',
+          externalId: first ? 'update:1' : 'update:2',
+          threadId: '123',
+          threadTitle: 'Direct',
+          threadIsDirect: true,
+          actorId: '111',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: first ? '2026-03-18T09:00:00Z' : '2026-03-18T09:00:01Z',
+          receivedAt: null,
+          text: first ? 'photo set' : null,
+          attachmentCount: 1,
+          envelopePath: first ? 'raw/inbox/album-1.json' : 'raw/inbox/album-2.json',
+          eventId: first ? 'evt-album-1' : 'evt-album-2',
+          createdAt: first ? '2026-03-18T09:00:00Z' : '2026-03-18T09:00:01Z',
+          promotions: [],
+          attachments: [
+            {
+              ordinal: 1,
+              kind: 'image',
+              fileName: first ? 'meal-1.jpg' : 'meal-2.jpg',
+              transcriptText: null,
+              extractedText: first ? 'plate one' : 'plate two',
+              parseState: 'succeeded',
+            },
+          ],
+        },
+      }
+    },
+  } as any
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 2,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 1)
+
+  const firstArtifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-album-1',
+        'assistant',
+        'chat-result.json',
+      ),
+      'utf8',
+    ),
+  )
+  const secondArtifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-album-2',
+        'assistant',
+        'chat-result.json',
+      ),
+      'utf8',
+    ),
+  )
+  assert.deepEqual(firstArtifact.groupCaptureIds, ['cap-album-1', 'cap-album-2'])
+  assert.deepEqual(secondArtifact.groupCaptureIds, ['cap-album-1', 'cap-album-2'])
+})
+
 test('runAssistantAutomation reports daemon failures as error results', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-daemon-'))
   const vaultRoot = path.join(parent, 'vault')

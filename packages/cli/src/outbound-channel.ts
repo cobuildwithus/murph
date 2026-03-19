@@ -21,6 +21,10 @@ import {
 } from './telegram-runtime.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
+const TELEGRAM_MAX_TEXT_LENGTH = 4096
+const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
+const TELEGRAM_SEND_TIMEOUT_MS = 30_000
+
 interface ImessageSdkLike {
   close?: () => Promise<void> | void
   send?: (target: string, content: string) => Promise<unknown>
@@ -45,6 +49,7 @@ type FetchLike = (
     body?: string
     headers?: Record<string, string>
     method: string
+    signal?: AbortSignal
   },
 ) => Promise<FetchLikeResponse>
 
@@ -323,45 +328,95 @@ export async function sendTelegramMessage(
   )
   const target = parseTelegramSendTarget(input.target)
 
-  let response: FetchLikeResponse
-  try {
-    response = await fetchImplementation(`${baseUrl}/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        chat_id: target.chatId,
-        message_thread_id: target.messageThreadId ?? undefined,
-        text: input.message,
-      }),
+  const chunks = splitTelegramMessageText(input.message)
+  for (const chunk of chunks) {
+    await sendTelegramTextChunk({
+      baseUrl,
+      fetchImplementation,
+      target,
+      targetLabel: input.target,
+      text: chunk,
+      token,
     })
-  } catch (error) {
-    throw new VaultCliError(
+  }
+}
+
+async function sendTelegramTextChunk(input: {
+  baseUrl: string
+  fetchImplementation: FetchLike
+  target: ReturnType<typeof parseTelegramSendTarget>
+  targetLabel: string
+  text: string
+  token: string
+}): Promise<void> {
+  let lastFailure: VaultCliError | null = null
+
+  for (let attempt = 0; attempt < TELEGRAM_MAX_DELIVERY_ATTEMPTS; attempt += 1) {
+    let response: FetchLikeResponse
+    let payload: unknown = null
+
+    try {
+      response = await sendTelegramBotApiRequest({
+        baseUrl: input.baseUrl,
+        fetchImplementation: input.fetchImplementation,
+        payload: {
+          business_connection_id: input.target.businessConnectionId ?? undefined,
+          chat_id: input.target.chatId,
+          direct_messages_topic_id: input.target.directMessagesTopicId ?? undefined,
+          message_thread_id: input.target.messageThreadId ?? undefined,
+          text: input.text,
+        },
+        token: input.token,
+      })
+      payload = await readTelegramResponsePayload(response)
+    } catch (error) {
+      const failure = new VaultCliError(
+        'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+        'Outbound Telegram delivery failed while calling the Bot API.',
+        {
+          error: describeUnknownError(error),
+          target: input.targetLabel,
+        },
+      )
+      if (attempt >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1) {
+        throw failure
+      }
+
+      lastFailure = failure
+      await waitForTelegramRetryDelay(attempt, null)
+      continue
+    }
+
+    if (response.ok && isTelegramSuccessResponse(payload)) {
+      return
+    }
+
+    const errorContext = extractTelegramErrorContext(payload)
+    const failure = new VaultCliError(
       'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
-      'Outbound Telegram delivery failed while calling the Bot API.',
+      errorContext.description ??
+        `Telegram Bot API sendMessage failed with HTTP ${response.status}.`,
       {
-        error: describeUnknownError(error),
+        errorCode: errorContext.errorCode,
+        status: response.status,
+        target: input.targetLabel,
       },
     )
+
+    if (
+      attempt >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1 ||
+      !shouldRetryTelegramSend(response.status, errorContext.errorCode)
+    ) {
+      throw failure
+    }
+
+    lastFailure = failure
+    await waitForTelegramRetryDelay(attempt, errorContext.retryAfterSeconds)
   }
 
-  const payload = await readTelegramResponsePayload(response)
-  if (response.ok && isTelegramSuccessResponse(payload)) {
-    return
+  if (lastFailure) {
+    throw lastFailure
   }
-
-  const errorContext = extractTelegramErrorContext(payload)
-  throw new VaultCliError(
-    'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
-    errorContext.description ??
-      `Telegram Bot API sendMessage failed with HTTP ${response.status}.`,
-    {
-      errorCode: errorContext.errorCode,
-      status: response.status,
-      target: input.target,
-    },
-  )
 }
 
 async function readTelegramResponsePayload(
@@ -390,11 +445,13 @@ function isTelegramSuccessResponse(
 function extractTelegramErrorContext(value: unknown): {
   description: string | null
   errorCode: number | null
+  retryAfterSeconds: number | null
 } {
   if (!value || typeof value !== 'object') {
     return {
       description: null,
       errorCode: null,
+      retryAfterSeconds: null,
     }
   }
 
@@ -406,11 +463,133 @@ function extractTelegramErrorContext(value: unknown): {
     'error_code' in value && typeof (value as { error_code?: unknown }).error_code === 'number'
       ? (value as { error_code: number }).error_code
       : null
+  const retryAfterSeconds = extractTelegramRetryAfter(value)
 
   return {
     description,
     errorCode,
+    retryAfterSeconds,
   }
+}
+
+async function sendTelegramBotApiRequest(input: {
+  baseUrl: string
+  fetchImplementation: FetchLike
+  payload: Record<string, unknown>
+  token: string
+}): Promise<FetchLikeResponse> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_SEND_TIMEOUT_MS)
+
+  try {
+    return await input.fetchImplementation(
+      `${input.baseUrl}/bot${input.token}/sendMessage`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(input.payload),
+        signal: controller.signal,
+      },
+    )
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function splitTelegramMessageText(message: string): string[] {
+  const codePoints = Array.from(message)
+  if (codePoints.length <= TELEGRAM_MAX_TEXT_LENGTH) {
+    return [message]
+  }
+
+  const chunks: string[] = []
+  let startIndex = 0
+
+  while (startIndex < codePoints.length) {
+    const endIndex = Math.min(
+      startIndex + TELEGRAM_MAX_TEXT_LENGTH,
+      codePoints.length,
+    )
+
+    if (endIndex === codePoints.length) {
+      chunks.push(codePoints.slice(startIndex).join(''))
+      break
+    }
+
+    const slice = codePoints.slice(startIndex, endIndex)
+    const breakIndex = findTelegramChunkBreakIndex(slice)
+    chunks.push(slice.slice(0, breakIndex).join('').trimEnd())
+    startIndex += breakIndex
+
+    while (
+      startIndex < codePoints.length &&
+      /\s/u.test(codePoints[startIndex] ?? '')
+    ) {
+      startIndex += 1
+    }
+  }
+
+  return chunks.filter((chunk) => chunk.length > 0)
+}
+
+function findTelegramChunkBreakIndex(slice: string[]): number {
+  const joined = slice.join('')
+  const candidates = ['\n\n', '\n', ' ']
+
+  for (const candidate of candidates) {
+    const index = joined.lastIndexOf(candidate)
+    if (index >= 2048) {
+      return Array.from(joined.slice(0, index + candidate.length)).length
+    }
+  }
+
+  return slice.length
+}
+
+function shouldRetryTelegramSend(
+  status: number,
+  errorCode: number | null,
+): boolean {
+  return status === 429 || status >= 500 || errorCode === 429
+}
+
+async function waitForTelegramRetryDelay(
+  attempt: number,
+  retryAfterSeconds: number | null,
+): Promise<void> {
+  const milliseconds =
+    retryAfterSeconds !== null
+      ? retryAfterSeconds * 1000
+      : Math.min((attempt + 1) * 1000, 5000)
+
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds)
+  })
+}
+
+function extractTelegramRetryAfter(value: unknown): number | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const parameters =
+    'parameters' in value &&
+    value.parameters &&
+    typeof value.parameters === 'object'
+      ? (value.parameters as Record<string, unknown>)
+      : null
+
+  if (!parameters) {
+    return null
+  }
+
+  return typeof parameters.retry_after === 'number' &&
+    Number.isFinite(parameters.retry_after) &&
+    parameters.retry_after > 0
+    ? parameters.retry_after
+    : null
 }
 
 async function ensureImessageRuntimeReady(

@@ -1,5 +1,4 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantMemoryLongTermSectionValues,
@@ -13,14 +12,37 @@ import {
   type AssistantMemoryWriteScope,
 } from '../assistant-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-import type { AssistantStatePaths } from './store.js'
-import { redactAssistantDisplayPath, resolveAssistantStatePaths } from './store.js'
+import { redactAssistantDisplayPath } from './store.js'
 import {
   isMissingFileError,
   normalizeNullableString,
   writeTextFileAtomic,
 } from './shared.js'
-import { HEALTHYBOB_VAULT_ENV } from '../operator-config.js'
+import {
+  resolveAssistantDailyMemoryPath,
+  resolveAssistantMemoryStoragePaths,
+  type AssistantMemoryPaths,
+} from './memory/paths.js'
+export {
+  resolveAssistantDailyMemoryPath,
+  resolveAssistantMemoryPaths,
+  resolveAssistantMemoryStoragePaths,
+} from './memory/paths.js'
+export type { AssistantMemoryPaths } from './memory/paths.js'
+import {
+  type AssistantMemoryTurnContext,
+} from './memory/turn-context.js'
+export {
+  createAssistantMemoryTurnContextEnv,
+  resolveAssistantMemoryTurnContext,
+  assertAssistantMemoryTurnContextVault,
+  assistantMemoryTurnEnvKeys,
+} from './memory/turn-context.js'
+export type {
+  AssistantMemoryTurnContext,
+  AssistantMemoryTurnContextInput,
+} from './memory/turn-context.js'
+import { withAssistantMemoryWriteLock } from './memory/locking.js'
 
 const LONG_TERM_MEMORY_SECTIONS = assistantMemoryLongTermSectionValues
 const MEMORY_PROMPT_MAX_CHARS = 2_800
@@ -28,26 +50,6 @@ const MEMORY_SEARCH_DEFAULT_LIMIT = 8
 const MEMORY_SEARCH_MAX_LIMIT = 25
 const MEMORY_TIME_SEPARATOR = ' — '
 const ASSISTANT_MEMORY_METADATA_COMMENT_PREFIX = 'healthybob-assistant-memory:'
-const ASSISTANT_MEMORY_LOCK_DIRECTORY = '.locks/assistant-memory-write'
-const ASSISTANT_MEMORY_LOCK_METADATA_PATH = `${ASSISTANT_MEMORY_LOCK_DIRECTORY}/owner.json`
-const ASSISTANT_MEMORY_TURN_VAULT_ENV =
-  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_VAULT'
-const ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV =
-  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT'
-const ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV =
-  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT'
-const ASSISTANT_MEMORY_TURN_SESSION_ID_ENV =
-  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_SESSION_ID'
-const ASSISTANT_MEMORY_TURN_ID_ENV =
-  'HEALTHYBOB_ASSISTANT_MEMORY_BOUND_TURN_ID'
-export const assistantMemoryTurnEnvKeys = [
-  HEALTHYBOB_VAULT_ENV,
-  ASSISTANT_MEMORY_TURN_VAULT_ENV,
-  ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV,
-  ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV,
-  ASSISTANT_MEMORY_TURN_SESSION_ID_ENV,
-  ASSISTANT_MEMORY_TURN_ID_ENV,
-] as const
 const RESPONSE_CONTEXT_PATTERN =
   /\b(?:answer|answers|response|responses|reply|replies|summary|summaries)\b/iu
 const RESPONSE_STYLE_PATTERN =
@@ -120,19 +122,16 @@ export interface AssistantMemoryUpsertWriteResult {
   scope: AssistantMemoryWriteScope
 }
 
-export interface AssistantMemoryTurnContextInput {
-  allowSensitiveHealthContext: boolean
-  sessionId: string
-  sourcePrompt: string
-  turnId: string
-  vault: string
-}
+async function readOptionalText(filePath: string): Promise<string> {
+  try {
+    return await readFile(filePath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return ''
+    }
 
-export interface AssistantMemoryTurnContext {
-  allowSensitiveHealthContext: boolean
-  provenance: AssistantMemoryRecordProvenance
-  sourcePrompt: string
-  vault: string
+    throw error
+  }
 }
 
 export interface AssistantLongTermMemoryEntry {
@@ -187,116 +186,6 @@ interface NormalizedAssistantMemoryUpsert {
   requireSourcePromptMatch: boolean
   sourcePrompt: string | null
   scope: AssistantMemoryWriteScope
-}
-
-interface AssistantMemoryWriteLockMetadata {
-  command: string
-  pid: number
-  startedAt: string
-}
-
-interface ProcessAssistantMemoryLockState {
-  depth: number
-  metadata: AssistantMemoryWriteLockMetadata
-}
-
-const processAssistantMemoryLocks = new Map<string, ProcessAssistantMemoryLockState>()
-const processAssistantMemoryWriteChains = new Map<string, Promise<void>>()
-const assistantMemoryWriteOwnerStorage = new AsyncLocalStorage<Set<string>>()
-
-export type AssistantMemoryPaths = Pick<
-  AssistantStatePaths,
-  'assistantStateRoot' | 'dailyMemoryDirectory' | 'longTermMemoryPath'
->
-
-function pickAssistantMemoryPaths(
-  paths: AssistantStatePaths,
-): AssistantMemoryPaths {
-  return {
-    assistantStateRoot: paths.assistantStateRoot,
-    dailyMemoryDirectory: paths.dailyMemoryDirectory,
-    longTermMemoryPath: paths.longTermMemoryPath,
-  }
-}
-
-export function resolveAssistantMemoryStoragePaths(
-  vault: string,
-): AssistantMemoryPaths {
-  return pickAssistantMemoryPaths(resolveAssistantStatePaths(vault))
-}
-
-/**
- * @deprecated Use `resolveAssistantMemoryStoragePaths` for memory-only operations
- * or `resolveAssistantStatePaths` when non-memory assistant-state paths are
- * intentionally required.
- */
-export function resolveAssistantMemoryPaths(vault: string): AssistantStatePaths {
-  return resolveAssistantStatePaths(vault)
-}
-
-export function resolveAssistantDailyMemoryPath(
-  paths: Pick<AssistantMemoryPaths, 'dailyMemoryDirectory'>,
-  now = new Date(),
-): string {
-  return path.join(paths.dailyMemoryDirectory, `${formatLocalDate(now)}.md`)
-}
-
-export function createAssistantMemoryTurnContextEnv(
-  input: AssistantMemoryTurnContextInput,
-): NodeJS.ProcessEnv {
-  const resolvedVault = path.resolve(input.vault)
-
-  return {
-    [HEALTHYBOB_VAULT_ENV]: resolvedVault,
-    [ASSISTANT_MEMORY_TURN_ID_ENV]: input.turnId,
-    [ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV]: input.allowSensitiveHealthContext
-      ? '1'
-      : '0',
-    [ASSISTANT_MEMORY_TURN_SESSION_ID_ENV]: input.sessionId,
-    [ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV]: input.sourcePrompt,
-    [ASSISTANT_MEMORY_TURN_VAULT_ENV]: resolvedVault,
-  }
-}
-
-export function resolveAssistantMemoryTurnContext(
-  env: NodeJS.ProcessEnv = process.env,
-): AssistantMemoryTurnContext | null {
-  const vault = normalizeNullableString(env[ASSISTANT_MEMORY_TURN_VAULT_ENV])
-  const sourcePrompt = normalizeNullableString(
-    env[ASSISTANT_MEMORY_TURN_SOURCE_PROMPT_ENV],
-  )
-  const sessionId = normalizeNullableString(
-    env[ASSISTANT_MEMORY_TURN_SESSION_ID_ENV],
-  )
-  const turnId = normalizeNullableString(env[ASSISTANT_MEMORY_TURN_ID_ENV])
-
-  if (!vault || !sourcePrompt || !sessionId || !turnId) {
-    return null
-  }
-
-  return {
-    allowSensitiveHealthContext:
-      env[ASSISTANT_MEMORY_TURN_PRIVATE_CONTEXT_ENV]?.trim() === '1',
-    provenance: {
-      writtenBy: 'assistant',
-      sessionId,
-      turnId,
-    },
-    sourcePrompt,
-    vault: path.resolve(vault),
-  }
-}
-
-export function assertAssistantMemoryTurnContextVault(
-  context: AssistantMemoryTurnContext,
-  vault: string,
-): void {
-  if (context.vault !== path.resolve(vault)) {
-    throw new VaultCliError(
-      'ASSISTANT_MEMORY_TURN_VAULT_MISMATCH',
-      'Assistant memory turn context is only valid for the active assistant vault.',
-    )
-  }
 }
 
 export async function loadAssistantMemoryPromptBlock(
@@ -2153,244 +2042,4 @@ function isAssistantMemoryRecordProvenance(
       ((value as { turnId?: unknown }).turnId === null ||
         typeof (value as { turnId?: unknown }).turnId === 'string'),
   )
-}
-
-async function withAssistantMemoryWriteLock<TResult>(
-  paths: AssistantMemoryPaths,
-  run: () => Promise<TResult>,
-): Promise<TResult> {
-  const ownedRoots = assistantMemoryWriteOwnerStorage.getStore()
-  if (ownedRoots?.has(paths.assistantStateRoot)) {
-    const handle = await acquireAssistantMemoryWriteLock(paths)
-
-    try {
-      return await run()
-    } finally {
-      await handle.release()
-    }
-  }
-
-  const prior =
-    processAssistantMemoryWriteChains.get(paths.assistantStateRoot) ?? Promise.resolve()
-  let releaseQueue!: () => void
-  const queued = new Promise<void>((resolve) => {
-    releaseQueue = resolve
-  })
-  const tail = prior.then(
-    () => queued,
-    () => queued,
-  )
-  processAssistantMemoryWriteChains.set(paths.assistantStateRoot, tail)
-
-  await prior.catch(() => undefined)
-
-  try {
-    const nextOwnedRoots = new Set(ownedRoots ?? [])
-    nextOwnedRoots.add(paths.assistantStateRoot)
-
-    return await assistantMemoryWriteOwnerStorage.run(nextOwnedRoots, async () => {
-      const handle = await acquireAssistantMemoryWriteLock(paths)
-
-      try {
-        return await run()
-      } finally {
-        await handle.release()
-      }
-    })
-  } finally {
-    releaseQueue()
-    if (processAssistantMemoryWriteChains.get(paths.assistantStateRoot) === tail) {
-      processAssistantMemoryWriteChains.delete(paths.assistantStateRoot)
-    }
-  }
-}
-
-async function acquireAssistantMemoryWriteLock(paths: AssistantMemoryPaths): Promise<{
-  release(): Promise<void>
-}> {
-  const lockRoot = path.join(paths.assistantStateRoot, ASSISTANT_MEMORY_LOCK_DIRECTORY)
-  const metadataPath = path.join(paths.assistantStateRoot, ASSISTANT_MEMORY_LOCK_METADATA_PATH)
-  const existing = processAssistantMemoryLocks.get(paths.assistantStateRoot)
-
-  if (existing) {
-    existing.depth += 1
-    let released = false
-
-    return {
-      async release() {
-        if (released) {
-          return
-        }
-
-        released = true
-        existing.depth -= 1
-        if (existing.depth <= 0) {
-          processAssistantMemoryLocks.delete(paths.assistantStateRoot)
-          await rm(lockRoot, {
-            recursive: true,
-            force: true,
-            maxRetries: 3,
-            retryDelay: 10,
-          })
-        }
-      },
-    }
-  }
-
-  const metadata: AssistantMemoryWriteLockMetadata = {
-    command: formatAssistantMemoryLockCommand(),
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-  }
-
-  processAssistantMemoryLocks.set(paths.assistantStateRoot, {
-    depth: 1,
-    metadata,
-  })
-
-  try {
-    await mkdir(path.dirname(lockRoot), { recursive: true })
-
-    while (true) {
-      try {
-        await mkdir(lockRoot)
-        break
-      } catch (error) {
-        if (
-          typeof error === 'object' &&
-          error !== null &&
-          'code' in error &&
-          error.code === 'EEXIST'
-        ) {
-          if (await clearStaleAssistantMemoryWriteLock(metadataPath, lockRoot)) {
-            continue
-          }
-
-          const owner = await readAssistantMemoryWriteLockMetadata(metadataPath)
-          throw new VaultCliError(
-            'ASSISTANT_MEMORY_WRITE_LOCKED',
-            owner
-              ? `Assistant memory writes are already in progress (pid=${owner.pid}, startedAt=${owner.startedAt}, command=${owner.command}).`
-              : 'Assistant memory writes are already in progress.',
-          )
-        }
-
-        throw error
-      }
-    }
-
-    await writeTextFileAtomic(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`)
-  } catch (error) {
-    processAssistantMemoryLocks.delete(paths.assistantStateRoot)
-    await rm(lockRoot, { recursive: true, force: true })
-    throw error
-  }
-
-  let released = false
-
-  return {
-    async release() {
-      if (released) {
-        return
-      }
-
-      released = true
-      const current = processAssistantMemoryLocks.get(paths.assistantStateRoot)
-      if (current) {
-        current.depth -= 1
-        if (current.depth <= 0) {
-          processAssistantMemoryLocks.delete(paths.assistantStateRoot)
-          await rm(lockRoot, {
-            recursive: true,
-            force: true,
-            maxRetries: 3,
-            retryDelay: 10,
-          })
-        }
-      }
-    },
-  }
-}
-
-async function clearStaleAssistantMemoryWriteLock(
-  metadataPath: string,
-  lockRoot: string,
-): Promise<boolean> {
-  const metadata = await readAssistantMemoryWriteLockMetadata(metadataPath)
-  if (metadata && isAssistantMemoryLockProcessRunning(metadata.pid)) {
-    return false
-  }
-
-  await rm(lockRoot, { recursive: true, force: true })
-  return true
-}
-
-async function readAssistantMemoryWriteLockMetadata(
-  metadataPath: string,
-): Promise<AssistantMemoryWriteLockMetadata | null> {
-  const raw = await readOptionalText(metadataPath)
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      'command' in parsed &&
-      typeof (parsed as { command?: unknown }).command === 'string' &&
-      'pid' in parsed &&
-      typeof (parsed as { pid?: unknown }).pid === 'number' &&
-      Number.isInteger((parsed as { pid: number }).pid) &&
-      'startedAt' in parsed &&
-      typeof (parsed as { startedAt?: unknown }).startedAt === 'string'
-    ) {
-      return parsed as AssistantMemoryWriteLockMetadata
-    }
-  } catch {}
-
-  return null
-}
-
-function isAssistantMemoryLockProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'ESRCH'
-    ) {
-      return false
-    }
-
-    return true
-  }
-}
-
-function formatAssistantMemoryLockCommand(): string {
-  const values = [process.argv[0], process.argv[1]]
-    .map((value) =>
-      typeof value === 'string' && value.trim().length > 0
-        ? path.basename(value)
-        : '',
-    )
-    .filter(Boolean)
-
-  return values.join(' ').trim() || 'unknown'
-}
-
-async function readOptionalText(filePath: string): Promise<string | null> {
-  try {
-    const raw = await readFile(filePath, 'utf8')
-    return normalizeNullableString(raw)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
-    }
-    throw error
-  }
 }

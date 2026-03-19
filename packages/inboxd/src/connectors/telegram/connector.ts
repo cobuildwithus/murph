@@ -13,12 +13,10 @@ import type {
 
 export const DEFAULT_TELEGRAM_ALLOWED_UPDATES = [
   "message",
-  "edited_message",
-  "channel_post",
-  "edited_channel_post",
   "business_message",
-  "edited_business_message",
 ] as const;
+
+const TELEGRAM_WATCH_RETRY_DELAYS_MS = [1000, 3000, 5000, 10000] as const;
 
 export type TelegramApiClient = Api<RawApi>;
 type TelegramApiSignal = Parameters<TelegramApiClient["getMe"]>[0];
@@ -160,15 +158,40 @@ export function createTelegramApiPollDriver({
       const controller = new AbortController();
       const releaseRelay = relayAbort(signal, controller);
       const watchSignal = controller.signal;
+      let failureCount = 0;
 
       const loop = (async () => {
         while (!watchSignal.aborted) {
-          const batch = await getUpdates(api, {
-            offset,
-            limit: normalizedBatchSize,
-            timeout: timeoutSeconds,
-            allowed_updates: allowedUpdates ?? undefined,
-          }, watchSignal);
+          let batch: TelegramUpdateLike[];
+          try {
+            batch = await getUpdates(api, {
+              offset,
+              limit: normalizedBatchSize,
+              timeout: timeoutSeconds,
+              allowed_updates: allowedUpdates ?? undefined,
+            }, watchSignal);
+            failureCount = 0;
+          } catch (error) {
+            if (watchSignal.aborted) {
+              break;
+            }
+
+            if (!shouldRetryTelegramPollingError(error)) {
+              throw error;
+            }
+
+            try {
+              await waitForTelegramRetryDelay(error, failureCount, watchSignal);
+            } catch (retryError) {
+              if (isAbortError(retryError)) {
+                break;
+              }
+
+              throw retryError;
+            }
+            failureCount += 1;
+            continue;
+          }
 
           if (batch.length === 0) {
             continue;
@@ -326,11 +349,7 @@ function parseTelegramUpdateExternalId(externalId: string): number | null {
 function isTelegramMessageUpdate(update: TelegramUpdateLike): boolean {
   return Boolean(
     update.message ??
-      update.edited_message ??
-      update.channel_post ??
-      update.edited_channel_post ??
-      update.business_message ??
-      update.edited_business_message,
+      update.business_message,
   );
 }
 
@@ -421,6 +440,70 @@ function relayAbort(signal: AbortSignal, controller: AbortController): () => voi
   const onAbort = () => controller.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);
+}
+
+function shouldRetryTelegramPollingError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return true;
+  }
+
+  if (/webhook/u.test(error.message) || /\b409\b/u.test(error.message)) {
+    return false;
+  }
+
+  if (/\b401\b/u.test(error.message) || /\b403\b/u.test(error.message)) {
+    return false;
+  }
+
+  return true;
+}
+
+async function waitForTelegramRetryDelay(
+  error: unknown,
+  failureCount: number,
+  signal: AbortSignal,
+): Promise<void> {
+  const retryAfterMilliseconds = parseRetryAfterMilliseconds(error);
+  const backoffMilliseconds =
+    TELEGRAM_WATCH_RETRY_DELAYS_MS[
+      Math.min(failureCount, TELEGRAM_WATCH_RETRY_DELAYS_MS.length - 1)
+    ] ?? TELEGRAM_WATCH_RETRY_DELAYS_MS[TELEGRAM_WATCH_RETRY_DELAYS_MS.length - 1];
+  const delay = retryAfterMilliseconds ?? backoffMilliseconds;
+
+  await new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delay);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function parseRetryAfterMilliseconds(error: unknown): number | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const match = /retry after (\d+)/iu.exec(error.message);
+  if (!match) {
+    return null;
+  }
+
+  const seconds = Number.parseInt(match[1], 10);
+  if (!Number.isSafeInteger(seconds) || seconds <= 0) {
+    return null;
+  }
+
+  return seconds * 1000;
 }
 
 function asTelegramApiSignal(signal: AbortSignal | undefined): TelegramApiSignal {

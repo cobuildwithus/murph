@@ -221,6 +221,91 @@ test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including
   })
 })
 
+test('sendTelegramMessage posts business and direct-message topic routing fields', async () => {
+  const requests: Array<Record<string, unknown>> = []
+
+  await sendTelegramMessage(
+    {
+      message: 'Route this through the business inbox.',
+      target: '-1001234567890:business:biz-42:dm-topic:9',
+    },
+    {
+      env: {
+        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+      },
+      fetchImplementation: async (_url, init) => {
+        requests.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: { message_id: 2 } }),
+        }
+      },
+    },
+  )
+
+  assert.deepEqual(requests, [
+    {
+      business_connection_id: 'biz-42',
+      chat_id: '-1001234567890',
+      direct_messages_topic_id: 9,
+      text: 'Route this through the business inbox.',
+    },
+  ])
+})
+
+test('sendTelegramMessage splits long replies and retries transient Telegram failures', async () => {
+  const longMessage = `${'A'.repeat(4096)}${'B'.repeat(32)}`
+  const requests: Array<Record<string, unknown>> = []
+  let callCount = 0
+
+  await sendTelegramMessage(
+    {
+      message: longMessage,
+      target: '123456789',
+    },
+    {
+      env: {
+        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+      },
+      fetchImplementation: async (_url, init) => {
+        callCount += 1
+        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+        requests.push(body)
+
+        if (callCount === 1) {
+          return {
+            ok: false,
+            status: 429,
+            json: async () => ({
+              ok: false,
+              error_code: 429,
+              description: 'Too Many Requests: retry later',
+              parameters: {
+                retry_after: 0.001,
+              },
+            }),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: { message_id: callCount } }),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 3)
+  assert.equal((requests[0]?.text as string).length, 4096)
+  assert.equal(requests[0]?.text, requests[1]?.text)
+  assert.equal(
+    `${requests[1]?.text as string}${requests[2]?.text as string}`,
+    longMessage,
+  )
+})
+
 test('sendTelegramMessage requires a bot token before attempting delivery', async () => {
   await assert.rejects(
     () =>
