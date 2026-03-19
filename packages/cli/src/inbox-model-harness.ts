@@ -8,6 +8,7 @@ import {
 import {
   generateAssistantObject,
   resolveAssistantLanguageModel,
+  type AssistantModelMessage,
   type AssistantModelSpec,
 } from './model-harness.js'
 import type { InboxShowResult } from './inbox-cli-contracts.js'
@@ -21,8 +22,13 @@ import {
   type InboxModelAttachmentBundle,
   type InboxModelBundle,
   type InboxModelBundleResult,
+  type InboxModelInputMode,
   type InboxModelRouteResult,
 } from './inbox-model-contracts.js'
+import {
+  getRoutingImageEligibility,
+  type RoutingImageEligibility,
+} from './inbox-routing-vision.js'
 import type { VaultCliServices } from './vault-cli-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -38,6 +44,20 @@ const parserManifestSchema = z.object({
     tablesPath: z.string().min(1).nullable().optional(),
   }),
 })
+
+interface PreparedRoutingImage {
+  ordinal: number
+  fileName: string | null
+  mediaType: string | null
+  bytes: Buffer
+}
+
+interface PreparedInboxPlacementInput {
+  prompt: string
+  inputMode: InboxModelInputMode
+  messages?: AssistantModelMessage[]
+  fallbackError: string | null
+}
 
 export interface BuildInboxModelBundleInput {
   inboxServices: InboxCliServices
@@ -89,13 +109,35 @@ export async function routeInboxCaptureWithModel(
     bundle,
   )
   const model = resolveAssistantLanguageModel(input.modelSpec)
-  const rawPlan = await generateAssistantObject({
-    model,
-    schema: assistantExecutionPlanSchema,
-    schemaName: 'healthybob_assistant_plan',
-    system: buildInboxPlacementSystemPrompt(),
-    prompt: buildInboxPlacementPrompt(bundle),
+  const preparedInput = await prepareInboxPlacementInput({
+    bundle,
+    vaultRoot: input.vault,
   })
+
+  let inputMode = preparedInput.inputMode
+  let fallbackError = preparedInput.fallbackError
+  let rawPlan: unknown
+
+  try {
+    rawPlan = await generateAssistantObject(
+      buildInboxPlacementGenerationInput(model, preparedInput),
+    )
+  } catch (error) {
+    if (inputMode === 'multimodal' && shouldRetryMultimodalAsTextOnly(error)) {
+      inputMode = 'text-only'
+      fallbackError = errorMessage(error)
+      rawPlan = await generateAssistantObject({
+        model,
+        schema: assistantExecutionPlanSchema,
+        schemaName: 'healthybob_assistant_plan',
+        system: buildInboxPlacementSystemPrompt(),
+        prompt: preparedInput.prompt,
+      })
+    } else {
+      throw error
+    }
+  }
+
   const plan = validateAssistantPlan(rawPlan, toolCatalog)
   const planPath = await writeAssistantArtifact(
     input.vault,
@@ -115,6 +157,9 @@ export async function routeInboxCaptureWithModel(
     {
       schema: 'healthybob.assistant-plan-result.v1',
       apply: input.apply ?? false,
+      preparedInputMode: bundle.preparedInputMode,
+      inputMode,
+      fallbackError,
       results,
     },
   )
@@ -126,6 +171,9 @@ export async function routeInboxCaptureWithModel(
     bundlePath,
     planPath,
     resultPath,
+    preparedInputMode: bundle.preparedInputMode,
+    inputMode,
+    fallbackError,
     model: {
       model: input.modelSpec.model,
       providerMode: input.modelSpec.baseUrl ? 'openai-compatible' : 'gateway',
@@ -164,8 +212,9 @@ async function prepareInboxModelSession(
       }),
     ),
   )
+  const preparedInputMode = inferPreparedInputMode(attachments)
   const routingText = clampText(
-    renderRoutingText(shown.capture, attachments),
+    renderRoutingText(shown.capture, attachments, preparedInputMode),
     DEFAULT_MAX_ROUTING_CHARS,
   ).text
 
@@ -188,6 +237,7 @@ async function prepareInboxModelSession(
       captureText: shown.capture.text ?? null,
       attachments,
       tools,
+      preparedInputMode,
       routingText,
     }),
   }
@@ -199,7 +249,8 @@ function buildInboxPlacementSystemPrompt(): string {
     'Choose the smallest safe set of CLI tool calls needed to place the capture into canonical storage.',
     'Prefer inbox.promote.* tools when a single capture-level promotion fits the evidence.',
     'Use broader vault.* tools only when the capture clearly contains structured data that should be written directly.',
-    'Do not invent facts that are not present in the normalized text bundle.',
+    'When routing images are attached, treat them as raw evidence alongside the normalized text bundle.',
+    'Do not invent facts that are not present in the normalized bundle or clearly visible in attached routing images.',
     'If the capture should not be written yet, return an empty actions array.',
     'Return JSON only.',
   ].join(' ')
@@ -224,6 +275,7 @@ function buildInboxPlacementPrompt(bundle: InboxModelBundle): string {
     'Choose zero to four tool calls from the catalog below.',
     'When a single inbox promotion tool safely captures the intent, prefer that over lower-level writes.',
     'If you choose a tool, copy the input field names exactly as shown in the example.',
+    'If raw routing images are attached as additional message parts, use them as evidence. Otherwise rely only on the text bundle below.',
     '',
     'Available tools:',
     renderToolCatalog(bundle.tools),
@@ -234,6 +286,90 @@ function buildInboxPlacementPrompt(bundle: InboxModelBundle): string {
     'Normalized capture bundle:',
     bundle.routingText,
   ].join('\n')
+}
+
+function buildInboxPlacementGenerationInput(
+  model: ReturnType<typeof resolveAssistantLanguageModel>,
+  preparedInput: PreparedInboxPlacementInput,
+) {
+  return {
+    model,
+    schema: assistantExecutionPlanSchema,
+    schemaName: 'healthybob_assistant_plan',
+    system: buildInboxPlacementSystemPrompt(),
+    ...(preparedInput.inputMode === 'multimodal' && preparedInput.messages
+      ? {
+          messages: preparedInput.messages,
+        }
+      : {
+          prompt: preparedInput.prompt,
+        }),
+  }
+}
+
+async function prepareInboxPlacementInput(input: {
+  bundle: InboxModelBundle
+  vaultRoot: string
+}): Promise<PreparedInboxPlacementInput> {
+  const prompt = buildInboxPlacementPrompt(input.bundle)
+  if (input.bundle.preparedInputMode === 'text-only') {
+    return {
+      prompt,
+      inputMode: 'text-only',
+      fallbackError: null,
+    }
+  }
+
+  const routingImages = await readPreparedRoutingImages({
+    attachments: input.bundle.attachments,
+    vaultRoot: input.vaultRoot,
+  })
+
+  if (routingImages.images.length === 0) {
+    return {
+      prompt,
+      inputMode: 'text-only',
+      fallbackError:
+        routingImages.error ??
+        'Falling back to text-only routing because no eligible image evidence could be loaded.',
+    }
+  }
+
+  const content: AssistantModelMessage['content'] = [
+    {
+      type: 'text',
+      text: prompt,
+    },
+  ]
+
+  for (const image of routingImages.images) {
+    content.push({
+      type: 'text',
+      text: `Routing image ${image.ordinal}${image.fileName ? ` (${image.fileName})` : ''}.`,
+    })
+    content.push({
+      type: 'image',
+      image: image.bytes,
+      ...(image.mediaType
+        ? {
+            mediaType: image.mediaType,
+            mimeType: image.mediaType,
+          }
+        : {}),
+    })
+  }
+
+  return {
+    prompt,
+    inputMode: 'multimodal',
+    messages: [
+      {
+        role: 'user',
+        content,
+      },
+    ],
+    fallbackError: null,
+  }
 }
 
 function validateAssistantPlan(
@@ -258,8 +394,9 @@ async function buildAttachmentBundle(input: {
   attachment: InboxShowResult['capture']['attachments'][number]
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle> {
+  const routingImage = getRoutingImageEligibility(input.attachment)
   const fragments = [
-    buildMetadataFragment(input.attachment),
+    buildMetadataFragment(input.attachment, routingImage),
     ...buildInlineTextFragments(input.attachment),
     ...(await buildDerivedTextFragments(input.vaultRoot, input.attachment.derivedPath)),
   ]
@@ -276,6 +413,7 @@ async function buildAttachmentBundle(input: {
     fileName: input.attachment.fileName ?? null,
     storedPath: input.attachment.storedPath ?? null,
     parseState: input.attachment.parseState ?? null,
+    routingImage,
     fragments,
     combinedText,
   })
@@ -283,6 +421,7 @@ async function buildAttachmentBundle(input: {
 
 function buildMetadataFragment(
   attachment: InboxShowResult['capture']['attachments'][number],
+  routingImage: RoutingImageEligibility,
 ) {
   const metadataLines = [
     `attachmentId: ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`}`,
@@ -292,6 +431,10 @@ function buildMetadataFragment(
     `fileName: ${attachment.fileName ?? 'unknown'}`,
     `storedPath: ${attachment.storedPath ?? 'missing'}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
+    `routingImageEligible: ${String(routingImage.eligible)}`,
+    `routingImageReason: ${routingImage.reason}`,
+    `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
+    `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
   ]
   const text = metadataLines.join('\n')
   return {
@@ -408,6 +551,7 @@ async function buildDerivedTextFragments(
 function renderRoutingText(
   capture: InboxShowResult['capture'],
   attachments: InboxModelAttachmentBundle[],
+  preparedInputMode: InboxModelInputMode,
 ): string {
   const lines: string[] = [
     `Capture id: ${capture.captureId}`,
@@ -416,6 +560,7 @@ function renderRoutingText(
     `Thread: ${capture.threadId}${capture.threadTitle ? ` (${capture.threadTitle})` : ''}`,
     `Actor: ${capture.actorName ?? capture.actorId ?? 'unknown'} | self=${String(capture.actorIsSelf)}`,
     `Envelope path: ${capture.envelopePath}`,
+    `Prepared input mode: ${preparedInputMode}`,
   ]
 
   const captureText = normalizeNullableString(capture.text)
@@ -471,6 +616,79 @@ async function readRelativeTextFile(
   }
 }
 
+async function readPreparedRoutingImages(input: {
+  attachments: InboxModelBundle['attachments']
+  vaultRoot: string
+}): Promise<{
+  images: PreparedRoutingImage[]
+  error: string | null
+}> {
+  const images: PreparedRoutingImage[] = []
+  const errors: string[] = []
+
+  for (const attachment of input.attachments) {
+    if (!attachment.routingImage.eligible || !attachment.storedPath) {
+      continue
+    }
+
+    try {
+      const absolutePath = await resolveAssistantVaultPath(
+        input.vaultRoot,
+        attachment.storedPath,
+        'file path',
+      )
+      images.push({
+        ordinal: attachment.ordinal,
+        fileName: attachment.fileName ?? null,
+        mediaType: attachment.routingImage.mediaType ?? null,
+        bytes: await readFile(absolutePath),
+      })
+    } catch (error) {
+      errors.push(`attachment ${attachment.ordinal}: ${errorMessage(error)}`)
+    }
+  }
+
+  return {
+    images,
+    error:
+      images.length === 0 && errors.length > 0
+        ? `Falling back to text-only routing because image evidence could not be loaded (${errors.join('; ')}).`
+        : null,
+  }
+}
+
+function inferPreparedInputMode(
+  attachments: InboxModelAttachmentBundle[],
+): InboxModelInputMode {
+  return attachments.some((attachment) => attachment.routingImage.eligible)
+    ? 'multimodal'
+    : 'text-only'
+}
+
+function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase()
+  const mentionsImageInput = [
+    'image',
+    'vision',
+    'multimodal',
+    'multi-modal',
+    'media type',
+    'mime type',
+    'input_image',
+    'image_url',
+  ].some((token) => message.includes(token))
+  const signalsUnsupported = [
+    'unsupported',
+    'not support',
+    'does not support',
+    'invalid',
+    'reject',
+    'unknown',
+  ].some((token) => message.includes(token))
+
+  return mentionsImageInput && signalsUnsupported
+}
+
 async function writeAssistantArtifact(
   vaultRoot: string,
   captureId: string,
@@ -523,4 +741,12 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const normalized = value.trim()
   return normalized.length > 0 ? normalized : null
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+
+  return String(error)
 }

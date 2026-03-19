@@ -79,7 +79,7 @@ test('inbox help surfaces the first-pass operator commands', async () => {
   assert.match(help, /show\s+Show one captured inbox item/u)
   assert.match(help, /search\s+Search captured inbox items/u)
   assert.match(help, /promote\s+Promote captured inbox items/u)
-  assert.match(help, /model\s+Build a text-only inbox bundle/u)
+  assert.match(help, /model\s+Build a normalized inbox bundle/u)
 })
 
 test('inbox promote help includes document promotion', async () => {

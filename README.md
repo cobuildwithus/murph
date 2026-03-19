@@ -294,7 +294,7 @@ The repo also includes local-first inbox parser controls:
 - `vault-cli inbox requeue --vault <path> [--captureId <captureId>] [--attachmentId <attachmentId>] [--state failed|running]` resets failed or interrupted jobs back to pending
 - `vault-cli inbox attachment list|show|show-status|parse|reparse` exposes attachment-level inspection plus single-attachment parser control
 - `vault-cli inbox promote meal|document|journal|experiment-note` exposes implemented promotion flows for deterministic meal, document, journal, and experiment-note follow-ups
-- `vault-cli inbox model bundle <captureId>` materializes the normalized text-only routing bundle for one inbox capture
+- `vault-cli inbox model bundle <captureId>` materializes the normalized routing bundle for one inbox capture, including multimodal image-routing eligibility metadata
 - `vault-cli inbox model route <captureId> --model <model> [--baseUrl <url>] [--apply]` uses the shared Vercel AI SDK harness to preview or apply canonical CLI actions
 
 ### Assistant Commands

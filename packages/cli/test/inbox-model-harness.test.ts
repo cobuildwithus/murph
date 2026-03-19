@@ -181,6 +181,9 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
 
     assert.equal(result.bundle.schema, 'healthybob.inbox-model-bundle.v1')
     assert.equal(result.bundle.captureId, 'cap_1')
+    assert.equal(result.bundle.preparedInputMode, 'text-only')
+    assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
+    assert.equal(result.bundle.attachments[0]?.routingImage.reason, 'not-image')
     assert.equal(
       result.bundle.tools.some((tool) => tool.name === 'inbox.promote.document'),
       true,
@@ -218,6 +221,138 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       persistedBundle.tools.some((tool) => tool.name === 'inbox.promote.document'),
       true,
     )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeInboxModelBundle marks supported meal photos as multimodal-ready routing inputs', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-photo-bundle-'))
+  const imageDirectory = path.join(
+    vaultRoot,
+    'raw',
+    'inbox',
+    'captures',
+    'cap_photo',
+    'attachments',
+    '1',
+  )
+  await mkdir(imageDirectory, { recursive: true })
+  await writeFile(path.join(imageDirectory, 'meal.jpg'), Buffer.from([0xff, 0xd8, 0xff]))
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_photo',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-photo',
+      threadId: 'thread-photo',
+      threadTitle: 'Meal log',
+      actorId: 'self',
+      actorName: 'Me',
+      actorIsSelf: true,
+      occurredAt: '2026-03-13T18:00:00.000Z',
+      receivedAt: '2026-03-13T18:00:02.000Z',
+      text: 'Dinner',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_photo/envelope.json',
+      eventId: 'evt_photo',
+      promotions: [],
+      createdAt: '2026-03-13T18:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_photo',
+          ordinal: 1,
+          kind: 'image',
+          mime: 'image/jpeg',
+          fileName: 'meal.jpg',
+          storedPath: 'raw/inbox/captures/cap_photo/attachments/1/meal.jpg',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: null,
+          parserProviderId: null,
+          parseState: 'pending',
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_photo',
+      captureId: 'cap_photo',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.equal(result.bundle.preparedInputMode, 'multimodal')
+    assert.equal(result.bundle.attachments[0]?.routingImage.eligible, true)
+    assert.equal(result.bundle.attachments[0]?.routingImage.reason, 'supported-format')
+    assert.equal(result.bundle.attachments[0]?.routingImage.mediaType, 'image/jpeg')
+    assert.match(result.bundle.routingText, /routingImageEligible: true/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text-only path', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-heic-bundle-'))
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_heic',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-heic',
+      threadId: 'thread-heic',
+      threadTitle: 'Meal log',
+      actorId: 'self',
+      actorName: 'Me',
+      actorIsSelf: true,
+      occurredAt: '2026-03-13T18:00:00.000Z',
+      receivedAt: '2026-03-13T18:00:02.000Z',
+      text: 'Dinner',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_heic/envelope.json',
+      eventId: 'evt_heic',
+      promotions: [],
+      createdAt: '2026-03-13T18:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_heic',
+          ordinal: 1,
+          kind: 'image',
+          mime: 'image/heic',
+          fileName: 'dinner.heic',
+          storedPath: 'raw/inbox/captures/cap_heic/attachments/1/dinner.heic',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: null,
+          parserProviderId: null,
+          parseState: 'pending',
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_heic',
+      captureId: 'cap_heic',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.equal(result.bundle.preparedInputMode, 'text-only')
+    assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
+    assert.equal(result.bundle.attachments[0]?.routingImage.reason, 'unsupported-format')
+    assert.equal(result.bundle.attachments[0]?.routingImage.mediaType, 'image/heic')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

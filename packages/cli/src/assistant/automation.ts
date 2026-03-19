@@ -8,6 +8,7 @@ import {
 import type { InboxShowResult } from '../inbox-cli-contracts.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import { routeInboxCaptureWithModel } from '../inbox-model-harness.js'
+import { shouldBypassParserWaitForRouting } from '../inbox-routing-vision.js'
 import type { AssistantModelSpec } from '../model-harness.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import { sendAssistantMessage } from './service.js'
@@ -301,11 +302,16 @@ export async function scanAssistantInboxOnce(input: {
         captureId: capture.captureId,
       })
 
-      const waitingForParser = shown.capture.attachments.some(
-        (attachment) =>
-          attachment.parseState === 'pending' ||
-          attachment.parseState === 'running',
-      )
+      const waitingForParser = shown.capture.attachments.some((attachment) => {
+        if (
+          attachment.parseState !== 'pending' &&
+          attachment.parseState !== 'running'
+        ) {
+          return false
+        }
+
+        return !shouldBypassParserWaitForRouting(attachment)
+      })
       if (waitingForParser) {
         summary.skipped += 1
         input.onEvent?.({

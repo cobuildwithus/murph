@@ -30,6 +30,28 @@ export interface AssistantToolDefinition<TResult = unknown> {
 
 export type AssistantToolExecutionMode = 'preview' | 'apply'
 
+export interface AssistantModelTextPart {
+  type: 'text'
+  text: string
+}
+
+export interface AssistantModelImagePart {
+  type: 'image'
+  image: string | Uint8Array | Buffer | ArrayBuffer | URL
+  mediaType?: string
+  mimeType?: string
+}
+
+export type AssistantModelContentPart =
+  | AssistantModelTextPart
+  | AssistantModelImagePart
+  | Record<string, unknown>
+
+export interface AssistantModelMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | AssistantModelContentPart[]
+}
+
 export interface AssistantToolCatalog {
   createAiSdkTools(mode?: AssistantToolExecutionMode): ToolSet
   executeCalls(input: {
@@ -52,8 +74,9 @@ export interface AssistantModelSpec {
 
 export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
   maxSteps?: number
+  messages?: AssistantModelMessage[]
   model: LanguageModel
-  prompt: string
+  prompt?: string
   schema: TSchema
   schemaName?: string
   system?: string
@@ -131,26 +154,35 @@ export function createAssistantToolCatalog(
 export async function generateAssistantObject<TSchema extends z.ZodTypeAny>(
   input: GenerateAssistantObjectInput<TSchema>,
 ): Promise<z.infer<TSchema>> {
-  if (input.tools) {
+  const promptOrMessages = resolveAssistantPromptOrMessages(input)
+
+  if (input.tools || 'messages' in promptOrMessages) {
     const result = await generateText({
       model: input.model,
       system: input.system,
-      prompt: input.prompt,
       temperature: input.temperature,
-      tools: input.tools,
-      stopWhen: stepCountIs(input.maxSteps ?? 6),
+      ...(input.tools
+        ? {
+            tools: input.tools,
+            stopWhen: stepCountIs(input.maxSteps ?? 6),
+          }
+        : {}),
+      ...promptOrMessages,
       experimental_output: Output.object({
         schema: input.schema,
       }),
-    })
+    } as Parameters<typeof generateText>[0])
 
-    return input.schema.parse(result.experimental_output)
+    return input.schema.parse(
+      (result as { experimental_output?: unknown; output?: unknown }).experimental_output ??
+        (result as { output?: unknown }).output,
+    )
   }
 
   const result = await generateObject({
     model: input.model,
     system: input.system,
-    prompt: input.prompt,
+    prompt: promptOrMessages.prompt,
     temperature: input.temperature,
     schema: input.schema,
     schemaName: input.schemaName,
@@ -244,6 +276,24 @@ async function executeDefinition(
   return definition.execute(input as any)
 }
 
+function resolveAssistantPromptOrMessages(
+  input: Pick<GenerateAssistantObjectInput<z.ZodTypeAny>, 'messages' | 'prompt'>,
+): { messages: AssistantModelMessage[] } | { prompt: string } {
+  if (Array.isArray(input.messages) && input.messages.length > 0) {
+    return {
+      messages: input.messages,
+    }
+  }
+
+  if (typeof input.prompt === 'string' && input.prompt.trim().length > 0) {
+    return {
+      prompt: input.prompt,
+    }
+  }
+
+  throw new Error('Assistant generation requires either a prompt string or at least one message.')
+}
+
 function resolveAssistantApiKey(spec: AssistantModelSpec): string | undefined {
   if (typeof spec.apiKey === 'string' && spec.apiKey.length > 0) {
     return spec.apiKey
@@ -259,7 +309,7 @@ function resolveAssistantApiKey(spec: AssistantModelSpec): string | undefined {
   return undefined
 }
 
-function normalizeAssistantProviderName(value: string | undefined): string {
+function normalizeAssistantProviderName(value: string | null | undefined): string {
   if (typeof value === 'string') {
     const trimmed = value.trim()
     if (trimmed.length > 0) {

@@ -723,6 +723,201 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
   ])
 })
 
+
+test('scanAssistantInboxOnce bypasses parser waits for supported pending meal photos', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-photo-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.routeInboxCaptureWithModel.mockResolvedValue({
+    plan: {
+      actions: [
+        {
+          tool: 'meal.add',
+        },
+      ],
+    },
+  })
+
+  const inboxServices = {
+    list: async () => ({
+      items: [
+        {
+          captureId: 'cap-photo',
+          occurredAt: '2026-03-16T16:10:00Z',
+          promotions: [],
+        },
+      ],
+    }),
+    show: async () => ({
+      capture: {
+        attachments: [
+          {
+            kind: 'image',
+            fileName: 'meal.jpg',
+            mediaType: 'image/jpeg',
+            storedPath: 'attachments/2026/03/16/meal.jpg',
+            parseState: 'pending',
+          },
+        ],
+      },
+    }),
+  } as any
+
+  const result = await scanAssistantInboxOnce({
+    inboxServices,
+    vault: vaultRoot,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+    },
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    noAction: 0,
+    routed: 1,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.routeInboxCaptureWithModel.mock.calls.length, 1)
+  assert.equal(
+    runtimeMocks.routeInboxCaptureWithModel.mock.calls[0]?.[0]?.captureId,
+    'cap-photo',
+  )
+})
+
+test('scanAssistantInboxOnce still waits for pending document parsers', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-doc-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const events: Array<{ type: string; details?: string }> = []
+  const inboxServices = {
+    list: async () => ({
+      items: [
+        {
+          captureId: 'cap-doc',
+          occurredAt: '2026-03-16T16:11:00Z',
+          promotions: [],
+        },
+      ],
+    }),
+    show: async () => ({
+      capture: {
+        attachments: [
+          {
+            kind: 'document',
+            fileName: 'report.pdf',
+            mediaType: 'application/pdf',
+            storedPath: 'attachments/2026/03/16/report.pdf',
+            parseState: 'pending',
+          },
+        ],
+      },
+    }),
+  } as any
+
+  const result = await scanAssistantInboxOnce({
+    inboxServices,
+    vault: vaultRoot,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+    },
+    onEvent(event) {
+      events.push({
+        type: event.type,
+        details: event.details,
+      })
+    },
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    noAction: 0,
+    routed: 0,
+    skipped: 1,
+  })
+  assert.equal(runtimeMocks.routeInboxCaptureWithModel.mock.calls.length, 0)
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.skipped' &&
+        event.details === 'waiting for parser completion',
+    ),
+    true,
+  )
+})
+
+test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-heic-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const events: Array<{ type: string; details?: string }> = []
+  const inboxServices = {
+    list: async () => ({
+      items: [
+        {
+          captureId: 'cap-heic',
+          occurredAt: '2026-03-16T16:12:00Z',
+          promotions: [],
+        },
+      ],
+    }),
+    show: async () => ({
+      capture: {
+        attachments: [
+          {
+            kind: 'image',
+            fileName: 'meal.heic',
+            mediaType: 'image/heic',
+            storedPath: 'attachments/2026/03/16/meal.heic',
+            parseState: 'pending',
+          },
+        ],
+      },
+    }),
+  } as any
+
+  const result = await scanAssistantInboxOnce({
+    inboxServices,
+    vault: vaultRoot,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+    },
+    onEvent(event) {
+      events.push({
+        type: event.type,
+        details: event.details,
+      })
+    },
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    noAction: 0,
+    routed: 0,
+    skipped: 1,
+  })
+  assert.equal(runtimeMocks.routeInboxCaptureWithModel.mock.calls.length, 0)
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.skipped' &&
+        event.details === 'waiting for parser completion',
+    ),
+    true,
+  )
+})
+
 test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbound iMessages', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-'))
   const vaultRoot = path.join(parent, 'vault')

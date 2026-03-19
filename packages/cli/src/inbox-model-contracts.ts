@@ -3,6 +3,7 @@ import {
   isoTimestampSchema,
   pathSchema,
 } from './vault-cli-contracts.js'
+import { routingImageEligibilityReasonValues } from './inbox-routing-vision.js'
 
 export const assistantToolSpecSchema = z.object({
   name: z.string().min(1),
@@ -22,6 +23,17 @@ export const assistantToolExecutionResultSchema = z.object({
   result: z.record(z.string(), z.unknown()).nullable(),
   errorCode: z.string().min(1).nullable(),
   errorMessage: z.string().min(1).nullable(),
+})
+
+export const inboxModelInputModeValues = ['text-only', 'multimodal'] as const
+
+export const inboxModelInputModeSchema = z.enum(inboxModelInputModeValues)
+
+export const inboxModelRoutingImageSchema = z.object({
+  eligible: z.boolean(),
+  reason: z.enum(routingImageEligibilityReasonValues),
+  mediaType: z.string().min(1).nullable(),
+  extension: z.string().min(1).nullable(),
 })
 
 export const inboxModelTextFragmentSchema = z.object({
@@ -48,6 +60,7 @@ export const inboxModelAttachmentBundleSchema = z.object({
   fileName: z.string().min(1).nullable(),
   storedPath: pathSchema.nullable(),
   parseState: z.enum(['pending', 'running', 'succeeded', 'failed']).nullable(),
+  routingImage: inboxModelRoutingImageSchema,
   fragments: z.array(inboxModelTextFragmentSchema),
   combinedText: z.string(),
 })
@@ -69,6 +82,7 @@ export const inboxModelBundleSchema = z.object({
   captureText: z.string().nullable(),
   attachments: z.array(inboxModelAttachmentBundleSchema),
   tools: z.array(assistantToolSpecSchema),
+  preparedInputMode: inboxModelInputModeSchema,
   routingText: z.string().min(1),
 })
 
@@ -93,6 +107,9 @@ export const inboxModelRouteResultSchema = z.object({
   bundlePath: pathSchema,
   planPath: pathSchema,
   resultPath: pathSchema.nullable(),
+  preparedInputMode: inboxModelInputModeSchema,
+  inputMode: inboxModelInputModeSchema,
+  fallbackError: z.string().min(1).nullable(),
   model: z.object({
     model: z.string().min(1),
     providerMode: z.enum(['gateway', 'openai-compatible']),
@@ -112,6 +129,7 @@ export type InboxModelAttachmentBundle = z.infer<
   typeof inboxModelAttachmentBundleSchema
 >
 export type InboxModelBundle = z.infer<typeof inboxModelBundleSchema>
-export type AssistantExecutionPlan = z.infer<typeof assistantExecutionPlanSchema>
 export type InboxModelBundleResult = z.infer<typeof inboxModelBundleResultSchema>
+export type InboxModelInputMode = z.infer<typeof inboxModelInputModeSchema>
 export type InboxModelRouteResult = z.infer<typeof inboxModelRouteResultSchema>
+export type AssistantExecutionPlan = z.infer<typeof assistantExecutionPlanSchema>

@@ -110,6 +110,8 @@ vault-cli inbox model bundle <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--apply] [--request-id <id>]
 ```
 
+`vault-cli inbox model bundle` materializes the normalized routing bundle plus image-routing eligibility metadata. `vault-cli inbox model route` may attach supported stored routing images to the model request when the capture includes an eligible JPEG, PNG, WEBP, or GIF attachment.
+
 `vault-cli assistant ask|chat` persist out-of-vault session metadata and local transcript entries. Durable assistant memory is now managed explicitly through `vault-cli assistant memory search|get|upsert|forget`, with only a small core long-term block injected automatically into fresh sessions. In provider-backed Codex sessions the live memory path is exposed as a bounded MCP tool surface, assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, that memory may include selected non-canonical health context only in private contexts, and the vault remains authoritative.
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Those surfaces are provided by incur and are not re-frozen command-by-command in this contract.

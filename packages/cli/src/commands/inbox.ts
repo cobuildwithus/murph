@@ -766,7 +766,7 @@ export function registerInboxCommands(
 
   const model = Cli.create('model', {
     description:
-      'Build a text-only inbox bundle and ask a Vercel AI SDK-backed model to choose canonical CLI actions.',
+      'Build a normalized inbox bundle, attach supported routing images when available, and ask a Vercel AI SDK-backed model to choose canonical CLI actions.',
   })
 
   model.command('bundle', {
@@ -774,7 +774,7 @@ export function registerInboxCommands(
       captureId: z.string().min(1).describe('Inbox capture id to bundle.'),
     }),
     description:
-      'Materialize the normalized text-only routing bundle for one inbox capture.',
+      'Materialize the normalized routing bundle for one inbox capture, including multimodal image-routing eligibility metadata.',
     options: withBaseOptions(),
     output: inboxModelBundleResultSchema,
     async run(context) {
