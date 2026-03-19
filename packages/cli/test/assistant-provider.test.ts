@@ -105,3 +105,32 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
     rawEvents: [{ type: 'thread.started', thread_id: 'thread-123' }],
   })
 })
+
+
+test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {
+  const onTraceEvent = vi.fn()
+  providerMocks.executeCodexPrompt.mockResolvedValue({
+    finalMessage: 'assistant reply',
+    jsonEvents: [],
+    sessionId: 'thread-thinking',
+    stderr: '',
+    stdout: '',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'codex-cli',
+    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
+    workingDirectory: '/tmp/vault',
+    userPrompt: 'hello',
+    showThinkingTraces: true,
+    onTraceEvent,
+  })
+
+  const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
+  assert.deepEqual(call?.configOverrides, [
+    'mcp_servers.healthybob_memory.command="node"',
+    'model_reasoning_summary="auto"',
+    'hide_agent_reasoning=false',
+  ])
+  assert.equal(call?.onTraceEvent, onTraceEvent)
+})

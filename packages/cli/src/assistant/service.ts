@@ -6,6 +6,7 @@ import {
   type AssistantDeliveryError,
   type AssistantSandbox,
 } from '../assistant-cli-contracts.js'
+import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
   buildAssistantMemoryMcpConfig,
   buildAssistantCliGuidanceText,
@@ -55,7 +56,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliverResponse?: boolean
   deliveryTarget?: string | null
   maxSessionAgeMs?: number | null
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   prompt: string
+  showThinkingTraces?: boolean
   workingDirectory?: string
 }
 
@@ -101,6 +104,7 @@ export async function sendAssistantMessage(
     buildResolveAssistantSessionInput(input, defaults),
   )
 
+  const provider = input.provider ?? defaults?.provider ?? resolved.session.provider
   const providerOptions = resolveAssistantProviderOptions({
     model: input.model ?? resolved.session.providerOptions.model ?? defaults?.model,
     reasoningEffort:
@@ -157,32 +161,46 @@ export async function sendAssistantMessage(
     input.workingDirectory ?? input.vault,
   )
 
-  const providerResult = await executeAssistantProviderTurn({
-    provider: input.provider ?? defaults?.provider ?? resolved.session.provider,
-    workingDirectory: input.workingDirectory ?? input.vault,
-    configOverrides: memoryMcpConfig?.configOverrides,
-    env: {
-      ...cliAccess.env,
-      ...memoryTurnEnv,
-    },
-    userPrompt: input.prompt,
-    systemPrompt: shouldInjectBootstrapContext
-      ? buildAssistantSystemPrompt(cliAccess, assistantMemoryPrompt)
-      : null,
-    sessionContext: shouldInjectBootstrapContext
-      ? {
-          binding: resolved.session.binding,
-        }
-      : undefined,
-    resumeProviderSessionId: resolved.session.providerSessionId,
-    codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
-    model: providerOptions.model,
-    reasoningEffort: providerOptions.reasoningEffort,
-    sandbox: providerOptions.sandbox,
-    approvalPolicy: providerOptions.approvalPolicy,
-    profile: providerOptions.profile,
-    oss: providerOptions.oss,
-  })
+  let providerResult
+  try {
+    providerResult = await executeAssistantProviderTurn({
+      provider,
+      workingDirectory: input.workingDirectory ?? input.vault,
+      configOverrides: memoryMcpConfig?.configOverrides,
+      env: {
+        ...cliAccess.env,
+        ...memoryTurnEnv,
+      },
+      userPrompt: input.prompt,
+      systemPrompt: shouldInjectBootstrapContext
+        ? buildAssistantSystemPrompt(cliAccess, assistantMemoryPrompt)
+        : null,
+      sessionContext: shouldInjectBootstrapContext
+        ? {
+            binding: resolved.session.binding,
+          }
+        : undefined,
+      resumeProviderSessionId: resolved.session.providerSessionId,
+      codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
+      model: providerOptions.model,
+      reasoningEffort: providerOptions.reasoningEffort,
+      sandbox: providerOptions.sandbox,
+      approvalPolicy: providerOptions.approvalPolicy,
+      profile: providerOptions.profile,
+      oss: providerOptions.oss,
+      onTraceEvent: input.onTraceEvent,
+      showThinkingTraces: input.showThinkingTraces ?? false,
+    })
+  } catch (error) {
+    await maybePersistProviderSessionAfterError({
+      error,
+      provider,
+      providerOptions,
+      resolvedSession: resolved.session,
+      vault: input.vault,
+    }).catch(() => {})
+    throw error
+  }
 
   await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
     {
@@ -246,6 +264,64 @@ export async function sendAssistantMessage(
     delivery,
     deliveryError,
   })
+}
+
+async function maybePersistProviderSessionAfterError(input: {
+  error: unknown
+  provider: AssistantChatProvider
+  providerOptions: ReturnType<typeof resolveAssistantProviderOptions>
+  resolvedSession: Awaited<ReturnType<typeof resolveAssistantSession>>['session']
+  vault: string
+}): Promise<void> {
+  if (!isRecoverableConnectionLossError(input.error)) {
+    return
+  }
+
+  const recoveredProviderSessionId = extractProviderSessionIdFromError(input.error)
+  if (
+    !recoveredProviderSessionId ||
+    recoveredProviderSessionId === input.resolvedSession.providerSessionId
+  ) {
+    return
+  }
+
+  await saveAssistantSession(input.vault, {
+    ...input.resolvedSession,
+    provider: input.provider,
+    providerSessionId: recoveredProviderSessionId,
+    providerOptions: input.providerOptions,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+function isRecoverableConnectionLossError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('context' in error)) {
+    return false
+  }
+
+  const context = (error as { context?: unknown }).context
+  return (
+    !!context &&
+    typeof context === 'object' &&
+    (context as { recoverableConnectionLoss?: unknown }).recoverableConnectionLoss ===
+      true
+  )
+}
+
+function extractProviderSessionIdFromError(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('context' in error)) {
+    return null
+  }
+
+  const context = (error as { context?: unknown }).context
+  if (!context || typeof context !== 'object') {
+    return null
+  }
+
+  const providerSessionId = (context as { providerSessionId?: unknown }).providerSessionId
+  return typeof providerSessionId === 'string' && providerSessionId.trim().length > 0
+    ? providerSessionId.trim()
+    : null
 }
 
 function buildAssistantSystemPrompt(

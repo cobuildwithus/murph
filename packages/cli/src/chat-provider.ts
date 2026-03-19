@@ -4,6 +4,7 @@ import type {
   AssistantSandbox,
   AssistantSessionBinding,
 } from './assistant-cli-contracts.js'
+import type { AssistantProviderTraceEvent } from './assistant/provider-traces.js'
 import { executeCodexPrompt } from './assistant-codex.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import { getAssistantBindingContextLines } from './assistant/bindings.js'
@@ -15,6 +16,7 @@ export interface AssistantProviderTurnInput {
   configOverrides?: readonly string[]
   env?: NodeJS.ProcessEnv
   model?: string | null
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean
   profile?: string | null
   prompt?: string
@@ -25,6 +27,7 @@ export interface AssistantProviderTurnInput {
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }
+  showThinkingTraces?: boolean
   systemPrompt?: string | null
   userPrompt?: string | null
   workingDirectory: string
@@ -67,7 +70,10 @@ export async function executeAssistantProviderTurn(
     case 'codex-cli': {
       const result = await executeCodexPrompt({
         codexCommand: input.codexCommand,
-        configOverrides: input.configOverrides,
+        configOverrides: mergeCodexConfigOverrides({
+          configOverrides: input.configOverrides,
+          showThinkingTraces: input.showThinkingTraces ?? false,
+        }),
         env: input.env,
         workingDirectory: input.workingDirectory,
         prompt,
@@ -78,6 +84,7 @@ export async function executeAssistantProviderTurn(
         approvalPolicy: input.approvalPolicy ?? undefined,
         profile: normalizeNullableString(input.profile),
         oss: input.oss ?? false,
+        onTraceEvent: input.onTraceEvent,
       })
 
       return {
@@ -132,4 +139,38 @@ export function flattenAssistantProviderPrompt(
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n\n')
+}
+
+function mergeCodexConfigOverrides(input: {
+  configOverrides?: readonly string[]
+  showThinkingTraces: boolean
+}): readonly string[] | undefined {
+  const overrides = [...(input.configOverrides ?? [])]
+
+  if (!input.showThinkingTraces) {
+    return overrides.length > 0 ? overrides : input.configOverrides
+  }
+
+  upsertCodexConfigOverride(overrides, 'model_reasoning_summary', '"auto"')
+  upsertCodexConfigOverride(overrides, 'hide_agent_reasoning', 'false')
+
+  return overrides
+}
+
+function upsertCodexConfigOverride(
+  overrides: string[],
+  key: string,
+  value: string,
+): void {
+  const assignmentPrefix = `${key}=`
+  const existingIndex = overrides.findIndex((override) =>
+    override.trim().startsWith(assignmentPrefix),
+  )
+
+  if (existingIndex >= 0) {
+    overrides[existingIndex] = `${key}=${value}`
+    return
+  }
+
+  overrides.push(`${key}=${value}`)
 }

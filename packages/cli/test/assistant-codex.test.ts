@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
@@ -23,6 +23,7 @@ vi.mock('node:child_process', async () => {
 import {
   buildCodexArgs,
   executeCodexPrompt,
+  extractCodexTraceUpdates,
   resolveCodexDisplayOptions,
 } from '../src/assistant-codex.js'
 
@@ -311,3 +312,128 @@ interface MockChildProcess extends EventEmitter {
   stderr: EventEmitter
   stdout: EventEmitter
 }
+
+
+test('executeCodexPrompt falls back to the final assistant JSON item when the last-message file is missing', async () => {
+  installSpawnMock((child) => {
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'item.completed', item: { id: 'item-1', type: 'agent_message', text: 'assistant reply from json' } })}
+`,
+    )
+    child.emit('close', 0, null)
+  })
+
+  const result = await executeCodexPrompt({
+    prompt: 'What changed?',
+    workingDirectory: '/tmp/vault',
+  })
+
+  assert.equal(result.finalMessage, 'assistant reply from json')
+})
+
+test('executeCodexPrompt marks recoverable connection loss failures with the recovered provider session id', async () => {
+  installSpawnMock((child) => {
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-resume-1' })}
+`,
+    )
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'error', message: 'stream disconnected before completion: stream closed before response.completed' })}
+`,
+    )
+    child.emit('close', 2, null)
+  })
+
+  await assert.rejects(
+    executeCodexPrompt({
+      prompt: 'Summarize the vault.',
+      workingDirectory: '/tmp/vault',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CODEX_FAILED')
+      assert.match(String(error.message), /lost the provider stream before the turn finished/u)
+      assert.match(String(error.message), /thread-resume-1/u)
+      assert.equal(error.context?.providerSessionId, 'thread-resume-1')
+      assert.equal(error.context?.recoverableConnectionLoss, true)
+      return true
+    },
+  )
+})
+
+test('extractCodexTraceUpdates normalizes assistant, thinking, and reconnect status events', () => {
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'item.completed',
+      item: {
+        id: 'reasoning-1',
+        type: 'reasoning',
+        summary: [
+          {
+            text: 'Checking the vault state before answering.',
+          },
+        ],
+      },
+    }),
+    [
+      {
+        kind: 'thinking',
+        mode: 'replace',
+        streamKey: 'thinking:reasoning-1',
+        text: 'Checking the vault state before answering.',
+      },
+    ],
+  )
+
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'item/agentMessage/delta',
+      item_id: 'assistant-1',
+      delta: 'Hello',
+    }),
+    [
+      {
+        kind: 'assistant',
+        mode: 'append',
+        streamKey: 'assistant:assistant-1',
+        text: 'Hello',
+      },
+    ],
+  )
+
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'error',
+      message: 'Reconnecting... 1/100 (stream disconnected before completion: stream closed before response.completed)',
+    }),
+    [
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'status:connection',
+        text: 'Reconnecting... 1/100 (stream disconnected before completion: stream closed before response.completed)',
+      },
+    ],
+  )
+
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'item.completed',
+      item: {
+        id: 'change-1',
+        type: 'file.change',
+        path: path.join(homedir(), 'repo', 'secret.ts'),
+      },
+    }),
+    [
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'status:change-1',
+        text: 'Updated ~/repo/secret.ts.',
+      },
+    ],
+  )
+})

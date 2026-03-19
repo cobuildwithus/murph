@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
@@ -580,4 +580,49 @@ test('sendAssistantMessage blocks health-memory upserts in non-private assistant
 
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Health context/u)
+})
+
+
+test('sendAssistantMessage preserves a recovered provider session id after a resumable provider failure', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-recoverable-error-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockRejectedValue(
+    Object.assign(
+      new Error('Codex CLI lost the provider stream before the turn finished.'),
+      {
+        context: {
+          providerSessionId: 'thread-resume-1',
+          recoverableConnectionLoss: true,
+        },
+      },
+    ),
+  )
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:recoverable-error',
+      prompt: 'hello',
+    }),
+    /lost the provider stream before the turn finished/u,
+  )
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const sessionFiles = await readdir(statePaths.sessionsDirectory)
+  assert.equal(sessionFiles.length, 1)
+  const sessionPath = path.join(
+    statePaths.sessionsDirectory,
+    sessionFiles[0] ?? 'missing-session.json',
+  )
+  const savedSession = JSON.parse(await readFile(sessionPath, 'utf8')) as {
+    providerSessionId: string | null
+    turnCount: number
+  }
+
+  assert.equal(savedSession.providerSessionId, 'thread-resume-1')
+  assert.equal(savedSession.turnCount, 0)
 })

@@ -6,6 +6,10 @@ import type {
   AssistantApprovalPolicy,
   AssistantSandbox,
 } from './assistant-cli-contracts.js'
+import type {
+  AssistantProviderTraceEvent,
+  AssistantProviderTraceUpdate,
+} from './assistant/provider-traces.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export interface CodexExecInput {
@@ -14,6 +18,7 @@ export interface CodexExecInput {
   codexCommand?: string
   env?: NodeJS.ProcessEnv
   model?: string | null
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean
   profile?: string | null
   prompt: string
@@ -55,6 +60,50 @@ export async function executeCodexPrompt(
   const nonJsonStdoutLines: string[] = []
   let discoveredSessionId = input.resumeSessionId ?? null
   let lastEventError: string | null = null
+  const assistantStreams = new Map<string, string>()
+  const assistantStreamOrder: string[] = []
+
+  const recordAssistantTraceUpdate = (update: AssistantProviderTraceUpdate) => {
+    if (update.kind !== 'assistant') {
+      return
+    }
+
+    const normalizedText = normalizeStreamingText(update.text)
+    if (!normalizedText) {
+      return
+    }
+
+    const streamKey = normalizeNullableString(update.streamKey) ?? 'assistant:main'
+    const previousText = assistantStreams.get(streamKey) ?? ''
+
+    if (!assistantStreams.has(streamKey)) {
+      assistantStreamOrder.push(streamKey)
+    }
+
+    assistantStreams.set(
+      streamKey,
+      update.mode === 'append'
+        ? `${previousText}${normalizedText}`
+        : normalizedText,
+    )
+  }
+
+  const handleParsedEvent = (event: unknown) => {
+    jsonEvents.push(event)
+    discoveredSessionId = discoveredSessionId ?? extractCodexSessionId(event)
+    lastEventError = extractCodexErrorMessage(event) ?? lastEventError
+
+    const updates = extractCodexTraceUpdates(event)
+    for (const update of updates) {
+      recordAssistantTraceUpdate(update)
+    }
+
+    input.onTraceEvent?.({
+      providerSessionId: discoveredSessionId,
+      rawEvent: event,
+      updates,
+    })
+  }
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -87,11 +136,7 @@ export async function executeCodexPrompt(
         stdoutBuffer = consumeCompleteLines(stdoutBuffer, (line) => {
           const parsed = tryParseJsonLine(line)
           if (parsed.ok) {
-            jsonEvents.push(parsed.value)
-            discoveredSessionId =
-              discoveredSessionId ?? extractCodexSessionId(parsed.value)
-            lastEventError =
-              extractCodexErrorMessage(parsed.value) ?? lastEventError
+            handleParsedEvent(parsed.value)
             return
           }
 
@@ -110,17 +155,14 @@ export async function executeCodexPrompt(
         if (stdoutBuffer.trim().length > 0) {
           const parsed = tryParseJsonLine(stdoutBuffer)
           if (parsed.ok) {
-            jsonEvents.push(parsed.value)
-            discoveredSessionId =
-              discoveredSessionId ?? extractCodexSessionId(parsed.value)
-            lastEventError =
-              extractCodexErrorMessage(parsed.value) ?? lastEventError
+            handleParsedEvent(parsed.value)
           } else {
             nonJsonStdoutLines.push(stdoutBuffer.trim())
           }
         }
 
         if (code !== 0) {
+          const detail = lastEventError ?? tailText(stderr)
           reject(
             new VaultCliError(
               'ASSISTANT_CODEX_FAILED',
@@ -128,8 +170,14 @@ export async function executeCodexPrompt(
                 code,
                 signal,
                 stderr,
-                fallback: lastEventError,
+                fallback: detail,
+                sessionId: discoveredSessionId,
               }),
+              {
+                providerSessionId: discoveredSessionId,
+                recoverableConnectionLoss:
+                  detail !== null && isConnectionLossMessage(detail),
+              },
             ),
           )
           return
@@ -141,6 +189,10 @@ export async function executeCodexPrompt(
 
     const finalMessage =
       (await readOptionalTextFile(outputFile)) ??
+      extractAssistantMessageFallback({
+        assistantStreams,
+        assistantStreamOrder,
+      }) ??
       nonJsonStdoutLines.join('\n').trim()
 
     return {
@@ -356,6 +408,596 @@ function tryParseJsonLine(
   }
 }
 
+export function extractCodexTraceUpdates(
+  event: unknown,
+): AssistantProviderTraceUpdate[] {
+  const record = asRecord(event)
+  if (!record) {
+    return []
+  }
+
+  const eventType = normalizeIdentifier(
+    typeof record.type === 'string' ? record.type : null,
+  )
+  if (eventType === null) {
+    return []
+  }
+
+  const errorMessage = extractCodexErrorMessage(record)
+  if (errorMessage) {
+    const normalizedErrorMessage = normalizeStatusText(errorMessage)
+    if (!normalizedErrorMessage) {
+      return []
+    }
+
+    return [
+      isRetryableConnectionStatus(normalizedErrorMessage)
+        ? {
+            kind: 'status',
+            mode: 'replace',
+            streamKey: 'status:connection',
+            text: normalizedErrorMessage,
+          }
+        : {
+            kind: 'error',
+            text: normalizedErrorMessage,
+          },
+    ]
+  }
+
+  const item = extractCodexEventItem(record)
+  const itemId = extractCodexItemId(record, item)
+  const itemType = normalizeIdentifier(
+    typeof item?.type === 'string'
+      ? item.type
+      : typeof record.item_type === 'string'
+        ? record.item_type
+        : typeof record.itemType === 'string'
+          ? record.itemType
+          : null,
+  )
+
+  if (
+    eventType.includes('agent.message.delta') ||
+    eventType.includes('assistant.message.delta')
+  ) {
+    const textDelta = extractEventTextDelta(record)
+    return textDelta
+      ? [
+          {
+            kind: 'assistant',
+            mode: 'append',
+            streamKey: buildTraceStreamKey('assistant', itemId),
+            text: textDelta,
+          },
+        ]
+      : []
+  }
+
+  if (
+    eventType.includes('reasoning.summary.text.delta') ||
+    eventType.includes('reasoning.text.delta')
+  ) {
+    const textDelta = extractEventTextDelta(record)
+    return textDelta
+      ? [
+          {
+            kind: 'thinking',
+            mode: 'append',
+            streamKey: buildTraceStreamKey('thinking', itemId),
+            text: textDelta,
+          },
+        ]
+      : []
+  }
+
+  if (eventType.endsWith('plan.updated')) {
+    const planText = normalizeStreamingText(
+      findDeepStringByKeys(record, ['explanation', 'summary', 'plan']) ?? null,
+    )
+
+    return planText
+      ? [
+          {
+            kind: 'thinking',
+            mode: 'replace',
+            streamKey: buildTraceStreamKey('thinking', itemId ?? 'plan'),
+            text: planText,
+          },
+        ]
+      : []
+  }
+
+  if (eventType === 'model.rerouted') {
+    const reroutedModel = normalizeStatusText(
+      findDeepStringByKeys(record, ['model', 'target_model', 'targetModel']) ?? null,
+    )
+
+    return reroutedModel
+      ? [
+          {
+            kind: 'status',
+            mode: 'replace',
+            streamKey: 'status:model-reroute',
+            text: `Switched to ${reroutedModel}.`,
+          },
+        ]
+      : []
+  }
+
+  if (eventType !== 'item.started' && eventType !== 'item.completed') {
+    return []
+  }
+
+  if (itemType === 'agent.message' || itemType === 'assistant.message') {
+    const assistantText = extractAssistantTextFromItem(item)
+    return assistantText
+      ? [
+          {
+            kind: 'assistant',
+            mode: 'replace',
+            streamKey: buildTraceStreamKey('assistant', itemId),
+            text: assistantText,
+          },
+        ]
+      : []
+  }
+
+  if (itemType === 'reasoning') {
+    const reasoningText = extractReasoningTextFromItem(item)
+    return reasoningText
+      ? [
+          {
+            kind: 'thinking',
+            mode: 'replace',
+            streamKey: buildTraceStreamKey('thinking', itemId),
+            text: reasoningText,
+          },
+        ]
+      : []
+  }
+
+  const statusText = summarizeCodexStatusItem({
+    eventType,
+    item,
+    itemId,
+    itemType,
+  })
+
+  return statusText
+    ? [
+        {
+          kind: 'status',
+          mode: 'replace',
+          streamKey: buildTraceStreamKey('status', itemId ?? itemType),
+          text: statusText,
+        },
+      ]
+    : []
+}
+
+function extractCodexEventItem(
+  event: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const directItem = asRecord(event.item)
+  if (directItem) {
+    return directItem
+  }
+
+  const data = asRecord(event.data)
+  const nestedItem = asRecord(data?.item)
+  if (nestedItem) {
+    return nestedItem
+  }
+
+  return null
+}
+
+function extractCodexItemId(
+  event: Record<string, unknown>,
+  item: Record<string, unknown> | null,
+): string | null {
+  return (
+    normalizeNullableString(
+      typeof item?.id === 'string'
+        ? item.id
+        : typeof event.item_id === 'string'
+          ? event.item_id
+          : typeof event.itemId === 'string'
+            ? event.itemId
+            : null,
+    ) ?? null
+  )
+}
+
+function extractAssistantTextFromItem(
+  item: Record<string, unknown> | null,
+): string | null {
+  if (!item) {
+    return null
+  }
+
+  return normalizeStreamingText(
+    typeof item.text === 'string'
+      ? item.text
+      : typeof item.message === 'string'
+        ? item.message
+        : collectTextParts(item.content) ?? collectTextParts(item.parts),
+  )
+}
+
+function extractReasoningTextFromItem(
+  item: Record<string, unknown> | null,
+): string | null {
+  if (!item) {
+    return null
+  }
+
+  return normalizeStreamingText(
+    collectReasoningSummaryParts(item.summary) ??
+      collectReasoningSummaryParts(item.summary_parts) ??
+      collectTextParts(item.content) ??
+      collectTextParts(item.parts) ??
+      (typeof item.text === 'string' ? item.text : null),
+  )
+}
+
+function collectReasoningSummaryParts(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const parts = value
+    .map((part) => {
+      if (typeof part === 'string') {
+        return part
+      }
+
+      const record = asRecord(part)
+      if (!record) {
+        return null
+      }
+
+      return collectTextParts(record.text) ?? collectTextParts(record.content)
+    })
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
+
+  if (parts.length === 0) {
+    return null
+  }
+
+  return parts.join('\n\n')
+}
+
+function collectTextParts(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (!Array.isArray(value)) {
+    const record = asRecord(value)
+    if (!record) {
+      return null
+    }
+
+    return (
+      (typeof record.text === 'string' ? record.text : null) ??
+      (typeof record.value === 'string' ? record.value : null) ??
+      collectTextParts(record.content)
+    )
+  }
+
+  const parts: string[] = []
+  for (const entry of value) {
+    if (typeof entry === 'string') {
+      parts.push(entry)
+      continue
+    }
+
+    const record = asRecord(entry)
+    if (!record) {
+      continue
+    }
+
+    const nestedText =
+      (typeof record.text === 'string' ? record.text : null) ??
+      (typeof record.value === 'string' ? record.value : null) ??
+      collectTextParts(record.content)
+
+    if (nestedText) {
+      parts.push(nestedText)
+    }
+  }
+
+  if (parts.length === 0) {
+    return null
+  }
+
+  return parts.join('')
+}
+
+function extractEventTextDelta(record: Record<string, unknown>): string | null {
+  const directDelta =
+    (typeof record.delta === 'string' ? record.delta : null) ??
+    (typeof record.text_delta === 'string' ? record.text_delta : null) ??
+    (typeof record.textDelta === 'string' ? record.textDelta : null) ??
+    (typeof record.text === 'string' ? record.text : null) ??
+    (typeof record.value === 'string' ? record.value : null)
+
+  if (directDelta) {
+    return normalizeStreamingText(directDelta)
+  }
+
+  const delta = asRecord(record.delta)
+  if (!delta) {
+    return null
+  }
+
+  return normalizeStreamingText(
+    (typeof delta.text === 'string' ? delta.text : null) ??
+      (typeof delta.value === 'string' ? delta.value : null) ??
+      (typeof delta.content === 'string' ? delta.content : null) ??
+      null,
+  )
+}
+
+function summarizeCodexStatusItem(input: {
+  eventType: string
+  item: Record<string, unknown> | null
+  itemId: string | null
+  itemType: string | null
+}): string | null {
+  const itemType = input.itemType
+  if (!itemType) {
+    return null
+  }
+
+  const started = input.eventType === 'item.started'
+  const completed = input.eventType === 'item.completed'
+
+  if (itemType === 'command.execution') {
+    const command = extractCommandLikeLabel(input.item)
+    const exitCode = extractNumericField(input.item, ['exit_code', 'exitCode'])
+
+    if (started) {
+      return command ? `Running ${command}.` : 'Running command.'
+    }
+
+    if (completed && typeof exitCode === 'number') {
+      return command
+        ? exitCode === 0
+          ? `Finished ${command}.`
+          : `${command} exited with code ${exitCode}.`
+        : exitCode === 0
+          ? 'Command finished.'
+          : `Command exited with code ${exitCode}.`
+    }
+
+    return command ? `Finished ${command}.` : 'Command finished.'
+  }
+
+  if (itemType === 'mcp.tool.call' || itemType === 'tool.call') {
+    const server = normalizeStatusText(
+      findDeepStringByKeys(input.item, ['server', 'server_name', 'serverName']) ?? null,
+    )
+    const tool = normalizeStatusText(
+      findDeepStringByKeys(input.item, ['tool', 'tool_name', 'toolName', 'name']) ?? null,
+    )
+    const label =
+      server && tool
+        ? `${server}/${tool}`
+        : tool ?? server ?? 'tool call'
+
+    return started
+      ? `Using ${label}.`
+      : completed
+        ? `Finished ${label}.`
+        : null
+  }
+
+  if (itemType === 'web.search') {
+    const query = normalizeStatusText(
+      findDeepStringByKeys(input.item, ['query', 'search_query', 'searchQuery']) ?? null,
+    )
+
+    if (started) {
+      return query ? `Searching the web for ${JSON.stringify(query)}.` : 'Searching the web.'
+    }
+
+    return query ? `Finished web search for ${JSON.stringify(query)}.` : 'Finished web search.'
+  }
+
+  if (itemType === 'file.change' && completed) {
+    const paths = collectFilePaths(input.item)
+    if (paths.length === 0) {
+      return 'Updated files.'
+    }
+
+    if (paths.length === 1) {
+      return `Updated ${paths[0]}.`
+    }
+
+    return `Updated files: ${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ', …' : ''}.`
+  }
+
+  return null
+}
+
+function extractCommandLikeLabel(item: Record<string, unknown> | null): string | null {
+  return normalizeStatusText(
+    findDeepStringByKeys(item, [
+      'command',
+      'command_line',
+      'commandLine',
+      'cmd',
+      'label',
+      'description',
+      'query',
+    ]) ?? null,
+  )
+}
+
+function collectFilePaths(item: Record<string, unknown> | null): string[] {
+  const collected = new Set<string>()
+  collectDeepStringsByKeys(
+    item,
+    ['path', 'file_path', 'filePath', 'relative_path', 'relativePath'],
+    collected,
+  )
+  return [...collected]
+}
+
+function collectDeepStringsByKeys(
+  value: unknown,
+  keys: readonly string[],
+  output: Set<string>,
+  visited = new Set<unknown>(),
+): void {
+  if (!value || typeof value !== 'object') {
+    return
+  }
+
+  if (visited.has(value)) {
+    return
+  }
+  visited.add(value)
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectDeepStringsByKeys(entry, keys, output, visited)
+    }
+    return
+  }
+
+  const record = value as Record<string, unknown>
+  for (const key of keys) {
+    const candidate = record[key]
+    if (typeof candidate === 'string') {
+      const normalizedCandidate = redactCodexStatusText(candidate.trim())
+      if (normalizedCandidate.length > 0) {
+        output.add(normalizedCandidate)
+      }
+    }
+  }
+
+  for (const nested of Object.values(record)) {
+    collectDeepStringsByKeys(nested, keys, output, visited)
+  }
+}
+
+function extractNumericField(
+  value: unknown,
+  keys: readonly string[],
+  visited = new Set<unknown>(),
+): number | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  if (visited.has(value)) {
+    return null
+  }
+  visited.add(value)
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nested = extractNumericField(entry, keys, visited)
+      if (nested !== null) {
+        return nested
+      }
+    }
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  for (const key of keys) {
+    const candidate = record[key]
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate
+    }
+  }
+
+  for (const nested of Object.values(record)) {
+    const result = extractNumericField(nested, keys, visited)
+    if (result !== null) {
+      return result
+    }
+  }
+
+  return null
+}
+
+function extractAssistantMessageFallback(input: {
+  assistantStreams: Map<string, string>
+  assistantStreamOrder: readonly string[]
+}): string | null {
+  for (let index = input.assistantStreamOrder.length - 1; index >= 0; index -= 1) {
+    const streamKey = input.assistantStreamOrder[index]
+    if (!streamKey) {
+      continue
+    }
+
+    const text = normalizeStreamingText(input.assistantStreams.get(streamKey) ?? null)
+    if (text) {
+      return text.trim()
+    }
+  }
+
+  return null
+}
+
+function buildTraceStreamKey(
+  kind: 'assistant' | 'status' | 'thinking',
+  itemId: string | null,
+): string {
+  return `${kind}:${itemId ?? 'main'}`
+}
+
+function normalizeIdentifier(value: string | null): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  return trimmed
+    .replace(/([a-z0-9])([A-Z])/gu, '$1.$2')
+    .replace(/[^A-Za-z0-9]+/gu, '.')
+    .replace(/\.+/gu, '.')
+    .replace(/^\.|\.$/gu, '')
+    .toLowerCase()
+}
+
+function normalizeStreamingText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.replace(/\r\n?/gu, '\n')
+  return normalized.length > 0 ? normalized : null
+}
+
+function normalizeStatusText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = redactCodexStatusText(value.replace(/\r\n?/gu, '\n')).trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+function redactCodexStatusText(value: string): string {
+  const homeRoot = homedir().trim()
+  if (homeRoot.length === 0) {
+    return value
+  }
+
+  return value.replaceAll(homeRoot, '~')
+}
+
 function extractCodexSessionId(event: unknown): string | null {
   const record = asRecord(event)
   const eventType = typeof record?.type === 'string' ? record.type : null
@@ -440,10 +1082,44 @@ function findDeepStringByKeys(
 
 function buildCodexFailureMessage(input: {
   code: number | null
+  fallback: string | null
+  sessionId: string | null
   signal: NodeJS.Signals | null
   stderr: string
-  fallback: string | null
 }): string {
+  const detail =
+    normalizeStatusText(input.fallback ?? tailText(input.stderr)) ??
+    input.fallback ??
+    tailText(input.stderr)
+  const recoverableConnectionLoss =
+    detail !== null && isConnectionLossMessage(detail)
+
+  if (recoverableConnectionLoss) {
+    const parts = ['Codex CLI lost the provider stream before the turn finished.']
+
+    if (typeof input.code === 'number') {
+      parts.push(`exit code ${input.code}.`)
+    }
+
+    if (input.signal) {
+      parts.push(`signal ${input.signal}.`)
+    }
+
+    if (detail) {
+      parts.push(detail)
+    }
+
+    if (input.sessionId) {
+      parts.push(
+        `Healthy Bob recovered provider session ${input.sessionId}, so the next chat turn can resume it.`,
+      )
+    } else {
+      parts.push('Send another message to retry the turn.')
+    }
+
+    return parts.join(' ')
+  }
+
   const parts = ['Codex CLI failed.']
 
   if (typeof input.code === 'number') {
@@ -454,12 +1130,34 @@ function buildCodexFailureMessage(input: {
     parts.push(`signal ${input.signal}.`)
   }
 
-  const detail = input.fallback ?? tailText(input.stderr)
   if (detail) {
     parts.push(detail)
   }
 
   return parts.join(' ')
+}
+
+function isRetryableConnectionStatus(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('reconnect') ||
+    normalized.includes('retry') ||
+    normalized.includes('trying again')
+  )
+}
+
+function isConnectionLossMessage(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('stream disconnected') ||
+    normalized.includes('stream closed before response.completed') ||
+    normalized.includes('lost the provider stream') ||
+    normalized.includes('connection reset') ||
+    normalized.includes('socket hang up') ||
+    normalized.includes('econnreset') ||
+    normalized.includes('timed out') ||
+    normalized.includes('timeout')
+  )
 }
 
 interface CodexDisplayConfig {
