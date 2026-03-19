@@ -15,6 +15,7 @@ import {
   type VaultCliServices,
 } from './vault-cli-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import { resolveTelegramBotToken } from './telegram-runtime.js'
 import { resolveEffectiveTopLevelToken } from './command-helpers.js'
 import {
   normalizeVaultForConfig,
@@ -118,6 +119,8 @@ const HEALTHYBOB_PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
 const HEALTHYBOB_PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
 const IMESSAGE_SETUP_CONNECTOR_ID = 'imessage:self'
 const IMESSAGE_SETUP_ACCOUNT_ID = 'self'
+const TELEGRAM_SETUP_CONNECTOR_ID = 'telegram:bot'
+const TELEGRAM_SETUP_ACCOUNT_ID = 'bot'
 
 const modelFileNames: Record<WhisperModel, string> = {
   tiny: 'ggml-tiny.bin',
@@ -451,6 +454,7 @@ export function createSetupServices(
         : await configureSetupChannels({
             channels: normalizeSetupChannels(input.channels),
             dryRun,
+            env: state.env,
             inboxServices,
             requestId,
             steps,
@@ -523,6 +527,7 @@ function normalizeSetupChannels(
 async function configureSetupChannels(input: {
   channels: readonly SetupChannel[]
   dryRun: boolean
+  env: NodeJS.ProcessEnv
   inboxServices: Pick<InboxCliServices, 'bootstrap'> &
     Partial<Pick<InboxCliServices, 'sourceAdd' | 'sourceList'>>
   requestId: string | null
@@ -544,31 +549,22 @@ async function configureSetupChannels(input: {
   }
 
   if (input.channels.includes('telegram')) {
-    input.steps.push(
-      createStep({
-        detail:
-          'Telegram setup is shown in the onboarding wizard, but the Healthy Bob connector is not wired yet.',
-        id: 'channel-telegram',
-        kind: 'configure',
-        status: 'skipped',
-        title: 'Telegram channel',
+    configured.push(
+      await configureTelegramChannel({
+        dryRun: input.dryRun,
+        env: input.env,
+        inboxServices: input.inboxServices,
+        requestId: input.requestId,
+        steps: input.steps,
+        vault: input.vault,
       }),
     )
-    configured.push({
-      autoReply: false,
-      channel: 'telegram',
-      configured: false,
-      connectorId: null,
-      detail:
-        'Telegram appeared in the wizard, but the connector is still coming soon.',
-      enabled: true,
-    })
   }
 
   if (!input.dryRun) {
     await updateAssistantAutoReplyChannels({
       channels: configured
-        .filter((channel) => channel.autoReply && channel.configured)
+        .filter((channel) => channel.autoReply)
         .map((channel) => channel.channel),
       vault: input.vault,
     })
@@ -683,14 +679,147 @@ async function configureIMessageChannel(input: {
   }
 }
 
+async function configureTelegramChannel(input: {
+  dryRun: boolean
+  env: NodeJS.ProcessEnv
+  inboxServices: Pick<InboxCliServices, 'bootstrap'> &
+    Partial<Pick<InboxCliServices, 'sourceAdd' | 'sourceList'>>
+  requestId: string | null
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<SetupConfiguredChannel> {
+  const token = resolveTelegramBotToken(input.env)
+  const sourceList = input.inboxServices.sourceList
+  const sourceAdd = input.inboxServices.sourceAdd
+
+  if (input.dryRun) {
+    input.steps.push(
+      createStep({
+        detail: token
+          ? 'Would add or reuse the telegram:bot inbox connector and enable assistant auto-reply for Telegram bot chats.'
+          : 'Would configure Telegram once HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN is set in the shell environment.',
+        id: 'channel-telegram',
+        kind: 'configure',
+        status: 'planned',
+        title: 'Telegram channel',
+      }),
+    )
+
+    return {
+      autoReply: Boolean(token),
+      channel: 'telegram',
+      configured: false,
+      connectorId: TELEGRAM_SETUP_CONNECTOR_ID,
+      detail: token
+        ? 'Would configure the Telegram bot connector and enable assistant auto-reply for Telegram chats.'
+        : 'Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN before setup can enable the channel.',
+      enabled: true,
+    }
+  }
+
+  if (!sourceList || !sourceAdd) {
+    throw new VaultCliError(
+      'runtime_unavailable',
+      'Healthy Bob setup cannot configure Telegram because the inbox source management services are unavailable in this build.',
+    )
+  }
+
+  const listed = await sourceList({
+    vault: input.vault,
+    requestId: input.requestId,
+  })
+  const existingConnector =
+    listed.connectors.find((connector) => connector.id === TELEGRAM_SETUP_CONNECTOR_ID) ??
+    listed.connectors.find(
+      (connector) =>
+        connector.source === 'telegram' && connector.accountId === TELEGRAM_SETUP_ACCOUNT_ID,
+    ) ??
+    null
+
+  if (!token) {
+    input.steps.push(
+      createStep({
+        detail: existingConnector
+          ? `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN is not set.`
+          : 'Telegram was selected, but setup did not add the connector because HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN is not set.',
+        id: 'channel-telegram',
+        kind: 'configure',
+        status: existingConnector ? 'reused' : 'skipped',
+        title: 'Telegram channel',
+      }),
+    )
+
+    return {
+      autoReply: false,
+      channel: 'telegram',
+      configured: existingConnector !== null,
+      connectorId: existingConnector?.id ?? null,
+      detail: existingConnector
+        ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is exported in the environment.`
+        : 'Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN before setup can add the connector and enable assistant auto-reply.',
+      enabled: true,
+    }
+  }
+
+  if (existingConnector) {
+    input.steps.push(
+      createStep({
+        detail:
+          `Reusing the Telegram inbox connector "${existingConnector.id}" and enabling assistant auto-reply for Telegram bot chats.`,
+        id: 'channel-telegram',
+        kind: 'configure',
+        status: 'reused',
+        title: 'Telegram channel',
+      }),
+    )
+
+    return {
+      autoReply: true,
+      channel: 'telegram',
+      configured: true,
+      connectorId: existingConnector.id,
+      detail:
+        `Reused the Telegram connector "${existingConnector.id}" and enabled assistant auto-reply for Telegram bot chats.`,
+      enabled: true,
+    }
+  }
+
+  const added = await sourceAdd({
+    account: TELEGRAM_SETUP_ACCOUNT_ID,
+    id: TELEGRAM_SETUP_CONNECTOR_ID,
+    requestId: input.requestId,
+    source: 'telegram',
+    vault: input.vault,
+  })
+
+  input.steps.push(
+    createStep({
+      detail:
+        `Added the Telegram inbox connector "${added.connector.id}" and enabled assistant auto-reply for Telegram bot chats.`,
+      id: 'channel-telegram',
+      kind: 'configure',
+      status: 'completed',
+      title: 'Telegram channel',
+    }),
+  )
+
+  return {
+    autoReply: true,
+    channel: 'telegram',
+    configured: true,
+    connectorId: added.connector.id,
+    detail:
+      `Configured the Telegram connector "${added.connector.id}" and enabled assistant auto-reply for Telegram bot chats.`,
+    enabled: true,
+  }
+}
+
 async function updateAssistantAutoReplyChannels(input: {
   channels: readonly SetupChannel[]
   vault: string
 }): Promise<void> {
   const state = await readAssistantAutomationState(input.vault)
-  const channels = normalizeSetupChannels(input.channels).filter(
-    (channel) => channel === 'imessage',
-  )
+  const channels = normalizeSetupChannels(input.channels)
   const changed =
     channels.length !== state.autoReplyChannels.length ||
     channels.some((channel, index) => state.autoReplyChannels[index] !== channel)

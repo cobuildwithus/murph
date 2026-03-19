@@ -7,6 +7,11 @@ import { resolveRuntimePaths, type RuntimePaths } from '@healthybob/runtime-stat
 import { z } from 'incur'
 import { ensureImessageMessagesDbReadable } from './imessage-readiness.js'
 import { loadRuntimeModule } from './runtime-import.js'
+import {
+  resolveTelegramApiBaseUrl,
+  resolveTelegramBotToken,
+  resolveTelegramFileBaseUrl,
+} from './telegram-runtime.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
   type InboxAttachmentListResult,
@@ -3280,27 +3285,6 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const normalized = value.trim()
   return normalized.length > 0 ? normalized : null
-}
-
-function resolveTelegramBotToken(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.HEALTHYBOB_TELEGRAM_BOT_TOKEN) ??
-    normalizeNullableString(env.TELEGRAM_BOT_TOKEN)
-  )
-}
-
-function resolveTelegramApiBaseUrl(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.HEALTHYBOB_TELEGRAM_API_BASE_URL) ??
-    normalizeNullableString(env.TELEGRAM_API_BASE_URL)
-  )
-}
-
-function resolveTelegramFileBaseUrl(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.HEALTHYBOB_TELEGRAM_FILE_BASE_URL) ??
-    normalizeNullableString(env.TELEGRAM_FILE_BASE_URL)
-  )
 }
 
 function runtimeNamespaceAccountId(

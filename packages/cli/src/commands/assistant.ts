@@ -139,7 +139,7 @@ const assistantDeliveryOptionFields = {
     .min(1)
     .optional()
     .describe(
-      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
+      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>.',
     ),
 }
 
@@ -232,7 +232,7 @@ export function registerAssistantCommands(
     description:
       'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
     hint:
-      'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage.',
+      'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage or Telegram.',
     examples: [
       {
         args: {
@@ -254,6 +254,19 @@ export function registerAssistantCommands(
           deliverResponse: true,
         },
         description: 'Generate a reply locally and deliver it over iMessage.',
+      },
+      {
+        args: {
+          prompt: 'Reply that I can review the latest labs tonight.',
+        },
+        options: {
+          vault: './vault',
+          channel: 'telegram',
+          participant: '123456789',
+          sourceThread: '123456789',
+          deliverResponse: true,
+        },
+        description: 'Generate a reply locally and deliver it back into a Telegram bot chat.',
       },
     ],
     options: withBaseOptions({
@@ -295,9 +308,9 @@ export function registerAssistantCommands(
         .describe('Outbound message body to deliver over the mapped assistant channel.'),
     }),
     description:
-      'Deliver one outbound assistant message without invoking the chat provider. iMessage is supported first and future channels can plug into the same surface.',
+      'Deliver one outbound assistant message without invoking the chat provider. iMessage and Telegram both use the same stored assistant channel binding surface.',
     hint:
-      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id.',
+      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>.',
     examples: [
       {
         args: {
@@ -309,6 +322,18 @@ export function registerAssistantCommands(
           participant: '+15551234567',
         },
         description: 'Send a direct iMessage to one participant.',
+      },
+      {
+        args: {
+          message: 'I imported that lab report and queued the parser.',
+        },
+        options: {
+          vault: './vault',
+          channel: 'telegram',
+          sourceThread: '-1001234567890:topic:42',
+          deliveryTarget: '-1001234567890:topic:42',
+        },
+        description: 'Send a Telegram reply into a specific chat topic.',
       },
       {
         args: {
@@ -329,7 +354,7 @@ export function registerAssistantCommands(
         .min(1)
         .optional()
         .describe(
-          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id.',
+          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>.',
         ),
     }),
     output: assistantDeliverResultSchema,
@@ -351,7 +376,7 @@ export function registerAssistantCommands(
   assistant.command('run', {
     args: emptyArgsSchema,
     description:
-      'Start the local assistant automation loop that watches the inbox runtime, auto-replies over configured channels such as iMessage, and optionally applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
     hint:
       'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model.',
     examples: [

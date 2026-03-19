@@ -156,7 +156,9 @@ export function resolveSetupPostLaunchAction(
     return null
   }
 
-  return context.result.channels.some((channel) => channel.autoReply)
+  return context.result.channels.some(
+    (channel) => channel.autoReply && channel.configured,
+  )
     ? 'assistant-run'
     : 'assistant-chat'
 }
@@ -180,11 +182,11 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     description: string
   }> = []
 
-  if (result.channels.some((channel) => channel.autoReply)) {
+  if (result.channels.some((channel) => channel.autoReply && channel.configured)) {
     commands.push({
       command: 'assistant run',
       description:
-        'Start the assistant automation loop so configured channels like iMessage can receive automatic replies.',
+        'Start the assistant automation loop so configured channels like iMessage or Telegram can receive automatic replies.',
     })
   }
 
@@ -199,11 +201,19 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     },
   )
 
-  if (!result.channels.some((channel) => channel.channel === 'imessage')) {
+  if (!result.channels.some((channel) => channel.channel === 'imessage' && channel.configured)) {
     commands.push({
       command: 'inbox source add imessage --id imessage:self --account self --includeOwn',
       description:
         'Add a local iMessage connector when you are ready to ingest captures and deliver assistant replies.',
+    })
+  }
+
+  if (!result.channels.some((channel) => channel.channel === 'telegram' && channel.configured)) {
+    commands.push({
+      command: 'inbox source add telegram --id telegram:bot --account bot',
+      description:
+        'Add the Telegram poll connector after exporting HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.',
     })
   }
 

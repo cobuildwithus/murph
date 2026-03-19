@@ -73,6 +73,12 @@ Instantiate a grammY `Api` object in app code and pass it to `createTelegramApiP
 
 That keeps grammY as the transport/runtime layer while `@healthybob/inboxd` stays the canonical sink.
 
+## Current wiring status
+
+- Telegram long-poll ingestion now plugs into the same assistant auto-reply loop as iMessage.
+- Assistant session reuse is keyed by the normalized Telegram thread id, so one bot chat or topic can keep reusing the same Healthy Bob assistant session.
+- Outbound assistant delivery accepts either a plain Telegram chat id or `<chatId>:topic:<messageThreadId>` so replies can land back in the exact same chat topic.
+
 ## Environment variables
 
 The CLI/runtime now looks for these Telegram settings:

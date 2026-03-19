@@ -7,6 +7,7 @@ import {
   deliverAssistantMessage,
   resolveImessageDeliveryCandidates,
   sendImessageMessage,
+  sendTelegramMessage,
 } from '../src/outbound-channel.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
@@ -129,6 +130,119 @@ test('deliverAssistantMessage uses one-off targets only for the current send and
   assert.equal(result.delivery.targetKind, 'explicit')
   assert.equal(result.session.binding.delivery?.kind, 'participant')
   assert.equal(result.session.binding.delivery?.target, '+15551234567')
+})
+
+
+test('deliverAssistantMessage uses stored Telegram thread bindings so one assistant session can reply back into the same chat', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-telegram-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sent: Array<{ message: string; target: string }> = []
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'telegram',
+      participantId: '123456789',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
+      message: 'Telegram thread reply.',
+    },
+    {
+      sendTelegram: async (input: { message: string; target: string }) => {
+        sent.push(input)
+      },
+    },
+  )
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0], {
+    target: '-1001234567890:topic:42',
+    message: 'Telegram thread reply.',
+  })
+  assert.equal(result.delivery.channel, 'telegram')
+  assert.equal(result.delivery.target, '-1001234567890:topic:42')
+  assert.equal(result.delivery.targetKind, 'thread')
+  assert.equal(result.session.binding.channel, 'telegram')
+  assert.equal(result.session.binding.threadId, '-1001234567890:topic:42')
+  assert.equal(result.session.binding.delivery?.kind, 'thread')
+  assert.equal(result.session.binding.delivery?.target, '-1001234567890:topic:42')
+  assert.equal('lastAssistantMessage' in result.session, false)
+  assert.equal(result.session.turnCount, 0)
+})
+
+test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including topic targets', async () => {
+  const requests: Array<{
+    body: Record<string, unknown>
+    headers: Record<string, string> | undefined
+    method: string
+    url: string
+  }> = []
+
+  await sendTelegramMessage(
+    {
+      message: 'Queued the parser.',
+      target: '-1001234567890:topic:42',
+    },
+    {
+      env: {
+        HEALTHYBOB_TELEGRAM_API_BASE_URL: 'https://bot.example.test/',
+        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+      },
+      fetchImplementation: async (url, init) => {
+        requests.push({
+          body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+          headers: init.headers,
+          method: init.method,
+          url,
+        })
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: { message_id: 1 } }),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 1)
+  assert.equal(
+    requests[0]?.url,
+    'https://bot.example.test/bottoken-123/sendMessage',
+  )
+  assert.equal(requests[0]?.method, 'POST')
+  assert.equal(requests[0]?.headers?.['content-type'], 'application/json')
+  assert.deepEqual(requests[0]?.body, {
+    chat_id: '-1001234567890',
+    message_thread_id: 42,
+    text: 'Queued the parser.',
+  })
+})
+
+test('sendTelegramMessage requires a bot token before attempting delivery', async () => {
+  await assert.rejects(
+    () =>
+      sendTelegramMessage(
+        {
+          message: 'Smoke test',
+          target: '123456789',
+        },
+        {
+          env: {},
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultCliError, true)
+      assert.equal((error as VaultCliError).code, 'ASSISTANT_TELEGRAM_TOKEN_REQUIRED')
+      assert.match(
+        (error as VaultCliError).message,
+        /HEALTHYBOB_TELEGRAM_BOT_TOKEN|TELEGRAM_BOT_TOKEN/iu,
+      )
+      return true
+    },
+  )
 })
 
 test('deliverAssistantMessage redacts HOME-based vault paths in its result payload', async () => {

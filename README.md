@@ -16,7 +16,7 @@ pnpm onboard --vault ./vault
 ./scripts/setup-macos.sh --vault ./vault
 ```
 
-`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. iMessage is enabled by default there, and if you keep it enabled the command will drop into `assistant run` so new iMessages can create or continue an assistant conversation automatically.
+`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. iMessage is enabled by default there, Telegram can be enabled through the same channel surface, and if at least one selected channel is fully configured the command will drop into `assistant run` so new inbound messages can create or continue an assistant conversation automatically.
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
@@ -292,12 +292,12 @@ The repo also includes a Healthy Bob-native assistant layer:
 - `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider
 - `vault-cli assistant memory search|get|upsert` searches cited assistant memory snippets, fetches one memory item by id, and commits typed non-canonical memory updates under `assistant-state/`
-- `vault-cli assistant run [--model <model>] [--baseUrl <url>] [--allowSelfAuthored] [--sessionRolloverHours <hours>]` runs the always-on assistant loop; with a model it also performs canonical inbox triage, and without one it can still handle channel auto-reply such as iMessage
+- `vault-cli assistant run [--model <model>] [--baseUrl <url>] [--allowSelfAuthored] [--sessionRolloverHours <hours>]` runs the always-on assistant loop; with a model it also performs canonical inbox triage, and without one it can still handle channel auto-reply such as iMessage or Telegram
 - `vault-cli assistant session list|show` inspects local assistant session metadata under `assistant-state/`; local transcript replay is reserved for the chat UI rather than those metadata commands
 
 Fresh assistant sessions bootstrap from a small core block in `assistant-state/<vault-bucket>/MEMORY.md`. Recent `assistant-state/<vault-bucket>/memory/YYYY-MM-DD.md` notes are now retrieved on demand through `assistant memory search|get` rather than injected wholesale into every fresh session. That continuity layer stays non-canonical, health memory only loads in private assistant contexts, and explicit `assistant memory upsert` writes still never override canonical vault records.
 
-The first installed chat provider adapter is Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Outbound channel delivery is also adapter-backed, with iMessage as the first send path. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
+The first installed chat provider adapter is Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Outbound channel delivery is also adapter-backed, with iMessage and Telegram both flowing through the same stored binding abstraction. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
 
 When you intentionally use a dedicated iMessage self-chat thread, `assistant run --allowSelfAuthored --sessionRolloverHours 48` lets self-authored captures drive the assistant, builds prompts from parsed attachment transcripts/OCR when message text is empty, and rolls the session every couple of days to keep that thread fresh. Healthy Bob still requires Full Disk Access for the terminal app that reads `~/Library/Messages/chat.db`, and the CLI now surfaces that requirement as an operator-facing error instead of a raw database-open stack trace.
 
@@ -365,11 +365,11 @@ That setup entrypoint is intentionally separate from the main `vault-cli` manife
 - install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon unless you pass `--skipOcr`
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
 - open an interactive onboarding wizard where channel delivery surfaces can be selected with arrow keys plus Space
-- enable iMessage by default in that wizard and show Telegram as a coming-soon placeholder so the channel surface is visible from day one
+- enable iMessage by default in that wizard and let Telegram opt into the same onboarding flow when a bot token is available in the shell environment
 - save that vault as the default Healthy Bob CLI vault for future commands on the same machine
 - install user-level `healthybob` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
-- configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled
-- automatically launch `assistant run` after a successful interactive onboarding with iMessage enabled, or `assistant chat` when no auto-reply channel is selected
+- configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled, and do the same for Telegram when a bot token is present in the shell environment
+- automatically launch `assistant run` after a successful interactive onboarding when at least one selected channel is fully configured for auto-reply, or `assistant chat` when no auto-reply channel is ready yet
 
 Common options:
 

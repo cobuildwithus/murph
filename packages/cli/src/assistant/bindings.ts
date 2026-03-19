@@ -64,6 +64,7 @@ export function createAssistantBinding(
     typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null
   const delivery = resolveAssistantBindingDelivery({
     actorId,
+    channel,
     threadId,
     threadIsDirect,
     deliveryKind: input.deliveryKind ?? null,
@@ -129,6 +130,7 @@ export function mergeAssistantBinding(
 
 export function resolveAssistantBindingDelivery(input: {
   actorId?: string | null
+  channel?: string | null
   deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
   threadId?: string | null
@@ -144,9 +146,17 @@ export function resolveAssistantBindingDelivery(input: {
   }
 
   const actorId = normalizeNullableString(input.actorId)
+  const channel = normalizeNullableString(input.channel)
   const threadId = normalizeNullableString(input.threadId)
   const threadIsDirect =
     typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null
+
+  if (channel === 'telegram' && threadId) {
+    return assistantBindingDeliverySchema.parse({
+      kind: 'thread',
+      target: threadId,
+    })
+  }
 
   if (threadIsDirect === false && threadId) {
     return assistantBindingDeliverySchema.parse({

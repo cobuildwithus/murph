@@ -34,10 +34,10 @@ const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
     title: 'Configure iMessage',
   },
   {
-    available: false,
+    available: true,
     channel: 'telegram',
     description:
-      'Telegram appears in the wizard now so the channel surface matches the planned onboarding flow, but wiring is still coming soon.',
+      'Receive and deliver replies through a Telegram bot. Export HEALTHYBOB_TELEGRAM_BOT_TOKEN before setup to enable assistant auto-reply.',
     title: 'Configure Telegram',
   },
 ]
@@ -220,9 +220,7 @@ export async function runSetupWizard(
             ? '[x]'
             : '[ ]'
           : '[·]'
-        const title = option.available
-          ? option.title
-          : `${option.title} (coming soon)`
+        const title = option.title
 
         return createElement(
           Box,
@@ -271,7 +269,7 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'iMessage is enabled by default. Telegram is shown here already, but the wiring is still coming soon.',
+                'iMessage is enabled by default. Telegram works through the same assistant channel surface when HEALTHYBOB_TELEGRAM_BOT_TOKEN is exported before setup.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, 'Press Enter to choose channels, or q to cancel.'),
@@ -306,9 +304,13 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                selectedChannels.includes('imessage')
-                  ? 'Healthy Bob will add the local iMessage connector and start the assistant automation loop after setup so new texts can create or continue an assistant conversation.'
-                  : 'Healthy Bob will finish machine and vault setup without enabling an external message channel yet.',
+                selectedChannels.includes('imessage') && selectedChannels.includes('telegram')
+                  ? 'Healthy Bob will add the local iMessage connector, configure the Telegram bot connector when a bot token is available, and start the assistant automation loop after setup so either channel can create or continue a shared assistant conversation.'
+                  : selectedChannels.includes('imessage')
+                    ? 'Healthy Bob will add the local iMessage connector and start the assistant automation loop after setup so new texts can create or continue an assistant conversation.'
+                    : selectedChannels.includes('telegram')
+                      ? 'Healthy Bob will configure the Telegram bot connector when a bot token is available and then start the assistant automation loop after setup so Telegram chats can create or continue an assistant conversation.'
+                      : 'Healthy Bob will finish machine and vault setup without enabling an external message channel yet.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, 'Press Enter to run setup, or Esc to change the selection.'),

@@ -21,6 +21,7 @@ import {
   shouldRunSetupWizard,
   type SuccessfulSetupContext,
 } from '../src/setup-cli.js'
+import { readAssistantAutomationState } from '../src/assistant-state.js'
 import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
 import { createSetupServices } from '../src/setup-services.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
@@ -29,6 +30,7 @@ import {
   repoRoot,
   requireData,
   type CliEnvelope,
+  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
@@ -255,6 +257,7 @@ async function runSetupAliasRaw(
       {
         cwd: repoRoot,
         encoding: 'utf8',
+        env: withoutNodeV8Coverage(),
       },
     )
     return stdout.trim()
@@ -270,10 +273,10 @@ async function runSetupWrapper(
   return await execFileAsync('bash', [path.join(repoRoot, 'scripts/setup-macos.sh'), ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: {
+    env: withoutNodeV8Coverage({
       ...process.env,
       ...envOverrides,
-    },
+    }),
   })
 }
 
@@ -681,6 +684,175 @@ test('setup handoff launches assistant automation instead of chat when auto-repl
     }),
     'assistant-run',
   )
+})
+
+
+test('setup handoff keeps the post-setup flow in assistant chat when a selected auto-reply channel is not fully configured yet', () => {
+  const context = {
+    agent: false,
+    format: 'toon' as const,
+    formatExplicit: false,
+    result: {
+      ...makeSetupResult('./vault'),
+      channels: [
+        {
+          autoReply: true,
+          channel: 'telegram' as const,
+          configured: false,
+          connectorId: 'telegram:bot',
+          detail: 'Telegram still needs a bot token.',
+          enabled: true,
+        },
+      ],
+    },
+  }
+
+  assert.equal(
+    resolveSetupPostLaunchAction(context, {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    }),
+    'assistant-chat',
+  )
+})
+
+test.sequential('setup service configures Telegram and enables assistant auto-reply when a bot token is present', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-telegram-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
+  const formulaPrefixes = {
+    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
+    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
+    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
+  }
+  const brewCommand = path.join(homebrewBin, 'brew')
+  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
+  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
+  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
+  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const sourceAddCalls: Array<Record<string, unknown>> = []
+
+  await mkdir(vaultRoot, { recursive: true })
+  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+  await writeExecutable(brewCommand)
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperCommand)
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    downloadFile: async (_url, destinationPath) => {
+      await mkdir(path.dirname(destinationPath), { recursive: true })
+      await writeFile(destinationPath, 'model', 'utf8')
+    },
+    env: () => ({
+      HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+      PATH: homebrewBin,
+    }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap() {
+        return makeBootstrapResult(vaultRoot)
+      },
+      async sourceAdd(input) {
+        sourceAddCalls.push(input as unknown as Record<string, unknown>)
+        return {
+          configPath: '.runtime/inboxd/config.json',
+          connector: {
+            accountId: input.account ?? null,
+            enabled: true,
+            id: input.id,
+            options: {},
+            source: input.source,
+          },
+          connectorCount: 1,
+          vault: input.vault,
+        }
+      },
+      async sourceList(input) {
+        return {
+          configPath: '.runtime/inboxd/config.json',
+          connectors: [],
+          vault: input.vault,
+        }
+      },
+    },
+    log() {},
+    platform: () => 'darwin',
+    resolveCliBinPath: () => cliBinPath,
+    runCommand: async ({ file, args }) => {
+      const baseName = path.basename(file)
+
+      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
+        const formula = args[2] ?? ''
+        return installedFormulas.has(formula)
+          ? {
+              exitCode: 0,
+              stderr: '',
+              stdout: `${formula} 1.0.0\n`,
+            }
+          : {
+              exitCode: 1,
+              stderr: '',
+              stdout: '',
+            }
+      }
+
+      if (baseName === 'brew' && args[0] === '--prefix') {
+        const formula = args[1] as keyof typeof formulaPrefixes
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: `${formulaPrefixes[formula]}\n`,
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+    vaultServices: {
+      core: {
+        async init() {
+          throw new Error('init should not be called for an existing vault')
+        },
+      },
+    } as any,
+  })
+
+  try {
+    const result = await services.setupMacos({
+      channels: ['telegram'],
+      skipOcr: true,
+      vault: vaultRoot,
+      whisperModel: 'base.en',
+    })
+
+    assert.equal(sourceAddCalls.length, 1)
+    assert.deepEqual(sourceAddCalls[0], {
+      account: 'bot',
+      id: 'telegram:bot',
+      requestId: null,
+      source: 'telegram',
+      vault: vaultRoot,
+    })
+    assert.equal(result.channels.length, 1)
+    assert.equal(result.channels[0]?.channel, 'telegram')
+    assert.equal(result.channels[0]?.configured, true)
+    assert.equal(result.channels[0]?.autoReply, true)
+    assert.equal(result.channels[0]?.connectorId, 'telegram:bot')
+    assert.equal(
+      result.steps.some(
+        (step) => step.id === 'channel-telegram' && step.status === 'completed',
+      ),
+      true,
+    )
+
+    const automationState = await readAssistantAutomationState(vaultRoot)
+    assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
 })
 
 test('setup auto-chat gating only enables the handoff for interactive default-format runs', () => {

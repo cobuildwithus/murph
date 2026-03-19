@@ -60,7 +60,7 @@ async function actionMain(): Promise<void> {
 
         if (launchAction === 'assistant-run') {
           process.stderr.write(
-            '\nStarting Healthy Bob assistant automation. Leave this terminal open while iMessage auto-reply is active. Press Ctrl+C to stop.\n\n',
+            '\nStarting Healthy Bob assistant automation. Leave this terminal open while channel auto-reply is active for iMessage and/or Telegram. Press Ctrl+C to stop.\n\n',
           )
           await cli.serve(['assistant', 'run', '--vault', launchVault])
           return
