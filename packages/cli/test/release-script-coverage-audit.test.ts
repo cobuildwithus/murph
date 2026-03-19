@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(packageDir, '..', '..')
@@ -31,6 +33,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
     expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
     expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
+    expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
   })
 
   it('keeps release:check ordered around install, build, repo verification, target validation, and pnpm pack', () => {
@@ -106,5 +109,84 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootDocsDrift).toContain('scripts/release-manifest.json')
     expect(rootDocsDrift).toContain('packages/cli/CHANGELOG.md')
     expect(rootDocsDrift).toContain('package_jsons_version_only')
+  })
+
+  it('packages the selected vault and matching assistant-state without runtime or export-pack residue', () => {
+    const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'healthybob-review-gpt-data-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const outputRoot = path.join(repoRoot, '.tmp-review-gpt-data')
+
+    rmSync(outputRoot, { recursive: true, force: true })
+    mkdirSync(path.join(vaultRoot, 'journal', '2026'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, '.runtime'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
+    writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
+    writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
+    writeFileSync(path.join(vaultRoot, 'journal', '2026', '2026-03-18.md'), '# Journal\n', 'utf8')
+    writeFileSync(path.join(vaultRoot, '.runtime', 'secret.json'), '{"token":"nope"}\n', 'utf8')
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
+      '{"packId":"existing-pack"}\n',
+      'utf8',
+    )
+
+    const assistantPaths = resolveAssistantStatePaths(vaultRoot)
+    mkdirSync(assistantPaths.sessionsDirectory, { recursive: true })
+    writeFileSync(assistantPaths.longTermMemoryPath, '# Memory\n', 'utf8')
+    writeFileSync(
+      path.join(assistantPaths.sessionsDirectory, 'session.json'),
+      '{"sessionId":"asst_test"}\n',
+      'utf8',
+    )
+
+    try {
+      const output = execFileSync(
+        'bash',
+        [
+          'scripts/package-data-context.sh',
+          '--vault',
+          vaultRoot,
+          '--out-dir',
+          outputRoot,
+          '--name',
+          'healthybob-test-data',
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+        },
+      )
+
+      expect(output).toContain('Data package created.')
+      expect(output).toContain('Assistant-state files: 2 (included)')
+      expect(output).not.toContain(vaultRoot)
+
+      const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
+      expect(zipMatch).not.toBeNull()
+
+      const zipPath = path.join(repoRoot, zipMatch?.[1] ?? '')
+      const bundleDir = path.basename(zipPath, '.zip')
+      const entries = execFileSync('unzip', ['-Z1', zipPath], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+        .trim()
+        .split('\n')
+        .filter((entry) => entry.length > 0)
+
+      expect(entries).toContain(`${bundleDir}/bundle-manifest.json`)
+      expect(entries).toContain(`${bundleDir}/vault/vault.json`)
+      expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
+      expect(entries).toContain(`${bundleDir}/vault/journal/2026/2026-03-18.md`)
+      expect(entries).toContain(`${bundleDir}/assistant-state/MEMORY.md`)
+      expect(entries).toContain(`${bundleDir}/assistant-state/sessions/session.json`)
+      expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
+      )
+    } finally {
+      rmSync(outputRoot, { recursive: true, force: true })
+      rmSync(parentRoot, { recursive: true, force: true })
+    }
   })
 })

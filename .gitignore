@@ -17,6 +17,7 @@ coverage/
 .codex-runs/
 .codex-worker-prompts/
 audit-packages/
+output-packages/
 vault/
 .env
 .env.*

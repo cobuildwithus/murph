@@ -52,6 +52,19 @@ For a quick web-only demo against the included fixture vault:
 HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev
 ```
 
+## ChatGPT Bundles
+
+The repo now has two separate ChatGPT upload paths:
+
+- `pnpm review:gpt`
+  packages source/docs for code review using the existing audit ZIP flow
+- `pnpm review:gpt:data --vault ./vault --chat-url <url>`
+  packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
+
+`review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Healthy Bob precedence order: explicit `--vault`, then `HEALTHYBOB_VAULT`, then the saved default vault.
+
+The data bundle intentionally excludes `.runtime/**`, `.env*`, archive files, and `exports/packs/**` so machine-local runtime/auth material and already-derived export packs are not uploaded by default. Generated ZIPs are written under `output-packages/`.
+
 ## What Healthy Bob Is
 
 Healthy Bob is built around a few hard rules:
@@ -194,6 +207,7 @@ Important storage rules:
 - `assistant-state/**` is local assistant/session metadata outside the vault and is never canonical health truth
 - `assistant-state/**` stores minimal session metadata, local assistant transcript files, and distilled Markdown memory such as aliases, bindings, timestamps, turn counts, provider session references, naming/preferences/instructions, recent project context, and selected health context; the vault remains authoritative on conflicts
 - export packs are derived outputs, not canonical records
+- `pnpm review:gpt:data` packages the selected vault plus matching `assistant-state/**`, but intentionally excludes `.runtime/**`, `.env*`, archive files, and `exports/packs/**`
 
 Schema version policy:
 
