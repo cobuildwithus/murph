@@ -24,6 +24,7 @@ test('configureSetupChannels enables Telegram auto-reply only after the doctor p
         async doctor(input) {
           doctorCalls.push(input.sourceId ?? '')
           return {
+            vault,
             checks: [
               {
                 message: '401 unauthorized',
@@ -41,15 +42,22 @@ test('configureSetupChannels enables Telegram auto-reply only after the doctor p
         },
         async sourceAdd() {
           return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
             connector: {
               accountId: 'bot',
               id: 'telegram:bot',
               source: 'telegram',
+              enabled: true,
+              options: {},
             },
+            connectorCount: 1,
           }
         },
         async sourceList() {
           return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
             connectors: [],
           }
         },
@@ -87,6 +95,7 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
         },
         async doctor() {
           return {
+            vault,
             checks: [
               {
                 message: 'bot authenticated',
@@ -104,15 +113,22 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
         },
         async sourceAdd() {
           return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
             connector: {
               accountId: 'bot',
               id: 'telegram:bot',
               source: 'telegram',
+              enabled: true,
+              options: {},
             },
+            connectorCount: 1,
           }
         },
         async sourceList() {
           return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
             connectors: [],
           }
         },

@@ -15,6 +15,9 @@
   ],
   "references": [
     {
+      "path": "../runtime-state"
+    },
+    {
       "path": "../contracts/tsconfig.build.json"
     }
   ]

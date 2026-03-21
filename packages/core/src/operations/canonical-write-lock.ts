@@ -1,10 +1,14 @@
-import { createHash } from "node:crypto";
-import os from "node:os";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import {
+  acquireDirectoryLock,
+  buildProcessCommand,
+  DirectoryLockHeldError,
+  fingerprintHost,
+  inspectDirectoryLock,
+  isProcessRunning,
+} from "@healthybob/runtime-state";
 
 import { VaultError } from "../errors.js";
-import { ensureDirectory, pathExists, readJsonFile } from "../fs.js";
 import { normalizeVaultRoot, resolveVaultPath } from "../path-safety.js";
 import { toIsoTimestamp } from "../time.js";
 import { isErrnoException, isPlainRecord } from "../types.js";
@@ -42,31 +46,12 @@ export type CanonicalWriteLockInspection =
       reason: string;
     };
 
-interface ProcessLockState {
-  depth: number;
-  metadata: CanonicalWriteLockMetadata;
-}
-
-const processLocks = new Map<string, ProcessLockState>();
-
-function normalizeHost(): string {
-  return `sha256:${createHash("sha256").update(os.hostname()).digest("hex").slice(0, 12)}`;
-}
-
-function normalizeCommand(): string {
-  const parts = [process.argv[0], process.argv[1]]
-    .map((value) => (typeof value === "string" && value.trim().length > 0 ? path.basename(value) : ""))
-    .filter(Boolean);
-
-  return parts.join(" ").trim() || "unknown";
-}
-
 function buildMetadata(): CanonicalWriteLockMetadata {
   return {
     pid: process.pid,
-    command: normalizeCommand(),
+    command: buildProcessCommand(),
     startedAt: toIsoTimestamp(new Date(), "startedAt"),
-    host: normalizeHost(),
+    host: fingerprintHost(),
   };
 }
 
@@ -97,126 +82,123 @@ function isCanonicalWriteLockMetadata(value: unknown): value is CanonicalWriteLo
   );
 }
 
-async function readLockMetadata(vaultRoot: string): Promise<CanonicalWriteLockMetadata | null> {
-  const metadataPath = resolveVaultPath(vaultRoot, CANONICAL_WRITE_LOCK_METADATA_PATH);
-
-  if (!(await pathExists(metadataPath.absolutePath))) {
-    return null;
-  }
-
-  const raw = await readJsonFile(vaultRoot, CANONICAL_WRITE_LOCK_METADATA_PATH);
-  if (!isCanonicalWriteLockMetadata(raw)) {
-    throw new VaultError(
-      "HB_CANONICAL_WRITE_LOCK_INVALID",
-      "Canonical write lock metadata is malformed.",
-      {
-        relativePath: CANONICAL_WRITE_LOCK_METADATA_PATH,
+function mapDirectoryLockInspection(
+  inspection:
+    | {
+        state: "active";
+        metadata: CanonicalWriteLockMetadata;
+      }
+    | {
+        state: "stale";
+        metadata: CanonicalWriteLockMetadata | null;
+        reason: string;
       },
-    );
+): Exclude<CanonicalWriteLockInspection, { state: "unlocked" }> {
+  if (inspection.state === "active") {
+    return {
+      state: "active",
+      relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
+      metadata: inspection.metadata,
+    };
   }
 
-  return raw;
-}
-
-function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (isErrnoException(error) && error.code === "ESRCH") {
-      return false;
-    }
-
-    return true;
-  }
+  return {
+    state: "stale",
+    relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
+    metadata: inspection.metadata,
+    reason: inspection.reason,
+  };
 }
 
 export async function inspectCanonicalWriteLock(vaultRoot: string): Promise<CanonicalWriteLockInspection> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
   const lockPath = resolveVaultPath(absoluteRoot, CANONICAL_WRITE_LOCK_DIRECTORY);
+  const metadataPath = resolveVaultPath(absoluteRoot, CANONICAL_WRITE_LOCK_METADATA_PATH);
+  const inspection = await inspectDirectoryLock({
+    lockPath: lockPath.absolutePath,
+    metadataPath: metadataPath.absolutePath,
+    parseMetadata(value) {
+      return isCanonicalWriteLockMetadata(value) ? value : null;
+    },
+    invalidMetadataReason: "Canonical write lock metadata is malformed.",
+    missingMetadataReason: `Missing ${path.posix.basename(CANONICAL_WRITE_LOCK_METADATA_PATH)} metadata.`,
+    inspectStale(metadata) {
+      if (metadata.host === fingerprintHost() && !isProcessRunning(metadata.pid)) {
+        return `Process ${metadata.pid} is no longer running.`;
+      }
 
-  if (!(await pathExists(lockPath.absolutePath))) {
+      return null;
+    },
+  });
+
+  if (inspection.state === "unlocked") {
     return {
       state: "unlocked",
       relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
     };
   }
 
-  let metadata: CanonicalWriteLockMetadata | null = null;
-
-  try {
-    metadata = await readLockMetadata(absoluteRoot);
-  } catch (error) {
+  if (inspection.state === "stale") {
     return {
       state: "stale",
       relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
-      metadata: null,
-      reason: error instanceof Error ? error.message : String(error),
-    };
-  }
-
-  if (!metadata) {
-    return {
-      state: "stale",
-      relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
-      metadata: null,
-      reason: `Missing ${path.posix.basename(CANONICAL_WRITE_LOCK_METADATA_PATH)} metadata.`,
-    };
-  }
-
-  if (metadata.host === normalizeHost() && !isProcessRunning(metadata.pid)) {
-    return {
-      state: "stale",
-      relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
-      metadata,
-      reason: `Process ${metadata.pid} is no longer running.`,
+      metadata: inspection.metadata,
+      reason: inspection.reason,
     };
   }
 
   return {
     state: "active",
     relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
-    metadata,
+    metadata: inspection.metadata,
   };
 }
 
 export async function acquireCanonicalWriteLock(vaultRoot: string): Promise<CanonicalWriteLockHandle> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
-  const existing = processLocks.get(absoluteRoot);
-
-  if (existing) {
-    existing.depth += 1;
-    let released = false;
-
-    return {
-      metadata: existing.metadata,
-      relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
-      async release() {
-        if (released) {
-          return;
-        }
-
-        released = true;
-        existing.depth -= 1;
-        if (existing.depth <= 0) {
-          processLocks.delete(absoluteRoot);
-        }
-      },
-    };
-  }
-
   const lockPath = resolveVaultPath(absoluteRoot, CANONICAL_WRITE_LOCK_DIRECTORY);
   const metadataPath = resolveVaultPath(absoluteRoot, CANONICAL_WRITE_LOCK_METADATA_PATH);
-  await ensureDirectory(path.dirname(lockPath.absolutePath));
 
   try {
-    await fs.mkdir(lockPath.absolutePath);
+    const handle = await acquireDirectoryLock({
+      ownerKey: `canonical-write:${absoluteRoot}`,
+      lockPath: lockPath.absolutePath,
+      metadataPath: metadataPath.absolutePath,
+      metadata: buildMetadata(),
+      parseMetadata(value) {
+        return isCanonicalWriteLockMetadata(value) ? value : null;
+      },
+      invalidMetadataReason: "Canonical write lock metadata is malformed.",
+      missingMetadataReason: `Missing ${path.posix.basename(CANONICAL_WRITE_LOCK_METADATA_PATH)} metadata.`,
+      inspectStale(metadata) {
+        if (metadata.host === fingerprintHost() && !isProcessRunning(metadata.pid)) {
+          return `Process ${metadata.pid} is no longer running.`;
+        }
+
+        return null;
+      },
+    });
+
+    return {
+      metadata: handle.metadata,
+      relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
+      release: handle.release,
+    };
   } catch (error) {
-    if (isErrnoException(error) && error.code === "EEXIST") {
-      const inspection = await inspectCanonicalWriteLock(absoluteRoot);
-      if (inspection.state === "unlocked") {
-        return acquireCanonicalWriteLock(absoluteRoot);
-      }
+    if (error instanceof DirectoryLockHeldError) {
+      const inspection = mapDirectoryLockInspection(
+        error.inspection.state === "active"
+          ? {
+              state: "active",
+              metadata: error.inspection.metadata as CanonicalWriteLockMetadata,
+            }
+          : {
+              state: "stale",
+              metadata: error.inspection.metadata as CanonicalWriteLockMetadata | null,
+              reason: error.inspection.reason,
+            },
+      );
+
       throw new VaultError("HB_CANONICAL_WRITE_LOCKED", toLockFailureMessage(inspection), {
         relativePath: inspection.relativePath,
         metadata: inspection.metadata
@@ -230,42 +212,23 @@ export async function acquireCanonicalWriteLock(vaultRoot: string): Promise<Cano
       });
     }
 
+    if (isErrnoException(error) && error.code === "EEXIST") {
+      const inspection = await inspectCanonicalWriteLock(absoluteRoot);
+      if (inspection.state !== "unlocked") {
+        throw new VaultError("HB_CANONICAL_WRITE_LOCKED", toLockFailureMessage(inspection), {
+          relativePath: inspection.relativePath,
+          metadata: inspection.metadata
+            ? {
+                pid: inspection.metadata.pid,
+                command: inspection.metadata.command,
+                startedAt: inspection.metadata.startedAt,
+                host: inspection.metadata.host,
+              }
+            : null,
+        });
+      }
+    }
+
     throw error;
   }
-
-  const metadata = buildMetadata();
-
-  try {
-    await fs.writeFile(metadataPath.absolutePath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
-  } catch (error) {
-    await fs.rm(lockPath.absolutePath, { recursive: true, force: true });
-    throw error;
-  }
-
-  const state: ProcessLockState = {
-    depth: 1,
-    metadata,
-  };
-  processLocks.set(absoluteRoot, state);
-  let released = false;
-
-  return {
-    metadata,
-    relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
-    async release() {
-      if (released) {
-        return;
-      }
-
-      released = true;
-      state.depth -= 1;
-
-      if (state.depth > 0) {
-        return;
-      }
-
-      processLocks.delete(absoluteRoot);
-      await fs.rm(lockPath.absolutePath, { recursive: true, force: true });
-    },
-  };
 }

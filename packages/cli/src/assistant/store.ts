@@ -1,155 +1,63 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readdir } from 'node:fs/promises'
 import {
-  assistantAliasStoreSchema,
   assistantAutomationStateSchema,
-  assistantProviderSessionOptionsSchema,
   assistantSessionSchema,
   assistantTranscriptEntrySchema,
-  type AssistantAliasStore,
-  type AssistantApprovalPolicy,
   type AssistantAutomationState,
-  type AssistantBindingDeliveryKind,
-  type AssistantChatProvider,
-  type AssistantProviderSessionOptions,
-  type AssistantSandbox,
   type AssistantSession,
   type AssistantTranscriptEntry,
-  type AssistantTranscriptEntryKind,
 } from '../assistant-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   createAssistantBinding,
-  mergeAssistantBinding,
-  resolveAssistantConversationKey,
   type AssistantBindingPatch,
 } from './bindings.js'
 import {
-  isMissingFileError,
+  writeJsonFileAtomic,
   normalizeNullableString,
   resolveTimestamp,
-  writeJsonFileAtomic,
 } from './shared.js'
+import {
+  ensureAssistantState,
+  appendTranscriptEntries,
+  loadAndPersistResolvedSession,
+  readAssistantIndexStore,
+  readAssistantSession,
+  readAssistantTranscriptEntries,
+  readAutomationState,
+  synchronizeAssistantIndexes,
+  writeAssistantSession,
+} from './store/persistence.js'
+import {
+  bindingInputFromLocator,
+  bindingPatchFromLocator,
+  normalizeProviderOptions,
+  createAssistantSessionId,
+  resolveAssistantConversationLookupKey,
+  resolveAssistantStatePaths,
+} from './store/paths.js'
+export {
+  redactAssistantDisplayPath,
+  resolveAssistantAliasKey,
+  resolveAssistantConversationLookupKey,
+  resolveAssistantStatePaths,
+} from './store/paths.js'
+export type { AssistantStatePaths } from './store/paths.js'
+export type {
+  AssistantSessionLocator,
+  CreateAssistantSessionInput,
+  ResolveAssistantSessionInput,
+  ResolvedAssistantSession,
+  AssistantTranscriptEntryInput,
+} from './store/types.js'
+import type {
+  AssistantSessionLocator,
+  ResolveAssistantSessionInput,
+  ResolvedAssistantSession,
+  AssistantTranscriptEntryInput,
+} from './store/types.js'
 
-const ASSISTANT_STATE_DIRECTORY_NAME = 'assistant-state'
 const ASSISTANT_STATE_SCHEMA = 'healthybob.assistant-session.v2'
-const ASSISTANT_INDEX_STORE_VERSION = 2
-const ASSISTANT_AUTOMATION_STATE_VERSION = 2
-
-export interface AssistantStatePaths {
-  absoluteVaultRoot: string
-  assistantStateRoot: string
-  automationPath: string
-  dailyMemoryDirectory: string
-  indexesPath: string
-  longTermMemoryPath: string
-  sessionsDirectory: string
-  transcriptsDirectory: string
-}
-
-export interface AssistantSessionLocator {
-  actorId?: string | null
-  alias?: string | null
-  channel?: string | null
-  deliveryKind?: AssistantBindingDeliveryKind | null
-  identityId?: string | null
-  participantId?: string | null
-  sessionId?: string | null
-  sourceThreadId?: string | null
-  threadId?: string | null
-  threadIsDirect?: boolean | null
-}
-
-export interface CreateAssistantSessionInput extends AssistantSessionLocator {
-  approvalPolicy?: AssistantApprovalPolicy | null
-  model?: string | null
-  now?: Date
-  oss?: boolean
-  profile?: string | null
-  provider?: AssistantChatProvider
-  reasoningEffort?: string | null
-  sandbox?: AssistantSandbox | null
-  vault: string
-}
-
-export interface ResolveAssistantSessionInput
-  extends CreateAssistantSessionInput {
-  createIfMissing?: boolean
-  maxSessionAgeMs?: number | null
-}
-
-export interface ResolvedAssistantSession {
-  created: boolean
-  paths: AssistantStatePaths
-  session: AssistantSession
-}
-
-export interface AssistantTranscriptEntryInput {
-  createdAt?: string | null
-  kind: AssistantTranscriptEntryKind
-  text: string
-}
-
-export function resolveAssistantStatePaths(
-  vaultRoot: string,
-): AssistantStatePaths {
-  const absoluteVaultRoot = path.resolve(vaultRoot)
-  const vaultName = path.basename(absoluteVaultRoot)
-  const bucketName = `${vaultName}-${hashVaultRoot(absoluteVaultRoot)}`
-  const assistantStateRoot = path.join(
-    path.dirname(absoluteVaultRoot),
-    ASSISTANT_STATE_DIRECTORY_NAME,
-    bucketName,
-  )
-
-  return {
-    absoluteVaultRoot,
-    assistantStateRoot,
-    automationPath: path.join(assistantStateRoot, 'automation.json'),
-    dailyMemoryDirectory: path.join(assistantStateRoot, 'memory'),
-    indexesPath: path.join(assistantStateRoot, 'indexes.json'),
-    longTermMemoryPath: path.join(assistantStateRoot, 'MEMORY.md'),
-    sessionsDirectory: path.join(assistantStateRoot, 'sessions'),
-    transcriptsDirectory: path.join(assistantStateRoot, 'transcripts'),
-  }
-}
-
-export function redactAssistantDisplayPath(filePath: string): string {
-  const absolutePath = path.resolve(filePath)
-  const homeDirectory = normalizeNullableString(process.env.HOME)
-  if (!homeDirectory) {
-    return absolutePath
-  }
-
-  const absoluteHome = path.resolve(homeDirectory)
-  if (absolutePath === absoluteHome) {
-    return '~'
-  }
-
-  if (!absolutePath.startsWith(`${absoluteHome}${path.sep}`)) {
-    return absolutePath
-  }
-
-  return path.join('~', path.relative(absoluteHome, absolutePath))
-}
-
-export function resolveAssistantAliasKey(
-  input: AssistantSessionLocator,
-): string | null {
-  const explicitAlias = normalizeNullableString(input.alias)
-  if (explicitAlias) {
-    return explicitAlias
-  }
-
-  return resolveAssistantConversationKey(bindingInputFromLocator(input))
-}
-
-export function resolveAssistantConversationLookupKey(
-  input: AssistantSessionLocator,
-): string | null {
-  return resolveAssistantConversationKey(bindingInputFromLocator(input))
-}
 
 export async function resolveAssistantSession(
   input: ResolveAssistantSessionInput,
@@ -338,13 +246,7 @@ export async function appendAssistantTranscriptEntries(
       createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
     }),
   )
-  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
-  const serialized = `${parsed.map((entry) => JSON.stringify(entry)).join('\n')}\n`
-
-  await mkdir(path.dirname(transcriptPath), {
-    recursive: true,
-  })
-  await appendFile(transcriptPath, serialized, 'utf8')
+  await appendTranscriptEntries(paths, sessionId, parsed)
 
   return parsed
 }
@@ -366,320 +268,4 @@ export async function saveAssistantAutomationState(
   const parsed = assistantAutomationStateSchema.parse(state)
   await writeJsonFileAtomic(paths.automationPath, parsed)
   return parsed
-}
-
-async function ensureAssistantState(paths: AssistantStatePaths): Promise<void> {
-  await Promise.all([
-    mkdir(paths.sessionsDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.transcriptsDirectory, {
-      recursive: true,
-    }),
-  ])
-}
-
-async function readAssistantSession(input: {
-  paths: AssistantStatePaths
-  sessionId: string
-}): Promise<AssistantSession | null> {
-  const sessionPath = path.join(
-    input.paths.sessionsDirectory,
-    `${input.sessionId}.json`,
-  )
-
-  try {
-    const raw = await readFile(sessionPath, 'utf8')
-    return assistantSessionSchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
-    }
-    throw error
-  }
-}
-
-async function writeAssistantSession(
-  paths: AssistantStatePaths,
-  session: AssistantSession,
-): Promise<void> {
-  const sessionPath = path.join(paths.sessionsDirectory, `${session.sessionId}.json`)
-  await writeJsonFileAtomic(sessionPath, session)
-}
-
-async function readAssistantTranscriptEntries(
-  paths: AssistantStatePaths,
-  sessionId: string,
-): Promise<AssistantTranscriptEntry[]> {
-  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
-
-  try {
-    const raw = await readFile(transcriptPath, 'utf8')
-    return raw
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => assistantTranscriptEntrySchema.parse(JSON.parse(line) as unknown))
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return []
-    }
-
-    throw error
-  }
-}
-
-function resolveAssistantTranscriptPath(
-  paths: AssistantStatePaths,
-  sessionId: string,
-): string {
-  return path.join(paths.transcriptsDirectory, `${sessionId}.jsonl`)
-}
-
-async function persistResolvedSession(
-  paths: AssistantStatePaths,
-  session: AssistantSession,
-  input: {
-    alias: string | null
-    bindingPatch: AssistantBindingPatch
-  },
-): Promise<AssistantSession> {
-  const nextBinding = mergeAssistantBinding(session.binding, input.bindingPatch)
-  const aliasChanged = input.alias !== null && input.alias !== session.alias
-  const bindingChanged =
-    JSON.stringify(nextBinding) !== JSON.stringify(session.binding)
-
-  if (!aliasChanged && !bindingChanged) {
-    return session
-  }
-
-  const updated = assistantSessionSchema.parse({
-    ...session,
-    alias: input.alias ?? session.alias,
-    binding: nextBinding,
-    updatedAt: new Date().toISOString(),
-  })
-  await writeAssistantSession(paths, updated)
-  await synchronizeAssistantIndexes(paths, updated, session)
-  return updated
-}
-
-async function loadAndPersistResolvedSession(input: {
-  paths: AssistantStatePaths
-  sessionId: string
-  persistenceInput: {
-    alias: string | null
-    bindingPatch: AssistantBindingPatch
-  }
-  skipIfExpired?: boolean
-  maxSessionAgeMs?: number | null
-  now?: Date
-}): Promise<ResolvedAssistantSession | null> {
-  const existing = await readAssistantSession({
-    paths: input.paths,
-    sessionId: input.sessionId,
-  })
-  if (!existing) {
-    return null
-  }
-  if (
-    input.skipIfExpired &&
-    isAssistantSessionExpired(existing, input.maxSessionAgeMs, input.now)
-  ) {
-    return null
-  }
-
-  const updated = await persistResolvedSession(
-    input.paths,
-    existing,
-    input.persistenceInput,
-  )
-  return {
-    created: false,
-    paths: input.paths,
-    session: updated,
-  }
-}
-
-function isAssistantSessionExpired(
-  session: AssistantSession,
-  maxSessionAgeMs: number | null | undefined,
-  now?: Date,
-): boolean {
-  if (!Number.isFinite(maxSessionAgeMs) || typeof maxSessionAgeMs !== 'number') {
-    return false
-  }
-
-  const normalizedMaxAgeMs = Math.max(Math.trunc(maxSessionAgeMs), 0)
-  if (normalizedMaxAgeMs === 0) {
-    return false
-  }
-
-  const referenceTimestamp =
-    normalizeNullableString(session.lastTurnAt) ??
-    normalizeNullableString(session.updatedAt) ??
-    normalizeNullableString(session.createdAt)
-  if (!referenceTimestamp) {
-    return false
-  }
-
-  const referenceTime = Date.parse(referenceTimestamp)
-  const nowTime = (now ?? new Date()).getTime()
-  if (!Number.isFinite(referenceTime) || !Number.isFinite(nowTime)) {
-    return false
-  }
-
-  return nowTime - referenceTime >= normalizedMaxAgeMs
-}
-
-async function readAssistantIndexStore(
-  paths: AssistantStatePaths,
-): Promise<AssistantAliasStore> {
-  try {
-    const raw = await readFile(paths.indexesPath, 'utf8')
-    return assistantAliasStoreSchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
-    }
-  }
-
-  const initial = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases: {},
-    conversationKeys: {},
-  })
-  await writeJsonFileAtomic(paths.indexesPath, initial)
-  return initial
-}
-
-async function synchronizeAssistantIndexes(
-  paths: AssistantStatePaths,
-  session: AssistantSession,
-  previous: AssistantSession | null,
-): Promise<void> {
-  const store = await readAssistantIndexStore(paths)
-  const aliases = {
-    ...store.aliases,
-  }
-  const conversationKeys = {
-    ...store.conversationKeys,
-  }
-
-  if (previous?.alias && previous.alias !== session.alias) {
-    delete aliases[previous.alias]
-  }
-  if (
-    previous?.binding.conversationKey &&
-    previous.binding.conversationKey !== session.binding.conversationKey
-  ) {
-    delete conversationKeys[previous.binding.conversationKey]
-  }
-
-  if (session.alias) {
-    aliases[session.alias] = session.sessionId
-  }
-  if (session.binding.conversationKey) {
-    conversationKeys[session.binding.conversationKey] = session.sessionId
-  }
-
-  const updated = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases,
-    conversationKeys,
-  })
-  await writeJsonFileAtomic(paths.indexesPath, updated)
-}
-
-async function readAutomationState(
-  paths: AssistantStatePaths,
-): Promise<AssistantAutomationState> {
-  try {
-    const raw = await readFile(paths.automationPath, 'utf8')
-    return assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
-    }
-  }
-
-  const initial = assistantAutomationStateSchema.parse({
-    version: ASSISTANT_AUTOMATION_STATE_VERSION,
-    inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    autoReplyPrimed: true,
-    updatedAt: new Date().toISOString(),
-  })
-  await writeJsonFileAtomic(paths.automationPath, initial)
-  return initial
-}
-
-function bindingInputFromLocator(
-  input: AssistantSessionLocator,
-): AssistantBindingPatch {
-  return {
-    actorId: normalizeNullableString(input.actorId ?? input.participantId),
-    channel: normalizeNullableString(input.channel),
-    deliveryKind: input.deliveryKind ?? null,
-    identityId: normalizeNullableString(input.identityId),
-    threadId: normalizeNullableString(input.threadId ?? input.sourceThreadId),
-    threadIsDirect:
-      typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
-  }
-}
-
-function bindingPatchFromLocator(
-  input: AssistantSessionLocator,
-): AssistantBindingPatch {
-  const patch: AssistantBindingPatch = {}
-
-  if ('actorId' in input || 'participantId' in input) {
-    patch.actorId = normalizeNullableString(input.actorId ?? input.participantId)
-  }
-  if ('channel' in input) {
-    patch.channel = normalizeNullableString(input.channel)
-  }
-  if ('deliveryKind' in input) {
-    patch.deliveryKind = input.deliveryKind ?? null
-  }
-  if ('identityId' in input) {
-    patch.identityId = normalizeNullableString(input.identityId)
-  }
-  if ('threadId' in input || 'sourceThreadId' in input) {
-    patch.threadId = normalizeNullableString(input.threadId ?? input.sourceThreadId)
-  }
-  if ('threadIsDirect' in input) {
-    patch.threadIsDirect =
-      typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null
-  }
-
-  return patch
-}
-
-
-function normalizeProviderOptions(input: {
-  approvalPolicy?: AssistantApprovalPolicy | null
-  model?: string | null
-  oss?: boolean
-  profile?: string | null
-  reasoningEffort?: string | null
-  sandbox?: AssistantSandbox | null
-}): AssistantProviderSessionOptions {
-  return assistantProviderSessionOptionsSchema.parse({
-    model: normalizeNullableString(input.model),
-    reasoningEffort: normalizeNullableString(input.reasoningEffort),
-    sandbox: input.sandbox ?? null,
-    approvalPolicy: input.approvalPolicy ?? null,
-    profile: normalizeNullableString(input.profile),
-    oss: input.oss ?? false,
-  })
-}
-
-function createAssistantSessionId(): string {
-  return `asst_${randomUUID().replace(/-/gu, '')}`
-}
-
-function hashVaultRoot(value: string): string {
-  return createHash('sha1').update(value).digest('hex').slice(0, 12)
 }

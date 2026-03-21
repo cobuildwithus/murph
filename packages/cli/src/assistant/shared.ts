@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import {
+  writeJsonFileAtomic as writeRuntimeJsonFileAtomic,
+  writeTextFileAtomic as writeRuntimeTextFileAtomic,
+} from '@healthybob/runtime-state'
 import { VaultCliError } from '../vault-cli-errors.js'
 
 export function normalizeNullableString(
@@ -51,18 +52,12 @@ export async function writeJsonFileAtomic(
   filePath: string,
   value: unknown,
 ): Promise<void> {
-  await writeTextFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`)
+  await writeRuntimeJsonFileAtomic(filePath, value)
 }
 
 export async function writeTextFileAtomic(
   filePath: string,
   value: string,
 ): Promise<void> {
-  await mkdir(path.dirname(filePath), {
-    recursive: true,
-  })
-
-  const tempPath = `${filePath}.${randomUUID().replace(/-/gu, '')}.tmp`
-  await writeFile(tempPath, value, 'utf8')
-  await rename(tempPath, filePath)
+  await writeRuntimeTextFileAtomic(filePath, value)
 }

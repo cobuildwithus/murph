@@ -1,100 +1,59 @@
-import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { openSync, closeSync } from 'node:fs'
 import {
   chmod,
   mkdir,
   readFile,
   rm,
-  writeFile,
 } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import path from 'node:path'
-
-import { resolveRuntimePaths } from '@healthybob/runtime-state'
+import { writeTextFileAtomic } from '@healthybob/runtime-state'
 
 import {
-  DEFAULT_DEVICE_SYNC_BASE_URL,
   HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
-  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
   resolveDeviceSyncBaseUrl,
   resolveDeviceSyncControlToken,
 } from './device-sync-client.js'
+import {
+  buildManagedDeviceSyncEnvironment,
+  resolveDeviceDaemonPaths,
+  resolveDeviceSyncDaemonBinPath,
+  resolveInstalledDeviceSyncPackageEntry,
+} from './device-daemon/paths.js'
+import {
+  defaultIsProcessAlive,
+  defaultSpawnDeviceDaemonProcess,
+  isDeviceDaemonHealthy,
+  readRecentDeviceDaemonLog,
+  waitForDeviceDaemonExit,
+  waitForDeviceDaemonHealth,
+} from './device-daemon/process.js'
+import {
+  buildDeviceDaemonStartResult,
+  buildDeviceDaemonStatusResult,
+  buildDeviceDaemonStopResult,
+  readDeviceDaemonState,
+  resolveManagedControlToken,
+  writeDeviceDaemonState,
+} from './device-daemon/state.js'
+import type {
+  DeviceDaemonDependencies,
+  DeviceDaemonDependencyOverrides,
+  DeviceDaemonStartResult,
+  DeviceDaemonStateRecord,
+  DeviceDaemonStatusResult,
+  DeviceDaemonStopResult,
+} from './device-daemon/types.js'
+import {
+  DEVICE_DAEMON_START_TIMEOUT_MS,
+  DEVICE_DAEMON_STOP_TIMEOUT_MS,
+  DEVICE_DAEMON_STATE_VERSION,
+} from './device-daemon/types.js'
 import { VaultCliError } from './vault-cli-errors.js'
-
-const require = createRequire(import.meta.url)
-
-const DEVICE_DAEMON_START_TIMEOUT_MS = 5_000
-const DEVICE_DAEMON_STOP_TIMEOUT_MS = 5_000
-const DEVICE_DAEMON_HEALTH_POLL_MS = 100
-const DEVICE_DAEMON_STATE_VERSION = 1
-const HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL_ENV =
-  'HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL'
-const HEALTHYBOB_DEVICE_SYNC_SECRET_ENV = 'HEALTHYBOB_DEVICE_SYNC_SECRET'
-const HEALTHYBOB_DEVICE_SYNC_HOST_ENV = 'HEALTHYBOB_DEVICE_SYNC_HOST'
-const HEALTHYBOB_DEVICE_SYNC_PORT_ENV = 'HEALTHYBOB_DEVICE_SYNC_PORT'
-const HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH_ENV =
-  'HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH'
-
-interface DeviceDaemonStateRecord {
-  version: number
-  pid: number
-  baseUrl: string
-  controlToken: string
-  startedAt: string
-}
-
-interface DeviceDaemonPaths {
-  absoluteVaultRoot: string
-  launcherStatePath: string
-  stdoutLogPath: string
-  stderrLogPath: string
-  stateDbPath: string
-}
-
-export interface DeviceDaemonStatusResult {
-  baseUrl: string
-  statePath: string
-  stdoutLogPath: string
-  stderrLogPath: string
-  managed: boolean
-  running: boolean
-  healthy: boolean
-  pid: number | null
-  startedAt: string | null
-  message: string | null
-}
-
-export interface DeviceDaemonStartResult extends DeviceDaemonStatusResult {
-  started: boolean
-}
-
-export interface DeviceDaemonStopResult extends DeviceDaemonStatusResult {
-  stopped: boolean
-}
-
-interface DeviceDaemonDependencies {
-  now(): Date
-  sleep(milliseconds: number): Promise<void>
-  mkdir(path: string): Promise<void>
-  readFile(path: string): Promise<string>
-  writeFile(path: string, text: string): Promise<void>
-  removeFile(path: string): Promise<void>
-  chmod(path: string, mode: number): Promise<void>
-  fetchImpl: typeof fetch
-  isProcessAlive(pid: number): boolean
-  killProcess(pid: number, signal?: NodeJS.Signals | number): void
-  spawnProcess(input: {
-    command: string
-    args: string[]
-    env: NodeJS.ProcessEnv
-    stdoutPath: string
-    stderrPath: string
-  }): Promise<{ pid: number }>
-  resolveDeviceSyncPackageEntry(): string
-}
-
-type DeviceDaemonDependencyOverrides = Partial<DeviceDaemonDependencies>
+export type {
+  DeviceDaemonPaths,
+  DeviceDaemonStartResult,
+  DeviceDaemonStatusResult,
+  DeviceDaemonStopResult,
+} from './device-daemon/types.js'
 
 export async function ensureManagedDeviceSyncControlPlane(input: {
   vault?: string | null
@@ -406,7 +365,7 @@ function createDeviceDaemonDependencies(
     writeFile:
       overrides.writeFile ??
       (async (filePath, text) => {
-        await writeFile(filePath, text, 'utf8')
+        await writeTextFileAtomic(filePath, text, { trailingNewline: true })
       }),
     removeFile:
       overrides.removeFile ??
@@ -428,19 +387,7 @@ function createDeviceDaemonDependencies(
     spawnProcess: overrides.spawnProcess ?? defaultSpawnDeviceDaemonProcess,
     resolveDeviceSyncPackageEntry:
       overrides.resolveDeviceSyncPackageEntry ??
-      (() => require.resolve('@healthybob/device-syncd')),
-  }
-}
-
-function resolveDeviceDaemonPaths(vaultRoot: string): DeviceDaemonPaths {
-  const runtimePaths = resolveRuntimePaths(vaultRoot)
-
-  return {
-    absoluteVaultRoot: runtimePaths.absoluteVaultRoot,
-    launcherStatePath: runtimePaths.deviceSyncLauncherStatePath,
-    stdoutLogPath: runtimePaths.deviceSyncStdoutLogPath,
-    stderrLogPath: runtimePaths.deviceSyncStderrLogPath,
-    stateDbPath: runtimePaths.deviceSyncDbPath,
+      resolveInstalledDeviceSyncPackageEntry,
   }
 }
 
@@ -488,324 +435,14 @@ function isLoopbackHostname(hostname: string): boolean {
   )
 }
 
-function resolveDeviceSyncDaemonBinPath(
-  dependencies: DeviceDaemonDependencies,
-): string {
-  return path.join(
-    path.dirname(dependencies.resolveDeviceSyncPackageEntry()),
-    'bin.js',
-  )
-}
-
-function buildManagedDeviceSyncEnvironment(input: {
-  vault: string
-  baseUrl: string
-  controlToken: string
-  env: NodeJS.ProcessEnv
-  paths: DeviceDaemonPaths
-}): NodeJS.ProcessEnv {
-  const parsedBaseUrl = new URL(input.baseUrl)
-  const effectivePort =
-    parsedBaseUrl.port ||
-    (parsedBaseUrl.protocol === 'https:' ? '443' : '80')
-  const normalizedHost =
-    input.env[HEALTHYBOB_DEVICE_SYNC_HOST_ENV]?.trim() ||
-    (parsedBaseUrl.hostname === 'localhost'
-      ? '127.0.0.1'
-      : parsedBaseUrl.hostname)
-
-  return {
-    ...input.env,
-    HEALTHYBOB_VAULT_ROOT: input.vault,
-    HEALTHYBOB_DEVICE_SYNC_VAULT_ROOT: input.vault,
-    [HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL_ENV]:
-      input.env[HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL_ENV]?.trim() ||
-      input.baseUrl,
-    [HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]:
-      input.env[HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]?.trim() ||
-      input.controlToken,
-    [HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]:
-      input.env[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
-      input.controlToken,
-    [HEALTHYBOB_DEVICE_SYNC_HOST_ENV]: normalizedHost,
-    [HEALTHYBOB_DEVICE_SYNC_PORT_ENV]:
-      input.env[HEALTHYBOB_DEVICE_SYNC_PORT_ENV]?.trim() || effectivePort,
-    [HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH_ENV]:
-      input.env[HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH_ENV]?.trim() ||
-      input.paths.stateDbPath,
-  }
-}
-
-function buildDeviceDaemonStatusResult(input: {
-  vault: string
-  paths: DeviceDaemonPaths
-  baseUrl: string
-  state: DeviceDaemonStateRecord | null
-  managed: boolean
-  running: boolean
-  healthy: boolean
-  message: string | null
-}): DeviceDaemonStatusResult {
-  return {
-    baseUrl: input.baseUrl,
-    statePath: relativeToVault(input.vault, input.paths.launcherStatePath),
-    stdoutLogPath: relativeToVault(input.vault, input.paths.stdoutLogPath),
-    stderrLogPath: relativeToVault(input.vault, input.paths.stderrLogPath),
-    managed: input.managed,
-    running: input.running,
-    healthy: input.healthy,
-    pid: input.state?.pid ?? null,
-    startedAt: input.state?.startedAt ?? null,
-    message: input.message,
-  }
-}
-
-function buildDeviceDaemonStartResult(
-  input: Parameters<typeof buildDeviceDaemonStatusResult>[0] & {
-    started: boolean
-  },
-): DeviceDaemonStartResult {
-  return {
-    ...buildDeviceDaemonStatusResult(input),
-    started: input.started,
-  }
-}
-
-function buildDeviceDaemonStopResult(
-  input: Parameters<typeof buildDeviceDaemonStatusResult>[0] & {
-    stopped: boolean
-  },
-): DeviceDaemonStopResult {
-  return {
-    ...buildDeviceDaemonStatusResult(input),
-    stopped: input.stopped,
-  }
-}
-
-function relativeToVault(vaultRoot: string, targetPath: string): string {
-  const relativePath = path.relative(path.resolve(vaultRoot), targetPath)
-  return relativePath.length > 0 ? relativePath : '.'
-}
-
-function defaultIsProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function defaultSpawnDeviceDaemonProcess(input: {
-  command: string
-  args: string[]
-  env: NodeJS.ProcessEnv
-  stdoutPath: string
-  stderrPath: string
-}): Promise<{ pid: number }> {
-  await mkdir(path.dirname(input.stdoutPath), { recursive: true })
-  const stdoutFd = openSync(input.stdoutPath, 'a')
-  const stderrFd = openSync(input.stderrPath, 'a')
-
-  return await new Promise((resolve, reject) => {
-    try {
-      const child = spawn(input.command, input.args, {
-        detached: true,
-        stdio: ['ignore', stdoutFd, stderrFd],
-        env: input.env,
-      })
-
-      child.once('error', (error) => {
-        closeSync(stdoutFd)
-        closeSync(stderrFd)
-        reject(error)
-      })
-      child.once('spawn', () => {
-        child.unref()
-        closeSync(stdoutFd)
-        closeSync(stderrFd)
-        if (!child.pid) {
-          reject(new Error('Device sync daemon spawn did not yield a PID.'))
-          return
-        }
-        resolve({ pid: child.pid })
-      })
-    } catch (error) {
-      closeSync(stdoutFd)
-      closeSync(stderrFd)
-      reject(error)
-    }
-  })
-}
-
-async function readDeviceDaemonState(
-  paths: DeviceDaemonPaths,
-  dependencies: DeviceDaemonDependencies,
-): Promise<DeviceDaemonStateRecord | null> {
-  let text: string
-
-  try {
-    text = await dependencies.readFile(paths.launcherStatePath)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
-    }
-
-    throw error
-  }
-
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(text) as unknown
-  } catch {
-    throw new VaultCliError(
-      'DEVICE_SYNC_STATE_INVALID',
-      'Device sync daemon launcher state is invalid.',
-    )
-  }
-
-  if (
-    !parsed ||
-    typeof parsed !== 'object' ||
-    Array.isArray(parsed) ||
-    (parsed as { version?: unknown }).version !== DEVICE_DAEMON_STATE_VERSION ||
-    typeof (parsed as { pid?: unknown }).pid !== 'number' ||
-    !Number.isInteger((parsed as { pid: number }).pid) ||
-    (parsed as { pid: number }).pid <= 0 ||
-    typeof (parsed as { baseUrl?: unknown }).baseUrl !== 'string' ||
-    typeof (parsed as { controlToken?: unknown }).controlToken !== 'string' ||
-    typeof (parsed as { startedAt?: unknown }).startedAt !== 'string'
-  ) {
-    throw new VaultCliError(
-      'DEVICE_SYNC_STATE_INVALID',
-      'Device sync daemon launcher state is invalid.',
-    )
-  }
-
-  return parsed as DeviceDaemonStateRecord
-}
-
-async function writeDeviceDaemonState(
-  paths: DeviceDaemonPaths,
-  state: DeviceDaemonStateRecord,
-  dependencies: DeviceDaemonDependencies,
-): Promise<void> {
-  await dependencies.mkdir(path.dirname(paths.launcherStatePath))
-  await dependencies.writeFile(
-    paths.launcherStatePath,
-    JSON.stringify(state, null, 2),
-  )
-  await dependencies.chmod(paths.launcherStatePath, 0o600)
-}
-
-function readManagedControlToken(
-  vaultRoot: string,
-  overrides?: DeviceDaemonDependencyOverrides,
-): string | null {
-  const dependencies = createDeviceDaemonDependencies(overrides)
-  const paths = resolveDeviceDaemonPaths(vaultRoot)
-  return resolveManagedControlToken(paths, dependencies)
-}
-
-function resolveManagedControlToken(
-  paths: DeviceDaemonPaths,
-  dependencies: DeviceDaemonDependencies,
-): string | null {
-  // Synchronous best-effort read for already-started managed daemons.
-  try {
-    const text = require('node:fs').readFileSync(paths.launcherStatePath, 'utf8')
-    const parsed = JSON.parse(text) as Partial<DeviceDaemonStateRecord>
-    return typeof parsed.controlToken === 'string' ? parsed.controlToken : null
-  } catch {
-    return null
-  }
-}
-
 function generateDeviceSyncControlToken(): string {
   return randomBytes(24).toString('hex')
 }
 
-async function isDeviceDaemonHealthy(
-  baseUrl: string,
-  fetchImpl: typeof fetch,
-): Promise<boolean> {
-  try {
-    const response = await fetchImpl(new URL('healthz', `${baseUrl}/`), {
-      signal: AbortSignal.timeout(750),
-    })
-    return response.ok
-  } catch {
-    return false
-  }
-}
-
-async function waitForDeviceDaemonHealth(
-  baseUrl: string,
-  dependencies: DeviceDaemonDependencies,
-  timeoutMs: number,
-): Promise<boolean> {
-  const deadline = dependencies.now().valueOf() + timeoutMs
-
-  while (dependencies.now().valueOf() < deadline) {
-    if (await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl)) {
-      return true
-    }
-
-    await dependencies.sleep(DEVICE_DAEMON_HEALTH_POLL_MS)
-  }
-
-  return false
-}
-
-async function waitForDeviceDaemonExit(
-  pid: number,
-  dependencies: DeviceDaemonDependencies,
-  timeoutMs: number,
-): Promise<boolean> {
-  const deadline = dependencies.now().valueOf() + timeoutMs
-
-  while (dependencies.now().valueOf() < deadline) {
-    if (!dependencies.isProcessAlive(pid)) {
-      return true
-    }
-
-    await dependencies.sleep(DEVICE_DAEMON_HEALTH_POLL_MS)
-  }
-
-  return false
-}
-
-async function readRecentDeviceDaemonLog(
-  logPath: string,
-  dependencies: DeviceDaemonDependencies,
-): Promise<string | null> {
-  try {
-    const text = await dependencies.readFile(logPath)
-    const lines = text
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .filter(Boolean)
-
-    if (lines.length === 0) {
-      return null
-    }
-
-    return lines.slice(-4).join(' ')
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
-    }
-
-    throw error
-  }
-}
-
-function isMissingFileError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'ENOENT'
-  )
+function readManagedControlToken(
+  vaultRoot: string,
+  _overrides?: DeviceDaemonDependencyOverrides,
+): string | null {
+  const paths = resolveDeviceDaemonPaths(vaultRoot)
+  return resolveManagedControlToken(paths)
 }

@@ -1,0 +1,49 @@
+import path from 'node:path'
+import {
+  resolveAssistantStatePaths,
+  type AssistantStatePaths,
+} from '@healthybob/runtime-state'
+
+export type AssistantMemoryPaths = Pick<
+  AssistantStatePaths,
+  'assistantStateRoot' | 'dailyMemoryDirectory' | 'longTermMemoryPath'
+>
+
+function pickAssistantMemoryPaths(
+  paths: AssistantStatePaths,
+): AssistantMemoryPaths {
+  return {
+    assistantStateRoot: paths.assistantStateRoot,
+    dailyMemoryDirectory: paths.dailyMemoryDirectory,
+    longTermMemoryPath: paths.longTermMemoryPath,
+  }
+}
+
+export function resolveAssistantMemoryStoragePaths(
+  vault: string,
+): AssistantMemoryPaths {
+  return pickAssistantMemoryPaths(resolveAssistantStatePaths(vault))
+}
+
+/**
+ * @deprecated Use `resolveAssistantMemoryStoragePaths` for memory-only operations
+ * or `resolveAssistantStatePaths` when non-memory assistant-state paths are
+ * intentionally required.
+ */
+export function resolveAssistantMemoryPaths(vault: string): AssistantStatePaths {
+  return resolveAssistantStatePaths(vault)
+}
+
+export function resolveAssistantDailyMemoryPath(
+  paths: Pick<AssistantMemoryPaths, 'dailyMemoryDirectory'>,
+  now = new Date(),
+): string {
+  return path.join(paths.dailyMemoryDirectory, `${formatLocalDate(now)}.md`)
+}
+
+function formatLocalDate(value: Date): string {
+  const year = value.getFullYear().toString().padStart(4, '0')
+  const month = `${value.getMonth() + 1}`.padStart(2, '0')
+  const day = `${value.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
