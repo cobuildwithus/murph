@@ -4,6 +4,13 @@ import {
   assistantAskResultSchema,
   assistantChatProviderValues,
   assistantChatResultSchema,
+  assistantCronAddResultSchema,
+  assistantCronListResultSchema,
+  assistantCronRemoveResultSchema,
+  assistantCronRunResultSchema,
+  assistantCronRunsResultSchema,
+  assistantCronShowResultSchema,
+  assistantCronStatusResultSchema,
   assistantDeliverResultSchema,
   assistantMemoryForgetResultSchema,
   assistantMemoryGetResultSchema,
@@ -21,9 +28,18 @@ import {
 import { deliverAssistantMessage } from '../assistant-channel.js'
 import type { ConversationRef } from '../assistant/conversation-ref.js'
 import {
+  addAssistantCronJob,
+  buildAssistantCronSchedule,
+  getAssistantCronJob,
+  getAssistantCronStatus,
+  listAssistantCronJobs,
+  listAssistantCronRuns,
+  removeAssistantCronJob,
   runAssistantAutomation,
   runAssistantChat,
+  runAssistantCronJobNow,
   sendAssistantMessage,
+  setAssistantCronJobEnabled,
 } from '../assistant-runtime.js'
 import {
   assertAssistantMemoryTurnContextVault,
@@ -163,6 +179,16 @@ const assistantDeliveryOptionFields = {
     .describe(
       'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>.',
     ),
+}
+
+function buildAssistantCronResultPaths(vault: string) {
+  const statePaths = resolveAssistantStatePaths(vault)
+  return {
+    vault: redactAssistantDisplayPath(vault),
+    stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
+    jobsPath: redactAssistantDisplayPath(statePaths.cronJobsPath),
+    runsRoot: redactAssistantDisplayPath(statePaths.cronRunsDirectory),
+  }
 }
 
 const assistantChatArgsSchema = z.object({
@@ -404,9 +430,9 @@ export function registerAssistantCommands(
   assistant.command('run', {
     args: emptyArgsSchema,
     description:
-      'Start the local assistant automation loop that watches the inbox runtime, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, runs due assistant cron jobs, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
     hint:
-      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model.',
+      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and assistant cron schedules fire while this loop is active.',
     examples: [
       {
         options: {
@@ -782,6 +808,273 @@ export function registerAssistantCommands(
   })
 
   assistant.command(memory)
+
+  const cron = Cli.create('cron', {
+    description:
+      'Manage scheduled assistant prompts stored outside the canonical vault under assistant-state/cron.',
+  })
+
+  cron.command('status', {
+    args: emptyArgsSchema,
+    description: 'Show scheduler counts and the next upcoming assistant cron run.',
+    hint: 'Assistant cron jobs execute while `assistant run` is active for the vault.',
+    options: withBaseOptions(),
+    output: assistantCronStatusResultSchema,
+    async run(context) {
+      const status = await getAssistantCronStatus(context.options.vault)
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        ...status,
+      }
+    },
+  })
+
+  cron.command('list', {
+    args: emptyArgsSchema,
+    description: 'List assistant cron jobs for one vault.',
+    options: withBaseOptions(),
+    output: assistantCronListResultSchema,
+    async run(context) {
+      const jobs = await listAssistantCronJobs(context.options.vault)
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        jobs,
+      }
+    },
+  })
+
+  cron.command('show', {
+    args: z.object({
+      job: z.string().min(1).describe('Assistant cron job id or name to inspect.'),
+    }),
+    description: 'Show one assistant cron job record.',
+    options: withBaseOptions(),
+    output: assistantCronShowResultSchema,
+    async run(context) {
+      const job = await getAssistantCronJob(context.options.vault, context.args.job)
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        job,
+      }
+    },
+  })
+
+  cron.command('add', {
+    args: z.object({
+      prompt: z.string().min(1).describe('Prompt to send when the assistant cron job fires.'),
+    }),
+    description: 'Create one assistant cron job backed by the local assistant runtime.',
+    hint:
+      'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun.',
+    examples: [
+      {
+        args: {
+          prompt: 'Check whether I have been sitting too long and remind me to stretch.',
+        },
+        options: {
+          vault: './vault',
+          name: 'stretch-reminder',
+          every: '2h',
+        },
+        description: 'Create a recurring interval job.',
+      },
+      {
+        args: {
+          prompt: 'Remind me to review my lab results after dinner.',
+        },
+        options: {
+          vault: './vault',
+          name: 'lab-review-tonight',
+          at: '2026-03-22T18:30:00+10:00',
+        },
+        description: 'Create a one-shot reminder at a specific timestamp.',
+      },
+      {
+        args: {
+          prompt: 'Every weekday morning, ask me for a quick symptom check-in.',
+        },
+        options: {
+          vault: './vault',
+          name: 'weekday-symptom-check',
+          cron: '0 8 * * 1-5',
+          channel: 'telegram',
+          participant: '-1001234567890',
+          deliverResponse: true,
+        },
+        description: 'Create a cron expression job that also delivers the reply back out.',
+      },
+    ],
+    options: withBaseOptions({
+      name: z
+        .string()
+        .min(1)
+        .describe('Unique assistant cron job name.'),
+      at: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('One-shot ISO 8601 timestamp with an explicit offset.'),
+      every: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Recurring interval such as 30m, 2h, or 1d.'),
+      cron: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Five-field cron expression: minute hour day-of-month month day-of-week.'),
+      keepAfterRun: z
+        .boolean()
+        .optional()
+        .describe('Keep a completed one-shot job in the scheduler instead of deleting it.'),
+      disabled: z
+        .boolean()
+        .optional()
+        .describe('Create the job in a disabled state without scheduling it yet.'),
+      ...assistantSessionOptionFields,
+      ...assistantDeliveryOptionFields,
+    }),
+    output: assistantCronAddResultSchema,
+    async run(context) {
+      const job = await addAssistantCronJob({
+        vault: context.options.vault,
+        name: context.options.name,
+        prompt: context.args.prompt,
+        schedule: buildAssistantCronSchedule({
+          at: context.options.at,
+          every: context.options.every,
+          cron: context.options.cron,
+        }),
+        enabled: context.options.disabled ? false : true,
+        keepAfterRun: context.options.keepAfterRun,
+        sessionId: context.options.session,
+        alias: context.options.alias,
+        channel: context.options.channel,
+        identityId: context.options.identity,
+        participantId: context.options.participant,
+        sourceThreadId: context.options.sourceThread,
+        deliverResponse: context.options.deliverResponse,
+        deliveryTarget: context.options.deliveryTarget,
+      })
+
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        job,
+      }
+    },
+  })
+
+  cron.command('remove', {
+    args: z.object({
+      job: z.string().min(1).describe('Assistant cron job id or name to remove.'),
+    }),
+    description: 'Remove one assistant cron job from the scheduler.',
+    options: withBaseOptions(),
+    output: assistantCronRemoveResultSchema,
+    async run(context) {
+      const removed = await removeAssistantCronJob(
+        context.options.vault,
+        context.args.job,
+      )
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        removed,
+      }
+    },
+  })
+
+  cron.command('enable', {
+    args: z.object({
+      job: z.string().min(1).describe('Assistant cron job id or name to enable.'),
+    }),
+    description: 'Enable one assistant cron job.',
+    options: withBaseOptions(),
+    output: assistantCronShowResultSchema,
+    async run(context) {
+      const job = await setAssistantCronJobEnabled(
+        context.options.vault,
+        context.args.job,
+        true,
+      )
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        job,
+      }
+    },
+  })
+
+  cron.command('disable', {
+    args: z.object({
+      job: z.string().min(1).describe('Assistant cron job id or name to disable.'),
+    }),
+    description: 'Disable one assistant cron job without deleting it.',
+    options: withBaseOptions(),
+    output: assistantCronShowResultSchema,
+    async run(context) {
+      const job = await setAssistantCronJobEnabled(
+        context.options.vault,
+        context.args.job,
+        false,
+      )
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        job,
+      }
+    },
+  })
+
+  cron.command('run', {
+    args: z.object({
+      job: z.string().min(1).describe('Assistant cron job id or name to run immediately.'),
+    }),
+    description: 'Run one assistant cron job immediately, regardless of its next scheduled time.',
+    options: withBaseOptions(),
+    output: assistantCronRunResultSchema,
+    async run(context) {
+      const result = await runAssistantCronJobNow({
+        vault: context.options.vault,
+        job: context.args.job,
+      })
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        job: result.job,
+        removedAfterRun: result.removedAfterRun,
+        run: result.run,
+      }
+    },
+  })
+
+  cron.command('runs', {
+    args: z.object({
+      job: z.string().min(1).describe('Assistant cron job id or name to inspect run history for.'),
+    }),
+    description: 'List recent run history for one assistant cron job.',
+    options: withBaseOptions({
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(100)
+        .default(20)
+        .describe('Maximum number of recent runs to return.'),
+    }),
+    output: assistantCronRunsResultSchema,
+    async run(context) {
+      const result = await listAssistantCronRuns({
+        vault: context.options.vault,
+        job: context.args.job,
+        limit: context.options.limit,
+      })
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        jobId: result.jobId,
+        runs: result.runs,
+      }
+    },
+  })
+
+  assistant.command(cron)
 
   const session = Cli.create('session', {
     description:

@@ -1,0 +1,10 @@
+{
+  "id": "assistant-cron-run",
+  "command": "vault-cli assistant cron run <job> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents forcing one assistant cron job to run immediately regardless of its next scheduled time."
+}

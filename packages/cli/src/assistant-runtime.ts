@@ -1,4 +1,24 @@
 export type {
+  AddAssistantCronJobInput,
+  AssistantCronProcessDueResult,
+  AssistantCronRunExecutionResult,
+  AssistantCronStatusSnapshot,
+  ProcessDueAssistantCronJobsInput,
+  RunAssistantCronJobInput,
+} from './assistant/cron.js'
+export {
+  addAssistantCronJob,
+  buildAssistantCronSchedule,
+  getAssistantCronJob,
+  getAssistantCronStatus,
+  listAssistantCronJobs,
+  listAssistantCronRuns,
+  processDueAssistantCronJobs,
+  removeAssistantCronJob,
+  runAssistantCronJobNow,
+  setAssistantCronJobEnabled,
+} from './assistant/cron.js'
+export type {
   AssistantChatInput,
   AssistantMessageInput,
 } from './assistant/service.js'

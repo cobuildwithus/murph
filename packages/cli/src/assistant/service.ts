@@ -9,6 +9,7 @@ import {
 } from '../assistant-cli-contracts.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
+  buildAssistantCronMcpConfig,
   buildAssistantMemoryMcpConfig,
   buildAssistantCliGuidanceText,
   resolveAssistantCliAccessContext,
@@ -250,13 +251,20 @@ export async function sendAssistantMessage(
   const memoryMcpConfig = buildAssistantMemoryMcpConfig(
     input.workingDirectory ?? input.vault,
   )
+  const cronMcpConfig = buildAssistantCronMcpConfig(
+    input.workingDirectory ?? input.vault,
+  )
+  const configOverrides = [
+    ...(memoryMcpConfig?.configOverrides ?? []),
+    ...(cronMcpConfig?.configOverrides ?? []),
+  ]
 
   let providerResult: AssistantProviderTurnResult
   try {
     providerResult = await executeAssistantProviderTurn({
       provider,
       workingDirectory: input.workingDirectory ?? input.vault,
-      configOverrides: memoryMcpConfig?.configOverrides,
+      configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
       env: {
         ...cliAccess.env,
         ...memoryTurnEnv,
@@ -548,6 +556,7 @@ function buildAssistantSystemPrompt(
     'When you reference evidence from the vault, mention relative file paths when practical.',
     assistantMemoryPrompt,
     buildAssistantMemoryGuidanceText(cliAccess),
+    buildAssistantCronGuidanceText(cliAccess),
     buildAssistantCliGuidanceText(cliAccess),
   ]
     .filter((value): value is string => Boolean(value))
@@ -566,6 +575,20 @@ function buildAssistantMemoryGuidanceText(
     'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
     'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
     'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
+  ].join('\n\n')
+}
+
+function buildAssistantCronGuidanceText(
+  cliAccess: {
+    rawCommand: 'vault-cli'
+  },
+): string {
+  return [
+    'Scheduled assistant automation is available as native Codex MCP tools from the Healthy Bob CLI subtree. Prefer those `assistant cron ...` tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
+    'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
+    'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
+    'Cron schedules execute while `assistant run` is active for the vault.',
+    `Use \`${cliAccess.rawCommand} assistant cron ...\` only as a fallback when the MCP tools are unavailable in this session.`,
   ].join('\n\n')
 }
 

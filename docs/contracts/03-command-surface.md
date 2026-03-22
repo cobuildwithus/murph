@@ -27,6 +27,15 @@ vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias
 vault-cli assistant chat [prompt] --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli|openai-compatible] [--codexCommand <path>] [--model <model>] [--baseUrl <url>] [--apiKeyEnv <name>] [--providerName <name>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--request-id <id>]
 vault-cli assistant deliver <message> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]
 vault-cli assistant run --vault <path> [--model <model>] [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--scanIntervalMs <ms>] [--maxPerScan <n>] [--allowSelfAuthored] [--sessionRolloverHours <hours>] [--once] [--skipDaemon] [--request-id <id>]
+vault-cli assistant cron status --vault <path> [--request-id <id>]
+vault-cli assistant cron list --vault <path> [--request-id <id>]
+vault-cli assistant cron show <job> --vault <path> [--request-id <id>]
+vault-cli assistant cron add <prompt> --vault <path> --name <name> [--at <ts>] [--every <duration>] [--cron <expr>] [--keepAfterRun] [--disabled] [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]
+vault-cli assistant cron remove <job> --vault <path> [--request-id <id>]
+vault-cli assistant cron enable <job> --vault <path> [--request-id <id>]
+vault-cli assistant cron disable <job> --vault <path> [--request-id <id>]
+vault-cli assistant cron run <job> --vault <path> [--request-id <id>]
+vault-cli assistant cron runs <job> --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli assistant session list --vault <path> [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli assistant memory search --vault <path> [--text <query>] [--scope long-term|daily|all] [--section <section>] [--limit <n>] [--request-id <id>]
@@ -112,7 +121,7 @@ vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUr
 
 `vault-cli inbox model bundle` materializes the normalized routing bundle plus image-routing eligibility metadata. `vault-cli inbox model route` may attach supported stored routing images to the model request when the capture includes an eligible JPEG, PNG, WEBP, or GIF attachment.
 
-`vault-cli assistant ask|chat` persist out-of-vault session metadata and local transcript entries. Durable assistant memory is now managed explicitly through `vault-cli assistant memory search|get|upsert|forget`, with only a small core long-term block injected automatically into fresh sessions. In provider-backed Codex sessions the live memory path is exposed as a bounded MCP tool surface, while OpenAI-compatible sessions replay the recent local transcript plus the same bootstrap system context on each turn. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, selected non-canonical health context only loads in private contexts, and the vault remains authoritative.
+`vault-cli assistant ask|chat` persist out-of-vault session metadata and local transcript entries. Durable assistant memory is now managed explicitly through `vault-cli assistant memory search|get|upsert|forget`, and scheduled assistant prompts are managed through `vault-cli assistant cron add|status|list|show|enable|disable|remove|run|runs`, with only a small core long-term block injected automatically into fresh sessions. In provider-backed Codex sessions the live memory and cron paths are exposed as bounded MCP tool surfaces, while OpenAI-compatible sessions replay the recent local transcript plus the same bootstrap system context on each turn. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, selected non-canonical health context only loads in private contexts, assistant cron state stays outside the canonical vault under `assistant-state/cron/`, and the vault remains authoritative.
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Those surfaces are provided by incur and are not re-frozen command-by-command in this contract.
 
@@ -156,7 +165,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `export` composes readable and derived/admin capabilities.
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
-- `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, and always-on inbox triage; it stores only minimal assistant metadata outside the canonical vault, uses explicit conversation bindings for session reuse, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, and delegates canonical promotions back through inbox/core boundaries.
+- `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, scheduled assistant cron prompts, and always-on inbox triage; it stores only minimal assistant metadata outside the canonical vault, uses explicit conversation bindings for session reuse, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due cron jobs while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
 - Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `healthybob chat` discovery stays truthful.
 - `device` is a local control-plane noun backed by `@healthybob/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Healthy Bob-managed local daemon for the selected vault.
 

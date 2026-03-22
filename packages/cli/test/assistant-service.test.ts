@@ -197,6 +197,8 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
   assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
   assert.equal(firstCall?.env?.[HEALTHYBOB_VAULT_ENV], path.resolve(vaultRoot))
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
@@ -209,6 +211,12 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.equal(
     firstCall?.configOverrides?.some((value: string) =>
       value.includes('"assistant","memory","--mcp"'),
+    ),
+    true,
+  )
+  assert.equal(
+    firstCall?.configOverrides?.some((value: string) =>
+      value.includes('"assistant","cron","--mcp"'),
     ),
     true,
   )

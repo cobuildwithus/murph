@@ -1,0 +1,10 @@
+{
+  "id": "assistant-cron-show",
+  "command": "vault-cli assistant cron show <job> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents inspection of one assistant cron job definition."
+}

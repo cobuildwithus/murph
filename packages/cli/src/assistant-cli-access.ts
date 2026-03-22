@@ -6,7 +6,8 @@ import { assistantMemoryTurnEnvKeys } from './assistant/memory.js'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
 const ASSISTANT_MEMORY_MCP_SERVER_NAME = 'healthybob_memory'
-const ASSISTANT_MEMORY_MCP_FORWARD_ENV_VARS = [
+const ASSISTANT_CRON_MCP_SERVER_NAME = 'healthybob_cron'
+const ASSISTANT_CLI_MCP_FORWARD_ENV_VARS = [
   'HOME',
   'PATH',
   ...assistantMemoryTurnEnvKeys,
@@ -48,6 +49,28 @@ export function buildAssistantCliGuidanceText(
 export function buildAssistantMemoryMcpConfig(
   workingDirectory: string,
 ): AssistantCliMcpConfig | null {
+  return buildAssistantCliSubtreeMcpConfig({
+    serverName: ASSISTANT_MEMORY_MCP_SERVER_NAME,
+    subcommandPath: ['memory'],
+    workingDirectory,
+  })
+}
+
+export function buildAssistantCronMcpConfig(
+  workingDirectory: string,
+): AssistantCliMcpConfig | null {
+  return buildAssistantCliSubtreeMcpConfig({
+    serverName: ASSISTANT_CRON_MCP_SERVER_NAME,
+    subcommandPath: ['cron'],
+    workingDirectory,
+  })
+}
+
+function buildAssistantCliSubtreeMcpConfig(input: {
+  serverName: string
+  subcommandPath: readonly string[]
+  workingDirectory: string
+}): AssistantCliMcpConfig | null {
   const packageDirectory = resolveCliPackageDirectory()
   const distBinPath = path.join(packageDirectory, 'dist', 'bin.js')
   if (!existsSync(distBinPath)) {
@@ -56,20 +79,20 @@ export function buildAssistantMemoryMcpConfig(
 
   return {
     configOverrides: [
-      `mcp_servers.${ASSISTANT_MEMORY_MCP_SERVER_NAME}.command=${JSON.stringify(process.execPath)}`,
-      `mcp_servers.${ASSISTANT_MEMORY_MCP_SERVER_NAME}.args=${JSON.stringify([
+      `mcp_servers.${input.serverName}.command=${JSON.stringify(process.execPath)}`,
+      `mcp_servers.${input.serverName}.args=${JSON.stringify([
         distBinPath,
         'assistant',
-        'memory',
+        ...input.subcommandPath,
         '--mcp',
       ])}`,
-      `mcp_servers.${ASSISTANT_MEMORY_MCP_SERVER_NAME}.cwd=${JSON.stringify(
-        path.resolve(workingDirectory),
+      `mcp_servers.${input.serverName}.cwd=${JSON.stringify(
+        path.resolve(input.workingDirectory),
       )}`,
-      `mcp_servers.${ASSISTANT_MEMORY_MCP_SERVER_NAME}.env_vars=${JSON.stringify(
-        ASSISTANT_MEMORY_MCP_FORWARD_ENV_VARS,
+      `mcp_servers.${input.serverName}.env_vars=${JSON.stringify(
+        ASSISTANT_CLI_MCP_FORWARD_ENV_VARS,
       )}`,
-      `mcp_servers.${ASSISTANT_MEMORY_MCP_SERVER_NAME}.required=true`,
+      `mcp_servers.${input.serverName}.required=true`,
     ],
   }
 }

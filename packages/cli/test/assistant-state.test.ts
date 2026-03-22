@@ -77,6 +77,9 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   )
   assert.equal(statePaths.longTermMemoryPath, path.join(statePaths.assistantStateRoot, 'MEMORY.md'))
   assert.equal(statePaths.dailyMemoryDirectory, path.join(statePaths.assistantStateRoot, 'memory'))
+  assert.equal(statePaths.cronDirectory, path.join(statePaths.assistantStateRoot, 'cron'))
+  assert.equal(statePaths.cronJobsPath, path.join(statePaths.cronDirectory, 'jobs.json'))
+  assert.equal(statePaths.cronRunsDirectory, path.join(statePaths.cronDirectory, 'runs'))
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,

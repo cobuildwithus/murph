@@ -174,6 +174,30 @@ test('root chat alias keeps the same command schema as assistant chat', async ()
   assert.deepEqual(rootSchema.options, assistantSchema.options)
 })
 
+test('assistant cron add schema exposes the scheduler-specific options', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['assistant', 'cron', 'add', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('prompt' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['prompt'])
+  assert.equal('name' in schema.options.properties, true)
+  assert.equal('at' in schema.options.properties, true)
+  assert.equal('every' in schema.options.properties, true)
+  assert.equal('cron' in schema.options.properties, true)
+  assert.equal('deliverResponse' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault', 'name'])
+})
+
 test('profile show help exposes only the global format flag', async () => {
   const help = await runRawCli(['profile', 'show', '--help'])
 

@@ -62,6 +62,17 @@ export const assistantMemoryVisibleSectionValues = [
   ...assistantMemoryLongTermSectionValues,
   'Notes',
 ] as const
+export const assistantCronScheduleKindValues = [
+  'at',
+  'every',
+  'cron',
+] as const
+export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
+export const assistantCronRunStatusValues = [
+  'succeeded',
+  'failed',
+  'skipped',
+] as const
 
 export const assistantProviderSessionOptionsSchema = z.object({
   model: z.string().min(1).nullable(),
@@ -155,6 +166,91 @@ export const assistantMemorySearchHitSchema = assistantMemoryRecordSchema.extend
   score: z.number().int().nonnegative(),
 })
 
+export const assistantCronAtScheduleSchema = z
+  .object({
+    kind: z.literal('at'),
+    at: isoTimestampSchema,
+  })
+  .strict()
+
+export const assistantCronEveryScheduleSchema = z
+  .object({
+    kind: z.literal('every'),
+    everyMs: z.number().int().positive(),
+  })
+  .strict()
+
+export const assistantCronExpressionScheduleSchema = z
+  .object({
+    kind: z.literal('cron'),
+    expression: z.string().min(1),
+  })
+  .strict()
+
+export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
+  assistantCronAtScheduleSchema,
+  assistantCronEveryScheduleSchema,
+  assistantCronExpressionScheduleSchema,
+])
+
+export const assistantCronTargetSchema = z
+  .object({
+    sessionId: z.string().min(1).nullable(),
+    alias: z.string().min(1).nullable(),
+    channel: z.string().min(1).nullable(),
+    identityId: z.string().min(1).nullable(),
+    participantId: z.string().min(1).nullable(),
+    sourceThreadId: z.string().min(1).nullable(),
+    deliveryTarget: z.string().min(1).nullable(),
+    deliverResponse: z.boolean(),
+  })
+  .strict()
+
+export const assistantCronJobStateSchema = z
+  .object({
+    nextRunAt: isoTimestampSchema.nullable(),
+    lastRunAt: isoTimestampSchema.nullable(),
+    lastSucceededAt: isoTimestampSchema.nullable(),
+    lastFailedAt: isoTimestampSchema.nullable(),
+    consecutiveFailures: z.number().int().nonnegative(),
+    lastError: z.string().nullable(),
+    runningAt: isoTimestampSchema.nullable(),
+    runningPid: z.number().int().positive().nullable(),
+  })
+  .strict()
+
+export const assistantCronJobSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-cron-job.v1'),
+    jobId: z.string().min(1),
+    name: z.string().min(1),
+    enabled: z.boolean(),
+    keepAfterRun: z.boolean(),
+    prompt: z.string().min(1),
+    schedule: assistantCronScheduleSchema,
+    target: assistantCronTargetSchema,
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    state: assistantCronJobStateSchema,
+  })
+  .strict()
+
+export const assistantCronRunRecordSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-cron-run.v1'),
+    runId: z.string().min(1),
+    jobId: z.string().min(1),
+    trigger: z.enum(assistantCronTriggerValues),
+    status: z.enum(assistantCronRunStatusValues),
+    startedAt: isoTimestampSchema,
+    finishedAt: isoTimestampSchema,
+    sessionId: z.string().min(1).nullable(),
+    response: z.string().nullable(),
+    responseLength: z.number().int().nonnegative(),
+    error: z.string().nullable(),
+  })
+  .strict()
+
 export const assistantAskResultSchema = z.object({
   vault: pathSchema,
   prompt: z.string().min(1),
@@ -219,6 +315,63 @@ export const assistantMemoryForgetResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
   removed: assistantMemoryRecordSchema,
+})
+
+export const assistantCronStatusResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  totalJobs: z.number().int().nonnegative(),
+  enabledJobs: z.number().int().nonnegative(),
+  dueJobs: z.number().int().nonnegative(),
+  runningJobs: z.number().int().nonnegative(),
+  nextRunAt: isoTimestampSchema.nullable(),
+})
+
+export const assistantCronListResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  jobs: z.array(assistantCronJobSchema),
+})
+
+export const assistantCronShowResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  job: assistantCronJobSchema,
+})
+
+export const assistantCronAddResultSchema = assistantCronShowResultSchema
+
+export const assistantCronRemoveResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  removed: assistantCronJobSchema,
+})
+
+export const assistantCronRunResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  job: assistantCronJobSchema,
+  removedAfterRun: z.boolean(),
+  run: assistantCronRunRecordSchema,
+})
+
+export const assistantCronRunsResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  jobId: z.string().min(1),
+  runs: z.array(assistantCronRunRecordSchema),
 })
 
 export const assistantRunResultSchema = z.object({
@@ -305,6 +458,30 @@ export type AssistantMemoryUpsertResult = z.infer<
 export type AssistantMemoryForgetResult = z.infer<
   typeof assistantMemoryForgetResultSchema
 >
+export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
+export type AssistantCronTarget = z.infer<typeof assistantCronTargetSchema>
+export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
+export type AssistantCronJob = z.infer<typeof assistantCronJobSchema>
+export type AssistantCronRunRecord = z.infer<
+  typeof assistantCronRunRecordSchema
+>
+export type AssistantCronStatusResult = z.infer<
+  typeof assistantCronStatusResultSchema
+>
+export type AssistantCronListResult = z.infer<
+  typeof assistantCronListResultSchema
+>
+export type AssistantCronShowResult = z.infer<
+  typeof assistantCronShowResultSchema
+>
+export type AssistantCronAddResult = z.infer<typeof assistantCronAddResultSchema>
+export type AssistantCronRemoveResult = z.infer<
+  typeof assistantCronRemoveResultSchema
+>
+export type AssistantCronRunResult = z.infer<typeof assistantCronRunResultSchema>
+export type AssistantCronRunsResult = z.infer<
+  typeof assistantCronRunsResultSchema
+>
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema
@@ -335,6 +512,11 @@ export type AssistantMemoryLongTermSection =
   (typeof assistantMemoryLongTermSectionValues)[number]
 export type AssistantMemoryVisibleSection =
   (typeof assistantMemoryVisibleSectionValues)[number]
+export type AssistantCronScheduleKind =
+  (typeof assistantCronScheduleKindValues)[number]
+export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
+export type AssistantCronRunStatus =
+  (typeof assistantCronRunStatusValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >

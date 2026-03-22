@@ -1,0 +1,10 @@
+{
+  "id": "assistant-cron-add",
+  "command": "vault-cli assistant cron add <prompt> --vault <path> --name <name> [--at <ts>] [--every <duration>] [--cron <expr>] [--keepAfterRun] [--disabled] [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents creation of one-shot, interval, or cron-expression assistant schedules stored outside the canonical vault."
+}

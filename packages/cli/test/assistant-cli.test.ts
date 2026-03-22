@@ -252,6 +252,107 @@ test.sequential(
 )
 
 test.sequential(
+  'assistant cron add/list/show/status/disable/enable/remove expose typed scheduler records through the CLI',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const added = requireData(
+      await runCli<{
+        jobsPath: string
+        job: {
+          jobId: string
+          name: string
+          schedule: {
+            kind: string
+          }
+          enabled: boolean
+        }
+      }>([
+        'assistant',
+        'cron',
+        'add',
+        'Check whether I need to stretch.',
+        '--vault',
+        vaultRoot,
+        '--name',
+        'stretch-reminder',
+        '--every',
+        '2h',
+      ]),
+    )
+
+    assert.equal(added.job.name, 'stretch-reminder')
+    assert.equal(added.job.schedule.kind, 'every')
+    assert.equal(added.job.enabled, true)
+    assert.equal(added.jobsPath.includes(path.join(parent, 'assistant-state')), true)
+
+    const status = requireData(
+      await runCli<{
+        totalJobs: number
+        enabledJobs: number
+        dueJobs: number
+      }>(['assistant', 'cron', 'status', '--vault', vaultRoot]),
+    )
+    assert.equal(status.totalJobs, 1)
+    assert.equal(status.enabledJobs, 1)
+    assert.equal(status.dueJobs, 0)
+
+    const listed = requireData(
+      await runCli<{
+        jobs: Array<{
+          jobId: string
+          name: string
+        }>
+      }>(['assistant', 'cron', 'list', '--vault', vaultRoot]),
+    )
+    assert.equal(listed.jobs.length, 1)
+    assert.equal(listed.jobs[0]?.name, 'stretch-reminder')
+
+    const shown = requireData(
+      await runCli<{
+        job: {
+          jobId: string
+          enabled: boolean
+        }
+      }>(['assistant', 'cron', 'show', added.job.jobId, '--vault', vaultRoot]),
+    )
+    assert.equal(shown.job.jobId, added.job.jobId)
+    assert.equal(shown.job.enabled, true)
+
+    const disabled = requireData(
+      await runCli<{
+        job: {
+          enabled: boolean
+        }
+      }>(['assistant', 'cron', 'disable', 'stretch-reminder', '--vault', vaultRoot]),
+    )
+    assert.equal(disabled.job.enabled, false)
+
+    const enabled = requireData(
+      await runCli<{
+        job: {
+          enabled: boolean
+        }
+      }>(['assistant', 'cron', 'enable', 'stretch-reminder', '--vault', vaultRoot]),
+    )
+    assert.equal(enabled.job.enabled, true)
+
+    const removed = requireData(
+      await runCli<{
+        removed: {
+          jobId: string
+        }
+      }>(['assistant', 'cron', 'remove', 'stretch-reminder', '--vault', vaultRoot]),
+    )
+    assert.equal(removed.removed.jobId, added.job.jobId)
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
   'assistant memory search/get/upsert/forget expose typed memory records through the CLI',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-cli-'))

@@ -4,6 +4,7 @@ import {
 import type { InboxCliServices } from '../../inbox-services.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultCliServices } from '../../vault-cli-services.js'
+import { processDueAssistantCronJobs } from '../cron.js'
 import {
   readAssistantAutomationState,
   redactAssistantDisplayPath,
@@ -72,6 +73,11 @@ export async function runAssistantAutomation(
   try {
     while (!controller.signal.aborted) {
       scans += 1
+      await processDueAssistantCronJobs({
+        vault: input.vault,
+        signal: controller.signal,
+        limit: input.maxPerScan,
+      })
       let state = await readAssistantAutomationState(input.vault)
 
       if (input.modelSpec?.model) {
