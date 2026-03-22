@@ -38,59 +38,6 @@ export function resolveTelegramFileBaseUrl(
   )
 }
 
-export function serializeTelegramSendTarget(
-  target: TelegramSendTarget,
-): string {
-  const chatId = normalizeNullableString(target.chatId)
-  if (!chatId) {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TARGET_INVALID',
-      'Telegram delivery requires a non-empty chat id, username, or topic target.',
-    )
-  }
-
-  const businessConnectionId = normalizeNullableString(
-    target.businessConnectionId,
-  )
-  const messageThreadId = normalizePositiveInteger(
-    target.messageThreadId,
-    'message_thread_id',
-    chatId,
-  )
-  const directMessagesTopicId = normalizePositiveInteger(
-    target.directMessagesTopicId,
-    'direct_messages_topic_id',
-    chatId,
-  )
-
-  if (
-    messageThreadId !== null &&
-    directMessagesTopicId !== null
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TARGET_INVALID',
-      'Telegram targets cannot include both message_thread_id and direct_messages_topic_id.',
-      {
-        target: chatId,
-      },
-    )
-  }
-
-  let serialized = chatId
-  if (businessConnectionId) {
-    serialized += `${TELEGRAM_BUSINESS_TARGET_MARKER}${encodeURIComponent(
-      businessConnectionId,
-    )}`
-  }
-  if (directMessagesTopicId !== null) {
-    serialized += `${TELEGRAM_DIRECT_MESSAGES_TOPIC_TARGET_MARKER}${directMessagesTopicId}`
-  } else if (messageThreadId !== null) {
-    serialized += `${TELEGRAM_TOPIC_TARGET_MARKER}${messageThreadId}`
-  }
-
-  return serialized
-}
-
 export function parseTelegramSendTarget(target: string): TelegramSendTarget {
   const normalizedTarget = normalizeNullableString(target)
   if (!normalizedTarget) {

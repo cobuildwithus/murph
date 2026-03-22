@@ -564,10 +564,6 @@ const genericLookupDescriptors = queryHealthDescriptors.filter((descriptor) => {
   );
 });
 
-const genericListDescriptors = queryHealthDescriptors.filter(
-  (descriptor) => Boolean(descriptor.query.genericListKinds?.length),
-);
-
 export function findHealthDescriptorForLookup(id: string): HealthQueryDescriptorEntry | null {
   return (
     genericLookupDescriptors.find((descriptor) => {
@@ -579,18 +575,6 @@ export function findHealthDescriptorForLookup(id: string): HealthQueryDescriptor
         genericLookupPrefixes.some((prefix) => id.startsWith(prefix))
       );
     })
-  ) ?? null;
-}
-
-export function findHealthDescriptorForListKind(kind?: string): HealthQueryDescriptorEntry | null {
-  if (!kind) {
-    return null;
-  }
-
-  return (
-    genericListDescriptors.find((descriptor) =>
-      descriptor.query.genericListKinds?.includes(kind),
-    )
   ) ?? null;
 }
 
