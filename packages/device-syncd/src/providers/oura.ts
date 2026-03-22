@@ -10,9 +10,11 @@ import {
   buildOAuthConnectUrl,
   buildProviderApiError,
   buildScheduledReconcileJobs,
+  createRefreshingApiSession,
   fetchBearerJson,
   postOAuthTokenRequest,
-  requestWithRefreshAndRetry,
+  splitScopes,
+  tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.js";
 
 import type {
@@ -77,32 +79,8 @@ function buildOuraScopes(input: string[] | undefined): string[] {
   return [...new Set(requested.map((scope) => scope.trim()).filter(Boolean))];
 }
 
-function isoFromExpiresIn(expiresIn: unknown): string | undefined {
-  const numeric = typeof expiresIn === "number" ? expiresIn : Number(expiresIn);
-  return Number.isFinite(numeric) ? addMilliseconds(new Date().toISOString(), numeric * 1000) : undefined;
-}
-
-function splitScopes(value: unknown): string[] {
-  if (typeof value !== "string") {
-    return [];
-  }
-
-  return value
-    .split(/\s+/u)
-    .map((scope) => scope.trim())
-    .filter(Boolean);
-}
-
 function hasOuraScope(account: DeviceSyncAccount, scope: string): boolean {
   return account.scopes.includes(scope);
-}
-
-function isTokenNearExpiry(account: DeviceSyncAccount, skewMs = 60_000): boolean {
-  if (!account.accessTokenExpiresAt) {
-    return false;
-  }
-
-  return Date.parse(account.accessTokenExpiresAt) - Date.now() <= skewMs;
 }
 
 function toDateParameter(timestamp: string): string {
@@ -116,22 +94,14 @@ function buildDisplayName(personalInfo: Record<string, unknown>): string {
 }
 
 function tokenResponseToAuthTokens(payload: OuraTokenResponse): ProviderAuthTokens {
-  const accessToken = normalizeString(payload.access_token);
-
-  if (!accessToken) {
-    throw deviceSyncError({
+  return sharedTokenResponseToAuthTokens(payload, () =>
+    deviceSyncError({
       code: "OURA_TOKEN_RESPONSE_INVALID",
       message: "Oura token response did not include an access token.",
       retryable: false,
       httpStatus: 502,
-    });
-  }
-
-  return {
-    accessToken,
-    refreshToken: normalizeString(payload.refresh_token) ?? null,
-    accessTokenExpiresAt: isoFromExpiresIn(payload.expires_in),
-  };
+    }),
+  );
 }
 
 function buildOuraApiError(
@@ -235,33 +205,23 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   }
 
   function createApiSession(context: ProviderJobContext) {
-    let currentAccount = context.account;
-
-    async function refresh(): Promise<DeviceSyncAccount> {
-      currentAccount = await context.refreshAccountTokens();
-      return currentAccount;
-    }
-
-    async function requestJson<T>(path: string, options: { optional?: boolean } = {}): Promise<T | null> {
-      return requestWithRefreshAndRetry({
-        shouldRefresh: () => isTokenNearExpiry(currentAccount),
-        refresh,
-        request: () =>
-          fetchOuraJson<T>({
-            path,
-            accessToken: currentAccount.accessToken,
-            optional: options.optional,
-          }),
-      });
-    }
+    const session = createRefreshingApiSession({
+      context,
+      requestJsonWithAccessToken: <T>(accessToken: string, path: string, options: { optional?: boolean }) =>
+        fetchOuraJson<T>({
+          path,
+          accessToken,
+          optional: options.optional,
+        }),
+    });
 
     return {
       get account() {
-        return currentAccount;
+        return session.account;
       },
-      requestJson,
+      requestJson: session.requestJson,
       fetchPagedCollection(path: string, parameters: Record<string, string | null | undefined>) {
-        return fetchPagedCollection(requestJson, path, parameters);
+        return fetchPagedCollection(session.requestJson, path, parameters);
       },
     };
   }

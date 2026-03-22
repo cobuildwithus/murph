@@ -2,7 +2,7 @@ import { deviceSyncError } from "../errors.js";
 import { addMilliseconds, computeRetryDelayMs, sha256Text, sleep, subtractDays } from "../shared.js";
 
 import type { DeviceSyncErrorOptions } from "../errors.js";
-import type { ProviderScheduleResult } from "../types.js";
+import type { DeviceSyncAccount, ProviderAuthTokens, ProviderJobContext, ProviderScheduleResult } from "../types.js";
 
 export async function parseResponseBody(response: Response): Promise<string> {
   try {
@@ -109,6 +109,93 @@ export async function postOAuthTokenRequest<T>(input: {
   }
 
   return (await response.json()) as T;
+}
+
+export function isoFromExpiresIn(expiresIn: unknown, now = new Date().toISOString()): string | undefined {
+  const numeric = typeof expiresIn === "number" ? expiresIn : Number(expiresIn);
+  return Number.isFinite(numeric) ? addMilliseconds(now, numeric * 1000) : undefined;
+}
+
+export function splitScopes(value: unknown): string[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(/\s+/u)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+}
+
+export function isTokenNearExpiry(
+  account: Pick<DeviceSyncAccount, "accessTokenExpiresAt">,
+  skewMs = 60_000,
+): boolean {
+  if (!account.accessTokenExpiresAt) {
+    return false;
+  }
+
+  return Date.parse(account.accessTokenExpiresAt) - Date.now() <= skewMs;
+}
+
+export function tokenResponseToAuthTokens<T extends {
+  access_token?: unknown;
+  expires_in?: unknown;
+  refresh_token?: unknown;
+}>(payload: T, buildMissingAccessTokenError: () => Error): ProviderAuthTokens {
+  const accessToken =
+    typeof payload.access_token === "string" ? payload.access_token.trim() : String(payload.access_token ?? "").trim();
+
+  if (!accessToken) {
+    throw buildMissingAccessTokenError();
+  }
+
+  const refreshToken =
+    typeof payload.refresh_token === "string"
+      ? payload.refresh_token.trim() || null
+      : payload.refresh_token == null
+        ? null
+        : String(payload.refresh_token).trim() || null;
+
+  return {
+    accessToken,
+    refreshToken,
+    accessTokenExpiresAt: isoFromExpiresIn(payload.expires_in),
+  };
+}
+
+export function createRefreshingApiSession(input: {
+  context: Pick<ProviderJobContext, "account" | "refreshAccountTokens">;
+  requestJsonWithAccessToken: <T>(
+    accessToken: string,
+    path: string,
+    options: {
+      optional?: boolean;
+    },
+  ) => Promise<T | null>;
+  shouldRefresh?: (account: DeviceSyncAccount) => boolean;
+}) {
+  let currentAccount = input.context.account;
+
+  async function refresh(): Promise<DeviceSyncAccount> {
+    currentAccount = await input.context.refreshAccountTokens();
+    return currentAccount;
+  }
+
+  async function requestJson<T>(path: string, options: { optional?: boolean } = {}): Promise<T | null> {
+    return requestWithRefreshAndRetry({
+      shouldRefresh: () => (input.shouldRefresh ?? isTokenNearExpiry)(currentAccount),
+      refresh,
+      request: () => input.requestJsonWithAccessToken<T>(currentAccount.accessToken, path, options),
+    });
+  }
+
+  return {
+    get account() {
+      return currentAccount;
+    },
+    requestJson,
+  };
 }
 
 export async function fetchBearerJson<T>(input: {
