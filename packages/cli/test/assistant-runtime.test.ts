@@ -84,6 +84,7 @@ import {
 } from '../src/assistant/ui/view-model.js'
 import {
   applyComposerEditingInput,
+  formatFooterBadgeText,
   formatAssistantTerminalHyperlink,
   normalizeComposerInsertedText,
   renderChatTranscriptFeed,
@@ -2536,6 +2537,30 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   assert.equal(resolveMessageRoleLabel('assistant'), 'healthy bob')
   assert.equal(resolveMessageRoleLabel('error'), 'error')
   assert.equal(resolveMessageRoleLabel('user'), null)
+  assert.equal(
+    formatFooterBadgeText({
+      key: 'model',
+      label: 'model',
+      value: 'gpt-5.4',
+    }),
+    ' gpt-5.4 ',
+  )
+  assert.equal(
+    formatFooterBadgeText({
+      key: 'reasoning',
+      label: 'reasoning',
+      value: 'high',
+    }),
+    ' high ',
+  )
+  assert.equal(
+    formatFooterBadgeText({
+      key: 'vault',
+      label: 'vault',
+      value: '~/vault',
+    }),
+    ' vault: ~/vault ',
+  )
   assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
   assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
   assert.equal(CHAT_SLASH_COMMANDS[0]?.command, '/model')

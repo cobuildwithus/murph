@@ -272,9 +272,17 @@ const FooterBadge = React.memo(function FooterBadge(input: {
       backgroundColor,
       color,
     },
-    ` ${input.badge.label}: ${input.badge.value} `,
+    formatFooterBadgeText(input.badge),
   )
 })
+
+export function formatFooterBadgeText(badge: ChatMetadataBadge): string {
+  if (badge.key === 'model' || badge.key === 'reasoning') {
+    return ` ${badge.value} `
+  }
+
+  return ` ${badge.label}: ${badge.value} `
+}
 
 const ChatBanner = React.memo(function ChatBanner(): React.ReactElement {
   const createElement = React.createElement
