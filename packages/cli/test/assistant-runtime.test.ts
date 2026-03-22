@@ -91,6 +91,7 @@ import {
   partitionChatTranscriptEntries,
   renderChatTranscriptFeed,
   renderComposerValue,
+  resolveChromePanelBoxProps,
   resolveMessageRoleLabel,
   resolveAssistantHyperlinkTarget,
   resolveComposerTerminalAction,
@@ -2590,6 +2591,32 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   assert.equal(resolveMessageRoleLabel('assistant'), 'healthy bob')
   assert.equal(resolveMessageRoleLabel('error'), 'error')
   assert.equal(resolveMessageRoleLabel('user'), null)
+
+  const plainPanel = resolveChromePanelBoxProps({})
+  const tintedPanel = resolveChromePanelBoxProps({
+    backgroundColor: LIGHT_ASSISTANT_INK_THEME.switcherBackground,
+    marginBottom: 0,
+    paddingY: 1,
+  })
+
+  assert.equal('borderColor' in plainPanel, false)
+  assert.equal('borderStyle' in plainPanel, false)
+  assert.deepEqual(plainPanel, {
+    flexDirection: 'column',
+    marginBottom: 1,
+    paddingX: 0,
+    paddingY: 0,
+    width: '100%',
+  })
+  assert.deepEqual(tintedPanel, {
+    backgroundColor: LIGHT_ASSISTANT_INK_THEME.switcherBackground,
+    flexDirection: 'column',
+    marginBottom: 0,
+    paddingX: 1,
+    paddingY: 1,
+    width: '100%',
+  })
+
   assert.equal(
     formatFooterBadgeText({
       key: 'model',

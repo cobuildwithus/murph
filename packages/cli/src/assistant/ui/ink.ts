@@ -149,7 +149,6 @@ interface ChatFooterProps {
 
 interface ChromePanelProps {
   backgroundColor?: string
-  borderColor?: string
   children?: React.ReactNode
   marginBottom?: number
   paddingX?: number
@@ -186,36 +185,64 @@ function useAssistantInkTheme(): AssistantInkTheme {
 
 const BUSY_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
+export function resolveChromePanelBoxProps(
+  props: ChromePanelProps,
+): {
+  backgroundColor?: string
+  flexDirection: 'column'
+  marginBottom: number
+  paddingX: number
+  paddingY: number
+  width: string
+} {
+  const boxProps: {
+    backgroundColor?: string
+    flexDirection: 'column'
+    marginBottom: number
+    paddingX: number
+    paddingY: number
+    width: string
+  } = {
+    flexDirection: 'column',
+    marginBottom: props.marginBottom ?? 1,
+    paddingX:
+      props.paddingX ??
+      (typeof props.backgroundColor === 'string' && props.backgroundColor.length > 0
+        ? 1
+        : 0),
+    paddingY: props.paddingY ?? 0,
+    width: props.width ?? '100%',
+  }
+
+  if (typeof props.backgroundColor === 'string' && props.backgroundColor.length > 0) {
+    boxProps.backgroundColor = props.backgroundColor
+  }
+
+  return boxProps
+}
+
 const ChromePanel = React.memo(function ChromePanel(
   props: ChromePanelProps,
 ): React.ReactElement {
   const createElement = React.createElement
-  const theme = useAssistantInkTheme()
 
   return createElement(
     Box,
-    {
-      backgroundColor: props.backgroundColor,
-      borderColor: props.borderColor ?? theme.borderColor,
-      borderStyle: 'round',
-      flexDirection: 'column',
-      marginBottom: props.marginBottom ?? 1,
-      paddingX: props.paddingX ?? 1,
-      paddingY: props.paddingY ?? 0,
-      width: props.width ?? '100%',
-    },
+    resolveChromePanelBoxProps(props),
     props.children,
   )
 })
 
-const BusySpinner = React.memo(function BusySpinner(): React.ReactElement {
+const BusySpinner = React.memo(function BusySpinner(input: {
+  color?: string
+}): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
 
   return createElement(
     Text,
     {
-      color: theme.accentColor,
+      color: input.color ?? theme.accentColor,
     },
     BUSY_SPINNER_FRAMES[0],
   )
@@ -701,6 +728,7 @@ const ChatHeader = React.memo(function ChatHeader(
     return createElement(
       ChromePanel,
       {
+        backgroundColor: theme.switcherBackground,
         marginBottom: 1,
       },
       createElement(
@@ -736,6 +764,7 @@ const ChatHeader = React.memo(function ChatHeader(
     createElement(
       ChromePanel,
       {
+        backgroundColor: theme.switcherBackground,
         marginBottom: 1,
       },
       createElement(
@@ -753,6 +782,7 @@ const ChatHeader = React.memo(function ChatHeader(
     createElement(
       ChromePanel,
       {
+        backgroundColor: theme.switcherBackground,
         marginBottom: 0,
       },
       createElement(
@@ -799,7 +829,7 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
     return createElement(
       ChromePanel,
       {
-        borderColor: theme.errorColor,
+        backgroundColor: theme.switcherBackground,
         marginBottom: 1,
       },
       createElement(MessageRoleLabel, {
@@ -877,7 +907,6 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
     ChromePanel,
     {
       backgroundColor: theme.composerBackground,
-      borderColor: theme.composerBorderColor,
       marginBottom: 1,
     },
     createElement(MessageRoleLabel, {
@@ -1037,7 +1066,7 @@ const ChatStatus = React.memo(function ChatStatus(
     return createElement(
       ChromePanel,
       {
-        borderColor: busyColor,
+        backgroundColor: theme.switcherBackground,
         marginBottom: 1,
       },
       createElement(
@@ -1045,12 +1074,14 @@ const ChatStatus = React.memo(function ChatStatus(
         {
           flexDirection: 'row',
         },
-        createElement(BusySpinner, {}),
+        createElement(BusySpinner, {
+          color: busyColor,
+        }),
         createElement(Text, {}, ' '),
         createElement(
           Text,
           {
-            color: theme.composerTextColor,
+            color: busyColor,
           },
           busyLabel,
         ),
@@ -1086,7 +1117,7 @@ const ChatStatus = React.memo(function ChatStatus(
   return createElement(
     ChromePanel,
     {
-      borderColor: statusColor,
+      backgroundColor: theme.switcherBackground,
       marginBottom: 1,
     },
     createElement(
@@ -1132,7 +1163,6 @@ const ChatComposer = React.memo(function ChatComposer(
       ChromePanel,
       {
         backgroundColor: theme.composerBackground,
-        borderColor: theme.composerBorderColor,
         marginBottom: slashSuggestions.length > 0 ? 0 : 1,
         paddingY: 1,
       },
@@ -1905,7 +1935,6 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
     ChromePanel,
     {
       backgroundColor: theme.switcherBackground,
-      borderColor: theme.switcherBorderColor,
       marginBottom: 1,
     },
     createElement(
@@ -1971,7 +2000,7 @@ function SlashCommandSuggestions(input: {
   return createElement(
     ChromePanel,
     {
-      borderColor: theme.composerBorderColor,
+      backgroundColor: theme.switcherBackground,
       marginBottom: 1,
     },
     createElement(
@@ -2029,11 +2058,7 @@ function renderSwitcherRow(input: {
     {
       backgroundColor: input.selected
         ? input.theme.switcherSelectionBackground
-        : input.theme.switcherBackground,
-      borderColor: input.selected
-        ? input.theme.accentColor
-        : input.theme.switcherBorderColor,
-      borderStyle: 'round',
+        : undefined,
       key: `${input.label}:${input.index}`,
       flexDirection: 'column',
       marginBottom: 1,
