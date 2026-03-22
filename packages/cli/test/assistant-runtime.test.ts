@@ -2528,9 +2528,9 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit',
   )
   assert.deepEqual(CHAT_STARTER_SUGGESTIONS, [
-    'Summarize my recent sleep, activity, and recovery',
-    'Review patterns in my meals and workouts',
-    'Find gaps or anomalies in my recent health data',
+    'Summarize recent sleep and recovery',
+    'Review meal and workout patterns',
+    'Find recent health anomalies',
   ])
   assert.equal(shouldShowChatComposerGuidance(0), true)
   assert.equal(shouldShowChatComposerGuidance(1), false)

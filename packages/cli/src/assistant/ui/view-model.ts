@@ -89,9 +89,9 @@ export const CHAT_COMPOSER_HINT =
   'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit'
 
 export const CHAT_STARTER_SUGGESTIONS = [
-  'Summarize my recent sleep, activity, and recovery',
-  'Review patterns in my meals and workouts',
-  'Find gaps or anomalies in my recent health data',
+  'Summarize recent sleep and recovery',
+  'Review meal and workout patterns',
+  'Find recent health anomalies',
 ] as const
 
 export function shouldShowChatComposerGuidance(entryCount: number): boolean {

@@ -26,6 +26,7 @@ import {
 } from '../provider-turn-recovery.js'
 import {
   appendAssistantTranscriptEntries,
+  isAssistantSessionNotFoundError,
   listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
   resolveAssistantSession,
@@ -1125,6 +1126,7 @@ const ChatComposer = React.memo(function ChatComposer(
             createElement(
               Text,
               {
+                color: theme.accentColor,
                 wrap: 'wrap',
               },
               createElement(Text, { color: theme.mutedColor }, 'try: '),
@@ -1142,7 +1144,6 @@ const ChatComposer = React.memo(function ChatComposer(
                 createElement(
                   Text,
                   {
-                    color: theme.accentColor,
                     key: `starter:${suggestion}`,
                   },
                   suggestion,
@@ -2354,6 +2355,7 @@ export async function runAssistantChatWithInk(
               prompt: action.prompt,
               reasoningEffort: activeReasoningEffort,
               sessionId: latestSessionRef.current.sessionId,
+              sessionSnapshot: latestSessionRef.current,
               showThinkingTraces: true,
             })
 
@@ -2400,6 +2402,7 @@ export async function runAssistantChatWithInk(
 
             const errorText = error instanceof Error ? error.message : String(error)
             const connectionLost = isAssistantProviderConnectionLostError(error)
+            const missingSession = isAssistantSessionNotFoundError(error)
             setEntries((previous: InkChatEntry[]) => [
               ...previous,
               {
@@ -2413,21 +2416,28 @@ export async function runAssistantChatWithInk(
                     kind: 'error',
                     text: 'The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.',
                   }
+                : missingSession
+                  ? {
+                      kind: 'error',
+                      text: 'The local assistant session record is missing. Check the current vault/default vault or start a new chat.',
+                    }
                 : {
                     kind: 'error',
                     text: 'The assistant hit an error. Fix it or keep chatting.',
                   },
             )
-            void appendAssistantTranscriptEntries(
-              input.vault,
-              latestSessionRef.current.sessionId,
-              [
-                {
-                  kind: 'error',
-                  text: errorText,
-                },
-              ],
-            ).catch(() => {})
+            if (!missingSession) {
+              void appendAssistantTranscriptEntries(
+                input.vault,
+                latestSessionRef.current.sessionId,
+                [
+                  {
+                    kind: 'error',
+                    text: errorText,
+                  },
+                ],
+              ).catch(() => {})
+            }
           } finally {
             setBusy(false)
             setBusyStartedAt(null)
