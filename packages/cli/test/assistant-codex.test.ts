@@ -169,6 +169,130 @@ test('executeCodexPrompt falls back to non-JSON stdout when the last-message fil
   assert.equal(result.sessionId, 'thread-456')
 })
 
+test('executeCodexPrompt emits progress events and can fall back to the last agent-message item', async () => {
+  installSpawnMock((child) => {
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'item.started', item: { id: 'reason-1', type: 'reasoning' } })}\n`,
+    )
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'item.started', item: { id: 'cmd-1', type: 'command_execution', command: 'bash -lc ls' } })}\n`,
+    )
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'item.completed', item: { id: 'msg-1', type: 'agent_message', text: 'agent message fallback' } })}\n`,
+    )
+    child.emit('close', 0, null)
+  })
+
+  const progressEvents: Array<{
+    id: string | null
+    kind: string
+    state: string
+    text: string
+  }> = []
+
+  const result = await executeCodexPrompt({
+    prompt: 'Trace the run.',
+    workingDirectory: '/tmp/vault',
+    onProgress(event) {
+      progressEvents.push({
+        id: event.id,
+        kind: event.kind,
+        state: event.state,
+        text: event.text,
+      })
+    },
+  })
+
+  assert.equal(result.finalMessage, 'agent message fallback')
+  assert.deepEqual(progressEvents, [
+    {
+      id: 'reason-1',
+      kind: 'reasoning',
+      state: 'running',
+      text: 'Thinking…',
+    },
+    {
+      id: 'cmd-1',
+      kind: 'command',
+      state: 'running',
+      text: '$ bash -lc ls',
+    },
+    {
+      id: 'msg-1',
+      kind: 'message',
+      state: 'completed',
+      text: 'agent message fallback',
+    },
+  ])
+})
+
+test('executeCodexPrompt emits reconnect status events and classifies connection losses as resumable failures', async () => {
+  installSpawnMock((child) => {
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-reconnect-1' })}\n`,
+    )
+    child.stderr.emit(
+      'data',
+      'Network error while contacting OpenAI.\nRe-connecting...\nExceeded retry limit.\n',
+    )
+    child.emit('close', 1, null)
+  })
+
+  const progressEvents: Array<{
+    id: string | null
+    kind: string
+    state: string
+    text: string
+  }> = []
+
+  await assert.rejects(
+    executeCodexPrompt({
+      prompt: 'Reconnect after a network error.',
+      workingDirectory: '/tmp/vault',
+      onProgress(event) {
+        progressEvents.push({
+          id: event.id,
+          kind: event.kind,
+          state: event.state,
+          text: event.text,
+        })
+      },
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CODEX_CONNECTION_LOST')
+      assert.equal(error.context?.providerSessionId, 'thread-reconnect-1')
+      assert.equal(error.context?.retryable, true)
+      assert.match(String(error.message), /lost its connection/u)
+      return true
+    },
+  )
+
+  assert.deepEqual(progressEvents, [
+    {
+      id: 'codex-connection-status',
+      kind: 'status',
+      state: 'completed',
+      text: 'Network error while contacting OpenAI.',
+    },
+    {
+      id: 'codex-connection-status',
+      kind: 'status',
+      state: 'running',
+      text: 'Re-connecting...',
+    },
+    {
+      id: 'codex-connection-status',
+      kind: 'status',
+      state: 'completed',
+      text: 'Exceeded retry limit.',
+    },
+  ])
+})
+
 test('executeCodexPrompt translates missing codex executables into ASSISTANT_CODEX_NOT_FOUND', async () => {
   installSpawnMock((child) => {
     const error = Object.assign(new Error('spawn codex ENOENT'), {
@@ -353,10 +477,10 @@ test('executeCodexPrompt marks recoverable connection loss failures with the rec
       workingDirectory: '/tmp/vault',
     }),
     (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CODEX_FAILED')
-      assert.match(String(error.message), /lost the provider stream before the turn finished/u)
-      assert.match(String(error.message), /thread-resume-1/u)
+      assert.equal(error.code, 'ASSISTANT_CODEX_CONNECTION_LOST')
+      assert.match(String(error.message), /lost its connection/u)
       assert.equal(error.context?.providerSessionId, 'thread-resume-1')
+      assert.equal(error.context?.connectionLost, true)
       assert.equal(error.context?.recoverableConnectionLoss, true)
       return true
     },

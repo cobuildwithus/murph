@@ -24,6 +24,7 @@ import {
   normalizeNullableString,
   writeJsonFileAtomic,
 } from './shared.js'
+import { isAssistantProviderConnectionLostError } from './provider-turn-recovery.js'
 
 export interface AssistantRunEvent {
   captureId?: string
@@ -595,6 +596,7 @@ export async function scanAssistantAutoReplyOnce(input: {
         vault: input.vault,
         channel: primaryCapture.source,
         participantId: primaryCapture.actorId ?? undefined,
+        persistUserPromptOnFailure: false,
         sourceThreadId: primaryCapture.threadId,
         threadIsDirect: primaryCapture.threadIsDirect,
         prompt: prompt.prompt,
@@ -623,6 +625,17 @@ export async function scanAssistantAutoReplyOnce(input: {
         details: `${result.delivery.channel} -> ${result.delivery.target}`,
       })
     } catch (error) {
+      const detail = errorMessage(error)
+      if (isAssistantProviderConnectionLostError(error)) {
+        summary.skipped += group.items.length
+        input.onEvent?.({
+          type: 'capture.reply-skipped',
+          captureId: firstItem.summary.captureId,
+          details: `${detail} Will retry this capture after the provider reconnects.`,
+        })
+        break
+      }
+
       summary.failed += 1
       cursor = cursorFromCapture(lastItem.summary)
       await writeAssistantChatErrorArtifacts({
@@ -633,7 +646,7 @@ export async function scanAssistantAutoReplyOnce(input: {
       input.onEvent?.({
         type: 'capture.reply-failed',
         captureId: firstItem.summary.captureId,
-        details: errorMessage(error),
+        details: detail,
       })
       continue
     }

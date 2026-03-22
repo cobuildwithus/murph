@@ -12,7 +12,12 @@ import {
   buildAssistantCliGuidanceText,
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
-import { executeAssistantProviderTurn, resolveAssistantProviderOptions } from '../chat-provider.js'
+import {
+  executeAssistantProviderTurn,
+  resolveAssistantProviderOptions,
+  type AssistantProviderProgressEvent,
+  type AssistantProviderTurnResult,
+} from '../chat-provider.js'
 import { deliverAssistantMessage } from '../outbound-channel.js'
 import {
   resolveAssistantOperatorDefaults,
@@ -29,6 +34,10 @@ import {
   createAssistantMemoryTurnContextEnv,
   loadAssistantMemoryPromptBlock,
 } from './memory.js'
+import {
+  attachRecoveredAssistantSession,
+  recoverAssistantSessionAfterProviderFailure,
+} from './provider-turn-recovery.js'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -56,7 +65,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliverResponse?: boolean
   deliveryTarget?: string | null
   maxSessionAgeMs?: number | null
+  onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  persistUserPromptOnFailure?: boolean
   prompt: string
   showThinkingTraces?: boolean
   workingDirectory?: string
@@ -143,13 +154,21 @@ export async function sendAssistantMessage(
       })
     : null
 
-  const userEntries = await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
-    {
-      kind: 'user',
-      text: input.prompt,
-    },
-  ])
-  const turnCreatedAt = userEntries[0]?.createdAt ?? new Date().toISOString()
+  const persistUserPromptOnFailure = input.persistUserPromptOnFailure ?? true
+  let turnCreatedAt = new Date().toISOString()
+  if (persistUserPromptOnFailure) {
+    const userEntries = await appendAssistantTranscriptEntries(
+      input.vault,
+      resolved.session.sessionId,
+      [
+        {
+          kind: 'user',
+          text: input.prompt,
+        },
+      ],
+    )
+    turnCreatedAt = userEntries[0]?.createdAt ?? turnCreatedAt
+  }
   const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
     allowSensitiveHealthContext,
     sessionId: resolved.session.sessionId,
@@ -161,7 +180,7 @@ export async function sendAssistantMessage(
     input.workingDirectory ?? input.vault,
   )
 
-  let providerResult
+  let providerResult: AssistantProviderTurnResult
   try {
     providerResult = await executeAssistantProviderTurn({
       provider,
@@ -186,20 +205,32 @@ export async function sendAssistantMessage(
       reasoningEffort: providerOptions.reasoningEffort,
       sandbox: providerOptions.sandbox,
       approvalPolicy: providerOptions.approvalPolicy,
+      onEvent: input.onProviderEvent ?? undefined,
       profile: providerOptions.profile,
       oss: providerOptions.oss,
       onTraceEvent: input.onTraceEvent,
       showThinkingTraces: input.showThinkingTraces ?? false,
     })
   } catch (error) {
-    await maybePersistProviderSessionAfterError({
+    const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
       error,
       provider,
       providerOptions,
-      resolvedSession: resolved.session,
+      session: resolved.session,
       vault: input.vault,
-    }).catch(() => {})
+    })
+    attachRecoveredAssistantSession(error, recoveredSession)
     throw error
+  }
+
+  if (!persistUserPromptOnFailure) {
+    await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
+      {
+        kind: 'user',
+        text: input.prompt,
+        createdAt: turnCreatedAt,
+      },
+    ])
   }
 
   await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
@@ -264,64 +295,6 @@ export async function sendAssistantMessage(
     delivery,
     deliveryError,
   })
-}
-
-async function maybePersistProviderSessionAfterError(input: {
-  error: unknown
-  provider: AssistantChatProvider
-  providerOptions: ReturnType<typeof resolveAssistantProviderOptions>
-  resolvedSession: Awaited<ReturnType<typeof resolveAssistantSession>>['session']
-  vault: string
-}): Promise<void> {
-  if (!isRecoverableConnectionLossError(input.error)) {
-    return
-  }
-
-  const recoveredProviderSessionId = extractProviderSessionIdFromError(input.error)
-  if (
-    !recoveredProviderSessionId ||
-    recoveredProviderSessionId === input.resolvedSession.providerSessionId
-  ) {
-    return
-  }
-
-  await saveAssistantSession(input.vault, {
-    ...input.resolvedSession,
-    provider: input.provider,
-    providerSessionId: recoveredProviderSessionId,
-    providerOptions: input.providerOptions,
-    updatedAt: new Date().toISOString(),
-  })
-}
-
-function isRecoverableConnectionLossError(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || !('context' in error)) {
-    return false
-  }
-
-  const context = (error as { context?: unknown }).context
-  return (
-    !!context &&
-    typeof context === 'object' &&
-    (context as { recoverableConnectionLoss?: unknown }).recoverableConnectionLoss ===
-      true
-  )
-}
-
-function extractProviderSessionIdFromError(error: unknown): string | null {
-  if (!error || typeof error !== 'object' || !('context' in error)) {
-    return null
-  }
-
-  const context = (error as { context?: unknown }).context
-  if (!context || typeof context !== 'object') {
-    return null
-  }
-
-  const providerSessionId = (context as { providerSessionId?: unknown }).providerSessionId
-  return typeof providerSessionId === 'string' && providerSessionId.trim().length > 0
-    ? providerSessionId.trim()
-    : null
 }
 
 function buildAssistantSystemPrompt(

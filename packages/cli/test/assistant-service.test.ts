@@ -40,7 +40,11 @@ import {
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
 import { HEALTHYBOB_VAULT_ENV } from '../src/operator-config.js'
-import { resolveAssistantStatePaths } from '../src/assistant-state.js'
+import {
+  resolveAssistantSession,
+  resolveAssistantStatePaths,
+} from '../src/assistant-state.js'
+import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
 
@@ -583,6 +587,34 @@ test('sendAssistantMessage blocks health-memory upserts in non-private assistant
 })
 
 
+test('sendAssistantMessage forwards provider progress callbacks to the provider turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-progress-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-progress-1',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const onProviderEvent = vi.fn()
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    prompt: 'Show me the progress plumbing.',
+    onProviderEvent,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.onEvent, onProviderEvent)
+})
+
 test('sendAssistantMessage preserves a recovered provider session id after a resumable provider failure', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-recoverable-error-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -591,13 +623,13 @@ test('sendAssistantMessage preserves a recovered provider session id after a res
   await mkdir(vaultRoot, { recursive: true })
 
   serviceMocks.executeAssistantProviderTurn.mockRejectedValue(
-    Object.assign(
-      new Error('Codex CLI lost the provider stream before the turn finished.'),
+    new VaultCliError(
+      'ASSISTANT_CODEX_CONNECTION_LOST',
+      'Codex CLI lost its connection while waiting for the model.',
       {
-        context: {
-          providerSessionId: 'thread-resume-1',
-          recoverableConnectionLoss: true,
-        },
+        connectionLost: true,
+        providerSessionId: 'thread-resume-1',
+        retryable: true,
       },
     ),
   )
@@ -608,21 +640,58 @@ test('sendAssistantMessage preserves a recovered provider session id after a res
       alias: 'chat:recoverable-error',
       prompt: 'hello',
     }),
-    /lost the provider stream before the turn finished/u,
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CODEX_CONNECTION_LOST')
+      assert.equal(
+        error.context?.assistantSession?.providerSessionId,
+        'thread-resume-1',
+      )
+      return true
+    },
   )
 
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const sessionFiles = await readdir(statePaths.sessionsDirectory)
-  assert.equal(sessionFiles.length, 1)
-  const sessionPath = path.join(
-    statePaths.sessionsDirectory,
-    sessionFiles[0] ?? 'missing-session.json',
-  )
-  const savedSession = JSON.parse(await readFile(sessionPath, 'utf8')) as {
-    providerSessionId: string | null
-    turnCount: number
-  }
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:recoverable-error',
+  })
 
-  assert.equal(savedSession.providerSessionId, 'thread-resume-1')
-  assert.equal(savedSession.turnCount, 0)
+  assert.equal(resolved.session.providerSessionId, 'thread-resume-1')
+  assert.equal(resolved.session.turnCount, 0)
+})
+
+test('sendAssistantMessage does not persist a recovered provider session id for non-retryable provider failures', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-nonretryable-error-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockRejectedValue(
+    new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex CLI failed.',
+      {
+        connectionLost: false,
+        providerSessionId: 'thread-should-not-stick',
+        retryable: false,
+      },
+    ),
+  )
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:nonretryable-error',
+      prompt: 'hello',
+    }),
+    /Codex CLI failed/u,
+  )
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:nonretryable-error',
+  })
+
+  assert.equal(resolved.session.providerSessionId, null)
+  assert.equal(resolved.session.turnCount, 0)
 })

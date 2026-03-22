@@ -5,10 +5,15 @@ import type {
   AssistantSessionBinding,
 } from './assistant-cli-contracts.js'
 import type { AssistantProviderTraceEvent } from './assistant/provider-traces.js'
-import { executeCodexPrompt } from './assistant-codex.js'
+import {
+  executeCodexPrompt,
+  type CodexProgressEvent,
+} from './assistant-codex.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import { getAssistantBindingContextLines } from './assistant/bindings.js'
 import { normalizeNullableString } from './assistant/shared.js'
+
+export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
 
 export interface AssistantProviderTurnInput {
   approvalPolicy?: AssistantApprovalPolicy | null
@@ -16,6 +21,7 @@ export interface AssistantProviderTurnInput {
   configOverrides?: readonly string[]
   env?: NodeJS.ProcessEnv
   model?: string | null
+  onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean
   profile?: string | null
@@ -84,6 +90,7 @@ export async function executeAssistantProviderTurn(
         approvalPolicy: input.approvalPolicy ?? undefined,
         profile: normalizeNullableString(input.profile),
         oss: input.oss ?? false,
+        onProgress: input.onEvent ?? undefined,
         onTraceEvent: input.onTraceEvent,
       })
 

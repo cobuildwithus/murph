@@ -39,6 +39,7 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
 })
 
 test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves the provider session id', async () => {
+  const onEvent = vi.fn()
   providerMocks.executeCodexPrompt.mockResolvedValue({
     finalMessage: 'assistant reply',
     jsonEvents: [{ type: 'thread.started', thread_id: 'thread-123' }],
@@ -73,6 +74,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
     resumeProviderSessionId: 'thread-existing',
     codexCommand: '/opt/homebrew/bin/codex',
     model: 'gpt-oss:20b',
+    onEvent,
     sandbox: 'read-only',
     approvalPolicy: 'never',
     profile: 'primary',
@@ -90,6 +92,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.equal(call?.model, 'gpt-oss:20b')
   assert.equal(call?.sandbox, 'read-only')
   assert.equal(call?.approvalPolicy, 'never')
+  assert.equal(call?.onProgress, onEvent)
   assert.equal(call?.profile, 'primary')
   assert.equal(call?.oss, true)
   assert.match(call?.prompt ?? '', /system prompt/u)

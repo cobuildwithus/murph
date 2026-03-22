@@ -18,6 +18,7 @@ export interface CodexExecInput {
   codexCommand?: string
   env?: NodeJS.ProcessEnv
   model?: string | null
+  onProgress?: ((event: CodexProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean
   profile?: string | null
@@ -41,6 +42,22 @@ export interface CodexDisplayOptions {
   reasoningEffort: string | null
 }
 
+export interface CodexProgressEvent {
+  id: string | null
+  kind:
+    | 'command'
+    | 'file'
+    | 'message'
+    | 'plan'
+    | 'reasoning'
+    | 'search'
+    | 'status'
+    | 'tool'
+  rawEvent: unknown
+  state: 'completed' | 'running'
+  text: string
+}
+
 export async function executeCodexPrompt(
   input: CodexExecInput,
 ): Promise<CodexExecResult> {
@@ -59,6 +76,7 @@ export async function executeCodexPrompt(
   const jsonEvents: unknown[] = []
   const nonJsonStdoutLines: string[] = []
   let discoveredSessionId = input.resumeSessionId ?? null
+  let lastAgentMessage: string | null = null
   let lastEventError: string | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
@@ -103,6 +121,14 @@ export async function executeCodexPrompt(
       rawEvent: event,
       updates,
     })
+
+    const progressEvent = extractCodexProgressEvent(event)
+    if (progressEvent) {
+      if (progressEvent.kind === 'message') {
+        lastAgentMessage = progressEvent.text
+      }
+      input.onProgress?.(progressEvent)
+    }
   }
 
   try {
@@ -128,6 +154,7 @@ export async function executeCodexPrompt(
       })
 
       let stdoutBuffer = ''
+      let stderrBuffer = ''
 
       child.stdout.on('data', (chunk) => {
         const text = String(chunk)
@@ -148,10 +175,25 @@ export async function executeCodexPrompt(
       })
 
       child.stderr.on('data', (chunk) => {
-        stderr += String(chunk)
+        const text = String(chunk)
+        stderr += text
+        stderrBuffer += text
+        stderrBuffer = consumeCompleteLines(stderrBuffer, (line) => {
+          const progressEvent = extractCodexStatusEventFromStderrLine(line)
+          if (progressEvent) {
+            input.onProgress?.(progressEvent)
+          }
+        })
       })
 
       child.on('close', (code, signal) => {
+        if (stderrBuffer.trim().length > 0) {
+          const progressEvent = extractCodexStatusEventFromStderrLine(stderrBuffer)
+          if (progressEvent) {
+            input.onProgress?.(progressEvent)
+          }
+        }
+
         if (stdoutBuffer.trim().length > 0) {
           const parsed = tryParseJsonLine(stdoutBuffer)
           if (parsed.ok) {
@@ -162,23 +204,14 @@ export async function executeCodexPrompt(
         }
 
         if (code !== 0) {
-          const detail = lastEventError ?? tailText(stderr)
           reject(
-            new VaultCliError(
-              'ASSISTANT_CODEX_FAILED',
-              buildCodexFailureMessage({
-                code,
-                signal,
-                stderr,
-                fallback: detail,
-                sessionId: discoveredSessionId,
-              }),
-              {
-                providerSessionId: discoveredSessionId,
-                recoverableConnectionLoss:
-                  detail !== null && isConnectionLossMessage(detail),
-              },
-            ),
+            buildCodexFailure({
+              code,
+              signal,
+              stderr,
+              fallback: lastEventError,
+              providerSessionId: discoveredSessionId,
+            }),
           )
           return
         }
@@ -193,6 +226,7 @@ export async function executeCodexPrompt(
         assistantStreams,
         assistantStreamOrder,
       }) ??
+      lastAgentMessage ??
       nonJsonStdoutLines.join('\n').trim()
 
     return {
@@ -405,6 +439,200 @@ function tryParseJsonLine(
     return {
       ok: false,
     }
+  }
+}
+
+function extractCodexProgressEvent(event: unknown): CodexProgressEvent | null {
+  const record = asRecord(event)
+  if (!record) {
+    return null
+  }
+
+  const eventType = normalizeIdentifier(
+    typeof record.type === 'string' ? record.type : null,
+  )
+  if (!eventType) {
+    return null
+  }
+
+  const errorText = normalizeStatusText(extractCodexErrorMessage(record))
+  if (errorText) {
+    return {
+      id: 'codex-status',
+      kind: 'status',
+      rawEvent: event,
+      state: 'completed',
+      text: errorText,
+    }
+  }
+
+  const item = extractCodexEventItem(record)
+  const itemId = extractCodexItemId(record, item)
+  const itemType = normalizeIdentifier(
+    typeof item?.type === 'string'
+      ? item.type
+      : typeof record.item_type === 'string'
+        ? record.item_type
+        : typeof record.itemType === 'string'
+          ? record.itemType
+          : null,
+  )
+  if (!itemType || (eventType !== 'item.started' && eventType !== 'item.completed')) {
+    return null
+  }
+
+  const state = eventType === 'item.started' ? 'running' : 'completed'
+
+  if (itemType === 'reasoning') {
+    return {
+      id: itemId,
+      kind: 'reasoning',
+      rawEvent: event,
+      state,
+      text:
+        extractReasoningTextFromItem(item) ??
+        (state === 'running' ? 'Thinking…' : 'Thought through the next step.'),
+    }
+  }
+
+  if (itemType === 'command.execution') {
+    const command = extractCommandLikeLabel(item)
+    if (!command) {
+      return null
+    }
+
+    return {
+      id: itemId,
+      kind: 'command',
+      rawEvent: event,
+      state,
+      text: `$ ${command}`,
+    }
+  }
+
+  if (itemType === 'mcp.tool.call' || itemType === 'tool.call') {
+    const server = normalizeStatusText(
+      findDeepStringByKeys(item, ['server', 'server_name', 'serverName']) ?? null,
+    )
+    const tool = normalizeStatusText(
+      findDeepStringByKeys(item, ['tool', 'tool_name', 'toolName', 'name']) ?? null,
+    )
+
+    return {
+      id: itemId,
+      kind: 'tool',
+      rawEvent: event,
+      state,
+      text:
+        tool && server && server !== tool
+          ? `Tool ${server}.${tool}`
+          : tool
+            ? `Tool ${tool}`
+            : server
+              ? `Tool ${server}`
+              : 'Used a tool.',
+    }
+  }
+
+  if (itemType === 'web.search') {
+    const query = normalizeStatusText(
+      findDeepStringByKeys(item, ['query', 'search_query', 'searchQuery']) ?? null,
+    )
+
+    return {
+      id: itemId,
+      kind: 'search',
+      rawEvent: event,
+      state,
+      text: query ? `Web: ${query}` : 'Ran a web search.',
+    }
+  }
+
+  if (itemType === 'file.change') {
+    const paths = collectFilePaths(item)
+    const text =
+      paths.length === 0
+        ? 'Updated files.'
+        : paths.length === 1
+          ? `Changed ${paths[0]}`
+          : `Changed files: ${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ', …' : ''}`
+
+    return {
+      id: itemId,
+      kind: 'file',
+      rawEvent: event,
+      state,
+      text,
+    }
+  }
+
+  if (itemType === 'plan') {
+    const planText = normalizeStreamingText(
+      findDeepStringByKeys(item, ['explanation', 'summary', 'message', 'text']) ??
+        findDeepStringByKeys(record, ['explanation', 'summary', 'plan']) ??
+        null,
+    )
+
+    return {
+      id: itemId,
+      kind: 'plan',
+      rawEvent: event,
+      state,
+      text: planText ? `Plan:\n${planText}` : 'Updated the plan.',
+    }
+  }
+
+  if (itemType === 'agent.message' || itemType === 'assistant.message') {
+    const assistantText = extractAssistantTextFromItem(item)
+    if (!assistantText) {
+      return null
+    }
+
+    return {
+      id: itemId,
+      kind: 'message',
+      rawEvent: event,
+      state,
+      text: assistantText,
+    }
+  }
+
+  const statusText = summarizeCodexStatusItem({
+    eventType,
+    item,
+    itemId,
+    itemType,
+  })
+  if (!statusText) {
+    return null
+  }
+
+  return {
+    id: itemId ?? `status:${itemType}`,
+    kind: 'status',
+    rawEvent: event,
+    state,
+    text: statusText,
+  }
+}
+
+function extractCodexStatusEventFromStderrLine(
+  line: string,
+): CodexProgressEvent | null {
+  const text = normalizeStatusText(line)
+  if (!text || !isCodexConnectionLossText(text)) {
+    return null
+  }
+
+  return {
+    id: 'codex-connection-status',
+    kind: 'status',
+    rawEvent: {
+      type: 'stderr',
+      line: text,
+    },
+    state: /\bre-connecting\b|\bretrying\b/iu.test(text) ? 'running' : 'completed',
+    text,
   }
 }
 
@@ -1080,6 +1308,74 @@ function findDeepStringByKeys(
   return null
 }
 
+function buildCodexFailure(input: {
+  code: number | null
+  fallback: string | null
+  providerSessionId: string | null
+  signal: NodeJS.Signals | null
+  stderr: string
+}): VaultCliError {
+  const detail =
+    normalizeStatusText(input.fallback ?? tailText(input.stderr)) ??
+    input.fallback ??
+    tailText(input.stderr)
+  const connectionLost = isCodexConnectionLossText(
+    [detail, input.stderr].filter((value): value is string => Boolean(value)).join('\n'),
+  )
+
+  return new VaultCliError(
+    connectionLost
+      ? 'ASSISTANT_CODEX_CONNECTION_LOST'
+      : 'ASSISTANT_CODEX_FAILED',
+    connectionLost
+      ? buildCodexConnectionFailureMessage({
+          ...input,
+          fallback: detail,
+        })
+      : buildCodexFailureMessage({
+          ...input,
+          fallback: detail,
+          sessionId: input.providerSessionId,
+        }),
+    {
+      connectionLost,
+      providerSessionId: connectionLost ? input.providerSessionId : null,
+      recoverableConnectionLoss: connectionLost,
+      retryable: connectionLost,
+    },
+  )
+}
+
+function buildCodexConnectionFailureMessage(input: {
+  code: number | null
+  fallback: string | null
+  providerSessionId: string | null
+  signal: NodeJS.Signals | null
+  stderr: string
+}): string {
+  const parts = ['Codex CLI lost its connection while waiting for the model.']
+
+  if (typeof input.code === 'number') {
+    parts.push(`exit code ${input.code}.`)
+  }
+
+  if (input.signal) {
+    parts.push(`signal ${input.signal}.`)
+  }
+
+  if (input.fallback) {
+    parts.push(input.fallback)
+  }
+
+  parts.push(
+    input.providerSessionId
+      ? 'Healthy Bob preserved the provider session and will try to resume it automatically on the next turn once connectivity returns.'
+      : 'Restore connectivity, then retry the request.',
+  )
+
+  return parts.join(' ')
+}
+
 function buildCodexFailureMessage(input: {
   code: number | null
   fallback: string | null
@@ -1092,7 +1388,7 @@ function buildCodexFailureMessage(input: {
     input.fallback ??
     tailText(input.stderr)
   const recoverableConnectionLoss =
-    detail !== null && isConnectionLossMessage(detail)
+    detail !== null && isCodexConnectionLossText(detail)
 
   if (recoverableConnectionLoss) {
     const parts = ['Codex CLI lost the provider stream before the turn finished.']
@@ -1146,15 +1442,28 @@ function isRetryableConnectionStatus(message: string): boolean {
   )
 }
 
-function isConnectionLossMessage(message: string): boolean {
+function isCodexConnectionLossText(message: string): boolean {
   const normalized = message.toLowerCase()
   return (
     normalized.includes('stream disconnected') ||
     normalized.includes('stream closed before response.completed') ||
     normalized.includes('lost the provider stream') ||
+    normalized.includes('network error while contacting openai') ||
+    normalized.includes('connection closed prematurely') ||
     normalized.includes('connection reset') ||
+    normalized.includes('connection lost') ||
+    normalized.includes('connection closed') ||
     normalized.includes('socket hang up') ||
     normalized.includes('econnreset') ||
+    normalized.includes('econnrefused') ||
+    normalized.includes('etimedout') ||
+    normalized.includes('enotfound') ||
+    normalized.includes('eai_again') ||
+    normalized.includes('fetch failed') ||
+    normalized.includes('exceeded retry limit') ||
+    normalized.includes('retry limit') ||
+    normalized.includes('re-connecting') ||
+    normalized.includes('retrying') ||
     normalized.includes('timed out') ||
     normalized.includes('timeout')
   )
