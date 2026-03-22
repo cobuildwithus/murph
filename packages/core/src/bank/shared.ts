@@ -1,10 +1,7 @@
 import path from "node:path";
 
 import { VaultError } from "../errors.js";
-import { parseFrontmatterDocument } from "../frontmatter.js";
-import { readUtf8File, walkVaultFiles } from "../fs.js";
 import { sanitizePathSegment } from "../path-safety.js";
-import { resolveRecordByIdOrSlug } from "../registry/id-or-slug.js";
 import { toDateOnly } from "../time.js";
 
 import {
@@ -20,12 +17,6 @@ import {
 } from "../history/shared.js";
 
 import type { DateInput, FrontmatterObject } from "../types.js";
-
-export interface RegistryRecordBase {
-  slug: string;
-  relativePath: string;
-  markdown: string;
-}
 
 export function stripUndefined<TRecord>(record: TRecord): TRecord {
   return Object.fromEntries(
@@ -110,63 +101,6 @@ export function optionalFiniteNumber(
   }
 
   return value;
-}
-
-export async function loadMarkdownRegistry<TRecord>(
-  vaultRoot: string,
-  relativeDirectory: string,
-  parseRecord: (attributes: FrontmatterObject, relativePath: string, markdown: string) => TRecord,
-  sortRecords: (left: TRecord, right: TRecord) => number,
-): Promise<TRecord[]> {
-  const relativePaths = await walkVaultFiles(vaultRoot, relativeDirectory, { extension: ".md" });
-  const records: TRecord[] = [];
-
-  for (const relativePath of relativePaths) {
-    const markdown = await readUtf8File(vaultRoot, relativePath);
-    const document = parseFrontmatterDocument(markdown);
-    records.push(parseRecord(document.attributes, relativePath, markdown));
-  }
-
-  records.sort(sortRecords);
-
-  return records;
-}
-
-export function selectRecordByIdOrSlug<TRecord extends RegistryRecordBase>(
-  records: TRecord[],
-  idValue: string | undefined,
-  slug: string | undefined,
-  getId: (record: TRecord) => string,
-  entityLabel: string,
-  conflictCode: string,
-): TRecord | null {
-  const selection = resolveRecordByIdOrSlug({
-    records,
-    recordId: idValue,
-    slug,
-    getRecordId: getId,
-    detectConflict: true,
-  });
-
-  if (selection.hasConflict) {
-    throw new VaultError(conflictCode, `${entityLabel} id and slug resolve to different records.`);
-  }
-
-  return selection.match;
-}
-
-export function findRecordByIdOrSlug<TRecord extends RegistryRecordBase>(
-  records: TRecord[],
-  idValue: string | undefined,
-  slug: string | undefined,
-  getId: (record: TRecord) => string,
-): TRecord | null {
-  return resolveRecordByIdOrSlug({
-    records,
-    recordId: idValue,
-    slug,
-    getRecordId: getId,
-  }).match;
 }
 
 export function requireMatchingDocType(

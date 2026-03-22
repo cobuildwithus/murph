@@ -1,6 +1,10 @@
 import { VaultError } from "../errors.js";
-import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { generateRecordId } from "../ids.js";
+import {
+  loadMarkdownRegistryDocuments,
+  resolveMarkdownRegistryUpsertTarget,
+  writeMarkdownRegistryRecord,
+} from "../registry/markdown.js";
 
 import {
   REGIMEN_DOC_TYPE,
@@ -14,7 +18,6 @@ import {
   detailList,
   groupFromRegimenPath,
   listSection,
-  loadMarkdownRegistry,
   normalizeGroupPath,
   normalizeRecordIdList,
   normalizeSelectorSlug,
@@ -30,9 +33,7 @@ import {
   section,
   stripUndefined,
   normalizeId,
-  normalizeSlug,
 } from "./shared.js";
-import { writeBankRecordWithAudit } from "./write-audit.js";
 
 import type { FrontmatterObject } from "../types.js";
 import type {
@@ -150,15 +151,23 @@ function validateRegimenTiming(record: RegimenItemRecord): RegimenItemRecord {
 }
 
 async function loadRegimenItems(vaultRoot: string): Promise<RegimenItemRecord[]> {
-  return loadMarkdownRegistry(
+  const records = await loadMarkdownRegistryDocuments({
     vaultRoot,
-    REGIMENS_DIRECTORY,
-    parseRegimenItemRecord,
+    directory: REGIMENS_DIRECTORY,
+    recordFromParts: parseRegimenItemRecord,
+    isExpectedRecord: (record) =>
+      record.docType === REGIMEN_DOC_TYPE && record.schemaVersion === REGIMEN_SCHEMA_VERSION,
+    invalidCode: "VAULT_INVALID_REGIMEN",
+    invalidMessage: "Regimen registry document has an unexpected shape.",
+  });
+
+  records.sort(
     (left, right) =>
       left.group.localeCompare(right.group) ||
       left.title.localeCompare(right.title) ||
       left.regimenId.localeCompare(right.regimenId),
   );
+  return records;
 }
 
 function selectRegimenRecord(
@@ -228,84 +237,86 @@ export async function upsertRegimenItem(
   const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "regimen") : undefined;
   const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const slug = existingRecord?.slug ?? requestedSlug ?? normalizeSlug(undefined, "slug", title);
   const kind = resolveRequiredUpsertValue(input.kind, existingRecord?.kind, "medication", (value) =>
     optionalEnum(value, REGIMEN_KINDS, "kind") ?? "medication",
   );
-  const regimenId = existingRecord?.regimenId ?? normalizedRegimenId ?? generateRecordId("reg");
   const group = existingRecord?.group ?? requestedGroup ?? normalizeGroupPath(undefined, kind);
-  const record = validateRegimenTiming(
-    stripUndefined({
-      schemaVersion: REGIMEN_SCHEMA_VERSION,
-      docType: REGIMEN_DOC_TYPE,
-      regimenId,
-      slug: existingRecord?.slug ?? slug,
-      title,
-      kind,
-      status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
-        optionalEnum(value, REGIMEN_STATUSES, "status") ?? "active",
-      ),
-      startedOn:
-        optionalDateOnly(input.startedOn ?? existingRecord?.startedOn ?? new Date(), "startedOn") ?? "",
-      stoppedOn: resolveOptionalUpsertValue(input.stoppedOn, existingRecord?.stoppedOn, (value) =>
-        optionalDateOnly(value, "stoppedOn"),
-      ),
-      substance: resolveOptionalUpsertValue(input.substance, existingRecord?.substance, (value) =>
-        optionalString(value, "substance", 160),
-      ),
-      dose: resolveOptionalUpsertValue(input.dose, existingRecord?.dose, (value) =>
-        optionalFiniteNumber(value, "dose", 0),
-      ),
-      unit: resolveOptionalUpsertValue(input.unit, existingRecord?.unit, (value) =>
-        optionalString(value, "unit", 40),
-      ),
-      schedule: resolveOptionalUpsertValue(input.schedule, existingRecord?.schedule, (value) =>
-        optionalString(value, "schedule", 160),
-      ),
-      relatedGoalIds: resolveOptionalUpsertValue(
-        input.relatedGoalIds,
-        existingRecord?.relatedGoalIds,
-        (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
-      ),
-      relatedConditionIds: resolveOptionalUpsertValue(
-        input.relatedConditionIds,
-        existingRecord?.relatedConditionIds,
-        (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
-      ),
-      group,
-      relativePath: existingRecord?.relativePath ?? `${REGIMENS_DIRECTORY}/${group}/${slug}.md`,
-    }) as RegimenItemRecord,
-  );
-  const markdown = stringifyFrontmatterDocument({
-    attributes: buildAttributes(record),
-    body: buildBody(record),
+  const target = resolveMarkdownRegistryUpsertTarget({
+    existingRecord,
+    recordId: normalizedRegimenId,
+    requestedSlug,
+    defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
+    directory: `${REGIMENS_DIRECTORY}/${group}`,
+    getRecordId: (record) => record.regimenId,
+    createRecordId: () => generateRecordId("reg"),
   });
-
-  const auditPath = await writeBankRecordWithAudit({
+  const attributes = buildAttributes(
+    validateRegimenTiming(
+      stripUndefined({
+        schemaVersion: REGIMEN_SCHEMA_VERSION,
+        docType: REGIMEN_DOC_TYPE,
+        regimenId: target.recordId,
+        slug: target.slug,
+        title,
+        kind,
+        status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
+          optionalEnum(value, REGIMEN_STATUSES, "status") ?? "active",
+        ),
+        startedOn:
+          optionalDateOnly(input.startedOn ?? existingRecord?.startedOn ?? new Date(), "startedOn") ?? "",
+        stoppedOn: resolveOptionalUpsertValue(input.stoppedOn, existingRecord?.stoppedOn, (value) =>
+          optionalDateOnly(value, "stoppedOn"),
+        ),
+        substance: resolveOptionalUpsertValue(input.substance, existingRecord?.substance, (value) =>
+          optionalString(value, "substance", 160),
+        ),
+        dose: resolveOptionalUpsertValue(input.dose, existingRecord?.dose, (value) =>
+          optionalFiniteNumber(value, "dose", 0),
+        ),
+        unit: resolveOptionalUpsertValue(input.unit, existingRecord?.unit, (value) =>
+          optionalString(value, "unit", 40),
+        ),
+        schedule: resolveOptionalUpsertValue(input.schedule, existingRecord?.schedule, (value) =>
+          optionalString(value, "schedule", 160),
+        ),
+        relatedGoalIds: resolveOptionalUpsertValue(
+          input.relatedGoalIds,
+          existingRecord?.relatedGoalIds,
+          (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+        ),
+        relatedConditionIds: resolveOptionalUpsertValue(
+          input.relatedConditionIds,
+          existingRecord?.relatedConditionIds,
+          (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
+        ),
+      }) as RegimenItemRecord,
+    ),
+  );
+  const { auditPath, record } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
+    target,
+    attributes,
+    body: buildBody({
+      ...attributes,
+      group,
+      relativePath: target.relativePath,
+      markdown: existingRecord?.markdown ?? "",
+    } as RegimenItemRecord),
+    recordFromParts: parseRegimenItemRecord,
     operationType: "regimen_upsert",
-    batchSummary: `Upsert regimen ${record.regimenId}`,
-    relativePath: record.relativePath,
-    markdown,
-    auditAction: "regimen_upsert",
-    auditCommandName: "core.upsertRegimenItem",
-    auditSummary: `Upserted regimen ${record.regimenId}.`,
-    auditTargetIds: [record.regimenId],
-    auditChanges: [
-      {
-        path: record.relativePath,
-        op: existingRecord ? "update" : "create",
-      },
-    ],
+    summary: `Upsert regimen ${target.recordId}`,
+    audit: {
+      action: "regimen_upsert",
+      commandName: "core.upsertRegimenItem",
+      summary: `Upserted regimen ${target.recordId}.`,
+      targetIds: [target.recordId],
+    },
   });
 
   return {
-    created: !existingRecord,
+    created: target.created,
     auditPath,
-    record: {
-      ...record,
-      markdown,
-    },
+    record,
   };
 }
 
@@ -327,34 +338,29 @@ export async function stopRegimenItem(
     status: "stopped",
     stoppedOn,
   });
-  const markdown = stringifyFrontmatterDocument({
+  const { auditPath, record } = await writeMarkdownRegistryRecord({
+    vaultRoot: input.vaultRoot,
+    target: {
+      recordId: updatedRecord.regimenId,
+      slug: updatedRecord.slug,
+      relativePath: updatedRecord.relativePath,
+      created: false,
+    },
     attributes: buildAttributes(updatedRecord),
     body: buildBody(updatedRecord),
-  });
-
-  const auditPath = await writeBankRecordWithAudit({
-    vaultRoot: input.vaultRoot,
+    recordFromParts: parseRegimenItemRecord,
     operationType: "regimen_stop",
-    batchSummary: `Stop regimen ${updatedRecord.regimenId}`,
-    relativePath: updatedRecord.relativePath,
-    markdown,
-    auditAction: "regimen_stop",
-    auditCommandName: "core.stopRegimenItem",
-    auditSummary: `Stopped regimen ${updatedRecord.regimenId}.`,
-    auditTargetIds: [updatedRecord.regimenId],
-    auditChanges: [
-      {
-        path: updatedRecord.relativePath,
-        op: "update",
-      },
-    ],
+    summary: `Stop regimen ${updatedRecord.regimenId}`,
+    audit: {
+      action: "regimen_stop",
+      commandName: "core.stopRegimenItem",
+      summary: `Stopped regimen ${updatedRecord.regimenId}.`,
+      targetIds: [updatedRecord.regimenId],
+    },
   });
 
   return {
     auditPath,
-    record: {
-      ...updatedRecord,
-      markdown,
-    },
+    record,
   };
 }
