@@ -5,6 +5,7 @@ import { Box, Text, render, useApp, useInput, type Key } from 'ink'
 import {
   assistantChatResultSchema,
 } from '../../assistant-cli-contracts.js'
+import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
 import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
@@ -20,6 +21,10 @@ import {
   type AssistantChatInput,
 } from '../service.js'
 import {
+  extractRecoveredAssistantSession,
+  isAssistantProviderConnectionLostError,
+} from '../provider-turn-recovery.js'
+import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
@@ -34,6 +39,7 @@ import {
   CHAT_REASONING_OPTIONS,
   CHAT_SLASH_COMMANDS,
   CHAT_STARTER_SUGGESTIONS,
+  applyProviderProgressEventToEntries,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatBusyStatus,
@@ -42,6 +48,7 @@ import {
   getMatchingSlashCommands,
   resolveChatMetadataBadges,
   resolveChatSubmitAction,
+  shouldShowChatComposerGuidance,
   shouldClearComposerForSubmitAction,
   type ChatMetadataBadge,
   type InkChatEntry,
@@ -107,6 +114,7 @@ interface ChatStatusProps {
 }
 
 interface ChatComposerProps {
+  entryCount: number
   modelSwitcherActive: boolean
   onSubmit: (value: string) => ComposerSubmitDisposition
 }
@@ -198,17 +206,29 @@ const BusySpinner = React.memo(function BusySpinner(): React.ReactElement {
   )
 })
 
+export function resolveMessageRoleLabel(
+  kind: InkChatEntry['kind'],
+): string | null {
+  if (kind === 'assistant') {
+    return 'healthy bob'
+  }
+
+  if (kind === 'error') {
+    return 'error'
+  }
+
+  return null
+}
+
 const MessageRoleLabel = React.memo(function MessageRoleLabel(input: {
   kind: InkChatEntry['kind']
-}): React.ReactElement {
+}): React.ReactElement | null {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
-  const label =
-    input.kind === 'assistant'
-      ? 'healthy bob'
-      : input.kind === 'error'
-        ? 'error'
-        : 'you'
+  const label = resolveMessageRoleLabel(input.kind)
+  if (!label) {
+    return null
+  }
   const color =
     input.kind === 'assistant'
       ? theme.assistantLabelColor
@@ -793,6 +813,25 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
     )
   }
 
+  if (props.entry.kind === 'trace') {
+    return createElement(
+      Box,
+      {
+        marginBottom: 1,
+        paddingLeft: 2,
+        width: '100%',
+      },
+      createElement(
+        Text,
+        {
+          dimColor: true,
+          wrap: 'wrap',
+        },
+        `${props.entry.pending ? '· ' : '  '}${props.entry.text}`,
+      ),
+    )
+  }
+
   if (props.entry.kind === 'thinking' || props.entry.kind === 'status') {
     return createElement(
       Box,
@@ -1014,8 +1053,11 @@ const ChatComposer = React.memo(function ChatComposer(
   const slashSuggestions = props.modelSwitcherActive
     ? []
     : getMatchingSlashCommands(value)
+  const showComposerGuidance = shouldShowChatComposerGuidance(props.entryCount)
   const showStarterSuggestions =
-    !props.modelSwitcherActive && value.trim().length === 0
+    showComposerGuidance &&
+    !props.modelSwitcherActive &&
+    value.trim().length === 0
 
   return createElement(
     React.Fragment,
@@ -1049,20 +1091,22 @@ const ChatComposer = React.memo(function ChatComposer(
           onSubmit: props.onSubmit,
         }),
       ),
-      createElement(
-        Box,
-        {
-          marginTop: 1,
-        },
-        createElement(
-          Text,
-          {
-            color: theme.mutedColor,
-            wrap: 'wrap',
-          },
-          CHAT_COMPOSER_HINT,
-        ),
-      ),
+      showComposerGuidance
+        ? createElement(
+            Box,
+            {
+              marginTop: 1,
+            },
+            createElement(
+              Text,
+              {
+                color: theme.mutedColor,
+                wrap: 'wrap',
+              },
+              CHAT_COMPOSER_HINT,
+            ),
+          )
+        : null,
       showStarterSuggestions
         ? createElement(
             Box,
@@ -1969,34 +2013,13 @@ function namespaceTurnTraceUpdates(
   }))
 }
 
-function extractRecoverableTraceErrorContext(error: unknown): {
-  providerSessionId: string | null
-  recoverableConnectionLoss: boolean
-} {
-  if (!error || typeof error !== 'object' || !('context' in error)) {
-    return {
-      providerSessionId: null,
-      recoverableConnectionLoss: false,
-    }
-  }
-
-  const context = (error as { context?: unknown }).context
-  if (!context || typeof context !== 'object') {
-    return {
-      providerSessionId: null,
-      recoverableConnectionLoss: false,
-    }
-  }
-
-  const providerSessionId =
-    typeof (context as { providerSessionId?: unknown }).providerSessionId === 'string'
-      ? ((context as { providerSessionId: string }).providerSessionId.trim() || null)
-      : null
-
+function namespaceProviderProgressEvent(
+  event: AssistantProviderProgressEvent,
+  turnTracePrefix: string,
+): AssistantProviderProgressEvent {
   return {
-    providerSessionId,
-    recoverableConnectionLoss:
-      (context as { recoverableConnectionLoss?: unknown }).recoverableConnectionLoss === true,
+    ...event,
+    id: event.id ? `${turnTracePrefix}:${event.id}` : `${turnTracePrefix}:trace`,
   }
 }
 
@@ -2310,6 +2333,14 @@ export async function runAssistantChatWithInk(
             const result = await sendAssistantMessage({
               ...input,
               model: activeModel,
+              onProviderEvent: (event) => {
+                setEntries((previous: InkChatEntry[]) =>
+                  applyProviderProgressEventToEntries({
+                    entries: previous,
+                    event: namespaceProviderProgressEvent(event, turnTracePrefix),
+                  }),
+                )
+              },
               onTraceEvent: handleTraceEvent,
               prompt: action.prompt,
               reasoningEffort: activeReasoningEffort,
@@ -2352,8 +2383,14 @@ export async function runAssistantChatWithInk(
                   : null,
             )
           } catch (error) {
+            const recoveredSession = extractRecoveredAssistantSession(error)
+            if (recoveredSession) {
+              latestSessionRef.current = recoveredSession
+              setSession(recoveredSession)
+            }
+
             const errorText = error instanceof Error ? error.message : String(error)
-            const traceErrorContext = extractRecoverableTraceErrorContext(error)
+            const connectionLost = isAssistantProviderConnectionLostError(error)
             setEntries((previous: InkChatEntry[]) => [
               ...previous,
               {
@@ -2362,10 +2399,10 @@ export async function runAssistantChatWithInk(
               },
             ])
             setStatus(
-              traceErrorContext.recoverableConnectionLoss && traceErrorContext.providerSessionId
+              connectionLost
                 ? {
                     kind: 'error',
-                    text: `Connection lost before the turn finished. Session ${traceErrorContext.providerSessionId} was preserved, so your next message will resume it.`,
+                    text: 'The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.',
                   }
                 : {
                     kind: 'error',
@@ -2454,6 +2491,7 @@ export async function runAssistantChatWithInk(
                 })
               : null,
             createElement(ChatComposer, {
+              entryCount: entries.length,
               modelSwitcherActive: modelSwitcherState !== null,
               onSubmit: submitPrompt,
             }),

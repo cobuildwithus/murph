@@ -4,9 +4,34 @@ import type {
 } from '../../assistant-cli-contracts.js'
 import { normalizeNullableString } from '../shared.js'
 
-export interface InkChatEntry {
-  kind: 'assistant' | 'error' | 'status' | 'thinking' | 'user'
-  streamKey?: string | null
+export type InkChatTraceKind =
+  | 'command'
+  | 'file'
+  | 'plan'
+  | 'reasoning'
+  | 'search'
+  | 'status'
+  | 'tool'
+
+export type InkChatEntry =
+  | {
+      kind: 'assistant' | 'error' | 'status' | 'thinking' | 'user'
+      streamKey?: string | null
+      text: string
+    }
+  | {
+      kind: 'trace'
+      pending: boolean
+      text: string
+      traceId: string | null
+      traceKind: InkChatTraceKind
+    }
+
+interface InkChatProgressEvent {
+  id: string | null
+  kind: InkChatTraceKind | 'message'
+  rawEvent?: unknown
+  state: 'completed' | 'running'
   text: string
 }
 
@@ -64,10 +89,14 @@ export const CHAT_COMPOSER_HINT =
   'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit'
 
 export const CHAT_STARTER_SUGGESTIONS = [
-  'Summarize the current codebase',
-  'Continue the last session',
-  'Find likely issues in this area',
+  'Summarize my recent sleep, activity, and recovery',
+  'Review patterns in my meals and workouts',
+  'Find gaps or anomalies in my recent health data',
 ] as const
+
+export function shouldShowChatComposerGuidance(entryCount: number): boolean {
+  return entryCount === 0
+}
 
 export const CHAT_MODEL_OPTIONS: readonly AssistantModelOption[] = [
   {
@@ -135,6 +164,67 @@ export function seedChatEntries(
   }))
 }
 
+export function applyProviderProgressEventToEntries(input: {
+  entries: readonly InkChatEntry[]
+  event: InkChatProgressEvent
+}): InkChatEntry[] {
+  const traceKind = resolveInkTraceKind(input.event.kind)
+  const text = input.event.text.trim()
+  if (!traceKind || text.length === 0) {
+    return [...input.entries]
+  }
+
+  const nextEntry: InkChatEntry = {
+    kind: 'trace',
+    pending: input.event.state === 'running',
+    text,
+    traceId: input.event.id,
+    traceKind,
+  }
+
+  if (input.event.id) {
+    const existingIndex = [...input.entries]
+      .map((entry, index) => ({ entry, index }))
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.entry.kind === 'trace' &&
+          candidate.entry.traceId === input.event.id,
+      )?.index
+
+    if (typeof existingIndex === 'number') {
+      const existingEntry = input.entries[existingIndex]
+      if (
+        existingEntry &&
+        existingEntry.kind === 'trace' &&
+        existingEntry.pending === nextEntry.pending &&
+        existingEntry.text === nextEntry.text &&
+        existingEntry.traceKind === nextEntry.traceKind
+      ) {
+        return [...input.entries]
+      }
+
+      return input.entries.map((entry, index) =>
+        index === existingIndex ? nextEntry : entry,
+      )
+    }
+  }
+
+  const previousEntry = input.entries[input.entries.length - 1]
+  if (
+    previousEntry &&
+    previousEntry.kind === 'trace' &&
+    previousEntry.traceId === nextEntry.traceId &&
+    previousEntry.pending === nextEntry.pending &&
+    previousEntry.text === nextEntry.text &&
+    previousEntry.traceKind === nextEntry.traceKind
+  ) {
+    return [...input.entries]
+  }
+
+  return [...input.entries, nextEntry]
+}
+
 export function applyInkChatTraceUpdates(
   entries: readonly InkChatEntry[],
   updates: readonly InkChatTraceUpdate[],
@@ -190,6 +280,23 @@ export function applyInkChatTraceUpdates(
   }
 
   return nextEntries
+}
+
+function resolveInkTraceKind(
+  kind: InkChatProgressEvent['kind'],
+): InkChatTraceKind | null {
+  switch (kind) {
+    case 'command':
+    case 'file':
+    case 'plan':
+    case 'reasoning':
+    case 'search':
+    case 'status':
+    case 'tool':
+      return kind
+    default:
+      return null
+  }
 }
 
 export function findAssistantModelOptionIndex(model: string | null): number {
@@ -336,11 +443,16 @@ export function formatSessionBinding(session: AssistantSession): string | null {
 function findInkChatEntryIndexByStreamKey(
   entries: readonly InkChatEntry[],
   streamKey: string,
-  kind: InkChatEntry['kind'],
+  kind: InkChatTraceUpdate['kind'],
 ): number {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]
-    if (entry?.streamKey === streamKey && entry.kind === kind) {
+    if (
+      entry &&
+      entry.kind !== 'trace' &&
+      entry.streamKey === streamKey &&
+      entry.kind === kind
+    ) {
       return index
     }
   }

@@ -7,8 +7,10 @@ import * as React from 'react'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
   listAssistantTranscriptEntries,
+  resolveAssistantSession,
   resolveAssistantStatePaths,
 } from '../src/assistant-state.js'
+import { VaultCliError } from '../src/vault-cli-errors.js'
 import {
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
@@ -66,6 +68,7 @@ import {
   CHAT_SLASH_COMMANDS,
   CHAT_STARTER_SUGGESTIONS,
   applyInkChatTraceUpdates,
+  applyProviderProgressEventToEntries,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatBusyStatus,
@@ -76,6 +79,7 @@ import {
   resolveChatMetadataBadges,
   resolveChatSubmitAction,
   seedChatEntries,
+  shouldShowChatComposerGuidance,
   shouldClearComposerForSubmitAction,
 } from '../src/assistant/ui/view-model.js'
 import {
@@ -84,6 +88,7 @@ import {
   normalizeComposerInsertedText,
   renderChatTranscriptFeed,
   renderComposerValue,
+  resolveMessageRoleLabel,
   resolveAssistantHyperlinkTarget,
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
@@ -1584,6 +1589,163 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
   )
 })
 
+test('scanAssistantAutoReplyOnce defers reconnectable provider failures and preserves the resumable session without duplicating transcript turns', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-reconnect-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockRejectedValue(
+    new VaultCliError(
+      'ASSISTANT_CODEX_CONNECTION_LOST',
+      'Codex CLI lost its connection while waiting for the model.',
+      {
+        connectionLost: true,
+        providerSessionId: 'thread-retry-1',
+        retryable: true,
+      },
+    ),
+  )
+
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    primed: boolean
+  }> = []
+  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-retry',
+            source: 'telegram',
+            accountId: 'self',
+            externalId: 'ext-retry',
+            threadId: 'thread-retry',
+            threadTitle: 'Retry chat',
+            actorId: 'telegram:123',
+            actorName: 'Retry User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:10:00Z',
+            receivedAt: null,
+            text: 'Can you follow up?',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/retry.json',
+            eventId: 'evt-retry',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show() {
+      return {
+        capture: {
+          captureId: 'cap-retry',
+          source: 'telegram',
+          accountId: 'self',
+          externalId: 'ext-retry',
+          threadId: 'thread-retry',
+          threadTitle: 'Retry chat',
+          threadIsDirect: true,
+          actorId: 'telegram:123',
+          actorName: 'Retry User',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:10:00Z',
+          receivedAt: null,
+          text: 'Can you follow up?',
+          attachmentCount: 0,
+          envelopePath: 'raw/inbox/retry.json',
+          eventId: 'evt-retry',
+          createdAt: '2026-03-18T09:10:00Z',
+          promotions: [],
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const first = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  const second = await scanAssistantAutoReplyOnce({
+    afterCursor: stateProgress[0]?.cursor ?? null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(first, {
+    considered: 1,
+    failed: 0,
+    replied: 0,
+    skipped: 1,
+  })
+  assert.deepEqual(second, {
+    considered: 1,
+    failed: 0,
+    replied: 0,
+    skipped: 1,
+  })
+  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 0)
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.deepEqual(stateProgress[0], {
+    cursor: null,
+    primed: true,
+  })
+  assert.deepEqual(stateProgress[1], {
+    cursor: null,
+    primed: true,
+  })
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-skipped' &&
+        event.captureId === 'cap-retry' &&
+        event.details?.includes('Will retry this capture after the provider reconnects.'),
+    ),
+    true,
+  )
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    actorId: 'telegram:123',
+    threadId: 'thread-retry',
+    threadIsDirect: true,
+    provider: 'codex-cli',
+    model: null,
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    maxSessionAgeMs: null,
+  })
+
+  assert.equal(resolved.session.providerSessionId, 'thread-retry-1')
+  assert.equal(resolved.session.turnCount, 0)
+  assert.deepEqual(
+    await listAssistantTranscriptEntries(vaultRoot, resolved.session.sessionId),
+    [],
+  )
+})
+
 test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery and records the failure artifact', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-failure-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -2217,6 +2379,115 @@ test('assistant Ink view-model merges streaming trace updates by stream key', ()
   ])
 })
 
+test('assistant Ink view-model upserts provider progress rows and ignores final message events', () => {
+  const started = applyProviderProgressEventToEntries({
+    entries: [],
+    event: {
+      id: 'turn-1:reason-1',
+      kind: 'reasoning',
+      state: 'running',
+      text: 'Thinking…',
+      rawEvent: {
+        type: 'item.started',
+      },
+    },
+  })
+
+  assert.deepEqual(started, [
+    {
+      kind: 'trace',
+      pending: true,
+      text: 'Thinking…',
+      traceId: 'turn-1:reason-1',
+      traceKind: 'reasoning',
+    },
+  ])
+
+  const completed = applyProviderProgressEventToEntries({
+    entries: started,
+    event: {
+      id: 'turn-1:reason-1',
+      kind: 'reasoning',
+      state: 'completed',
+      text: 'Thought through the next step.',
+      rawEvent: {
+        type: 'item.completed',
+      },
+    },
+  })
+
+  assert.deepEqual(completed, [
+    {
+      kind: 'trace',
+      pending: false,
+      text: 'Thought through the next step.',
+      traceId: 'turn-1:reason-1',
+      traceKind: 'reasoning',
+    },
+  ])
+
+  assert.deepEqual(
+    applyProviderProgressEventToEntries({
+      entries: completed,
+      event: {
+        id: 'turn-1:msg-1',
+        kind: 'message',
+        state: 'completed',
+        text: 'final answer',
+        rawEvent: {
+          type: 'item.completed',
+        },
+      },
+    }),
+    completed,
+  )
+})
+
+test('assistant Ink view-model preserves prior progress rows when later turns use the same raw provider item ids', () => {
+  const firstTurn = applyProviderProgressEventToEntries({
+    entries: [],
+    event: {
+      id: 'turn-1:codex-connection-status',
+      kind: 'status',
+      state: 'running',
+      text: 'Re-connecting...',
+      rawEvent: {
+        type: 'stderr',
+      },
+    },
+  })
+
+  const secondTurn = applyProviderProgressEventToEntries({
+    entries: firstTurn,
+    event: {
+      id: 'turn-2:codex-connection-status',
+      kind: 'status',
+      state: 'completed',
+      text: 'Exceeded retry limit.',
+      rawEvent: {
+        type: 'stderr',
+      },
+    },
+  })
+
+  assert.deepEqual(secondTurn, [
+    {
+      kind: 'trace',
+      pending: true,
+      text: 'Re-connecting...',
+      traceId: 'turn-1:codex-connection-status',
+      traceKind: 'status',
+    },
+    {
+      kind: 'trace',
+      pending: false,
+      text: 'Exceeded retry limit.',
+      traceId: 'turn-2:codex-connection-status',
+      traceKind: 'status',
+    },
+  ])
+})
+
 test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
   const session = {
     schema: 'healthybob.assistant-session.v2',
@@ -2256,10 +2527,15 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit',
   )
   assert.deepEqual(CHAT_STARTER_SUGGESTIONS, [
-    'Summarize the current codebase',
-    'Continue the last session',
-    'Find likely issues in this area',
+    'Summarize my recent sleep, activity, and recovery',
+    'Review patterns in my meals and workouts',
+    'Find gaps or anomalies in my recent health data',
   ])
+  assert.equal(shouldShowChatComposerGuidance(0), true)
+  assert.equal(shouldShowChatComposerGuidance(1), false)
+  assert.equal(resolveMessageRoleLabel('assistant'), 'healthy bob')
+  assert.equal(resolveMessageRoleLabel('error'), 'error')
+  assert.equal(resolveMessageRoleLabel('user'), null)
   assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
   assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
   assert.equal(CHAT_SLASH_COMMANDS[0]?.command, '/model')
