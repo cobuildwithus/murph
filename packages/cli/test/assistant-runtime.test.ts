@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Box, type Key } from 'ink'
+import { Box, Static, type Key } from 'ink'
 import * as React from 'react'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
@@ -87,6 +87,7 @@ import {
   formatFooterBadgeText,
   formatAssistantTerminalHyperlink,
   normalizeComposerInsertedText,
+  partitionChatTranscriptEntries,
   renderChatTranscriptFeed,
   renderComposerValue,
   resolveMessageRoleLabel,
@@ -384,6 +385,62 @@ test('sendAssistantMessage reuses saved assistant model defaults and persists re
     assert.equal(result.session.providerOptions.model, 'gpt-5.4-mini')
     assert.equal(result.session.providerOptions.reasoningEffort, 'high')
   } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-openai-defaults-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+  const originalApiKey = process.env.OLLAMA_API_KEY
+  process.env.OLLAMA_API_KEY = 'secret-token'
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'defaults reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    await saveAssistantOperatorDefaultsPatch(
+      {
+        provider: 'openai-compatible',
+        model: 'gpt-oss:20b',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+      },
+      homeRoot,
+    )
+
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      prompt: 'reuse openai-compatible defaults',
+    })
+
+    const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    assert.equal(providerCall.provider, 'openai-compatible')
+    assert.equal(providerCall.model, 'gpt-oss:20b')
+    assert.equal(providerCall.baseUrl, 'http://127.0.0.1:11434/v1')
+    assert.equal(providerCall.apiKeyEnv, 'OLLAMA_API_KEY')
+    assert.equal(providerCall.providerName, 'ollama')
+    assert.equal(result.session.provider, 'openai-compatible')
+    assert.equal(result.session.providerOptions.model, 'gpt-oss:20b')
+    assert.equal(result.session.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
+    assert.equal(result.session.providerOptions.apiKeyEnv, 'OLLAMA_API_KEY')
+    assert.equal(result.session.providerOptions.providerName, 'ollama')
+  } finally {
+    restoreEnvironmentVariable('OLLAMA_API_KEY', originalApiKey)
     restoreEnvironmentVariable('HOME', originalHome)
   }
 })
@@ -3007,46 +3064,169 @@ test('assistant Ink composer render highlights the active character instead of i
   )
 })
 
-test('assistant Ink transcript feed stays in one dynamic width-aware container instead of static terminal rows', () => {
+test('assistant Ink transcript partition keeps completed turns static while the current busy turn stays live', () => {
+  const entries = [
+    {
+      kind: 'user' as const,
+      text: 'previous turn',
+    },
+    {
+      kind: 'assistant' as const,
+      text: 'previous reply',
+    },
+    {
+      kind: 'user' as const,
+      text: 'current turn',
+    },
+    {
+      kind: 'thinking' as const,
+      text: 'working on it',
+      streamKey: 'thinking:1',
+    },
+  ]
+
+  assert.deepEqual(
+    partitionChatTranscriptEntries({
+      busy: false,
+      entries,
+    }),
+    {
+      liveEntries: [],
+      staticEntries: entries,
+    },
+  )
+  assert.deepEqual(
+    partitionChatTranscriptEntries({
+      busy: true,
+      entries,
+    }),
+    {
+      liveEntries: entries.slice(3),
+      staticEntries: entries.slice(0, 3),
+    },
+  )
+})
+
+test('assistant Ink transcript partition keeps all rows live when no user turn has been committed yet', () => {
+  const entries = [
+    {
+      kind: 'thinking' as const,
+      text: 'warming up',
+      streamKey: 'thinking:1',
+    },
+    {
+      kind: 'assistant' as const,
+      text: 'partial reply',
+      streamKey: 'assistant:1',
+    },
+  ]
+
+  assert.deepEqual(
+    partitionChatTranscriptEntries({
+      busy: true,
+      entries,
+    }),
+    {
+      liveEntries: entries,
+      staticEntries: [],
+    },
+  )
+})
+
+test('assistant Ink transcript feed renders the header and committed rows via Ink Static output', () => {
   const rendered = renderChatTranscriptFeed({
     bindingSummary: 'imessage · assistant:primary · chat-123',
+    busy: true,
     entries: [
       {
         kind: 'user',
-        text: 'whats good legend',
+        text: 'previous turn',
       },
       {
         kind: 'assistant',
-        text: 'All good.',
+        text: 'previous reply',
+      },
+      {
+        kind: 'user',
+        text: 'current turn',
+      },
+      {
+        kind: 'assistant',
+        text: 'streaming now',
+        streamKey: 'assistant:live',
       },
     ],
     sessionId: 'asst_test_session',
   })
-  const renderedProps = rendered.props as {
+  const fragmentChildren = React.Children.toArray(
+    (rendered.props as { children?: React.ReactNode }).children,
+  )
+
+  assert.equal(rendered.type, React.Fragment)
+  assert.equal(fragmentChildren.length, 2)
+  assert.equal(React.isValidElement(fragmentChildren[0]), true)
+  assert.equal(React.isValidElement(fragmentChildren[1]), true)
+
+  if (
+    !React.isValidElement(fragmentChildren[0]) ||
+    !React.isValidElement(fragmentChildren[1])
+  ) {
+    throw new Error('Expected transcript feed children to be valid React elements.')
+  }
+
+  assert.equal(fragmentChildren[0].type, Static)
+  assert.equal(fragmentChildren[1].type, Box)
+
+  const staticProps = fragmentChildren[0].props as {
+    items?: unknown[]
+  }
+  const liveProps = fragmentChildren[1].props as {
     children?: React.ReactNode
     flexDirection?: string
     width?: string
   }
-  const children = React.Children.toArray(renderedProps.children)
+  const liveChildren = React.Children.toArray(liveProps.children)
 
-  assert.equal(rendered.type, Box)
-  assert.equal(renderedProps.flexDirection, 'column')
-  assert.equal(renderedProps.width, '100%')
-  assert.equal(children.length, 3)
+  assert.equal(staticProps.items?.length, 4)
+  assert.equal(liveProps.flexDirection, 'column')
+  assert.equal(liveProps.width, '100%')
+  assert.equal(liveChildren.length, 1)
 })
 
 test('assistant Ink transcript feed keeps the intro banner only for empty chats', () => {
   const rendered = renderChatTranscriptFeed({
     bindingSummary: null,
+    busy: false,
     entries: [],
     sessionId: 'asst_empty_session',
   })
-  const renderedProps = rendered.props as {
+  const fragmentChildren = React.Children.toArray(
+    (rendered.props as { children?: React.ReactNode }).children,
+  )
+
+  assert.equal(fragmentChildren.length, 2)
+  assert.equal(React.isValidElement(fragmentChildren[0]), true)
+  assert.equal(React.isValidElement(fragmentChildren[1]), true)
+
+  if (
+    !React.isValidElement(fragmentChildren[0]) ||
+    !React.isValidElement(fragmentChildren[1])
+  ) {
+    throw new Error('Expected transcript feed children to be valid React elements.')
+  }
+
+  const staticProps = fragmentChildren[0].props as {
+    items?: unknown[]
+  }
+  const liveProps = fragmentChildren[1].props as {
     children?: React.ReactNode
   }
-  const children = React.Children.toArray(renderedProps.children)
+  const liveChildren = React.Children.toArray(liveProps.children)
 
-  assert.equal(children.length, 2)
+  assert.equal(fragmentChildren[0].type, Static)
+  assert.equal(fragmentChildren[1].type, Box)
+  assert.equal(staticProps.items?.length, 1)
+  assert.equal(liveChildren.length, 1)
 })
 
 test('assistant Ink link helpers split markdown links and map absolute file paths to file URLs', () => {

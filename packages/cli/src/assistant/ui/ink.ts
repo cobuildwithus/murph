@@ -1,7 +1,16 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import * as React from 'react'
-import { Box, Text, render, useApp, useInput, type Key } from 'ink'
+import {
+  Box,
+  Static,
+  Text,
+  render,
+  useApp,
+  useInput,
+  type Key,
+  type StaticProps,
+} from 'ink'
 import {
   assistantChatResultSchema,
 } from '../../assistant-cli-contracts.js'
@@ -43,7 +52,6 @@ import {
   applyProviderProgressEventToEntries,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
-  formatBusyStatus,
   formatSessionBinding,
   applyInkChatTraceUpdates,
   getMatchingSlashCommands,
@@ -100,6 +108,23 @@ interface ChatHeaderProps {
 interface ChatEntryRowProps {
   entry: InkChatEntry
 }
+
+interface StaticTranscriptRowHeader {
+  kind: 'header'
+  bindingSummary: string | null
+  sessionId: string
+}
+
+interface StaticTranscriptRowEntry {
+  kind: 'entry'
+  entry: InkChatEntry
+}
+
+type StaticTranscriptRow = StaticTranscriptRowHeader | StaticTranscriptRowEntry
+
+const StaticTranscript = Static as React.ComponentType<
+  StaticProps<StaticTranscriptRow>
+>
 
 interface AssistantMessageTextProps {
   text: string
@@ -188,22 +213,13 @@ const ChromePanel = React.memo(function ChromePanel(
 const BusySpinner = React.memo(function BusySpinner(): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
-  const [frameIndex, setFrameIndex] = React.useState(0)
-
-  React.useEffect(() => {
-    const timer = setInterval(() => {
-      setFrameIndex((previous) => (previous + 1) % BUSY_SPINNER_FRAMES.length)
-    }, 80)
-
-    return () => clearInterval(timer)
-  }, [])
 
   return createElement(
     Text,
     {
       color: theme.accentColor,
     },
-    BUSY_SPINNER_FRAMES[frameIndex],
+    BUSY_SPINNER_FRAMES[0],
   )
 })
 
@@ -908,38 +924,121 @@ const AssistantMessageText = React.memo(function AssistantMessageText(
 
 export function renderChatTranscriptFeed(input: {
   bindingSummary: string | null
+  busy: boolean
   entries: readonly InkChatEntry[]
   sessionId: string
 }): React.ReactElement {
   const createElement = React.createElement
-
-  return createElement(
-    Box,
+  const { liveEntries, staticEntries } = partitionChatTranscriptEntries({
+    busy: input.busy,
+    entries: input.entries,
+  })
+  const staticRows: StaticTranscriptRow[] = [
     {
-      flexDirection: 'column',
-      width: '100%',
-    },
-    createElement(ChatHeader, {
-      key: `header:${input.sessionId}`,
+      kind: 'header',
       bindingSummary: input.bindingSummary,
       sessionId: input.sessionId,
+    },
+    ...staticEntries.map((entry) => ({
+      kind: 'entry' as const,
+      entry,
+    })),
+  ]
+
+  return createElement(
+    React.Fragment,
+    {},
+    createElement(StaticTranscript, {
+      items: staticRows,
+      children: renderStaticTranscriptRow,
     }),
-    input.entries.length === 0
-      ? createElement(ChatBanner, {
-          key: 'banner',
-        })
-      : null,
-    ...input.entries.map((entry, index) =>
-      createElement(ChatEntryRow, {
-        key: `entry:${index}`,
-        entry,
-      }),
+    createElement(
+      Box,
+      {
+        flexDirection: 'column',
+        width: '100%',
+      },
+      input.entries.length === 0
+        ? createElement(ChatBanner, {
+            key: 'banner',
+          })
+        : null,
+      ...liveEntries.map((entry, index) =>
+        createElement(ChatEntryRow, {
+          key: `live-entry:${staticEntries.length + index}`,
+          entry,
+        }),
+      ),
     ),
   )
 }
 
+export function partitionChatTranscriptEntries(input: {
+  busy: boolean
+  entries: readonly InkChatEntry[]
+}): {
+  liveEntries: readonly InkChatEntry[]
+  staticEntries: readonly InkChatEntry[]
+} {
+  if (input.entries.length === 0) {
+    return {
+      liveEntries: [],
+      staticEntries: [],
+    }
+  }
+
+  if (!input.busy) {
+    return {
+      liveEntries: [],
+      staticEntries: [...input.entries],
+    }
+  }
+
+  let lastUserEntryIndex = -1
+  for (let index = input.entries.length - 1; index >= 0; index -= 1) {
+    const entry = input.entries[index]
+    if (entry?.kind === 'user') {
+      lastUserEntryIndex = index
+      break
+    }
+  }
+
+  if (lastUserEntryIndex < 0) {
+    return {
+      liveEntries: [...input.entries],
+      staticEntries: [],
+    }
+  }
+
+  return {
+    liveEntries: input.entries.slice(lastUserEntryIndex + 1),
+    staticEntries: input.entries.slice(0, lastUserEntryIndex + 1),
+  }
+}
+
+function renderStaticTranscriptRow(
+  item: StaticTranscriptRow,
+  index: number,
+): React.ReactElement {
+  const createElement = React.createElement
+
+  if (item.kind === 'header') {
+    return createElement(ChatHeader, {
+      key: `static-header:${item.sessionId}`,
+      bindingSummary: item.bindingSummary,
+      sessionId: item.sessionId,
+    })
+  }
+
+  return createElement(ChatEntryRow, {
+    key: `static-entry:${index}`,
+    entry: item.entry,
+  })
+}
+
 const ChatTranscriptFeed = React.memo(function ChatTranscriptFeed(input: {
   bindingSummary: string | null
+  busy: boolean
   entries: readonly InkChatEntry[]
   sessionId: string
 }): React.ReactElement {
@@ -951,22 +1050,6 @@ const ChatStatus = React.memo(function ChatStatus(
 ): React.ReactElement | null {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
-  const [busySeconds, setBusySeconds] = React.useState(0)
-
-  React.useEffect(() => {
-    if (!props.busy || props.busyStartedAt === null) {
-      setBusySeconds(0)
-      return
-    }
-
-    const busyStartedAt = props.busyStartedAt
-    setBusySeconds(Math.max(0, Math.floor((Date.now() - busyStartedAt) / 1000)))
-    const timer = setInterval(() => {
-      setBusySeconds(Math.max(0, Math.floor((Date.now() - busyStartedAt) / 1000)))
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [props.busy, props.busyStartedAt])
 
   if (props.busy) {
     const busyColor =
@@ -976,6 +1059,7 @@ const ChatStatus = React.memo(function ChatStatus(
           ? theme.successColor
           : theme.infoColor
     const busyDetail = props.status?.text ?? 'You can keep typing while the assistant works.'
+    const busyLabel = 'Working'
 
     return createElement(
       ChromePanel,
@@ -995,7 +1079,7 @@ const ChatStatus = React.memo(function ChatStatus(
           {
             color: theme.composerTextColor,
           },
-          formatBusyStatus(busySeconds),
+          busyLabel,
         ),
       ),
       createElement(
@@ -2483,6 +2567,7 @@ export async function runAssistantChatWithInk(
           },
           createElement(ChatTranscriptFeed, {
             bindingSummary,
+            busy,
             entries,
             sessionId: session.sessionId,
           }),
