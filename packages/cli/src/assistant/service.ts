@@ -1,5 +1,6 @@
 import {
   assistantAskResultSchema,
+  type AssistantSession,
   type AssistantApprovalPolicy,
   type AssistantAskResult,
   type AssistantChatProvider,
@@ -25,6 +26,7 @@ import {
 } from '../operator-config.js'
 import {
   appendAssistantTranscriptEntries,
+  isAssistantSessionNotFoundError,
   redactAssistantDisplayPath,
   resolveAssistantSession,
   saveAssistantSession,
@@ -69,6 +71,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   persistUserPromptOnFailure?: boolean
   prompt: string
+  sessionSnapshot?: AssistantSession | null
   showThinkingTraces?: boolean
   workingDirectory?: string
 }
@@ -111,9 +114,7 @@ export async function sendAssistantMessage(
 ): Promise<AssistantAskResult> {
   const defaults = await resolveAssistantOperatorDefaults()
   const cliAccess = resolveAssistantCliAccessContext()
-  const resolved = await resolveAssistantSession(
-    buildResolveAssistantSessionInput(input, defaults),
-  )
+  const resolved = await resolveAssistantSessionForMessage(input, defaults)
 
   const provider = input.provider ?? defaults?.provider ?? resolved.session.provider
   const providerOptions = resolveAssistantProviderOptions({
@@ -295,6 +296,57 @@ export async function sendAssistantMessage(
     delivery,
     deliveryError,
   })
+}
+
+async function resolveAssistantSessionForMessage(
+  input: AssistantMessageInput,
+  defaults: AssistantOperatorDefaults | null,
+) {
+  const sessionInput = buildResolveAssistantSessionInput(input, defaults)
+
+  try {
+    return await resolveAssistantSession(sessionInput)
+  } catch (error) {
+    const restored = await restoreMissingAssistantSessionSnapshot({
+      error,
+      input,
+      sessionInput,
+    })
+    if (!restored) {
+      throw error
+    }
+
+    return resolveAssistantSession({
+      ...sessionInput,
+      createIfMissing: false,
+    })
+  }
+}
+
+async function restoreMissingAssistantSessionSnapshot(input: {
+  error: unknown
+  input: AssistantMessageInput
+  sessionInput: ResolveAssistantSessionInput
+}): Promise<boolean> {
+  if (!isAssistantSessionNotFoundError(input.error)) {
+    return false
+  }
+
+  const requestedSessionId = input.sessionInput.sessionId
+  const snapshot = input.input.sessionSnapshot
+  if (
+    typeof requestedSessionId !== 'string' ||
+    requestedSessionId.trim().length === 0 ||
+    !snapshot ||
+    snapshot.sessionId !== requestedSessionId
+  ) {
+    return false
+  }
+
+  // Live Ink chat already has the hydrated session in memory, so recreate the
+  // missing local session file and retry the normal resolution path once.
+  await saveAssistantSession(input.input.vault, snapshot)
+  return true
 }
 
 function buildAssistantSystemPrompt(

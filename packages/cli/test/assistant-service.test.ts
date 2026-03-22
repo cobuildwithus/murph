@@ -41,8 +41,10 @@ import {
 } from '../src/assistant/memory.js'
 import { HEALTHYBOB_VAULT_ENV } from '../src/operator-config.js'
 import {
+  listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
+  saveAssistantSession,
 } from '../src/assistant-state.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
@@ -613,6 +615,80 @@ test('sendAssistantMessage forwards provider progress callbacks to the provider 
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.equal(firstCall?.onEvent, onProviderEvent)
+})
+
+test('sendAssistantMessage recreates a missing local session from the live session snapshot and retries the turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-session-restore-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:restore',
+  })
+  const hydrated = await saveAssistantSession(vaultRoot, {
+    ...created.session,
+    providerSessionId: 'thread-live-1',
+    updatedAt: '2026-03-22T06:27:12.000Z',
+    lastTurnAt: '2026-03-22T06:27:12.000Z',
+    turnCount: 1,
+  })
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+
+  await rm(path.join(statePaths.sessionsDirectory, `${hydrated.sessionId}.json`), {
+    force: true,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-live-1',
+    response: 'Recovered.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    prompt: 'Keep going.',
+    sessionId: hydrated.sessionId,
+    sessionSnapshot: hydrated,
+  })
+
+  assert.equal(result.session.sessionId, hydrated.sessionId)
+  assert.equal(result.session.providerSessionId, 'thread-live-1')
+  assert.equal(result.session.turnCount, 2)
+
+  const persisted = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: hydrated.sessionId,
+    createIfMissing: false,
+  })
+  assert.equal(persisted.session.sessionId, hydrated.sessionId)
+  assert.equal(persisted.session.turnCount, 2)
+
+  const transcript = await listAssistantTranscriptEntries(vaultRoot, hydrated.sessionId)
+  assert.deepEqual(
+    transcript.map((entry) => ({
+      kind: entry.kind,
+      text: entry.text,
+    })),
+    [
+      {
+        kind: 'user',
+        text: 'Keep going.',
+      },
+      {
+        kind: 'assistant',
+        text: 'Recovered.',
+      },
+    ],
+  )
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.resumeProviderSessionId, 'thread-live-1')
 })
 
 test('sendAssistantMessage preserves a recovered provider session id after a resumable provider failure', async () => {

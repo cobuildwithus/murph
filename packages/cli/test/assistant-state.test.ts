@@ -349,6 +349,39 @@ test('assistant transcripts are stored separately from session metadata', async 
   assert.equal('lastAssistantMessage' in persistedSession, false)
 })
 
+test('getAssistantSession explains vault-scoped session drift when only a transcript remains', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-missing-session-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sessionId = 'asst_orphaned'
+  await appendAssistantTranscriptEntries(vaultRoot, sessionId, [
+    {
+      kind: 'error',
+      text: 'Assistant session vanished.',
+    },
+  ])
+
+  await assert.rejects(
+    () => getAssistantSession(vaultRoot, sessionId),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_SESSION_NOT_FOUND')
+      assert.match(String(error.message), /vault-scoped/u)
+      assert.match(String(error.message), /local transcript exists/u)
+      assert.equal(error.context?.sessionId, sessionId)
+      assert.equal(error.context?.sessionExists, false)
+      assert.equal(error.context?.transcriptExists, true)
+      assert.equal(
+        typeof error.context?.stateRoot === 'string' &&
+          error.context.stateRoot.includes(path.join(parent, 'assistant-state')),
+        true,
+      )
+      return true
+    },
+  )
+})
+
 test('getAssistantSession rejects non-canonical assistant state payloads with legacy excerpt fields', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-migrate-'))
   const vaultRoot = path.join(parent, 'vault')

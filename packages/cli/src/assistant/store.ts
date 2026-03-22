@@ -20,6 +20,7 @@ import {
 import {
   ensureAssistantState,
   appendTranscriptEntries,
+  inspectAssistantSessionStorage,
   loadAndPersistResolvedSession,
   readAssistantIndexStore,
   readAssistantSession,
@@ -33,8 +34,10 @@ import {
   bindingPatchFromLocator,
   normalizeProviderOptions,
   createAssistantSessionId,
+  redactAssistantDisplayPath,
   resolveAssistantConversationLookupKey,
   resolveAssistantStatePaths,
+  type AssistantStatePaths,
 } from './store/paths.js'
 export {
   redactAssistantDisplayPath,
@@ -59,6 +62,15 @@ import type {
 
 const ASSISTANT_STATE_SCHEMA = 'healthybob.assistant-session.v2'
 
+export function isAssistantSessionNotFoundError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'ASSISTANT_SESSION_NOT_FOUND',
+  )
+}
+
 export async function resolveAssistantSession(
   input: ResolveAssistantSessionInput,
 ): Promise<ResolvedAssistantSession> {
@@ -80,10 +92,10 @@ export async function resolveAssistantSession(
       persistenceInput,
     })
     if (!resolved) {
-      throw new VaultCliError(
-        'ASSISTANT_SESSION_NOT_FOUND',
-        `Assistant session "${input.sessionId}" was not found.`,
-      )
+      throw await createAssistantSessionNotFoundError({
+        paths,
+        sessionId: input.sessionId,
+      })
     }
     return resolved
   }
@@ -191,10 +203,10 @@ export async function getAssistantSession(
 
   const session = await readAssistantSession({ paths, sessionId })
   if (!session) {
-    throw new VaultCliError(
-      'ASSISTANT_SESSION_NOT_FOUND',
-      `Assistant session "${sessionId}" was not found.`,
-    )
+    throw await createAssistantSessionNotFoundError({
+      paths,
+      sessionId,
+    })
   }
 
   return session
@@ -249,6 +261,33 @@ export async function appendAssistantTranscriptEntries(
   await appendTranscriptEntries(paths, sessionId, parsed)
 
   return parsed
+}
+
+async function createAssistantSessionNotFoundError(input: {
+  paths: AssistantStatePaths
+  sessionId: string
+}): Promise<VaultCliError> {
+  const diagnosis = await inspectAssistantSessionStorage(input)
+  const stateRoot = redactAssistantDisplayPath(input.paths.assistantStateRoot)
+  const message = [
+    `Assistant session "${input.sessionId}" was not found in ${stateRoot}.`,
+    diagnosis.transcriptExists
+      ? 'A local transcript exists for that id, but the matching session record is missing, so local assistant state is out of sync.'
+      : null,
+    'Assistant sessions are vault-scoped. This usually means the session id was resumed against a different vault/default vault, or the local session file was deleted while assistant-state remained.',
+    'List sessions for the current vault or start a new chat.',
+  ]
+    .filter((value): value is string => value !== null)
+    .join(' ')
+
+  return new VaultCliError('ASSISTANT_SESSION_NOT_FOUND', message, {
+    sessionId: input.sessionId,
+    stateRoot,
+    sessionPath: redactAssistantDisplayPath(diagnosis.sessionPath),
+    sessionExists: diagnosis.sessionExists,
+    transcriptPath: redactAssistantDisplayPath(diagnosis.transcriptPath),
+    transcriptExists: diagnosis.transcriptExists,
+  })
 }
 
 export async function readAssistantAutomationState(

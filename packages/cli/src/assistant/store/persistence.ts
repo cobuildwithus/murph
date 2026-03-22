@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises'
+import { access, appendFile, mkdir, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantAliasStoreSchema,
@@ -45,10 +45,7 @@ export async function readAssistantSession(input: {
   paths: AssistantStatePaths
   sessionId: string
 }): Promise<AssistantSession | null> {
-  const sessionPath = path.join(
-    input.paths.sessionsDirectory,
-    `${input.sessionId}.json`,
-  )
+  const sessionPath = resolveAssistantSessionPath(input.paths, input.sessionId)
 
   try {
     const raw = await readFile(sessionPath, 'utf8')
@@ -65,7 +62,7 @@ export async function writeAssistantSession(
   paths: AssistantStatePaths,
   session: AssistantSession,
 ): Promise<void> {
-  const sessionPath = path.join(paths.sessionsDirectory, `${session.sessionId}.json`)
+  const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
   await writeJsonFileAtomic(sessionPath, session)
 }
 
@@ -98,6 +95,37 @@ export function resolveAssistantTranscriptPath(
   return path.join(paths.transcriptsDirectory, `${sessionId}.jsonl`)
 }
 
+export function resolveAssistantSessionPath(
+  paths: AssistantStatePaths,
+  sessionId: string,
+): string {
+  return path.join(paths.sessionsDirectory, `${sessionId}.json`)
+}
+
+export async function inspectAssistantSessionStorage(input: {
+  paths: AssistantStatePaths
+  sessionId: string
+}): Promise<{
+  sessionExists: boolean
+  sessionPath: string
+  transcriptExists: boolean
+  transcriptPath: string
+}> {
+  const sessionPath = resolveAssistantSessionPath(input.paths, input.sessionId)
+  const transcriptPath = resolveAssistantTranscriptPath(input.paths, input.sessionId)
+  const [sessionExists, transcriptExists] = await Promise.all([
+    pathExists(sessionPath),
+    pathExists(transcriptPath),
+  ])
+
+  return {
+    sessionExists,
+    sessionPath,
+    transcriptExists,
+    transcriptPath,
+  }
+}
+
 export async function appendTranscriptEntries(
   paths: AssistantStatePaths,
   sessionId: string,
@@ -114,6 +142,19 @@ export async function appendTranscriptEntries(
     recursive: true,
   })
   await appendFile(transcriptPath, serialized, 'utf8')
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath)
+    return true
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+
+    throw error
+  }
 }
 
 export async function persistResolvedSession(
