@@ -1,0 +1,173 @@
+import {
+  loadMarkdownRegistryDocuments,
+  type MarkdownRegistryUpsertTarget,
+  readRegistryRecord,
+  resolveMarkdownRegistryUpsertTarget,
+  selectExistingRegistryRecord,
+  writeMarkdownRegistryRecord,
+} from "./markdown.js";
+
+import type { FrontmatterObject } from "../types.js";
+
+type MarkdownRegistryAuditAction = Parameters<typeof writeMarkdownRegistryRecord>[0]["audit"]["action"];
+
+interface RegistryApiRecord {
+  slug: string;
+  relativePath: string;
+}
+
+interface CreateMarkdownRegistryApiOptions<TRecord extends RegistryApiRecord> {
+  directory: string;
+  recordFromParts: (attributes: FrontmatterObject, relativePath: string, markdown: string) => TRecord;
+  isExpectedRecord: (record: TRecord) => boolean;
+  invalidCode: string;
+  invalidMessage: string;
+  sortRecords: (records: TRecord[]) => void;
+  getRecordId: (record: TRecord) => string;
+  conflictCode: string;
+  conflictMessage: string;
+  readMissingCode: string;
+  readMissingMessage: string;
+  createRecordId: () => string;
+  operationType: string;
+  summary: (recordId: string) => string;
+  audit: {
+    action: MarkdownRegistryAuditAction;
+    commandName: string;
+    summary: (created: boolean) => string;
+  };
+}
+
+interface UpsertMarkdownRegistryApiRecordInput<TRecord extends RegistryApiRecord> {
+  vaultRoot: string;
+  existingRecord: TRecord | null;
+  recordId?: string;
+  requestedSlug?: string;
+  defaultSlug: string;
+  buildDocument: (target: MarkdownRegistryUpsertTarget) => {
+    attributes: FrontmatterObject;
+    body: string;
+  };
+}
+
+interface ReadMarkdownRegistryApiRecordInput {
+  vaultRoot: string;
+  recordId?: string;
+  slug?: string;
+}
+
+export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
+  directory,
+  recordFromParts,
+  isExpectedRecord,
+  invalidCode,
+  invalidMessage,
+  sortRecords,
+  getRecordId,
+  conflictCode,
+  conflictMessage,
+  readMissingCode,
+  readMissingMessage,
+  createRecordId,
+  operationType,
+  summary,
+  audit,
+}: CreateMarkdownRegistryApiOptions<TRecord>) {
+  async function loadRecords(vaultRoot: string): Promise<TRecord[]> {
+    const records = await loadMarkdownRegistryDocuments({
+      vaultRoot,
+      directory,
+      recordFromParts,
+      isExpectedRecord,
+      invalidCode,
+      invalidMessage,
+    });
+
+    sortRecords(records);
+    return records;
+  }
+
+  function selectExistingRecord(
+    records: TRecord[],
+    recordId: string | undefined,
+    slug: string | undefined,
+  ): TRecord | null {
+    return selectExistingRegistryRecord({
+      records,
+      recordId,
+      slug,
+      getRecordId,
+      conflictCode,
+      conflictMessage,
+    });
+  }
+
+  async function upsertRecord({
+    vaultRoot,
+    existingRecord,
+    recordId,
+    requestedSlug,
+    defaultSlug,
+    buildDocument,
+  }: UpsertMarkdownRegistryApiRecordInput<TRecord>): Promise<{
+    created: boolean;
+    auditPath: string;
+    record: TRecord;
+  }> {
+    const target = resolveMarkdownRegistryUpsertTarget({
+      existingRecord,
+      recordId,
+      requestedSlug,
+      defaultSlug,
+      directory,
+      getRecordId,
+      createRecordId,
+    });
+    const { attributes, body } = buildDocument(target);
+    const { auditPath, record } = await writeMarkdownRegistryRecord({
+      vaultRoot,
+      target,
+      attributes,
+      body,
+      recordFromParts,
+      operationType,
+      summary: summary(target.recordId),
+      audit: {
+        action: audit.action,
+        commandName: audit.commandName,
+        summary: audit.summary(target.created),
+        targetIds: [target.recordId],
+      },
+    });
+
+    return {
+      created: target.created,
+      auditPath,
+      record,
+    };
+  }
+
+  async function readRecord({
+    vaultRoot,
+    recordId,
+    slug,
+  }: ReadMarkdownRegistryApiRecordInput): Promise<TRecord> {
+    const records = await loadRecords(vaultRoot);
+    return readRegistryRecord({
+      records,
+      recordId,
+      slug,
+      getRecordId,
+      readMissingCode,
+      readMissingMessage,
+    });
+  }
+
+  return {
+    loadRecords,
+    selectExistingRecord,
+    listRecords: loadRecords,
+    upsertRecord,
+    readRecord,
+  };
+}

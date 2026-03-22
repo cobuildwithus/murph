@@ -5,23 +5,17 @@ import {
 } from "@healthybob/contracts";
 
 import { generateRecordId } from "../ids.js";
-import {
-  loadMarkdownRegistryDocuments,
-  readRegistryRecord,
-  resolveMarkdownRegistryUpsertTarget,
-  selectExistingRegistryRecord,
-  writeMarkdownRegistryRecord,
-} from "../registry/markdown.js";
+import { createMarkdownRegistryApi } from "../registry/api.js";
 
 import {
   bulletList,
   maybeSection,
   normalizeId,
   normalizeSlug,
-  normalizeStringList,
   optionalBoolean,
   optionalString,
   requireString,
+  validateSortedStringList,
 } from "../history/shared.js";
 
 import type { FrontmatterObject } from "../types.js";
@@ -77,7 +71,7 @@ function recordFromParts(
     slug: requireString(attributes.slug, "slug", 160),
     title: requireString(attributes.title, "title", FAMILY_TITLE_MAX_LENGTH),
     relationship: requireString(attributes.relationship, "relationship", FAMILY_RELATIONSHIP_MAX_LENGTH),
-    conditions: normalizeStringList(
+    conditions: validateSortedStringList(
       attributes.conditions,
       "conditions",
       "condition",
@@ -86,7 +80,7 @@ function recordFromParts(
     ),
     deceased: optionalBoolean(attributes.deceased, "deceased"),
     note: optionalString(attributes.note, "note", FAMILY_NOTE_MAX_LENGTH),
-    relatedVariantIds: normalizeStringList(
+    relatedVariantIds: validateSortedStringList(
       attributes.relatedVariantIds,
       "relatedVariantIds",
       "variantId",
@@ -98,37 +92,31 @@ function recordFromParts(
   };
 }
 
-async function loadFamilyRecords(vaultRoot: string): Promise<FamilyMemberRecord[]> {
-  const records = await loadMarkdownRegistryDocuments({
-    vaultRoot,
-    directory: FAMILY_DIRECTORY,
-    recordFromParts,
-    isExpectedRecord: (record) =>
-      record.docType === FAMILY_MEMBER_DOC_TYPE && record.schemaVersion === FAMILY_MEMBER_SCHEMA_VERSION,
-    invalidCode: "VAULT_INVALID_FAMILY_MEMBER",
-    invalidMessage: "Family registry document has an unexpected shape.",
-  });
-
-  records.sort(
-    (left, right) => left.title.localeCompare(right.title) || left.familyMemberId.localeCompare(right.familyMemberId),
-  );
-  return records;
-}
-
-function selectExistingRecord(
-  records: FamilyMemberRecord[],
-  familyMemberId: string | undefined,
-  slug: string | undefined,
-): FamilyMemberRecord | null {
-  return selectExistingRegistryRecord({
-    records,
-    recordId: familyMemberId,
-    slug,
-    getRecordId: (record) => record.familyMemberId,
-    conflictCode: "VAULT_FAMILY_MEMBER_CONFLICT",
-    conflictMessage: "familyMemberId and slug resolve to different family members.",
-  });
-}
+const familyRegistryApi = createMarkdownRegistryApi<FamilyMemberRecord>({
+  directory: FAMILY_DIRECTORY,
+  recordFromParts,
+  isExpectedRecord: (record) =>
+    record.docType === FAMILY_MEMBER_DOC_TYPE && record.schemaVersion === FAMILY_MEMBER_SCHEMA_VERSION,
+  invalidCode: "VAULT_INVALID_FAMILY_MEMBER",
+  invalidMessage: "Family registry document has an unexpected shape.",
+  sortRecords: (records) =>
+    records.sort(
+      (left, right) => left.title.localeCompare(right.title) || left.familyMemberId.localeCompare(right.familyMemberId),
+    ),
+  getRecordId: (record) => record.familyMemberId,
+  conflictCode: "VAULT_FAMILY_MEMBER_CONFLICT",
+  conflictMessage: "familyMemberId and slug resolve to different family members.",
+  readMissingCode: "VAULT_FAMILY_MEMBER_MISSING",
+  readMissingMessage: "Family member was not found.",
+  createRecordId: () => generateRecordId("fam"),
+  operationType: "family_upsert",
+  summary: (recordId) => `Upsert family member ${recordId}`,
+  audit: {
+    action: "family_upsert",
+    commandName: "core.upsertFamilyMember",
+    summary: (created) => `${created ? "Created" : "Updated"} family member registry record.`,
+  },
+});
 
 function buildAttributes(input: {
   familyMemberId: string;
@@ -160,30 +148,31 @@ export async function upsertFamilyMember(
   input: UpsertFamilyMemberInput,
 ): Promise<UpsertFamilyMemberResult> {
   const normalizedFamilyMemberId = normalizeId(input.familyMemberId, "familyMemberId", "fam");
-  const existingRecords = await loadFamilyRecords(input.vaultRoot);
+  const existingRecords = await familyRegistryApi.loadRecords(input.vaultRoot);
   const selectorSlug =
     (input.slug ? normalizeSlug(input.slug, "slug") : undefined) ??
     (input.title ?? input.name ? normalizeSlug(undefined, "slug", input.title ?? input.name) : undefined);
-  const existingRecord = selectExistingRecord(existingRecords, normalizedFamilyMemberId, selectorSlug);
+  const existingRecord = familyRegistryApi.selectExistingRecord(
+    existingRecords,
+    normalizedFamilyMemberId,
+    selectorSlug,
+  );
   const title = requireString(input.title ?? input.name ?? existingRecord?.title, "title", FAMILY_TITLE_MAX_LENGTH);
   const relationship = requireString(
     input.relationship ?? input.relation ?? existingRecord?.relationship,
     "relationship",
     FAMILY_RELATIONSHIP_MAX_LENGTH,
   );
-  const target = resolveMarkdownRegistryUpsertTarget({
-    existingRecord,
-    recordId: normalizedFamilyMemberId,
-    requestedSlug: selectorSlug,
-    defaultSlug: normalizeSlug(undefined, "slug", title),
-    directory: FAMILY_DIRECTORY,
-    getRecordId: (record) => record.familyMemberId,
-    createRecordId: () => generateRecordId("fam"),
-  });
   const conditions =
     input.conditions === undefined
       ? existingRecord?.conditions
-      : normalizeStringList(input.conditions, "conditions", "condition", 24, FAMILY_CONDITION_MAX_LENGTH);
+      : validateSortedStringList(
+          input.conditions,
+          "conditions",
+          "condition",
+          24,
+          FAMILY_CONDITION_MAX_LENGTH,
+        );
   const note =
     input.note === undefined && input.summary === undefined
       ? existingRecord?.note
@@ -191,55 +180,44 @@ export async function upsertFamilyMember(
   const relatedVariantIds =
     input.relatedVariantIds === undefined
       ? existingRecord?.relatedVariantIds
-      : normalizeStringList(
+      : validateSortedStringList(
           input.relatedVariantIds,
           "relatedVariantIds",
           "variantId",
           24,
           FAMILY_VARIANT_ID_MAX_LENGTH,
         );
-  const attributes = buildAttributes({
-    familyMemberId: target.recordId,
-    slug: target.slug,
-    title,
-    relationship,
-    conditions,
-    deceased:
-      input.deceased === undefined ? existingRecord?.deceased : optionalBoolean(input.deceased, "deceased"),
-    note,
-    relatedVariantIds,
-  });
-  const { auditPath, record } = await writeMarkdownRegistryRecord({
+  return familyRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
-    target,
-    attributes,
-    body: buildBody({
-      title,
-      relationship,
-      conditions,
-      note,
-      relatedVariantIds,
+    existingRecord,
+    recordId: normalizedFamilyMemberId,
+    requestedSlug: selectorSlug,
+    defaultSlug: normalizeSlug(undefined, "slug", title),
+    buildDocument: (target) => ({
+      attributes: buildAttributes({
+        familyMemberId: target.recordId,
+        slug: target.slug,
+        title,
+        relationship,
+        conditions,
+        deceased:
+          input.deceased === undefined ? existingRecord?.deceased : optionalBoolean(input.deceased, "deceased"),
+        note,
+        relatedVariantIds,
+      }),
+      body: buildBody({
+        title,
+        relationship,
+        conditions,
+        note,
+        relatedVariantIds,
+      }),
     }),
-    recordFromParts,
-    operationType: "family_upsert",
-    summary: `Upsert family member ${target.recordId}`,
-    audit: {
-      action: "family_upsert",
-      commandName: "core.upsertFamilyMember",
-      summary: `${target.created ? "Created" : "Updated"} family member registry record.`,
-      targetIds: [target.recordId],
-    },
   });
-
-  return {
-    created: target.created,
-    auditPath,
-    record,
-  };
 }
 
 export async function listFamilyMembers(vaultRoot: string): Promise<FamilyMemberRecord[]> {
-  return loadFamilyRecords(vaultRoot);
+  return familyRegistryApi.listRecords(vaultRoot);
 }
 
 export async function readFamilyMember({
@@ -249,13 +227,9 @@ export async function readFamilyMember({
 }: ReadFamilyMemberInput): Promise<FamilyMemberRecord> {
   const normalizedFamilyMemberId = normalizeId(memberId, "memberId", "fam");
   const normalizedSlug = slug ? normalizeSlug(slug, "slug") : undefined;
-  const records = await loadFamilyRecords(vaultRoot);
-  return readRegistryRecord({
-    records,
+  return familyRegistryApi.readRecord({
+    vaultRoot,
     recordId: normalizedFamilyMemberId,
     slug: normalizedSlug,
-    getRecordId: (record) => record.familyMemberId,
-    readMissingCode: "VAULT_FAMILY_MEMBER_MISSING",
-    readMissingMessage: "Family member was not found.",
   });
 }

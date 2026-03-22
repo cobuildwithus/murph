@@ -5,23 +5,17 @@ import {
 } from "@healthybob/contracts";
 
 import { generateRecordId } from "../ids.js";
-import {
-  loadMarkdownRegistryDocuments,
-  readRegistryRecord,
-  resolveMarkdownRegistryUpsertTarget,
-  selectExistingRegistryRecord,
-  writeMarkdownRegistryRecord,
-} from "../registry/markdown.js";
+import { createMarkdownRegistryApi } from "../registry/api.js";
 
 import {
   bulletList,
   maybeSection,
   normalizeId,
   normalizeSlug,
-  normalizeStringList,
   optionalEnum,
   optionalString,
   requireString,
+  validateSortedStringList,
 } from "../history/shared.js";
 
 import type { FrontmatterObject } from "../types.js";
@@ -80,7 +74,7 @@ function recordFromParts(
     zygosity: optionalEnum(attributes.zygosity, VARIANT_ZYGOSITIES, "zygosity"),
     significance: optionalEnum(attributes.significance, VARIANT_SIGNIFICANCES, "significance"),
     inheritance: optionalString(attributes.inheritance, "inheritance", GENETIC_INHERITANCE_MAX_LENGTH),
-    sourceFamilyMemberIds: normalizeStringList(
+    sourceFamilyMemberIds: validateSortedStringList(
       attributes.sourceFamilyMemberIds,
       "sourceFamilyMemberIds",
       "familyMemberId",
@@ -93,37 +87,34 @@ function recordFromParts(
   };
 }
 
-async function loadGeneticVariants(vaultRoot: string): Promise<GeneticVariantRecord[]> {
-  const records = await loadMarkdownRegistryDocuments({
-    vaultRoot,
-    directory: GENETICS_DIRECTORY,
-    recordFromParts,
-    isExpectedRecord: (record) =>
-      record.docType === GENETIC_VARIANT_DOC_TYPE && record.schemaVersion === GENETIC_VARIANT_SCHEMA_VERSION,
-    invalidCode: "VAULT_INVALID_GENETIC_VARIANT",
-    invalidMessage: "Genetics registry document has an unexpected shape.",
-  });
-
-  records.sort(
-    (left, right) => left.gene.localeCompare(right.gene) || left.title.localeCompare(right.title) || left.variantId.localeCompare(right.variantId),
-  );
-  return records;
-}
-
-function selectExistingRecord(
-  records: GeneticVariantRecord[],
-  variantId: string | undefined,
-  slug: string | undefined,
-): GeneticVariantRecord | null {
-  return selectExistingRegistryRecord({
-    records,
-    recordId: variantId,
-    slug,
-    getRecordId: (record) => record.variantId,
-    conflictCode: "VAULT_GENETIC_VARIANT_CONFLICT",
-    conflictMessage: "variantId and slug resolve to different variants.",
-  });
-}
+const geneticsRegistryApi = createMarkdownRegistryApi<GeneticVariantRecord>({
+  directory: GENETICS_DIRECTORY,
+  recordFromParts,
+  isExpectedRecord: (record) =>
+    record.docType === GENETIC_VARIANT_DOC_TYPE && record.schemaVersion === GENETIC_VARIANT_SCHEMA_VERSION,
+  invalidCode: "VAULT_INVALID_GENETIC_VARIANT",
+  invalidMessage: "Genetics registry document has an unexpected shape.",
+  sortRecords: (records) =>
+    records.sort(
+      (left, right) =>
+        left.gene.localeCompare(right.gene) ||
+        left.title.localeCompare(right.title) ||
+        left.variantId.localeCompare(right.variantId),
+    ),
+  getRecordId: (record) => record.variantId,
+  conflictCode: "VAULT_GENETIC_VARIANT_CONFLICT",
+  conflictMessage: "variantId and slug resolve to different variants.",
+  readMissingCode: "VAULT_GENETIC_VARIANT_MISSING",
+  readMissingMessage: "Genetic variant was not found.",
+  createRecordId: () => generateRecordId("var"),
+  operationType: "genetics_upsert",
+  summary: (recordId) => `Upsert genetic variant ${recordId}`,
+  audit: {
+    action: "genetics_upsert",
+    commandName: "core.upsertGeneticVariant",
+    summary: (created) => `${created ? "Created" : "Updated"} genetic variant registry record.`,
+  },
+});
 
 function buildAttributes(input: {
   variantId: string;
@@ -157,29 +148,24 @@ export async function upsertGeneticVariant(
   input: UpsertGeneticVariantInput,
 ): Promise<UpsertGeneticVariantResult> {
   const normalizedVariantId = normalizeId(input.variantId, "variantId", "var");
-  const existingRecords = await loadGeneticVariants(input.vaultRoot);
+  const existingRecords = await geneticsRegistryApi.loadRecords(input.vaultRoot);
   const selectorSlug =
     (input.slug ? normalizeSlug(input.slug, "slug") : undefined) ??
     (input.gene && (input.title ?? input.label)
       ? normalizeSlug(undefined, "slug", `${input.gene}-${input.title ?? input.label}`)
       : undefined);
-  const existingRecord = selectExistingRecord(existingRecords, normalizedVariantId, selectorSlug);
+  const existingRecord = geneticsRegistryApi.selectExistingRecord(
+    existingRecords,
+    normalizedVariantId,
+    selectorSlug,
+  );
   const title = requireString(input.title ?? input.label ?? existingRecord?.title, "title", GENETIC_TITLE_MAX_LENGTH);
   const gene = requireString(input.gene ?? existingRecord?.gene, "gene", GENETIC_GENE_MAX_LENGTH);
-  const target = resolveMarkdownRegistryUpsertTarget({
-    existingRecord,
-    recordId: normalizedVariantId,
-    requestedSlug: selectorSlug,
-    defaultSlug: normalizeSlug(undefined, "slug", `${gene}-${title}`),
-    directory: GENETICS_DIRECTORY,
-    getRecordId: (record) => record.variantId,
-    createRecordId: () => generateRecordId("var"),
-  });
   const sourceIdsInput = input.sourceFamilyMemberIds ?? input.familyMemberIds;
   const sourceFamilyMemberIds =
     sourceIdsInput === undefined
       ? existingRecord?.sourceFamilyMemberIds
-      : normalizeStringList(
+      : validateSortedStringList(
           sourceIdsInput,
           "sourceFamilyMemberIds",
           "familyMemberId",
@@ -190,56 +176,45 @@ export async function upsertGeneticVariant(
     input.note === undefined && input.summary === undefined
       ? existingRecord?.note
       : optionalString(input.note ?? input.summary, "note", GENETIC_NOTE_MAX_LENGTH);
-  const attributes = buildAttributes({
-    variantId: target.recordId,
-    slug: target.slug,
-    title,
-    gene,
-    zygosity:
-      input.zygosity === undefined
-        ? existingRecord?.zygosity
-        : optionalEnum(input.zygosity, VARIANT_ZYGOSITIES, "zygosity"),
-    significance:
-      input.significance === undefined
-        ? existingRecord?.significance
-        : optionalEnum(input.significance, VARIANT_SIGNIFICANCES, "significance"),
-    inheritance:
-      input.inheritance === undefined
-        ? existingRecord?.inheritance
-        : optionalString(input.inheritance, "inheritance", GENETIC_INHERITANCE_MAX_LENGTH),
-    sourceFamilyMemberIds,
-    note,
-  });
-  const { auditPath, record } = await writeMarkdownRegistryRecord({
+  return geneticsRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
-    target,
-    attributes,
-    body: buildBody({
-      gene,
-      title,
-      sourceFamilyMemberIds,
-      note,
+    existingRecord,
+    recordId: normalizedVariantId,
+    requestedSlug: selectorSlug,
+    defaultSlug: normalizeSlug(undefined, "slug", `${gene}-${title}`),
+    buildDocument: (target) => ({
+      attributes: buildAttributes({
+        variantId: target.recordId,
+        slug: target.slug,
+        title,
+        gene,
+        zygosity:
+          input.zygosity === undefined
+            ? existingRecord?.zygosity
+            : optionalEnum(input.zygosity, VARIANT_ZYGOSITIES, "zygosity"),
+        significance:
+          input.significance === undefined
+            ? existingRecord?.significance
+            : optionalEnum(input.significance, VARIANT_SIGNIFICANCES, "significance"),
+        inheritance:
+          input.inheritance === undefined
+            ? existingRecord?.inheritance
+            : optionalString(input.inheritance, "inheritance", GENETIC_INHERITANCE_MAX_LENGTH),
+        sourceFamilyMemberIds,
+        note,
+      }),
+      body: buildBody({
+        gene,
+        title,
+        sourceFamilyMemberIds,
+        note,
+      }),
     }),
-    recordFromParts,
-    operationType: "genetics_upsert",
-    summary: `Upsert genetic variant ${target.recordId}`,
-    audit: {
-      action: "genetics_upsert",
-      commandName: "core.upsertGeneticVariant",
-      summary: `${target.created ? "Created" : "Updated"} genetic variant registry record.`,
-      targetIds: [target.recordId],
-    },
   });
-
-  return {
-    created: target.created,
-    auditPath,
-    record,
-  };
 }
 
 export async function listGeneticVariants(vaultRoot: string): Promise<GeneticVariantRecord[]> {
-  return loadGeneticVariants(vaultRoot);
+  return geneticsRegistryApi.listRecords(vaultRoot);
 }
 
 export async function readGeneticVariant({
@@ -249,13 +224,9 @@ export async function readGeneticVariant({
 }: ReadGeneticVariantInput): Promise<GeneticVariantRecord> {
   const normalizedVariantId = normalizeId(variantId, "variantId", "var");
   const normalizedSlug = slug ? normalizeSlug(slug, "slug") : undefined;
-  const records = await loadGeneticVariants(vaultRoot);
-  return readRegistryRecord({
-    records,
+  return geneticsRegistryApi.readRecord({
+    vaultRoot,
     recordId: normalizedVariantId,
     slug: normalizedSlug,
-    getRecordId: (record) => record.variantId,
-    readMissingCode: "VAULT_GENETIC_VARIANT_MISSING",
-    readMissingMessage: "Genetic variant was not found.",
   });
 }
