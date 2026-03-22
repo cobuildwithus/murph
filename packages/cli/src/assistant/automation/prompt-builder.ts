@@ -1,0 +1,363 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import type { InboxShowResult } from '../../inbox-cli-contracts.js'
+import { normalizeNullableString } from '../shared.js'
+
+export interface TelegramAutoReplyMetadata {
+  mediaGroupId: string | null
+  replyContext: string | null
+}
+
+export interface AssistantAutoReplyPromptCapture {
+  capture: InboxShowResult['capture']
+  telegramMetadata: TelegramAutoReplyMetadata | null
+}
+
+export type AssistantAutoReplyPrompt =
+  | { kind: 'defer'; reason: string }
+  | { kind: 'ready'; prompt: string }
+  | { kind: 'skip'; reason: string }
+
+export function buildAssistantAutoReplyPrompt(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+): AssistantAutoReplyPrompt {
+  if (
+    captures.some(({ capture }) =>
+      capture.attachments.some(
+        (attachment) =>
+          attachment.parseState === 'pending' ||
+          attachment.parseState === 'running',
+      ),
+    )
+  ) {
+    return {
+      kind: 'defer',
+      reason: 'waiting for parser completion',
+    }
+  }
+
+  const sections = captures
+    .map((entry, index) =>
+      renderAssistantAutoReplyCaptureSection(entry, index, captures.length),
+    )
+    .filter((section): section is string => section !== null)
+
+  if (sections.length === 0) {
+    return {
+      kind: 'skip',
+      reason: 'capture has no text or parsed attachment content',
+    }
+  }
+
+  const firstCapture = captures[0]?.capture
+  const lastCapture = captures[captures.length - 1]?.capture
+  if (!firstCapture || !lastCapture) {
+    return {
+      kind: 'skip',
+      reason: 'capture has no text or parsed attachment content',
+    }
+  }
+
+  const mediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
+  const contextLines = [
+    `Source: ${firstCapture.source}`,
+    `Occurred at: ${
+      firstCapture.occurredAt === lastCapture.occurredAt
+        ? firstCapture.occurredAt
+        : `${firstCapture.occurredAt} -> ${lastCapture.occurredAt}`
+    }`,
+    `Thread: ${firstCapture.threadId}${firstCapture.threadTitle ? ` (${firstCapture.threadTitle})` : ''}`,
+    `Actor: ${firstCapture.actorName ?? firstCapture.actorId ?? 'unknown'} | self=${String(firstCapture.actorIsSelf)}`,
+    captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
+    mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
+  ]
+
+  return {
+    kind: 'ready',
+    prompt: [...contextLines.filter((line): line is string => line !== null), '', ...sections].join('\n'),
+  }
+}
+
+export async function loadTelegramAutoReplyMetadata(
+  vaultRoot: string,
+  envelopePath: string | null,
+): Promise<TelegramAutoReplyMetadata | null> {
+  const normalizedEnvelopePath = normalizeNullableString(envelopePath)
+  if (!normalizedEnvelopePath) {
+    return null
+  }
+
+  try {
+    const absoluteEnvelopePath = path.isAbsolute(normalizedEnvelopePath)
+      ? normalizedEnvelopePath
+      : path.join(vaultRoot, normalizedEnvelopePath)
+    const parsed = JSON.parse(
+      await readFile(absoluteEnvelopePath, 'utf8'),
+    ) as unknown
+    const envelope = asRecord(parsed)
+    const input = asRecord(envelope?.input)
+    const raw = asRecord(input?.raw)
+    const message = extractTelegramRawMessage(raw)
+
+    return {
+      mediaGroupId: normalizeNullableString(
+        typeof message?.media_group_id === 'string'
+          ? message.media_group_id
+          : null,
+      ),
+      replyContext: buildTelegramReplyContext(message),
+    }
+  } catch {
+    return null
+  }
+}
+
+function renderAssistantAutoReplyCaptureSection(
+  entry: AssistantAutoReplyPromptCapture,
+  index: number,
+  totalCaptures: number,
+): string | null {
+  const sections: string[] = []
+  const captureText = normalizeNullableString(entry.capture.text)
+  if (entry.telegramMetadata?.replyContext) {
+    sections.push(`Reply context:
+${entry.telegramMetadata.replyContext}`)
+  }
+  if (captureText) {
+    sections.push(`Message text:
+${captureText}`)
+  }
+
+  const attachmentSections = entry.capture.attachments
+    .map((attachment) => renderAttachmentPromptSection(attachment))
+    .filter((section): section is string => section !== null)
+
+  if (attachmentSections.length > 0) {
+    sections.push(`Attachment context:
+${attachmentSections.join('\n\n')}`)
+  }
+
+  if (sections.length === 0) {
+    return null
+  }
+
+  if (totalCaptures === 1) {
+    return sections.join('\n\n')
+  }
+
+  return `Capture ${index + 1}:
+${sections.join('\n\n')}`
+}
+
+function renderAttachmentPromptSection(
+  attachment: InboxShowResult['capture']['attachments'][number],
+): string | null {
+  const transcript = normalizeNullableString(attachment.transcriptText)
+  const extractedText = normalizeNullableString(attachment.extractedText)
+  const chunks: string[] = []
+
+  if (transcript) {
+    chunks.push(`Transcript:
+${transcript}`)
+  }
+  if (extractedText) {
+    chunks.push(`Extracted text:
+${extractedText}`)
+  }
+
+  if (chunks.length === 0) {
+    return null
+  }
+
+  const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
+  return `${label}\n${chunks.join('\n\n')}`
+}
+
+function extractTelegramRawMessage(
+  raw: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return asRecord(raw?.business_message) ?? asRecord(raw?.message)
+}
+
+function buildTelegramReplyContext(
+  message: Record<string, unknown> | null,
+): string | null {
+  if (!message) {
+    return null
+  }
+
+  const replyToMessage = asRecord(message.reply_to_message)
+  const quote = asRecord(message.quote)
+  const lines: string[] = []
+
+  if (replyToMessage) {
+    const actor = buildTelegramRawActorDisplayName(replyToMessage)
+    const text = summarizeTelegramRawMessageText(replyToMessage)
+    if (actor && text) {
+      lines.push(`Replying to ${actor}: ${text}`)
+    } else if (text) {
+      lines.push(`Replying to: ${text}`)
+    } else if (actor) {
+      lines.push(`Replying to ${actor}`)
+    } else {
+      lines.push('Replying to an earlier Telegram message')
+    }
+  }
+
+  const quoteText =
+    typeof quote?.text === 'string' ? normalizeNullableString(quote.text) : null
+  if (quoteText) {
+    lines.push(`Quoted text: ${summarizeTelegramText(quoteText)}`)
+  }
+
+  return lines.length > 0 ? lines.join('\n') : null
+}
+
+function summarizeTelegramRawMessageText(
+  message: Record<string, unknown>,
+): string | null {
+  const text =
+    stringFromRecord(message, 'text') ??
+    stringFromRecord(message, 'caption') ??
+    buildTelegramRawContactText(asRecord(message.contact)) ??
+    buildTelegramRawVenueText(asRecord(message.venue)) ??
+    buildTelegramRawLocationText(asRecord(message.location)) ??
+    buildTelegramRawPollText(asRecord(message.poll)) ??
+    null
+
+  return text ? summarizeTelegramText(text) : null
+}
+
+function buildTelegramRawActorDisplayName(
+  message: Record<string, unknown>,
+): string | null {
+  return (
+    buildTelegramRawDisplayName(asRecord(message.from)) ??
+    buildTelegramRawDisplayName(asRecord(message.sender_chat)) ??
+    buildTelegramRawDisplayName(asRecord(message.chat)) ??
+    null
+  )
+}
+
+function buildTelegramRawDisplayName(
+  record: Record<string, unknown> | null,
+): string | null {
+  if (!record) {
+    return null
+  }
+
+  const parts = [
+    stringFromRecord(record, 'first_name'),
+    stringFromRecord(record, 'last_name'),
+  ].filter((value): value is string => value !== null)
+
+  if (parts.length > 0) {
+    return parts.join(' ')
+  }
+
+  const username = stringFromRecord(record, 'username')
+  if (username) {
+    return username.startsWith('@') ? username : `@${username}`
+  }
+
+  return stringFromRecord(record, 'title')
+}
+
+function buildTelegramRawContactText(
+  contact: Record<string, unknown> | null,
+): string | null {
+  if (!contact) {
+    return null
+  }
+
+  const name = [
+    stringFromRecord(contact, 'first_name'),
+    stringFromRecord(contact, 'last_name'),
+  ]
+    .filter((value): value is string => value !== null)
+    .join(' ')
+  const phoneNumber = stringFromRecord(contact, 'phone_number')
+
+  if (!name && !phoneNumber) {
+    return null
+  }
+
+  return phoneNumber ? `Shared contact ${name || 'unknown'} (${phoneNumber})` : `Shared contact ${name}`
+}
+
+function buildTelegramRawLocationText(
+  location: Record<string, unknown> | null,
+): string | null {
+  if (!location) {
+    return null
+  }
+
+  const latitude =
+    typeof location.latitude === 'number' ? location.latitude : null
+  const longitude =
+    typeof location.longitude === 'number' ? location.longitude : null
+  if (latitude === null || longitude === null) {
+    return null
+  }
+
+  return `Shared location ${latitude}, ${longitude}`
+}
+
+function buildTelegramRawVenueText(
+  venue: Record<string, unknown> | null,
+): string | null {
+  if (!venue) {
+    return null
+  }
+
+  const parts = [
+    stringFromRecord(venue, 'title'),
+    stringFromRecord(venue, 'address'),
+    buildTelegramRawLocationText(asRecord(venue.location)),
+  ].filter((value): value is string => value !== null)
+
+  return parts.length > 0 ? `Shared venue ${parts.join(' | ')}` : null
+}
+
+function buildTelegramRawPollText(
+  poll: Record<string, unknown> | null,
+): string | null {
+  if (!poll) {
+    return null
+  }
+
+  const question = stringFromRecord(poll, 'question')
+  const options = Array.isArray(poll.options)
+    ? poll.options
+        .map((option) => stringFromRecord(asRecord(option), 'text'))
+        .filter((value): value is string => value !== null)
+    : []
+
+  if (!question && options.length === 0) {
+    return null
+  }
+
+  return `Shared poll ${question ?? 'untitled poll'}${options.length > 0 ? ` [${options.join(' | ')}]` : ''}`
+}
+
+function summarizeTelegramText(text: string): string {
+  const normalized = text.replace(/\s+/gu, ' ').trim()
+  return normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized
+}
+
+function stringFromRecord(
+  record: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  if (!record) {
+    return null
+  }
+
+  return typeof record[key] === 'string'
+    ? normalizeNullableString(record[key] as string)
+    : null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+}

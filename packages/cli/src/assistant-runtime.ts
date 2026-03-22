@@ -2,7 +2,14 @@ export type {
   AssistantChatInput,
   AssistantMessageInput,
 } from './assistant/service.js'
-export { sendAssistantMessage } from './assistant/service.js'
+export type {
+  ConversationRef,
+} from './assistant/conversation-ref.js'
+export {
+  openAssistantConversation,
+  sendAssistantMessage,
+  updateAssistantSessionOptions,
+} from './assistant/service.js'
 export type {
   AssistantMemoryForgetInput,
   AssistantMemoryGetInput,

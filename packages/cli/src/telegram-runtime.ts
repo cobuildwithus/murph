@@ -1,15 +1,11 @@
+import {
+  parseTelegramThreadTarget,
+  serializeTelegramThreadTarget,
+  type TelegramThreadTarget,
+} from '@healthybob/inboxd'
 import { VaultCliError } from './vault-cli-errors.js'
 
-const TELEGRAM_BUSINESS_TARGET_MARKER = ':business:'
-const TELEGRAM_DIRECT_MESSAGES_TOPIC_TARGET_MARKER = ':dm-topic:'
-const TELEGRAM_TOPIC_TARGET_MARKER = ':topic:'
-
-export interface TelegramSendTarget {
-  chatId: string
-  businessConnectionId: string | null
-  directMessagesTopicId: number | null
-  messageThreadId: number | null
-}
+export type TelegramSendTarget = TelegramThreadTarget
 
 export function resolveTelegramBotToken(
   env: NodeJS.ProcessEnv,
@@ -39,6 +35,11 @@ export function resolveTelegramFileBaseUrl(
 }
 
 export function parseTelegramSendTarget(target: string): TelegramSendTarget {
+  const parsed = parseTelegramThreadTarget(target)
+  if (parsed) {
+    return parsed
+  }
+
   const normalizedTarget = normalizeNullableString(target)
   if (!normalizedTarget) {
     throw new VaultCliError(
@@ -47,198 +48,63 @@ export function parseTelegramSendTarget(target: string): TelegramSendTarget {
     )
   }
 
-  const firstMarkerIndex = firstTelegramMarkerIndex(normalizedTarget)
-  const chatId =
-    firstMarkerIndex < 0
-      ? normalizedTarget
-      : normalizeNullableString(normalizedTarget.slice(0, firstMarkerIndex))
+  throw new VaultCliError(
+    'ASSISTANT_TELEGRAM_TARGET_INVALID',
+    'Telegram targets must use "<chatId>", "<chatId>:topic:<messageThreadId>", "<chatId>:dm-topic:<directMessagesTopicId>", and optional ":business:<businessConnectionId>" routing segments.',
+    {
+      target: normalizedTarget,
+    },
+  )
+}
 
-  if (!chatId) {
+export function formatTelegramSendTarget(
+  target: TelegramSendTarget,
+): string {
+  const normalized = normalizeTelegramSendTarget(target)
+  return serializeTelegramThreadTarget(normalized)
+}
+
+export function normalizeTelegramSendTarget(
+  target: TelegramSendTarget,
+): TelegramSendTarget {
+  const normalizedChatId = normalizeNullableString(target.chatId)
+  if (!normalizedChatId) {
     throw new VaultCliError(
       'ASSISTANT_TELEGRAM_TARGET_INVALID',
       'Telegram delivery requires a non-empty chat id, username, or topic target.',
+    )
+  }
+
+  const businessConnectionId = normalizeNullableString(
+    target.businessConnectionId,
+  )
+  const directMessagesTopicId = normalizePositiveInteger(
+    target.directMessagesTopicId,
+    'direct_messages_topic_id',
+    normalizedChatId,
+  )
+  const messageThreadId = normalizePositiveInteger(
+    target.messageThreadId,
+    'message_thread_id',
+    normalizedChatId,
+  )
+
+  if (directMessagesTopicId !== null && messageThreadId !== null) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TARGET_INVALID',
+      'Telegram targets can include only one topic selector.',
       {
-        target: normalizedTarget,
+        target: normalizedChatId,
       },
     )
   }
 
-  let businessConnectionId: string | null = null
-  let directMessagesTopicId: number | null = null
-  let messageThreadId: number | null = null
-  let remainder =
-    firstMarkerIndex < 0 ? '' : normalizedTarget.slice(firstMarkerIndex)
-
-  while (remainder.length > 0) {
-    const marker = matchingTelegramMarker(remainder)
-    if (!marker) {
-      throw new VaultCliError(
-        'ASSISTANT_TELEGRAM_TARGET_INVALID',
-        'Telegram targets must use "<chatId>", "<chatId>:topic:<messageThreadId>", "<chatId>:dm-topic:<directMessagesTopicId>", and optional ":business:<businessConnectionId>" routing segments.',
-        {
-          target: normalizedTarget,
-        },
-      )
-    }
-
-    remainder = remainder.slice(marker.length)
-    const nextMarkerIndex = firstTelegramMarkerIndex(remainder)
-    const rawValue =
-      nextMarkerIndex < 0 ? remainder : remainder.slice(0, nextMarkerIndex)
-    remainder = nextMarkerIndex < 0 ? '' : remainder.slice(nextMarkerIndex)
-
-    if (marker === TELEGRAM_BUSINESS_TARGET_MARKER) {
-      if (businessConnectionId !== null) {
-        throw new VaultCliError(
-          'ASSISTANT_TELEGRAM_TARGET_INVALID',
-          'Telegram targets can include at most one business connection identifier.',
-          {
-            target: normalizedTarget,
-          },
-        )
-      }
-
-      businessConnectionId = normalizeTelegramBusinessConnectionId(
-        rawValue,
-        normalizedTarget,
-      )
-      continue
-    }
-
-    const parsedInteger = parseTelegramTargetPositiveInteger(
-      rawValue,
-      marker === TELEGRAM_TOPIC_TARGET_MARKER
-        ? 'message_thread_id'
-        : 'direct_messages_topic_id',
-      normalizedTarget,
-    )
-
-    if (marker === TELEGRAM_TOPIC_TARGET_MARKER) {
-      if (messageThreadId !== null || directMessagesTopicId !== null) {
-        throw new VaultCliError(
-          'ASSISTANT_TELEGRAM_TARGET_INVALID',
-          'Telegram targets can include only one topic selector.',
-          {
-            target: normalizedTarget,
-          },
-        )
-      }
-
-      messageThreadId = parsedInteger
-      continue
-    }
-
-    if (directMessagesTopicId !== null || messageThreadId !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_TELEGRAM_TARGET_INVALID',
-        'Telegram targets can include only one topic selector.',
-        {
-          target: normalizedTarget,
-        },
-      )
-    }
-
-    directMessagesTopicId = parsedInteger
-  }
-
   return {
-    chatId,
+    chatId: normalizedChatId,
     businessConnectionId,
     directMessagesTopicId,
     messageThreadId,
   }
-}
-
-function firstTelegramMarkerIndex(target: string): number {
-  const indexes = [
-    target.indexOf(TELEGRAM_BUSINESS_TARGET_MARKER),
-    target.indexOf(TELEGRAM_DIRECT_MESSAGES_TOPIC_TARGET_MARKER),
-    target.indexOf(TELEGRAM_TOPIC_TARGET_MARKER),
-  ].filter((value) => value >= 0)
-
-  if (indexes.length === 0) {
-    return -1
-  }
-
-  return Math.min(...indexes)
-}
-
-function matchingTelegramMarker(target: string): string | null {
-  if (target.startsWith(TELEGRAM_BUSINESS_TARGET_MARKER)) {
-    return TELEGRAM_BUSINESS_TARGET_MARKER
-  }
-
-  if (target.startsWith(TELEGRAM_DIRECT_MESSAGES_TOPIC_TARGET_MARKER)) {
-    return TELEGRAM_DIRECT_MESSAGES_TOPIC_TARGET_MARKER
-  }
-
-  if (target.startsWith(TELEGRAM_TOPIC_TARGET_MARKER)) {
-    return TELEGRAM_TOPIC_TARGET_MARKER
-  }
-
-  return null
-}
-
-function normalizeTelegramBusinessConnectionId(
-  rawValue: string,
-  target: string,
-): string {
-  const normalized = normalizeNullableString(rawValue)
-  if (!normalized) {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TARGET_INVALID',
-      'Telegram business targets must use a non-empty business_connection_id.',
-      {
-        target,
-      },
-    )
-  }
-
-  try {
-    const decoded = decodeURIComponent(normalized)
-    if (!decoded.trim()) {
-      throw new TypeError('decoded business connection id was empty')
-    }
-    return decoded
-  } catch {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TARGET_INVALID',
-      'Telegram business targets must use a valid URL-encoded business_connection_id.',
-      {
-        target,
-      },
-    )
-  }
-}
-
-function parseTelegramTargetPositiveInteger(
-  rawValue: string,
-  fieldName: 'direct_messages_topic_id' | 'message_thread_id',
-  target: string,
-): number {
-  const normalized = normalizeNullableString(rawValue)
-  if (!normalized || !/^\d+$/u.test(normalized)) {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TARGET_INVALID',
-      `Telegram targets must use a positive integer ${fieldName}.`,
-      {
-        target,
-      },
-    )
-  }
-
-  const parsed = Number.parseInt(normalized, 10)
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TARGET_INVALID',
-      `Telegram targets must use a positive integer ${fieldName}.`,
-      {
-        target,
-      },
-    )
-  }
-
-  return parsed
 }
 
 function normalizePositiveInteger(

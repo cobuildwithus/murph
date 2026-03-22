@@ -6,6 +6,11 @@ import {
   type AssistantSession,
   type AssistantSessionBinding,
 } from '../assistant-cli-contracts.js'
+import { inferAssistantBindingDelivery } from './channel-adapters.js'
+import {
+  conversationDirectnessFromThreadIsDirect,
+  type ConversationRef,
+} from './conversation-ref.js'
 import { normalizeNullableString } from './shared.js'
 
 export interface AssistantBindingInput {
@@ -136,50 +141,12 @@ export function resolveAssistantBindingDelivery(input: {
   threadId?: string | null
   threadIsDirect?: boolean | null
 }): AssistantBindingDelivery | null {
-  const explicitKind = input.deliveryKind ?? null
-  const explicitTarget = normalizeNullableString(input.deliveryTarget)
-  if (explicitKind && explicitTarget) {
-    return assistantBindingDeliverySchema.parse({
-      kind: explicitKind,
-      target: explicitTarget,
-    })
-  }
-
-  const actorId = normalizeNullableString(input.actorId)
-  const channel = normalizeNullableString(input.channel)
-  const threadId = normalizeNullableString(input.threadId)
-  const threadIsDirect =
-    typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null
-
-  if (channel === 'telegram' && threadId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'thread',
-      target: threadId,
-    })
-  }
-
-  if (threadIsDirect === false && threadId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'thread',
-      target: threadId,
-    })
-  }
-
-  if (actorId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'participant',
-      target: actorId,
-    })
-  }
-
-  if (threadId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'thread',
-      target: threadId,
-    })
-  }
-
-  return null
+  return inferAssistantBindingDelivery({
+    channel: input.channel,
+    conversation: bindingConversationRef(input),
+    deliveryKind: input.deliveryKind ?? null,
+    deliveryTarget: input.deliveryTarget ?? null,
+  })
 }
 
 export function getAssistantBindingContextLines(
@@ -203,4 +170,20 @@ export function getAssistantDisplayTarget(
   session: Pick<AssistantSession, 'binding'>,
 ): string | null {
   return session.binding.delivery?.target ?? null
+}
+
+function bindingConversationRef(input: {
+  actorId?: string | null
+  channel?: string | null
+  identityId?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}): ConversationRef {
+  return {
+    channel: normalizeNullableString(input.channel),
+    identityId: normalizeNullableString(input.identityId),
+    participantId: normalizeNullableString(input.actorId),
+    threadId: normalizeNullableString(input.threadId),
+    directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
+  }
 }

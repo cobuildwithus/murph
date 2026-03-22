@@ -93,6 +93,13 @@ export type {
   NormalizeTelegramUpdateInput,
   TelegramAttachmentDownloadDriver,
 } from "./connectors/telegram/normalize.js";
+export {
+  parseTelegramThreadTarget,
+  serializeTelegramThreadTarget,
+} from "./connectors/telegram/target.js";
+export type {
+  TelegramThreadTarget,
+} from "./connectors/telegram/target.js";
 export type {
   TelegramChat,
   TelegramFile,

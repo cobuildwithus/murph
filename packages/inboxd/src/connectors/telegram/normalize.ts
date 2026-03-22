@@ -17,6 +17,7 @@ import type {
   TelegramUser,
   TelegramVenue,
 } from "./types.js";
+import { serializeTelegramThreadTarget } from "./target.js";
 
 export interface TelegramAttachmentDownloadDriver {
   getFile(fileId: string, signal?: AbortSignal): Promise<TelegramFile>;
@@ -707,27 +708,6 @@ function pickTelegramPoll(
 
 function normalizeTelegramPositiveInteger(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
-}
-
-function serializeTelegramThreadTarget(input: {
-  businessConnectionId: string | null;
-  chatId: string;
-  directMessagesTopicId: number | null;
-  messageThreadId: number | null;
-}): string {
-  let target = input.chatId;
-
-  if (input.businessConnectionId) {
-    target += `:business:${encodeURIComponent(input.businessConnectionId)}`;
-  }
-
-  if (input.directMessagesTopicId !== null) {
-    target += `:dm-topic:${input.directMessagesTopicId}`;
-  } else if (input.messageThreadId !== null) {
-    target += `:topic:${input.messageThreadId}`;
-  }
-
-  return target;
 }
 
 function compactRecord(fields: Record<string, unknown>): Record<string, unknown> {

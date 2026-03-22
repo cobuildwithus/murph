@@ -2,6 +2,7 @@ import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from '../assistant-state.js'
+import { getAssistantChannelAdapter } from '../assistant/channel-adapters.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import { resolveTelegramBotToken } from '../telegram-runtime.js'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -187,7 +188,9 @@ async function configureTelegramChannel(input: {
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel> {
+  const telegramAdapter = getAssistantChannelAdapter('telegram')
   const token = resolveTelegramBotToken(input.env)
+  const readyForSetup = telegramAdapter?.isReadyForSetup(input.env) ?? Boolean(token)
   const doctor = input.inboxServices.doctor
   const sourceList = input.inboxServices.sourceList
   const sourceAdd = input.inboxServices.sourceAdd
@@ -206,7 +209,7 @@ async function configureTelegramChannel(input: {
     )
 
     return {
-      autoReply: Boolean(token),
+      autoReply: readyForSetup,
       channel: 'telegram',
       configured: false,
       connectorId: TELEGRAM_SETUP_CONNECTOR_ID,
@@ -236,7 +239,7 @@ async function configureTelegramChannel(input: {
     ) ??
     null
 
-  if (!token) {
+  if (!readyForSetup) {
     input.steps.push(
       createStep({
         detail: existingConnector
