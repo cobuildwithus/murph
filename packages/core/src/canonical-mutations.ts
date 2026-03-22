@@ -301,7 +301,7 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)];
 }
 
-function normalizeStringList(value: unknown): string[] | undefined {
+function uniqueTrimmedStringList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
@@ -472,7 +472,7 @@ function replaceMarkdownTitle(body: string, title: string): string {
   return `# ${title}\n\n${body.trimStart()}`;
 }
 
-function normalizeExperimentStatus(value: unknown): ExperimentStatus {
+function requireExperimentStatus(value: unknown): ExperimentStatus {
   if (typeof value !== "string" || !EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)) {
     throw new VaultError("HB_EXPERIMENT_STATUS_INVALID", "Experiment status is invalid.");
   }
@@ -596,9 +596,9 @@ function buildManualEventRecord(payload: JsonObject): EventRecord {
     source,
     title,
     note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
-    tags: normalizeStringList(payload.tags) ?? undefined,
-    relatedIds: normalizeStringList(payload.relatedIds) ?? undefined,
-    rawRefs: normalizeStringList(payload.rawRefs) ?? undefined,
+    tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
+    relatedIds: uniqueTrimmedStringList(payload.relatedIds) ?? undefined,
+    rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
     ...eventSpecificFields(payload),
   });
   const result = safeParseContract(eventRecordSchema, record);
@@ -835,9 +835,11 @@ export async function updateExperiment(
       status:
         input.status === undefined
           ? document.attributes.status
-          : normalizeExperimentStatus(input.status),
+          : requireExperimentStatus(input.status),
       tags:
-        input.tags === undefined ? document.attributes.tags : normalizeStringList(input.tags) ?? undefined,
+        input.tags === undefined
+          ? document.attributes.tags
+          : uniqueTrimmedStringList(input.tags) ?? undefined,
     }),
     input.relativePath,
   );
@@ -1041,7 +1043,7 @@ async function mutateJournalLinks(
   const currentValues = new Set(document.attributes[input.key]);
   let changed = 0;
 
-  for (const value of normalizeStringList(input.values) ?? []) {
+  for (const value of uniqueTrimmedStringList(input.values) ?? []) {
     if (input.operation === "link") {
       if (!currentValues.has(value)) {
         currentValues.add(value);
@@ -1236,7 +1238,7 @@ export async function upsertProvider(
       website: normalizeOptionalText(input.website) ?? undefined,
       phone: normalizeOptionalText(input.phone) ?? undefined,
       note: normalizeOptionalText(input.note) ?? undefined,
-      aliases: normalizeStringList(input.aliases) ?? undefined,
+      aliases: uniqueTrimmedStringList(input.aliases) ?? undefined,
     }),
     relativePath,
   );

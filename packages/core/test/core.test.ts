@@ -471,6 +471,25 @@ test("createExperiment returns the existing experiment for idempotent retries", 
   assert.equal(experimentOperations[0]?.status, "committed");
 });
 
+test("createExperiment coerces invalid status values to active for the legacy create path", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "status-boundary",
+    title: "Status Boundary",
+    status: "not-a-real-status",
+  });
+
+  const experimentDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, created.experiment.relativePath), "utf8"),
+  );
+
+  assert.equal(created.created, true);
+  assert.equal(experimentDocument.attributes.status, "active");
+});
+
 test("assessment imports append contract-shaped records and emit intake audits", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   const sourceRoot = await makeTempDirectory("healthybob-source");

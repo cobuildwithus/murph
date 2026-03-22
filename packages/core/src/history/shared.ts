@@ -99,7 +99,7 @@ export function optionalEnum<TValue extends string>(
   return value as TValue;
 }
 
-export function normalizeStringList(
+export function validateSortedStringList(
   value: unknown,
   fieldName: string,
   itemFieldName = "item",
@@ -130,7 +130,7 @@ export function normalizeStringList(
 }
 
 export function normalizeTagList(value: unknown, fieldName: string): string[] | undefined {
-  const values = normalizeStringList(value, fieldName, "tag", 32, 80);
+  const values = validateSortedStringList(value, fieldName, "tag", 32, 80);
 
   if (!values) {
     return undefined;
@@ -140,7 +140,7 @@ export function normalizeTagList(value: unknown, fieldName: string): string[] | 
 }
 
 export function normalizeRelativePathList(value: unknown, fieldName: string): string[] | undefined {
-  const values = normalizeStringList(value, fieldName, "path", 32, 240);
+  const values = validateSortedStringList(value, fieldName, "path", 32, 240);
 
   if (!values) {
     return undefined;

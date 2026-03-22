@@ -41,6 +41,7 @@ import {
   updateVaultSummary,
   upsertEvent,
   upsertProvider,
+  VaultError,
 } from "../src/index.js";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -245,6 +246,86 @@ test("high-level core provider, event, and summary mutation ports preserve canon
   assert.equal(providerDocument.attributes.title, "Labcorp West");
   assert.ok(eventRecord);
   assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
+});
+
+test("high-level core experiment mutation ports keep legacy create coercion distinct from canonical update validation", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  await initializeVault({ vaultRoot });
+
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "status-boundary",
+    title: "Status Boundary",
+    status: "not-a-real-status",
+  });
+  const experimentDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, created.experiment.relativePath), "utf8"),
+  );
+
+  assert.equal(experimentDocument.attributes.status, "active");
+
+  await assert.rejects(
+    () =>
+      updateExperiment({
+        vaultRoot,
+        relativePath: created.experiment.relativePath,
+        status: "not-a-real-status",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "HB_EXPERIMENT_STATUS_INVALID",
+  );
+});
+
+test("high-level canonical mutation ports dedupe trimmed duplicate experiment and event lists", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  await initializeVault({ vaultRoot });
+
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "duplicate-boundary",
+    title: "Duplicate Boundary",
+    startedOn: "2026-03-10",
+  });
+
+  await updateExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    tags: [" energy ", "walking", "energy", "walking  "],
+  });
+
+  const experimentDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, created.experiment.relativePath), "utf8"),
+  );
+  assert.deepEqual(experimentDocument.attributes.tags, ["energy", "walking"]);
+
+  const upsertedEvent = await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: "evt_01JNV422Y2M5ZBV64ZP4N1DRB3",
+      kind: "note",
+      occurredAt: "2026-03-12T08:15:00.000Z",
+      title: "Boundary note",
+      note: "Checking canonical duplicate trimming.",
+      tags: [" focus ", "focus", "energy"],
+      relatedIds: [created.experiment.id, ` ${created.experiment.id} `, "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      rawRefs: [" raw/documents/a.pdf ", "raw/documents/a.pdf", "raw/documents/b.pdf"],
+    } satisfies Record<string, unknown>,
+  });
+  const ledgerRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: upsertedEvent.ledgerFile,
+  });
+  const eventRecord = ledgerRecords.find(
+    (record) => (record as { id?: string }).id === "evt_01JNV422Y2M5ZBV64ZP4N1DRB3",
+  ) as EventRecord | undefined;
+
+  assert.ok(eventRecord);
+  assert.deepEqual(eventRecord.tags, ["focus", "energy"]);
+  assert.deepEqual(eventRecord.relatedIds, [
+    created.experiment.id,
+    "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+  ]);
+  assert.deepEqual(eventRecord.rawRefs, ["raw/documents/a.pdf", "raw/documents/b.pdf"]);
 });
 
 test("high-level core inbox promotion ports preserve journal and experiment-note idempotency", async () => {

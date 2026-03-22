@@ -1,7 +1,7 @@
 import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.js";
 import {
   addMeal as addMealInternal,
-  createExperiment as createExperimentInternal,
+  createExperiment as createExperimentViaLegacyMutationsInternal,
   ensureJournalDay as ensureJournalDayInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importDocument as importDocumentInternal,
@@ -14,10 +14,10 @@ import {
   linkJournalStreams as linkJournalStreamsInternal,
   promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
   promoteInboxJournal as promoteInboxJournalInternal,
-  stopExperiment as stopExperimentInternal,
+  stopExperiment as stopExperimentViaCanonicalMutationsInternal,
   unlinkJournalEventIds as unlinkJournalEventIdsInternal,
   unlinkJournalStreams as unlinkJournalStreamsInternal,
-  updateExperiment as updateExperimentInternal,
+  updateExperiment as updateExperimentViaCanonicalMutationsInternal,
   updateVaultSummary as updateVaultSummaryInternal,
   upsertEvent as upsertEventInternal,
   upsertProvider as upsertProviderInternal,
@@ -244,15 +244,15 @@ export async function unlinkJournalStreams(
 }
 
 export async function createExperiment(
-  input: Parameters<typeof createExperimentInternal>[0],
-): ReturnType<typeof createExperimentInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => createExperimentInternal(input));
+  input: Parameters<typeof createExperimentViaLegacyMutationsInternal>[0],
+): ReturnType<typeof createExperimentViaLegacyMutationsInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => createExperimentViaLegacyMutationsInternal(input));
 }
 
 export async function updateExperiment(
-  input: Parameters<typeof updateExperimentInternal>[0],
-): ReturnType<typeof updateExperimentInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => updateExperimentInternal(input));
+  input: Parameters<typeof updateExperimentViaCanonicalMutationsInternal>[0],
+): ReturnType<typeof updateExperimentViaCanonicalMutationsInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => updateExperimentViaCanonicalMutationsInternal(input));
 }
 
 export async function checkpointExperiment(
@@ -262,9 +262,9 @@ export async function checkpointExperiment(
 }
 
 export async function stopExperiment(
-  input: Parameters<typeof stopExperimentInternal>[0],
-): ReturnType<typeof stopExperimentInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => stopExperimentInternal(input));
+  input: Parameters<typeof stopExperimentViaCanonicalMutationsInternal>[0],
+): ReturnType<typeof stopExperimentViaCanonicalMutationsInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => stopExperimentViaCanonicalMutationsInternal(input));
 }
 
 export async function importDocument(

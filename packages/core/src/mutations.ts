@@ -411,7 +411,7 @@ function normalizeSource<T extends string>(value: unknown, allowed: ReadonlySet<
   return typeof value === "string" && allowed.has(value as T) ? (value as T) : fallback;
 }
 
-function normalizeStringList(value: unknown): string[] | undefined {
+function trimStringList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
@@ -428,7 +428,7 @@ function normalizeExperimentHypothesis(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function normalizeExperimentStatus(value: unknown): ExperimentStatus {
+function coerceExperimentStatus(value: unknown): ExperimentStatus {
   return typeof value === "string" && EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)
     ? (value as ExperimentStatus)
     : "active";
@@ -444,7 +444,7 @@ function toExperimentComparableAttributes(
 ): UnknownRecord {
   return compactRecord({
     slug: frontmatterString(attributes as FrontmatterObject, "slug").trim(),
-    status: normalizeExperimentStatus((attributes as FrontmatterObject).status),
+    status: coerceExperimentStatus((attributes as FrontmatterObject).status),
     title: frontmatterString(attributes as FrontmatterObject, "title").trim(),
     startedOn: frontmatterString(attributes as FrontmatterObject, "startedOn").trim(),
     hypothesis: normalizeExperimentHypothesis((attributes as FrontmatterObject).hypothesis),
@@ -570,9 +570,9 @@ function buildEventRecord<K extends EventKind>({
     source: normalizeSource(source, EVENT_SOURCE_SET, "manual"),
     title: typeof title === "string" && title.trim() ? title.trim() : kind,
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
-    tags: normalizeStringList(tags),
-    relatedIds: normalizeStringList(relatedIds),
-    rawRefs: normalizeStringList(rawRefs),
+    tags: trimStringList(tags),
+    relatedIds: trimStringList(relatedIds),
+    rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
     ...normalizedFields,
   });
@@ -779,7 +779,7 @@ export async function createExperiment({
   const startedDay = toDateOnly(startedOn, "startedOn");
   const relativePath = `${VAULT_LAYOUT.experimentsDirectory}/${safeSlug}.md`;
   const normalizedTitle = String(title ?? safeSlug).trim();
-  const normalizedStatus = normalizeExperimentStatus(status);
+  const normalizedStatus = coerceExperimentStatus(status);
   const normalizedHypothesis = normalizeExperimentHypothesis(hypothesis);
   const comparableAttributes = toExperimentComparableAttributes({
     slug: safeSlug,
@@ -1375,7 +1375,7 @@ export async function importDeviceBatch({
       "VAULT_INVALID_EVENT_FIELDS",
       `Device event ${index + 1} fields must be a plain object.`,
     ) ?? {};
-    const rawArtifactRoles = normalizeStringList(eventInput.rawArtifactRoles) ?? [];
+    const rawArtifactRoles = trimStringList(eventInput.rawArtifactRoles) ?? [];
     const fingerprintRecord = buildEventRecord({
       kind,
       occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? normalizedImportedAt,

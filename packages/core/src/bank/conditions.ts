@@ -33,7 +33,7 @@ import {
   section,
   stripUndefined,
   normalizeId,
-  normalizeStringList,
+  validateSortedStringList,
 } from "./shared.js";
 
 import type { FrontmatterObject } from "../types.js";
@@ -92,7 +92,7 @@ function parseConditionRecord(
     assertedOn: optionalDateOnly(attributes.assertedOn as string | undefined, "assertedOn"),
     resolvedOn: optionalDateOnly(attributes.resolvedOn as string | undefined, "resolvedOn"),
     severity: optionalEnum(attributes.severity, CONDITION_SEVERITIES, "severity"),
-    bodySites: normalizeStringList(attributes.bodySites, "bodySites", "bodySite", 16, 120),
+    bodySites: validateSortedStringList(attributes.bodySites, "bodySites", "bodySite", 16, 120),
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
     relatedRegimenIds: normalizeRecordIdList(attributes.relatedRegimenIds, "relatedRegimenIds", "reg"),
     note: optionalString(attributes.note, "note", 4000),
@@ -200,7 +200,7 @@ export async function upsertCondition(
           optionalEnum(value, CONDITION_SEVERITIES, "severity"),
         ),
         bodySites: resolveOptionalUpsertValue(input.bodySites, existingRecord?.bodySites, (value) =>
-          normalizeStringList(value, "bodySites", "bodySite", 16, 120),
+          validateSortedStringList(value, "bodySites", "bodySite", 16, 120),
         ),
         relatedGoalIds: resolveOptionalUpsertValue(
           input.relatedGoalIds,

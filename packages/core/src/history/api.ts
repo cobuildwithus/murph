@@ -12,12 +12,12 @@ import {
   compareIsoTimestamps,
   normalizeId,
   normalizeRelativePathList,
-  normalizeStringList,
   normalizeTagList,
   normalizeTimestamp,
   optionalEnum,
   optionalString,
   requireString,
+  validateSortedStringList,
 } from "./shared.js";
 import {
   ADVERSE_EFFECT_SEVERITIES,
@@ -66,7 +66,7 @@ function normalizeBaseEvent(input: AppendHistoryEventInput) {
     title: requireString(input.title, "title", 160),
     note: optionalString(input.note, "note", 4000),
     tags: normalizeTagList(input.tags, "tags"),
-    relatedIds: normalizeStringList(input.relatedIds, "relatedIds", "id", 32, 80),
+    relatedIds: validateSortedStringList(input.relatedIds, "relatedIds", "id", 32, 80),
     rawRefs: normalizeRelativePathList(input.rawRefs, "rawRefs"),
   };
 }
@@ -235,7 +235,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     title: requireString(value.title, "title", 160),
     note: optionalString(value.note, "note", 4000),
     tags: normalizeTagList(value.tags, "tags"),
-    relatedIds: normalizeStringList(value.relatedIds, "relatedIds", "id", 32, 80),
+    relatedIds: validateSortedStringList(value.relatedIds, "relatedIds", "id", 32, 80),
     rawRefs: normalizeRelativePathList(value.rawRefs, "rawRefs"),
   };
 

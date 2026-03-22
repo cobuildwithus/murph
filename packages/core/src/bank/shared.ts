@@ -9,11 +9,11 @@ import {
   heading,
   normalizeId,
   normalizeSlug,
-  normalizeStringList,
   optionalEnum,
   optionalInteger,
   optionalString,
   requireString,
+  validateSortedStringList,
 } from "../history/shared.js";
 
 import type { DateInput, FrontmatterObject } from "../types.js";
@@ -50,7 +50,7 @@ export function normalizeRecordIdList(
   prefix: string,
   maxItems = 24,
 ): string[] | undefined {
-  const values = normalizeStringList(value, fieldName, "id", maxItems, 80);
+  const values = validateSortedStringList(value, fieldName, "id", maxItems, 80);
 
   if (!values) {
     return undefined;
@@ -60,7 +60,7 @@ export function normalizeRecordIdList(
 }
 
 export function normalizeDomainList(value: unknown, fieldName: string): string[] | undefined {
-  const values = normalizeStringList(value, fieldName, "domain", 24, 80);
+  const values = validateSortedStringList(value, fieldName, "domain", 24, 80);
 
   if (!values) {
     return undefined;
@@ -203,9 +203,9 @@ export function resolveRequiredUpsertValue<TRawValue, TPersistedValue>(
 export {
   normalizeId,
   normalizeSlug,
-  normalizeStringList,
   optionalEnum,
   optionalInteger,
   optionalString,
   requireString,
+  validateSortedStringList,
 };
