@@ -595,6 +595,28 @@ interface DoctorInput extends CommandContext {
   sourceId?: string | null
 }
 
+interface DoctorContext {
+  input: DoctorInput
+  paths: InboxPaths
+  inboxd: InboxRuntimeModule
+  checks: InboxDoctorCheck[]
+  config: InboxRuntimeConfig | null
+  databaseAvailable: boolean
+  parserToolchain: InboxParserToolchainStatus | null
+}
+
+type DoctorTargetResolution =
+  | {
+      kind: 'all'
+    }
+  | {
+      kind: 'missing'
+    }
+  | {
+      kind: 'connector'
+      connector: InboxConnectorConfig
+    }
+
 interface InitInput extends CommandContext {
   rebuild?: boolean
 }
@@ -963,72 +985,124 @@ export function createIntegratedInboxCliServices(
     }
   }
 
-  const buildDoctorResult = async (
-    input: DoctorInput,
-  ): Promise<InboxDoctorResult> => {
-    const paths = resolveRuntimePaths(input.vault)
-    const inboxd = await loadInbox()
-    const checks: InboxDoctorCheck[] = []
-    let config: InboxRuntimeConfig | null = null
-    let databaseAvailable = false
-    let parserToolchain: InboxParserToolchainStatus | null = null
+  const toDoctorCheckList = (
+    checks: InboxDoctorCheck | InboxDoctorCheck[],
+  ): InboxDoctorCheck[] => (Array.isArray(checks) ? checks : [checks])
 
+  const runDoctorCheck = async <TResult>(
+    context: DoctorContext,
+    input: {
+      run: () => Promise<TResult>
+      onSuccess: (result: TResult) => InboxDoctorCheck | InboxDoctorCheck[]
+      onError: (error: unknown) => InboxDoctorCheck | InboxDoctorCheck[]
+    },
+  ): Promise<TResult | null> => {
     try {
-      await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
-      checks.push(passCheck('vault', 'Vault metadata is readable.'))
+      const result = await input.run()
+      context.checks.push(...toDoctorCheckList(input.onSuccess(result)))
+      return result
     } catch (error) {
-      checks.push(
+      context.checks.push(...toDoctorCheckList(input.onError(error)))
+      return null
+    }
+  }
+
+  const finalizeDoctorResult = async (
+    context: DoctorContext,
+    connector: InboxConnectorConfig | null = null,
+  ): Promise<InboxDoctorResult> => {
+    const configPath = context.config
+      ? relativeToVault(
+          context.paths.absoluteVaultRoot,
+          context.paths.inboxConfigPath,
+        )
+      : (await fileExists(context.paths.inboxConfigPath))
+        ? relativeToVault(
+            context.paths.absoluteVaultRoot,
+            context.paths.inboxConfigPath,
+          )
+        : null
+
+    return {
+      vault: context.paths.absoluteVaultRoot,
+      configPath,
+      databasePath: context.databaseAvailable
+        ? relativeToVault(
+            context.paths.absoluteVaultRoot,
+            context.paths.inboxDbPath,
+          )
+        : null,
+      target: connector?.id ?? context.input.sourceId ?? null,
+      ok: context.checks.every((check) => check.status !== 'fail'),
+      checks: context.checks,
+      connectors: context.config?.connectors ?? [],
+      parserToolchain: context.parserToolchain,
+    }
+  }
+
+  const runVaultDoctorCheck = async (
+    context: DoctorContext,
+  ): Promise<boolean> => {
+    const result = await runDoctorCheck(context, {
+      run: () => context.inboxd.ensureInboxVault(context.paths.absoluteVaultRoot),
+      onSuccess: () => passCheck('vault', 'Vault metadata is readable.'),
+      onError: (error) =>
         failCheck('vault', 'Vault metadata could not be read.', {
           error: errorMessage(error),
         }),
-      )
-      return {
-        vault: paths.absoluteVaultRoot,
-        configPath: null,
-        databasePath: null,
-        target: input.sourceId ?? null,
-        ok: false,
-        checks,
-        connectors: [],
-        parserToolchain: null,
-      }
-    }
+    })
 
-    try {
-      config = await readConfig(paths)
-      checks.push(passCheck('config', 'Inbox runtime config parsed successfully.'))
-    } catch (error) {
-      checks.push(
+    return result !== null
+  }
+
+  const runConfigDoctorCheck = async (context: DoctorContext): Promise<void> => {
+    const config = await runDoctorCheck(context, {
+      run: () => readConfig(context.paths),
+      onSuccess: () =>
+        passCheck('config', 'Inbox runtime config parsed successfully.'),
+      onError: (error) =>
         failCheck('config', 'Inbox runtime config is missing or invalid.', {
           error: errorMessage(error),
         }),
-      )
-    }
+    })
 
-    try {
-      const runtime = await inboxd.openInboxRuntime({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-      runtime.close()
-      databaseAvailable = true
-      checks.push(passCheck('runtime-db', 'Inbox runtime SQLite opened successfully.'))
-    } catch (error) {
-      checks.push(
+    context.config = config
+  }
+
+  const runRuntimeDbDoctorCheck = async (
+    context: DoctorContext,
+  ): Promise<void> => {
+    const runtime = await runDoctorCheck(context, {
+      run: async () => {
+        const runtime = await context.inboxd.openInboxRuntime({
+          vaultRoot: context.paths.absoluteVaultRoot,
+        })
+        runtime.close()
+        return runtime
+      },
+      onSuccess: () =>
+        passCheck('runtime-db', 'Inbox runtime SQLite opened successfully.'),
+      onError: (error) =>
         failCheck('runtime-db', 'Inbox runtime SQLite could not be opened.', {
           error: errorMessage(error),
         }),
-      )
-    }
+    })
 
-    try {
-      const parsers = await loadParsers()
-      const doctor = await parsers.discoverParserToolchain({
-        vaultRoot: paths.absoluteVaultRoot,
-      })
-      parserToolchain = toCliParserToolchain(paths.absoluteVaultRoot, doctor)
-      checks.push(...toParserToolChecks(doctor.tools))
-    } catch (error) {
-      checks.push(
+    context.databaseAvailable = runtime !== null
+  }
+
+  const runParserToolchainDoctorCheck = async (
+    context: DoctorContext,
+  ): Promise<void> => {
+    const doctor = await runDoctorCheck(context, {
+      run: async () => {
+        const parsers = await loadParsers()
+        return parsers.discoverParserToolchain({
+          vaultRoot: context.paths.absoluteVaultRoot,
+        })
+      },
+      onSuccess: (doctor) => toParserToolChecks(doctor.tools),
+      onError: (error) =>
         warnCheck(
           'parser-runtime',
           'Parser toolchain discovery is unavailable in this workspace.',
@@ -1036,32 +1110,44 @@ export function createIntegratedInboxCliServices(
             error: errorMessage(error),
           },
         ),
+    })
+
+    if (doctor) {
+      context.parserToolchain = toCliParserToolchain(
+        context.paths.absoluteVaultRoot,
+        doctor,
       )
     }
+  }
 
-    if (!config) {
+  const runBaselineDoctorChecks = async (
+    context: DoctorContext,
+  ): Promise<boolean> => {
+    if (!(await runVaultDoctorCheck(context))) {
+      return false
+    }
+
+    await runConfigDoctorCheck(context)
+    await runRuntimeDbDoctorCheck(context)
+    await runParserToolchainDoctorCheck(context)
+    return true
+  }
+
+  const resolveDoctorTarget = (
+    context: DoctorContext,
+  ): DoctorTargetResolution => {
+    if (!context.config) {
       return {
-        vault: paths.absoluteVaultRoot,
-        configPath: (await fileExists(paths.inboxConfigPath))
-          ? relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath)
-          : null,
-        databasePath: databaseAvailable
-          ? relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath)
-          : null,
-        target: input.sourceId ?? null,
-        ok: checks.every((check) => check.status !== 'fail'),
-        checks,
-        connectors: [],
-        parserToolchain,
+        kind: 'missing',
       }
     }
 
-    if (!input.sourceId) {
-      checks.push(
-        config.connectors.length > 0
+    if (!context.input.sourceId) {
+      context.checks.push(
+        context.config.connectors.length > 0
           ? passCheck(
               'connectors',
-              `Configured ${config.connectors.length} inbox source${config.connectors.length === 1 ? '' : 's'}.`,
+              `Configured ${context.config.connectors.length} inbox source${context.config.connectors.length === 1 ? '' : 's'}.`,
             )
           : warnCheck(
               'connectors',
@@ -1070,42 +1156,24 @@ export function createIntegratedInboxCliServices(
       )
 
       return {
-        vault: paths.absoluteVaultRoot,
-        configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-        databasePath: databaseAvailable
-          ? relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath)
-          : null,
-        target: null,
-        ok: checks.every((check) => check.status !== 'fail'),
-        checks,
-        connectors: config.connectors,
-        parserToolchain,
+        kind: 'all',
       }
     }
 
-    const connector = findConnector(config, input.sourceId)
+    const connector = findConnector(context.config, context.input.sourceId)
     if (!connector) {
-      checks.push(
+      context.checks.push(
         failCheck(
           'connector',
-          `Inbox source "${input.sourceId}" is not configured.`,
+          `Inbox source "${context.input.sourceId}" is not configured.`,
         ),
       )
       return {
-        vault: paths.absoluteVaultRoot,
-        configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-        databasePath: databaseAvailable
-          ? relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath)
-          : null,
-        target: input.sourceId,
-        ok: false,
-        checks,
-        connectors: config.connectors,
-        parserToolchain,
+        kind: 'missing',
       }
     }
 
-    checks.push(
+    context.checks.push(
       passCheck(
         'connector',
         `Connector "${connector.id}" is configured and ${connector.enabled ? 'enabled' : 'disabled'}.`,
@@ -1116,218 +1184,253 @@ export function createIntegratedInboxCliServices(
       ),
     )
 
-    if (databaseAvailable) {
-      try {
-        await rebuildRuntime(paths, inboxd)
-        checks.push(
-          passCheck(
-            'rebuild',
-            'Runtime rebuild from vault envelopes completed successfully.',
-          ),
-        )
-      } catch (error) {
-        checks.push(
-          failCheck(
-            'rebuild',
-            'Runtime rebuild from vault envelopes failed.',
-            { error: errorMessage(error) },
-          ),
-        )
-      }
+    return {
+      kind: 'connector',
+      connector,
+    }
+  }
+
+  const runRuntimeRebuildDoctorCheck = async (
+    context: DoctorContext,
+  ): Promise<void> => {
+    if (!context.databaseAvailable) {
+      return
     }
 
-    if (connector.source === 'imessage') {
-      if (getPlatform() !== 'darwin') {
-        checks.push(
-          failCheck(
-            'platform',
-            'The iMessage connector requires macOS.',
-            { platform: getPlatform() },
-          ),
-        )
-      } else {
-        checks.push(passCheck('platform', 'Running on macOS.'))
-      }
+    await runDoctorCheck(context, {
+      run: () => rebuildRuntime(context.paths, context.inboxd),
+      onSuccess: () =>
+        passCheck(
+          'rebuild',
+          'Runtime rebuild from vault envelopes completed successfully.',
+        ),
+      onError: (error) =>
+        failCheck(
+          'rebuild',
+          'Runtime rebuild from vault envelopes failed.',
+          { error: errorMessage(error) },
+        ),
+    })
+  }
 
-      let driver: ImessageDriver | null = null
-      try {
-        driver = await loadConfiguredImessageDriver(connector)
-        checks.push(passCheck('driver-import', 'The iMessage driver imported successfully.'))
-      } catch (error) {
-        checks.push(
-          failCheck(
-            'driver-import',
-            'The iMessage driver could not be imported.',
-            { error: errorMessage(error) },
-          ),
-        )
-      }
+  const runImessageDoctorChecks = async (
+    context: DoctorContext,
+    connector: InboxConnectorConfig,
+  ): Promise<void> => {
+    if (getPlatform() !== 'darwin') {
+      context.checks.push(
+        failCheck(
+          'platform',
+          'The iMessage connector requires macOS.',
+          { platform: getPlatform() },
+        ),
+      )
+    } else {
+      context.checks.push(passCheck('platform', 'Running on macOS.'))
+    }
 
-      try {
-        await ensureConfiguredImessageReady()
-        checks.push(
-          passCheck(
-            'messages-db',
-            'The local Messages database is readable.',
-            {
-              path: IMESSAGE_MESSAGES_DB_RELATIVE_PATH.replace(/\\/g, '/'),
-            },
-          ),
-        )
-      } catch (error) {
-        checks.push(
-          failCheck(
-            'messages-db',
-            'The local Messages database could not be accessed.',
-            { error: errorMessage(error) },
-          ),
-        )
-      }
+    const driver = await runDoctorCheck(context, {
+      run: () => loadConfiguredImessageDriver(connector),
+      onSuccess: () =>
+        passCheck('driver-import', 'The iMessage driver imported successfully.'),
+      onError: (error) =>
+        failCheck(
+          'driver-import',
+          'The iMessage driver could not be imported.',
+          { error: errorMessage(error) },
+        ),
+    })
 
-      if (driver) {
-        try {
-          const chats = (await driver.listChats?.()) ?? []
-          const messages = await driver.getMessages({
-            limit: 1,
-            cursor: null,
-            includeOwnMessages:
-              connector.options.includeOwnMessages ?? true,
-          })
+    await runDoctorCheck(context, {
+      run: () => ensureConfiguredImessageReady(),
+      onSuccess: () =>
+        passCheck('messages-db', 'The local Messages database is readable.', {
+          path: IMESSAGE_MESSAGES_DB_RELATIVE_PATH.replace(/\\/g, '/'),
+        }),
+      onError: (error) =>
+        failCheck(
+          'messages-db',
+          'The local Messages database could not be accessed.',
+          { error: errorMessage(error) },
+        ),
+    })
 
-          if (chats.length > 0 || messages.length > 0) {
-            checks.push(
+    if (!driver) {
+      return
+    }
+
+    await runDoctorCheck(context, {
+      run: async () => {
+        const chats = (await driver.listChats?.()) ?? []
+        const messages = await driver.getMessages({
+          limit: 1,
+          cursor: null,
+          includeOwnMessages: connector.options.includeOwnMessages ?? true,
+        })
+
+        return {
+          chats,
+          messages,
+        }
+      },
+      onSuccess: ({ chats, messages }) =>
+        chats.length > 0 || messages.length > 0
+          ? passCheck(
+              'probe',
+              'The connector can list chats or fetch messages.',
+              {
+                chats: chats.length,
+                messages: messages.length,
+              },
+            )
+          : warnCheck(
+              'probe',
+              'The connector responded but returned no chats or messages.',
+            ),
+      onError: (error) =>
+        failCheck(
+          'probe',
+          'The connector could not fetch chats or messages.',
+          { error: errorMessage(error) },
+        ),
+    })
+  }
+
+  const runTelegramDoctorChecks = async (
+    context: DoctorContext,
+    connector: InboxConnectorConfig,
+  ): Promise<void> => {
+    context.checks.push(
+      passCheck('platform', 'Telegram long polling is platform-agnostic.'),
+    )
+
+    const env = getEnvironment()
+    const token = resolveTelegramBotToken(env)
+    const usesInjectedTelegramDriver = Boolean(dependencies.loadTelegramDriver)
+    if (!token && !usesInjectedTelegramDriver) {
+      context.checks.push(
+        failCheck(
+          'token',
+          'Telegram bot token is missing from HEALTHYBOB_TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_TOKEN.',
+        ),
+      )
+    } else if (usesInjectedTelegramDriver) {
+      context.checks.push(
+        passCheck(
+          'token',
+          'Telegram driver configuration is delegated to the integrating workspace.',
+        ),
+      )
+    } else {
+      context.checks.push(
+        passCheck(
+          'token',
+          'Telegram bot token was found in the local environment.',
+        ),
+      )
+    }
+
+    const driver =
+      token || usesInjectedTelegramDriver
+        ? await runDoctorCheck(context, {
+            run: () => loadConfiguredTelegramDriver(connector),
+            onSuccess: () =>
               passCheck(
-                'probe',
-                'The connector can list chats or fetch messages.',
-                {
-                  chats: chats.length,
-                  messages: messages.length,
-                },
+                'driver-import',
+                'The Telegram poll driver initialized successfully.',
               ),
-            )
-          } else {
-            checks.push(
-              warnCheck(
-                'probe',
-                'The connector responded but returned no chats or messages.',
-              ),
-            )
-          }
-        } catch (error) {
-          checks.push(
-            failCheck(
-              'probe',
-              'The connector could not fetch chats or messages.',
-              { error: errorMessage(error) },
-            ),
-          )
-        }
-      }
-    }
-
-    if (connector.source === 'telegram') {
-      checks.push(passCheck('platform', 'Telegram long polling is platform-agnostic.'))
-
-      const env = getEnvironment()
-      const token = resolveTelegramBotToken(env)
-      const usesInjectedTelegramDriver = Boolean(dependencies.loadTelegramDriver)
-      if (!token && !usesInjectedTelegramDriver) {
-        checks.push(
-          failCheck(
-            'token',
-            'Telegram bot token is missing from HEALTHYBOB_TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_TOKEN.',
-          ),
-        )
-      } else if (usesInjectedTelegramDriver) {
-        checks.push(
-          passCheck(
-            'token',
-            'Telegram driver configuration is delegated to the integrating workspace.',
-          ),
-        )
-      } else {
-        checks.push(
-          passCheck('token', 'Telegram bot token was found in the local environment.'),
-        )
-      }
-
-      let driver: TelegramDriver | null = null
-      if (token || usesInjectedTelegramDriver) {
-        try {
-          driver = await loadConfiguredTelegramDriver(connector)
-          checks.push(passCheck('driver-import', 'The Telegram poll driver initialized successfully.'))
-        } catch (error) {
-          checks.push(
-            failCheck(
-              'driver-import',
-              'The Telegram poll driver could not be initialized.',
-              { error: errorMessage(error) },
-            ),
-          )
-        }
-      }
-
-      if (driver) {
-        try {
-          const bot = await driver.getMe()
-          checks.push(
-            passCheck('probe', 'The Telegram bot token authenticated successfully.', {
-              bot: typeof bot === 'object' && bot !== null && 'username' in bot ? (bot as { username?: unknown }).username ?? null : null,
-            }),
-          )
-        } catch (error) {
-          checks.push(
-            failCheck(
-              'probe',
-              'The Telegram bot token could not authenticate with getMe.',
-              { error: errorMessage(error) },
-            ),
-          )
-        }
-
-        if (driver.getWebhookInfo) {
-          try {
-            const webhook = await driver.getWebhookInfo()
-            const url = normalizeNullableString(webhook?.url)
-
-            if (url) {
-              checks.push(
-                warnCheck(
-                  'webhook',
-                  'Telegram currently has an active webhook; the local poll connector will delete it on start.',
-                  { url },
-                ),
-              )
-            } else {
-              checks.push(
-                passCheck('webhook', 'No Telegram webhook is configured; local polling can run safely.'),
-              )
-            }
-          } catch (error) {
-            checks.push(
-              warnCheck(
-                'webhook',
-                'Telegram webhook status could not be read.',
+            onError: (error) =>
+              failCheck(
+                'driver-import',
+                'The Telegram poll driver could not be initialized.',
                 { error: errorMessage(error) },
               ),
-            )
-          }
-        }
-      }
+          })
+        : null
+
+    if (!driver) {
+      return
     }
 
-    return {
-      vault: paths.absoluteVaultRoot,
-      configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
-      databasePath: databaseAvailable
-        ? relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath)
-        : null,
-      target: connector.id,
-      ok: checks.every((check) => check.status !== 'fail'),
-      checks,
-      connectors: config.connectors,
-      parserToolchain,
+    await runDoctorCheck(context, {
+      run: () => driver.getMe(),
+      onSuccess: (bot) =>
+        passCheck('probe', 'The Telegram bot token authenticated successfully.', {
+          bot:
+            typeof bot === 'object' && bot !== null && 'username' in bot
+              ? (bot as { username?: unknown }).username ?? null
+              : null,
+        }),
+      onError: (error) =>
+        failCheck(
+          'probe',
+          'The Telegram bot token could not authenticate with getMe.',
+          { error: errorMessage(error) },
+        ),
+    })
+
+    if (!driver.getWebhookInfo) {
+      return
     }
+
+    await runDoctorCheck(context, {
+      run: () => driver.getWebhookInfo!(),
+      onSuccess: (webhook) => {
+        const url = normalizeNullableString(webhook?.url)
+
+        return url
+          ? warnCheck(
+              'webhook',
+              'Telegram currently has an active webhook; the local poll connector will delete it on start.',
+              { url },
+            )
+          : passCheck(
+              'webhook',
+              'No Telegram webhook is configured; local polling can run safely.',
+            )
+      },
+      onError: (error) =>
+        warnCheck(
+          'webhook',
+          'Telegram webhook status could not be read.',
+          { error: errorMessage(error) },
+        ),
+    })
+  }
+
+  const buildDoctorResult = async (
+    input: DoctorInput,
+  ): Promise<InboxDoctorResult> => {
+    const context: DoctorContext = {
+      input,
+      paths: resolveRuntimePaths(input.vault),
+      inboxd: await loadInbox(),
+      checks: [],
+      config: null,
+      databaseAvailable: false,
+      parserToolchain: null,
+    }
+
+    if (!(await runBaselineDoctorChecks(context))) {
+      return finalizeDoctorResult(context)
+    }
+
+    const target = resolveDoctorTarget(context)
+    if (target.kind !== 'connector') {
+      return finalizeDoctorResult(context)
+    }
+
+    await runRuntimeRebuildDoctorCheck(context)
+
+    if (target.connector.source === 'imessage') {
+      await runImessageDoctorChecks(context, target.connector)
+    }
+
+    if (target.connector.source === 'telegram') {
+      await runTelegramDoctorChecks(context, target.connector)
+    }
+
+    return finalizeDoctorResult(context, target.connector)
   }
 
   const withInboxRuntime = async <TResult>(
