@@ -133,7 +133,8 @@ export function sleep(milliseconds: number): Promise<void> {
 
 export function computeRetryDelayMs(attempts: number): number {
   const sequence = [15_000, 60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000];
-  return sequence[Math.min(Math.max(attempts, 0), sequence.length - 1)] ?? sequence[sequence.length - 1]!;
+  const retryIndex = Math.min(Math.max(attempts - 1, 0), sequence.length - 1);
+  return sequence[retryIndex] ?? sequence[sequence.length - 1]!;
 }
 
 export function coerceRecord(value: unknown): Record<string, unknown> {

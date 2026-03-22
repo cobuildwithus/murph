@@ -142,6 +142,55 @@ test("HomePage renders the ready state", async () => {
   assert.doesNotMatch(markup, /safe fields only/);
 });
 
+test("HomePage keeps additional weekly stat rows when the same stream has multiple units", async () => {
+  const { default: HomePage } = await import("../app/page");
+  const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const { loadDeviceSyncOverviewFromEnv } = await import("../src/lib/device-sync");
+  const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+  const mockedLoadDeviceSyncOverviewFromEnv = vi.mocked(loadDeviceSyncOverviewFromEnv);
+
+  mockedLoadVaultOverviewFromEnv.mockResolvedValue({
+    currentProfile: null,
+    experiments: [],
+    generatedAt: "2026-03-24T15:00:00Z",
+    metrics: [],
+    recentJournals: [],
+    sampleSummaries: [],
+    search: null,
+    status: "ready",
+    timeline: [],
+    weeklyStats: [
+      {
+        currentWeekAvg: 7.5,
+        deltaPercent: 5,
+        previousWeekAvg: 7.1,
+        stream: "sleep",
+        unit: "hrs",
+      },
+      {
+        currentWeekAvg: 450,
+        deltaPercent: 7,
+        previousWeekAvg: 420,
+        stream: "sleep",
+        unit: "min",
+      },
+    ],
+  });
+  mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({
+    status: "ready",
+    baseUrl: "http://127.0.0.1:8788",
+    providers: [],
+    accounts: [],
+  });
+
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, />7.5</);
+  assert.match(markup, />450</);
+  assert.match(markup, />hrs</);
+  assert.match(markup, />min</);
+});
+
 test("HomePage renders the setup state when no vault is configured", async () => {
   const { default: HomePage } = await import("../app/page");
   const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");

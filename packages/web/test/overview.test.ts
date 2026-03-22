@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { loadVaultOverview } from "../src/lib/overview";
 import {
@@ -191,6 +191,94 @@ Ordinary notes without the filename token.
     assert.equal(pathProbe.status, "ready");
     assert.equal(pathProbe.search?.total, 0);
   } finally {
+    await destroyWebFixtureVault(vaultRoot);
+  }
+});
+
+test("loadVaultOverview keeps weekly stats separated by unit for the same stream", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-24T12:00:00.000Z"));
+
+  const vaultRoot = await createWebFixtureVault();
+
+  try {
+    await writeFixtureFile(
+      vaultRoot,
+      "ledger/samples/sleep/2026/2026-03.jsonl",
+      [
+        {
+          schemaVersion: "hb.sample.v1",
+          id: "smp_sleep_hours_current",
+          stream: "sleep",
+          occurredAt: "2026-03-24T07:00:00Z",
+          recordedAt: "2026-03-24T07:00:00Z",
+          value: 7.5,
+          unit: "hrs",
+          source: "manual",
+        },
+        {
+          schemaVersion: "hb.sample.v1",
+          id: "smp_sleep_minutes_current",
+          stream: "sleep",
+          occurredAt: "2026-03-24T08:00:00Z",
+          recordedAt: "2026-03-24T08:00:00Z",
+          value: 450,
+          unit: "min",
+          source: "manual",
+        },
+        {
+          schemaVersion: "hb.sample.v1",
+          id: "smp_sleep_hours_previous",
+          stream: "sleep",
+          occurredAt: "2026-03-17T07:00:00Z",
+          recordedAt: "2026-03-17T07:00:00Z",
+          value: 7,
+          unit: "hrs",
+          source: "manual",
+        },
+        {
+          schemaVersion: "hb.sample.v1",
+          id: "smp_sleep_minutes_previous",
+          stream: "sleep",
+          occurredAt: "2026-03-17T08:00:00Z",
+          recordedAt: "2026-03-17T08:00:00Z",
+          value: 420,
+          unit: "min",
+          source: "manual",
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n") + "\n",
+    );
+
+    const result = await loadVaultOverview({
+      vaultRoot,
+    });
+
+    assert.equal(result.status, "ready");
+    assert.deepEqual(
+      result.weeklyStats
+        .filter((entry) => entry.stream === "sleep")
+        .map((entry) => ({
+          currentWeekAvg: entry.currentWeekAvg,
+          previousWeekAvg: entry.previousWeekAvg,
+          unit: entry.unit,
+        })),
+      [
+        {
+          currentWeekAvg: 7.5,
+          previousWeekAvg: 7,
+          unit: "hrs",
+        },
+        {
+          currentWeekAvg: 450,
+          previousWeekAvg: 420,
+          unit: "min",
+        },
+      ],
+    );
+  } finally {
+    vi.useRealTimers();
     await destroyWebFixtureVault(vaultRoot);
   }
 });

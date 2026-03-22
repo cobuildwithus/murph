@@ -462,7 +462,7 @@ test.sequential('timeline merges journals, events, and sample summaries into one
     assert.deepEqual(
       requireData(result).items.slice(0, 3).map((item) => [item.entryType, item.id]),
       [
-        ['sample_summary', 'sample-summary:2026-03-12:heart_rate'],
+        ['sample_summary', 'sample-summary:2026-03-12:heart_rate:bpm'],
         ['event', fixture.mealId],
         ['journal', 'journal:2026-03-12'],
       ],

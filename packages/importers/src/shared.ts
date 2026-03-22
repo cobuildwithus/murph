@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
+import { normalizeStrictIsoTimestamp } from "@healthybob/contracts";
 import { z } from "zod";
 
 const MEDIA_TYPES: ReadonlyMap<string, string> = new Map([
@@ -111,9 +112,7 @@ export function optionalTimestampSchema(
           return false;
         }
 
-        const candidate =
-          value instanceof Date ? value : new Date(value);
-        return !Number.isNaN(candidate.valueOf());
+        return normalizeStrictIsoTimestamp(value) !== null;
       },
       { error: `${label} must be a valid timestamp` },
     )
@@ -122,9 +121,13 @@ export function optionalTimestampSchema(
         return undefined;
       }
 
-      const candidate =
-        value instanceof Date ? value : new Date(value);
-      return candidate.toISOString();
+      const normalized = normalizeStrictIsoTimestamp(value);
+
+      if (!normalized) {
+        throw new TypeError(`${label} must be a valid timestamp`);
+      }
+
+      return normalized;
     });
 }
 

@@ -315,45 +315,49 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
     },
     async getMessages({ cursor }) {
       if (cursor) {
-        return [];
+        return {
+          messages: [],
+        };
       }
 
-      return [
-        {
-          update_id: 6,
-          message: {
-            message_id: 200,
-            date: 1_773_397_140,
-            text: "second",
-            chat: {
-              id: 10,
-              type: "private",
-              first_name: "Bob",
-            },
-            from: {
-              id: 111,
-              first_name: "Bob",
-            },
-          },
-        },
-        {
-          update_id: 5,
-          message: {
-            message_id: 199,
-            date: 1_773_397_200,
-            text: "first",
-            chat: {
-              id: 10,
-              type: "private",
-              first_name: "Bob",
-            },
-            from: {
-              id: 111,
-              first_name: "Bob",
+      return {
+        messages: [
+          {
+            update_id: 6,
+            message: {
+              message_id: 200,
+              date: 1_773_397_140,
+              text: "second",
+              chat: {
+                id: 10,
+                type: "private",
+                first_name: "Bob",
+              },
+              from: {
+                id: 111,
+                first_name: "Bob",
+              },
             },
           },
-        },
-      ];
+          {
+            update_id: 5,
+            message: {
+              message_id: 199,
+              date: 1_773_397_200,
+              text: "first",
+              chat: {
+                id: 10,
+                type: "private",
+                first_name: "Bob",
+              },
+              from: {
+                id: 111,
+                first_name: "Bob",
+              },
+            },
+          },
+        ],
+      };
     },
     async startWatching(input) {
       watcher = input.onMessage as typeof watcher;
@@ -506,7 +510,8 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
     cursor: { updateId: 42 },
     limit: 1,
   });
-  assert.deepEqual(updates.map((update) => update.update_id), [43]);
+  assert.deepEqual(updates.messages.map((update) => update.update_id), [43]);
+  assert.deepEqual(updates.nextCursor, { updateId: 43 });
   assert.deepEqual(updateCalls, [
     {
       offset: 43,
@@ -614,46 +619,52 @@ test("createTelegramPollConnector backfills page-by-page so cursors advance afte
         const updateId = cursor && typeof cursor.updateId === "number" ? cursor.updateId : null;
 
         if (updateId === null) {
-          return [
-            {
-              update_id: 1,
-              message: {
-                message_id: 1,
-                date: 1_773_397_100,
-                text: "one",
-                chat: { id: 10, type: "private", first_name: "Bob" },
-                from: { id: 111, first_name: "Bob" },
+          return {
+            messages: [
+              {
+                update_id: 1,
+                message: {
+                  message_id: 1,
+                  date: 1_773_397_100,
+                  text: "one",
+                  chat: { id: 10, type: "private", first_name: "Bob" },
+                  from: { id: 111, first_name: "Bob" },
+                },
               },
-            },
-            {
-              update_id: 2,
-              message: {
-                message_id: 2,
-                date: 1_773_397_101,
-                text: "two",
-                chat: { id: 10, type: "private", first_name: "Bob" },
-                from: { id: 111, first_name: "Bob" },
+              {
+                update_id: 2,
+                message: {
+                  message_id: 2,
+                  date: 1_773_397_101,
+                  text: "two",
+                  chat: { id: 10, type: "private", first_name: "Bob" },
+                  from: { id: 111, first_name: "Bob" },
+                },
               },
-            },
-          ];
+            ],
+          };
         }
 
         if (updateId === 2) {
-          return [
-            {
-              update_id: 3,
-              message: {
-                message_id: 3,
-                date: 1_773_397_102,
-                text: "three",
-                chat: { id: 10, type: "private", first_name: "Bob" },
-                from: { id: 111, first_name: "Bob" },
+          return {
+            messages: [
+              {
+                update_id: 3,
+                message: {
+                  message_id: 3,
+                  date: 1_773_397_102,
+                  text: "three",
+                  chat: { id: 10, type: "private", first_name: "Bob" },
+                  from: { id: 111, first_name: "Bob" },
+                },
               },
-            },
-          ];
+            ],
+          };
         }
 
-        return [];
+        return {
+          messages: [],
+        };
       },
       async startWatching() {},
       async getFile() {
@@ -679,6 +690,72 @@ test("createTelegramPollConnector backfills page-by-page so cursors advance afte
   assert.deepEqual(cursor, { updateId: 3 });
 });
 
+test("createTelegramPollConnector advances raw cursors even when a page emits no normalized messages", async () => {
+  const seenCursors: Array<Record<string, unknown> | null | undefined> = [];
+  const emitted: string[] = [];
+
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "healthybob_bot" };
+      },
+      async getMessages({ cursor }) {
+        seenCursors.push(cursor);
+        const updateId = cursor && typeof cursor.updateId === "number" ? cursor.updateId : null;
+
+        if (updateId === null) {
+          return {
+            messages: [],
+            nextCursor: { updateId: 5 },
+          };
+        }
+
+        if (updateId === 5) {
+          return {
+            messages: [
+              {
+                update_id: 6,
+                message: {
+                  message_id: 6,
+                  date: 1_773_397_103,
+                  text: "after ignored page",
+                  chat: { id: 10, type: "private", first_name: "Bob" },
+                  from: { id: 111, first_name: "Bob" },
+                },
+              },
+            ],
+            nextCursor: { updateId: 6 },
+          };
+        }
+
+        return {
+          messages: [],
+        };
+      },
+      async startWatching() {},
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+    },
+    downloadAttachments: false,
+    backfillLimit: 3,
+    resetWebhookOnStart: false,
+  });
+
+  const cursor = await connector.backfill(null, async (capture, checkpoint) => {
+    emitted.push(capture.externalId);
+    assert.ok(checkpoint);
+    return createPersistedCapture(capture);
+  });
+
+  assert.deepEqual(seenCursors, [null, { updateId: 5 }, { updateId: 6 }]);
+  assert.deepEqual(emitted, ["update:6"]);
+  assert.deepEqual(cursor, { updateId: 6 });
+});
+
 test("createTelegramPollConnector surfaces async polling failures from the watcher", async () => {
   const connector = createTelegramPollConnector({
     driver: {
@@ -686,7 +763,9 @@ test("createTelegramPollConnector surfaces async polling failures from the watch
         return { id: 999, username: "healthybob_bot" };
       },
       async getMessages() {
-        return [];
+        return {
+          messages: [],
+        };
       },
       async startWatching() {
         return {

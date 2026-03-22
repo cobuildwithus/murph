@@ -66,7 +66,7 @@ function ReadyState({
       {/* ── Weekly stats ── */}
       <div className="grid grid-cols-5 gap-3 max-[940px]:grid-cols-2 max-sm:grid-cols-1">
         {stats.map((stat) => (
-          <div className="py-5 px-5 rounded-2xl bg-card border border-line" key={stat.stream}>
+          <div className="py-5 px-5 rounded-2xl bg-card border border-line" key={`${stat.stream}:${stat.unit ?? "none"}`}>
             <div className="flex items-baseline gap-2 mb-1">
               <span className="font-display text-[2rem] font-bold tracking-[-0.03em] leading-none">
                 {stat.currentWeekAvg !== null ? formatStatValue(stat.currentWeekAvg) : "—"}
@@ -388,8 +388,28 @@ function TimelineRow({ entry }: { entry: OverviewTimelineEntry }) {
 /* ── Helpers ── */
 
 function mergeWithPlaceholders(weeklyStats: OverviewWeeklyStat[]): OverviewWeeklyStat[] {
-  const byStream = new Map(weeklyStats.map((s) => [s.stream, s]));
-  return PLACEHOLDER_STATS.map((placeholder) => byStream.get(placeholder.stream) ?? placeholder);
+  const remaining = [...weeklyStats];
+  const merged = PLACEHOLDER_STATS.map((placeholder) => {
+    const exactIndex = remaining.findIndex(
+      (stat) => stat.stream === placeholder.stream && stat.unit === placeholder.unit,
+    );
+
+    if (exactIndex >= 0) {
+      return remaining.splice(exactIndex, 1)[0]!;
+    }
+
+    const fallbackIndex = remaining.findIndex(
+      (stat) => stat.stream === placeholder.stream,
+    );
+
+    if (fallbackIndex >= 0) {
+      return remaining.splice(fallbackIndex, 1)[0]!;
+    }
+
+    return placeholder;
+  });
+
+  return [...merged, ...remaining];
 }
 
 function formatStatValue(value: number): string {

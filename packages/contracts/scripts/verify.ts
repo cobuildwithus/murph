@@ -28,6 +28,9 @@ import {
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   providerFrontmatterSchema,
+  isStrictIsoDate,
+  isStrictIsoDateTime,
+  normalizeStrictIsoTimestamp,
   regimenFrontmatterSchema,
   safeParseContract,
   sampleRecordSchema,
@@ -162,6 +165,15 @@ assert.equal(
   )?.maxLength,
   40,
 );
+assert.equal(isStrictIsoDate("2024-02-29"), true);
+assert.equal(isStrictIsoDate("2024-02-31"), false);
+assert.equal(isStrictIsoDateTime("2024-04-30T12:00:00Z"), true);
+assert.equal(isStrictIsoDateTime("2024-04-31T12:00:00Z"), false);
+assert.equal(
+  normalizeStrictIsoTimestamp("2026-03-11T14:00:00-05:00"),
+  "2026-03-11T19:00:00.000Z",
+);
+assert.equal(normalizeStrictIsoTimestamp("2024-02-31"), null);
 
 assertNoErrors("vault metadata example", exampleVaultMetadata, vaultMetadataSchema);
 exampleAssessmentResponses.forEach((record, index) =>
@@ -185,6 +197,24 @@ assertNoErrors("allergy frontmatter object", exampleHealthFrontmatterObjects.all
 assertNoErrors("regimen frontmatter object", exampleHealthFrontmatterObjects.regimen, regimenFrontmatterSchema);
 assertNoErrors("family-member frontmatter object", exampleHealthFrontmatterObjects.familyMember, familyMemberFrontmatterSchema);
 assertNoErrors("genetic-variant frontmatter object", exampleHealthFrontmatterObjects.geneticVariant, geneticVariantFrontmatterSchema);
+assertHasErrors(
+  "sample record rejects overflow recordedAt",
+  {
+    ...exampleSampleRecords[0],
+    recordedAt: "2024-02-31T12:00:00Z",
+  },
+  sampleRecordSchema,
+  [/recordedAt/u, /Invalid ISO date-time string/u],
+);
+assertHasErrors(
+  "experiment frontmatter rejects overflow startedOn",
+  {
+    ...exampleFrontmatterObjects.experiment,
+    startedOn: "2024-02-31",
+  },
+  experimentFrontmatterSchema,
+  [/startedOn/u, /Invalid ISO date string/u],
+);
 
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.core), exampleFrontmatterObjects.core);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.journalDay), exampleFrontmatterObjects.journalDay);

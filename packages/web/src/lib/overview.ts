@@ -322,8 +322,8 @@ function buildWeeklyStats(vault: VaultReadModel): OverviewWeeklyStat[] {
   lastMonday.setUTCDate(thisMonday.getUTCDate() - 7);
   const lastWeekStart = lastMonday.toISOString().slice(0, 10);
 
-  const thisWeekSamples = new Map<string, { values: number[]; unit: string | null }>();
-  const lastWeekSamples = new Map<string, { values: number[]; unit: string | null }>();
+  const thisWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
+  const lastWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
 
   for (const sample of vault.samples) {
     const sampleDate = sample.date ?? extractDate(sample.occurredAt);
@@ -335,7 +335,7 @@ function buildWeeklyStats(vault: VaultReadModel): OverviewWeeklyStat[] {
     const rawUnit = sample.data?.unit;
     const unit = typeof rawUnit === "string" && rawUnit.trim() ? rawUnit.trim() : null;
 
-    let bucket: Map<string, { values: number[]; unit: string | null }> | null = null;
+    let bucket: Map<string, { stream: string; unit: string | null; values: number[] }> | null = null;
     if (sampleDate >= thisWeekStart && sampleDate <= todayStr) {
       bucket = thisWeekSamples;
     } else if (sampleDate >= lastWeekStart && sampleDate < thisWeekStart) {
@@ -344,20 +344,26 @@ function buildWeeklyStats(vault: VaultReadModel): OverviewWeeklyStat[] {
 
     if (!bucket) continue;
 
-    const existing = bucket.get(stream);
+    const key = buildWeeklyStatKey(stream, unit);
+    const existing = bucket.get(key);
     if (existing) {
       existing.values.push(numericValue);
     } else {
-      bucket.set(stream, { values: [numericValue], unit });
+      bucket.set(key, { stream, unit, values: [numericValue] });
     }
   }
 
   const allStreams = new Set([...thisWeekSamples.keys(), ...lastWeekSamples.keys()]);
   const stats: OverviewWeeklyStat[] = [];
 
-  for (const stream of allStreams) {
-    const thisWeek = thisWeekSamples.get(stream);
-    const lastWeek = lastWeekSamples.get(stream);
+  for (const key of allStreams) {
+    const thisWeek = thisWeekSamples.get(key);
+    const lastWeek = lastWeekSamples.get(key);
+    const stream = thisWeek?.stream ?? lastWeek?.stream;
+
+    if (!stream) {
+      continue;
+    }
 
     const currentAvg = thisWeek ? thisWeek.values.reduce((a, b) => a + b, 0) / thisWeek.values.length : null;
     const previousAvg = lastWeek ? lastWeek.values.reduce((a, b) => a + b, 0) / lastWeek.values.length : null;
@@ -376,7 +382,15 @@ function buildWeeklyStats(vault: VaultReadModel): OverviewWeeklyStat[] {
     });
   }
 
-  return stats.sort((a, b) => a.stream.localeCompare(b.stream));
+  return stats.sort((a, b) =>
+    a.stream === b.stream
+      ? (a.unit ?? "").localeCompare(b.unit ?? "")
+      : a.stream.localeCompare(b.stream),
+  );
+}
+
+function buildWeeklyStatKey(stream: string, unit: string | null): string {
+  return `${stream}:${unit ?? ""}`;
 }
 
 function summarizeExperiments(vault: VaultReadModel): OverviewExperiment[] {

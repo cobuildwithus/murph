@@ -414,23 +414,35 @@ test("summarizeDailySamples honors filters and ignores incomplete sample records
     experimentSlug: "recovery-plan",
   });
 
-  assert.equal(summaries.length, 1);
+  assert.equal(summaries.length, 2);
   assert.deepEqual(summaries[0]?.sampleIds, [
     "smp_filter_03",
+  ]);
+  assert.deepEqual(summaries[0]?.sourcePaths, [
+    "ledger/samples/glucose/2026/2026-03.jsonl",
+  ]);
+  assert.deepEqual(summaries[0]?.units, ["mg_dL"]);
+  assert.equal(summaries[0]?.unit, "mg_dL");
+  assert.equal(summaries[0]?.minValue, 92);
+  assert.equal(summaries[0]?.maxValue, 92);
+  assert.equal(summaries[0]?.averageValue, 92);
+  assert.equal(summaries[0]?.firstSampleAt, "2026-03-10T08:00:00Z");
+  assert.equal(summaries[0]?.lastSampleAt, "2026-03-10T08:00:00Z");
+  assert.deepEqual(summaries[1]?.sampleIds, [
     "smp_filter_04",
     "smp_filter_05",
   ]);
-  assert.deepEqual(summaries[0]?.sourcePaths, [
+  assert.deepEqual(summaries[1]?.sourcePaths, [
     "ledger/samples/glucose/2026/2026-03-b.jsonl",
     "ledger/samples/glucose/2026/2026-03.jsonl",
   ]);
-  assert.deepEqual(summaries[0]?.units, ["mg_dL", "mmol/L"]);
-  assert.equal(summaries[0]?.unit, null);
-  assert.equal(summaries[0]?.minValue, 92);
-  assert.equal(summaries[0]?.maxValue, 98);
-  assert.equal(summaries[0]?.averageValue, 95);
-  assert.equal(summaries[0]?.firstSampleAt, "2026-03-10T08:00:00Z");
-  assert.equal(summaries[0]?.lastSampleAt, "2026-03-10T18:00:00Z");
+  assert.deepEqual(summaries[1]?.units, ["mmol/L"]);
+  assert.equal(summaries[1]?.unit, "mmol/L");
+  assert.equal(summaries[1]?.minValue, 98);
+  assert.equal(summaries[1]?.maxValue, 98);
+  assert.equal(summaries[1]?.averageValue, 98);
+  assert.equal(summaries[1]?.firstSampleAt, "2026-03-10T12:00:00Z");
+  assert.equal(summaries[1]?.lastSampleAt, "2026-03-10T18:00:00Z");
 });
 
 test("buildExportPack omits optional sections when the scoped vault is empty", () => {
@@ -818,7 +830,7 @@ test("buildTimeline merges journals, events, and daily sample summaries into a d
   assert.deepEqual(
     timeline.map((entry) => [entry.entryType, entry.id]),
     [
-      ["sample_summary", "sample-summary:2026-03-12:heart_rate"],
+      ["sample_summary", "sample-summary:2026-03-12:heart_rate:bpm"],
       ["event", "evt_walk_01"],
       ["journal", "journal:2026-03-12"],
     ],
@@ -1160,14 +1172,14 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
   assert.deepEqual(
     timeline.map((entry) => [entry.entryType, entry.id]),
     [
-      ["sample_summary", "sample-summary:2026-03-13:glucose"],
+      ["sample_summary", "sample-summary:2026-03-13:glucose:mg_dL"],
       ["journal", "journal:2026-03-13"],
       ["event", "evt_focus"],
     ],
   );
-  assert.equal(timeline[0]?.occurredAt, "2026-03-13T23:59:59");
+  assert.equal(timeline[0]?.occurredAt, "2026-03-13T23:59:59Z");
   assert.equal(timeline[1]?.kind, "journal_day");
-  assert.equal(timeline[2]?.occurredAt, "2026-03-13T00:00:00");
+  assert.equal(timeline[2]?.occurredAt, "2026-03-13T00:00:00Z");
 
   const summariesOnly = buildTimeline(vault, {
     experimentSlug: "focus",

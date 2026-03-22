@@ -3,7 +3,11 @@ import {
   type ChatSummary as PhotonImessageChatSummary,
   type Message as PhotonImessageMessage,
 } from "@photon-ai/imessage-kit";
-import { createNormalizedChatPollConnector, type ChatPollDriver } from "../chat/poll.js";
+import {
+  createNormalizedChatPollConnector,
+  type ChatPollDriver,
+  type ChatPollMessagePage,
+} from "../chat/poll.js";
 import {
   type ImessageKitChatLike,
   type ImessageKitMessageLike,
@@ -31,7 +35,7 @@ export interface ImessageWatcherHandle {
 }
 
 export interface ImessagePollDriver extends ChatPollDriver<ImessageKitMessageLike> {
-  getMessages(input: ImessageGetMessagesInput): Promise<ImessageKitMessageLike[]>;
+  getMessages(input: ImessageGetMessagesInput): Promise<ChatPollMessagePage<ImessageKitMessageLike>>;
   listChats?(): Promise<ImessageKitChatLike[]>;
   startWatching(options: ImessageWatchOptions): Promise<ImessageWatcherHandle | (() => Promise<void> | void) | void>;
 }
@@ -100,7 +104,13 @@ export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
           excludeOwnMessages: input.includeOwnMessages === false,
         });
 
-        return result.messages.map(toImessageKitMessageLike);
+        return {
+          messages: filterImessageMessages({
+            messages: result.messages.map(toImessageKitMessageLike),
+            cursor: input.cursor,
+            limit: input.limit,
+          }),
+        };
       });
     },
     listChats() {
@@ -226,6 +236,110 @@ function toImessageKitChatLike(
     isGroup: chat.isGroup,
     participantCount: chat.isGroup ? 3 : 1,
   };
+}
+
+function filterImessageMessages(input: {
+  messages: ImessageKitMessageLike[];
+  cursor?: Record<string, unknown> | null;
+  limit?: number;
+}): ImessageKitMessageLike[] {
+  const normalizedLimit =
+    typeof input.limit === "number" && Number.isFinite(input.limit)
+      ? Math.max(Math.trunc(input.limit), 0)
+      : input.messages.length;
+  const cursor = readImessageMessageCursor(input.cursor);
+  const ordered = [...input.messages].sort(compareImessageMessages);
+  const filtered = cursor
+    ? ordered.filter((message) => compareImessageMessageToCursor(message, cursor) > 0)
+    : ordered;
+
+  return filtered.slice(0, normalizedLimit);
+}
+
+function compareImessageMessages(
+  left: ImessageKitMessageLike,
+  right: ImessageKitMessageLike,
+): number {
+  const leftCursor = createImessageMessageCursor(left);
+  const rightCursor = createImessageMessageCursor(right);
+
+  if (!leftCursor || !rightCursor) {
+    return 0;
+  }
+
+  return compareImessageCursor(leftCursor, rightCursor);
+}
+
+function compareImessageMessageToCursor(
+  message: ImessageKitMessageLike,
+  cursor: { occurredAt: string; externalId: string },
+): number {
+  const messageCursor = createImessageMessageCursor(message);
+
+  if (!messageCursor) {
+    return 1;
+  }
+
+  return compareImessageCursor(messageCursor, cursor);
+}
+
+function compareImessageCursor(
+  left: { occurredAt: string; externalId: string },
+  right: { occurredAt: string; externalId: string },
+): number {
+  if (left.occurredAt !== right.occurredAt) {
+    return left.occurredAt.localeCompare(right.occurredAt);
+  }
+
+  return left.externalId.localeCompare(right.externalId);
+}
+
+function createImessageMessageCursor(
+  message: ImessageKitMessageLike,
+): { occurredAt: string; externalId: string } | null {
+  const externalId = message.guid ?? message.id;
+
+  if (!externalId || message.date === null || message.date === undefined) {
+    return null;
+  }
+
+  try {
+    return {
+      occurredAt: normalizeImessageCursorTimestamp(message.date),
+      externalId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeImessageCursorTimestamp(value: Date | string | number): string {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.valueOf())) {
+    throw new TypeError("Invalid iMessage cursor timestamp.");
+  }
+
+  return date.toISOString();
+}
+
+function readImessageMessageCursor(
+  cursor: Record<string, unknown> | null | undefined,
+): { occurredAt: string; externalId: string } | null {
+  const occurredAt =
+    typeof cursor?.occurredAt === "string" && cursor.occurredAt.length > 0
+      ? cursor.occurredAt
+      : null;
+  const externalId =
+    typeof cursor?.externalId === "string" && cursor.externalId.length > 0
+      ? cursor.externalId
+      : null;
+
+  if (!occurredAt || !externalId) {
+    return null;
+  }
+
+  return { occurredAt, externalId };
 }
 
 function resolveChat(

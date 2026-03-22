@@ -79,7 +79,7 @@ export function buildTimeline(
       entries.push({
         id: journal.displayId,
         entryType: "journal",
-        occurredAt: journal.occurredAt ?? `${date}T12:00:00`,
+        occurredAt: journal.occurredAt ?? `${date}T12:00:00Z`,
         date,
         title: journal.title ?? journal.displayId,
         kind: journalKind,
@@ -110,7 +110,7 @@ export function buildTimeline(
       }
 
       const date = event.date ?? extractDate(event.occurredAt);
-      const occurredAt = event.occurredAt ?? (date ? `${date}T00:00:00` : "");
+      const occurredAt = event.occurredAt ?? (date ? `${date}T00:00:00Z` : "");
 
       if (!date || !occurredAt) {
         continue;
@@ -145,7 +145,7 @@ export function buildTimeline(
       }
 
       const date = assessment.date ?? extractDate(assessment.occurredAt);
-      const occurredAt = assessment.occurredAt ?? (date ? `${date}T12:00:00` : "");
+      const occurredAt = assessment.occurredAt ?? (date ? `${date}T12:00:00Z` : "");
 
       if (!date || !occurredAt) {
         continue;
@@ -183,7 +183,7 @@ export function buildTimeline(
       }
 
       const date = history.date ?? extractDate(history.occurredAt);
-      const occurredAt = history.occurredAt ?? (date ? `${date}T00:00:00` : "");
+      const occurredAt = history.occurredAt ?? (date ? `${date}T00:00:00Z` : "");
 
       if (!date || !occurredAt) {
         continue;
@@ -218,7 +218,7 @@ export function buildTimeline(
       }
 
       const date = snapshot.date ?? extractDate(snapshot.occurredAt);
-      const occurredAt = snapshot.occurredAt ?? (date ? `${date}T12:00:00` : "");
+      const occurredAt = snapshot.occurredAt ?? (date ? `${date}T12:00:00Z` : "");
 
       if (!date || !occurredAt) {
         continue;
@@ -273,9 +273,9 @@ function timelineRelatedIds(record: VaultRecord): string[] {
 
 function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {
   return {
-    id: `sample-summary:${summary.date}:${summary.stream}`,
+    id: buildSampleSummaryId(summary),
     entryType: "sample_summary",
-    occurredAt: summary.lastSampleAt ?? `${summary.date}T23:59:59`,
+    occurredAt: summary.lastSampleAt ?? `${summary.date}T23:59:59Z`,
     date: summary.date,
     title: `${summary.stream} daily summary`,
     kind: "sample_summary",
@@ -299,6 +299,10 @@ function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {
       sourcePaths: summary.sourcePaths,
     },
   };
+}
+
+function buildSampleSummaryId(summary: DailySampleSummary): string {
+  return `sample-summary:${summary.date}:${summary.stream}:${summary.unit ?? "none"}`;
 }
 
 function compareTimelineEntries(left: TimelineEntry, right: TimelineEntry): number {

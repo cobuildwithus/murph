@@ -15,13 +15,12 @@ const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 export function toIsoTimestamp(value: Date | string | number): string {
   const date = value instanceof Date ? value : new Date(value);
-  const timestamp = date.toISOString();
 
   if (Number.isNaN(date.valueOf())) {
     throw new TypeError(`Invalid ISO timestamp: ${String(value)}`);
   }
 
-  return timestamp;
+  return date.toISOString();
 }
 
 function encodeCrockford(value: number, length: number): string {

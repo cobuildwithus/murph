@@ -98,7 +98,15 @@ test("loadImessageKitDriver adapts IMessageSDK query and chat results to the inb
   ];
 
   const driver = await loadImessageKitDriver();
-  const messages = await driver.getMessages({
+  const firstPage = await driver.getMessages({
+    includeOwnMessages: false,
+    limit: 5,
+  });
+  const secondPage = await driver.getMessages({
+    cursor: {
+      occurredAt: "2026-03-18T12:00:00.000Z",
+      externalId: "im-msg-1",
+    },
     includeOwnMessages: false,
     limit: 5,
   });
@@ -108,8 +116,8 @@ test("loadImessageKitDriver adapts IMessageSDK query and chat results to the inb
     excludeOwnMessages: true,
     limit: 5,
   });
-  assert.equal(imessageMocks.closeCalls, 2);
-  assert.deepEqual(messages, [
+  assert.equal(imessageMocks.closeCalls, 3);
+  assert.deepEqual(firstPage.messages, [
     {
       id: "msg-1",
       guid: "im-msg-1",
@@ -132,6 +140,7 @@ test("loadImessageKitDriver adapts IMessageSDK query and chat results to the inb
       ],
     },
   ]);
+  assert.deepEqual(secondPage.messages, []);
   assert.deepEqual(chats, [
     {
       id: "chat-1",

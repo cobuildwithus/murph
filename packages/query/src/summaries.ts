@@ -59,10 +59,10 @@ export function summarizeDailySamples(
       continue;
     }
 
-    const key = `${date}:${stream}`;
     const numericValue = getNumericValue(sample);
     const unit = getString(sample.data.unit);
-    const group = getOrCreateSummaryGroup(groups, key, date, stream);
+    const key = buildSummaryKey(date, stream, unit);
+    const group = getOrCreateSummaryGroup(groups, key, date, stream, unit);
 
     const { summary, values, unitSet } = group;
     summary.sampleCount += 1;
@@ -104,6 +104,7 @@ function getOrCreateSummaryGroup(
   key: string,
   date: string,
   stream: string,
+  unit: string | null,
 ): { summary: DailySampleSummary; values: number[]; unitSet: Set<string> } {
   const existing = groups.get(key);
   if (existing) {
@@ -127,7 +128,7 @@ function getOrCreateSummaryGroup(
       sourcePaths: [],
     },
     values: [],
-    unitSet: new Set<string>(),
+    unitSet: new Set<string>(unit ? [unit] : []),
   };
 
   groups.set(key, created);
@@ -161,6 +162,10 @@ function compareDailySampleSummaries(
   right: DailySampleSummary,
 ): number {
   if (left.date === right.date) {
+    if (left.stream === right.stream) {
+      return (left.unit ?? "").localeCompare(right.unit ?? "");
+    }
+
     return left.stream.localeCompare(right.stream);
   }
 
@@ -174,4 +179,8 @@ function getNumericValue(sample: VaultRecord): number | null {
 
 function getString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function buildSummaryKey(date: string, stream: string, unit: string | null): string {
+  return `${date}:${stream}:${unit ?? ""}`;
 }

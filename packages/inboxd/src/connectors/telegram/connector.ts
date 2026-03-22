@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api, type ApiClientOptions, type RawApi } from "grammy";
-import { createNormalizedChatPollConnector, type ChatPollDriver } from "../chat/poll.js";
+import {
+  createNormalizedChatPollConnector,
+  type ChatPollDriver,
+} from "../chat/poll.js";
 import { normalizeTelegramUpdate, type TelegramAttachmentDownloadDriver } from "./normalize.js";
 import type {
   TelegramFile,
@@ -150,8 +153,12 @@ export function createTelegramApiPollDriver({
         timeout: 0,
         allowed_updates: allowedUpdates ?? undefined,
       }, signal);
+      const ordered = [...batch].sort(compareTelegramUpdates);
 
-      return [...batch].sort(compareTelegramUpdates).filter(isTelegramMessageUpdate);
+      return {
+        messages: ordered.filter(isTelegramMessageUpdate),
+        nextCursor: ordered.length > 0 ? createTelegramUpdateCheckpoint(ordered.at(-1)!) : cursor ?? null,
+      };
     },
     async startWatching({ cursor, signal, onMessage }) {
       let offset = nextUpdateOffset(cursor);

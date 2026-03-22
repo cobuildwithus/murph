@@ -115,14 +115,16 @@ test("createImessageConnector loads chats lazily and refreshes metadata when a w
   const connector = createImessageConnector({
     driver: {
       async getMessages() {
-        return [
-          {
-            guid: "im-backfill-1",
-            chatGuid: "chat-known",
-            date: "2026-03-13T08:00:00.000Z",
-            text: "First capture",
-          },
-        ];
+        return {
+          messages: [
+            {
+              guid: "im-backfill-1",
+              chatGuid: "chat-known",
+              date: "2026-03-13T08:00:00.000Z",
+              text: "First capture",
+            },
+          ],
+        };
       },
       async listChats() {
         listChatsCalls += 1;
@@ -199,13 +201,15 @@ test("createImessageConnector preserves an explicit null account scope while def
   const explicitNull = createImessageConnector({
     driver: {
       async getMessages() {
-        return [
-          {
-            guid: "im-null-account",
-            chatGuid: "chat-null-account",
-            date: "2026-03-13T08:00:00.000Z",
-          },
-        ];
+        return {
+          messages: [
+            {
+              guid: "im-null-account",
+              chatGuid: "chat-null-account",
+              date: "2026-03-13T08:00:00.000Z",
+            },
+          ],
+        };
       },
       async startWatching() {},
     },
@@ -214,7 +218,9 @@ test("createImessageConnector preserves an explicit null account scope while def
   const defaulted = createImessageConnector({
     driver: {
       async getMessages() {
-        return [];
+        return {
+          messages: [],
+        };
       },
       async startWatching() {},
     },

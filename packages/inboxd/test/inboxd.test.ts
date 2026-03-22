@@ -19,6 +19,7 @@ import {
 } from "../src/index.js";
 import {
   sanitizeRawMetadata,
+  toIsoTimestamp,
 } from "../src/shared.js";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -30,6 +31,15 @@ async function writeExternalFile(directory: string, fileName: string, content: s
   await fs.writeFile(filePath, content, "utf8");
   return filePath;
 }
+
+test("toIsoTimestamp rejects invalid values with the inbox-specific TypeError", () => {
+  assert.throws(
+    () => toIsoTimestamp("not-a-timestamp"),
+    (error) =>
+      error instanceof TypeError &&
+      error.message === "Invalid ISO timestamp: not-a-timestamp",
+  );
+});
 
 test("processCapture stores redacted raw evidence, note events, audit records, and attachment jobs", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-vault");
@@ -881,16 +891,18 @@ test("runPollConnector backfills and watches iMessage messages while advancing t
   let closeCount = 0;
   const driver = {
     async getMessages() {
-      return [
-        {
-          guid: "im-1",
-          text: "Backfill capture",
-          date: "2026-03-13T08:00:00.000Z",
-          isFromMe: false,
-          chatGuid: "chat-1",
-          handleId: "friend",
-        },
-      ];
+      return {
+        messages: [
+          {
+            guid: "im-1",
+            text: "Backfill capture",
+            date: "2026-03-13T08:00:00.000Z",
+            isFromMe: false,
+            chatGuid: "chat-1",
+            handleId: "friend",
+          },
+        ],
+      };
     },
     async startWatching(options: {
       onMessage(message: Record<string, unknown>): Promise<void> | void;

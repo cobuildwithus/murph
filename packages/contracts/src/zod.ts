@@ -36,6 +36,7 @@ import {
   VARIANT_ZYGOSITIES,
 } from "./constants.js";
 import { GENERIC_CONTRACT_ID_PATTERN, idPattern } from "./ids.js";
+import { isStrictIsoDate, isStrictIsoDateTime } from "./time.js";
 
 export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -82,9 +83,6 @@ const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const DATE_TIME_PREFIX_PATTERN = /^\d{4}-\d{2}-\d{2}T/;
-
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
   relationship: 120,
@@ -132,20 +130,14 @@ function isoDateTimeString(): z.ZodType<string> {
   return z
     .string()
     .meta({ format: "date-time" })
-    .refine(
-      (value) => DATE_TIME_PREFIX_PATTERN.test(value) && !Number.isNaN(Date.parse(value)),
-      "Invalid ISO date-time string.",
-    );
+    .refine((value) => isStrictIsoDateTime(value), "Invalid ISO date-time string.");
 }
 
 function isoDateString(): z.ZodType<string> {
   return z
     .string()
     .meta({ format: "date" })
-    .refine(
-      (value) => DATE_PATTERN.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)),
-      "Invalid ISO date string.",
-    );
+    .refine((value) => isStrictIsoDate(value), "Invalid ISO date string.");
 }
 
 function integerSchema(minimum?: number, maximum?: number): z.ZodType<number> {

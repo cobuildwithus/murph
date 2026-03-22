@@ -9,13 +9,20 @@ export interface ChatPollWatcherHandle {
   done?: Promise<void>;
 }
 
+export interface ChatPollMessagePage<TMessage> {
+  messages: TMessage[];
+  nextCursor?: Cursor | null;
+}
+
+export type ChatPollMessageResult<TMessage> = ChatPollMessagePage<TMessage> | TMessage[];
+
 export interface ChatPollDriver<TMessage> {
   getMessages(input: {
     cursor?: Cursor | null;
     limit?: number;
     includeOwnMessages?: boolean;
     signal?: AbortSignal;
-  }): Promise<TMessage[]>;
+  }): Promise<ChatPollMessageResult<TMessage>>;
   startWatching(input: {
     cursor?: Cursor | null;
     includeOwnMessages?: boolean;
@@ -98,15 +105,15 @@ export function createNormalizedChatPollConnector<
       let remaining = backfillLimit;
 
       while (remaining > 0) {
-        const messages = await driver.getMessages({
+        const page = normalizeChatPollMessagePage(await driver.getMessages({
           cursor: nextCursor,
           limit: remaining,
           includeOwnMessages,
-        });
+        }));
+        const messages = page.messages;
 
-        if (messages.length === 0) {
-          break;
-        }
+        const pageStartCursor = serializeCursor(nextCursor);
+        let currentCursor = pageStartCursor;
 
         const captures: Array<{ capture: InboundCapture; message: TMessage; context: TContext | null }> = [];
 
@@ -127,9 +134,6 @@ export function createNormalizedChatPollConnector<
         }
 
         captures.sort((left, right) => compare(left.capture, right.capture));
-
-        const pageStartCursor = serializeCursor(nextCursor);
-        let currentCursor = pageStartCursor;
         for (const entry of captures) {
           const nextCheckpoint = checkpoint?.({
             message: entry.message,
@@ -152,7 +156,12 @@ export function createNormalizedChatPollConnector<
           }
         }
 
-        if (captures.length === 0 || serializeCursor(nextCursor) === pageStartCursor) {
+        const pageCursorValue = serializeCursor(page.nextCursor);
+        if (pageCursorValue !== pageStartCursor && page.nextCursor) {
+          nextCursor = page.nextCursor;
+        }
+
+        if (serializeCursor(nextCursor) === pageStartCursor) {
           break;
         }
       }
@@ -203,6 +212,18 @@ export function createNormalizedChatPollConnector<
       activeWatcher = undefined;
     },
   };
+}
+
+function normalizeChatPollMessagePage<TMessage>(
+  value: ChatPollMessageResult<TMessage>,
+): ChatPollMessagePage<TMessage> {
+  if (Array.isArray(value)) {
+    return {
+      messages: value,
+    };
+  }
+
+  return value;
 }
 
 async function ensureContext<TMessage, TDriver extends ChatPollDriver<TMessage>, TContext>(

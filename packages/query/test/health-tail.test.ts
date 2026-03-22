@@ -799,9 +799,9 @@ test("buildTimeline applies health-specific fallbacks, related-id defaults, and 
   assert.deepEqual(
     filteredTimeline.map((entry) => [entry.id, entry.entryType, entry.occurredAt, entry.title]),
     [
-      ["assessment_manual_01", "assessment", "2026-03-12T12:00:00", "Mood check"],
-      ["sample-summary:2026-03-12:glucose", "sample_summary", "2026-03-12T06:00:00Z", "glucose daily summary"],
-      ["history_manual_01", "history", "2026-03-12T00:00:00", "history"],
+      ["assessment_manual_01", "assessment", "2026-03-12T12:00:00Z", "Mood check"],
+      ["sample-summary:2026-03-12:glucose:mg_dL", "sample_summary", "2026-03-12T06:00:00Z", "glucose daily summary"],
+      ["history_manual_01", "history", "2026-03-12T00:00:00Z", "history"],
     ],
   );
 });

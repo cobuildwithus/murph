@@ -99,6 +99,9 @@ importers:
       '@healthybob/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@healthybob/runtime-state':
+        specifier: workspace:*
+        version: link:../runtime-state
 
   packages/device-syncd:
     dependencies:
@@ -111,6 +114,9 @@ importers:
 
   packages/importers:
     dependencies:
+      '@healthybob/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@healthybob/core':
         specifier: workspace:*
         version: link:../core

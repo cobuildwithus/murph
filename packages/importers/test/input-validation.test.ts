@@ -123,4 +123,13 @@ test("prepareMealImport and assessment import reject invalid typed fields with s
       }),
     /importedAt must be a valid timestamp/,
   );
+
+  await assert.rejects(
+    () =>
+      prepareAssessmentResponseImport({
+        filePath: assessmentPath,
+        occurredAt: "2024-02-31",
+      }),
+    /occurredAt must be a valid timestamp/,
+  );
 });

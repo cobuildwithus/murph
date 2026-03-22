@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { loadDeviceSyncEnvironment } from "../src/config.js";
+import { computeRetryDelayMs } from "../src/shared.js";
+
+test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
+  assert.equal(computeRetryDelayMs(1), 15_000);
+  assert.equal(computeRetryDelayMs(2), 60_000);
+});
 
 test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
   const loaded = loadDeviceSyncEnvironment({
