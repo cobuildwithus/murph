@@ -144,7 +144,7 @@ const USER_PATH_PATTERNS = [
 ];
 const REDACTED_PATH = "<REDACTED_PATH>";
 const REDACTED_SECRET = "<REDACTED_SECRET>";
-const SENSITIVE_RAW_KEYS = new Set([
+const SENSITIVE_EXACT_RAW_KEYS = new Set([
   "accesskey",
   "accesstoken",
   "apikey",
@@ -171,6 +171,45 @@ const SENSITIVE_RAW_KEYS = new Set([
   "setcookie",
   "token",
 ]);
+const SENSITIVE_COLLAPSED_SUBSTRINGS = [
+  "authorization",
+  "setcookie",
+  "accesstoken",
+  "refreshtoken",
+  "sessiontoken",
+  "sessionid",
+  "apikey",
+  "privatekey",
+  "clientsecret",
+  "oauthtoken",
+  "idtoken",
+] as const;
+const SENSITIVE_TOKENIZED_PART_KEYS = [
+  "authorization",
+  "cookie",
+  "secret",
+  "session",
+  "credential",
+  "credentials",
+  "password",
+  "passwd",
+] as const;
+type SensitivePartCombinationRule = {
+  required: readonly string[];
+  anyOf: readonly string[];
+  allowOnlyRequired?: boolean;
+};
+const SENSITIVE_PART_COMBINATION_RULES: readonly SensitivePartCombinationRule[] = [
+  {
+    required: ["token"],
+    anyOf: ["access", "refresh", "api", "auth", "oauth", "session", "id", "bearer", "csrf"],
+    allowOnlyRequired: true,
+  },
+  {
+    required: ["key"],
+    anyOf: ["api", "private", "client"],
+  },
+] as const;
 const SENSITIVE_STRING_PATTERNS = [
   /^\s*(bearer|basic|digest)\s+\S+/iu,
   /\b(authorization|cookie|set-cookie|access_token|refresh_token|api[_-]?key|session(?:[_-]?(?:id|token))?|secret)\b\s*[:=]\s*\S+/iu,
@@ -355,76 +394,61 @@ function sanitizeRawMetadataValue(value: unknown): unknown {
 }
 
 function isSensitiveRawKey(key: string): boolean {
-  const collapsed = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+  const collapsed = collapseRawKey(key);
 
   if (!collapsed) {
     return false;
   }
 
-  if (SENSITIVE_RAW_KEYS.has(collapsed)) {
+  if (SENSITIVE_EXACT_RAW_KEYS.has(collapsed)) {
     return true;
   }
 
-  if (collapsed.includes("authorization") || collapsed.includes("setcookie")) {
+  if (SENSITIVE_COLLAPSED_SUBSTRINGS.some((pattern) => collapsed.includes(pattern))) {
     return true;
   }
 
-  if (
-    collapsed.includes("accesstoken") ||
-    collapsed.includes("refreshtoken") ||
-    collapsed.includes("sessiontoken") ||
-    collapsed.includes("sessionid") ||
-    collapsed.includes("apikey") ||
-    collapsed.includes("privatekey") ||
-    collapsed.includes("clientsecret") ||
-    collapsed.includes("oauthtoken") ||
-    collapsed.includes("idtoken")
-  ) {
-    return true;
-  }
-
-  const parts = key
-    .toLowerCase()
-    .split(/[^a-z0-9]+/u)
-    .filter((part) => part.length > 0);
+  const parts = tokenizeRawKeyParts(key);
   const partSet = new Set(parts);
 
-  if (
-    partSet.has("authorization") ||
-    partSet.has("cookie") ||
-    partSet.has("secret") ||
-    partSet.has("session") ||
-    partSet.has("credential") ||
-    partSet.has("credentials") ||
-    partSet.has("password") ||
-    partSet.has("passwd")
-  ) {
+  if (SENSITIVE_TOKENIZED_PART_KEYS.some((part) => partSet.has(part))) {
     return true;
   }
 
-  if (
-    partSet.has("token") &&
-    (
-      parts.length === 1 ||
-      partSet.has("access") ||
-      partSet.has("refresh") ||
-      partSet.has("api") ||
-      partSet.has("auth") ||
-      partSet.has("oauth") ||
-      partSet.has("session") ||
-      partSet.has("id") ||
-      partSet.has("bearer") ||
-      partSet.has("csrf")
-    )
-  ) {
-    return true;
-  }
-
-  return partSet.has("key") && (partSet.has("api") || partSet.has("private") || partSet.has("client"));
+  return SENSITIVE_PART_COMBINATION_RULES.some((rule) =>
+    matchesSensitivePartCombinationRule(parts, partSet, rule),
+  );
 }
 
 function looksSensitiveStringValue(value: string): boolean {
   return SENSITIVE_STRING_PATTERNS.some((pattern) => pattern.test(value.trim()));
+}
+
+function collapseRawKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+}
+
+function tokenizeRawKeyParts(key: string): string[] {
+  return key
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((part) => part.length > 0);
+}
+
+function matchesSensitivePartCombinationRule(
+  parts: ReadonlyArray<string>,
+  partSet: ReadonlySet<string>,
+  rule: SensitivePartCombinationRule,
+): boolean {
+  if (!rule.required.every((part) => partSet.has(part))) {
+    return false;
+  }
+
+  if (rule.allowOnlyRequired && parts.length === rule.required.length) {
+    return true;
+  }
+
+  return rule.anyOf.some((part) => partSet.has(part));
 }
 
 export async function walkNamedFiles(

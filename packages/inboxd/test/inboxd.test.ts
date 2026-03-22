@@ -17,6 +17,9 @@ import {
   rebuildRuntimeFromVault,
   runPollConnector,
 } from "../src/index.js";
+import {
+  sanitizeRawMetadata,
+} from "../src/shared.js";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -1005,6 +1008,59 @@ test("normalizeImessageMessage trims text, allowlists raw fields, and registry k
     () => registry.requireWebhook("imessage"),
     /Webhook connector not registered for source: imessage/,
   );
+});
+
+test("sanitizeRawMetadata redacts the current sensitive raw-key set", () => {
+  const sensitiveKeys = [
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "access_token",
+    "refreshToken",
+    "api_key",
+    "secret",
+    "session",
+    "session_id",
+    "session-token",
+    "auth_token",
+    "api-token",
+    "private-key",
+    "client_key",
+    "credential",
+    "credentials",
+    "password",
+    "passwd",
+    "id-token",
+    "oauth_token",
+    "bearer-token",
+    "csrf_token",
+    "token",
+  ] as const;
+  const sanitized = sanitizeRawMetadata(
+    Object.fromEntries(sensitiveKeys.map((key) => [key, `${key}-value`])),
+  ) as Record<string, unknown>;
+
+  for (const key of sensitiveKeys) {
+    assert.equal(sanitized[key], "<REDACTED_SECRET>");
+  }
+});
+
+test("sanitizeRawMetadata keeps current near-miss raw keys unchanged", () => {
+  const nearMissEntries = [
+    ["api", "api-value"],
+    ["client", "client-value"],
+    ["private", "private-value"],
+    ["tokenizer", "tokenizer-value"],
+    ["keynote", "keynote-value"],
+    ["cookieJar", "cookie-jar-value"],
+    ["sessional", "sessional-value"],
+    ["secretary", "secretary-value"],
+  ] as const;
+  const sanitized = sanitizeRawMetadata(Object.fromEntries(nearMissEntries)) as Record<string, unknown>;
+
+  for (const [key, value] of nearMissEntries) {
+    assert.equal(sanitized[key], value);
+  }
 });
 
 test("normalizeImessageMessage treats non-string text payloads as null", () => {
