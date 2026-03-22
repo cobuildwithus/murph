@@ -19,7 +19,7 @@ export const assistantReasoningEffortValues = [
   'xhigh',
 ] as const
 
-export const assistantChatProviderValues = ['codex-cli'] as const
+export const assistantChatProviderValues = ['codex-cli', 'openai-compatible'] as const
 export const assistantChannelDeliveryTargetKindValues = [
   'explicit',
   'participant',
@@ -70,6 +70,9 @@ export const assistantProviderSessionOptionsSchema = z.object({
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   profile: z.string().min(1).nullable(),
   oss: z.boolean(),
+  baseUrl: z.string().min(1).nullable().optional(),
+  apiKeyEnv: z.string().min(1).nullable().optional(),
+  providerName: z.string().min(1).nullable().optional(),
 })
 
 export const assistantAliasStoreSchema = z

@@ -169,6 +169,7 @@ function makeBootstrapResult(vault: string, options?: {
 function makeSetupResult(vault: string): SetupResult {
   return {
     arch: 'arm64',
+    assistant: null,
     bootstrap: makeBootstrapResult(vault),
     channels: [],
     dryRun: false,
@@ -655,6 +656,96 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 
   assert.equal(wizardCalls, 1)
   assert.deepEqual(receivedChannels[1], ['imessage'])
+})
+
+test('setup resolves assistant defaults from explicit assistant options when the wizard is skipped', async () => {
+  const resolvedAssistants: any[] = []
+  const receivedAssistants: any[] = []
+  const cli = createSetupCli({
+    commandName: 'healthybob',
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+    assistantSetup: {
+      async resolve(input) {
+        resolvedAssistants.push({
+          allowPrompt: input.allowPrompt,
+          preset: input.preset,
+        })
+
+        return {
+          preset: 'openai-compatible',
+          enabled: true,
+          provider: 'openai-compatible',
+          model: 'gpt-oss:20b',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          codexCommand: null,
+          profile: null,
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          oss: false,
+          detail: 'Use gpt-oss:20b through Ollama.',
+        }
+      },
+    },
+    services: {
+      async setupMacos(input: any) {
+        receivedAssistants.push(input.assistant)
+        return makeSetupResult(input.vault)
+      },
+    } as ReturnType<typeof createSetupServices>,
+  })
+
+  await cli.serve(
+    [
+      'setup',
+      '--assistantPreset',
+      'openai-compatible',
+      '--assistantBaseUrl',
+      'http://127.0.0.1:11434/v1',
+      '--assistantModel',
+      'gpt-oss:20b',
+      '--assistantApiKeyEnv',
+      'OLLAMA_API_KEY',
+      '--format',
+      'json',
+      '--verbose',
+    ],
+    {
+      env: process.env,
+      exit: () => {},
+      stdout() {},
+    },
+  )
+
+  assert.deepEqual(resolvedAssistants, [
+    {
+      allowPrompt: false,
+      preset: 'openai-compatible',
+    },
+  ])
+  assert.deepEqual(receivedAssistants, [
+    {
+      preset: 'openai-compatible',
+      enabled: true,
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
+      codexCommand: null,
+      profile: null,
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      detail: 'Use gpt-oss:20b through Ollama.',
+    },
+  ])
 })
 
 test('setup handoff launches assistant automation instead of chat when auto-reply channels are enabled', () => {

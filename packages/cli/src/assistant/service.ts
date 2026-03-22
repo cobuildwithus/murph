@@ -19,7 +19,7 @@ import {
   type AssistantProviderProgressEvent,
   type AssistantProviderTurnResult,
 } from '../chat-provider.js'
-import { deliverAssistantMessage } from '../outbound-channel.js'
+import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
 import {
   resolveAssistantOperatorDefaults,
   type AssistantOperatorDefaults,
@@ -27,6 +27,7 @@ import {
 import {
   appendAssistantTranscriptEntries,
   isAssistantSessionNotFoundError,
+  listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
   resolveAssistantSession,
   saveAssistantSession,
@@ -36,6 +37,7 @@ import {
   createAssistantMemoryTurnContextEnv,
   loadAssistantMemoryPromptBlock,
 } from './memory.js'
+import type { ConversationRef } from './conversation-ref.js'
 import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
@@ -45,7 +47,10 @@ interface AssistantSessionResolutionFields {
   actorId?: string | null
   alias?: string | null
   approvalPolicy?: AssistantApprovalPolicy | null
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
   channel?: string | null
+  conversation?: ConversationRef | null
   identityId?: string | null
   model?: string | null
   maxSessionAgeMs?: number | null
@@ -53,6 +58,7 @@ interface AssistantSessionResolutionFields {
   participantId?: string | null
   profile?: string | null
   provider?: AssistantChatProvider
+  providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
   sessionId?: string | null
@@ -85,15 +91,44 @@ export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
   defaults: AssistantOperatorDefaults | null,
 ): ResolveAssistantSessionInput {
+  const sessionId = input.conversation?.sessionId ?? input.sessionId
+  const alias = input.conversation?.alias ?? input.alias
+  const channel = input.conversation?.channel ?? input.channel
+  const identityId =
+    input.conversation?.identityId ??
+    input.identityId ??
+    defaults?.identityId ??
+    null
+  const participantId =
+    input.conversation?.participantId ??
+    input.actorId ??
+    input.participantId ??
+    null
+  const threadId =
+    input.conversation?.threadId ?? input.threadId ?? input.sourceThreadId ?? null
+  const directness =
+    typeof input.threadIsDirect === 'boolean'
+      ? input.threadIsDirect
+        ? 'direct'
+        : 'group'
+      : input.conversation?.directness ?? null
+
   return {
     vault: input.vault,
-    sessionId: input.sessionId,
-    alias: input.alias,
-    channel: input.channel,
-    identityId: input.identityId ?? defaults?.identityId ?? null,
-    actorId: input.actorId ?? input.participantId,
-    threadId: input.threadId ?? input.sourceThreadId,
-    threadIsDirect: input.threadIsDirect,
+    sessionId,
+    alias,
+    channel,
+    identityId,
+    actorId: participantId,
+    threadId,
+    threadIsDirect:
+      typeof input.threadIsDirect === 'boolean'
+        ? input.threadIsDirect
+        : directness === 'direct'
+          ? true
+          : directness === 'group'
+            ? false
+            : undefined,
     provider: input.provider ?? defaults?.provider ?? undefined,
     model: input.model ?? defaults?.model ?? null,
     sandbox: input.sandbox ?? defaults?.sandbox ?? 'workspace-write',
@@ -101,12 +136,22 @@ export function buildResolveAssistantSessionInput(
       input.approvalPolicy ?? defaults?.approvalPolicy ?? 'on-request',
     oss: input.oss ?? defaults?.oss ?? false,
     profile: input.profile ?? defaults?.profile ?? null,
+    baseUrl: input.baseUrl ?? defaults?.baseUrl ?? null,
+    apiKeyEnv: input.apiKeyEnv ?? defaults?.apiKeyEnv ?? null,
+    providerName: input.providerName ?? defaults?.providerName ?? null,
     reasoningEffort:
       input.reasoningEffort ??
       defaults?.reasoningEffort ??
       null,
     maxSessionAgeMs: input.maxSessionAgeMs ?? null,
   }
+}
+
+export async function openAssistantConversation(
+  input: AssistantSessionResolutionFields,
+) {
+  const defaults = await resolveAssistantOperatorDefaults()
+  return resolveAssistantSession(buildResolveAssistantSessionInput(input, defaults))
 }
 
 export async function sendAssistantMessage(
@@ -139,12 +184,33 @@ export async function sendAssistantMessage(
       input.oss ??
       resolved.session.providerOptions.oss ??
       defaults?.oss,
+    baseUrl:
+      input.baseUrl ??
+      resolved.session.providerOptions.baseUrl ??
+      defaults?.baseUrl,
+    apiKeyEnv:
+      input.apiKeyEnv ??
+      resolved.session.providerOptions.apiKeyEnv ??
+      defaults?.apiKeyEnv,
+    providerName:
+      input.providerName ??
+      resolved.session.providerOptions.providerName ??
+      defaults?.providerName,
   })
 
   const shouldInjectBootstrapContext =
     resolved.created ||
     resolved.session.turnCount === 0 ||
+    provider === 'openai-compatible' ||
+    provider !== resolved.session.provider ||
     resolved.session.providerSessionId === null
+  const conversationMessages = shouldUseLocalTranscriptContext(provider)
+    ? await loadAssistantConversationMessages({
+        limit: 20,
+        sessionId: resolved.session.sessionId,
+        vault: input.vault,
+      })
+    : undefined
   const allowSensitiveHealthContext = shouldExposeSensitiveHealthContext(
     resolved.session.binding,
   )
@@ -154,6 +220,10 @@ export async function sendAssistantMessage(
         vault: input.vault,
       })
     : null
+  const resumeProviderSessionId =
+    provider === resolved.session.provider
+      ? resolved.session.providerSessionId
+      : null
 
   const persistUserPromptOnFailure = input.persistUserPromptOnFailure ?? true
   let turnCreatedAt = new Date().toISOString()
@@ -200,12 +270,16 @@ export async function sendAssistantMessage(
             binding: resolved.session.binding,
           }
         : undefined,
-      resumeProviderSessionId: resolved.session.providerSessionId,
+      resumeProviderSessionId,
       codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
       model: providerOptions.model,
       reasoningEffort: providerOptions.reasoningEffort,
       sandbox: providerOptions.sandbox,
       approvalPolicy: providerOptions.approvalPolicy,
+      baseUrl: providerOptions.baseUrl,
+      apiKeyEnv: providerOptions.apiKeyEnv,
+      providerName: providerOptions.providerName,
+      conversationMessages,
       onEvent: input.onProviderEvent ?? undefined,
       profile: providerOptions.profile,
       oss: providerOptions.oss,
@@ -245,8 +319,12 @@ export async function sendAssistantMessage(
   let session = await saveAssistantSession(input.vault, {
     ...resolved.session,
     provider: providerResult.provider,
-    providerSessionId:
-      providerResult.providerSessionId ?? resolved.session.providerSessionId,
+    providerSessionId: resolveNextProviderSessionId({
+      provider: providerResult.provider,
+      providerSessionId: providerResult.providerSessionId,
+      previousProvider: resolved.session.provider,
+      previousProviderSessionId: resolved.session.providerSessionId,
+    }),
     providerOptions,
     updatedAt,
     lastTurnAt: updatedAt,
@@ -258,19 +336,45 @@ export async function sendAssistantMessage(
 
   if (input.deliverResponse) {
     try {
-      const delivered = await deliverAssistantMessage({
-        vault: input.vault,
-        sessionId: session.sessionId,
+      const delivered = await deliverAssistantMessageOverBinding({
+        message: providerResult.response,
         channel: session.binding.channel,
         identityId: session.binding.identityId,
         actorId: session.binding.actorId,
         threadId: session.binding.threadId,
         threadIsDirect: session.binding.threadIsDirect,
+        sessionId: session.sessionId,
         target: input.deliveryTarget ?? null,
-        message: providerResult.response,
+        vault: input.vault,
       })
-      session = delivered.session
-      delivery = delivered.delivery
+      const normalizedDelivery =
+        delivered &&
+        typeof delivered === 'object' &&
+        'delivery' in delivered &&
+        (delivered as { delivery?: AssistantAskResult['delivery'] }).delivery
+          ? (delivered as { delivery: NonNullable<AssistantAskResult['delivery']> }).delivery
+          : (delivered as NonNullable<AssistantAskResult['delivery']>)
+
+      if (
+        delivered &&
+        typeof delivered === 'object' &&
+        'session' in delivered &&
+        (delivered as { session?: AssistantSession }).session
+      ) {
+        session = (delivered as { session: AssistantSession }).session
+      } else {
+        const deliveredAt = normalizedDelivery.sentAt
+        session = await saveAssistantSession(input.vault, {
+          ...session,
+          binding: {
+            ...session.binding,
+            channel: normalizedDelivery.channel,
+          },
+          updatedAt: deliveredAt,
+          lastTurnAt: deliveredAt,
+        })
+      }
+      delivery = normalizedDelivery
     } catch (error) {
       deliveryError = {
         code:
@@ -296,6 +400,84 @@ export async function sendAssistantMessage(
     delivery,
     deliveryError,
   })
+}
+
+export async function updateAssistantSessionOptions(input: {
+  providerOptions: Partial<AssistantSession['providerOptions']>
+  sessionId: string
+  vault: string
+}): Promise<AssistantSession> {
+  const session = await resolveAssistantSession({
+    vault: input.vault,
+    conversation: {
+      sessionId: input.sessionId,
+    },
+    createIfMissing: false,
+  })
+
+  return saveAssistantSession(input.vault, {
+    ...session.session,
+    providerOptions: {
+      ...session.session.providerOptions,
+      ...input.providerOptions,
+    },
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+
+function shouldUseLocalTranscriptContext(
+  provider: AssistantChatProvider,
+): boolean {
+  return provider === 'openai-compatible'
+}
+
+async function loadAssistantConversationMessages(input: {
+  limit: number
+  sessionId: string
+  vault: string
+}): Promise<Array<{
+  content: string
+  role: 'assistant' | 'user'
+}>> {
+  const transcript = await listAssistantTranscriptEntries(
+    input.vault,
+    input.sessionId,
+  )
+
+  return transcript
+    .slice(-input.limit)
+    .flatMap((entry) =>
+      isAssistantConversationTranscriptEntry(entry)
+        ? [{
+            role: entry.kind,
+            content: entry.text,
+          }]
+        : [],
+    )
+}
+
+function isAssistantConversationTranscriptEntry(entry: {
+  kind: string
+  text: string
+}): entry is {
+  kind: 'assistant' | 'user'
+  text: string
+} {
+  return entry.kind === 'assistant' || entry.kind === 'user'
+}
+
+function resolveNextProviderSessionId(input: {
+  previousProvider: AssistantChatProvider
+  previousProviderSessionId: string | null
+  provider: AssistantChatProvider
+  providerSessionId: string | null
+}): string | null {
+  if (input.provider !== input.previousProvider) {
+    return input.providerSessionId
+  }
+
+  return input.providerSessionId ?? input.previousProviderSessionId
 }
 
 async function resolveAssistantSessionForMessage(
@@ -332,7 +514,8 @@ async function restoreMissingAssistantSessionSnapshot(input: {
     return false
   }
 
-  const requestedSessionId = input.sessionInput.sessionId
+  const requestedSessionId =
+    input.sessionInput.conversation?.sessionId ?? input.sessionInput.sessionId
   const snapshot = input.input.sessionSnapshot
   if (
     typeof requestedSessionId !== 'string' ||

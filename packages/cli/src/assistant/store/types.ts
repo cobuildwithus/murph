@@ -7,11 +7,13 @@ import type {
   AssistantSession,
   AssistantTranscriptEntryKind,
 } from '../../assistant-cli-contracts.js'
+import type { ConversationRef } from '../conversation-ref.js'
 
 export interface AssistantSessionLocator {
   actorId?: string | null
   alias?: string | null
   channel?: string | null
+  conversation?: ConversationRef | null
   deliveryKind?: AssistantBindingDeliveryKind | null
   identityId?: string | null
   participantId?: string | null
@@ -23,11 +25,14 @@ export interface AssistantSessionLocator {
 
 export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   approvalPolicy?: AssistantApprovalPolicy | null
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
   model?: string | null
   now?: Date
   oss?: boolean
   profile?: string | null
   provider?: AssistantChatProvider
+  providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
   vault: string

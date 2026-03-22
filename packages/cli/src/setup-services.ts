@@ -15,10 +15,13 @@ import { resolveEffectiveTopLevelToken } from './command-helpers.js'
 import {
   normalizeVaultForConfig,
   readOperatorConfig,
+  saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
+  type AssistantOperatorDefaults,
 } from './operator-config.js'
 import {
   type SetupChannel,
+  type SetupConfiguredAssistant,
   type SetupResult,
   type SetupStepKind,
   type SetupStepResult,
@@ -63,6 +66,7 @@ import {
 
 interface SetupInput {
   vault: string
+  assistant?: SetupConfiguredAssistant | null
   channels?: readonly SetupChannel[] | null
   requestId?: string | null
   dryRun?: boolean
@@ -355,6 +359,16 @@ export function createSetupServices(
       steps,
       vault,
     })
+    const assistant =
+      input.assistant == null
+        ? null
+        : await ensureAssistantDefaultSelection({
+            assistant: input.assistant,
+            dryRun,
+            homeDirectory,
+            notes,
+            steps,
+          })
 
     const channels =
       input.channels == null
@@ -375,6 +389,13 @@ export function createSetupServices(
         bootstrap === null
           ? null
           : redactHomePathsInValue(bootstrap, homeDirectory),
+      assistant:
+        assistant === null
+          ? null
+          : {
+              ...assistant,
+              detail: redactHomePathInText(assistant.detail, homeDirectory),
+            },
       channels: channels.map((channel) => ({
         ...channel,
         connectorId: channel.connectorId,
@@ -514,6 +535,137 @@ async function ensureDefaultVaultSelection(input: {
       title: 'Default vault selection',
     }),
   )
+}
+
+
+
+async function ensureAssistantDefaultSelection(input: {
+  assistant: SetupConfiguredAssistant
+  dryRun: boolean
+  homeDirectory: string
+  notes: string[]
+  steps: SetupStepResult[]
+}): Promise<SetupConfiguredAssistant> {
+  if (!input.assistant.enabled || input.assistant.provider === null) {
+    input.steps.push(
+      createStep({
+        detail:
+          'Skipped saving assistant defaults during setup and left any existing assistant config unchanged.',
+        id: 'assistant-defaults',
+        kind: 'configure',
+        status: 'skipped',
+        title: 'Assistant defaults',
+      }),
+    )
+    return input.assistant
+  }
+
+  const existing = await readOperatorConfig(input.homeDirectory)
+  const nextDefaults = assistantSelectionToOperatorDefaults(input.assistant)
+  const status = assistantOperatorDefaultsMatch(
+    existing?.assistant ?? null,
+    nextDefaults,
+  )
+    ? 'reused'
+    : input.dryRun
+      ? 'planned'
+      : 'completed'
+  const summary = formatAssistantDefaultsSummary(input.assistant)
+  const detail =
+    status === 'reused'
+      ? `Reusing ${summary} as the default assistant for future chats and auto-reply.`
+      : input.dryRun
+        ? `Would save ${summary} as the default assistant for future chats and auto-reply.`
+        : `Saved ${summary} as the default assistant for future chats and auto-reply.`
+
+  if (status !== 'reused' && !input.dryRun) {
+    await saveAssistantOperatorDefaultsPatch(nextDefaults, input.homeDirectory)
+  }
+
+  if (input.assistant.provider === 'openai-compatible' && input.assistant.apiKeyEnv) {
+    input.notes.push(
+      `Export ${input.assistant.apiKeyEnv} before using the saved OpenAI-compatible assistant backend.`,
+    )
+  }
+
+  input.steps.push(
+    createStep({
+      detail,
+      id: 'assistant-defaults',
+      kind: 'configure',
+      status,
+      title: 'Assistant defaults',
+    }),
+  )
+
+  return input.assistant
+}
+
+function assistantSelectionToOperatorDefaults(
+  assistant: SetupConfiguredAssistant,
+): Partial<AssistantOperatorDefaults> {
+  return {
+    provider: assistant.provider,
+    codexCommand: assistant.codexCommand,
+    model: assistant.model,
+    reasoningEffort: assistant.reasoningEffort,
+    sandbox: assistant.sandbox,
+    approvalPolicy: assistant.approvalPolicy,
+    profile: assistant.profile,
+    oss: assistant.oss,
+    baseUrl: assistant.baseUrl,
+    apiKeyEnv: assistant.apiKeyEnv,
+    providerName: assistant.providerName,
+  }
+}
+
+function assistantOperatorDefaultsMatch(
+  existing: AssistantOperatorDefaults | null,
+  next: Partial<AssistantOperatorDefaults>,
+): boolean {
+  return (
+    normalizeNullableConfigField(existing?.provider) ===
+      normalizeNullableConfigField(next.provider) &&
+    normalizeNullableConfigField(existing?.codexCommand) ===
+      normalizeNullableConfigField(next.codexCommand) &&
+    normalizeNullableConfigField(existing?.model) ===
+      normalizeNullableConfigField(next.model) &&
+    normalizeNullableConfigField(existing?.reasoningEffort) ===
+      normalizeNullableConfigField(next.reasoningEffort) &&
+    normalizeNullableConfigField(existing?.sandbox) ===
+      normalizeNullableConfigField(next.sandbox) &&
+    normalizeNullableConfigField(existing?.approvalPolicy) ===
+      normalizeNullableConfigField(next.approvalPolicy) &&
+    normalizeNullableConfigField(existing?.profile) ===
+      normalizeNullableConfigField(next.profile) &&
+    normalizeNullableConfigField(existing?.baseUrl) ===
+      normalizeNullableConfigField(next.baseUrl) &&
+    normalizeNullableConfigField(existing?.apiKeyEnv) ===
+      normalizeNullableConfigField(next.apiKeyEnv) &&
+    normalizeNullableConfigField(existing?.providerName) ===
+      normalizeNullableConfigField(next.providerName) &&
+    (existing?.oss ?? null) === (next.oss ?? null)
+  )
+}
+
+function formatAssistantDefaultsSummary(
+  assistant: SetupConfiguredAssistant,
+): string {
+  if (assistant.provider === 'openai-compatible') {
+    return assistant.baseUrl
+      ? `${assistant.model ?? 'the configured model'} via ${assistant.baseUrl}`
+      : `${assistant.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`
+  }
+
+  if (assistant.oss) {
+    return `${assistant.model ?? 'the configured local model'} in Codex OSS`
+  }
+
+  return `${assistant.model ?? 'the configured model'} in Codex CLI`
+}
+
+function normalizeNullableConfigField(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 function defaultResolveCliBinPath(): string {

@@ -16,7 +16,7 @@ pnpm onboard --vault ./vault
 ./scripts/setup-macos.sh --vault ./vault
 ```
 
-`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. iMessage is enabled by default there, Telegram can be enabled through the same channel surface, and if at least one selected channel is fully configured the command will drop into `assistant run` so new inbound messages can create or continue an assistant conversation automatically.
+`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. That wizard now starts by saving a default assistant backend such as Codex CLI, Codex OSS/local model, or an OpenAI-compatible endpoint before it moves to the channel picker. iMessage is enabled by default there, Telegram can be enabled through the same channel surface, and if at least one selected channel is fully configured the command will drop into `assistant run` so new inbound messages can create or continue an assistant conversation automatically.
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
@@ -302,8 +302,8 @@ The repo also includes local-first inbox parser controls:
 The repo also includes a Healthy Bob-native assistant layer:
 
 - `vault-cli chat [prompt]` is a root-level shorthand for `vault-cli assistant chat [prompt]`
-- `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores session metadata plus local transcript entries outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel
-- `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers
+- `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores session metadata plus local transcript entries outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel; local chat can target either Codex CLI or an OpenAI-compatible endpoint with `--provider`, `--model`, `--baseUrl`, `--apiKeyEnv`, and `--providerName`
+- `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers and shares the same saved assistant backend defaults plus per-invocation provider overrides as `assistant ask`
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider
 - `vault-cli assistant memory search|get|upsert` searches cited assistant memory snippets, fetches one memory item by id, and commits typed non-canonical memory updates under `assistant-state/`
 - `vault-cli assistant run [--model <model>] [--baseUrl <url>] [--allowSelfAuthored] [--sessionRolloverHours <hours>]` runs the always-on assistant loop; with a model it also performs canonical inbox triage, and without one it can still handle channel auto-reply such as iMessage or Telegram
@@ -311,7 +311,7 @@ The repo also includes a Healthy Bob-native assistant layer:
 
 Fresh assistant sessions bootstrap from a small core block in `assistant-state/<vault-bucket>/MEMORY.md`. Recent `assistant-state/<vault-bucket>/memory/YYYY-MM-DD.md` notes are now retrieved on demand through `assistant memory search|get` rather than injected wholesale into every fresh session. That continuity layer stays non-canonical, health memory only loads in private assistant contexts, and explicit `assistant memory upsert` writes still never override canonical vault records.
 
-The first installed chat provider adapter is Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Outbound channel delivery is also adapter-backed, with iMessage and Telegram both flowing through the same stored binding abstraction. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
+The first installed chat provider adapter is still Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Setup can now persist either Codex CLI/Codex OSS defaults or an OpenAI-compatible endpoint plus model/base URL/env-var metadata for local chat and channel auto-reply. Outbound channel delivery is also adapter-backed, with iMessage and Telegram both flowing through the same stored binding abstraction. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
 
 When you intentionally use a dedicated iMessage self-chat thread, `assistant run --allowSelfAuthored --sessionRolloverHours 48` lets self-authored captures drive the assistant, builds prompts from parsed attachment transcripts/OCR when message text is empty, and rolls the session every couple of days to keep that thread fresh. Healthy Bob still requires Full Disk Access for the terminal app that reads `~/Library/Messages/chat.db`, and the CLI now surfaces that requirement as an operator-facing error instead of a raw database-open stack trace.
 
@@ -378,7 +378,8 @@ That setup entrypoint is intentionally separate from the main `vault-cli` manife
 - download a local whisper.cpp model into `~/.healthybob/toolchain/models/whisper/`
 - install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon unless you pass `--skipOcr`
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
-- open an interactive onboarding wizard where channel delivery surfaces can be selected with arrow keys plus Space
+- open an interactive onboarding wizard that first saves the default assistant backend and then lets channel delivery surfaces be selected with arrow keys plus Space
+- offer Codex CLI, Codex OSS/local-model, OpenAI-compatible endpoint, or skip-for-now assistant presets during that wizard, with provider-specific follow-up prompts such as model ids, base URLs, and API-key environment variable names
 - enable iMessage by default in that wizard and let Telegram opt into the same onboarding flow when a bot token is available in the shell environment
 - save that vault as the default Healthy Bob CLI vault for future commands on the same machine
 - install user-level `healthybob` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
@@ -406,7 +407,7 @@ pnpm onboard --vault ./vault
 
 That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js onboard ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
-Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, so commands such as `healthybob chat` or `healthybob assistant chat` can omit `--vault` later, and a normal interactive `healthybob onboard` or `healthybob setup` run opens the channel picker first and then drops into the right assistant surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
+Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, stores the selected assistant backend defaults for later `healthybob chat` and channel auto-reply, and a normal interactive `healthybob onboard` or `healthybob setup` run now asks for the assistant backend before it opens the channel picker and then drops into the right assistant surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
 
 ## Local Inbox Parser Bootstrap
 

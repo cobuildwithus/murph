@@ -13,6 +13,10 @@ import {
   type AssistantBindingPatch,
 } from './bindings.js'
 import {
+  mergeConversationRefs,
+  normalizeConversationRef,
+} from './conversation-ref.js'
+import {
   writeJsonFileAtomic,
   normalizeNullableString,
   resolveTimestamp,
@@ -77,7 +81,24 @@ export async function resolveAssistantSession(
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
 
-  const manualAlias = normalizeNullableString(input.alias)
+  const conversation = normalizeConversationRef(
+    mergeConversationRefs(input.conversation, {
+      sessionId: input.sessionId,
+      alias: input.alias,
+      channel: input.channel,
+      identityId: input.identityId,
+      participantId: input.actorId ?? input.participantId,
+      threadId: input.threadId ?? input.sourceThreadId,
+      directness:
+        input.threadIsDirect === true
+          ? 'direct'
+          : input.threadIsDirect === false
+            ? 'group'
+            : null,
+    }),
+  )
+  const sessionId = normalizeNullableString(input.sessionId ?? conversation.sessionId)
+  const manualAlias = normalizeNullableString(conversation.alias)
   const bindingPatch = bindingPatchFromLocator(input)
   const persistenceInput = {
     alias: manualAlias,
@@ -85,16 +106,16 @@ export async function resolveAssistantSession(
   }
   const conversationKey = resolveAssistantConversationLookupKey(input)
 
-  if (input.sessionId) {
+  if (sessionId) {
     const resolved = await loadAndPersistResolvedSession({
       paths,
-      sessionId: input.sessionId,
+      sessionId,
       persistenceInput,
     })
     if (!resolved) {
       throw await createAssistantSessionNotFoundError({
         paths,
-        sessionId: input.sessionId,
+        sessionId,
       })
     }
     return resolved

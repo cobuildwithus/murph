@@ -1,11 +1,19 @@
 import { Cli, z } from 'incur'
 import {
+  type SetupAssistantPreset,
   type SetupChannel,
   type SetupCommandOptions,
   type SetupResult,
   setupCommandOptionsSchema,
   setupResultSchema,
 } from './setup-cli-contracts.js'
+import {
+  createSetupAssistantResolver,
+  getDefaultSetupAssistantPreset,
+  hasExplicitSetupAssistantOptions,
+  inferSetupAssistantPresetFromOptions,
+  type SetupAssistantResolver,
+} from './setup-assistant.js'
 import {
   createSetupServices,
   detectSetupProgramName,
@@ -27,12 +35,14 @@ export interface SuccessfulSetupContext {
 export interface SetupWizardRunner {
   run(input: {
     commandName: string
+    initialAssistantPreset?: SetupAssistantPreset
     initialChannels: readonly SetupChannel[]
     vault: string
   }): Promise<SetupWizardResult>
 }
 
 export interface SetupCliOptions {
+  assistantSetup?: SetupAssistantResolver
   commandName?: string
   onSetupSuccess?: ((context: SuccessfulSetupContext) => void | Promise<void>) | undefined
   services?: ReturnType<typeof createSetupServices>
@@ -48,6 +58,8 @@ export type SetupPostLaunchAction = 'assistant-chat' | 'assistant-run' | null
 export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   const commandName = options.commandName ?? 'vault-cli'
   const services = options.services ?? createSetupServices()
+  const assistantSetup =
+    options.assistantSetup ?? createSetupAssistantResolver()
   const terminal =
     options.terminal ??
     ({
@@ -62,7 +74,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   })
 
   const runSetupCommand = async (context: any) => {
-    const selectedChannels = shouldRunSetupWizard(
+    const interactiveWizard = shouldRunSetupWizard(
       {
         agent: context.agent,
         dryRun: context.options.dryRun,
@@ -70,16 +82,40 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       },
       terminal,
     )
-      ? (
-          await wizard.run({
+
+    let selectedChannels: SetupChannel[] | null = null
+    let selectedAssistantPreset: SetupAssistantPreset | null = null
+
+    if (interactiveWizard) {
+      const wizardResult = await wizard.run({
+        commandName,
+        initialAssistantPreset:
+          context.options.assistantPreset ?? getDefaultSetupAssistantPreset(),
+        initialChannels: getDefaultSetupWizardChannels(),
+        vault: context.options.vault,
+      })
+
+      selectedChannels = wizardResult.channels
+      selectedAssistantPreset =
+        wizardResult.assistantPreset ??
+        context.options.assistantPreset ??
+        null
+    } else if (hasExplicitSetupAssistantOptions(context.options)) {
+      selectedAssistantPreset = inferSetupAssistantPresetFromOptions(context.options)
+    }
+
+    const selectedAssistant =
+      selectedAssistantPreset === null
+        ? null
+        : await assistantSetup.resolve({
+            allowPrompt: interactiveWizard,
             commandName,
-            initialChannels: getDefaultSetupWizardChannels(),
-            vault: context.options.vault,
+            options: context.options,
+            preset: selectedAssistantPreset,
           })
-        ).channels
-      : null
 
     const result = await services.setupMacos({
+      assistant: selectedAssistant,
       channels: selectedChannels,
       dryRun: context.options.dryRun,
       rebuild: context.options.rebuild,
@@ -251,6 +287,16 @@ function registerSetupCommand(
           skipOcr: true,
           vault: './vault',
           whisperModel: 'small.en',
+        },
+      },
+      {
+        description:
+          'Save a local Ollama-compatible assistant during setup without using the interactive wizard.',
+        options: {
+          assistantPreset: 'openai-compatible',
+          assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+          assistantModel: 'gpt-oss:20b',
+          vault: './vault',
         },
       },
     ],

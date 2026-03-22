@@ -2,18 +2,28 @@ import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
+  type SetupAssistantPreset,
   type SetupChannel,
   setupChannelValues,
 } from './setup-cli-contracts.js'
+import { getDefaultSetupAssistantPreset } from './setup-assistant.js'
 
 export interface SetupWizardResult {
+  assistantPreset?: SetupAssistantPreset
   channels: SetupChannel[]
 }
 
 export interface SetupWizardInput {
   commandName?: string
+  initialAssistantPreset?: SetupAssistantPreset
   initialChannels?: readonly SetupChannel[]
   vault: string
+}
+
+interface SetupWizardAssistantOption {
+  description: string
+  preset: SetupAssistantPreset
+  title: string
 }
 
 interface SetupWizardChannelOption {
@@ -23,7 +33,34 @@ interface SetupWizardChannelOption {
   title: string
 }
 
-type SetupWizardStep = 'intro' | 'channels' | 'confirm'
+type SetupWizardStep = 'intro' | 'assistant' | 'channels' | 'confirm'
+
+const setupWizardAssistantOptions: readonly SetupWizardAssistantOption[] = [
+  {
+    preset: 'codex-cli',
+    title: 'Codex CLI (recommended)',
+    description:
+      'Healthy Bob keeps the existing agentic Codex path and saves a default hosted model such as gpt-5.4.',
+  },
+  {
+    preset: 'codex-oss',
+    title: 'Codex OSS / local model',
+    description:
+      'Save a local Codex OSS model default for operators who want the Codex CLI flow backed by an open-source local model.',
+  },
+  {
+    preset: 'openai-compatible',
+    title: 'OpenAI-compatible API or local endpoint',
+    description:
+      'Use one OpenAI-compatible base URL for Ollama, local gateways, or hosted provider APIs and save the model plus API-key env-var name.',
+  },
+  {
+    preset: 'skip',
+    title: 'Skip for now',
+    description:
+      'Leave the assistant backend unchanged during setup and configure it later with assistant chat defaults.',
+  },
+]
 
 const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
   {
@@ -41,6 +78,10 @@ const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
     title: 'Configure Telegram',
   },
 ]
+
+export function getDefaultSetupWizardAssistantPreset(): SetupAssistantPreset {
+  return getDefaultSetupAssistantPreset()
+}
 
 export function getDefaultSetupWizardChannels(): SetupChannel[] {
   return ['imessage']
@@ -80,6 +121,8 @@ export function toggleSetupWizardChannel(
 export async function runSetupWizard(
   input: SetupWizardInput,
 ): Promise<SetupWizardResult> {
+  const initialAssistantPreset =
+    input.initialAssistantPreset ?? getDefaultSetupWizardAssistantPreset()
   const initialChannels = sortSetupWizardChannels(
     input.initialChannels && input.initialChannels.length > 0
       ? [...input.initialChannels]
@@ -117,14 +160,26 @@ export async function runSetupWizard(
       const createElement = React.createElement
       const { exit } = useApp()
       const [step, setStep] = React.useState<SetupWizardStep>('intro')
-      const [activeIndex, setActiveIndex] = React.useState(0)
+      const [assistantIndex, setAssistantIndex] = React.useState(
+        findSetupWizardAssistantOptionIndex(initialAssistantPreset),
+      )
+      const [channelIndex, setChannelIndex] = React.useState(0)
+      const [selectedAssistantPreset, setSelectedAssistantPreset] =
+        React.useState<SetupAssistantPreset>(initialAssistantPreset)
       const [selectedChannels, setSelectedChannels] = React.useState<SetupChannel[]>(
         initialChannels,
       )
-      const latestSelectionRef = React.useRef<SetupChannel[]>(initialChannels)
+      const latestAssistantRef = React.useRef<SetupAssistantPreset>(
+        initialAssistantPreset,
+      )
+      const latestChannelsRef = React.useRef<SetupChannel[]>(initialChannels)
 
       React.useEffect(() => {
-        latestSelectionRef.current = selectedChannels
+        latestAssistantRef.current = selectedAssistantPreset
+      }, [selectedAssistantPreset])
+
+      React.useEffect(() => {
+        latestChannelsRef.current = selectedChannels
       }, [selectedChannels])
 
       useInput((value, key) => {
@@ -138,7 +193,7 @@ export async function runSetupWizard(
 
         if (step === 'intro') {
           if (key.return || value === ' ') {
-            setStep('channels')
+            setStep('assistant')
             return
           }
 
@@ -151,31 +206,61 @@ export async function runSetupWizard(
           return
         }
 
-        if (step === 'channels') {
+        if (step === 'assistant') {
           if (key.upArrow) {
-            setActiveIndex((current) =>
-              wrapSetupWizardIndex(
-                current,
-                setupWizardChannelOptions.length,
-                -1,
-              ),
+            setAssistantIndex((current) =>
+              wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, -1),
             )
             return
           }
 
           if (key.downArrow) {
-            setActiveIndex((current) =>
-              wrapSetupWizardIndex(
-                current,
-                setupWizardChannelOptions.length,
-                1,
-              ),
+            setAssistantIndex((current) =>
+              wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, 1),
             )
             return
           }
 
           if (value === ' ') {
-            const activeChannel = setupWizardChannelOptions[activeIndex]?.channel
+            const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
+            if (activePreset) {
+              setSelectedAssistantPreset(activePreset)
+            }
+            return
+          }
+
+          if (key.escape) {
+            setStep('intro')
+            return
+          }
+
+          if (key.return) {
+            const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
+            if (activePreset) {
+              setSelectedAssistantPreset(activePreset)
+            }
+            setStep('channels')
+          }
+          return
+        }
+
+        if (step === 'channels') {
+          if (key.upArrow) {
+            setChannelIndex((current) =>
+              wrapSetupWizardIndex(current, setupWizardChannelOptions.length, -1),
+            )
+            return
+          }
+
+          if (key.downArrow) {
+            setChannelIndex((current) =>
+              wrapSetupWizardIndex(current, setupWizardChannelOptions.length, 1),
+            )
+            return
+          }
+
+          if (value === ' ') {
+            const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
             if (!activeChannel) {
               return
             }
@@ -186,7 +271,7 @@ export async function runSetupWizard(
           }
 
           if (key.escape) {
-            setStep('intro')
+            setStep('assistant')
             return
           }
 
@@ -204,15 +289,34 @@ export async function runSetupWizard(
 
           if (key.return || value === ' ') {
             resolveOnce({
-              channels: sortSetupWizardChannels(latestSelectionRef.current),
+              assistantPreset: latestAssistantRef.current,
+              channels: sortSetupWizardChannels(latestChannelsRef.current),
             })
             exit()
           }
         }
       })
 
+      const assistantLines = setupWizardAssistantOptions.map((option, index) => {
+        const active = index === assistantIndex
+        const selected = option.preset === selectedAssistantPreset
+        const marker = active ? '>' : ' '
+        const radio = selected ? '(x)' : '( )'
+
+        return createElement(
+          Box,
+          {
+            flexDirection: 'column',
+            key: option.preset,
+            marginBottom: 1,
+          },
+          createElement(Text, null, `${marker} ${radio} ${option.title}`),
+          createElement(Text, null, `    ${option.description}`),
+        )
+      })
+
       const channelLines = setupWizardChannelOptions.map((option, index) => {
-        const active = index === activeIndex
+        const active = index === channelIndex
         const selected = selectedChannels.includes(option.channel)
         const marker = active ? '>' : ' '
         const checkbox = option.available
@@ -234,11 +338,16 @@ export async function runSetupWizard(
         )
       })
 
+      const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
       const enabledSummary =
         selectedChannels.length > 0
           ? selectedChannels
               .map((channel) =>
-                channel === 'imessage' ? 'iMessage' : channel === 'telegram' ? 'Telegram' : channel,
+                channel === 'imessage'
+                  ? 'iMessage'
+                  : channel === 'telegram'
+                    ? 'Telegram'
+                    : channel,
               )
               .join(', ')
           : 'none'
@@ -261,7 +370,7 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'Set up local channels so Healthy Bob can receive and deliver messages outside the terminal chat.',
+                'Choose the assistant backend you want Healthy Bob to save for local chat and channel auto-reply, then pick which external message channels to enable during setup.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, `Vault: ${input.vault}`),
@@ -269,10 +378,26 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'iMessage is enabled by default. Telegram works through the same assistant channel surface when HEALTHYBOB_TELEGRAM_BOT_TOKEN is exported before setup.',
+                'Codex CLI is preselected, iMessage is enabled by default, and Telegram can opt into the same assistant session surface when HEALTHYBOB_TELEGRAM_BOT_TOKEN is exported before setup.',
               ),
               createElement(Text, null, ''),
-              createElement(Text, null, 'Press Enter to choose channels, or q to cancel.'),
+              createElement(Text, null, 'Press Enter to continue, or q to cancel.'),
+            )
+          : null,
+        step === 'assistant'
+          ? createElement(
+              Box,
+              {
+                flexDirection: 'column',
+              },
+              createElement(Text, null, 'Assistant backend'),
+              createElement(Text, null, ''),
+              ...assistantLines,
+              createElement(
+                Text,
+                null,
+                'Use ↑/↓ to move, Space to select, Enter to continue, or Esc to go back.',
+              ),
             )
           : null,
         step === 'channels'
@@ -282,6 +407,12 @@ export async function runSetupWizard(
                 flexDirection: 'column',
               },
               createElement(Text, null, 'Message channels'),
+              createElement(Text, null, ''),
+              createElement(
+                Text,
+                null,
+                `Assistant backend: ${assistantSummary}`,
+              ),
               createElement(Text, null, ''),
               ...channelLines,
               createElement(
@@ -299,18 +430,20 @@ export async function runSetupWizard(
               },
               createElement(Text, null, 'Review setup'),
               createElement(Text, null, ''),
+              createElement(Text, null, `Assistant backend: ${assistantSummary}`),
               createElement(Text, null, `Enabled channels: ${enabledSummary}`),
               createElement(Text, null, ''),
               createElement(
                 Text,
                 null,
-                selectedChannels.includes('imessage') && selectedChannels.includes('telegram')
-                  ? 'Healthy Bob will add the local iMessage connector, configure the Telegram bot connector when a bot token is available, and start the assistant automation loop after setup so either channel can create or continue a shared assistant conversation.'
+                selectedChannels.includes('imessage') &&
+                  selectedChannels.includes('telegram')
+                  ? 'Healthy Bob will save the assistant defaults you selected, add the local iMessage connector, configure the Telegram bot connector when a bot token is available, and start the assistant automation loop after setup so either channel can create or continue a shared assistant conversation.'
                   : selectedChannels.includes('imessage')
-                    ? 'Healthy Bob will add the local iMessage connector and start the assistant automation loop after setup so new texts can create or continue an assistant conversation.'
+                    ? 'Healthy Bob will save the assistant defaults you selected, add the local iMessage connector, and start the assistant automation loop after setup so new texts can create or continue an assistant conversation.'
                     : selectedChannels.includes('telegram')
-                      ? 'Healthy Bob will configure the Telegram bot connector when a bot token is available and then start the assistant automation loop after setup so Telegram chats can create or continue an assistant conversation.'
-                      : 'Healthy Bob will finish machine and vault setup without enabling an external message channel yet.',
+                      ? 'Healthy Bob will save the assistant defaults you selected, configure the Telegram bot connector when a bot token is available, and then start the assistant automation loop after setup so Telegram chats can create or continue an assistant conversation.'
+                      : 'Healthy Bob will save the assistant defaults you selected and finish machine plus vault setup without enabling an external message channel yet.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, 'Press Enter to run setup, or Esc to change the selection.'),
@@ -345,4 +478,26 @@ function sortSetupWizardChannels(channels: readonly SetupChannel[]): SetupChanne
       (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
       (order.get(right) ?? Number.MAX_SAFE_INTEGER),
   )
+}
+
+function findSetupWizardAssistantOptionIndex(
+  preset: SetupAssistantPreset,
+): number {
+  const index = setupWizardAssistantOptions.findIndex(
+    (option) => option.preset === preset,
+  )
+  return index >= 0 ? index : 0
+}
+
+function formatSetupAssistantPreset(preset: SetupAssistantPreset): string {
+  switch (preset) {
+    case 'codex-cli':
+      return 'Codex CLI'
+    case 'codex-oss':
+      return 'Codex OSS / local model'
+    case 'openai-compatible':
+      return 'OpenAI-compatible API or local endpoint'
+    case 'skip':
+      return 'Skip for now'
+  }
 }

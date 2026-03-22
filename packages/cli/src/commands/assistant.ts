@@ -19,6 +19,7 @@ import {
   assistantSessionShowResultSchema,
 } from '../assistant-cli-contracts.js'
 import { deliverAssistantMessage } from '../assistant-channel.js'
+import type { ConversationRef } from '../assistant/conversation-ref.js'
 import {
   runAssistantAutomation,
   runAssistantChat,
@@ -88,7 +89,7 @@ const assistantSessionOptionFields = {
 const assistantProviderOptionFields = {
   provider: z
     .enum(assistantChatProviderValues)
-    .default('codex-cli')
+    .optional()
     .describe(
       'Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.',
     ),
@@ -102,15 +103,36 @@ const assistantProviderOptionFields = {
     .min(1)
     .optional()
     .describe('Optional provider model override for local chat turns.'),
+  baseUrl: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
+    ),
+  apiKeyEnv: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
+    ),
+  providerName: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
+    ),
   sandbox: z
     .enum(assistantSandboxValues)
-    .default('workspace-write')
+    .optional()
     .describe(
       'Codex sandbox mode for local assistant chat. Defaults to workspace-write for low-friction local tool use.',
     ),
   approvalPolicy: z
     .enum(assistantApprovalPolicyValues)
-    .default('on-request')
+    .optional()
     .describe(
       'Codex approval policy for local assistant chat. Defaults to on-request with workspace-write sandboxing.',
     ),
@@ -177,6 +199,9 @@ async function runAssistantChatCommand(context: {
     provider: context.options.provider,
     codexCommand: context.options.codexCommand,
     model: context.options.model,
+    baseUrl: context.options.baseUrl,
+    apiKeyEnv: context.options.apiKeyEnv,
+    providerName: context.options.providerName,
     sandbox: context.options.sandbox,
     approvalPolicy: context.options.approvalPolicy,
     profile: context.options.profile,
@@ -288,6 +313,9 @@ export function registerAssistantCommands(
         provider: context.options.provider,
         codexCommand: context.options.codexCommand,
         model: context.options.model,
+        baseUrl: context.options.baseUrl,
+        apiKeyEnv: context.options.apiKeyEnv,
+        providerName: context.options.providerName,
         sandbox: context.options.sandbox,
         approvalPolicy: context.options.approvalPolicy,
         profile: context.options.profile,

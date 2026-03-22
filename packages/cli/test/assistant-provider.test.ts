@@ -3,10 +3,20 @@ import { beforeEach, test, vi } from 'vitest'
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexPrompt: vi.fn(),
+  generateText: vi.fn(),
+  resolveAssistantLanguageModel: vi.fn(),
+}))
+
+vi.mock('ai', () => ({
+  generateText: providerMocks.generateText,
 }))
 
 vi.mock('../src/assistant-codex.js', () => ({
   executeCodexPrompt: providerMocks.executeCodexPrompt,
+}))
+
+vi.mock('../src/model-harness.js', () => ({
+  resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
 }))
 
 import {
@@ -16,6 +26,8 @@ import {
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
+  providerMocks.generateText.mockReset()
+  providerMocks.resolveAssistantLanguageModel.mockReset()
 })
 
 test('resolveAssistantProviderOptions normalizes provider session settings', () => {
@@ -25,6 +37,9 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: ' primary ',
+      baseUrl: ' http://127.0.0.1:11434/v1 ',
+      apiKeyEnv: ' OLLAMA_API_KEY ',
+      providerName: ' ollama ',
       oss: true,
     }),
     {
@@ -34,6 +49,9 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
       approvalPolicy: 'never',
       profile: 'primary',
       oss: true,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
     },
   )
 })
@@ -109,6 +127,88 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   })
 })
 
+test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter with transcript context', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+
+  const result = await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    env: {
+      OLLAMA_API_KEY: 'secret-token',
+    },
+    systemPrompt: 'system prompt',
+    baseUrl: ' http://127.0.0.1:11434/v1 ',
+    apiKeyEnv: ' OLLAMA_API_KEY ',
+    providerName: ' ollama ',
+    model: ' gpt-oss:20b ',
+    conversationMessages: [
+      {
+        role: 'user',
+        content: 'older question',
+      },
+      {
+        role: 'assistant',
+        content: 'older answer',
+      },
+    ],
+    sessionContext: {
+      binding: {
+        conversationKey: 'channel:telegram|thread:chat-55',
+        channel: 'telegram',
+        identityId: null,
+        actorId: 'contact:alice',
+        threadId: 'chat-55',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: 'chat-55',
+        },
+      },
+    },
+    userPrompt: 'hello',
+  })
+
+  assert.deepEqual(
+    providerMocks.resolveAssistantLanguageModel.mock.calls[0]?.[0],
+    {
+      apiKey: 'secret-token',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'gpt-oss:20b',
+      providerName: 'ollama',
+    },
+  )
+
+  const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
+  assert.equal(generateCall?.model, languageModel)
+  assert.equal(generateCall?.system, 'system prompt')
+  assert.deepEqual(generateCall?.messages?.slice(0, 2), [
+    {
+      role: 'user',
+      content: 'older question',
+    },
+    {
+      role: 'assistant',
+      content: 'older answer',
+    },
+  ])
+  assert.match(generateCall?.messages?.[2]?.content ?? '', /Conversation context:/u)
+  assert.match(generateCall?.messages?.[2]?.content ?? '', /channel: telegram/u)
+  assert.match(generateCall?.messages?.[2]?.content ?? '', /thread: chat-55/u)
+  assert.match(generateCall?.messages?.[2]?.content ?? '', /hello/u)
+  assert.deepEqual(result, {
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+})
 
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {
   const onTraceEvent = vi.fn()

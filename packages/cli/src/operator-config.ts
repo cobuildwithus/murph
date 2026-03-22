@@ -30,6 +30,9 @@ const assistantOperatorDefaultsSchema = z.object({
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   profile: z.string().min(1).nullable(),
   oss: z.boolean().nullable(),
+  baseUrl: z.string().min(1).nullable().optional(),
+  apiKeyEnv: z.string().min(1).nullable().optional(),
+  providerName: z.string().min(1).nullable().optional(),
 })
 
 const operatorConfigSchema = z.object({
@@ -261,6 +264,11 @@ function mergeAssistantOperatorDefaults(
         : existing?.approvalPolicy ?? null,
     profile: 'profile' in patch ? patch.profile : existing?.profile ?? null,
     oss: 'oss' in patch ? patch.oss : existing?.oss ?? null,
+    baseUrl: 'baseUrl' in patch ? patch.baseUrl : existing?.baseUrl ?? null,
+    apiKeyEnv:
+      'apiKeyEnv' in patch ? patch.apiKeyEnv : existing?.apiKeyEnv ?? null,
+    providerName:
+      'providerName' in patch ? patch.providerName : existing?.providerName ?? null,
   })
 }
 
