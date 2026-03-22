@@ -323,20 +323,6 @@ export function createHealthCrudGroup<
   return group
 }
 
-export function registerHealthCrudGroup<
-  TScaffold,
-  TUpsert extends object,
-  TShow,
-  TList,
->(
-  cli: Cli.Cli,
-  config: HealthCrudGroupConfig<TScaffold, TUpsert, TShow, TList>,
-) {
-  const group = createHealthCrudGroup(config)
-  cli.command(group)
-  return group
-}
-
 export function suggestedCommandsCta(commands: SuggestedCommand[]) {
   return {
     commands,
@@ -372,6 +358,16 @@ interface CommonListOptionsConfig {
   status?: z.ZodType<string | undefined>
   tag?: z.ZodType<unknown>
   to?: ListDateOptionConfig
+}
+
+interface CommonListOptions {
+  experiment?: string
+  from?: string
+  kind?: string
+  limit?: number
+  status?: string
+  tag?: unknown
+  to?: string
 }
 
 interface FactoryCommandConfig<
@@ -427,6 +423,20 @@ interface InputFileCommandConfig<TResult> {
   hint?: string
   output: z.ZodType<TResult>
   run(input: UpsertCommandContext): Promise<TResult>
+}
+
+interface CommonListCommandConfig<
+  TResult,
+  TInput extends CommandContext,
+> {
+  description: string
+  examples?: CommandExamples
+  hint?: string
+  optionNames?: Partial<CommonListOptionNames>
+  options?: CommonListOptionsConfig
+  output: z.ZodType<TResult>
+  buildInput?(input: CommandContext & CommonListOptions): TInput
+  run(input: TInput): Promise<TResult>
 }
 
 interface RegistryDocEntityGroupConfig<
@@ -571,15 +581,18 @@ function optionNumberValue(
   return typeof options[key] === 'number' ? options[key] : undefined
 }
 
-function buildListOptionShape(config: CommonListOptionsConfig) {
+function buildCommonListOptionShape(
+  config: CommonListOptionsConfig,
+  names: CommonListOptionNames,
+) {
   const shape: CommandOptionShape = {}
 
   if (config.status) {
-    shape.status = config.status
+    shape[names.status] = config.status
   }
 
   if (config.kind) {
-    shape.kind = config.kind
+    shape[names.kind] = config.kind
   }
 
   if (config.from) {
@@ -595,37 +608,32 @@ function buildListOptionShape(config: CommonListOptionsConfig) {
   }
 
   if (config.tag) {
-    shape.tag = config.tag
+    shape[names.tag] = config.tag
   }
 
   if (config.experiment) {
-    shape.experiment = config.experiment
+    shape[names.experiment] = config.experiment
   }
 
   if (config.limit) {
-    shape.limit = config.limit
+    shape[names.limit] = config.limit
   }
 
   return shape
 }
 
-function extractCommonListOptions(
+function readCommonListOptions(
   options: Record<string, unknown>,
-  names: Partial<CommonListOptionNames> = {},
+  names: CommonListOptionNames,
 ) {
-  const resolvedNames = {
-    ...defaultCommonListOptionNames,
-    ...names,
-  }
-
   return {
-    experiment: optionStringValue(options, resolvedNames.experiment),
-    from: optionStringValue(options, resolvedNames.from),
-    kind: optionStringValue(options, resolvedNames.kind),
-    limit: optionNumberValue(options, resolvedNames.limit),
-    status: optionStringValue(options, resolvedNames.status),
-    tag: options[resolvedNames.tag],
-    to: optionStringValue(options, resolvedNames.to),
+    experiment: optionStringValue(options, names.experiment),
+    from: optionStringValue(options, names.from),
+    kind: optionStringValue(options, names.kind),
+    limit: optionNumberValue(options, names.limit),
+    status: optionStringValue(options, names.status),
+    tag: options[names.tag],
+    to: optionStringValue(options, names.to),
   }
 }
 
@@ -695,6 +703,40 @@ function createInputFileFactoryCommand<TResult>(
         requestId,
         vault: options.vault,
       })
+    },
+  }
+}
+
+function createCommonListCommand<
+  TResult,
+  TInput extends CommandContext,
+>(
+  config: CommonListCommandConfig<TResult, TInput>,
+): FactoryCommandConfig<TResult> {
+  const optionNames = {
+    ...defaultCommonListOptionNames,
+    ...config.optionNames,
+  }
+  const buildInput =
+    config.buildInput ??
+    ((input: CommandContext & CommonListOptions) => input as TInput)
+
+  return {
+    name: 'list',
+    args: emptyArgsSchema,
+    description: config.description,
+    examples: config.examples,
+    hint: config.hint,
+    options: buildCommonListOptionShape(config.options ?? {}, optionNames),
+    output: config.output,
+    async run({ options, requestId }) {
+      return config.run(
+        buildInput({
+          ...readCommonListOptions(options, optionNames),
+          requestId,
+          vault: options.vault,
+        }),
+      )
     },
   }
 }
@@ -788,34 +830,6 @@ export function registerHealthCrudCommands<
   TShow,
   TList,
 >(config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>) {
-  const listOptions = buildListOptionShape({
-    from: config.listFilterCapabilities?.includes('date-range')
-      ? {
-          description: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
-          name: 'from',
-        }
-      : undefined,
-    kind: config.listFilterCapabilities?.includes('kind')
-      ? z
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            'Optional history event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
-          )
-      : undefined,
-    limit: limitOptionSchema,
-    status: config.listStatusDescription
-      ? statusOptionSchema.describe(config.listStatusDescription)
-      : undefined,
-    to: config.listFilterCapabilities?.includes('date-range')
-      ? {
-          description: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
-          name: 'to',
-        }
-      : undefined,
-  })
-
   config.group.command('scaffold', {
     args: emptyArgsSchema,
     description: config.descriptions.scaffold,
@@ -875,28 +889,45 @@ export function registerHealthCrudCommands<
     },
   })
 
-  config.group.command('list', {
-    args: emptyArgsSchema,
-    description: config.descriptions.list,
-    examples: examplesFor(config, 'list'),
-    hint: hintFor(config, 'list'),
-    options: withBaseOptions(listOptions),
-    output: config.outputs.list,
-    async run(context) {
-      const options = context.options as CommonCommandOptions & Record<string, unknown>
-      const listInput = extractCommonListOptions(options)
-
-      return config.services.list({
-        from: listInput.from,
-        kind: listInput.kind,
-        limit: listInput.limit,
-        requestId: requestIdFromOptions(options),
-        status: listInput.status,
-        to: listInput.to,
-        vault: options.vault,
-      })
-    },
-  })
+  registerFactoryCommand(
+    config.group,
+    createCommonListCommand({
+      description: config.descriptions.list,
+      examples: examplesFor(config, 'list'),
+      hint: hintFor(config, 'list'),
+      options: {
+        from: config.listFilterCapabilities?.includes('date-range')
+          ? {
+              description: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
+              name: 'from',
+            }
+          : undefined,
+        kind: config.listFilterCapabilities?.includes('kind')
+          ? z
+              .string()
+              .min(1)
+              .optional()
+              .describe(
+                'Optional history event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
+              )
+          : undefined,
+        limit: limitOptionSchema,
+        status: config.listStatusDescription
+          ? statusOptionSchema.describe(config.listStatusDescription)
+          : undefined,
+        to: config.listFilterCapabilities?.includes('date-range')
+          ? {
+              description: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
+              name: 'to',
+            }
+          : undefined,
+      },
+      output: config.outputs.list,
+      run(input) {
+        return config.services.list(input)
+      },
+    }),
+  )
 }
 
 export function createRegistryDocEntityGroup<
@@ -914,28 +945,19 @@ export function createRegistryDocEntityGroup<
       config.scaffold,
       createInputFileFactoryCommand('upsert', config.upsert),
       createNamedArgFactoryCommand('show', config.show),
-      {
-        name: 'list',
-        args: emptyArgsSchema,
+      createCommonListCommand({
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: buildListOptionShape({
+        options: {
           limit: limitOptionSchema,
           status: config.list.statusOption,
-        }),
-        output: config.list.output,
-        async run({ options, requestId }) {
-          const listInput = extractCommonListOptions(options)
-
-          return config.list.run({
-            limit: listInput.limit,
-            requestId,
-            status: listInput.status,
-            vault: options.vault,
-          })
         },
-      },
+        output: config.list.output,
+        run(input) {
+          return config.list.run(input)
+        },
+      }),
     ],
   })
 }
@@ -986,13 +1008,11 @@ export function createLedgerEventEntityGroup<
       },
       createInputFileFactoryCommand('upsert', config.upsert),
       createNamedArgFactoryCommand('show', config.show),
-      {
-        name: 'list',
-        args: emptyArgsSchema,
+      createCommonListCommand({
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: buildListOptionShape({
+        options: {
           experiment: config.list.experimentOption,
           from: {
             description: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
@@ -1005,23 +1025,12 @@ export function createLedgerEventEntityGroup<
             description: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
             name: 'to',
           },
-        }),
-        output: config.list.output,
-        async run({ options, requestId }) {
-          const listInput = extractCommonListOptions(options)
-
-          return config.list.run({
-            experiment: listInput.experiment,
-            from: listInput.from,
-            kind: listInput.kind,
-            limit: listInput.limit,
-            requestId,
-            tag: listInput.tag,
-            to: listInput.to,
-            vault: options.vault,
-          })
         },
-      },
+        output: config.list.output,
+        run(input) {
+          return config.list.run(input)
+        },
+      }),
     ],
   })
 }
@@ -1059,13 +1068,12 @@ export function createArtifactBackedEntityGroup<
     commands: [
       config.primaryAction,
       createNamedArgFactoryCommand('show', config.show),
-      {
-        name: 'list',
-        args: emptyArgsSchema,
+      createCommonListCommand({
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: buildListOptionShape({
+        optionNames,
+        options: {
           from: {
             description: 'Optional inclusive start date in YYYY-MM-DD form.',
             name: optionNames.from,
@@ -1075,20 +1083,12 @@ export function createArtifactBackedEntityGroup<
             description: 'Optional inclusive end date in YYYY-MM-DD form.',
             name: optionNames.to,
           },
-        }),
-        output: config.list.output,
-        async run({ options, requestId }) {
-          const listInput = extractCommonListOptions(options, optionNames)
-
-          return config.list.run({
-            from: listInput.from,
-            limit: listInput.limit,
-            requestId,
-            to: listInput.to,
-            vault: options.vault,
-          })
         },
-      },
+        output: config.list.output,
+        run(input) {
+          return config.list.run(input)
+        },
+      }),
       createNamedArgFactoryCommand('manifest', config.manifest),
       ...(config.additionalCommands ?? []),
     ],
@@ -1132,28 +1132,19 @@ export function createLifecycleEntityGroup<
     commands: [
       config.create,
       createNamedArgFactoryCommand('show', config.show),
-      {
-        name: 'list',
-        args: emptyArgsSchema,
+      createCommonListCommand({
         description: config.list.description,
         examples: config.list.examples,
         hint: config.list.hint,
-        options: buildListOptionShape({
+        options: {
           limit: limitOptionSchema,
           status: config.list.statusOption,
-        }),
-        output: config.list.output,
-        async run({ options, requestId }) {
-          const listInput = extractCommonListOptions(options)
-
-          return config.list.run({
-            limit: listInput.limit,
-            requestId,
-            status: listInput.status,
-            vault: options.vault,
-          })
         },
-      },
+        output: config.list.output,
+        run(input) {
+          return config.list.run(input)
+        },
+      }),
       config.update,
       config.checkpoint,
       {

@@ -55,12 +55,11 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultCliServices) 
       kindOption: eventScaffoldKindSchema.describe('Canonical event kind to scaffold.'),
       output: eventScaffoldResultSchema,
       async run(input) {
-        const result = await services.core.scaffoldEvent({
+        return services.core.scaffoldEvent({
           kind: input.kind,
           vault: input.vault,
           requestId: input.requestId,
         })
-        return result as z.infer<typeof eventScaffoldResultSchema>
       },
     },
     upsert: {
@@ -97,7 +96,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultCliServices) 
       experimentOption: slugSchema.optional(),
       output: eventListResultSchema,
       async run(input) {
-        const result = await services.query.listEvents({
+        return services.query.listEvents({
           vault: input.vault,
           requestId: input.requestId,
           kind: input.kind,
@@ -107,7 +106,6 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultCliServices) 
           experiment: input.experiment,
           limit: input.limit ?? 50,
         })
-        return result as z.infer<typeof eventListResultSchema>
       },
     },
   })

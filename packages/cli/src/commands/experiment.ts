@@ -94,13 +94,12 @@ export function registerExperimentCommands(
       statusOption: experimentStatusSchema.optional().describe('Optional experiment status filter.'),
       output: experimentListResultSchema,
       async run(input) {
-        const result = await services.query.listExperiments({
+        return services.query.listExperiments({
           vault: input.vault,
           requestId: input.requestId,
           status: input.status,
           limit: input.limit ?? 50,
         })
-        return result as z.infer<typeof experimentListResultSchema>
       },
     },
     update: {
@@ -112,12 +111,11 @@ export function registerExperimentCommands(
       },
       output: experimentUpdateResultSchema,
       async run({ options, requestId }) {
-        const result = await services.core.updateExperiment({
+        return services.core.updateExperiment({
           vault: String(options.vault ?? ''),
           requestId,
           inputFile: normalizeInputFileOption(String(options.input ?? '')),
         })
-        return result as z.infer<typeof experimentUpdateResultSchema>
       },
     },
     checkpoint: {
@@ -129,12 +127,11 @@ export function registerExperimentCommands(
       },
       output: experimentLifecycleResultSchema,
       async run({ options, requestId }) {
-        const result = await services.core.checkpointExperiment({
+        return services.core.checkpointExperiment({
           vault: String(options.vault ?? ''),
           requestId,
           inputFile: normalizeInputFileOption(String(options.input ?? '')),
         })
-        return result as z.infer<typeof experimentLifecycleResultSchema>
       },
     },
     stop: {
@@ -149,7 +146,7 @@ export function registerExperimentCommands(
       },
       output: experimentLifecycleResultSchema,
       async run(input) {
-        const result = await services.core.stopExperiment({
+        return services.core.stopExperiment({
           vault: input.vault,
           requestId: input.requestId,
           lookup: input.id,
@@ -157,7 +154,6 @@ export function registerExperimentCommands(
             typeof input.occurredAt === 'string' ? input.occurredAt : undefined,
           note: typeof input.note === 'string' ? input.note : undefined,
         })
-        return result as z.infer<typeof experimentLifecycleResultSchema>
       },
     },
   })

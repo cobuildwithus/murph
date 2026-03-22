@@ -85,7 +85,7 @@ export function registerProviderCommands(
         return services.query.listProviders({
           vault: input.vault,
           requestId: input.requestId,
-          status: input.status as z.infer<typeof providerStatusSchema> | undefined,
+          status: input.status,
           limit: input.limit ?? 50,
         })
       },

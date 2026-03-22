@@ -205,6 +205,27 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
 })
 
+test('health list help preserves command-family option shapes', async () => {
+  const providerHelp = await runRawCli(['provider', 'list', '--help'])
+  const eventHelp = await runRawCli(['event', 'list', '--help'])
+  const documentHelp = await runRawCli(['document', 'list', '--help'])
+
+  assert.match(providerHelp, /--status/u)
+  assert.doesNotMatch(providerHelp, /--from/u)
+  assert.doesNotMatch(providerHelp, /--to/u)
+
+  assert.match(eventHelp, /--kind/u)
+  assert.match(eventHelp, /--from/u)
+  assert.match(eventHelp, /--to/u)
+  assert.match(eventHelp, /--tag/u)
+  assert.match(eventHelp, /--experiment/u)
+
+  assert.match(documentHelp, /--from/u)
+  assert.match(documentHelp, /--to/u)
+  assert.doesNotMatch(documentHelp, /--status/u)
+  assert.doesNotMatch(documentHelp, /--limit/u)
+})
+
 test('command schema reflects only domain-specific options', async () => {
   const schema = JSON.parse(
     await runRawCli(['init', '--schema', '--format', 'json']),

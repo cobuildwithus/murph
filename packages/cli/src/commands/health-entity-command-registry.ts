@@ -2,7 +2,6 @@ import { Cli, z } from "incur";
 import {
   bindHealthCrudServices,
   createHealthCrudGroup,
-  registerHealthCrudGroup,
 } from "./health-command-factory.js";
 import {
   createHealthScaffoldResultSchema,
@@ -76,7 +75,7 @@ function bindCrudServices(
   });
 }
 
-function buildCrudGroupConfig(
+function createHealthEntityCrudConfig(
   services: VaultCliServices,
   descriptor: HealthCommandDescriptorEntry,
 ) {
@@ -114,8 +113,7 @@ export function registerHealthEntityCrudGroup(
   services: VaultCliServices,
   commandName: string,
 ) {
-  const descriptor = requireHealthCommandDescriptor(commandName);
-  registerHealthCrudGroup(cli, buildCrudGroupConfig(services, descriptor));
+  cli.command(createHealthEntityCrudGroup(services, commandName));
 }
 
 export function createHealthEntityCrudGroup(
@@ -123,5 +121,5 @@ export function createHealthEntityCrudGroup(
   commandName: string,
 ) {
   const descriptor = requireHealthCommandDescriptor(commandName);
-  return createHealthCrudGroup(buildCrudGroupConfig(services, descriptor));
+  return createHealthCrudGroup(createHealthEntityCrudConfig(services, descriptor));
 }
