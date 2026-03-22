@@ -26,6 +26,30 @@ export interface CurrentProfileResolution<TFallback> {
   fallbackCurrentProfile: TFallback | null;
 }
 
+export interface MissingCurrentProfileDocumentOutcome {
+  status: "missing";
+}
+
+export interface ParseFailedCurrentProfileDocumentOutcome<TFailure> {
+  status: "parse-failed";
+  failure: TFailure;
+}
+
+export interface CurrentProfileDocumentSuccess<TCurrent> {
+  status: "ok";
+  currentProfile: TCurrent;
+}
+
+export type CurrentProfileDocumentOutcome<TCurrent, TFailure> =
+  | MissingCurrentProfileDocumentOutcome
+  | ParseFailedCurrentProfileDocumentOutcome<TFailure>
+  | CurrentProfileDocumentSuccess<TCurrent>;
+
+export interface ResolvedCurrentProfileDocument<TCurrent, TFailure> {
+  currentProfile: TCurrent | null;
+  failures: TFailure[];
+}
+
 export function compareCurrentProfileSnapshotRecency(
   left: CurrentProfileSnapshotSortFields,
   right: CurrentProfileSnapshotSortFields,
@@ -96,6 +120,50 @@ export function resolveCurrentProfileProjection<TCurrent, TFallback>(
   )
     ? resolution.fallbackCurrentProfile
     : currentProfile;
+}
+
+export function resolveCurrentProfileDocument<TCurrent, TFallback, TFailure>(
+  resolution: Pick<
+    CurrentProfileResolution<TFallback>,
+    "latestSnapshotId" | "fallbackCurrentProfile"
+  >,
+  documentOutcome: CurrentProfileDocumentOutcome<TCurrent, TFailure>,
+  getSnapshotId: (currentProfile: TCurrent) => string | null | undefined,
+  options?: {
+    retainDocumentCurrentProfile?: (currentProfile: TCurrent) => void;
+  },
+): ResolvedCurrentProfileDocument<TCurrent | TFallback, TFailure> {
+  if (documentOutcome.status === "missing") {
+    return {
+      currentProfile: resolution.fallbackCurrentProfile,
+      failures: [],
+    };
+  }
+
+  if (documentOutcome.status === "parse-failed") {
+    return {
+      currentProfile: resolution.fallbackCurrentProfile,
+      failures: [documentOutcome.failure],
+    };
+  }
+
+  const resolvedCurrentProfile = resolveCurrentProfileProjection(
+    resolution,
+    documentOutcome.currentProfile,
+    getSnapshotId,
+  );
+
+  if (
+    resolvedCurrentProfile === documentOutcome.currentProfile ||
+    resolution.latestSnapshotId === null
+  ) {
+    options?.retainDocumentCurrentProfile?.(documentOutcome.currentProfile);
+  }
+
+  return {
+    currentProfile: resolvedCurrentProfile,
+    failures: [],
+  };
 }
 
 export function fallbackCurrentProfileEntityFromSnapshotRecord(

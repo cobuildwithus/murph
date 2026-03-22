@@ -10,7 +10,7 @@ import {
 } from "./shared.js";
 import {
   readJsonlRecords,
-  readOptionalMarkdownDocument,
+  readOptionalMarkdownDocumentOutcome,
 } from "./loaders.js";
 import {
   projectCurrentProfileEntity,
@@ -18,15 +18,17 @@ import {
 } from "../canonical-entities.js";
 import {
   compareCurrentProfileSnapshotRecency,
+  resolveCurrentProfileDocument,
   fallbackCurrentProfileEntityFromSnapshotRecord,
-  resolveCurrentProfileProjection,
   resolveCurrentProfileSnapshot,
+  type CurrentProfileDocumentOutcome,
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.js";
 
 import type {
   CanonicalEntity,
 } from "../canonical-entities.js";
+import type { ParseFailure } from "./loaders.js";
 import type { MarkdownDocumentRecord } from "./shared.js";
 
 export interface ProfileSnapshotQueryRecord {
@@ -92,8 +94,9 @@ function profileSnapshotRecordFromEntity(
   };
 }
 
-function currentProfileRecordFromEntity(
+function currentProfileRecordFromProjectedEntity(
   entity: CanonicalEntity,
+  rawDocumentMarkdown: string | null = entity.body,
 ): CurrentProfileQueryRecord | null {
   if (entity.family !== "current_profile") {
     return null;
@@ -112,7 +115,7 @@ function currentProfileRecordFromEntity(
     sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
     topGoalIds: firstStringArray(attributes, ["topGoalIds"]),
     relativePath: entity.path,
-    markdown: entity.body,
+    markdown: rawDocumentMarkdown,
     body: entity.body,
   };
 }
@@ -166,17 +169,17 @@ function isProfileSnapshotRecord(
 export function toCurrentProfileRecord(
   document: MarkdownDocumentRecord,
 ): CurrentProfileQueryRecord {
-  const entity = projectCurrentProfileEntity(document);
-  const record = currentProfileRecordFromEntity(entity);
+  const projectedCurrentProfile = projectCurrentProfileEntity(document);
+  const record = currentProfileRecordFromProjectedEntity(
+    projectedCurrentProfile,
+    document.markdown,
+  );
 
   if (!record) {
     throw new Error("Failed to project current profile.");
   }
 
-  return {
-    ...record,
-    markdown: document.markdown,
-  };
+  return record;
 }
 
 export async function listProfileSnapshots(
@@ -239,21 +242,14 @@ async function readCurrentProfileState(
   }
 
   try {
-    const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
-    if (!document) {
-      return {
-        currentProfile: resolution.fallbackCurrentProfile,
-        snapshots,
-      };
-    }
+    const resolvedCurrentProfile = resolveCurrentProfileDocument(
+      resolution,
+      await readCurrentProfileRecordOutcome(vaultRoot),
+      (currentProfile) => currentProfile.snapshotId,
+    );
 
-    const record = toCurrentProfileRecord(document);
     return {
-      currentProfile: resolveCurrentProfileProjection(
-        resolution,
-        record,
-        (currentProfile) => currentProfile.snapshotId,
-      ),
+      currentProfile: resolvedCurrentProfile.currentProfile,
       snapshots,
     };
   } catch {
@@ -269,7 +265,7 @@ function fallbackCurrent(
 ): CurrentProfileQueryRecord | null {
   const fallback = fallbackCurrentProfileEntityFromSnapshotRecord(latestSnapshot);
 
-  return fallback ? currentProfileRecordFromEntity(fallback) : null;
+  return fallback ? currentProfileRecordFromProjectedEntity(fallback) : null;
 }
 
 function profileSnapshotSortFields(
@@ -278,5 +274,30 @@ function profileSnapshotSortFields(
   return {
     snapshotId: snapshot.id,
     snapshotTimestamp: snapshot.recordedAt ?? snapshot.capturedAt,
+  };
+}
+
+async function readCurrentProfileRecordOutcome(
+  vaultRoot: string,
+): Promise<CurrentProfileDocumentOutcome<CurrentProfileQueryRecord, ParseFailure>> {
+  const outcome = await readOptionalMarkdownDocumentOutcome(
+    vaultRoot,
+    "bank/profile/current.md",
+  );
+
+  if (!outcome) {
+    return { status: "missing" };
+  }
+
+  if (!outcome.ok) {
+    return {
+      status: "parse-failed",
+      failure: outcome,
+    };
+  }
+
+  return {
+    status: "ok",
+    currentProfile: toCurrentProfileRecord(outcome.document),
   };
 }

@@ -22,6 +22,7 @@ import {
   walkRelativeFiles,
   walkRelativeFilesSync,
   type JsonlRecordOutcome,
+  type MarkdownDocumentOutcome,
   type ParseFailure,
 } from "./loaders.js";
 import {
@@ -36,8 +37,9 @@ import {
   type RegistryMarkdownRecord,
 } from "./registries.js";
 import {
-  resolveCurrentProfileProjection,
+  resolveCurrentProfileDocument,
   resolveCurrentProfileSnapshot,
+  type CurrentProfileDocumentOutcome,
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.js";
 import { firstString } from "./shared.js";
@@ -567,26 +569,28 @@ async function readCurrentProfileStrict(
   const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
 
   if (!document) {
-    return resolution.fallbackCurrentProfile;
+    return resolveCurrentProfileDocument(
+      resolution,
+      { status: "missing" },
+      currentProfileSnapshotId,
+    ).currentProfile;
   }
 
-  const currentProfile = projectCurrentProfileEntity(document);
-  const resolvedCurrentProfile = resolveCurrentProfileProjection(
+  const resolvedCurrentProfile = resolveCurrentProfileDocument(
     resolution,
-    currentProfile,
-    (entity) => firstString(entity.attributes, ["snapshotId"]),
+    {
+      status: "ok",
+      currentProfile: projectCurrentProfileEntity(document),
+    },
+    currentProfileSnapshotId,
+    {
+      retainDocumentCurrentProfile: (currentProfile) => {
+        markdownByPath.set(currentProfile.path, document.markdown);
+      },
+    },
   );
 
-  if (resolvedCurrentProfile !== currentProfile) {
-    if (resolution.latestSnapshotId === null) {
-      markdownByPath.set(currentProfile.path, document.markdown);
-    }
-
-    return resolvedCurrentProfile;
-  }
-
-  markdownByPath.set(currentProfile.path, document.markdown);
-  return currentProfile;
+  return resolvedCurrentProfile.currentProfile;
 }
 
 async function readCurrentProfileTolerant(
@@ -603,43 +607,22 @@ async function readCurrentProfileTolerant(
     vaultRoot,
     "bank/profile/current.md",
   );
-
-  if (!outcome) {
-    return {
-      entity: resolution.fallbackCurrentProfile,
-      failures: [],
-    };
-  }
-
-  if (!outcome.ok) {
-    return {
-      entity: resolution.fallbackCurrentProfile,
-      failures: [outcome],
-    };
-  }
-
-  const currentProfile = projectCurrentProfileEntity(outcome.document);
-  const resolvedCurrentProfile = resolveCurrentProfileProjection(
+  const resolvedCurrentProfile = resolveCurrentProfileDocument(
     resolution,
-    currentProfile,
-    (entity) => firstString(entity.attributes, ["snapshotId"]),
+    currentProfileDocumentOutcomeFromMarkdownOutcome(outcome),
+    currentProfileSnapshotId,
+    outcome && outcome.ok
+      ? {
+          retainDocumentCurrentProfile: (currentProfile) => {
+            markdownByPath.set(currentProfile.path, outcome.document.markdown);
+          },
+        }
+      : undefined,
   );
 
-  if (resolvedCurrentProfile !== currentProfile) {
-    if (resolution.latestSnapshotId === null) {
-      markdownByPath.set(currentProfile.path, outcome.document.markdown);
-    }
-
-    return {
-      entity: resolvedCurrentProfile,
-      failures: [],
-    };
-  }
-
-  markdownByPath.set(currentProfile.path, outcome.document.markdown);
   return {
-    entity: currentProfile,
-    failures: [],
+    entity: resolvedCurrentProfile.currentProfile,
+    failures: resolvedCurrentProfile.failures,
   };
 }
 
@@ -657,43 +640,22 @@ function readCurrentProfileTolerantSync(
     vaultRoot,
     "bank/profile/current.md",
   );
-
-  if (!outcome) {
-    return {
-      entity: resolution.fallbackCurrentProfile,
-      failures: [],
-    };
-  }
-
-  if (!outcome.ok) {
-    return {
-      entity: resolution.fallbackCurrentProfile,
-      failures: [outcome],
-    };
-  }
-
-  const currentProfile = projectCurrentProfileEntity(outcome.document);
-  const resolvedCurrentProfile = resolveCurrentProfileProjection(
+  const resolvedCurrentProfile = resolveCurrentProfileDocument(
     resolution,
-    currentProfile,
-    (entity) => firstString(entity.attributes, ["snapshotId"]),
+    currentProfileDocumentOutcomeFromMarkdownOutcome(outcome),
+    currentProfileSnapshotId,
+    outcome && outcome.ok
+      ? {
+          retainDocumentCurrentProfile: (currentProfile) => {
+            markdownByPath.set(currentProfile.path, outcome.document.markdown);
+          },
+        }
+      : undefined,
   );
 
-  if (resolvedCurrentProfile !== currentProfile) {
-    if (resolution.latestSnapshotId === null) {
-      markdownByPath.set(currentProfile.path, outcome.document.markdown);
-    }
-
-    return {
-      entity: resolvedCurrentProfile,
-      failures: [],
-    };
-  }
-
-  markdownByPath.set(currentProfile.path, outcome.document.markdown);
   return {
-    entity: currentProfile,
-    failures: [],
+    entity: resolvedCurrentProfile.currentProfile,
+    failures: resolvedCurrentProfile.failures,
   };
 }
 
@@ -703,5 +665,31 @@ function canonicalProfileSnapshotSortFields(
   return {
     snapshotId: snapshot.entityId,
     snapshotTimestamp: snapshot.occurredAt ?? snapshot.date,
+  };
+}
+
+function currentProfileSnapshotId(
+  entity: CanonicalEntity,
+): string | null {
+  return firstString(entity.attributes, ["snapshotId"]);
+}
+
+function currentProfileDocumentOutcomeFromMarkdownOutcome(
+  outcome: MarkdownDocumentOutcome | null,
+): CurrentProfileDocumentOutcome<CanonicalEntity, ParseFailure> {
+  if (!outcome) {
+    return { status: "missing" };
+  }
+
+  if (!outcome.ok) {
+    return {
+      status: "parse-failed",
+      failure: outcome,
+    };
+  }
+
+  return {
+    status: "ok",
+    currentProfile: projectCurrentProfileEntity(outcome.document),
   };
 }
