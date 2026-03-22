@@ -1,46 +1,17 @@
 import { spawn } from 'node:child_process'
+import {
+  DEFAULT_DEVICE_SYNC_BASE_URL,
+  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
+  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  normalizeDeviceSyncBaseUrl,
+  requestDeviceSyncJson as requestSharedDeviceSyncJson,
+  resolveDeviceSyncBaseUrl as resolveSharedDeviceSyncBaseUrl,
+  resolveDeviceSyncControlToken as resolveSharedDeviceSyncControlToken,
+  type DeviceSyncAccountRecord,
+  type DeviceSyncProviderDescriptor,
+} from '@healthybob/runtime-state'
 
 import { VaultCliError } from './vault-cli-errors.js'
-
-interface DeviceSyncApiErrorPayload {
-  error?: {
-    code?: unknown
-    message?: unknown
-    retryable?: unknown
-    details?: unknown
-  }
-}
-
-interface DeviceSyncProviderDescriptor {
-  provider: string
-  callbackPath: string
-  callbackUrl: string
-  webhookPath: string | null
-  webhookUrl: string | null
-  supportsWebhooks: boolean
-  defaultScopes: string[]
-}
-
-interface DeviceSyncAccountRecord {
-  id: string
-  provider: string
-  externalAccountId: string
-  displayName: string | null
-  status: 'active' | 'reauthorization_required' | 'disconnected'
-  scopes: string[]
-  accessTokenExpiresAt?: string | null
-  metadata: Record<string, unknown>
-  connectedAt: string
-  lastWebhookAt: string | null
-  lastSyncStartedAt: string | null
-  lastSyncCompletedAt: string | null
-  lastSyncErrorAt: string | null
-  lastErrorCode: string | null
-  lastErrorMessage: string | null
-  nextReconcileAt: string | null
-  createdAt: string
-  updatedAt: string
-}
 
 interface DeviceSyncJobRecord {
   id: string
@@ -72,44 +43,25 @@ export interface DeviceSyncClientOptions {
   openBrowser?: (url: string) => Promise<boolean>
 }
 
-export const HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV =
-  'HEALTHYBOB_DEVICE_SYNC_BASE_URL'
-export const HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV =
-  'HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN'
-export const DEFAULT_DEVICE_SYNC_BASE_URL = 'http://127.0.0.1:8788'
-const HEALTHYBOB_DEVICE_SYNC_SECRET_ENV = 'HEALTHYBOB_DEVICE_SYNC_SECRET'
-
-export function normalizeDeviceSyncBaseUrl(value: string): string {
-  const url = new URL(value)
-  url.pathname = url.pathname.replace(/\/+$/u, '')
-  url.search = ''
-  url.hash = ''
-  return url.toString().replace(/\/$/u, '')
+export {
+  DEFAULT_DEVICE_SYNC_BASE_URL,
+  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
+  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  normalizeDeviceSyncBaseUrl,
 }
 
 export function resolveDeviceSyncBaseUrl(
   value?: string | null,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const configured =
-    (typeof value === 'string' && value.trim()) ||
-    env[HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV]?.trim() ||
-    DEFAULT_DEVICE_SYNC_BASE_URL
-
-  return normalizeDeviceSyncBaseUrl(configured)
+  return resolveSharedDeviceSyncBaseUrl({ value, env })
 }
 
 export function resolveDeviceSyncControlToken(
   value?: string | null,
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
-  const configured =
-    (typeof value === 'string' && value.trim()) ||
-    env[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
-    env[HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]?.trim() ||
-    null
-
-  return configured || null
+  return resolveSharedDeviceSyncControlToken({ value, env })
 }
 
 export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
@@ -125,57 +77,45 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
     path: string,
     init?: RequestInit,
   ): Promise<TResponse> {
-    const url = new URL(path.replace(/^\/+/u, ''), `${baseUrl}/`).toString()
-    let response: Response
-
-    try {
-      response = await fetchImpl(url, {
-        ...init,
-        headers: withControlPlaneAuth(init?.headers, controlToken),
-      })
-    } catch (error) {
-      throw new VaultCliError(
-        'device_sync_unavailable',
-        `Device sync service is unavailable at ${baseUrl}. Run \`healthybob device daemon start --vault <path>\` or start \`healthybob-device-syncd\` manually and retry.`,
-        {
-          baseUrl,
-          cause: error instanceof Error ? error.message : String(error),
-        },
-      )
-    }
-
-    const text = await response.text()
-    const payload = parseJsonPayload(text)
-
-    if (!response.ok) {
-      const errorPayload = asErrorPayload(payload)
-      throw new VaultCliError(
-        errorPayload.code ?? 'device_sync_request_failed',
-        response.status === 401 && !controlToken
-          ? 'Device sync control plane requires HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
-          : errorPayload.message ??
-              `Device sync request failed with HTTP ${response.status}.`,
-        {
-          baseUrl,
-          status: response.status,
-          details: errorPayload.details,
-          retryable: errorPayload.retryable,
-        },
-      )
-    }
-
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw new VaultCliError(
-        'device_sync_invalid_response',
-        'Device sync service returned an invalid JSON payload.',
-        {
-          baseUrl,
-          path,
-        },
-      )
-    }
-
-    return payload as TResponse
+    return await requestSharedDeviceSyncJson<TResponse>({
+      baseUrl,
+      path,
+      fetchImpl,
+      controlToken,
+      request: init,
+      createUnavailableError: ({ cause }) =>
+        new VaultCliError(
+          'device_sync_unavailable',
+          `Device sync service is unavailable at ${baseUrl}. Run \`healthybob device daemon start --vault <path>\` or start \`healthybob-device-syncd\` manually and retry.`,
+          {
+            baseUrl,
+            cause: cause instanceof Error ? cause.message : String(cause),
+          },
+        ),
+      createHttpError: ({ status, errorPayload }) =>
+        new VaultCliError(
+          errorPayload.code ?? 'device_sync_request_failed',
+          status === 401 && !controlToken
+            ? 'Device sync control plane requires HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
+            : errorPayload.message ??
+                `Device sync request failed with HTTP ${status}.`,
+          {
+            baseUrl,
+            status,
+            details: errorPayload.details,
+            retryable: errorPayload.retryable,
+          },
+        ),
+      createInvalidResponseError: () =>
+        new VaultCliError(
+          'device_sync_invalid_response',
+          'Device sync service returned an invalid JSON payload.',
+          {
+            baseUrl,
+            path,
+          },
+        ),
+    })
   }
 
   return {
@@ -254,57 +194,6 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
         },
       )
     },
-  }
-}
-
-function withControlPlaneAuth(
-  headers: HeadersInit | undefined,
-  controlToken: string | null,
-): HeadersInit | undefined {
-  if (!controlToken) {
-    return headers
-  }
-
-  const nextHeaders = new Headers(headers)
-  nextHeaders.set('Authorization', `Bearer ${controlToken}`)
-  return nextHeaders
-}
-
-function parseJsonPayload(text: string): unknown {
-  if (!text.trim()) {
-    return {}
-  }
-
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    return null
-  }
-}
-
-function asErrorPayload(payload: unknown): {
-  code?: string
-  message?: string
-  retryable?: boolean
-  details?: unknown
-} {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return {}
-  }
-
-  const envelope = payload as DeviceSyncApiErrorPayload
-  const error = envelope.error
-
-  if (!error || typeof error !== 'object') {
-    return {}
-  }
-
-  return {
-    code: typeof error.code === 'string' ? error.code : undefined,
-    message: typeof error.message === 'string' ? error.message : undefined,
-    retryable:
-      typeof error.retryable === 'boolean' ? error.retryable : undefined,
-    details: error.details,
   }
 }
 

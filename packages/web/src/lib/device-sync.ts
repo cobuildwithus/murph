@@ -1,40 +1,23 @@
-export const HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV =
-  "HEALTHYBOB_DEVICE_SYNC_BASE_URL";
-export const HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV =
-  "HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN";
-export const DEFAULT_DEVICE_SYNC_BASE_URL = "http://127.0.0.1:8788";
-const HEALTHYBOB_DEVICE_SYNC_SECRET_ENV = "HEALTHYBOB_DEVICE_SYNC_SECRET";
+import {
+  DEFAULT_DEVICE_SYNC_BASE_URL,
+  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
+  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  normalizeDeviceSyncBaseUrl,
+  requestDeviceSyncJson as requestSharedDeviceSyncJson,
+  resolveDeviceSyncBaseUrl as resolveSharedDeviceSyncBaseUrl,
+  resolveDeviceSyncControlToken as resolveSharedDeviceSyncControlToken,
+  type DeviceSyncAccountRecord,
+  type DeviceSyncProviderDescriptor,
+} from "@healthybob/runtime-state";
 
-export interface DeviceSyncProviderDescriptor {
-  provider: string;
-  callbackPath: string;
-  callbackUrl: string;
-  webhookPath: string | null;
-  webhookUrl: string | null;
-  supportsWebhooks: boolean;
-  defaultScopes: string[];
-}
-
-export interface DeviceSyncAccountRecord {
-  id: string;
-  provider: string;
-  externalAccountId: string;
-  displayName: string | null;
-  status: "active" | "reauthorization_required" | "disconnected";
-  scopes: string[];
-  accessTokenExpiresAt?: string | null;
-  metadata: Record<string, unknown>;
-  connectedAt: string;
-  lastWebhookAt: string | null;
-  lastSyncStartedAt: string | null;
-  lastSyncCompletedAt: string | null;
-  lastSyncErrorAt: string | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  nextReconcileAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export {
+  DEFAULT_DEVICE_SYNC_BASE_URL,
+  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
+  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  normalizeDeviceSyncBaseUrl,
+  type DeviceSyncAccountRecord,
+  type DeviceSyncProviderDescriptor,
+};
 
 export interface DeviceSyncOverviewReady {
   status: "ready";
@@ -54,15 +37,6 @@ export interface DeviceSyncOverviewUnavailable {
 export type DeviceSyncOverview =
   | DeviceSyncOverviewReady
   | DeviceSyncOverviewUnavailable;
-
-interface DeviceSyncApiErrorPayload {
-  error?: {
-    code?: unknown;
-    message?: unknown;
-    retryable?: unknown;
-    details?: unknown;
-  };
-}
 
 export class DeviceSyncWebError extends Error {
   readonly code: string;
@@ -91,30 +65,16 @@ export function isDeviceSyncWebError(error: unknown): error is DeviceSyncWebErro
   return error instanceof DeviceSyncWebError;
 }
 
-export function normalizeDeviceSyncBaseUrl(value: string): string {
-  const url = new URL(value);
-  url.pathname = url.pathname.replace(/\/+$/u, "");
-  url.search = "";
-  url.hash = "";
-  return url.toString().replace(/\/$/u, "");
-}
-
 export function resolveDeviceSyncBaseUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return normalizeDeviceSyncBaseUrl(
-    env[HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV]?.trim() || DEFAULT_DEVICE_SYNC_BASE_URL,
-  );
+  return resolveSharedDeviceSyncBaseUrl({ env });
 }
 
 export function resolveDeviceSyncControlToken(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
-  return (
-    env[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
-    env[HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]?.trim() ||
-    null
-  );
+  return resolveSharedDeviceSyncControlToken({ env });
 }
 
 export async function loadDeviceSyncOverviewFromEnv(input: {
@@ -259,100 +219,39 @@ async function requestDeviceSyncJson<TResponse>(
     controlToken?: string | null;
   } = {},
 ): Promise<TResponse> {
-  const fetchImpl = input.fetchImpl ?? fetch;
-  const url = new URL(path.replace(/^\/+/u, ""), `${baseUrl}/`).toString();
-  let response: Response;
-
-  try {
-    response = await fetchImpl(url, {
+  return await requestSharedDeviceSyncJson<TResponse>({
+    baseUrl,
+    path,
+    fetchImpl: input.fetchImpl,
+    controlToken: input.controlToken ?? null,
+    request: {
       method: input.method ?? "GET",
       body: input.body,
-      headers: withControlPlaneAuth(input.headers, input.controlToken ?? null),
+      headers: input.headers,
       cache: "no-store",
-    });
-  } catch (error) {
-    throw new DeviceSyncWebError({
-      code: "device_sync_unavailable",
-      message: `Device sync service is unavailable at ${baseUrl}.`,
-      status: 503,
-      cause: error,
-    });
-  }
-
-  const text = await response.text();
-  const payload = parseJsonPayload(text);
-
-  if (!response.ok) {
-    const errorPayload = asErrorPayload(payload);
-    throw new DeviceSyncWebError({
-      code: errorPayload.code ?? "device_sync_request_failed",
-      message:
-        errorPayload.message ??
-        `Device sync request failed with HTTP ${response.status}.`,
-      status: response.status,
-      retryable: errorPayload.retryable,
-      details: errorPayload.details,
-    });
-  }
-
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new DeviceSyncWebError({
-      code: "device_sync_invalid_response",
-      message: "Device sync service returned an invalid JSON payload.",
-      status: 502,
-    });
-  }
-
-  return payload as TResponse;
-}
-
-function withControlPlaneAuth(
-  headers: HeadersInit | undefined,
-  controlToken: string | null,
-): HeadersInit | undefined {
-  if (!controlToken) {
-    return headers;
-  }
-
-  const nextHeaders = new Headers(headers);
-  nextHeaders.set("Authorization", `Bearer ${controlToken}`);
-  return nextHeaders;
-}
-
-function parseJsonPayload(text: string): unknown {
-  if (!text.trim()) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-function asErrorPayload(payload: unknown): {
-  code?: string;
-  message?: string;
-  retryable?: boolean;
-  details?: unknown;
-} {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return {};
-  }
-
-  const envelope = payload as DeviceSyncApiErrorPayload;
-  const error = envelope.error;
-
-  if (!error || typeof error !== "object") {
-    return {};
-  }
-
-  return {
-    code: typeof error.code === "string" ? error.code : undefined,
-    message: typeof error.message === "string" ? error.message : undefined,
-    retryable:
-      typeof error.retryable === "boolean" ? error.retryable : undefined,
-    details: error.details,
-  };
+    },
+    createUnavailableError: ({ cause }) =>
+      new DeviceSyncWebError({
+        code: "device_sync_unavailable",
+        message: `Device sync service is unavailable at ${baseUrl}.`,
+        status: 503,
+        cause,
+      }),
+    createHttpError: ({ status, errorPayload }) =>
+      new DeviceSyncWebError({
+        code: errorPayload.code ?? "device_sync_request_failed",
+        message:
+          errorPayload.message ??
+          `Device sync request failed with HTTP ${status}.`,
+        status,
+        retryable: errorPayload.retryable,
+        details: errorPayload.details,
+      }),
+    createInvalidResponseError: () =>
+      new DeviceSyncWebError({
+        code: "device_sync_invalid_response",
+        message: "Device sync service returned an invalid JSON payload.",
+        status: 502,
+      }),
+  });
 }
