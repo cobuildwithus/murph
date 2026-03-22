@@ -23,6 +23,7 @@ import {
 
 import type {
   DeviceSyncAccount,
+  DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
   ProviderAuthTokens,
@@ -91,6 +92,115 @@ interface WhoopDeleteMarker {
   source_event_type?: string;
   payload?: Record<string, unknown>;
 }
+
+type WhoopResourceType = "sleep" | "recovery" | "workout";
+type WhoopWebhookJobKind = "resource" | "delete";
+
+interface WhoopApiSession {
+  account: DeviceSyncAccount;
+  requestJson<T>(path: string, options?: { optional?: boolean }): Promise<T | null>;
+}
+
+interface WhoopResourceDescriptor {
+  importResource(api: WhoopApiSession, resourceId: string, now: string): Promise<Record<string, unknown> | null>;
+}
+
+interface WhoopWebhookEventDescriptor {
+  kind: WhoopWebhookJobKind;
+  resourceType: WhoopResourceType;
+  priority: number;
+}
+
+const WHOOP_WEBHOOK_EVENT_MAP: Record<string, WhoopWebhookEventDescriptor> = Object.freeze({
+  "sleep.updated": {
+    kind: "resource",
+    resourceType: "sleep",
+    priority: 90,
+  },
+  "recovery.updated": {
+    kind: "resource",
+    resourceType: "recovery",
+    priority: 90,
+  },
+  "workout.updated": {
+    kind: "resource",
+    resourceType: "workout",
+    priority: 90,
+  },
+  "sleep.deleted": {
+    kind: "delete",
+    resourceType: "sleep",
+    priority: 95,
+  },
+  "recovery.deleted": {
+    kind: "delete",
+    resourceType: "recovery",
+    priority: 95,
+  },
+  "workout.deleted": {
+    kind: "delete",
+    resourceType: "workout",
+    priority: 95,
+  },
+});
+
+async function importWhoopSleepRelatedSnapshot(
+  api: WhoopApiSession,
+  resourceId: string,
+  now: string,
+): Promise<Record<string, unknown> | null> {
+  const sleepRecord = await api.requestJson<Record<string, unknown>>(`/v2/activity/sleep/${resourceId}`, {
+    optional: true,
+  });
+
+  if (!sleepRecord) {
+    return null;
+  }
+
+  const cycleId = normalizeIdentifier(sleepRecord.cycle_id);
+  const cycle = cycleId ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}`, { optional: true }) : null;
+  const recovery = cycleId ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}/recovery`, { optional: true }) : null;
+
+  return {
+    accountId: api.account.externalAccountId,
+    importedAt: now,
+    sleeps: [sleepRecord],
+    cycles: cycle ? [cycle] : [],
+    recoveries: recovery ? [recovery] : [],
+  };
+}
+
+async function importWhoopWorkoutSnapshot(
+  api: WhoopApiSession,
+  resourceId: string,
+  now: string,
+): Promise<Record<string, unknown> | null> {
+  const workout = await api.requestJson<Record<string, unknown>>(`/v2/activity/workout/${resourceId}`, {
+    optional: true,
+  });
+
+  if (!workout) {
+    return null;
+  }
+
+  return {
+    accountId: api.account.externalAccountId,
+    importedAt: now,
+    workouts: [workout],
+  };
+}
+
+const WHOOP_RESOURCE_DESCRIPTORS: Record<WhoopResourceType, WhoopResourceDescriptor> = Object.freeze({
+  sleep: {
+    importResource: importWhoopSleepRelatedSnapshot,
+  },
+  recovery: {
+    importResource: importWhoopSleepRelatedSnapshot,
+  },
+  workout: {
+    importResource: importWhoopWorkoutSnapshot,
+  },
+});
 
 function whoopBaseUrl(config: WhoopDeviceSyncProviderConfig): string {
   return (config.baseUrl ?? DEFAULT_WHOOP_BASE_URL).replace(/\/+$/u, "");
@@ -257,6 +367,74 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     };
   }
 
+  function getWhoopResourceDescriptor(resourceType: string): WhoopResourceDescriptor | null {
+    return WHOOP_RESOURCE_DESCRIPTORS[resourceType as WhoopResourceType] ?? null;
+  }
+
+  function requireWhoopJobResource(
+    job: DeviceSyncJobRecord,
+    options: {
+      code: string;
+      message: string;
+    },
+  ): { resourceType: string; resourceId: string } {
+    const resourceType = normalizeString(job.payload.resourceType);
+    const resourceId = normalizeIdentifier(job.payload.resourceId);
+
+    if (!resourceType || !resourceId) {
+      throw deviceSyncError({
+        code: options.code,
+        message: options.message,
+        retryable: false,
+      });
+    }
+
+    return {
+      resourceType,
+      resourceId,
+    };
+  }
+
+  function buildWhoopDeleteMarker(
+    resourceType: string,
+    resourceId: string,
+    now: string,
+    payload: Record<string, unknown>,
+  ): WhoopDeleteMarker {
+    return {
+      resource_type: resourceType,
+      resource_id: resourceId,
+      occurred_at: now,
+      source_event_type: normalizeString(payload.eventType),
+      payload: coerceRecord(payload.webhookPayload),
+    };
+  }
+
+  function buildWhoopWebhookJobs(
+    eventType: string,
+    resourceId: string | null | undefined,
+    payload: Record<string, unknown>,
+  ): DeviceSyncJobInput[] {
+    const eventDescriptor = WHOOP_WEBHOOK_EVENT_MAP[eventType];
+
+    if (!eventDescriptor || !resourceId) {
+      return [];
+    }
+
+    return [
+      {
+        kind: eventDescriptor.kind,
+        payload: {
+          resourceType: eventDescriptor.resourceType,
+          resourceId,
+          eventType,
+          webhookPayload: payload,
+        },
+        priority: eventDescriptor.priority,
+      },
+    ];
+  }
+
   async function refreshAccountForRevoke(account: DeviceSyncAccount): Promise<string> {
     if (!isTokenNearExpiry(account) || !account.refreshToken) {
       return account.accessToken;
@@ -327,121 +505,51 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     return {};
   }
 
-  async function executeResourceImport(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {
-    const payload = job.payload;
-    const resourceType = normalizeString(payload.resourceType);
-    const resourceId = normalizeIdentifier(payload.resourceId);
+  async function executeWhoopResourceJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {
+    const { resourceType, resourceId } = requireWhoopJobResource(job, {
+      code: "WHOOP_JOB_INVALID",
+      message: `WHOOP ${job.kind} job is missing resource information.`,
+    });
     const now = context.now;
+    const descriptor = getWhoopResourceDescriptor(resourceType);
+    const api = createApiSession(context);
 
-    if (!resourceType || !resourceId) {
+    if (!descriptor) {
       throw deviceSyncError({
-        code: "WHOOP_JOB_INVALID",
-        message: `WHOOP ${job.kind} job is missing resource information.`,
+        code: "WHOOP_RESOURCE_UNSUPPORTED",
+        message: `WHOOP resource type ${resourceType} is not supported.`,
         retryable: false,
       });
     }
 
-    const api = createApiSession(context);
+    const snapshot = await descriptor.importResource(api, resourceId, now);
 
-    if (resourceType === "sleep") {
-      const sleepRecord = await api.requestJson<Record<string, unknown>>(`/v2/activity/sleep/${resourceId}`, {
-        optional: true,
-      });
-
-      if (!sleepRecord) {
-        await context.importSnapshot(
-          buildDeleteSnapshot(api.account, now, {
-            resource_type: "sleep",
-            resource_id: resourceId,
-            occurred_at: now,
-            source_event_type: normalizeString(payload.eventType),
-            payload: coerceRecord(payload.webhookPayload),
-          }),
-        );
-        return {};
-      }
-
-      const cycleId = normalizeIdentifier(sleepRecord.cycle_id);
-      const cycle = cycleId ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}`, { optional: true }) : null;
-      const recovery = cycleId
-        ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}/recovery`, { optional: true })
-        : null;
-
-      await context.importSnapshot({
-        accountId: api.account.externalAccountId,
-        importedAt: now,
-        sleeps: [sleepRecord],
-        cycles: cycle ? [cycle] : [],
-        recoveries: recovery ? [recovery] : [],
-      });
+    if (!snapshot) {
+      await context.importSnapshot(
+        buildDeleteSnapshot(api.account, now, buildWhoopDeleteMarker(resourceType, resourceId, now, job.payload)),
+      );
       return {};
     }
 
-    if (resourceType === "recovery") {
-      const sleepRecord = await api.requestJson<Record<string, unknown>>(`/v2/activity/sleep/${resourceId}`, {
-        optional: true,
-      });
+    await context.importSnapshot(snapshot);
+    return {};
+  }
 
-      if (!sleepRecord) {
-        await context.importSnapshot(
-          buildDeleteSnapshot(api.account, now, {
-            resource_type: "recovery",
-            resource_id: resourceId,
-            occurred_at: now,
-            source_event_type: normalizeString(payload.eventType),
-            payload: coerceRecord(payload.webhookPayload),
-          }),
-        );
-        return {};
-      }
-
-      const cycleId = normalizeIdentifier(sleepRecord.cycle_id);
-      const cycle = cycleId ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}`, { optional: true }) : null;
-      const recovery = cycleId
-        ? await api.requestJson<Record<string, unknown>>(`/v2/cycle/${cycleId}/recovery`, { optional: true })
-        : null;
-
-      await context.importSnapshot({
-        accountId: api.account.externalAccountId,
-        importedAt: now,
-        sleeps: [sleepRecord],
-        cycles: cycle ? [cycle] : [],
-        recoveries: recovery ? [recovery] : [],
-      });
-      return {};
-    }
-
-    if (resourceType === "workout") {
-      const workout = await api.requestJson<Record<string, unknown>>(`/v2/activity/workout/${resourceId}`, {
-        optional: true,
-      });
-
-      if (!workout) {
-        await context.importSnapshot(
-          buildDeleteSnapshot(api.account, now, {
-            resource_type: "workout",
-            resource_id: resourceId,
-            occurred_at: now,
-            source_event_type: normalizeString(payload.eventType),
-            payload: coerceRecord(payload.webhookPayload),
-          }),
-        );
-        return {};
-      }
-
-      await context.importSnapshot({
-        accountId: api.account.externalAccountId,
-        importedAt: now,
-        workouts: [workout],
-      });
-      return {};
-    }
-
-    throw deviceSyncError({
-      code: "WHOOP_RESOURCE_UNSUPPORTED",
-      message: `WHOOP resource type ${resourceType} is not supported.`,
-      retryable: false,
+  async function executeWhoopDeleteJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {
+    const { resourceType, resourceId } = requireWhoopJobResource(job, {
+      code: "WHOOP_DELETE_JOB_INVALID",
+      message: "WHOOP delete job did not include a resourceType and resourceId.",
     });
+
+    await context.importSnapshot(
+      buildDeleteSnapshot(
+        context.account,
+        context.now,
+        buildWhoopDeleteMarker(resourceType, resourceId, context.now, job.payload),
+      ),
+    );
+
+    return {};
   }
 
   const provider: DeviceSyncProvider = {
@@ -647,107 +755,13 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         });
       }
 
-      const jobs = (() => {
-        if (eventType === "sleep.updated" && resourceId) {
-          return [
-            {
-              kind: "resource",
-              payload: {
-                resourceType: "sleep",
-                resourceId,
-                eventType,
-                webhookPayload: payload,
-              },
-              priority: 90,
-            },
-          ];
-        }
-
-        if (eventType === "recovery.updated" && resourceId) {
-          return [
-            {
-              kind: "resource",
-              payload: {
-                resourceType: "recovery",
-                resourceId,
-                eventType,
-                webhookPayload: payload,
-              },
-              priority: 90,
-            },
-          ];
-        }
-
-        if (eventType === "workout.updated" && resourceId) {
-          return [
-            {
-              kind: "resource",
-              payload: {
-                resourceType: "workout",
-                resourceId,
-                eventType,
-                webhookPayload: payload,
-              },
-              priority: 90,
-            },
-          ];
-        }
-
-        if (eventType === "sleep.deleted" && resourceId) {
-          return [
-            {
-              kind: "delete",
-              payload: {
-                resourceType: "sleep",
-                resourceId,
-                eventType,
-                webhookPayload: payload,
-              },
-              priority: 95,
-            },
-          ];
-        }
-
-        if (eventType === "recovery.deleted" && resourceId) {
-          return [
-            {
-              kind: "delete",
-              payload: {
-                resourceType: "recovery",
-                resourceId,
-                eventType,
-                webhookPayload: payload,
-              },
-              priority: 95,
-            },
-          ];
-        }
-
-        if (eventType === "workout.deleted" && resourceId) {
-          return [
-            {
-              kind: "delete",
-              payload: {
-                resourceType: "workout",
-                resourceId,
-                eventType,
-                webhookPayload: payload,
-              },
-              priority: 95,
-            },
-          ];
-        }
-
-        return [];
-      })();
-
       return {
         externalAccountId,
         eventType,
         traceId,
         occurredAt: context.now,
         payload,
-        jobs,
+        jobs: buildWhoopWebhookJobs(eventType, resourceId, payload),
       };
     },
     async executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {
@@ -760,31 +774,11 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       }
 
       if (job.kind === "resource") {
-        return executeResourceImport(context, job);
+        return executeWhoopResourceJob(context, job);
       }
 
       if (job.kind === "delete") {
-        const resourceType = normalizeString(job.payload.resourceType);
-        const resourceId = normalizeIdentifier(job.payload.resourceId);
-
-        if (!resourceType || !resourceId) {
-          throw deviceSyncError({
-            code: "WHOOP_DELETE_JOB_INVALID",
-            message: "WHOOP delete job did not include a resourceType and resourceId.",
-            retryable: false,
-          });
-        }
-
-        await context.importSnapshot(
-          buildDeleteSnapshot(context.account, context.now, {
-            resource_type: resourceType,
-            resource_id: resourceId,
-            occurred_at: context.now,
-            source_event_type: normalizeString(job.payload.eventType),
-            payload: coerceRecord(job.payload.webhookPayload),
-          }),
-        );
-        return {};
+        return executeWhoopDeleteJob(context, job);
       }
 
       throw deviceSyncError({

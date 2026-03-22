@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
@@ -80,6 +81,17 @@ function readUrl(input: RequestInfo | URL): string {
 
 function readAuthorizationHeader(init?: RequestInit): string | null {
   return new Headers(init?.headers).get("Authorization");
+}
+
+function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timestamp = Date.now().toString()): Headers {
+  const signature = createHmac("sha256", clientSecret).update(Buffer.concat([Buffer.from(timestamp, "utf8"), rawBody])).digest(
+    "base64",
+  );
+
+  return new Headers({
+    "x-whoop-signature": signature,
+    "x-whoop-signature-timestamp": timestamp,
+  });
 }
 
 test("WHOOP provider builds a connect URL and exchanges an auth code into a refreshable connection", async () => {
@@ -306,4 +318,117 @@ test("WHOOP provider schedules reconcile jobs with provider-specific payload fla
     includeBodyMeasurement: false,
   });
   assert.equal(scheduled?.nextReconcileAt, "2026-03-16T16:00:00.000Z");
+});
+
+test("WHOOP provider maps webhook events to the same job kinds, priorities, and payload fields", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+  });
+
+  const cases = [
+    { eventType: "sleep.updated", kind: "resource", resourceType: "sleep", priority: 90 },
+    { eventType: "recovery.updated", kind: "resource", resourceType: "recovery", priority: 90 },
+    { eventType: "workout.updated", kind: "resource", resourceType: "workout", priority: 90 },
+    { eventType: "sleep.deleted", kind: "delete", resourceType: "sleep", priority: 95 },
+    { eventType: "recovery.deleted", kind: "delete", resourceType: "recovery", priority: 95 },
+    { eventType: "workout.deleted", kind: "delete", resourceType: "workout", priority: 95 },
+  ] as const;
+
+  for (const testCase of cases) {
+    const webhookPayload = {
+      user_id: "whoop-user-1",
+      type: testCase.eventType,
+      id: "resource-1",
+      trace_id: `trace:${testCase.eventType}`,
+    };
+    const rawBody = Buffer.from(JSON.stringify(webhookPayload), "utf8");
+    const result = await provider.verifyAndParseWebhook?.({
+      headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody),
+      rawBody,
+      now: "2026-03-16T10:00:00.000Z",
+    });
+
+    assert.ok(result);
+    assert.equal(result?.eventType, testCase.eventType);
+    assert.equal(result?.externalAccountId, "whoop-user-1");
+    assert.equal(result?.traceId, `trace:${testCase.eventType}`);
+    assert.deepEqual(result?.jobs, [
+      {
+        kind: testCase.kind,
+        priority: testCase.priority,
+        payload: {
+          resourceType: testCase.resourceType,
+          resourceId: "resource-1",
+          eventType: testCase.eventType,
+          webhookPayload,
+        },
+      },
+    ]);
+  }
+});
+
+test("WHOOP provider turns missing resource imports into the existing delete snapshot shape", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/developer/v2/activity/workout/workout-404") {
+        return new Response(null, { status: 404 });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["read:workout"]),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return {
+        ok: true,
+      };
+    },
+    async refreshAccountTokens() {
+      throw new Error("refreshAccountTokens should not be called");
+    },
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("resource", {
+      resourceType: "workout",
+      resourceId: "workout-404",
+      eventType: "workout.updated",
+      webhookPayload: {
+        user_id: "whoop-user-1",
+        type: "workout.updated",
+        id: "workout-404",
+      },
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "whoop-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      deletions: [
+        {
+          resource_type: "workout",
+          resource_id: "workout-404",
+          occurred_at: "2026-03-16T10:00:00.000Z",
+          source_event_type: "workout.updated",
+          payload: {
+            user_id: "whoop-user-1",
+            type: "workout.updated",
+            id: "workout-404",
+          },
+        },
+      ],
+    },
+  ]);
 });
