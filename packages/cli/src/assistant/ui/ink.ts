@@ -25,8 +25,9 @@ import {
   saveAssistantOperatorDefaultsPatch,
 } from '../../operator-config.js'
 import {
-  buildResolveAssistantSessionInput,
+  openAssistantConversation,
   sendAssistantMessage,
+  updateAssistantSessionOptions,
   type AssistantChatInput,
 } from '../service.js'
 import {
@@ -38,12 +39,9 @@ import {
   isAssistantSessionNotFoundError,
   listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
-  resolveAssistantSession,
-  saveAssistantSession,
 } from '../store.js'
 import { normalizeNullableString } from '../shared.js'
 import {
-  CHAT_BANNER,
   CHAT_COMPOSER_HINT,
   CHAT_MODEL_OPTIONS,
   CHAT_REASONING_OPTIONS,
@@ -300,26 +298,6 @@ export function formatFooterBadgeText(badge: ChatMetadataBadge): string {
 
   return ` ${badge.label}: ${badge.value} `
 }
-
-const ChatBanner = React.memo(function ChatBanner(): React.ReactElement {
-  const createElement = React.createElement
-  const theme = useAssistantInkTheme()
-
-  return createElement(
-    ChromePanel,
-    {
-      marginBottom: 1,
-    },
-    createElement(
-      Text,
-      {
-        color: theme.mutedColor,
-        wrap: 'wrap',
-      },
-      CHAT_BANNER,
-    ),
-  )
-})
 
 export function splitAssistantMarkdownLinks(input: string): Array<
   | {
@@ -958,11 +936,6 @@ export function renderChatTranscriptFeed(input: {
         flexDirection: 'column',
         width: '100%',
       },
-      input.entries.length === 0
-        ? createElement(ChatBanner, {
-            key: 'banner',
-          })
-        : null,
       ...liveEntries.map((entry, index) =>
         createElement(ChatEntryRow, {
           key: `live-entry:${staticEntries.length + index}`,
@@ -2139,9 +2112,7 @@ export async function runAssistantChatWithInk(
   const startedAt = new Date().toISOString()
   const defaults = await resolveAssistantOperatorDefaults()
   const theme = resolveAssistantInkTheme()
-  const resolved = await resolveAssistantSession(
-    buildResolveAssistantSessionInput(input, defaults),
-  )
+  const resolved = await openAssistantConversation(input)
   const transcriptEntries = await listAssistantTranscriptEntries(
     input.vault,
     resolved.session.sessionId,
@@ -2321,14 +2292,13 @@ export async function runAssistantChatWithInk(
 
         void (async () => {
           try {
-            const updatedSession = await saveAssistantSession(input.vault, {
-              ...latestSessionRef.current,
+            const updatedSession = await updateAssistantSessionOptions({
+              vault: input.vault,
+              sessionId: latestSessionRef.current.sessionId,
               providerOptions: {
-                ...latestSessionRef.current.providerOptions,
                 model: nextModel,
                 reasoningEffort: nextReasoningEffort,
               },
-              updatedAt: new Date().toISOString(),
             })
 
             latestSessionRef.current = updatedSession
@@ -2426,6 +2396,10 @@ export async function runAssistantChatWithInk(
           try {
             const result = await sendAssistantMessage({
               ...input,
+              conversation: {
+                ...(input.conversation ?? {}),
+                sessionId: latestSessionRef.current.sessionId,
+              },
               model: activeModel,
               onProviderEvent: (event) => {
                 setEntries((previous: InkChatEntry[]) =>
@@ -2438,7 +2412,6 @@ export async function runAssistantChatWithInk(
               onTraceEvent: handleTraceEvent,
               prompt: action.prompt,
               reasoningEffort: activeReasoningEffort,
-              sessionId: latestSessionRef.current.sessionId,
               sessionSnapshot: latestSessionRef.current,
               showThinkingTraces: true,
             })

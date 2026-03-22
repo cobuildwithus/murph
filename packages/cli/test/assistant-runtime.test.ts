@@ -17,7 +17,7 @@ import {
 } from '../src/operator-config.js'
 
 const runtimeMocks = vi.hoisted(() => ({
-  deliverAssistantMessage: vi.fn(),
+  deliverAssistantMessageOverBinding: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
@@ -34,7 +34,8 @@ vi.mock('../src/outbound-channel.js', async () => {
 
   return {
     ...actual,
-    deliverAssistantMessage: runtimeMocks.deliverAssistantMessage,
+    deliverAssistantMessageOverBinding:
+      runtimeMocks.deliverAssistantMessageOverBinding,
   }
 })
 
@@ -139,7 +140,7 @@ afterEach(async () => {
 })
 
 beforeEach(() => {
-  runtimeMocks.deliverAssistantMessage.mockReset()
+  runtimeMocks.deliverAssistantMessageOverBinding.mockReset()
   runtimeMocks.executeAssistantProviderTurn.mockReset()
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
   runtimeMocks.runAssistantChatWithInk.mockReset()
@@ -231,7 +232,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
     stdout: '',
     rawEvents: [],
   })
-  runtimeMocks.deliverAssistantMessage.mockImplementation(
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(
     async (input: { message: string; sessionId: string; vault: string }) => ({
       vault: path.resolve(input.vault),
       message: input.message,
@@ -289,21 +290,16 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
   assert.equal(result.delivery?.channel, 'imessage')
   assert.equal(result.delivery?.target, '+15551234567')
   assert.equal(result.deliveryError, null)
-  assert.deepEqual(runtimeMocks.deliverAssistantMessage.mock.calls, [
-    [
-      {
-        vault: vaultRoot,
-        sessionId: result.session.sessionId,
-        channel: 'imessage',
-        identityId: null,
-        actorId: '+15551234567',
-        threadId: null,
-        threadIsDirect: null,
-        target: null,
-        message: 'sent reply',
-      },
-    ],
-  ])
+  const deliveryCall = runtimeMocks.deliverAssistantMessageOverBinding.mock.calls[0]?.[0]
+  assert.equal(deliveryCall?.vault, vaultRoot)
+  assert.equal(deliveryCall?.sessionId, result.session.sessionId)
+  assert.equal(deliveryCall?.channel, 'imessage')
+  assert.equal(deliveryCall?.identityId, null)
+  assert.equal(deliveryCall?.actorId, '+15551234567')
+  assert.equal(deliveryCall?.threadId, null)
+  assert.equal(deliveryCall?.threadIsDirect, null)
+  assert.equal(deliveryCall?.target, null)
+  assert.equal(deliveryCall?.message, 'sent reply')
 })
 
 test('sendAssistantMessage keeps provider success and session updates even when outbound delivery fails', async () => {
@@ -320,7 +316,7 @@ test('sendAssistantMessage keeps provider success and session updates even when 
     stdout: '',
     rawEvents: [],
   })
-  runtimeMocks.deliverAssistantMessage.mockRejectedValue(
+  runtimeMocks.deliverAssistantMessageOverBinding.mockRejectedValue(
     Object.assign(new Error('delivery exploded'), {
       code: 'ASSISTANT_CHANNEL_DELIVERY_FAILED',
     }),
@@ -1000,7 +996,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     stdout: '',
     rawEvents: [],
   })
-  runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     vault: path.resolve(input.vault),
     message: input.message,
     session: {
@@ -1170,7 +1166,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     skipped: 0,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
-  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
   assert.deepEqual(stateProgress[1], {
     cursor: {
       occurredAt: '2026-03-18T09:05:00Z',
@@ -1242,7 +1238,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
       stdout: '',
       rawEvents: [],
     })
-    runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+    runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
       vault: path.resolve(input.vault),
       message: input.message,
       session: {
@@ -1487,7 +1483,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
     stdout: '',
     rawEvents: [],
   })
-  runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     vault: path.resolve(input.vault),
     message: input.message,
     session: {
@@ -1760,7 +1756,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     replied: 0,
     skipped: 1,
   })
-  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 0)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
   assert.deepEqual(stateProgress[0], {
     cursor: null,
@@ -1827,7 +1823,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
       stdout: '',
       rawEvents: [],
     })
-  runtimeMocks.deliverAssistantMessage
+  runtimeMocks.deliverAssistantMessageOverBinding
     .mockRejectedValueOnce(new Error('Telegram delivery failed'))
     .mockImplementationOnce(async (input: any) => ({
       vault: path.resolve(input.vault),
@@ -1978,7 +1974,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     primed: true,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
-  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 2)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
 
   const errorArtifact = JSON.parse(
     await readFile(
@@ -2054,7 +2050,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
     stdout: '',
     rawEvents: [],
   })
-  runtimeMocks.deliverAssistantMessage.mockImplementation(async (input: any) => ({
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     vault: path.resolve(input.vault),
     message: input.message,
     session: {
@@ -2192,7 +2188,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
     skipped: 0,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
-  assert.equal(runtimeMocks.deliverAssistantMessage.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
 
   const firstArtifact = JSON.parse(
     await readFile(
@@ -3193,7 +3189,7 @@ test('assistant Ink transcript feed renders the header and committed rows via In
   assert.equal(liveChildren.length, 1)
 })
 
-test('assistant Ink transcript feed keeps the intro banner only for empty chats', () => {
+test('assistant Ink transcript feed keeps the empty chat state free of an intro banner', () => {
   const rendered = renderChatTranscriptFeed({
     bindingSummary: null,
     busy: false,
@@ -3226,7 +3222,7 @@ test('assistant Ink transcript feed keeps the intro banner only for empty chats'
   assert.equal(fragmentChildren[0].type, Static)
   assert.equal(fragmentChildren[1].type, Box)
   assert.equal(staticProps.items?.length, 1)
-  assert.equal(liveChildren.length, 1)
+  assert.equal(liveChildren.length, 0)
 })
 
 test('assistant Ink link helpers split markdown links and map absolute file paths to file URLs', () => {
