@@ -20,12 +20,26 @@ import {
 
 export type JsonRecord = Record<string, unknown>
 
-export interface AssistantToolDefinition<TResult = unknown> {
+export interface AssistantToolDefinition<
+  TSchema extends ZodTypeAny = ZodTypeAny,
+  TResult = unknown,
+> {
   name: string
   description: string
-  inputSchema: ZodTypeAny
+  inputSchema: TSchema
   inputExample?: JsonRecord
-  execute(input: any): Promise<TResult>
+  execute(input: z.infer<TSchema>): Promise<TResult>
+}
+
+type AnyAssistantToolDefinition = AssistantToolDefinition<ZodTypeAny, unknown>
+
+export function defineAssistantTool<
+  TSchema extends ZodTypeAny,
+  TResult = unknown,
+>(
+  definition: AssistantToolDefinition<TSchema, TResult>,
+): AssistantToolDefinition<TSchema, TResult> {
+  return definition
 }
 
 export type AssistantToolExecutionMode = 'preview' | 'apply'
@@ -84,10 +98,12 @@ export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
   tools?: ToolSet
 }
 
-export function createAssistantToolCatalog(
-  definitions: readonly AssistantToolDefinition[],
+export function createAssistantToolCatalog<
+  const TDefinitions extends readonly AnyAssistantToolDefinition[],
+>(
+  definitions: TDefinitions,
 ): AssistantToolCatalog {
-  const toolMap = new Map<string, AssistantToolDefinition>()
+  const toolMap = new Map<string, TDefinitions[number]>()
 
   for (const definition of definitions) {
     toolMap.set(definition.name, definition)
@@ -98,9 +114,11 @@ export function createAssistantToolCatalog(
       const tools: ToolSet = {}
 
       for (const definition of toolMap.values()) {
-        tools[definition.name] = tool<unknown, unknown>({
+        tools[definition.name] = tool<z.infer<typeof definition.inputSchema>, unknown>({
           description: definition.description,
-          inputSchema: definition.inputSchema as ZodType<unknown>,
+          inputSchema: definition.inputSchema as ZodType<
+            z.infer<typeof definition.inputSchema>
+          >,
           execute: async (toolInput) =>
             executeDefinition(definition, toolInput, mode),
         })
@@ -218,8 +236,8 @@ export function normalizeJsonRecord(value: unknown): JsonRecord {
   return value as JsonRecord
 }
 
-async function executeCall(
-  toolMap: Map<string, AssistantToolDefinition>,
+async function executeCall<TDefinition extends AnyAssistantToolDefinition>(
+  toolMap: Map<string, TDefinition>,
   call: AssistantToolCall,
   mode: AssistantToolExecutionMode,
 ): Promise<AssistantToolExecutionResult> {
@@ -260,11 +278,14 @@ async function executeCall(
   }
 }
 
-async function executeDefinition(
-  definition: AssistantToolDefinition,
-  input: unknown,
+async function executeDefinition<
+  TSchema extends ZodTypeAny,
+  TResult,
+>(
+  definition: AssistantToolDefinition<TSchema, TResult>,
+  input: z.infer<TSchema>,
   mode: AssistantToolExecutionMode,
-): Promise<unknown> {
+): Promise<TResult | JsonRecord> {
   if (mode === 'preview') {
     return {
       preview: true,
@@ -273,7 +294,7 @@ async function executeDefinition(
     }
   }
 
-  return definition.execute(input as any)
+  return definition.execute(input)
 }
 
 function resolveAssistantPromptOrMessages(

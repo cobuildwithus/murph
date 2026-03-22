@@ -9,7 +9,7 @@ import { resolveAssistantVaultPath } from './assistant-vault-paths.js'
 import {
   createAssistantToolCatalog,
   type AssistantToolCatalog,
-  type AssistantToolDefinition,
+  defineAssistantTool,
 } from './model-harness.js'
 import type { InboxCliServices } from './inbox-services.js'
 import type { VaultCliServices } from './vault-cli-services.js'
@@ -58,7 +58,7 @@ export function createInboxRoutingAssistantToolCatalog(
 
 function createInboxPromotionToolDefinitions(
   input: AssistantToolContext,
-): AssistantToolDefinition[] {
+) {
   if (!input.inboxServices || !input.captureId) {
     return []
   }
@@ -68,7 +68,7 @@ function createInboxPromotionToolDefinitions(
   })
 
   return [
-    {
+    defineAssistantTool({
       name: 'inbox.promote.meal',
       description:
         'Promote the current inbox capture into canonical meal storage when the capture is primarily a meal, snack, or drink log anchored by an image.',
@@ -82,8 +82,8 @@ function createInboxPromotionToolDefinitions(
           requestId: input.requestId ?? null,
           captureId,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'inbox.promote.document',
       description:
         'Promote the current inbox capture into canonical document storage when the primary value is a PDF, report, scan, screenshot, form, or other stored document attachment.',
@@ -97,8 +97,8 @@ function createInboxPromotionToolDefinitions(
           requestId: input.requestId ?? null,
           captureId,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'inbox.promote.journal',
       description:
         'Promote the current inbox capture into the canonical journal day when it is best represented as a freeform note, workout note, symptom note, or reminder.',
@@ -112,8 +112,8 @@ function createInboxPromotionToolDefinitions(
           requestId: input.requestId ?? null,
           captureId,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'inbox.promote.experimentNote',
       description:
         'Promote the current inbox capture into one matching experiment page when the capture is clearly an experiment checkpoint or experiment note.',
@@ -127,19 +127,19 @@ function createInboxPromotionToolDefinitions(
           requestId: input.requestId ?? null,
           captureId,
         }),
-    },
+    }),
   ]
 }
 
 function createVaultQueryToolDefinitions(
   input: AssistantToolContext,
-): AssistantToolDefinition[] {
+) {
   if (!input.vaultServices) {
     return []
   }
 
   return [
-    {
+    defineAssistantTool({
       name: 'vault.show',
       description:
         'Show one canonical record or document by its lookup id. Use this to inspect an existing entity before deciding how to write related data.',
@@ -155,8 +155,8 @@ function createVaultQueryToolDefinitions(
           requestId: input.requestId ?? null,
           id,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.list',
       description:
         'List canonical records with query-layer filters. Use this to inspect existing records before choosing a write target.',
@@ -176,25 +176,27 @@ function createVaultQueryToolDefinitions(
         limit: 10,
       },
       execute: (filters) =>
-        input.vaultServices!.query.list({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          ...filters,
-        }),
-    },
+        input.vaultServices!.query.list(
+          {
+            vault: input.vault,
+            requestId: input.requestId ?? null,
+            ...filters,
+          } as Parameters<VaultCliServices['query']['list']>[0],
+        ),
+    }),
   ]
 }
 
 function createVaultWriteToolDefinitions(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
-): AssistantToolDefinition[] {
+) {
   if (!input.vaultServices) {
     return []
   }
 
-  const tools: AssistantToolDefinition[] = [
-    {
+  const tools = [
+    defineAssistantTool({
       name: 'vault.document.import',
       description:
         'Import one file into canonical document storage. Pass an absolute path or a vault-relative path copied into the vault.',
@@ -219,8 +221,8 @@ function createVaultWriteToolDefinitions(
           note,
           source,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.meal.add',
       description:
         'Create one canonical meal record from a photo plus an optional audio note and optional text note.',
@@ -245,8 +247,8 @@ function createVaultWriteToolDefinitions(
           note,
           occurredAt,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.journal.ensure',
       description:
         'Ensure the canonical journal page for one date exists.',
@@ -262,8 +264,8 @@ function createVaultWriteToolDefinitions(
           requestId: input.requestId ?? null,
           date,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.journal.append',
       description:
         'Append one freeform markdown note block to the canonical journal page for a date.',
@@ -282,8 +284,8 @@ function createVaultWriteToolDefinitions(
           date,
           text,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.experiment.create',
       description:
         'Create or reuse a canonical experiment page.',
@@ -308,8 +310,8 @@ function createVaultWriteToolDefinitions(
           startedOn,
           status,
         }),
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.provider.upsert',
       description:
         'Upsert one provider record from a JSON payload object.',
@@ -330,8 +332,8 @@ function createVaultWriteToolDefinitions(
           inputFile,
         })
       },
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.event.upsert',
       description:
         'Upsert one canonical event record from a JSON payload object.',
@@ -353,8 +355,8 @@ function createVaultWriteToolDefinitions(
           inputFile,
         })
       },
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.samples.add',
       description:
         'Append one or more sample records from a JSON payload object.',
@@ -377,8 +379,8 @@ function createVaultWriteToolDefinitions(
           inputFile,
         })
       },
-    },
-    {
+    }),
+    defineAssistantTool({
       name: 'vault.intake.import',
       description:
         'Import one assessment response file into canonical intake storage.',
@@ -394,13 +396,14 @@ function createVaultWriteToolDefinitions(
           requestId: input.requestId ?? null,
           file: await resolveAssistantVaultPath(input.vault, file, 'file path'),
         }),
-    },
+    }),
     ...createHealthUpsertToolDefinitions(input),
   ]
 
   if (options.includeStatefulWriteTools ?? true) {
-    tools.push(
-      {
+    return [
+      ...tools,
+      defineAssistantTool({
         name: 'vault.intake.project',
         description:
           'Project one imported intake assessment into a typed proposal object without directly mutating the health registries.',
@@ -416,8 +419,8 @@ function createVaultWriteToolDefinitions(
             requestId: input.requestId ?? null,
             assessmentId,
           }),
-      },
-      {
+      }),
+      defineAssistantTool({
         name: 'vault.profile.rebuildCurrent',
         description:
           'Rebuild the derived current profile page from the latest accepted profile snapshot.',
@@ -428,8 +431,8 @@ function createVaultWriteToolDefinitions(
             vault: input.vault,
             requestId: input.requestId ?? null,
           }),
-      },
-      {
+      }),
+      defineAssistantTool({
         name: 'vault.regimen.stop',
         description:
           'Stop an existing regimen while preserving its canonical id.',
@@ -448,8 +451,8 @@ function createVaultWriteToolDefinitions(
             regimenId,
             stoppedOn,
           }),
-      },
-    )
+      }),
+    ]
   }
 
   return tools
@@ -457,43 +460,45 @@ function createVaultWriteToolDefinitions(
 
 function createHealthUpsertToolDefinitions(
   input: AssistantToolContext,
-): AssistantToolDefinition[] {
+) {
   if (!input.vaultServices) {
     return []
   }
 
   return healthEntityDescriptors
     .filter(hasHealthCommandDescriptor)
-    .map((descriptor): AssistantToolDefinition => ({
-      name: `vault.${descriptor.command.commandName}.upsert`,
-      description: `${descriptor.command.descriptions.upsert} The payload should follow the scaffold template for ${descriptor.command.commandName}.`,
-      inputSchema: z.object({
-        payload: jsonObjectSchema,
-      }),
-      inputExample: {
-        payload: descriptor.core.payloadTemplate,
-      },
-      execute: async ({ payload }) => {
-        const inputFile = await writeAssistantPayloadFile(
-          input.vault,
-          `vault.${descriptor.command.commandName}.upsert`,
-          payload,
-        )
-        const method = input.vaultServices!.core[
-          descriptor.core.upsertServiceMethod
-        ] as unknown as (input: {
-          vault: string
-          requestId: string | null
-          input: string
-        }) => Promise<unknown>
+    .map((descriptor) =>
+      defineAssistantTool({
+        name: `vault.${descriptor.command.commandName}.upsert`,
+        description: `${descriptor.command.descriptions.upsert} The payload should follow the scaffold template for ${descriptor.command.commandName}.`,
+        inputSchema: z.object({
+          payload: jsonObjectSchema,
+        }),
+        inputExample: {
+          payload: descriptor.core.payloadTemplate,
+        },
+        execute: async ({ payload }) => {
+          const inputFile = await writeAssistantPayloadFile(
+            input.vault,
+            `vault.${descriptor.command.commandName}.upsert`,
+            payload,
+          )
+          const method = input.vaultServices!.core[
+            descriptor.core.upsertServiceMethod
+          ] as unknown as (input: {
+            vault: string
+            requestId: string | null
+            input: string
+          }) => Promise<unknown>
 
-        return method({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          input: inputFile,
-        })
-      },
-    }))
+          return method({
+            vault: input.vault,
+            requestId: input.requestId ?? null,
+            input: inputFile,
+          })
+        },
+      }),
+    )
 }
 
 async function writeAssistantPayloadFile(

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { afterEach, beforeEach, test, vi } from 'vitest'
+import { afterEach, beforeEach, expectTypeOf, test, vi } from 'vitest'
 
 const harnessMocks = vi.hoisted(() => {
   const gateway = vi.fn((model: string) => ({
@@ -34,6 +34,7 @@ vi.mock('@ai-sdk/openai-compatible', () => ({
 
 import {
   createAssistantToolCatalog,
+  defineAssistantTool,
   resolveAssistantLanguageModel,
 } from '../src/model-harness.js'
 
@@ -48,6 +49,26 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env[TEST_API_KEY_ENV]
+})
+
+test('defineAssistantTool infers execute input from the tool schema', () => {
+  const definition = defineAssistantTool({
+    name: 'typed.echo',
+    description: 'Compile-time typed echo tool.',
+    inputSchema: z.object({
+      value: z.string().min(1),
+      count: z.number().int().positive().optional(),
+    }),
+    execute: async ({ value, count }) => ({
+      echoed: value,
+      count,
+    }),
+  })
+
+  expectTypeOf<Parameters<typeof definition.execute>[0]>().toEqualTypeOf<{
+    value: string
+    count?: number | undefined
+  }>()
 })
 
 test('resolveAssistantLanguageModel uses gateway when no baseUrl is provided', () => {
