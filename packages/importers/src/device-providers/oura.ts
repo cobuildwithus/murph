@@ -1,14 +1,17 @@
+import { stripEmptyObject, stripUndefined } from "../shared.js";
 import {
-  normalizeTimestamp,
-  stripEmptyObject,
-  stripUndefined,
-} from "../shared.js";
-import {
+  asArray,
+  asPlainObject,
   createRawArtifact,
   finiteNumber,
+  minutesBetween,
   pushObservationEvent,
+  pushDeletionObservation as pushSharedDeletionObservation,
   pushRawArtifact,
   pushSample,
+  slugify,
+  stringId,
+  toIso,
   trimToLength,
 } from "./shared-normalization.js";
 
@@ -18,11 +21,8 @@ import type {
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
 } from "../core-port.js";
+import type { PlainObject } from "./shared-normalization.js";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.js";
-
-interface PlainObject {
-  [key: string]: unknown;
-}
 
 export interface OuraSnapshotInput {
   accountId?: string | number;
@@ -41,44 +41,6 @@ export interface OuraSnapshotInput {
   deletions?: unknown[];
 }
 
-function asPlainObject(value: unknown): PlainObject | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value as PlainObject;
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function stringId(value: unknown): string | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-
-  return undefined;
-}
-
-function slugify(value: unknown, fallback: string): string {
-  const candidate = String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return candidate || fallback;
-}
-
-function toIso(value: unknown): string | undefined {
-  return normalizeTimestamp(value, "timestamp");
-}
-
 function secondsToMinutes(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
@@ -87,20 +49,6 @@ function secondsToMinutes(value: unknown): number | undefined {
   }
 
   return Math.max(0, numeric / 60);
-}
-
-function minutesBetween(startAt: string | undefined, endAt: string | undefined): number | undefined {
-  if (!startAt || !endAt) {
-    return undefined;
-  }
-
-  const durationMs = Date.parse(endAt) - Date.parse(startAt);
-
-  if (!Number.isFinite(durationMs) || durationMs <= 0) {
-    return undefined;
-  }
-
-  return Math.max(1, Math.round(durationMs / 60000));
 }
 
 function makeExternalRef(
@@ -168,34 +116,16 @@ function pushDeletionObservation(
           : typeof deletion.eventType === "string" && deletion.eventType.trim()
             ? deletion.eventType.trim()
             : undefined;
-  const deletionRole = `deletion:${resourceType}:${resourceId}`;
-
-  pushRawArtifact(
-    rawArtifacts,
-    createRawArtifact(deletionRole, `deletion-${resourceType}-${resourceId}.json`, deletion),
-  );
-
-  events.push(
-    stripUndefined({
-      kind: "observation",
-      occurredAt,
-      recordedAt: occurredAt,
-      source: "device",
-      title: trimToLength(`Oura ${resourceType} deleted`, 160),
-      note: sourceEventType ? trimToLength(`Webhook event: ${sourceEventType}`, 4000) : undefined,
-      rawArtifactRoles: [deletionRole],
-      externalRef: makeExternalRef(resourceType, resourceId, occurredAt, "deleted"),
-      fields: stripUndefined({
-        metric: "external-resource-deleted",
-        value: 1,
-        unit: "boolean",
-        provider: "oura",
-        resourceType,
-        deleted: true,
-        sourceEventType,
-      }),
-    }),
-  );
+  pushSharedDeletionObservation(events, rawArtifacts, {
+    provider: "oura",
+    providerDisplayName: "Oura",
+    deletion,
+    resourceType,
+    resourceId,
+    occurredAt,
+    sourceEventType,
+    makeExternalRef,
+  });
 }
 
 export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDeviceBatch {

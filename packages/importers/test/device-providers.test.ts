@@ -385,6 +385,34 @@ test("prepareDeviceProviderSnapshotImport handles Oura string numerics through s
   assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 64));
 });
 
+test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias precedence through the shared tombstone builder", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "oura",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      deletions: [
+        {
+          data_type: "session",
+          object_id: "session-42",
+          event_time: "2026-03-16T10:30:00.000Z",
+          eventType: "session.deleted",
+        },
+      ],
+    },
+  });
+
+  const deletionEvent = payload.events?.find((event) => event.externalRef?.facet === "deleted");
+  const deletionArtifact = payload.rawArtifacts?.find((artifact) => artifact.role === "deletion:session:session-42");
+
+  assert.equal(deletionEvent?.externalRef?.system, "oura");
+  assert.equal(deletionEvent?.externalRef?.resourceType, "session");
+  assert.equal(deletionEvent?.externalRef?.resourceId, "session-42");
+  assert.equal(deletionEvent?.occurredAt, "2026-03-16T10:30:00.000Z");
+  assert.equal(deletionEvent?.note, "Webhook event: session.deleted");
+  assert.equal(deletionEvent?.fields?.sourceEventType, "session.deleted");
+  assert.equal(deletionArtifact?.fileName, "deletion-session-session-42.json");
+});
+
 test("importDeviceProviderSnapshot uses the default Oura adapter registry", async () => {
   const calls: DeviceBatchImportPayload[] = [];
 
