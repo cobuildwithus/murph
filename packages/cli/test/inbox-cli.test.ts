@@ -2597,6 +2597,83 @@ test.sequential('attachment-specific inbox services preserve lookup and parse-st
   }
 })
 
+test.sequential('attachment parse helpers reject non-parseable attachments with stable status output', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-attachment-unsupported')
+  const blobPath = path.join(fixture.vaultRoot, 'blob.bin')
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-other-1',
+            fileName: 'blob.bin',
+            path: blobPath,
+            mimeType: 'application/octet-stream',
+          },
+        ],
+      }),
+  })
+
+  try {
+    await writeFile(blobPath, 'blob', 'utf8')
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+
+    const captureId = await captureSingleCaptureId({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    const listed = await services.listAttachments({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    const attachmentId = listed.attachments[0]?.attachmentId
+    assert.ok(attachmentId)
+
+    const status = await services.showAttachmentStatus({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      attachmentId,
+    })
+    assert.equal(status.parseable, false)
+    assert.equal(status.currentState, null)
+    assert.deepEqual(status.jobs, [])
+
+    await expectVaultCliError(
+      services.parseAttachment({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        attachmentId,
+      }),
+      'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
+    )
+    await expectVaultCliError(
+      services.reparseAttachment({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        attachmentId,
+      }),
+      'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
+    )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('inbox requeue can reset running attachment parse jobs', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-requeue-running')
   const services = createIntegratedInboxCliServices({
