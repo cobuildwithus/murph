@@ -71,6 +71,7 @@ export function conversationRefFromBinding(
 }
 
 export function conversationRefFromCapture(input: {
+  accountId?: string | null
   actorId?: string | null
   source?: string | null
   threadId?: string | null
@@ -78,6 +79,7 @@ export function conversationRefFromCapture(input: {
 }): ConversationRef {
   return normalizeConversationRef({
     channel: input.source,
+    identityId: input.source === 'email' ? input.accountId : null,
     participantId: input.actorId,
     threadId: input.threadId,
     directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),

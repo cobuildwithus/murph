@@ -1,4 +1,10 @@
 import { IMessageSDK } from '@photon-ai/imessage-kit'
+import {
+  createAgentmailApiClient,
+  resolveAgentmailApiKey,
+  resolveAgentmailBaseUrl,
+  type AgentmailFetch,
+} from '../agentmail-runtime.js'
 import type { InboxShowResult } from '../inbox-cli-contracts.js'
 import {
   assistantBindingDeliverySchema,
@@ -54,9 +60,20 @@ interface TelegramRuntimeDependencies {
   fetchImplementation?: FetchLike
 }
 
+interface EmailRuntimeDependencies {
+  env?: NodeJS.ProcessEnv
+  fetchImplementation?: AgentmailFetch
+}
+
 export interface AssistantChannelDependencies {
   sendImessage?: (input: { message: string; target: string }) => Promise<void>
   sendTelegram?: (input: { message: string; target: string }) => Promise<void>
+  sendEmail?: (input: {
+    identityId: string
+    message: string
+    target: string
+    targetKind: AssistantDeliveryCandidate['kind']
+  }) => Promise<void>
 }
 
 export interface AssistantDeliveryCandidate {
@@ -65,7 +82,7 @@ export interface AssistantDeliveryCandidate {
 }
 
 export interface AssistantChannelAdapter {
-  channel: 'imessage' | 'telegram'
+  channel: 'imessage' | 'telegram' | 'email'
   canAutoReply: (capture: InboxShowResult['capture']) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef
@@ -76,6 +93,7 @@ export interface AssistantChannelAdapter {
   send: (input: {
     bindingDelivery: AssistantBindingDelivery | null
     explicitTarget: string | null
+    identityId: string | null
     message: string
   }, dependencies: AssistantChannelDependencies) => Promise<
     ReturnType<typeof assistantChannelDeliverySchema.parse>
@@ -90,6 +108,8 @@ export function getAssistantChannelAdapter(
       return IMESSAGE_CHANNEL_ADAPTER
     case 'telegram':
       return TELEGRAM_CHANNEL_ADAPTER
+    case 'email':
+      return EMAIL_CHANNEL_ADAPTER
     default:
       return null
   }
@@ -228,6 +248,74 @@ export async function sendTelegramMessage(
   }
 }
 
+export async function sendEmailMessage(
+  input: {
+    identityId: string
+    message: string
+    target: string
+    targetKind: AssistantDeliveryCandidate['kind']
+    subject?: string | null
+  },
+  dependencies: EmailRuntimeDependencies = {},
+): Promise<void> {
+  const identityId = input.identityId.trim()
+  if (identityId.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+      'Email delivery requires an AgentMail inbox identity.',
+    )
+  }
+
+  const target = input.target.trim()
+  if (target.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+      'Email delivery requires a non-empty recipient or thread target.',
+    )
+  }
+
+  const env = dependencies.env ?? process.env
+  const apiKey = resolveAgentmailApiKey(env)
+  if (!apiKey) {
+    throw new VaultCliError(
+      'ASSISTANT_EMAIL_API_KEY_REQUIRED',
+      'Outbound email delivery requires HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY.',
+    )
+  }
+
+  const client = createAgentmailApiClient(apiKey, {
+    baseUrl: resolveAgentmailBaseUrl(env) ?? undefined,
+    fetchImplementation: dependencies.fetchImplementation,
+  })
+
+  if (input.targetKind === 'thread') {
+    const thread = await client.getThread(target)
+    const messageId = resolveAgentmailThreadReplyMessageId(thread)
+    if (!messageId) {
+      throw new VaultCliError(
+        'ASSISTANT_EMAIL_THREAD_REPLY_UNAVAILABLE',
+        'Email thread delivery requires a resolvable parent AgentMail message.',
+        { threadId: target },
+      )
+    }
+
+    await client.replyToMessage({
+      inboxId: identityId,
+      messageId,
+      text: input.message,
+      replyAll: true,
+    })
+    return
+  }
+
+  await client.sendMessage({
+    inboxId: identityId,
+    to: target,
+    subject: input.subject?.trim() ? input.subject.trim() : 'Healthy Bob update',
+    text: input.message,
+  })
+}
+
 const IMESSAGE_CHANNEL_ADAPTER: AssistantChannelAdapter = {
   channel: 'imessage',
   canAutoReply() {
@@ -331,6 +419,80 @@ const TELEGRAM_CHANNEL_ADAPTER: AssistantChannelAdapter = {
   },
 }
 
+const EMAIL_CHANNEL_ADAPTER: AssistantChannelAdapter = {
+  channel: 'email',
+  canAutoReply(capture) {
+    return capture.threadIsDirect === true
+      ? null
+      : 'Email auto-reply only runs for direct threads'
+  },
+  inferBindingDelivery(input) {
+    const explicitKind = input.deliveryKind ?? null
+    const explicitTarget = input.deliveryTarget?.trim()
+      ? input.deliveryTarget.trim()
+      : null
+    if (explicitKind && explicitTarget) {
+      return assistantBindingDeliverySchema.parse({
+        kind: explicitKind,
+        target: explicitTarget,
+      })
+    }
+
+    if (input.conversation.threadId) {
+      return assistantBindingDeliverySchema.parse({
+        kind: 'thread',
+        target: input.conversation.threadId,
+      })
+    }
+
+    if (input.conversation.participantId) {
+      return assistantBindingDeliverySchema.parse({
+        kind: 'participant',
+        target: input.conversation.participantId,
+      })
+    }
+
+    return null
+  },
+  isReadyForSetup(env) {
+    return resolveAgentmailApiKey(env) !== null
+  },
+  async send(input, dependencies) {
+    const send = dependencies.sendEmail ?? sendEmailMessage
+    const identityId = input.identityId?.trim() ? input.identityId.trim() : null
+    if (!identityId) {
+      throw new VaultCliError(
+        'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+        'Email delivery requires an AgentMail inbox identity. Pass --identity or resume a session bound to an email inbox.',
+      )
+    }
+
+    const candidates = resolveDeliveryCandidates(input)
+    if (candidates.length === 0) {
+      throw new VaultCliError(
+        'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+        'Email delivery requires an explicit recipient or a stored delivery binding.',
+      )
+    }
+
+    const candidate = candidates[0]!
+    await send({
+      identityId,
+      target: candidate.target,
+      targetKind: candidate.kind,
+      message: input.message,
+    })
+
+    return assistantChannelDeliverySchema.parse({
+      channel: 'email',
+      target: candidate.target,
+      targetKind: candidate.kind,
+      sentAt: new Date().toISOString(),
+      messageLength: input.message.length,
+    })
+  },
+}
+
 function inferFallbackBindingDelivery(input: {
   conversation: ConversationRef
   deliveryKind?: 'participant' | 'thread' | null
@@ -364,6 +526,28 @@ function inferFallbackBindingDelivery(input: {
       kind: 'thread',
       target: input.conversation.threadId,
     })
+  }
+
+  return null
+}
+
+function resolveAgentmailThreadReplyMessageId(input: {
+  last_message_id?: string | null
+  messages?: Array<{ message_id?: string | null }> | null
+}): string | null {
+  const direct = input.last_message_id?.trim() ? input.last_message_id.trim() : null
+  if (direct) {
+    return direct
+  }
+
+  const messages = Array.isArray(input.messages) ? input.messages : []
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const candidate = messages[index]?.message_id?.trim()
+      ? messages[index]!.message_id!.trim()
+      : null
+    if (candidate) {
+      return candidate
+    }
   }
 
   return null

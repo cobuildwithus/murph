@@ -222,7 +222,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'assistant run',
       description:
-        'Start the assistant automation loop so configured channels like iMessage or Telegram can receive automatic replies.',
+        'Start the assistant automation loop so configured channels like iMessage, Telegram, or email can receive automatic replies.',
     })
   }
 
@@ -250,6 +250,14 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       command: 'inbox source add telegram --id telegram:bot --account bot',
       description:
         'Add the Telegram poll connector after exporting HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.',
+    })
+  }
+
+  if (!result.channels.some((channel) => channel.channel === 'email' && channel.configured)) {
+    commands.push({
+      command: 'inbox source add email --id email:agentmail --provision --emailDisplayName "Healthy Bob"',
+      description:
+        'Provision an AgentMail inbox after exporting HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY.',
     })
   }
 

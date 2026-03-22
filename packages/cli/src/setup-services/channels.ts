@@ -2,6 +2,7 @@ import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from '../assistant-state.js'
+import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
 import { getAssistantChannelAdapter } from '../assistant/channel-adapters.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import { resolveTelegramBotToken } from '../telegram-runtime.js'
@@ -17,6 +18,8 @@ const IMESSAGE_SETUP_CONNECTOR_ID = 'imessage:self'
 const IMESSAGE_SETUP_ACCOUNT_ID = 'self'
 const TELEGRAM_SETUP_CONNECTOR_ID = 'telegram:bot'
 const TELEGRAM_SETUP_ACCOUNT_ID = 'bot'
+const EMAIL_SETUP_CONNECTOR_ID = 'email:agentmail'
+const EMAIL_SETUP_DISPLAY_NAME = 'Healthy Bob'
 
 type SetupChannelInboxServices = Pick<InboxCliServices, 'bootstrap'> &
   Partial<Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList'>>
@@ -53,6 +56,19 @@ export async function configureSetupChannels(input: {
   if (input.channels.includes('telegram')) {
     configured.push(
       await configureTelegramChannel({
+        dryRun: input.dryRun,
+        env: input.env,
+        inboxServices: input.inboxServices,
+        requestId: input.requestId,
+        steps: input.steps,
+        vault: input.vault,
+      }),
+    )
+  }
+
+  if (input.channels.includes('email')) {
+    configured.push(
+      await configureEmailChannel({
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
@@ -265,11 +281,12 @@ async function configureTelegramChannel(input: {
   }
 
   if (existingConnector) {
-    const readiness = await probeTelegramSetupReadiness({
+    const readiness = await probeSetupReadiness({
       connectorId: existingConnector.id,
       doctor,
       requestId: input.requestId,
       vault: input.vault,
+      fallbackReason: 'Telegram readiness probe failed',
     })
 
     input.steps.push(
@@ -304,11 +321,12 @@ async function configureTelegramChannel(input: {
     vault: input.vault,
   })
 
-  const readiness = await probeTelegramSetupReadiness({
+  const readiness = await probeSetupReadiness({
     connectorId: added.connector.id,
     doctor,
     requestId: input.requestId,
     vault: input.vault,
+    fallbackReason: 'Telegram readiness probe failed',
   })
 
   input.steps.push(
@@ -335,11 +353,166 @@ async function configureTelegramChannel(input: {
   }
 }
 
-async function probeTelegramSetupReadiness(input: {
+async function configureEmailChannel(input: {
+  dryRun: boolean
+  env: NodeJS.ProcessEnv
+  inboxServices: SetupChannelInboxServices
+  requestId: string | null
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<SetupConfiguredChannel> {
+  const apiKey = resolveAgentmailApiKey(input.env)
+  const doctor = input.inboxServices.doctor
+  const sourceList = input.inboxServices.sourceList
+  const sourceAdd = input.inboxServices.sourceAdd
+
+  if (input.dryRun) {
+    input.steps.push(
+      createStep({
+        detail: apiKey
+          ? 'Would provision or reuse an AgentMail inbox, verify email polling, and enable assistant auto-reply for direct email threads.'
+          : 'Would configure email once HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY is set in the shell environment.',
+        id: 'channel-email',
+        kind: 'configure',
+        status: 'planned',
+        title: 'Email channel',
+      }),
+    )
+
+    return {
+      autoReply: Boolean(apiKey),
+      channel: 'email',
+      configured: false,
+      connectorId: EMAIL_SETUP_CONNECTOR_ID,
+      detail: apiKey
+        ? 'Would provision the AgentMail inbox connector and enable assistant auto-reply for direct email threads.'
+        : 'Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY before setup can enable the channel.',
+      enabled: true,
+    }
+  }
+
+  if (!sourceList || !sourceAdd) {
+    throw new VaultCliError(
+      'runtime_unavailable',
+      'Healthy Bob setup cannot configure email because the inbox source management services are unavailable in this build.',
+    )
+  }
+
+  const listed = await sourceList({
+    vault: input.vault,
+    requestId: input.requestId,
+  })
+  const existingConnector =
+    listed.connectors.find((connector) => connector.id === EMAIL_SETUP_CONNECTOR_ID) ??
+    listed.connectors.find((connector) => connector.source === 'email') ??
+    null
+
+  if (!apiKey) {
+    input.steps.push(
+      createStep({
+        detail: existingConnector
+          ? `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY is not set.`
+          : 'Email was selected, but setup did not add the connector because HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY is not set.',
+        id: 'channel-email',
+        kind: 'configure',
+        status: existingConnector ? 'reused' : 'skipped',
+        title: 'Email channel',
+      }),
+    )
+
+    return {
+      autoReply: false,
+      channel: 'email',
+      configured: existingConnector !== null,
+      connectorId: existingConnector?.id ?? null,
+      detail: existingConnector
+        ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is exported in the environment.`
+        : 'Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY before setup can provision the connector and enable assistant auto-reply.',
+      enabled: true,
+    }
+  }
+
+  if (existingConnector) {
+    const readiness = await probeSetupReadiness({
+      connectorId: existingConnector.id,
+      doctor,
+      requestId: input.requestId,
+      vault: input.vault,
+      fallbackReason: 'Email readiness probe failed',
+    })
+
+    input.steps.push(
+      createStep({
+        detail: readiness.ready
+          ? `Reusing the email inbox connector "${existingConnector.id}" and enabling assistant auto-reply for direct email threads.`
+          : `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        id: 'channel-email',
+        kind: 'configure',
+        status: 'reused',
+        title: 'Email channel',
+      }),
+    )
+
+    return {
+      autoReply: readiness.ready,
+      channel: 'email',
+      configured: readiness.ready,
+      connectorId: existingConnector.id,
+      detail: readiness.ready
+        ? `Reused the email connector "${existingConnector.id}" and enabled assistant auto-reply for direct email threads.`
+        : `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      enabled: true,
+    }
+  }
+
+  const added = await sourceAdd({
+    id: EMAIL_SETUP_CONNECTOR_ID,
+    provision: true,
+    emailDisplayName: EMAIL_SETUP_DISPLAY_NAME,
+    requestId: input.requestId,
+    source: 'email',
+    vault: input.vault,
+  })
+
+  const readiness = await probeSetupReadiness({
+    connectorId: added.connector.id,
+    doctor,
+    requestId: input.requestId,
+    vault: input.vault,
+    fallbackReason: 'Email readiness probe failed',
+  })
+
+  const provisionedAddress = added.provisionedMailbox?.emailAddress ?? null
+  input.steps.push(
+    createStep({
+      detail: readiness.ready
+        ? `Provisioned the AgentMail inbox connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
+        : `Provisioned the AgentMail inbox connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''}, but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      id: 'channel-email',
+      kind: 'configure',
+      status: 'completed',
+      title: 'Email channel',
+    }),
+  )
+
+  return {
+    autoReply: readiness.ready,
+    channel: 'email',
+    configured: readiness.ready,
+    connectorId: added.connector.id,
+    detail: readiness.ready
+      ? `Configured the email connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
+      : `Configured the email connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''}, but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+    enabled: true,
+  }
+}
+
+async function probeSetupReadiness(input: {
   connectorId: string
   doctor?: InboxCliServices['doctor']
   requestId: string | null
   vault: string
+  fallbackReason: string
 }): Promise<{
   ready: boolean
   reason: string | null
@@ -368,7 +541,7 @@ async function probeTelegramSetupReadiness(input: {
     reason:
       ready
         ? null
-        : probeCheck?.message ?? driverImportCheck?.message ?? 'Telegram readiness probe failed',
+        : probeCheck?.message ?? driverImportCheck?.message ?? input.fallbackReason,
   }
 }
 

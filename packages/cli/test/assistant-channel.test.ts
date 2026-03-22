@@ -6,6 +6,7 @@ import { afterEach, test, vi } from 'vitest'
 import {
   deliverAssistantMessage,
   resolveImessageDeliveryCandidates,
+  sendEmailMessage,
   sendImessageMessage,
   sendTelegramMessage,
 } from '../src/outbound-channel.js'
@@ -170,6 +171,173 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
   assert.equal(result.session.binding.delivery?.target, '-1001234567890:topic:42')
   assert.equal('lastAssistantMessage' in result.session, false)
   assert.equal(result.session.turnCount, 0)
+})
+
+test('deliverAssistantMessage uses stored email thread bindings so one assistant session can reply back into the same email thread', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-email-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sent: Array<{
+    identityId: string
+    message: string
+    target: string
+    targetKind: 'explicit' | 'participant' | 'thread'
+  }> = []
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'email',
+      identityId: 'inbox_123',
+      participantId: 'user@example.com',
+      sourceThreadId: 'thread_123',
+      threadIsDirect: true,
+      message: 'Email thread reply.',
+    },
+    {
+      sendEmail: async (input) => {
+        sent.push(input)
+      },
+    },
+  )
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0], {
+    identityId: 'inbox_123',
+    target: 'thread_123',
+    targetKind: 'thread',
+    message: 'Email thread reply.',
+  })
+  assert.equal(result.delivery.channel, 'email')
+  assert.equal(result.delivery.target, 'thread_123')
+  assert.equal(result.delivery.targetKind, 'thread')
+  assert.equal(result.session.binding.channel, 'email')
+  assert.equal(result.session.binding.identityId, 'inbox_123')
+  assert.equal(result.session.binding.threadId, 'thread_123')
+  assert.equal(result.session.binding.delivery?.kind, 'thread')
+  assert.equal(result.session.binding.delivery?.target, 'thread_123')
+})
+
+test('sendEmailMessage sends new outbound email through the configured AgentMail inbox', async () => {
+  const requests: Array<{
+    body: Record<string, unknown>
+    headers: Record<string, string> | undefined
+    method: string
+    url: string
+  }> = []
+
+  await sendEmailMessage(
+    {
+      identityId: 'inbox_123',
+      message: 'Daily summary',
+      target: 'user@example.com',
+      targetKind: 'participant',
+    },
+    {
+      env: {
+        HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+        HEALTHYBOB_AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+      },
+      fetchImplementation: async (url, init) => {
+        requests.push({
+          body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+          headers: init.headers,
+          method: init.method,
+          url,
+        })
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ message_id: 'msg_1', thread_id: 'thr_1' }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 1)
+  assert.equal(
+    requests[0]?.url,
+    'https://mail.example.test/v0/inboxes/inbox_123/messages/send',
+  )
+  assert.equal(requests[0]?.method, 'POST')
+  assert.equal(requests[0]?.headers?.authorization, 'Bearer agentmail-key')
+  assert.equal(requests[0]?.headers?.['content-type'], 'application/json')
+  assert.deepEqual(requests[0]?.body, {
+    to: 'user@example.com',
+    subject: 'Healthy Bob update',
+    text: 'Daily summary',
+  })
+})
+
+test('sendEmailMessage resolves a thread and replies to the latest AgentMail message', async () => {
+  const requests: Array<{
+    body: Record<string, unknown> | null
+    method: string
+    url: string
+  }> = []
+
+  await sendEmailMessage(
+    {
+      identityId: 'inbox_123',
+      message: 'Following up in-thread.',
+      target: 'thread_123',
+      targetKind: 'thread',
+    },
+    {
+      env: {
+        HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+        HEALTHYBOB_AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+      },
+      fetchImplementation: async (url, init) => {
+        requests.push({
+          body: init.body ? (JSON.parse(init.body) as Record<string, unknown>) : null,
+          method: init.method,
+          url,
+        })
+
+        if (url.endsWith('/threads/thread_123')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              thread_id: 'thread_123',
+              last_message_id: 'msg_9',
+              messages: [
+                { message_id: 'msg_1' },
+                { message_id: 'msg_9' },
+              ],
+            }),
+            text: async () => '',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ message_id: 'msg_10', thread_id: 'thread_123' }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 2)
+  assert.equal(requests[0]?.method, 'GET')
+  assert.equal(requests[0]?.url, 'https://mail.example.test/v0/threads/thread_123')
+  assert.equal(requests[1]?.method, 'POST')
+  assert.equal(
+    requests[1]?.url,
+    'https://mail.example.test/v0/inboxes/inbox_123/messages/msg_9/reply',
+  )
+  assert.deepEqual(requests[1]?.body, {
+    reply_all: true,
+    text: 'Following up in-thread.',
+  })
 })
 
 test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including topic targets', async () => {

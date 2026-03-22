@@ -48,6 +48,35 @@ export {
   createNormalizedChatPollConnector,
 } from "./connectors/chat/poll.js";
 export {
+  createAgentmailApiPollDriver,
+  createEmailPollConnector,
+} from "./connectors/email/connector.js";
+export type {
+  AgentmailFetch,
+  AgentmailPollDriver,
+  CreateAgentmailApiPollDriverInput,
+  EmailConnectorOptions,
+} from "./connectors/email/connector.js";
+export {
+  buildAgentmailMessageText,
+  inferDirectEmailThread,
+  normalizeAgentmailMessage,
+  resolveAgentmailAddress,
+  resolveAgentmailDisplayName,
+  toAgentmailChatMessage,
+} from "./connectors/email/normalize.js";
+export type {
+  AgentmailAttachmentDownloadDriver,
+  NormalizeAgentmailMessageInput,
+} from "./connectors/email/normalize.js";
+export type {
+  AgentmailAttachmentDownload,
+  AgentmailListMessagesResponse,
+  AgentmailMessageAttachment,
+  AgentmailMessageLike,
+  AgentmailThreadLike,
+} from "./connectors/email/types.js";
+export {
   createImessageConnector,
   loadImessageKitDriver,
 } from "./connectors/imessage/connector.js";

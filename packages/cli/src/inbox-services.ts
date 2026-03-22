@@ -2,6 +2,17 @@ import os from 'node:os'
 import path from 'node:path'
 import { resolveRuntimePaths, type RuntimePaths } from '@healthybob/runtime-state'
 import { z } from 'incur'
+import {
+  readAssistantAutomationState,
+  saveAssistantAutomationState,
+} from './assistant-state.js'
+import {
+  createAgentmailApiClient,
+  resolveAgentmailApiKey,
+  resolveAgentmailBaseUrl,
+  type AgentmailApiClient,
+  type AgentmailInbox,
+} from './agentmail-runtime.js'
 import { ensureImessageMessagesDbReadable } from './imessage-readiness.js'
 import {
   loadQueryRuntime,
@@ -33,6 +44,7 @@ import {
   type InboxParseResult,
   type InboxParserToolchainStatus,
   type InboxPromotionEntry,
+  type InboxProvisionedMailbox,
   type InboxPromoteExperimentNoteResult,
   type InboxPromoteMealResult,
   type InboxPromoteDocumentResult,
@@ -346,6 +358,31 @@ export interface TelegramDriver {
   getWebhookInfo?(signal?: AbortSignal): Promise<{ url?: string } | null>
 }
 
+export interface EmailDriver {
+  inboxId: string
+  listUnreadMessages(input?: {
+    limit?: number
+    signal?: AbortSignal
+  }): Promise<unknown[]>
+  getMessage?(input: {
+    messageId: string
+    signal?: AbortSignal
+  }): Promise<unknown>
+  markProcessed(input: {
+    messageId: string
+    signal?: AbortSignal
+  }): Promise<void>
+  downloadAttachment(input: {
+    attachmentId: string
+    messageId: string
+    signal?: AbortSignal
+  }): Promise<Uint8Array | null>
+  getThread?(input: {
+    threadId: string
+    signal?: AbortSignal
+  }): Promise<unknown>
+}
+
 export interface InboxRuntimeModule {
   ensureInboxVault(vaultRoot: string): Promise<void>
   openInboxRuntime(input: { vaultRoot: string }): Promise<RuntimeStore>
@@ -368,6 +405,14 @@ export interface InboxRuntimeModule {
     downloadAttachments?: boolean
     resetWebhookOnStart?: boolean
   }): PollConnector
+  createEmailPollConnector(input: {
+    driver: EmailDriver
+    id?: string
+    accountId?: string | null
+    accountAddress?: string | null
+    backfillLimit?: number
+    pollIntervalMs?: number
+  }): PollConnector
   createTelegramBotApiPollDriver(input: {
     token: string
     allowedUpdates?: string[] | null
@@ -376,6 +421,11 @@ export interface InboxRuntimeModule {
     apiBaseUrl?: string
     fileBaseUrl?: string
   }): TelegramDriver
+  createAgentmailApiPollDriver(input: {
+    apiKey: string
+    inboxId: string
+    baseUrl?: string
+  }): EmailDriver
   loadImessageKitDriver(): Promise<ImessageDriver>
   rebuildRuntimeFromVault(input: {
     vaultRoot: string
@@ -575,6 +625,7 @@ interface InboxServicesDependencies {
   loadQueryModule?: () => Promise<QueryRuntimeModule>
   loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
+  loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
   probeImessageMessagesDb?: (targetPath: string) => Promise<void>
   getEnvironment?: () => NodeJS.ProcessEnv
 }
@@ -583,8 +634,15 @@ interface SourceAddInput extends CommandContext {
   source: InboxConnectorConfig['source']
   id: string
   account?: string | null
+  address?: string | null
   includeOwn?: boolean
   backfillLimit?: number
+  provision?: boolean
+  emailDisplayName?: string | null
+  emailUsername?: string | null
+  emailDomain?: string | null
+  emailClientId?: string | null
+  enableAutoReply?: boolean
 }
 
 interface SourceRemoveInput extends CommandContext {
@@ -818,6 +876,85 @@ export function createIntegratedInboxCliServices(
       fileBaseUrl: resolveTelegramFileBaseUrl(env) ?? undefined,
     })
   }
+
+  const createConfiguredAgentmailClient = (
+    apiKey?: string | null,
+  ): AgentmailApiClient => {
+    const env = getEnvironment()
+    const resolvedApiKey =
+      normalizeNullableString(apiKey) ?? resolveAgentmailApiKey(env)
+
+    if (!resolvedApiKey) {
+      throw new VaultCliError(
+        'INBOX_EMAIL_API_KEY_MISSING',
+        'Email requires HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY.',
+      )
+    }
+
+    return createAgentmailApiClient(resolvedApiKey, {
+      baseUrl: resolveAgentmailBaseUrl(env) ?? undefined,
+    })
+  }
+
+  const loadConfiguredEmailDriver = async (
+    config: InboxConnectorConfig,
+  ): Promise<EmailDriver> => {
+    if (dependencies.loadEmailDriver) {
+      return dependencies.loadEmailDriver(config)
+    }
+
+    const inboxId = normalizeNullableString(config.accountId)
+    if (!inboxId) {
+      throw new VaultCliError(
+        'INBOX_EMAIL_ACCOUNT_REQUIRED',
+        'Email connectors require an AgentMail inbox id as the connector account.',
+      )
+    }
+
+    const client = createConfiguredAgentmailClient()
+    const inboxd = await loadInbox()
+    return inboxd.createAgentmailApiPollDriver({
+      apiKey: client.apiKey,
+      inboxId,
+      baseUrl: client.baseUrl,
+    })
+  }
+
+  const enableAssistantAutoReplyChannel = async (
+    vault: string,
+    channel: InboxConnectorConfig['source'],
+  ): Promise<boolean> => {
+    const state = await readAssistantAutomationState(vault)
+    const channels = [...new Set([...state.autoReplyChannels, channel])]
+    const changed =
+      channels.length !== state.autoReplyChannels.length ||
+      channels.some((value, index) => state.autoReplyChannels[index] !== value)
+
+    if (!changed) {
+      return false
+    }
+
+    await saveAssistantAutomationState(vault, {
+      version: 2,
+      inboxScanCursor: state.inboxScanCursor,
+      autoReplyScanCursor: null,
+      autoReplyChannels: channels,
+      autoReplyPrimed: false,
+      updatedAt: new Date().toISOString(),
+    })
+
+    return true
+  }
+
+  const toProvisionedMailbox = (
+    inbox: AgentmailInbox,
+  ): InboxProvisionedMailbox => ({
+    inboxId: inbox.inbox_id,
+    emailAddress: inbox.email,
+    displayName: normalizeNullableString(inbox.display_name),
+    clientId: normalizeNullableString(inbox.client_id),
+    provider: 'agentmail',
+  })
 
   const ensureConfiguredImessageReady = async (): Promise<void> => {
     await ensureImessageMessagesDbReadable(
@@ -1398,6 +1535,101 @@ export function createIntegratedInboxCliServices(
     })
   }
 
+  const runEmailDoctorChecks = async (
+    context: DoctorContext,
+    connector: InboxConnectorConfig,
+  ): Promise<void> => {
+    context.checks.push(
+      passCheck('platform', 'Email polling is platform-agnostic.'),
+    )
+
+    const env = getEnvironment()
+    const apiKey = resolveAgentmailApiKey(env)
+    const usesInjectedEmailDriver = Boolean(dependencies.loadEmailDriver)
+
+    if (!connector.accountId) {
+      context.checks.push(
+        failCheck(
+          'account',
+          'Email connectors require an AgentMail inbox id as the connector account.',
+        ),
+      )
+    } else {
+      context.checks.push(
+        passCheck('account', 'AgentMail inbox id is configured for the connector.', {
+          inboxId: connector.accountId,
+          emailAddress: connector.options.emailAddress ?? null,
+        }),
+      )
+    }
+
+    if (!apiKey && !usesInjectedEmailDriver) {
+      context.checks.push(
+        failCheck(
+          'token',
+          'AgentMail API key is missing from HEALTHYBOB_AGENTMAIL_API_KEY and AGENTMAIL_API_KEY.',
+        ),
+      )
+    } else if (usesInjectedEmailDriver) {
+      context.checks.push(
+        passCheck(
+          'token',
+          'Email driver configuration is delegated to the integrating workspace.',
+        ),
+      )
+    } else {
+      context.checks.push(
+        passCheck('token', 'AgentMail API key was found in the local environment.'),
+      )
+    }
+
+    const driver =
+      connector.accountId && (apiKey || usesInjectedEmailDriver)
+        ? await runDoctorCheck(context, {
+            run: () => loadConfiguredEmailDriver(connector),
+            onSuccess: () =>
+              passCheck(
+                'driver-import',
+                'The AgentMail poll driver initialized successfully.',
+              ),
+            onError: (error) =>
+              failCheck(
+                'driver-import',
+                'The AgentMail poll driver could not be initialized.',
+                { error: errorMessage(error) },
+              ),
+          })
+        : null
+
+    if (!driver) {
+      return
+    }
+
+    await runDoctorCheck(context, {
+      run: () =>
+        driver.listUnreadMessages({
+          limit: 1,
+        }),
+      onSuccess: (messages) =>
+        messages.length > 0
+          ? passCheck(
+              'probe',
+              'The AgentMail inbox responded and returned unread messages.',
+              { messages: messages.length },
+            )
+          : warnCheck(
+              'probe',
+              'The AgentMail inbox responded but returned no unread messages.',
+            ),
+      onError: (error) =>
+        failCheck(
+          'probe',
+          'The AgentMail inbox could not be queried for unread messages.',
+          { error: errorMessage(error) },
+        ),
+    })
+  }
+
   const buildDoctorResult = async (
     input: DoctorInput,
   ): Promise<InboxDoctorResult> => {
@@ -1428,6 +1660,10 @@ export function createIntegratedInboxCliServices(
 
     if (target.connector.source === 'telegram') {
       await runTelegramDoctorChecks(context, target.connector)
+    }
+
+    if (target.connector.source === 'email') {
+      await runEmailDoctorChecks(context, target.connector)
     }
 
     return finalizeDoctorResult(context, target.connector)
@@ -1535,14 +1771,42 @@ export function createIntegratedInboxCliServices(
         )
       }
 
+      let provisionedMailbox: InboxProvisionedMailbox | null = null
+      let accountId = normalizeConnectorAccountId(input.source, input.account)
+      let emailAddress = normalizeNullableString(input.address)
+
+      if (input.source === 'email') {
+        if (input.provision) {
+          const client = createConfiguredAgentmailClient()
+          const inbox = await client.createInbox({
+            displayName: normalizeNullableString(input.emailDisplayName),
+            username: normalizeNullableString(input.emailUsername),
+            domain: normalizeNullableString(input.emailDomain),
+            clientId: normalizeNullableString(input.emailClientId),
+          })
+          provisionedMailbox = toProvisionedMailbox(inbox)
+          accountId = inbox.inbox_id
+          emailAddress = inbox.email
+        }
+
+        if (!accountId) {
+          throw new VaultCliError(
+            'INBOX_EMAIL_ACCOUNT_REQUIRED',
+            'Email connectors require --account with an existing AgentMail inbox id, or --provision to create one.',
+          )
+        }
+      }
+
       const connector: InboxConnectorConfig = {
         id: input.id,
         source: input.source,
         enabled: true,
-        accountId: normalizeConnectorAccountId(input.source, input.account),
+        accountId,
         options: {
-          includeOwnMessages: input.includeOwn ?? undefined,
+          includeOwnMessages:
+            input.source === 'imessage' ? input.includeOwn ?? undefined : undefined,
           backfillLimit: normalizeBackfillLimit(input.backfillLimit),
+          emailAddress: input.source === 'email' ? emailAddress : undefined,
         },
       }
       ensureConnectorNamespaceAvailable(config, connector)
@@ -1551,11 +1815,17 @@ export function createIntegratedInboxCliServices(
       sortConnectors(config)
       await writeConfig(paths, config)
 
+      if (input.enableAutoReply) {
+        await enableAssistantAutoReplyChannel(paths.absoluteVaultRoot, connector.source)
+      }
+
       return {
         vault: paths.absoluteVaultRoot,
         configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
         connector,
         connectorCount: config.connectors.length,
+        provisionedMailbox,
+        autoReplyEnabled: input.enableAutoReply ? true : undefined,
       }
     },
 
@@ -1687,6 +1957,7 @@ export function createIntegratedInboxCliServices(
           inputLimit: input.limit,
           loadImessageDriver: loadConfiguredImessageDriver,
           loadTelegramDriver: loadConfiguredTelegramDriver,
+          loadEmailDriver: loadConfiguredEmailDriver,
           ensureImessageReady: ensureConfiguredImessageReady,
           loadInbox,
         })
@@ -1786,6 +2057,7 @@ export function createIntegratedInboxCliServices(
             connector,
             loadImessageDriver: loadConfiguredImessageDriver,
             loadTelegramDriver: loadConfiguredTelegramDriver,
+            loadEmailDriver: loadConfiguredEmailDriver,
             ensureImessageReady: ensureConfiguredImessageReady,
             loadInbox,
           }),

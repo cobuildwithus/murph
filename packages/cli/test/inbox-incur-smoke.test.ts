@@ -24,9 +24,11 @@ test('inbox source add schema exposes the local runtime config options', async (
   }
 
   assert.equal('source' in schema.args.properties, true)
-  assert.deepEqual(schema.args.properties.source?.enum, ['imessage', 'telegram'])
+  assert.deepEqual(schema.args.properties.source?.enum, ['imessage', 'telegram', 'email'])
   assert.equal('id' in schema.options.properties, true)
   assert.equal('includeOwn' in schema.options.properties, true)
+  assert.equal('provision' in schema.options.properties, true)
+  assert.equal('enableAutoReply' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'id', 'backfillLimit'])
 })
 

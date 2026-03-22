@@ -276,16 +276,32 @@ export function registerInboxCommands(
         },
         description: 'Configure a Telegram bot source for local long polling.',
       },
+      {
+        args: { source: 'email' },
+        options: {
+          id: 'email:agentmail',
+          provision: true,
+          emailDisplayName: 'Healthy Bob',
+          enableAutoReply: true,
+          vault: './vault',
+        },
+        description: 'Provision an AgentMail inbox, configure email polling, and enable assistant auto-reply.',
+      },
     ],
     hint:
-      'Use a stable runtime id such as `imessage:self` or `telegram:bot`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
+      'Use a stable runtime id such as `imessage:self`, `telegram:bot`, or `email:agentmail`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
     options: withBaseOptions({
       id: z.string().min(1).describe('Runtime connector id.'),
       account: z
         .string()
         .min(1)
         .optional()
-        .describe('Optional account identity for the connector. Defaults to `self` for iMessage and `bot` for Telegram.'),
+        .describe('Optional account identity for the connector. Defaults to `self` for iMessage, `bot` for Telegram, and should be an AgentMail inbox id for email unless `--provision` is used.'),
+      address: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional email address to associate with an existing AgentMail inbox connector.'),
       includeOwn: z
         .boolean()
         .optional()
@@ -297,6 +313,34 @@ export function registerInboxCommands(
         .max(5000)
         .default(500)
         .describe('Default backfill limit for this connector.'),
+      provision: z
+        .boolean()
+        .optional()
+        .describe('Provision a new AgentMail inbox when adding an email connector.'),
+      emailDisplayName: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional display name to use when provisioning a new AgentMail inbox.'),
+      emailUsername: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional mailbox username when provisioning a new AgentMail inbox.'),
+      emailDomain: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional AgentMail domain when provisioning a new AgentMail inbox.'),
+      emailClientId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional AgentMail client id to associate when provisioning a new inbox.'),
+      enableAutoReply: z
+        .boolean()
+        .optional()
+        .describe('Enable assistant auto-reply for this connector channel after the source is added.'),
     }),
     output: inboxSourceAddResultSchema,
     async run(context) {
@@ -306,8 +350,15 @@ export function registerInboxCommands(
         source: context.args.source,
         id: context.options.id,
         account: context.options.account,
+        address: context.options.address,
         includeOwn: context.options.includeOwn,
         backfillLimit: context.options.backfillLimit,
+        provision: context.options.provision,
+        emailDisplayName: context.options.emailDisplayName,
+        emailUsername: context.options.emailUsername,
+        emailDomain: context.options.emailDomain,
+        emailClientId: context.options.emailClientId,
+        enableAutoReply: context.options.enableAutoReply,
       })
 
       const sourceAddCta = {

@@ -80,6 +80,8 @@ export function normalizeConnectorAccountId(
       return normalized ?? 'self'
     case 'telegram':
       return normalized ?? 'bot'
+    case 'email':
+      return normalized
   }
 }
 

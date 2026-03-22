@@ -84,7 +84,7 @@ const assistantSessionOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe('Optional channel label such as imessage or telegram.'),
+    .describe('Optional channel label such as imessage, telegram, or email.'),
   identity: z
     .string()
     .min(1)
@@ -177,7 +177,7 @@ const assistantDeliveryOptionFields = {
     .min(1)
     .optional()
     .describe(
-      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>.',
+      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
     ),
 }
 
@@ -283,7 +283,7 @@ export function registerAssistantCommands(
     description:
       'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
     hint:
-      'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage or Telegram.',
+      'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
     examples: [
       {
         args: {
@@ -318,6 +318,19 @@ export function registerAssistantCommands(
           deliverResponse: true,
         },
         description: 'Generate a reply locally and deliver it back into a Telegram bot chat.',
+      },
+      {
+        args: {
+          prompt: "Send today's summary by email.",
+        },
+        options: {
+          vault: './vault',
+          channel: 'email',
+          identity: 'inbox_123',
+          participant: 'you@example.com',
+          deliverResponse: true,
+        },
+        description: 'Generate a reply locally and deliver it over AgentMail email.',
       },
     ],
     options: withBaseOptions({
@@ -362,9 +375,9 @@ export function registerAssistantCommands(
         .describe('Outbound message body to deliver over the mapped assistant channel.'),
     }),
     description:
-      'Deliver one outbound assistant message without invoking the chat provider. iMessage and Telegram both use the same stored assistant channel binding surface.',
+      'Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, and email all use the same stored assistant channel binding surface.',
     hint:
-      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>.',
+      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
     examples: [
       {
         args: {
@@ -391,6 +404,18 @@ export function registerAssistantCommands(
       },
       {
         args: {
+          message: 'Your weekly summary is ready.',
+        },
+        options: {
+          vault: './vault',
+          channel: 'email',
+          identity: 'inbox_123',
+          deliveryTarget: 'you@example.com',
+        },
+        description: 'Send a one-off outbound summary email through an AgentMail inbox.',
+      },
+      {
+        args: {
           message: 'I imported that lab report and queued the parser.',
         },
         options: {
@@ -408,7 +433,7 @@ export function registerAssistantCommands(
         .min(1)
         .optional()
         .describe(
-          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>.',
+          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
         ),
     }),
     output: assistantDeliverResultSchema,

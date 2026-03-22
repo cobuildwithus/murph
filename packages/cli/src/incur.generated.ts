@@ -98,7 +98,7 @@ declare module 'incur' {
       'inbox search': { args: {}; options: { vault: string; requestId: string; text: string; source: string; limit: number } }
       'inbox setup': { args: {}; options: { vault: string; requestId: string; ffmpegCommand: string; pdftotextCommand: string; whisperCommand: string; whisperModelPath: string; paddleocrCommand: string } }
       'inbox show': { args: { captureId: string }; options: { vault: string; requestId: string } }
-      'inbox source add': { args: { source: "imessage" | "telegram" }; options: { vault: string; requestId: string; id: string; account: string; includeOwn: boolean; backfillLimit: number } }
+      'inbox source add': { args: { source: "imessage" | "telegram" | "email" }; options: { vault: string; requestId: string; id: string; account: string; address: string; includeOwn: boolean; backfillLimit: number; provision: boolean; emailDisplayName: string; emailUsername: string; emailDomain: string; emailClientId: string; enableAutoReply: boolean } }
       'inbox source list': { args: {}; options: { vault: string; requestId: string } }
       'inbox source remove': { args: { id: string }; options: { vault: string; requestId: string } }
       'inbox status': { args: {}; options: { vault: string; requestId: string } }

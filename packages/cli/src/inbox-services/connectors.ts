@@ -2,6 +2,7 @@ import type {
   InboxConnectorConfig,
 } from '../inbox-cli-contracts.js'
 import type {
+  EmailDriver,
   ImessageDriver,
   InboxRuntimeModule,
   PollConnector,
@@ -15,6 +16,7 @@ export async function instantiateConnector(input: {
   loadInbox: () => Promise<InboxRuntimeModule>
   loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
+  loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
   ensureImessageReady?: () => Promise<void>
 }): Promise<PollConnector> {
   const inboxd = await input.loadInbox()
@@ -47,6 +49,22 @@ export async function instantiateConnector(input: {
           500,
         downloadAttachments: true,
         resetWebhookOnStart: true,
+      })
+    }
+    case 'email': {
+      if (!input.loadEmailDriver) {
+        throw new Error('Email connector instantiation requires loadEmailDriver.')
+      }
+      const driver = await input.loadEmailDriver(input.connector)
+      return inboxd.createEmailPollConnector({
+        driver,
+        id: input.connector.id,
+        accountId: input.connector.accountId,
+        accountAddress: input.connector.options.emailAddress ?? null,
+        backfillLimit:
+          normalizeBackfillLimit(input.inputLimit) ??
+          input.connector.options.backfillLimit ??
+          500,
       })
     }
   }

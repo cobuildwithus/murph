@@ -5,6 +5,7 @@ import {
 import {
   getAssistantChannelAdapter,
   resolveImessageDeliveryCandidates,
+  sendEmailMessage,
   sendImessageMessage,
   sendTelegramMessage,
   type AssistantChannelDependencies,
@@ -24,6 +25,7 @@ import { normalizeRequiredText } from './assistant/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export {
+  sendEmailMessage,
   resolveImessageDeliveryCandidates,
   sendImessageMessage,
   sendTelegramMessage,
@@ -150,6 +152,7 @@ export async function deliverAssistantMessageOverBinding(
     {
       bindingDelivery: binding.delivery,
       explicitTarget: input.target?.trim() ? input.target.trim() : null,
+      identityId: binding.identityId,
       message: input.message,
     },
     dependencies,
