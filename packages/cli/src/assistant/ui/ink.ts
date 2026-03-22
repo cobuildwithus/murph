@@ -1076,6 +1076,7 @@ const ChatComposer = React.memo(function ChatComposer(
         backgroundColor: theme.composerBackground,
         borderColor: theme.composerBorderColor,
         marginBottom: slashSuggestions.length > 0 ? 0 : 1,
+        paddingY: 1,
       },
       createElement(MessageRoleLabel, {
         kind: 'user',
