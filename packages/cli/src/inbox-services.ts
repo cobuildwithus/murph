@@ -2043,7 +2043,7 @@ export function createIntegratedInboxCliServices(
       if (existingState.running && existingState.pid !== getPid()) {
         throw new VaultCliError(
           'INBOX_ALREADY_RUNNING',
-          'Inbox daemon state already reports a running process.',
+          'Inbox daemon state already reports a running process. If a prior foreground run was suspended with Ctrl+Z, resume it with `fg` and stop it with Ctrl+C, or run `healthybob inbox stop`.',
           { pid: existingState.pid },
         )
       }
@@ -2169,7 +2169,10 @@ export function createIntegratedInboxCliServices(
         )
       }
 
-      killProcess(state.pid, 'SIGTERM')
+      // A suspended foreground inbox/assistant loop will ignore SIGTERM until it
+      // is resumed, so continue it first before requesting shutdown.
+      tryKillProcess(killProcess, state.pid, 'SIGCONT')
+      tryKillProcess(killProcess, state.pid, 'SIGTERM')
 
       for (let attempt = 0; attempt < 50; attempt += 1) {
         await sleep(100)
@@ -2660,6 +2663,27 @@ export function createIntegratedInboxCliServices(
         },
       })
     },
+  }
+}
+
+function tryKillProcess(
+  killProcess: (pid: number, signal?: NodeJS.Signals | number) => void,
+  pid: number,
+  signal: NodeJS.Signals | number,
+): void {
+  try {
+    killProcess(pid, signal)
+  } catch (error) {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: string }).code ?? '')
+        : ''
+
+    if (code === 'ESRCH') {
+      return
+    }
+
+    throw error
   }
 }
 

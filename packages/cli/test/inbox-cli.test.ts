@@ -1544,7 +1544,7 @@ test.sequential('run writes daemon state and status updates after abort', async 
 
 test.sequential('stop signals the recorded pid and waits for state to settle', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-stop')
-  let signaledPid: number | null = null
+  const signals: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = []
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPid: () => 9999,
@@ -1552,9 +1552,7 @@ test.sequential('stop signals the recorded pid and waits for state to settle', a
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: loadBuiltInboxRuntime,
     killProcess(pid, signal) {
-      if (signal === 'SIGTERM') {
-        signaledPid = pid
-      }
+      signals.push({ pid, signal })
     },
   })
 
@@ -1616,7 +1614,13 @@ test.sequential('stop signals the recorded pid and waits for state to settle', a
       vault: fixture.vaultRoot,
       requestId: null,
     })
-    assert.equal(signaledPid, 4242)
+    assert.deepEqual(
+      signals.filter(({ signal }) => signal !== 0),
+      [
+        { pid: 4242, signal: 'SIGCONT' },
+        { pid: 4242, signal: 'SIGTERM' },
+      ],
+    )
     assert.equal(stopped.running, false)
     assert.equal(stopped.status, 'stopped')
   } finally {
@@ -1782,16 +1786,13 @@ test.sequential(
 test.sequential('stop reports not-running and timeout edge cases', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-stop-edges')
   const paths = inboxPaths(fixture.vaultRoot)
-  let sigtermCount = 0
+  const sentSignals: Array<NodeJS.Signals | number | undefined> = []
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
     killProcess(_pid, signal) {
-      if (signal === 'SIGTERM') {
-        sigtermCount += 1
-        return
-      }
-      if (signal === 0) {
+      sentSignals.push(signal)
+      if (signal === 0 || signal === 'SIGCONT' || signal === 'SIGTERM') {
         return
       }
     },
@@ -1843,7 +1844,83 @@ test.sequential('stop reports not-running and timeout edge cases', async () => {
       }),
       'INBOX_STOP_TIMEOUT',
     )
-    assert.equal(sigtermCount > 0, true)
+    assert.deepEqual(sentSignals.filter((signal) => signal !== 0), [
+      'SIGCONT',
+      'SIGTERM',
+    ])
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('stop ignores missing suspended pid recovery signals and still returns stale state', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-stop-missing')
+  const paths = inboxPaths(fixture.vaultRoot)
+  const signals: Array<NodeJS.Signals | number | undefined> = []
+  let allowProbe = true
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPid: () => 9999,
+    getPlatform: () => 'darwin',
+    killProcess(_pid, signal) {
+      signals.push(signal)
+      if (signal === 0 && allowProbe) {
+        return
+      }
+      if (signal === 'SIGCONT' || signal === 'SIGTERM') {
+        allowProbe = false
+        const error = new Error('missing process') as Error & { code?: string }
+        error.code = 'ESRCH'
+        throw error
+      }
+      if (signal === 0) {
+        const error = new Error('missing process') as Error & { code?: string }
+        error.code = 'ESRCH'
+        throw error
+      }
+    },
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+  })
+
+  try {
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    await writeFile(
+      paths.inboxStatePath,
+      `${JSON.stringify(
+        {
+          running: true,
+          stale: false,
+          pid: 8989,
+          startedAt: '2026-03-13T09:00:00.000Z',
+          stoppedAt: null,
+          status: 'running',
+          connectorIds: ['imessage:self'],
+          statePath: '.runtime/inboxd/state.json',
+          configPath: '.runtime/inboxd/config.json',
+          databasePath: '.runtime/inboxd.sqlite',
+          message: null,
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    )
+
+    const stopped = await services.stop({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    assert.deepEqual(signals, [0, 'SIGCONT', 'SIGTERM', 0])
+    assert.equal(stopped.running, false)
+    assert.equal(stopped.stale, true)
+    assert.equal(stopped.status, 'stale')
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })
