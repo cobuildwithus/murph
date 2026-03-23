@@ -99,6 +99,7 @@ import {
   resolveComposerVerticalCursorMove,
   splitAssistantMarkdownLinks,
   supportsAssistantTerminalHyperlinks,
+  wrapAssistantPlainText,
 } from '../src/assistant/ui/ink.js'
 import { LIGHT_ASSISTANT_INK_THEME } from '../src/assistant/ui/theme.js'
 
@@ -3217,6 +3218,45 @@ test('assistant Ink transcript feed renders the header and committed rows via In
   assert.equal(liveChildren.length, 1)
 })
 
+test('assistant Ink transcript feed header omits the session id label', () => {
+  const rendered = renderChatTranscriptFeed({
+    bindingSummary: 'imessage · assistant:primary · chat-123',
+    busy: false,
+    entries: [],
+    sessionId: 'asst_test_session',
+  })
+  const fragmentChildren = React.Children.toArray(
+    (rendered.props as { children?: React.ReactNode }).children,
+  )
+
+  assert.equal(React.isValidElement(fragmentChildren[0]), true)
+  if (!React.isValidElement(fragmentChildren[0])) {
+    throw new Error('Expected transcript feed static output to be a valid React element.')
+  }
+
+  const staticProps = fragmentChildren[0].props as {
+    children?: ((item: unknown, index: number) => React.ReactElement) | React.ReactNode
+    items?: unknown[]
+  }
+  const renderStaticRow = staticProps.children
+
+  assert.equal(typeof renderStaticRow, 'function')
+  assert.equal(staticProps.items?.length, 1)
+  if (typeof renderStaticRow !== 'function') {
+    throw new Error('Expected transcript feed static output to expose a row renderer.')
+  }
+
+  const header = renderStaticRow(staticProps.items?.[0], 0)
+  assert.equal(React.isValidElement(header), true)
+  if (!React.isValidElement(header)) {
+    throw new Error('Expected transcript feed header to be a valid React element.')
+  }
+
+  assert.deepEqual(Object.keys(header.props as Record<string, unknown>), ['bindingSummary'])
+  assert.equal((header.props as { bindingSummary?: string | null }).bindingSummary, 'imessage · assistant:primary · chat-123')
+  assert.doesNotMatch(JSON.stringify(header.props), /asst_test_session/u)
+})
+
 test('assistant Ink transcript feed keeps the empty chat state free of an intro banner', () => {
   const rendered = renderChatTranscriptFeed({
     bindingSummary: null,
@@ -3334,6 +3374,13 @@ test('assistant Ink wrapped text block keeps assistant replies in a single full-
 
   assert.equal(textProps.wrap, 'wrap')
   assert.equal(textProps.children, text)
+})
+
+test('assistant Ink plain-text wrapping keeps words intact on narrow widths', () => {
+  assert.equal(
+    wrapAssistantPlainText('pull context from the vault if you want', 10),
+    'pull\ncontext\nfrom the\nvault if\nyou want',
+  )
 })
 
 test('assistant Ink hyperlink support only enables terminal links on supported tty environments', () => {

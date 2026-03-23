@@ -8,6 +8,7 @@ import {
   render,
   useApp,
   useInput,
+  useStdout,
   type Key,
   type StaticProps,
 } from 'ink'
@@ -100,7 +101,6 @@ type ComposerSubmitDisposition = 'clear' | 'keep'
 
 interface ChatHeaderProps {
   bindingSummary: string | null
-  sessionId: string
 }
 
 interface ChatEntryRowProps {
@@ -183,6 +183,7 @@ function useAssistantInkTheme(): AssistantInkTheme {
 }
 
 const BUSY_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+const ASSISTANT_PLAIN_TEXT_WRAP_SLACK = 4
 
 export function resolveChromePanelBoxProps(
   props: ChromePanelProps,
@@ -306,6 +307,78 @@ export function renderWrappedTextBlock(input: {
       input.children,
     ),
   )
+}
+
+export function wrapAssistantPlainText(input: string, columns: number): string {
+  return input
+    .replaceAll('\r\n', '\n')
+    .split('\n')
+    .map((line) => wrapAssistantPlainTextLine(line, columns))
+    .join('\n')
+}
+
+function wrapAssistantPlainTextLine(input: string, columns: number): string {
+  if (input.length === 0 || columns <= 0) {
+    return input
+  }
+
+  const leadingWhitespace = input.match(/^\s*/u)?.[0] ?? ''
+  const content = input.slice(leadingWhitespace.length)
+
+  if (content.length === 0) {
+    return input
+  }
+
+  const tokens = content.match(/\S+|\s+/gu) ?? [content]
+  const lines: string[] = []
+  let currentLine = leadingWhitespace
+  let currentWidth = leadingWhitespace.length
+  let pendingWhitespace = ''
+
+  for (const token of tokens) {
+    if (/^\s+$/u.test(token)) {
+      pendingWhitespace += token
+      continue
+    }
+
+    const spacer =
+      currentWidth > leadingWhitespace.length
+        ? pendingWhitespace.length > 0
+          ? pendingWhitespace
+          : ' '
+        : ''
+    const candidateWidth = currentWidth + spacer.length + token.length
+
+    if (currentWidth > leadingWhitespace.length && candidateWidth > columns) {
+      lines.push(currentLine)
+      currentLine = `${leadingWhitespace}${token}`
+      currentWidth = leadingWhitespace.length + token.length
+      pendingWhitespace = ''
+      continue
+    }
+
+    if (spacer.length > 0) {
+      currentLine += spacer
+      currentWidth += spacer.length
+    }
+
+    currentLine += token
+    currentWidth += token.length
+    pendingWhitespace = ''
+  }
+
+  lines.push(currentLine)
+
+  return lines.join('\n')
+}
+
+function resolveAssistantPlainTextWrapColumns(columns: number | null | undefined): number {
+  const normalizedColumns =
+    typeof columns === 'number' && Number.isFinite(columns)
+      ? Math.max(1, Math.floor(columns))
+      : 80
+
+  return Math.max(20, normalizedColumns - ASSISTANT_PLAIN_TEXT_WRAP_SLACK)
 }
 
 const WrappedTextBlock = React.memo(function WrappedTextBlock(input: {
@@ -481,8 +554,21 @@ export function renderAssistantMessageText(
 ): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const { stdout } = useStdout()
   const enableHyperlinks = supportsAssistantTerminalHyperlinks()
   const segments = splitAssistantMarkdownLinks(input.text)
+  const plainTextOnly = segments.every((segment) => segment.kind === 'text')
+
+  if (plainTextOnly) {
+    return createElement(
+      WrappedTextBlock,
+      {},
+      wrapAssistantPlainText(
+        input.text,
+        resolveAssistantPlainTextWrapColumns(stdout?.columns),
+      ),
+    )
+  }
 
   return createElement(
     WrappedTextBlock,
@@ -759,7 +845,6 @@ const ChatHeader = React.memo(function ChatHeader(
         createElement(Text, { color: theme.accentColor }, '●'),
         ' ',
         createElement(Text, { bold: true }, 'Healthy Bob'),
-        createElement(Text, { color: theme.mutedColor }, ` · session ${props.sessionId}`),
       ),
       props.bindingSummary
         ? createElement(
@@ -805,14 +890,6 @@ const ChatHeader = React.memo(function ChatHeader(
         backgroundColor: theme.switcherBackground,
         marginBottom: 0,
       },
-      createElement(
-        Text,
-        {
-          wrap: 'wrap',
-        },
-        createElement(Text, { color: theme.mutedColor }, 'session '),
-        createElement(Text, { color: theme.accentColor }, props.sessionId),
-      ),
       createElement(
         Text,
         {
@@ -1061,7 +1138,6 @@ function renderStaticTranscriptRow(
     return createElement(ChatHeader, {
       key: `static-header:${item.sessionId}`,
       bindingSummary: item.bindingSummary,
-      sessionId: item.sessionId,
     })
   }
 
