@@ -8,6 +8,7 @@ import {
   assistantSandboxValues,
 } from './assistant-cli-contracts.js'
 import {
+  ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
 export {
@@ -86,6 +87,47 @@ const NON_EXECUTING_BUILTIN_FLAGS = new Set([
   '--mcp',
   '--schema',
   '--version',
+])
+
+const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
+  'allergy',
+  'assistant',
+  'assistant cron',
+  'assistant memory',
+  'assistant session',
+  'audit',
+  'condition',
+  'device',
+  'device account',
+  'device daemon',
+  'device provider',
+  'document',
+  'event',
+  'experiment',
+  'export',
+  'export pack',
+  'family',
+  'genetics',
+  'goal',
+  'history',
+  'inbox',
+  'inbox attachment',
+  'inbox model',
+  'inbox promote',
+  'inbox source',
+  'intake',
+  'journal',
+  'meal',
+  'profile',
+  'profile current',
+  'provider',
+  'regimen',
+  'samples',
+  'samples batch',
+  'search',
+  'search index',
+  'vault',
+  'workout',
 ])
 
 export function resolveOperatorHomeDirectory(
@@ -299,6 +341,10 @@ export function applyDefaultVaultToArgs(
     return [...args]
   }
 
+  if (hasIncompleteCommandGroupPath(args)) {
+    return [...args]
+  }
+
   const separatorIndex = args.indexOf('--')
   if (separatorIndex < 0) {
     return [...args, '--vault', vault]
@@ -314,4 +360,28 @@ export function applyDefaultVaultToArgs(
 
 function hasNonExecutingBuiltinFlag(args: readonly string[]): boolean {
   return args.some((token) => NON_EXECUTING_BUILTIN_FLAGS.has(token))
+}
+
+function hasIncompleteCommandGroupPath(args: readonly string[]): boolean {
+  const commandTokens: string[] = []
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]
+    if (!token || token === '--') {
+      break
+    }
+
+    if (token.startsWith('-')) {
+      if (commandTokens.length === 0 && ROOT_OPTIONS_WITH_VALUES.has(token)) {
+        index += 1
+        continue
+      }
+
+      break
+    }
+
+    commandTokens.push(token)
+  }
+
+  return COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND.has(commandTokens.join(' '))
 }

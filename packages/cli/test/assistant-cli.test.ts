@@ -579,6 +579,21 @@ test('default-vault injection skips non-executing builtin flags', () => {
   )
 })
 
+test('default-vault injection skips incomplete command groups', () => {
+  assert.deepEqual(applyDefaultVaultToArgs(['assistant'], '/tmp/default-vault'), [
+    'assistant',
+  ])
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['assistant', 'session'], '/tmp/default-vault'),
+    ['assistant', 'session'],
+  )
+  assert.deepEqual(applyDefaultVaultToArgs(['goal'], '/tmp/default-vault'), ['goal'])
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['assistant', 'session', 'list'], '/tmp/default-vault'),
+    ['assistant', 'session', 'list', '--vault', '/tmp/default-vault'],
+  )
+})
+
 test.sequential(
   'assistant memory search falls back to the assistant-bound vault env when --vault is omitted',
   async () => {
