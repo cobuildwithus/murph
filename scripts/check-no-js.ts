@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scanRoots = ["packages", "e2e"] as const;
+const scanRoots = ["packages", "apps", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
 const allowedSourceArtifacts = new Set(["packages/web/postcss.config.mjs"]);
 const execFileAsync = promisify(execFile);
@@ -22,6 +22,17 @@ const nextEnvTrailingLines = [
 export const allowedDeclarationArtifacts = new Map<string, string[]>([
   [
     "packages/web/next-env.d.ts",
+    [
+      [...nextEnvCommonLines, 'import "./.next/types/routes.d.ts";', ...nextEnvTrailingLines].join(
+        "\n",
+      ),
+      [...nextEnvCommonLines, 'import "./.next/dev/types/routes.d.ts";', ...nextEnvTrailingLines].join(
+        "\n",
+      ),
+    ],
+  ],
+  [
+    "apps/web/next-env.d.ts",
     [
       [...nextEnvCommonLines, 'import "./.next/types/routes.d.ts";', ...nextEnvTrailingLines].join(
         "\n",
@@ -63,7 +74,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stub, and no tracked dist/.next/.test-dist/*.tsbuildinfo artifacts, found under packages/ or e2e/.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs, and no tracked dist/.next/.test-dist/*.tsbuildinfo artifacts, found under packages/, apps/, or e2e/.",
   );
 }
 

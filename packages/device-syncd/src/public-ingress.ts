@@ -74,7 +74,7 @@ export class DeviceSyncPublicIngress {
     };
   }
 
-  startConnection(input: StartConnectionInput): BeginConnectionResult {
+  async startConnection(input: StartConnectionInput): Promise<BeginConnectionResult> {
     const now = toIsoTimestamp(new Date());
     const provider = this.requireProvider(input.provider);
     const descriptor = this.describeProvider(provider);
@@ -82,14 +82,14 @@ export class DeviceSyncPublicIngress {
     const state = generateStateCode();
     const expiresAt = addMilliseconds(now, this.sessionTtlMs);
 
-    this.store.deleteExpiredOAuthStates(now);
-    this.store.createOAuthState({
+    await this.store.deleteExpiredOAuthStates(now);
+    await this.store.createOAuthState({
       state,
       provider: provider.provider,
       returnTo,
       createdAt: now,
       expiresAt,
-      metadata: {},
+      metadata: input.ownerId ? { ownerId: input.ownerId } : {},
     });
 
     return {
@@ -120,7 +120,7 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    const stateRecord = this.store.consumeOAuthState(state, now);
+    const stateRecord = await this.store.consumeOAuthState(state, now);
 
     if (!stateRecord) {
       throw deviceSyncError({
@@ -178,7 +178,11 @@ export class DeviceSyncPublicIngress {
       code,
     );
 
-    const account = this.store.upsertConnection({
+    const ownerId =
+      typeof stateRecord.metadata?.ownerId === "string" ? normalizeString(stateRecord.metadata.ownerId) : null;
+
+    const account = await this.store.upsertConnection({
+      ownerId,
       provider: provider.provider,
       externalAccountId: connection.externalAccountId,
       displayName: connection.displayName ?? null,
@@ -226,7 +230,7 @@ export class DeviceSyncPublicIngress {
     });
 
     if (parsed.traceId) {
-      const inserted = this.store.recordWebhookTraceIfNew({
+      const inserted = await this.store.recordWebhookTraceIfNew({
         provider: provider.provider,
         traceId: parsed.traceId,
         externalAccountId: parsed.externalAccountId,
@@ -246,7 +250,7 @@ export class DeviceSyncPublicIngress {
       }
     }
 
-    const account = this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
+    const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
 
     if (!account) {
       this.logger.warn?.("Ignoring webhook for unknown device sync account.", {
@@ -271,7 +275,7 @@ export class DeviceSyncPublicIngress {
       };
     }
 
-    this.store.markWebhookReceived(account.id, parsed.occurredAt ?? now);
+    await this.store.markWebhookReceived(account.id, parsed.occurredAt ?? now);
 
     if (account.status !== "active") {
       this.logger.warn?.("Ignoring webhook side effects for non-active device sync account.", {

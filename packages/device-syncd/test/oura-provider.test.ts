@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test } from "vitest";
 
-import { createOuraDeviceSyncProvider } from "../src/providers/oura.js";
+import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.js";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext } from "../src/types.js";
 
@@ -227,5 +228,89 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
   });
   assert.ok(requests.some((url) => url.includes("/v2/usercollection/daily_activity?")));
   assert.ok(requests.some((url) => url.includes("/v2/usercollection/heartrate?")));
-  assert.equal(provider.webhookPath, undefined);
+  assert.equal(provider.webhookPath, "/webhooks/oura");
+});
+
+test("Oura provider validates webhook signatures and turns notifications into reconcile hints", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "daily_sleep.updated",
+      data_type: "daily_sleep",
+      object_id: "daily-sleep-1",
+      user_id: "oura-user-1",
+      timestamp: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+  const timestamp = "2026-03-16T09:58:10.000Z";
+  const signature = createHmac("sha256", "oura-client-secret").update(`${timestamp}${rawBody.toString("utf8")}`).digest("hex");
+
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: new Headers({
+      "x-oura-signature": signature,
+      "x-oura-timestamp": timestamp,
+    }),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  assert.deepEqual(parsed, {
+    externalAccountId: "oura-user-1",
+    eventType: "daily_sleep.updated",
+    traceId: parsed?.traceId,
+    occurredAt: "2026-03-16T09:58:00.000Z",
+    payload: {
+      event_type: "daily_sleep.updated",
+      data_type: "daily_sleep",
+      object_id: "daily-sleep-1",
+      user_id: "oura-user-1",
+      timestamp: "2026-03-16T09:58:00.000Z",
+      eventType: "daily_sleep.updated",
+      dataType: "daily_sleep",
+      objectId: "daily-sleep-1",
+    },
+    jobs: [
+      {
+        kind: "reconcile",
+        priority: 90,
+        dedupeKey: parsed?.jobs[0]?.dedupeKey,
+        payload: {
+          windowStart: parsed?.jobs[0]?.payload?.windowStart,
+          windowEnd: "2026-03-16T10:00:00.000Z",
+          includePersonalInfo: false,
+          sourceEventType: "daily_sleep.updated",
+          dataType: "daily_sleep",
+          objectId: "daily-sleep-1",
+        },
+      },
+    ],
+  });
+  assert.match(parsed?.traceId ?? "", /^[a-f0-9]{64}$/u);
+  assert.match(String(parsed?.jobs[0]?.payload?.windowStart ?? ""), /^2026-03-09T10:00:00\.000Z$/u);
+  assert.equal(parsed?.jobs[0]?.dedupeKey, `oura-webhook:${parsed?.traceId}`);
+});
+
+test("Oura webhook verification challenge helper returns the challenge only for the configured token", () => {
+  const challenge = resolveOuraWebhookVerificationChallenge({
+    url: new URL(
+      "https://sync.healthybob.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
+    ),
+    verificationToken: "verify-token",
+  });
+
+  assert.equal(challenge, "random-challenge");
+  assert.throws(
+    () =>
+      resolveOuraWebhookVerificationChallenge({
+        url: new URL(
+          "https://sync.healthybob.test/api/device-sync/webhooks/oura?verification_token=wrong&challenge=random-challenge",
+        ),
+        verificationToken: "verify-token",
+      }),
+    /verification token/u,
+  );
 });

@@ -207,7 +207,7 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
     },
   });
 
-  const begin = ingress.startConnection({
+  const begin = await ingress.startConnection({
     provider: "demo",
     returnTo: "https://app.healthybob.test/settings/devices",
   });
@@ -245,7 +245,7 @@ test("public ingress deduplicates webhook traces and suppresses side effects for
     },
   });
 
-  const begin = ingress.startConnection({ provider: "demo" });
+  const begin = await ingress.startConnection({ provider: "demo" });
   const connected = await ingress.handleOAuthCallback({
     provider: "demo",
     state: begin.state,

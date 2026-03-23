@@ -90,6 +90,7 @@ export interface ProviderAuthTokens {
 }
 
 export interface UpsertPublicDeviceSyncConnectionInput {
+  ownerId?: string | null;
   provider: string;
   externalAccountId: string;
   displayName?: string | null;
@@ -111,13 +112,16 @@ export interface DeviceSyncWebhookTraceRecord {
 }
 
 export interface DeviceSyncPublicIngressStore {
-  deleteExpiredOAuthStates(now: string): number;
-  createOAuthState(input: OAuthStateRecord): OAuthStateRecord;
-  consumeOAuthState(state: string, now: string): OAuthStateRecord | null;
-  upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount;
-  getConnectionByExternalAccount(provider: string, externalAccountId: string): PublicDeviceSyncAccount | null;
-  recordWebhookTraceIfNew(input: DeviceSyncWebhookTraceRecord): boolean;
-  markWebhookReceived(accountId: string, now: string): void;
+  deleteExpiredOAuthStates(now: string): number | Promise<number>;
+  createOAuthState(input: OAuthStateRecord): OAuthStateRecord | Promise<OAuthStateRecord>;
+  consumeOAuthState(state: string, now: string): OAuthStateRecord | null | Promise<OAuthStateRecord | null>;
+  upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
+  getConnectionByExternalAccount(
+    provider: string,
+    externalAccountId: string,
+  ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  recordWebhookTraceIfNew(input: DeviceSyncWebhookTraceRecord): boolean | Promise<boolean>;
+  markWebhookReceived(accountId: string, now: string): void | Promise<void>;
 }
 
 export interface DeviceSyncJobInput {
@@ -256,6 +260,7 @@ export interface DeviceSyncRegistry {
 export interface StartConnectionInput {
   provider: string;
   returnTo?: string | null;
+  ownerId?: string | null;
 }
 
 export interface BeginConnectionResult {

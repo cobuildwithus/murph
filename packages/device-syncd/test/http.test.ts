@@ -163,7 +163,7 @@ function createStubService(
         webhookTraces: 0,
       };
     },
-    startConnection() {
+    async startConnection() {
       return {
         provider: "demo",
         state: "state_demo_01",

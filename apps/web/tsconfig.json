@@ -1,0 +1,77 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "composite": false,
+    "baseUrl": "../..",
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "es2022"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "apps/web/*"
+      ],
+      "@healthybob/contracts": [
+        "packages/contracts/dist/index.d.ts"
+      ],
+      "@healthybob/contracts/*": [
+        "packages/contracts/dist/*"
+      ],
+      "@healthybob/runtime-state": [
+        "packages/runtime-state/dist/index.d.ts"
+      ],
+      "@healthybob/runtime-state/*": [
+        "packages/runtime-state/dist/*"
+      ],
+      "@healthybob/core": [
+        "packages/core/dist/index.d.ts"
+      ],
+      "@healthybob/core/*": [
+        "packages/core/dist/*"
+      ],
+      "@healthybob/importers": [
+        "packages/importers/dist/index.d.ts"
+      ],
+      "@healthybob/importers/*": [
+        "packages/importers/dist/*"
+      ],
+      "#device-syncd": [
+        "packages/device-syncd/dist/index.d.ts"
+      ],
+      "@healthybob/device-syncd": [
+        "packages/device-syncd/dist/index.d.ts"
+      ],
+      "@healthybob/device-syncd/*": [
+        "packages/device-syncd/dist/*"
+      ]
+    },
+    "sourceMap": false,
+    "tsBuildInfoFile": ".next/cache/tsconfig.tsbuildinfo"
+  },
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

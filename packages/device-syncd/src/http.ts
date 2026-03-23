@@ -153,7 +153,7 @@ async function routeRequest(input: {
   const connectMatch = pathname.match(/^\/connect\/([^/]+)$/u);
 
   if (method === "GET" && connectMatch) {
-    const result = input.service.startConnection({
+    const result = await input.service.startConnection({
       provider: decodeURIComponent(connectMatch[1] ?? ""),
       returnTo: url.searchParams.get("returnTo"),
     });
@@ -165,7 +165,7 @@ async function routeRequest(input: {
 
   if (method === "POST" && connectApiMatch) {
     const body = await maybeReadJsonBody(input.request, input.bodyLimitBytes);
-    const result = input.service.startConnection({
+    const result = await input.service.startConnection({
       provider: decodeURIComponent(connectApiMatch[1] ?? ""),
       returnTo: readStringField(body, "returnTo"),
     });

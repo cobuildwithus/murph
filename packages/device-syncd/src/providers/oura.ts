@@ -1,9 +1,12 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 import { deviceSyncError } from "../errors.js";
 import {
   addMilliseconds,
   coerceRecord,
   normalizeIdentifier,
   normalizeString,
+  sha256Text,
   subtractDays,
 } from "../shared.js";
 import {
@@ -27,6 +30,8 @@ import type {
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
+  ProviderWebhookContext,
+  ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.js";
 
@@ -35,10 +40,12 @@ const OURA_API_BASE_URL = "https://api.ouraring.com";
 const OURA_AUTHORIZE_PATH = "/oauth/authorize";
 const OURA_TOKEN_PATH = "/oauth/token";
 const OURA_CALLBACK_PATH = "/oauth/oura/callback";
+const OURA_WEBHOOK_PATH = "/webhooks/oura";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_BACKFILL_DAYS = 90;
 const DEFAULT_RECONCILE_DAYS = 21;
 const DEFAULT_RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
+const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
 const OURA_DEFAULT_SCOPES = Object.freeze([
   "personal",
   "daily",
@@ -71,6 +78,7 @@ export interface OuraDeviceSyncProviderConfig {
   reconcileDays?: number;
   reconcileIntervalMs?: number;
   requestTimeoutMs?: number;
+  webhookTimestampToleranceMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -104,6 +112,98 @@ function tokenResponseToAuthTokens(payload: OuraTokenResponse): ProviderAuthToke
   );
 }
 
+function buildOuraSignatureCandidates(timestamp: string, rawBody: Buffer, secret: string): string[] {
+  const signatureBase = `${timestamp}${rawBody.toString("utf8")}`;
+  const digest = createHmac("sha256", secret).update(signatureBase).digest();
+  return [digest.toString("hex"), digest.toString("base64"), digest.toString("base64url")];
+}
+
+function constantTimeMatchSignature(expectedCandidates: readonly string[], actual: string): boolean {
+  const actualBuffer = Buffer.from(actual, "utf8");
+
+  for (const expected of expectedCandidates) {
+    const expectedBuffer = Buffer.from(expected, "utf8");
+
+    if (expectedBuffer.length !== actualBuffer.length) {
+      continue;
+    }
+
+    if (timingSafeEqual(expectedBuffer, actualBuffer)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function parseOuraWebhookPayload(rawBody: Buffer): Record<string, unknown> {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(rawBody.toString("utf8"));
+  } catch (error) {
+    throw deviceSyncError({
+      code: "OURA_WEBHOOK_INVALID_JSON",
+      message: "Oura webhook payload was not valid JSON.",
+      retryable: false,
+      httpStatus: 400,
+      cause: error,
+    });
+  }
+
+  return coerceRecord(parsed);
+}
+
+function parseTimestampMillis(value: string | null): number | null {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const numeric = Number(normalized);
+
+  if (Number.isFinite(numeric)) {
+    return numeric;
+  }
+
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function resolveOuraWebhookVerificationChallenge(input: {
+  url: URL;
+  verificationToken: string | null | undefined;
+}): string | null {
+  const challenge = normalizeString(input.url.searchParams.get("challenge"));
+  const receivedToken = normalizeString(input.url.searchParams.get("verification_token"));
+  const expectedToken = normalizeString(input.verificationToken);
+
+  if (!challenge && !receivedToken) {
+    return null;
+  }
+
+  if (!expectedToken) {
+    throw deviceSyncError({
+      code: "OURA_WEBHOOK_VERIFICATION_TOKEN_MISSING",
+      message: "Oura webhook verification requires HEALTHYBOB_OURA_WEBHOOK_VERIFICATION_TOKEN.",
+      retryable: false,
+      httpStatus: 500,
+    });
+  }
+
+  if (!challenge || !receivedToken || receivedToken !== expectedToken) {
+    throw deviceSyncError({
+      code: "OURA_WEBHOOK_VERIFICATION_FAILED",
+      message: "Oura webhook verification token did not match the configured verification token.",
+      retryable: false,
+      httpStatus: 403,
+    });
+  }
+
+  return challenge;
+}
+
 function buildOuraApiError(
   code: string,
   message: string,
@@ -126,6 +226,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   const reconcileDays = Math.max(1, config.reconcileDays ?? DEFAULT_RECONCILE_DAYS);
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const webhookTimestampToleranceMs = Math.max(1_000, config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS);
 
   async function postTokenRequest(parameters: Record<string, string>): Promise<OuraTokenResponse> {
     return postOAuthTokenRequest<OuraTokenResponse>({
@@ -421,6 +522,90 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       }
 
       return tokens;
+    },
+    webhookPath: OURA_WEBHOOK_PATH,
+    async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
+      const signature = normalizeString(context.headers.get("x-oura-signature"));
+      const timestamp = normalizeString(context.headers.get("x-oura-timestamp"));
+
+      if (!signature || !timestamp) {
+        throw deviceSyncError({
+          code: "OURA_WEBHOOK_SIGNATURE_MISSING",
+          message: "Oura webhook is missing required signature headers.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const timestampMs = parseTimestampMillis(timestamp);
+
+      if (timestampMs !== null && Math.abs(Date.parse(context.now) - timestampMs) > webhookTimestampToleranceMs) {
+        throw deviceSyncError({
+          code: "OURA_WEBHOOK_TIMESTAMP_INVALID",
+          message: "Oura webhook timestamp is outside the allowed tolerance window.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const expectedSignatures = buildOuraSignatureCandidates(timestamp, context.rawBody, config.clientSecret);
+
+      if (!constantTimeMatchSignature(expectedSignatures, signature)) {
+        throw deviceSyncError({
+          code: "OURA_WEBHOOK_SIGNATURE_INVALID",
+          message: "Oura webhook signature verification failed.",
+          retryable: false,
+          httpStatus: 401,
+        });
+      }
+
+      const payload = parseOuraWebhookPayload(context.rawBody);
+      const externalAccountId = normalizeIdentifier(payload.user_id ?? payload.userId);
+      const eventType = normalizeString(payload.event_type ?? payload.eventType);
+      const dataType = normalizeString(payload.data_type ?? payload.dataType);
+      const objectId = normalizeIdentifier(payload.object_id ?? payload.objectId ?? payload.id);
+      const occurredAt = normalizeString(payload.timestamp) ?? context.now;
+
+      if (!externalAccountId || !eventType || !dataType || !objectId) {
+        throw deviceSyncError({
+          code: "OURA_WEBHOOK_PAYLOAD_INVALID",
+          message: "Oura webhook payload did not include user_id, event_type, data_type, and object_id.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const traceId =
+        normalizeString(payload.trace_id ?? payload.traceId ?? payload.event_id ?? payload.eventId) ??
+        sha256Text(`${timestamp}:${externalAccountId}:${eventType}:${dataType}:${objectId}`);
+
+      return {
+        externalAccountId,
+        eventType,
+        traceId,
+        occurredAt,
+        payload: {
+          ...payload,
+          eventType,
+          dataType,
+          objectId,
+        },
+        jobs: [
+          {
+            kind: "reconcile",
+            priority: 90,
+            dedupeKey: `oura-webhook:${traceId}`,
+            payload: {
+              windowStart: subtractDays(context.now, Math.min(7, reconcileDays)),
+              windowEnd: context.now,
+              includePersonalInfo: false,
+              sourceEventType: eventType,
+              dataType,
+              objectId,
+            },
+          },
+        ],
+      };
     },
     createScheduledJobs(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult {
       return buildScheduledReconcileJobs({

@@ -128,7 +128,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
     importer,
   });
 
-  const begin = service.startConnection({
+  const begin = await service.startConnection({
     provider: "demo",
     returnTo: "/settings/devices",
   });
@@ -176,7 +176,7 @@ test("device sync service accepts configured external return origins and still r
   });
 
   try {
-    const begin = service.startConnection({
+    const begin = await service.startConnection({
       provider: "demo",
       returnTo: "http://127.0.0.1:3000/devices",
     });
@@ -189,7 +189,7 @@ test("device sync service accepts configured external return origins and still r
 
     assert.equal(connected.returnTo, "http://127.0.0.1:3000/devices");
 
-    assert.throws(
+    await assert.rejects(
       () =>
         service.startConnection({
           provider: "demo",
@@ -224,7 +224,7 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
     importer,
   });
 
-  const begin = service.startConnection({
+  const begin = await service.startConnection({
     provider: "demo",
   });
   const connected = await service.handleOAuthCallback({
@@ -286,7 +286,7 @@ test("device sync service records granted callback scopes and describes polling-
   assert.equal(descriptor.webhookPath, null);
   assert.equal(descriptor.webhookUrl, null);
 
-  const begin = service.startConnection({
+  const begin = await service.startConnection({
     provider: "polling",
   });
   const connected = await service.handleOAuthCallback({
@@ -352,7 +352,7 @@ test("manual reconcile queues every scheduled job and store claims only one job 
     ],
   });
 
-  const begin = service.startConnection({
+  const begin = await service.startConnection({
     provider: "demo",
   });
   const connected = await service.handleOAuthCallback({

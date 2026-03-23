@@ -186,8 +186,8 @@ export class DeviceSyncService {
     }
   }
 
-  startConnection(input: StartConnectionInput): BeginConnectionResult {
-    return this.publicIngress.startConnection(input);
+  async startConnection(input: StartConnectionInput): Promise<BeginConnectionResult> {
+    return await this.publicIngress.startConnection(input);
   }
 
   async handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult> {

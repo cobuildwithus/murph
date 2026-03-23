@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DeviceConnectionStatus {
+  active
+  reauthorization_required
+  disconnected
+}
+
+model DeviceConnection {
+  id                   String                 @id
+  userId               String                 @map("user_id")
+  provider             String
+  externalAccountId    String                 @map("external_account_id")
+  displayName          String?                @map("display_name")
+  status               DeviceConnectionStatus @default(active)
+  scopes               String[]               @default([])
+  accessTokenExpiresAt DateTime?              @map("access_token_expires_at")
+  metadataJson         Json                   @map("metadata_json")
+  connectedAt          DateTime               @map("connected_at")
+  lastWebhookAt        DateTime?              @map("last_webhook_at")
+  lastSyncStartedAt    DateTime?              @map("last_sync_started_at")
+  lastSyncCompletedAt  DateTime?              @map("last_sync_completed_at")
+  lastSyncErrorAt      DateTime?              @map("last_sync_error_at")
+  lastErrorCode        String?                @map("last_error_code")
+  lastErrorMessage     String?                @map("last_error_message")
+  nextReconcileAt      DateTime?              @map("next_reconcile_at")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  secret               DeviceConnectionSecret?
+  signals              DeviceSyncSignal[]
+
+  @@unique([provider, externalAccountId])
+  @@index([userId, provider])
+  @@map("device_connection")
+}
+
+model DeviceConnectionSecret {
+  connectionId          String   @id @map("connection_id")
+  accessTokenEncrypted  String   @map("access_token_encrypted")
+  refreshTokenEncrypted String?  @map("refresh_token_encrypted")
+  tokenVersion          Int      @default(1) @map("token_version")
+  keyVersion            String   @map("key_version")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  connection            DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@map("device_connection_secret")
+}
+
+model DeviceOauthSession {
+  state        String   @id
+  userId       String?  @map("user_id")
+  provider     String
+  returnTo     String?  @map("return_to")
+  metadataJson Json     @map("metadata_json")
+  createdAt    DateTime @map("created_at")
+  expiresAt    DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@index([userId, provider])
+  @@map("device_oauth_session")
+}
+
+model DeviceWebhookTrace {
+  provider          String
+  traceId           String   @map("trace_id")
+  externalAccountId String   @map("external_account_id")
+  eventType         String   @map("event_type")
+  receivedAt        DateTime @map("received_at")
+  payloadJson       Json?    @map("payload_json")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@id([provider, traceId])
+  @@index([provider, externalAccountId])
+  @@index([receivedAt])
+  @@map("device_webhook_trace")
+}
+
+model DeviceSyncSignal {
+  id           Int               @id @default(autoincrement())
+  userId       String            @map("user_id")
+  connectionId String?           @map("connection_id")
+  provider     String
+  kind         String
+  payloadJson  Json?             @map("payload_json")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  connection   DeviceConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, id])
+  @@index([connectionId])
+  @@map("device_sync_signal")
+}
+
+model DeviceAgentSession {
+  id         String   @id
+  userId     String   @map("user_id")
+  label      String?
+  tokenHash  String   @unique @map("token_hash")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  lastSeenAt DateTime? @map("last_seen_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  @@index([userId])
+  @@index([revokedAt])
+  @@map("device_agent_session")
+}
