@@ -1,6 +1,8 @@
 export { createSecretCodec } from "./crypto.js";
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.js";
 export { createDeviceSyncRegistry } from "./registry.js";
+export { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.js";
+export type { CreateDeviceSyncPublicIngressInput } from "./public-ingress.js";
 export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService } from "./service.js";
 export type { CreateDeviceSyncServiceInput } from "./service.js";
 export { loadDeviceSyncEnvironment, createConsoleDeviceSyncLogger } from "./config.js";

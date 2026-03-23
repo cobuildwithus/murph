@@ -6,6 +6,8 @@ Healthy Bob's CLI can install, start, reuse, and stop this daemon for the select
 
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
+The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook verification/dispatch. That shared ingress is the seam for a future hosted Vercel control plane while keeping the current local/tunneled callback flow alive.
+
 What it does:
 - serves a provider-agnostic local control plane for CLI and web auth flows
 - owns OAuth connection state
@@ -18,6 +20,21 @@ What it does:
 Current providers:
 - WHOOP
 - Oura
+
+## Shared public ingress
+
+Use `DeviceSyncPublicIngress` when you need the same callback/webhook logic in a different HTTP surface:
+- local `device-syncd` with an exposed public listener or tunnel
+- a future hosted Next.js/Vercel control plane that stores durable integration state in Postgres
+
+The shared ingress owns:
+- provider connect URL creation
+- OAuth state validation
+- OAuth callback completion
+- provider webhook verification/parsing
+- webhook dedupe and account lookup hooks
+
+It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Healthy Bob vault.
 
 ## Provider model
 

@@ -2,18 +2,15 @@ import { createImporters } from "@healthybob/importers";
 
 import { createSecretCodec } from "./crypto.js";
 import { deviceSyncError, isDeviceSyncError } from "./errors.js";
+import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.js";
 import { createDeviceSyncRegistry } from "./registry.js";
 import {
   addMilliseconds,
   computeRetryDelayMs,
   defaultStateDatabasePath,
   generatePrefixedId,
-  generateStateCode,
-  joinUrl,
   normalizeOriginList,
   normalizePublicBaseUrl,
-  normalizeString,
-  resolveRelativeOrAllowedOriginUrl,
   sha256Text,
   stringifyJson,
   toIsoTimestamp,
@@ -58,11 +55,11 @@ export class DeviceSyncService {
   readonly allowedReturnOrigins: string[];
   readonly store: SqliteDeviceSyncStore;
   readonly registry: DeviceSyncRegistry;
+  readonly publicIngress: DeviceSyncPublicIngress;
 
   private readonly logger: DeviceSyncLogger;
   private readonly importer: DeviceSyncImporterPort;
   private readonly codec: ReturnType<typeof createSecretCodec>;
-  private readonly sessionTtlMs: number;
   private readonly workerLeaseMs: number;
   private readonly workerPollMs: number;
   private readonly workerBatchSize: number;
@@ -81,7 +78,6 @@ export class DeviceSyncService {
     this.registry = input.registry ?? createDeviceSyncRegistry(input.providers ?? []);
     this.importer = input.importer ?? createDefaultImporterPort();
     this.logger = input.config.log ?? console;
-    this.sessionTtlMs = Math.max(60_000, input.config.sessionTtlMs ?? 15 * 60_000);
     this.workerLeaseMs = Math.max(60_000, input.config.workerLeaseMs ?? 5 * 60_000);
     this.workerPollMs = Math.max(1_000, input.config.workerPollMs ?? 5_000);
     this.workerBatchSize = Math.max(1, input.config.workerBatchSize ?? 4);
@@ -91,25 +87,54 @@ export class DeviceSyncService {
       input.store ?? new SqliteDeviceSyncStore(input.config.stateDatabasePath ?? defaultStateDatabasePath(this.vaultRoot));
     this.ownsStore = !input.store;
     this.codec = createSecretCodec(input.secret);
+    this.publicIngress = createDeviceSyncPublicIngress({
+      publicBaseUrl: this.publicBaseUrl,
+      allowedReturnOrigins: this.allowedReturnOrigins,
+      registry: this.registry,
+      sessionTtlMs: input.config.sessionTtlMs,
+      store: {
+        deleteExpiredOAuthStates: (now) => this.store.deleteExpiredOAuthStates(now),
+        createOAuthState: (record) => this.store.createOAuthState(record),
+        consumeOAuthState: (state, now) => this.store.consumeOAuthState(state, now),
+        upsertConnection: (record) =>
+          this.toPublicAccount(
+            this.store.upsertAccount({
+              provider: record.provider,
+              externalAccountId: record.externalAccountId,
+              displayName: record.displayName ?? null,
+              status: record.status,
+              scopes: record.scopes,
+              tokens: this.encryptTokens(record.tokens),
+              metadata: record.metadata,
+              connectedAt: record.connectedAt,
+              nextReconcileAt: record.nextReconcileAt ?? null,
+            }),
+          ),
+        getConnectionByExternalAccount: (provider, externalAccountId) => {
+          const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
+          return account ? this.toPublicAccount(account) : null;
+        },
+        recordWebhookTraceIfNew: (record) => this.store.recordWebhookTraceIfNew(record),
+        markWebhookReceived: (accountId, now) => this.store.markWebhookReceived(accountId, now),
+      },
+      hooks: {
+        onConnectionEstablished: async ({ account, connection }) => {
+          this.enqueueJobs(account, connection.initialJobs ?? []);
+        },
+        onWebhookAccepted: async ({ account, webhook }) => {
+          this.enqueueJobs(account, webhook.jobs);
+        },
+      },
+      log: this.logger,
+    });
   }
 
   describeProviders(): PublicProviderDescriptor[] {
-    return this.registry.list().map((provider) => this.describeProvider(provider));
+    return this.publicIngress.describeProviders();
   }
 
   describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor {
-    const provider = typeof providerName === "string" ? this.requireProvider(providerName) : providerName;
-    const webhookPath = provider.webhookPath ?? null;
-
-    return {
-      provider: provider.provider,
-      callbackPath: provider.callbackPath,
-      callbackUrl: joinUrl(this.publicBaseUrl, provider.callbackPath),
-      webhookPath,
-      webhookUrl: webhookPath ? joinUrl(this.publicBaseUrl, webhookPath) : null,
-      supportsWebhooks: Boolean(webhookPath && provider.verifyAndParseWebhook),
-      defaultScopes: [...provider.defaultScopes],
-    };
+    return this.publicIngress.describeProvider(providerName);
   }
 
   summarize(): DeviceSyncServiceSummary {
@@ -162,218 +187,15 @@ export class DeviceSyncService {
   }
 
   startConnection(input: StartConnectionInput): BeginConnectionResult {
-    const now = toIsoTimestamp(new Date());
-    const provider = this.requireProvider(input.provider);
-    const descriptor = this.describeProvider(provider);
-    const returnTo = this.resolveReturnTo(input.returnTo ?? null);
-    const state = generateStateCode();
-    const expiresAt = addMilliseconds(now, this.sessionTtlMs);
-
-    this.store.deleteExpiredOAuthStates(now);
-    this.store.createOAuthState({
-      state,
-      provider: provider.provider,
-      returnTo,
-      createdAt: now,
-      expiresAt,
-      metadata: {},
-    });
-
-    return {
-      provider: provider.provider,
-      state,
-      expiresAt,
-      authorizationUrl: provider.buildConnectUrl({
-        state,
-        callbackUrl: descriptor.callbackUrl,
-        scopes: provider.defaultScopes,
-        now,
-      }),
-    };
+    return this.publicIngress.startConnection(input);
   }
 
   async handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult> {
-    const provider = this.requireProvider(input.provider);
-    const now = toIsoTimestamp(new Date());
-    const descriptor = this.describeProvider(provider);
-    const state = normalizeString(input.state);
-
-    if (!state) {
-      throw deviceSyncError({
-        code: "OAUTH_STATE_MISSING",
-        message: "OAuth callback is missing the state parameter.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    const stateRecord = this.store.consumeOAuthState(state, now);
-
-    if (!stateRecord) {
-      throw deviceSyncError({
-        code: "OAUTH_STATE_INVALID",
-        message: "OAuth state is invalid or expired.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    if (stateRecord.provider !== provider.provider) {
-      throw deviceSyncError({
-        code: "OAUTH_PROVIDER_MISMATCH",
-        message: `OAuth state belongs to provider ${stateRecord.provider}, not ${provider.provider}.`,
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    const callbackError = normalizeString(input.error);
-
-    if (callbackError) {
-      throw deviceSyncError({
-        code: "OAUTH_CALLBACK_REJECTED",
-        message: normalizeString(input.errorDescription) ?? `OAuth authorization failed: ${callbackError}`,
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    const code = normalizeString(input.code);
-
-    if (!code) {
-      throw deviceSyncError({
-        code: "OAUTH_CODE_MISSING",
-        message: "OAuth callback is missing the authorization code.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    const grantedScopes = normalizeString(input.scope)
-      ? input.scope!
-        .split(/\s+/u)
-        .map((scope) => scope.trim())
-        .filter(Boolean)
-      : [];
-
-    const connection = await provider.exchangeAuthorizationCode(
-      {
-        callbackUrl: descriptor.callbackUrl,
-        now,
-        grantedScopes,
-      },
-      code,
-    );
-
-    const account = this.store.upsertAccount({
-      provider: provider.provider,
-      externalAccountId: connection.externalAccountId,
-      displayName: connection.displayName ?? null,
-      scopes: connection.scopes?.length
-        ? [...connection.scopes]
-        : grantedScopes.length > 0
-          ? [...grantedScopes]
-          : [...provider.defaultScopes],
-      tokens: this.encryptTokens(connection.tokens),
-      metadata: connection.metadata ?? {},
-      connectedAt: now,
-      nextReconcileAt: connection.nextReconcileAt ?? null,
-    });
-
-    this.enqueueJobs(account, connection.initialJobs ?? []);
-
-    return {
-      account: this.toPublicAccount(account),
-      returnTo: stateRecord.returnTo ?? null,
-    };
+    return this.publicIngress.handleOAuthCallback(input);
   }
 
   async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
-    const provider = this.requireProvider(providerName);
-
-    if (!provider.webhookPath || !provider.verifyAndParseWebhook) {
-      throw deviceSyncError({
-        code: "WEBHOOKS_NOT_SUPPORTED",
-        message: `Device sync provider ${provider.provider} does not accept webhooks.`,
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    const now = toIsoTimestamp(new Date());
-    const parsed = await provider.verifyAndParseWebhook({
-      headers,
-      rawBody,
-      now,
-    });
-
-    if (parsed.traceId) {
-      const inserted = this.store.recordWebhookTraceIfNew({
-        provider: provider.provider,
-        traceId: parsed.traceId,
-        externalAccountId: parsed.externalAccountId,
-        eventType: parsed.eventType,
-        receivedAt: parsed.occurredAt ?? now,
-        payload: parsed.payload,
-      });
-
-      if (!inserted) {
-        return {
-          accepted: true,
-          duplicate: true,
-          provider: provider.provider,
-          eventType: parsed.eventType,
-          traceId: parsed.traceId,
-        };
-      }
-    }
-
-    const account = this.store.getAccountByExternalAccount(provider.provider, parsed.externalAccountId);
-
-    if (!account) {
-      this.logger.warn?.("Ignoring webhook for unknown device sync account.", {
-        provider: provider.provider,
-        externalAccountId: parsed.externalAccountId,
-        eventType: parsed.eventType,
-      });
-
-      return {
-        accepted: true,
-        duplicate: false,
-        provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-      };
-    }
-
-    this.store.markWebhookReceived(account.id, parsed.occurredAt ?? now);
-
-    if (account.status !== "active") {
-      this.logger.warn?.("Ignoring webhook job enqueue for non-active device sync account.", {
-        provider: provider.provider,
-        accountId: account.id,
-        status: account.status,
-        eventType: parsed.eventType,
-      });
-
-      return {
-        accepted: true,
-        duplicate: false,
-        provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-      };
-    }
-
-    this.enqueueJobs(account, parsed.jobs);
-
-    return {
-      accepted: true,
-      duplicate: false,
-      provider: provider.provider,
-      eventType: parsed.eventType,
-      traceId: parsed.traceId,
-    };
+    return this.publicIngress.handleWebhook(providerName, headers, rawBody);
   }
 
   queueManualReconcile(accountId: string): QueueManualReconcileResult {
@@ -642,25 +464,6 @@ export class DeviceSyncService {
     return account;
   }
 
-  private resolveReturnTo(candidate: string | null): string | null {
-    const resolved = resolveRelativeOrAllowedOriginUrl(
-      candidate,
-      this.publicBaseUrl,
-      this.allowedReturnOrigins,
-    );
-
-    if (candidate && !resolved) {
-      throw deviceSyncError({
-        code: "RETURN_TO_INVALID",
-        message: "returnTo must be a relative path or an allowed origin URL.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    return resolved;
-  }
-
   private toPublicAccount(account: StoredDeviceSyncAccount): PublicDeviceSyncAccount {
     const { accessTokenEncrypted: _accessTokenEncrypted, refreshTokenEncrypted: _refreshTokenEncrypted, ...publicAccount } =
       account;
@@ -685,7 +488,10 @@ export class DeviceSyncService {
     };
   }
 
-  private enqueueJobs(account: StoredDeviceSyncAccount, jobs: readonly DeviceSyncJobInput[]): DeviceSyncJobRecord[] {
+  private enqueueJobs(
+    account: Pick<PublicDeviceSyncAccount, "id" | "provider">,
+    jobs: readonly DeviceSyncJobInput[],
+  ): DeviceSyncJobRecord[] {
     return jobs.map((job) =>
       this.store.enqueueJob({
         provider: account.provider,

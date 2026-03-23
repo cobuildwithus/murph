@@ -89,6 +89,37 @@ export interface ProviderAuthTokens {
   accessTokenExpiresAt?: string;
 }
 
+export interface UpsertPublicDeviceSyncConnectionInput {
+  provider: string;
+  externalAccountId: string;
+  displayName?: string | null;
+  status?: DeviceSyncAccountStatus;
+  scopes?: string[];
+  tokens: ProviderAuthTokens;
+  metadata?: Record<string, unknown>;
+  connectedAt: string;
+  nextReconcileAt?: string | null;
+}
+
+export interface DeviceSyncWebhookTraceRecord {
+  provider: string;
+  traceId: string;
+  externalAccountId: string;
+  eventType: string;
+  receivedAt: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface DeviceSyncPublicIngressStore {
+  deleteExpiredOAuthStates(now: string): number;
+  createOAuthState(input: OAuthStateRecord): OAuthStateRecord;
+  consumeOAuthState(state: string, now: string): OAuthStateRecord | null;
+  upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount;
+  getConnectionByExternalAccount(provider: string, externalAccountId: string): PublicDeviceSyncAccount | null;
+  recordWebhookTraceIfNew(input: DeviceSyncWebhookTraceRecord): boolean;
+  markWebhookReceived(accountId: string, now: string): void;
+}
+
 export interface DeviceSyncJobInput {
   kind: string;
   payload?: Record<string, unknown>;
@@ -149,6 +180,33 @@ export interface ProviderWebhookResult {
   occurredAt?: string;
   payload?: Record<string, unknown>;
   jobs: DeviceSyncJobInput[];
+}
+
+export interface DeviceSyncPublicIngressConnectionEstablishedInput {
+  account: PublicDeviceSyncAccount;
+  connection: ProviderConnectionResult;
+  provider: DeviceSyncProvider;
+  now: string;
+}
+
+export interface DeviceSyncPublicIngressWebhookAcceptedInput {
+  account: PublicDeviceSyncAccount;
+  webhook: ProviderWebhookResult;
+  provider: DeviceSyncProvider;
+  now: string;
+}
+
+export interface DeviceSyncPublicIngressUnknownWebhookInput {
+  provider: DeviceSyncProvider;
+  webhook: ProviderWebhookResult;
+  externalAccountId: string;
+  now: string;
+}
+
+export interface DeviceSyncPublicIngressHooks {
+  onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
+  onWebhookAccepted?(input: DeviceSyncPublicIngressWebhookAcceptedInput): void | Promise<void>;
+  onUnknownWebhook?(input: DeviceSyncPublicIngressUnknownWebhookInput): void | Promise<void>;
 }
 
 export interface ProviderScheduleResult {
