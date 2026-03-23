@@ -1,4 +1,7 @@
+import { readFile } from 'node:fs/promises'
 import { Cli, z } from 'incur'
+import { assistantAutomationStateSchema } from './assistant-cli-contracts.js'
+import { resolveAssistantStatePaths } from './assistant/store/paths.js'
 import {
   type SetupAssistantPreset,
   type SetupChannel,
@@ -114,7 +117,9 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         commandName,
         initialAssistantPreset:
           context.options.assistantPreset ?? getDefaultSetupAssistantPreset(),
-        initialChannels: getDefaultSetupWizardChannels(),
+        initialChannels: await resolveInitialSetupWizardChannels(
+          context.options.vault,
+        ),
         initialWearables: getDefaultSetupWizardWearables(),
         vault: context.options.vault,
         wearableStatuses: buildSetupWizardWearableStatuses(currentEnv),
@@ -260,6 +265,34 @@ export function listSetupPendingWearables(
 
 export function formatSetupWearableLabel(wearable: SetupWearable): string {
   return wearable === 'oura' ? 'Oura' : 'WHOOP'
+}
+
+export async function resolveInitialSetupWizardChannels(
+  vault: string,
+): Promise<SetupChannel[]> {
+  const automationPath = resolveAssistantStatePaths(vault).automationPath
+
+  try {
+    const raw = await readFile(automationPath, 'utf8')
+    const state = assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    const savedChannels = setupChannelValues.filter((channel) =>
+      state.autoReplyChannels.includes(channel),
+    )
+    return savedChannels.length > 0
+      ? savedChannels
+      : getDefaultSetupWizardChannels()
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return getDefaultSetupWizardChannels()
+    }
+
+    throw error
+  }
 }
 
 function buildSetupCtaCommands(result: SetupResult): Array<{

@@ -19,11 +19,15 @@ import {
   listSetupPendingWearables,
   listSetupReadyWearables,
   resolveSetupPostLaunchAction,
+  resolveInitialSetupWizardChannels,
   shouldAutoLaunchAssistantAfterSetup,
   shouldRunSetupWizard,
   type SuccessfulSetupContext,
 } from '../src/setup-cli.js'
-import { readAssistantAutomationState } from '../src/assistant-state.js'
+import {
+  readAssistantAutomationState,
+  saveAssistantAutomationState,
+} from '../src/assistant-state.js'
 import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
 import { createSetupServices } from '../src/setup-services.js'
 import {
@@ -732,7 +736,9 @@ test('setup wizard gating only enables interactive human onboarding runs', () =>
 })
 
 test('onboard invokes the wizard for interactive runs and skips it for explicit JSON output', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
   let wizardCalls = 0
+  const wizardInitialChannels: Array<string[]> = []
   const receivedChannels: Array<string[] | null> = []
   const receivedWearables: Array<string[] | null> = []
   const cli = createSetupCli({
@@ -753,8 +759,9 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
       },
     } as ReturnType<typeof createSetupServices>,
     wizard: {
-      async run() {
+      async run(input: any) {
         wizardCalls += 1
+        wizardInitialChannels.push([...input.initialChannels])
         return {
           channels: ['imessage'],
           wearables: [],
@@ -763,25 +770,51 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
     },
   })
 
-  await cli.serve(['onboard', '--format', 'json', '--verbose'], {
-    env: process.env,
-    exit: () => {},
-    stdout() {},
+  try {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'json', '--verbose'], {
+      env: process.env,
+      exit: () => {},
+      stdout() {},
+    })
+
+    assert.equal(wizardCalls, 0)
+    assert.deepEqual(receivedChannels[0], null)
+    assert.deepEqual(receivedWearables[0], null)
+
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+      env: process.env,
+      exit: () => {},
+      stdout() {},
+    })
+
+    assert.equal(wizardCalls, 1)
+    assert.deepEqual(wizardInitialChannels, [['imessage']])
+    assert.deepEqual(receivedChannels[1], ['imessage'])
+    assert.deepEqual(receivedWearables[1], [])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('resolveInitialSetupWizardChannels reuses saved email auto-reply channels', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
+  const initialState = await readAssistantAutomationState(vaultRoot)
+
+  await saveAssistantAutomationState(vaultRoot, {
+    ...initialState,
+    autoReplyChannels: ['email'],
+    autoReplyPrimed: false,
+    updatedAt: '2026-03-24T00:00:00.000Z',
   })
 
-  assert.equal(wizardCalls, 0)
-  assert.deepEqual(receivedChannels[0], null)
-  assert.deepEqual(receivedWearables[0], null)
-
-  await cli.serve(['onboard', '--verbose'], {
-    env: process.env,
-    exit: () => {},
-    stdout() {},
-  })
-
-  assert.equal(wizardCalls, 1)
-  assert.deepEqual(receivedChannels[1], ['imessage'])
-  assert.deepEqual(receivedWearables[1], [])
+  try {
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot),
+      ['email'],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('runtime env helpers honor channel aliases and require explicit wearable client credentials', () => {
@@ -827,6 +860,7 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
 })
 
 test('interactive onboarding prompts for missing channel and wearable credentials and passes them into setup', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
   const promptedInputs: Array<{
     channels: string[]
     env: NodeJS.ProcessEnv
@@ -887,7 +921,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
   })
 
   try {
-    await cli.serve(['onboard', '--verbose'], {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
       env: process.env,
       exit: () => {},
       stdout() {},
@@ -915,6 +949,8 @@ test('interactive onboarding prompts for missing channel and wearable credential
     assert.equal(process.env.HEALTHYBOB_OURA_CLIENT_ID, 'oura-client')
     assert.equal(process.env.HEALTHYBOB_OURA_CLIENT_SECRET, 'oura-secret')
   } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+
     if (previousEnv.HEALTHYBOB_AGENTMAIL_API_KEY === undefined) {
       delete process.env.HEALTHYBOB_AGENTMAIL_API_KEY
     } else {
