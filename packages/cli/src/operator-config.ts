@@ -71,6 +71,7 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'profile',
   'provider',
   'regimen',
+  'run',
   'samples',
   'search',
   'show',

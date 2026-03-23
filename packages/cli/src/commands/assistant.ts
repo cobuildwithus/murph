@@ -266,6 +266,186 @@ function createAssistantChatCommandDefinition(input?: {
   }
 }
 
+const assistantRunOptionsSchema = withBaseOptions({
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional model id for canonical inbox triage routing, such as gpt-oss:20b or an AI Gateway model string. Omit it when you only want channel auto-reply.',
+    ),
+  baseUrl: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional OpenAI-compatible base URL for the inbox routing model.'),
+  apiKey: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional explicit API key for the OpenAI-compatible routing endpoint.'),
+  apiKeyEnv: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional environment variable name that stores the routing API key.'),
+  providerName: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional stable provider label for the routing endpoint.'),
+  headersJson: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional JSON object of extra HTTP headers for the routing endpoint.'),
+  scanIntervalMs: z
+    .number()
+    .int()
+    .positive()
+    .max(60000)
+    .default(5000)
+    .describe('Polling interval between inbox scans when running continuously.'),
+  maxPerScan: z
+    .number()
+    .int()
+    .positive()
+    .max(200)
+    .default(50)
+    .describe('Maximum inbox captures to inspect during each assistant scan.'),
+  allowSelfAuthored: z
+    .boolean()
+    .optional()
+    .describe(
+      'Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Healthy Bob.',
+    ),
+  sessionRolloverHours: z
+    .number()
+    .int()
+    .positive()
+    .max(24 * 30)
+    .optional()
+    .describe(
+      'Optional maximum age for a reused assistant session in hours before Healthy Bob starts a new one for the same channel thread.',
+    ),
+  once: z
+    .boolean()
+    .optional()
+    .describe('Run one assistant scan and then exit.'),
+  skipDaemon: z
+    .boolean()
+    .optional()
+    .describe('Do not start the inbox foreground daemon; only run the assistant scan loop.'),
+})
+
+function createAssistantRunCommandDefinition(
+  inboxServices: InboxCliServices,
+  vaultServices?: VaultCliServices,
+  input?: {
+    description?: string
+    hint?: string
+  },
+) {
+  return {
+    args: emptyArgsSchema,
+    description:
+      input?.description ??
+      'Start the local assistant automation loop that watches the inbox runtime, runs due assistant cron jobs, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
+    hint:
+      input?.hint ??
+      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and assistant cron schedules fire while this loop is active.',
+    examples: [
+      {
+        options: {
+          vault: './vault',
+          model: 'gpt-oss:20b',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+        },
+        description: 'Run the always-on inbox assistant against a local Ollama model.',
+      },
+      {
+        options: {
+          vault: './vault',
+          model: 'gpt-oss:20b',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          once: true,
+          skipDaemon: true,
+        },
+        description: 'Run a single inbox scan without starting the foreground daemon.',
+      },
+      {
+        options: {
+          vault: './vault',
+          allowSelfAuthored: true,
+          sessionRolloverHours: 48,
+        },
+        description: 'Run dedicated iMessage self-chat mode with two-day session rollover.',
+      },
+    ],
+    options: assistantRunOptionsSchema,
+    output: assistantRunResultSchema,
+    async run(context: { options: z.infer<typeof assistantRunOptionsSchema> }) {
+      return runAssistantAutomation({
+        inboxServices,
+        vaultServices,
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
+        modelSpec: context.options.model
+          ? {
+              model: context.options.model,
+              baseUrl: context.options.baseUrl,
+              apiKey: context.options.apiKey,
+              apiKeyEnv: context.options.apiKeyEnv,
+              providerName: context.options.providerName,
+              headers: parseHeadersJsonOption(context.options.headersJson),
+            }
+          : undefined,
+        scanIntervalMs: context.options.scanIntervalMs,
+        maxPerScan: context.options.maxPerScan,
+        allowSelfAuthored: context.options.allowSelfAuthored,
+        sessionMaxAgeMs:
+          typeof context.options.sessionRolloverHours === 'number'
+            ? context.options.sessionRolloverHours * 60 * 60 * 1000
+            : null,
+        once: context.options.once,
+        startDaemon: context.options.skipDaemon ? false : true,
+        onEvent(event) {
+          if (event.type === 'scan.started') {
+            console.error(`[assistant] scanning canonical inbox routing: ${event.details ?? ''}`)
+            return
+          }
+
+          if (event.type === 'reply.scan.started') {
+            console.error(`[assistant] scanning channel auto-reply: ${event.details ?? ''}`)
+            return
+          }
+
+          if (event.type === 'reply.scan.primed') {
+            console.error(`[assistant] primed channel auto-reply: ${event.details ?? ''}`)
+            return
+          }
+
+          if (event.type === 'capture.routed') {
+            console.error(
+              `[assistant] routed ${event.captureId}: ${(event.tools ?? []).join(', ')}`,
+            )
+            return
+          }
+
+          if (event.type === 'capture.replied') {
+            console.error(`[assistant] replied ${event.captureId}: ${event.details ?? ''}`)
+            return
+          }
+
+          console.error(
+            `[assistant] ${event.type.replace(/^(capture|reply\.scan)\./u, '')} ${event.captureId ?? ''}: ${event.details ?? ''}`.trim(),
+          )
+        },
+      })
+    },
+  }
+}
+
 export function registerAssistantCommands(
   cli: Cli.Cli,
   inboxServices: InboxCliServices,
@@ -452,172 +632,10 @@ export function registerAssistantCommands(
     },
   })
 
-  assistant.command('run', {
-    args: emptyArgsSchema,
-    description:
-      'Start the local assistant automation loop that watches the inbox runtime, runs due assistant cron jobs, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
-    hint:
-      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and assistant cron schedules fire while this loop is active.',
-    examples: [
-      {
-        options: {
-          vault: './vault',
-          model: 'gpt-oss:20b',
-          baseUrl: 'http://127.0.0.1:11434/v1',
-        },
-        description: 'Run the always-on inbox assistant against a local Ollama model.',
-      },
-      {
-        options: {
-          vault: './vault',
-          model: 'gpt-oss:20b',
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          once: true,
-          skipDaemon: true,
-        },
-        description: 'Run a single inbox scan without starting the foreground daemon.',
-      },
-      {
-        options: {
-          vault: './vault',
-          allowSelfAuthored: true,
-          sessionRolloverHours: 48,
-        },
-        description: 'Run dedicated iMessage self-chat mode with two-day session rollover.',
-      },
-    ],
-    options: withBaseOptions({
-      model: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          'Optional model id for canonical inbox triage routing, such as gpt-oss:20b or an AI Gateway model string. Omit it when you only want channel auto-reply.',
-        ),
-      baseUrl: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional OpenAI-compatible base URL for the inbox routing model.'),
-      apiKey: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional explicit API key for the OpenAI-compatible routing endpoint.'),
-      apiKeyEnv: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional environment variable name that stores the routing API key.'),
-      providerName: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional stable provider label for the routing endpoint.'),
-      headersJson: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional JSON object of extra HTTP headers for the routing endpoint.'),
-      scanIntervalMs: z
-        .number()
-        .int()
-        .positive()
-        .max(60000)
-        .default(5000)
-        .describe('Polling interval between inbox scans when running continuously.'),
-      maxPerScan: z
-        .number()
-        .int()
-        .positive()
-        .max(200)
-        .default(50)
-        .describe('Maximum inbox captures to inspect during each assistant scan.'),
-      allowSelfAuthored: z
-        .boolean()
-        .optional()
-        .describe(
-          'Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Healthy Bob.',
-        ),
-      sessionRolloverHours: z
-        .number()
-        .int()
-        .positive()
-        .max(24 * 30)
-        .optional()
-        .describe(
-          'Optional maximum age for a reused assistant session in hours before Healthy Bob starts a new one for the same channel thread.',
-        ),
-      once: z
-        .boolean()
-        .optional()
-        .describe('Run one assistant scan and then exit.'),
-      skipDaemon: z
-        .boolean()
-        .optional()
-        .describe('Do not start the inbox foreground daemon; only run the assistant scan loop.'),
-    }),
-    output: assistantRunResultSchema,
-    async run(context) {
-      return runAssistantAutomation({
-        inboxServices,
-        vaultServices,
-        vault: context.options.vault,
-        requestId: requestIdFromOptions(context.options),
-        modelSpec: context.options.model
-          ? {
-              model: context.options.model,
-              baseUrl: context.options.baseUrl,
-              apiKey: context.options.apiKey,
-              apiKeyEnv: context.options.apiKeyEnv,
-              providerName: context.options.providerName,
-              headers: parseHeadersJsonOption(context.options.headersJson),
-            }
-          : undefined,
-        scanIntervalMs: context.options.scanIntervalMs,
-        maxPerScan: context.options.maxPerScan,
-        allowSelfAuthored: context.options.allowSelfAuthored,
-        sessionMaxAgeMs:
-          typeof context.options.sessionRolloverHours === 'number'
-            ? context.options.sessionRolloverHours * 60 * 60 * 1000
-            : null,
-        once: context.options.once,
-        startDaemon: context.options.skipDaemon ? false : true,
-        onEvent(event) {
-          if (event.type === 'scan.started') {
-            console.error(`[assistant] scanning canonical inbox routing: ${event.details ?? ''}`)
-            return
-          }
-
-          if (event.type === 'reply.scan.started') {
-            console.error(`[assistant] scanning channel auto-reply: ${event.details ?? ''}`)
-            return
-          }
-
-          if (event.type === 'reply.scan.primed') {
-            console.error(`[assistant] primed channel auto-reply: ${event.details ?? ''}`)
-            return
-          }
-
-          if (event.type === 'capture.routed') {
-            console.error(
-              `[assistant] routed ${event.captureId}: ${(event.tools ?? []).join(', ')}`,
-            )
-            return
-          }
-
-          if (event.type === 'capture.replied') {
-            console.error(`[assistant] replied ${event.captureId}: ${event.details ?? ''}`)
-            return
-          }
-
-          console.error(
-            `[assistant] ${event.type.replace(/^(capture|reply\.scan)\./u, '')} ${event.captureId ?? ''}: ${event.details ?? ''}`.trim(),
-          )
-        },
-      })
-    },
-  })
+  assistant.command(
+    'run',
+    createAssistantRunCommandDefinition(inboxServices, vaultServices),
+  )
 
   const memory = Cli.create('memory', {
     description:
@@ -1152,6 +1170,15 @@ export function registerAssistantCommands(
         'Open the same assistant chat UI as `assistant chat` directly from the CLI root.',
       hint:
         'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+    }),
+  )
+  cli.command(
+    'run',
+    createAssistantRunCommandDefinition(inboxServices, vaultServices, {
+      description:
+        'Start the same assistant automation loop as `assistant run` directly from the CLI root.',
+      hint:
+        'Shorthand for `assistant run`. This starts the always-on automation loop, so it may watch inbox state, auto-reply over configured channels, and keep the terminal attached until you stop it.',
     }),
   )
 }

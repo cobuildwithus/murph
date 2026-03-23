@@ -239,7 +239,7 @@ export const vaultCliCommandDescriptors = [
   {
     id: 'assistant',
     bindingMode: 'indirect',
-    rootCommandNames: ['assistant', 'chat'],
+    rootCommandNames: ['assistant', 'chat', 'run'],
     register({ cli, services, inboxServices }) {
       registerAssistantCommands(cli, inboxServices, services)
     },

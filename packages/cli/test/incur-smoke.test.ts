@@ -174,6 +174,24 @@ test('root chat alias keeps the same command schema as assistant chat', async ()
   assert.deepEqual(rootSchema.options, assistantSchema.options)
 })
 
+test('root run alias keeps the same command schema as assistant run', async () => {
+  const rootSchema = JSON.parse(
+    await runRawCli(['run', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+  const assistantSchema = JSON.parse(
+    await runRawCli(['assistant', 'run', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+
+  assert.deepEqual(rootSchema.args, assistantSchema.args)
+  assert.deepEqual(rootSchema.options, assistantSchema.options)
+})
+
 test('assistant cron add schema exposes the scheduler-specific options', async () => {
   const schema = JSON.parse(
     await runRawCli(['assistant', 'cron', 'add', '--schema', '--format', 'json']),

@@ -135,6 +135,7 @@ declare module 'incur' {
       'regimen show': { args: { id: string }; options: { vault: string; requestId: string } }
       'regimen stop': { args: { regimenId: string }; options: { vault: string; requestId: string; stoppedOn: string } }
       'regimen upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; allowSelfAuthored: boolean; sessionRolloverHours: number; once: boolean; skipDaemon: boolean } }
       'samples add': { args: {}; options: { vault: string; requestId: string; input: string } }
       'samples batch list': { args: {}; options: { vault: string; requestId: string; stream: string; from: string; to: string; limit: number } }
       'samples batch show': { args: { id: string }; options: { vault: string; requestId: string } }

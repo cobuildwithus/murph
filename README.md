@@ -20,7 +20,7 @@ pnpm onboard --vault ./vault
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
-After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout, and installed shims can use `healthybob chat` or `vault-cli chat`.
+After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout, and installed shims can use `healthybob chat` or `vault-cli chat`. For the always-on automation loop, installed shims can now also use `healthybob run` or `vault-cli run`.
 
 Device sync is also packaged as part of the overall Healthy Bob release. The normal operator path is:
 
@@ -302,6 +302,7 @@ The repo also includes local-first inbox parser controls:
 The repo also includes a Healthy Bob-native assistant layer:
 
 - `vault-cli chat [prompt]` is a root-level shorthand for `vault-cli assistant chat [prompt]`
+- `vault-cli run` is a root-level shorthand for `vault-cli assistant run`
 - `vault-cli assistant ask <prompt>` sends one local assistant turn through the selected provider adapter, stores session metadata plus local transcript entries outside the canonical vault, and can optionally deliver the generated reply back over a mapped channel; local chat can target either Codex CLI or an OpenAI-compatible endpoint with `--provider`, `--model`, `--baseUrl`, `--apiKeyEnv`, and `--providerName`
 - `vault-cli assistant chat [prompt]` opens an Ink terminal chat UI with `/exit` and `/session` helpers and shares the same saved assistant backend defaults plus per-invocation provider overrides as `assistant ask`
 - `vault-cli assistant deliver <message>` sends one outbound assistant message over the mapped channel without invoking the chat provider

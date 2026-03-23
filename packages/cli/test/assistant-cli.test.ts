@@ -562,9 +562,18 @@ test('root chat alias participates in default-vault injection', () => {
     '--vault',
     '/tmp/default-vault',
   ])
+  assert.deepEqual(applyDefaultVaultToArgs(['run'], '/tmp/default-vault'), [
+    'run',
+    '--vault',
+    '/tmp/default-vault',
+  ])
   assert.deepEqual(
     applyDefaultVaultToArgs(['chat', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
     ['chat', '--vault', '/tmp/explicit-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['run', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
+    ['run', '--vault', '/tmp/explicit-vault'],
   )
 })
 
