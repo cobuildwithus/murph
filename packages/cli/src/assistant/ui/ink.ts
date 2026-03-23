@@ -1273,7 +1273,6 @@ const ChatStatus = React.memo(function ChatStatus(
     return createElement(
       ChromePanel,
       {
-        backgroundColor: theme.switcherBackground,
         marginBottom: 1,
       },
       createElement(
