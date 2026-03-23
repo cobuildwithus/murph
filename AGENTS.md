@@ -19,16 +19,19 @@ If instructions still conflict after applying this order, ask the user before ac
 1. `agent-docs/index.md`
 2. `ARCHITECTURE.md`
 3. `agent-docs/PRODUCT_SENSE.md`
-4. `agent-docs/RELIABILITY.md`
-5. `agent-docs/SECURITY.md`
-6. `agent-docs/references/repo-scope.md`
-7. `agent-docs/references/testing-ci-map.md`
-8. `agent-docs/operations/verification-and-runtime.md`
-9. `agent-docs/operations/completion-workflow.md`
+4. `agent-docs/FRONTEND.md`
+5. `agent-docs/RELIABILITY.md`
+6. `agent-docs/SECURITY.md`
+7. `agent-docs/references/repo-scope.md`
+8. `agent-docs/references/testing-ci-map.md`
+9. `agent-docs/operations/verification-and-runtime.md`
+10. `agent-docs/operations/completion-workflow.md`
+11. `packages/web/AGENTS.md`
 
 ## Hard Rules (Non-Negotiable)
 
 - Always use Tailwind CSS utility classes in the web package (`packages/web`). No raw CSS — do not add custom classes to `globals.css` or create new `.css` files. All styling must be expressed as Tailwind utilities in JSX `className` props. The theme (colors, fonts, shadows, animations) is defined via `@theme` in `globals.css`.
+- For `packages/web` UI work, treat the app as an operator-facing observability surface by default: utility copy first, workspace/status hierarchy first, and no marketing-style hero treatment unless the user explicitly asks for it.
 - Treat `.env` and `.env*` files as sensitive inputs. Healthy Bob's CLI may load local `.env.local` and `.env` files at runtime for operator configuration, but agents must never print, commit, or otherwise expose their contents.
 - Never print or commit full secrets, tokens, raw credentials, or full `Authorization` headers.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
@@ -37,6 +40,7 @@ If instructions still conflict after applying this order, ask the user before ac
 - Any spawned subagent that may review or edit code must read `COORDINATION_LEDGER.md`, follow the same hard gate before making code changes, and honor any explicit exclusive/refactor notes on overlapping rows.
 - For non-doc changes that touch production code or tests, run completion workflow audit passes: `simplify` -> `test-coverage-audit` -> `task-finish-review`.
 - Docs/process-only changes skip completion workflow audit passes unless the user explicitly asks to run them.
+- For UI-affecting `packages/web` changes, inspect the rendered result at desktop and mobile sizes before handoff.
 - Until product/runtime tooling exists, do not invent fake compatibility or deployment requirements; define them in `agent-docs/operations/verification-and-runtime.md` and `package.json` in the same change that introduces them.
 - Keep this file short and route-oriented; move durable detail into `agent-docs/`.
 
