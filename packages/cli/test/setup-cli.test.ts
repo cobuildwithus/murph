@@ -78,6 +78,10 @@ function buildExpectedCliShimScript(cliBinPath: string): string {
 set -euo pipefail
 
 run_supervised() {
+  if [[ -t 0 && -t 2 ]]; then
+    exec "$@"
+  fi
+
   "$@" &
   child_pid=$!
 
