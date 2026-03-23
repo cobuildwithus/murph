@@ -234,20 +234,20 @@ test('health list help preserves command-family option shapes', async () => {
   const eventHelp = await runRawCli(['event', 'list', '--help'])
   const documentHelp = await runRawCli(['document', 'list', '--help'])
 
-  assert.match(providerHelp, /--status/u)
-  assert.doesNotMatch(providerHelp, /--from/u)
-  assert.doesNotMatch(providerHelp, /--to/u)
+  assert.match(providerHelp, /^\s+--status\b/mu)
+  assert.doesNotMatch(providerHelp, /^\s+--from\b/mu)
+  assert.doesNotMatch(providerHelp, /^\s+--to\b/mu)
 
-  assert.match(eventHelp, /--kind/u)
-  assert.match(eventHelp, /--from/u)
-  assert.match(eventHelp, /--to/u)
-  assert.match(eventHelp, /--tag/u)
-  assert.match(eventHelp, /--experiment/u)
+  assert.match(eventHelp, /^\s+--kind\b/mu)
+  assert.match(eventHelp, /^\s+--from\b/mu)
+  assert.match(eventHelp, /^\s+--to\b/mu)
+  assert.match(eventHelp, /^\s+--tag\b/mu)
+  assert.match(eventHelp, /^\s+--experiment\b/mu)
 
-  assert.match(documentHelp, /--from/u)
-  assert.match(documentHelp, /--to/u)
-  assert.doesNotMatch(documentHelp, /--status/u)
-  assert.doesNotMatch(documentHelp, /--limit/u)
+  assert.match(documentHelp, /^\s+--from\b/mu)
+  assert.match(documentHelp, /^\s+--to\b/mu)
+  assert.doesNotMatch(documentHelp, /^\s+--status\b/mu)
+  assert.doesNotMatch(documentHelp, /^\s+--limit\b/mu)
 })
 
 test('command schema reflects only domain-specific options', async () => {
