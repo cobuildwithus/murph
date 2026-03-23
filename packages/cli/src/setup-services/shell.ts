@@ -267,7 +267,14 @@ ${HEALTHYBOB_PATH_BLOCK_END}
 
 function buildCliShimScript(cliBinPath: string): string {
   const cliSourceBinPath = resolveRepoCliSourceBinPath(cliBinPath)
+  const cliPackageRoot = path.resolve(path.dirname(cliBinPath), '..')
   const repoRoot = resolveRepoRootFromCliBinPath(cliBinPath)
+  const cliRequiredDistPaths = [
+    cliBinPath,
+    path.join(cliPackageRoot, 'dist', 'index.js'),
+    path.join(cliPackageRoot, 'dist', 'vault-cli-contracts.js'),
+    path.join(cliPackageRoot, 'dist', 'inbox-cli-contracts.js'),
+  ]
   const workspacePackageNames = [
     'contracts',
     'core',
@@ -285,6 +292,13 @@ function buildCliShimScript(cliBinPath: string): string {
       return `  if [ ! -f ${quoteShellArgument(packageDistIndexPath)} ]; then
     missing_packages+=(${quoteShellArgument(packageRoot)})
   fi`
+    })
+    .join('\n')
+  const cliDistCheckLines = cliRequiredDistPaths
+    .map((requiredPath) => {
+      return `if [ ! -f ${quoteShellArgument(requiredPath)} ]; then
+  cli_dist_ready=false
+fi`
     })
     .join('\n')
 
@@ -334,22 +348,32 @@ run_supervised() {
   return "$exit_code"
 }
 
-if [ -f ${quoteShellArgument(cliBinPath)} ]; then
-  missing_packages=()
+missing_packages=()
+cli_dist_ready=true
+${cliDistCheckLines}
+
+if [ "$cli_dist_ready" != true ]; then
+  missing_packages+=(${quoteShellArgument(cliPackageRoot)})
+fi
+
 ${workspaceCheckLines}
 
-  if [ "\${#missing_packages[@]}" -gt 0 ]; then
-    if command -v pnpm >/dev/null 2>&1; then
-      for package_dir in "\${missing_packages[@]}"; do
-        pnpm --dir "$package_dir" build >/dev/null
-      done
-    elif command -v corepack >/dev/null 2>&1; then
-      for package_dir in "\${missing_packages[@]}"; do
-        corepack pnpm --dir "$package_dir" build >/dev/null
-      done
-    fi
+if [ "\${#missing_packages[@]}" -gt 0 ]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    for package_dir in "\${missing_packages[@]}"; do
+      pnpm --dir "$package_dir" build >/dev/null
+    done
+  elif command -v corepack >/dev/null 2>&1; then
+    for package_dir in "\${missing_packages[@]}"; do
+      corepack pnpm --dir "$package_dir" build >/dev/null
+    done
   fi
+fi
 
+cli_dist_ready=true
+${cliDistCheckLines}
+
+if [ "$cli_dist_ready" = true ]; then
   run_supervised node ${quoteShellArgument(cliBinPath)} "$@"
   exit $?
 fi

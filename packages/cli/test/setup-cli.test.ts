@@ -53,7 +53,14 @@ async function writeExecutable(
 
 function buildExpectedCliShimScript(cliBinPath: string): string {
   const cliSourceBinPath = path.resolve(path.dirname(cliBinPath), '..', 'src', 'bin.ts')
+  const cliPackageRoot = path.resolve(path.dirname(cliBinPath), '..')
   const repoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
+  const cliRequiredDistPaths = [
+    cliBinPath,
+    path.join(cliPackageRoot, 'dist', 'index.js'),
+    path.join(cliPackageRoot, 'dist', 'vault-cli-contracts.js'),
+    path.join(cliPackageRoot, 'dist', 'inbox-cli-contracts.js'),
+  ]
   const workspacePackageNames = [
     'contracts',
     'core',
@@ -71,6 +78,13 @@ function buildExpectedCliShimScript(cliBinPath: string): string {
       return `  if [ ! -f '${packageDistIndexPath}' ]; then
     missing_packages+=('${packageRoot}')
   fi`
+    })
+    .join('\n')
+  const cliDistCheckLines = cliRequiredDistPaths
+    .map((requiredPath) => {
+      return `if [ ! -f '${requiredPath}' ]; then
+  cli_dist_ready=false
+fi`
     })
     .join('\n')
 
@@ -120,22 +134,32 @@ run_supervised() {
   return "$exit_code"
 }
 
-if [ -f '${cliBinPath}' ]; then
-  missing_packages=()
+missing_packages=()
+cli_dist_ready=true
+${cliDistCheckLines}
+
+if [ "$cli_dist_ready" != true ]; then
+  missing_packages+=('${cliPackageRoot}')
+fi
+
 ${workspaceCheckLines}
 
-  if [ "\${#missing_packages[@]}" -gt 0 ]; then
-    if command -v pnpm >/dev/null 2>&1; then
-      for package_dir in "\${missing_packages[@]}"; do
-        pnpm --dir "$package_dir" build >/dev/null
-      done
-    elif command -v corepack >/dev/null 2>&1; then
-      for package_dir in "\${missing_packages[@]}"; do
-        corepack pnpm --dir "$package_dir" build >/dev/null
-      done
-    fi
+if [ "\${#missing_packages[@]}" -gt 0 ]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    for package_dir in "\${missing_packages[@]}"; do
+      pnpm --dir "$package_dir" build >/dev/null
+    done
+  elif command -v corepack >/dev/null 2>&1; then
+    for package_dir in "\${missing_packages[@]}"; do
+      corepack pnpm --dir "$package_dir" build >/dev/null
+    done
   fi
+fi
 
+cli_dist_ready=true
+${cliDistCheckLines}
+
+if [ "$cli_dist_ready" = true ]; then
   run_supervised node '${cliBinPath}' "$@"
   exit $?
 fi
@@ -1846,6 +1870,18 @@ test.sequential('CLI shim rebuilds missing workspace package dist outputs before
       )
     }
 
+    await writeFile(path.join(repoRoot, 'packages', 'cli', 'dist', 'index.js'), 'export {}\n', 'utf8')
+    await writeFile(
+      path.join(repoRoot, 'packages', 'cli', 'dist', 'vault-cli-contracts.js'),
+      'export {}\n',
+      'utf8',
+    )
+    await writeFile(
+      path.join(repoRoot, 'packages', 'cli', 'dist', 'inbox-cli-contracts.js'),
+      'export {}\n',
+      'utf8',
+    )
+
     await writeFile(
       cliBinPath,
       `import fs from 'node:fs'
@@ -1886,6 +1922,83 @@ exit 1
   }
 })
 
+test.sequential('CLI shim rebuilds missing cli dist artifacts before launching the built CLI', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-cli-repair-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
+  const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliBinPath = path.join(cliDistRoot, 'bin.js')
+  const shimPath = path.join(tempRoot, 'healthybob')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+  const rebuiltMarkerPath = path.join(tempRoot, 'cli-rebuilt.txt')
+
+  try {
+    await mkdir(cliDistRoot, { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeFile(
+      path.join(cliDistRoot, 'index.js'),
+      `import './vault-cli-contracts.js'
+console.log('built-ok')
+`,
+      'utf8',
+    )
+    await writeFile(cliBinPath, `import './index.js'\n`, 'utf8')
+    await writeFile(path.join(cliDistRoot, 'inbox-cli-contracts.js'), 'export {}\n', 'utf8')
+
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'pnpm'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
+  mkdir -p "$2/dist"
+  if [ "$2" = ${JSON.stringify(cliPackageRoot)} ]; then
+    printf '%s\\n' 'export {}' > "$2/dist/vault-cli-contracts.js"
+    printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
+  else
+    printf '%s\\n' 'export {}' > "$2/dist/index.js"
+  fi
+  exit 0
+fi
+exit 1
+`,
+    )
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+
+    const result = await execFileAsync(shimPath, [], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      },
+    })
+
+    assert.equal(result.stdout.trim(), 'built-ok')
+    assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
+    await readFile(path.join(cliDistRoot, 'vault-cli-contracts.js'), 'utf8')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('CLI shim force-stops a stubborn built child after SIGINT', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-sigint-'))
   const repoRoot = path.join(tempRoot, 'repo')
@@ -1916,6 +2029,18 @@ test.sequential('CLI shim force-stops a stubborn built child after SIGINT', asyn
       await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
       await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
     }
+
+    await writeFile(path.join(repoRoot, 'packages', 'cli', 'dist', 'index.js'), 'export {}\n', 'utf8')
+    await writeFile(
+      path.join(repoRoot, 'packages', 'cli', 'dist', 'vault-cli-contracts.js'),
+      'export {}\n',
+      'utf8',
+    )
+    await writeFile(
+      path.join(repoRoot, 'packages', 'cli', 'dist', 'inbox-cli-contracts.js'),
+      'export {}\n',
+      'utf8',
+    )
 
     await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
     await writeExecutable(
