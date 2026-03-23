@@ -2174,19 +2174,28 @@ export function createIntegratedInboxCliServices(
       tryKillProcess(killProcess, state.pid, 'SIGCONT')
       tryKillProcess(killProcess, state.pid, 'SIGTERM')
 
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        await sleep(100)
-        const nextState = await normalizeDaemonState(
-          paths,
-          {
-            clock,
-            getPid,
-            killProcess: dependencies.killProcess,
-          },
-        )
-        if (!nextState.running) {
-          return nextState
-        }
+      const stoppedGracefully = await waitForDaemonStop(paths, {
+        clock,
+        getPid,
+        killProcess: dependencies.killProcess,
+        sleep,
+      })
+      if (stoppedGracefully) {
+        return stoppedGracefully
+      }
+
+      // Some live assistant loops trap SIGTERM but never unwind their event
+      // loop. Escalate once so the state can recover instead of timing out.
+      tryKillProcess(killProcess, state.pid, 'SIGKILL')
+      const stoppedForcefully = await waitForDaemonStop(paths, {
+        attempts: 10,
+        clock,
+        getPid,
+        killProcess: dependencies.killProcess,
+        sleep,
+      })
+      if (stoppedForcefully) {
+        return stoppedForcefully
       }
 
       throw new VaultCliError(
@@ -2685,6 +2694,33 @@ function tryKillProcess(
 
     throw error
   }
+}
+
+async function waitForDaemonStop(
+  paths: InboxPaths,
+  input: {
+    attempts?: number
+    clock: () => Date
+    getPid: () => number
+    killProcess?: (pid: number, signal?: NodeJS.Signals | number) => void
+    sleep: (ms: number) => Promise<void>
+  },
+): Promise<InboxDaemonState | null> {
+  const attempts = input.attempts ?? 50
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await input.sleep(100)
+    const nextState = await normalizeDaemonState(paths, {
+      clock: input.clock,
+      getPid: input.getPid,
+      killProcess: input.killProcess,
+    })
+    if (!nextState.running) {
+      return nextState
+    }
+  }
+
+  return null
 }
 
 function unsupportedPromotion(target: 'journal' | 'experiment-note'): VaultCliError {

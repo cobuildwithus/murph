@@ -1847,7 +1847,87 @@ test.sequential('stop reports not-running and timeout edge cases', async () => {
     assert.deepEqual(sentSignals.filter((signal) => signal !== 0), [
       'SIGCONT',
       'SIGTERM',
+      'SIGKILL',
     ])
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('stop force-kills a stubborn live daemon and returns stale state', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-stop-kill')
+  const paths = inboxPaths(fixture.vaultRoot)
+  const signals: Array<NodeJS.Signals | number | undefined> = []
+  let killed = false
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPid: () => 9999,
+    getPlatform: () => 'darwin',
+    killProcess(_pid, signal) {
+      signals.push(signal)
+      if (signal === 'SIGKILL') {
+        killed = true
+        return
+      }
+      if (signal === 0 && !killed) {
+        return
+      }
+      if (signal === 0) {
+        const error = new Error('missing process') as Error & { code?: string }
+        error.code = 'ESRCH'
+        throw error
+      }
+      if (signal === 'SIGCONT' || signal === 'SIGTERM') {
+        return
+      }
+    },
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    sleep: async () => {},
+  })
+
+  try {
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    await writeFile(
+      paths.inboxStatePath,
+      `${JSON.stringify(
+        {
+          running: true,
+          stale: false,
+          pid: 8787,
+          startedAt: '2026-03-13T09:00:00.000Z',
+          stoppedAt: null,
+          status: 'running',
+          connectorIds: ['imessage:self'],
+          statePath: '.runtime/inboxd/state.json',
+          configPath: '.runtime/inboxd/config.json',
+          databasePath: '.runtime/inboxd.sqlite',
+          message: null,
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    )
+
+    const stopped = await services.stop({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    assert.deepEqual(signals.filter((signal) => signal !== 0), [
+      'SIGCONT',
+      'SIGTERM',
+      'SIGKILL',
+    ])
+    assert.equal(stopped.running, false)
+    assert.equal(stopped.stale, true)
+    assert.equal(stopped.status, 'stale')
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })
