@@ -70,6 +70,7 @@ test('configureSetupChannels enables Telegram auto-reply only after the doctor p
     assert.equal(configured[0]?.channel, 'telegram')
     assert.equal(configured[0]?.configured, false)
     assert.equal(configured[0]?.autoReply, false)
+    assert.deepEqual(configured[0]?.missingEnv, [])
     assert.deepEqual(doctorCalls, ['telegram:bot'])
 
     const automationState = await readAssistantAutomationState(vault)
@@ -141,6 +142,7 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
     assert.equal(configured[0]?.channel, 'telegram')
     assert.equal(configured[0]?.configured, true)
     assert.equal(configured[0]?.autoReply, true)
+    assert.deepEqual(configured[0]?.missingEnv, [])
 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
@@ -226,6 +228,7 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
     assert.equal(configured[0]?.configured, true)
     assert.equal(configured[0]?.autoReply, true)
     assert.equal(configured[0]?.connectorId, 'email:agentmail')
+    assert.deepEqual(configured[0]?.missingEnv, [])
     assert.match(configured[0]?.detail ?? '', /healthybob@example\.test/u)
 
     const automationState = await readAssistantAutomationState(vault)
@@ -312,6 +315,7 @@ test('configureSetupChannels keeps email configured but disables auto-reply when
     assert.equal(configured[0]?.configured, false)
     assert.equal(configured[0]?.autoReply, false)
     assert.equal(configured[0]?.connectorId, 'email:agentmail')
+    assert.deepEqual(configured[0]?.missingEnv, [])
     assert.match(configured[0]?.detail ?? '', /401 unauthorized/u)
 
     const automationState = await readAssistantAutomationState(vault)

@@ -16,7 +16,7 @@ pnpm onboard --vault ./vault
 ./scripts/setup-macos.sh --vault ./vault
 ```
 
-`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. That wizard now starts by saving a default assistant backend such as Codex CLI, Codex OSS/local model, or an OpenAI-compatible endpoint before it moves to the channel picker. iMessage is enabled by default there, Telegram can be enabled through the same channel surface, and if at least one selected channel is fully configured the command will drop into `assistant run` so new inbound messages can create or continue an assistant conversation automatically.
+`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. That wizard now uses a compact assistant/channel/wearable stepper: it saves a default assistant backend such as Codex CLI, Codex OSS/local model, or an OpenAI-compatible endpoint, shows inline readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP, can prompt for missing runtime credentials for the current onboarding run only, and can open ready wearable connect flows before the assistant handoff continues. iMessage remains enabled by default there, Telegram and email can be enabled from the same surface, optional Oura/WHOOP connect handoff can be selected at the same time, and if at least one selected auto-reply channel is fully configured the command will drop into `assistant run` after any ready wearable connect flows open in the browser.
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
@@ -379,12 +379,14 @@ That setup entrypoint is intentionally separate from the main `vault-cli` manife
 - download a local whisper.cpp model into `~/.healthybob/toolchain/models/whisper/`
 - install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon unless you pass `--skipOcr`
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
-- open an interactive onboarding wizard that first saves the default assistant backend and then lets channel delivery surfaces be selected with arrow keys plus Space
+- open an interactive onboarding wizard that steps through assistant defaults, message channels, optional wearable connect targets, and a final review with compact inline summaries instead of one long text wall
 - offer Codex CLI, Codex OSS/local-model, OpenAI-compatible endpoint, or skip-for-now assistant presets during that wizard, with provider-specific follow-up prompts such as model ids, base URLs, and API-key environment variable names
-- enable iMessage by default in that wizard and let Telegram opt into the same onboarding flow when a bot token is available in the shell environment
+- show readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP directly inside that wizard, including current-run-only prompts for missing runtime credentials when you want to continue without restarting setup
+- enable iMessage by default in that wizard, let Telegram and AgentMail email opt into the same onboarding flow, and let Oura/WHOOP be selected for immediate post-setup connect handoff when their client credentials are available
 - save that vault as the default Healthy Bob CLI vault for future commands on the same machine
 - install user-level `healthybob` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
-- configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled, and do the same for Telegram when a bot token is present in the shell environment
+- configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled, and do the same for Telegram or AgentMail email when their runtime credentials are available in the current environment
+- open selected Oura or WHOOP browser connect flows automatically after setup when their client credentials are ready, while clearly reporting any selected wearable that still needs env vars before connect can begin
 - automatically launch `assistant run` after a successful interactive onboarding when at least one selected channel is fully configured for auto-reply, or `assistant chat` when no auto-reply channel is ready yet
 
 Common options:
@@ -408,7 +410,7 @@ pnpm onboard --vault ./vault
 
 That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js onboard ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
-Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, stores the selected assistant backend defaults for later `healthybob chat` and channel auto-reply, and a normal interactive `healthybob onboard` or `healthybob setup` run now asks for the assistant backend before it opens the channel picker and then drops into the right assistant surface when provisioning finishes. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
+Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, stores the selected assistant backend defaults for later `healthybob chat` and channel auto-reply, and a normal interactive `healthybob onboard` or `healthybob setup` run now walks through assistant defaults, message channels, optional Oura/WHOOP connect targets, inline readiness badges, and any current-run runtime-env prompts before it drops into the right assistant surface. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
 
 ## Local Inbox Parser Bootstrap
 

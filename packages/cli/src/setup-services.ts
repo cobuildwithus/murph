@@ -26,6 +26,7 @@ import {
   type SetupStepKind,
   type SetupStepResult,
   type SetupTools,
+  type SetupWearable,
   type WhisperModel,
 } from './setup-cli-contracts.js'
 import type { InboxBootstrapResult } from './inbox-cli-contracts.js'
@@ -63,16 +64,19 @@ import {
   ensurePaddleXOcr,
   ensureWhisperModel,
 } from './setup-services/toolchain.js'
+import { describeSelectedSetupWearables } from './setup-runtime-env.js'
 
 interface SetupInput {
   vault: string
   assistant?: SetupConfiguredAssistant | null
   channels?: readonly SetupChannel[] | null
+  envOverrides?: NodeJS.ProcessEnv
   requestId?: string | null
   dryRun?: boolean
   rebuild?: boolean
   strict?: boolean
   toolchainRoot?: string
+  wearables?: readonly SetupWearable[] | null
   whisperModel?: WhisperModel
   skipOcr?: boolean
 }
@@ -142,6 +146,10 @@ export function createSetupServices(
     )
     const notes: string[] = []
     const steps: SetupStepResult[] = []
+    const effectiveEnv = {
+      ...getBaseEnv(),
+      ...(input.envOverrides ?? {}),
+    }
 
     log(
       `Healthy Bob setup targeting ${redactHomePathInText(vault, homeDirectory)} on macOS (${arch}).`,
@@ -150,7 +158,7 @@ export function createSetupServices(
     let state = await ensureHomebrew({
       arch,
       dryRun,
-      env: getBaseEnv(),
+      env: effectiveEnv,
       log,
       runCommand,
       steps,
@@ -382,6 +390,13 @@ export function createSetupServices(
             steps,
             vault,
           })
+    const wearables =
+      input.wearables == null
+        ? []
+        : describeSelectedSetupWearables({
+            env: state.env,
+            wearables: input.wearables,
+          })
 
     return {
       arch,
@@ -400,6 +415,10 @@ export function createSetupServices(
         ...channel,
         connectorId: channel.connectorId,
         detail: redactHomePathInText(channel.detail, homeDirectory),
+      })),
+      wearables: wearables.map((wearable) => ({
+        ...wearable,
+        detail: redactHomePathInText(wearable.detail, homeDirectory),
       })),
       dryRun,
       notes: notes.map((note) => redactHomePathInText(note, homeDirectory)),

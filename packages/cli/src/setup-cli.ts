@@ -3,9 +3,13 @@ import {
   type SetupAssistantPreset,
   type SetupChannel,
   type SetupCommandOptions,
+  type SetupConfiguredWearable,
   type SetupResult,
+  type SetupWearable,
+  setupChannelValues,
   setupCommandOptionsSchema,
   setupResultSchema,
+  setupWearableValues,
 } from './setup-cli-contracts.js'
 import {
   createSetupAssistantResolver,
@@ -15,12 +19,22 @@ import {
   type SetupAssistantResolver,
 } from './setup-assistant.js'
 import {
+  applySetupRuntimeEnvOverridesToProcess,
+  createSetupRuntimeEnvResolver,
+  describeSetupChannelStatus,
+  describeSetupWearableStatus,
+  SETUP_RUNTIME_ENV_NOTICE,
+  type SetupRuntimeEnvResolver,
+  type SetupWizardRuntimeStatus,
+} from './setup-runtime-env.js'
+import {
   createSetupServices,
   detectSetupProgramName,
   isSetupInvocation,
 } from './setup-services.js'
 import {
   getDefaultSetupWizardChannels,
+  getDefaultSetupWizardWearables,
   runSetupWizard,
   type SetupWizardResult,
 } from './setup-wizard.js'
@@ -34,10 +48,13 @@ export interface SuccessfulSetupContext {
 
 export interface SetupWizardRunner {
   run(input: {
+    channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
     commandName: string
     initialAssistantPreset?: SetupAssistantPreset
     initialChannels: readonly SetupChannel[]
+    initialWearables: readonly SetupWearable[]
     vault: string
+    wearableStatuses?: Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
   }): Promise<SetupWizardResult>
 }
 
@@ -45,6 +62,7 @@ export interface SetupCliOptions {
   assistantSetup?: SetupAssistantResolver
   commandName?: string
   onSetupSuccess?: ((context: SuccessfulSetupContext) => void | Promise<void>) | undefined
+  runtimeEnv?: SetupRuntimeEnvResolver
   services?: ReturnType<typeof createSetupServices>
   terminal?: {
     stderrIsTTY: boolean
@@ -60,6 +78,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   const services = options.services ?? createSetupServices()
   const assistantSetup =
     options.assistantSetup ?? createSetupAssistantResolver()
+  const runtimeEnv = options.runtimeEnv ?? createSetupRuntimeEnvResolver()
   const terminal =
     options.terminal ??
     ({
@@ -84,22 +103,36 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     )
 
     let selectedChannels: SetupChannel[] | null = null
+    let selectedWearables: SetupWearable[] | null = null
     let selectedAssistantPreset: SetupAssistantPreset | null = null
+    let envOverrides: NodeJS.ProcessEnv | undefined
 
     if (interactiveWizard) {
+      const currentEnv = runtimeEnv.getCurrentEnv()
       const wizardResult = await wizard.run({
+        channelStatuses: buildSetupWizardChannelStatuses(currentEnv),
         commandName,
         initialAssistantPreset:
           context.options.assistantPreset ?? getDefaultSetupAssistantPreset(),
         initialChannels: getDefaultSetupWizardChannels(),
+        initialWearables: getDefaultSetupWizardWearables(),
         vault: context.options.vault,
+        wearableStatuses: buildSetupWizardWearableStatuses(currentEnv),
       })
 
       selectedChannels = wizardResult.channels
+      selectedWearables = wizardResult.wearables
       selectedAssistantPreset =
         wizardResult.assistantPreset ??
         context.options.assistantPreset ??
         null
+
+      envOverrides = await runtimeEnv.promptForMissing({
+        channels: selectedChannels,
+        env: currentEnv,
+        wearables: selectedWearables,
+      })
+      applySetupRuntimeEnvOverridesToProcess(envOverrides)
     } else if (hasExplicitSetupAssistantOptions(context.options)) {
       selectedAssistantPreset = inferSetupAssistantPresetFromOptions(context.options)
     }
@@ -118,12 +151,14 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       assistant: selectedAssistant,
       channels: selectedChannels,
       dryRun: context.options.dryRun,
+      envOverrides,
       rebuild: context.options.rebuild,
       requestId: context.options.requestId ?? null,
       skipOcr: context.options.skipOcr,
       strict: context.options.strict,
       toolchainRoot: context.options.toolchainRoot,
       vault: context.options.vault,
+      wearables: selectedWearables,
       whisperModel: context.options.whisperModel,
     })
 
@@ -209,6 +244,24 @@ export function shouldAutoLaunchAssistantAfterSetup(
   return resolveSetupPostLaunchAction(context, terminal) !== null
 }
 
+export function listSetupReadyWearables(result: SetupResult): SetupWearable[] {
+  return result.wearables
+    .filter((wearable) => wearable.enabled && wearable.ready)
+    .map((wearable) => wearable.wearable)
+}
+
+export function listSetupPendingWearables(
+  result: SetupResult,
+): SetupConfiguredWearable[] {
+  return result.wearables.filter(
+    (wearable) => wearable.enabled && (!wearable.ready || wearable.missingEnv.length > 0),
+  )
+}
+
+export function formatSetupWearableLabel(wearable: SetupWearable): string {
+  return wearable === 'oura' ? 'Oura' : 'WHOOP'
+}
+
 function buildSetupCtaCommands(result: SetupResult): Array<{
   command: string
   description: string
@@ -261,7 +314,55 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     })
   }
 
+  for (const wearable of listSetupReadyWearables(result)) {
+    commands.push({
+      command: `device connect ${wearable} --open`,
+      description: `Open the ${formatSetupWearableLabel(wearable)} OAuth connect flow in your browser.`,
+    })
+  }
+
+  for (const key of collectSetupMissingEnvKeys(result)) {
+    commands.push({
+      command: `export ${key}=...`,
+      description: `Set this in the current environment before retrying the related setup step. ${SETUP_RUNTIME_ENV_NOTICE}`,
+    })
+  }
+
   return commands
+}
+
+function collectSetupMissingEnvKeys(result: SetupResult): string[] {
+  const keys = new Set<string>()
+
+  for (const channel of result.channels) {
+    for (const key of channel.missingEnv) {
+      keys.add(key)
+    }
+  }
+
+  for (const wearable of result.wearables) {
+    for (const key of wearable.missingEnv) {
+      keys.add(key)
+    }
+  }
+
+  return [...keys].sort()
+}
+
+function buildSetupWizardChannelStatuses(
+  env: NodeJS.ProcessEnv,
+): Partial<Record<SetupChannel, SetupWizardRuntimeStatus>> {
+  return Object.fromEntries(
+    setupChannelValues.map((channel) => [channel, describeSetupChannelStatus(channel, env)]),
+  ) as Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
+}
+
+function buildSetupWizardWearableStatuses(
+  env: NodeJS.ProcessEnv,
+): Partial<Record<SetupWearable, SetupWizardRuntimeStatus>> {
+  return Object.fromEntries(
+    setupWearableValues.map((wearable) => [wearable, describeSetupWearableStatus(wearable, env)]),
+  ) as Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
 }
 
 function registerSetupCommand(

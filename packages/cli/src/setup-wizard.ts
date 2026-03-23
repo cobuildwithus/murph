@@ -1,23 +1,33 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
-import { VaultCliError } from './vault-cli-errors.js'
+import { getDefaultSetupAssistantPreset as getDefaultAssistantPreset } from './setup-assistant.js'
 import {
   type SetupAssistantPreset,
   type SetupChannel,
+  type SetupWearable,
   setupChannelValues,
+  setupWearableValues,
 } from './setup-cli-contracts.js'
-import { getDefaultSetupAssistantPreset } from './setup-assistant.js'
+import {
+  SETUP_RUNTIME_ENV_NOTICE,
+  type SetupWizardRuntimeStatus,
+} from './setup-runtime-env.js'
+import { VaultCliError } from './vault-cli-errors.js'
 
 export interface SetupWizardResult {
   assistantPreset?: SetupAssistantPreset
   channels: SetupChannel[]
+  wearables: SetupWearable[]
 }
 
 export interface SetupWizardInput {
+  channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
   commandName?: string
   initialAssistantPreset?: SetupAssistantPreset
   initialChannels?: readonly SetupChannel[]
+  initialWearables?: readonly SetupWearable[]
   vault: string
+  wearableStatuses?: Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
 }
 
 interface SetupWizardAssistantOption {
@@ -27,71 +37,88 @@ interface SetupWizardAssistantOption {
 }
 
 interface SetupWizardChannelOption {
-  available: boolean
   channel: SetupChannel
   description: string
   title: string
 }
 
-type SetupWizardStep = 'intro' | 'assistant' | 'channels' | 'confirm'
+interface SetupWizardWearableOption {
+  description: string
+  title: string
+  wearable: SetupWearable
+}
+
+type SetupWizardStep =
+  | 'intro'
+  | 'assistant'
+  | 'channels'
+  | 'wearables'
+  | 'confirm'
 
 const setupWizardAssistantOptions: readonly SetupWizardAssistantOption[] = [
   {
     preset: 'codex-cli',
-    title: 'Codex CLI (recommended)',
-    description:
-      'Healthy Bob keeps the existing agentic Codex path and saves a default hosted model such as gpt-5.4.',
+    title: 'Codex CLI',
+    description: 'Hosted-model Codex flow with a saved default like gpt-5.4.',
   },
   {
     preset: 'codex-oss',
     title: 'Codex OSS / local model',
-    description:
-      'Save a local Codex OSS model default for operators who want the Codex CLI flow backed by an open-source local model.',
+    description: 'Keep the Codex CLI path, but default it to a local OSS model.',
   },
   {
     preset: 'openai-compatible',
-    title: 'OpenAI-compatible API or local endpoint',
-    description:
-      'Use one OpenAI-compatible base URL for Ollama, local gateways, or hosted provider APIs and save the model plus API-key env-var name.',
+    title: 'OpenAI-compatible endpoint',
+    description: 'Save one base URL for Ollama, a local gateway, or a hosted API.',
   },
   {
     preset: 'skip',
     title: 'Skip for now',
-    description:
-      'Leave the assistant backend unchanged during setup and configure it later with assistant chat defaults.',
+    description: 'Leave the current assistant backend unchanged.',
   },
 ]
 
 const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
   {
-    available: true,
     channel: 'imessage',
-    description:
-      'Receive and deliver replies through Messages.app. Healthy Bob reuses one assistant session per conversation.',
-    title: 'Configure iMessage',
+    description: 'Messages.app auto-reply on this Mac.',
+    title: 'iMessage',
   },
   {
-    available: true,
     channel: 'telegram',
-    description:
-      'Receive and deliver replies through a Telegram bot. Set HEALTHYBOB_TELEGRAM_BOT_TOKEN in the shell or local `.env` before setup to enable assistant auto-reply.',
-    title: 'Configure Telegram',
+    description: 'Telegram bot auto-reply.',
+    title: 'Telegram',
   },
   {
-    available: true,
     channel: 'email',
-    description:
-      'Provision an AgentMail inbox for summaries and email conversations. Set HEALTHYBOB_AGENTMAIL_API_KEY in the shell or local `.env` before setup to enable the channel.',
-    title: 'Configure email',
+    description: 'AgentMail inbox plus email auto-reply.',
+    title: 'Email',
+  },
+]
+
+const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [
+  {
+    description: 'OAuth connect plus scheduled sync.',
+    title: 'Oura',
+    wearable: 'oura',
+  },
+  {
+    description: 'OAuth connect plus ongoing sync.',
+    title: 'WHOOP',
+    wearable: 'whoop',
   },
 ]
 
 export function getDefaultSetupWizardAssistantPreset(): SetupAssistantPreset {
-  return getDefaultSetupAssistantPreset()
+  return getDefaultAssistantPreset()
 }
 
 export function getDefaultSetupWizardChannels(): SetupChannel[] {
   return ['imessage']
+}
+
+export function getDefaultSetupWizardWearables(): SetupWearable[] {
+  return []
 }
 
 export function wrapSetupWizardIndex(
@@ -110,11 +137,6 @@ export function toggleSetupWizardChannel(
   selectedChannels: readonly SetupChannel[],
   channel: SetupChannel,
 ): SetupChannel[] {
-  const option = setupWizardChannelOptions.find((candidate) => candidate.channel === channel)
-  if (!option || !option.available) {
-    return [...selectedChannels]
-  }
-
   const next = new Set(selectedChannels)
   if (next.has(channel)) {
     next.delete(channel)
@@ -123,6 +145,20 @@ export function toggleSetupWizardChannel(
   }
 
   return sortSetupWizardChannels([...next])
+}
+
+export function toggleSetupWizardWearable(
+  selectedWearables: readonly SetupWearable[],
+  wearable: SetupWearable,
+): SetupWearable[] {
+  const next = new Set(selectedWearables)
+  if (next.has(wearable)) {
+    next.delete(wearable)
+  } else {
+    next.add(wearable)
+  }
+
+  return sortSetupWizardWearables([...next])
 }
 
 export async function runSetupWizard(
@@ -135,6 +171,12 @@ export async function runSetupWizard(
       ? [...input.initialChannels]
       : getDefaultSetupWizardChannels(),
   )
+  const initialWearables = sortSetupWizardWearables(
+    input.initialWearables && input.initialWearables.length > 0
+      ? [...input.initialWearables]
+      : getDefaultSetupWizardWearables(),
+  )
+  const commandName = input.commandName ?? 'healthybob'
 
   return await new Promise<SetupWizardResult>((resolve, reject) => {
     let settled = false
@@ -171,15 +213,20 @@ export async function runSetupWizard(
         findSetupWizardAssistantOptionIndex(initialAssistantPreset),
       )
       const [channelIndex, setChannelIndex] = React.useState(0)
+      const [wearableIndex, setWearableIndex] = React.useState(0)
       const [selectedAssistantPreset, setSelectedAssistantPreset] =
         React.useState<SetupAssistantPreset>(initialAssistantPreset)
       const [selectedChannels, setSelectedChannels] = React.useState<SetupChannel[]>(
         initialChannels,
       )
+      const [selectedWearables, setSelectedWearables] = React.useState<
+        SetupWearable[]
+      >(initialWearables)
       const latestAssistantRef = React.useRef<SetupAssistantPreset>(
         initialAssistantPreset,
       )
       const latestChannelsRef = React.useRef<SetupChannel[]>(initialChannels)
+      const latestWearablesRef = React.useRef<SetupWearable[]>(initialWearables)
 
       React.useEffect(() => {
         latestAssistantRef.current = selectedAssistantPreset
@@ -188,6 +235,10 @@ export async function runSetupWizard(
       React.useEffect(() => {
         latestChannelsRef.current = selectedChannels
       }, [selectedChannels])
+
+      React.useEffect(() => {
+        latestWearablesRef.current = selectedWearables
+      }, [selectedWearables])
 
       useInput((value, key) => {
         if ((key.ctrl && value === 'c') || value.toLowerCase() === 'q') {
@@ -268,17 +319,52 @@ export async function runSetupWizard(
 
           if (value === ' ') {
             const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
-            if (!activeChannel) {
-              return
+            if (activeChannel) {
+              setSelectedChannels((current) =>
+                toggleSetupWizardChannel(current, activeChannel),
+              )
             }
-            setSelectedChannels((current) =>
-              toggleSetupWizardChannel(current, activeChannel),
-            )
             return
           }
 
           if (key.escape) {
             setStep('assistant')
+            return
+          }
+
+          if (key.return) {
+            setStep('wearables')
+          }
+          return
+        }
+
+        if (step === 'wearables') {
+          if (key.upArrow) {
+            setWearableIndex((current) =>
+              wrapSetupWizardIndex(current, setupWizardWearableOptions.length, -1),
+            )
+            return
+          }
+
+          if (key.downArrow) {
+            setWearableIndex((current) =>
+              wrapSetupWizardIndex(current, setupWizardWearableOptions.length, 1),
+            )
+            return
+          }
+
+          if (value === ' ') {
+            const activeWearable = setupWizardWearableOptions[wearableIndex]?.wearable
+            if (activeWearable) {
+              setSelectedWearables((current) =>
+                toggleSetupWizardWearable(current, activeWearable),
+              )
+            }
+            return
+          }
+
+          if (key.escape) {
+            setStep('channels')
             return
           }
 
@@ -290,7 +376,7 @@ export async function runSetupWizard(
 
         if (step === 'confirm') {
           if (key.escape || key.leftArrow) {
-            setStep('channels')
+            setStep('wearables')
             return
           }
 
@@ -298,17 +384,46 @@ export async function runSetupWizard(
             resolveOnce({
               assistantPreset: latestAssistantRef.current,
               channels: sortSetupWizardChannels(latestChannelsRef.current),
+              wearables: sortSetupWizardWearables(latestWearablesRef.current),
             })
             exit()
           }
         }
       })
 
+      const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
+      const selectedChannelSummary = formatSelectionSummary(
+        selectedChannels.map((channel) => formatSetupChannel(channel)),
+      )
+      const selectedWearableSummary = formatSelectionSummary(
+        selectedWearables.map((wearable) => formatSetupWearable(wearable)),
+      )
+      const selectedReadyNow = [
+        ...selectedChannels.flatMap((channel) =>
+          getChannelStatus(channel).ready ? [formatSetupChannel(channel)] : [],
+        ),
+        ...selectedWearables.flatMap((wearable) =>
+          getWearableStatus(wearable).ready ? [formatSetupWearable(wearable)] : [],
+        ),
+      ]
+      const selectedNeedsEnv = [
+        ...selectedChannels.flatMap((channel) => {
+          const status = getChannelStatus(channel)
+          return status.missingEnv.length > 0
+            ? [`${formatSetupChannel(channel)} (${formatMissingEnv(status.missingEnv)})`]
+            : []
+        }),
+        ...selectedWearables.flatMap((wearable) => {
+          const status = getWearableStatus(wearable)
+          return status.missingEnv.length > 0
+            ? [`${formatSetupWearable(wearable)} (${formatMissingEnv(status.missingEnv)})`]
+            : []
+        }),
+      ]
+
       const assistantLines = setupWizardAssistantOptions.map((option, index) => {
         const active = index === assistantIndex
         const selected = option.preset === selectedAssistantPreset
-        const marker = active ? '>' : ' '
-        const radio = selected ? '(x)' : '( )'
 
         return createElement(
           Box,
@@ -317,7 +432,11 @@ export async function runSetupWizard(
             key: option.preset,
             marginBottom: 1,
           },
-          createElement(Text, null, `${marker} ${radio} ${option.title}`),
+          createElement(
+            Text,
+            null,
+            `${active ? '>' : ' '} ${selected ? '(x)' : '( )'} ${option.title}`,
+          ),
           createElement(Text, null, `    ${option.description}`),
         )
       })
@@ -325,13 +444,7 @@ export async function runSetupWizard(
       const channelLines = setupWizardChannelOptions.map((option, index) => {
         const active = index === channelIndex
         const selected = selectedChannels.includes(option.channel)
-        const marker = active ? '>' : ' '
-        const checkbox = option.available
-          ? selected
-            ? '[x]'
-            : '[ ]'
-          : '[·]'
-        const title = option.title
+        const status = getChannelStatus(option.channel)
 
         return createElement(
           Box,
@@ -340,26 +453,35 @@ export async function runSetupWizard(
             key: option.channel,
             marginBottom: 1,
           },
-          createElement(Text, null, `${marker} ${checkbox} ${title}`),
-          createElement(Text, null, `    ${option.description}`),
+          createElement(
+            Text,
+            null,
+            `${active ? '>' : ' '} ${selected ? '[x]' : '[ ]'} ${option.title} · ${status.badge}`,
+          ),
+          createElement(Text, null, `    ${option.description} ${status.detail}`),
         )
       })
 
-      const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
-      const enabledSummary =
-        selectedChannels.length > 0
-          ? selectedChannels
-              .map((channel) =>
-                channel === 'imessage'
-                  ? 'iMessage'
-                  : channel === 'telegram'
-                    ? 'Telegram'
-                    : channel === 'email'
-                      ? 'Email'
-                    : channel,
-              )
-              .join(', ')
-          : 'none'
+      const wearableLines = setupWizardWearableOptions.map((option, index) => {
+        const active = index === wearableIndex
+        const selected = selectedWearables.includes(option.wearable)
+        const status = getWearableStatus(option.wearable)
+
+        return createElement(
+          Box,
+          {
+            flexDirection: 'column',
+            key: option.wearable,
+            marginBottom: 1,
+          },
+          createElement(
+            Text,
+            null,
+            `${active ? '>' : ' '} ${selected ? '[x]' : '[ ]'} ${option.title} · ${status.badge}`,
+          ),
+          createElement(Text, null, `    ${option.description} ${status.detail}`),
+        )
+      })
 
       return createElement(
         Box,
@@ -369,37 +491,43 @@ export async function runSetupWizard(
           paddingY: 1,
         },
         createElement(Text, null, 'Healthy Bob onboarding'),
+        createElement(Text, null, formatSetupWizardStepper(step)),
+        createElement(Text, null, ''),
+        createElement(Text, null, `Vault: ${input.vault}`),
+        createElement(Text, null, `Assistant: ${assistantSummary}`),
+        createElement(Text, null, `Channels: ${selectedChannelSummary}`),
+        createElement(Text, null, `Wearables: ${selectedWearableSummary}`),
         createElement(Text, null, ''),
         step === 'intro'
           ? createElement(
               Box,
-              {
-                flexDirection: 'column',
-              },
+              { flexDirection: 'column' },
               createElement(
                 Text,
                 null,
-                'Choose the assistant backend you want Healthy Bob to save for local chat and channel auto-reply, then pick which external message channels to enable during setup.',
+                'Set your default assistant, choose message channels, and optionally connect wearables in the same onboarding flow.',
               ),
               createElement(Text, null, ''),
-              createElement(Text, null, `Vault: ${input.vault}`),
+              createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),
               createElement(Text, null, ''),
               createElement(
                 Text,
                 null,
-                'Codex CLI is preselected, iMessage is enabled by default, and Telegram or email can opt into the same assistant session surface when their credentials are available through the shell or a local `.env` before setup.',
+                'Missing credentials can be entered after review for this run only, or left for later.',
               ),
               createElement(Text, null, ''),
-              createElement(Text, null, 'Press Enter to continue, or q to cancel.'),
+              createElement(
+                Text,
+                null,
+                `Press Enter to continue with ${commandName}, or q to cancel.`,
+              ),
             )
           : null,
         step === 'assistant'
           ? createElement(
               Box,
-              {
-                flexDirection: 'column',
-              },
-              createElement(Text, null, 'Assistant backend'),
+              { flexDirection: 'column' },
+              createElement(Text, null, '1 of 4 · Assistant backend'),
               createElement(Text, null, ''),
               ...assistantLines,
               createElement(
@@ -412,18 +540,24 @@ export async function runSetupWizard(
         step === 'channels'
           ? createElement(
               Box,
-              {
-                flexDirection: 'column',
-              },
-              createElement(Text, null, 'Message channels'),
+              { flexDirection: 'column' },
+              createElement(Text, null, '2 of 4 · Message channels'),
               createElement(Text, null, ''),
+              ...channelLines,
               createElement(
                 Text,
                 null,
-                `Assistant backend: ${assistantSummary}`,
+                'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
               ),
+            )
+          : null,
+        step === 'wearables'
+          ? createElement(
+              Box,
+              { flexDirection: 'column' },
+              createElement(Text, null, '3 of 4 · Optional wearables'),
               createElement(Text, null, ''),
-              ...channelLines,
+              ...wearableLines,
               createElement(
                 Text,
                 null,
@@ -434,31 +568,42 @@ export async function runSetupWizard(
         step === 'confirm'
           ? createElement(
               Box,
-              {
-                flexDirection: 'column',
-              },
-              createElement(Text, null, 'Review setup'),
+              { flexDirection: 'column' },
+              createElement(Text, null, '4 of 4 · Review'),
               createElement(Text, null, ''),
-              createElement(Text, null, `Assistant backend: ${assistantSummary}`),
-              createElement(Text, null, `Enabled channels: ${enabledSummary}`),
+              createElement(Text, null, `Ready now: ${formatSelectionSummary(selectedReadyNow)}`),
+              createElement(
+                Text,
+                null,
+                `Still needs env: ${formatSelectionSummary(selectedNeedsEnv)}`,
+              ),
               createElement(Text, null, ''),
               createElement(
                 Text,
                 null,
-                selectedChannels.includes('imessage') &&
-                  selectedChannels.includes('telegram')
-                  ? 'Healthy Bob will save the assistant defaults you selected, add the local iMessage connector, configure the Telegram bot connector when a bot token is available, and start the assistant automation loop after setup so either channel can create or continue a shared assistant conversation.'
-                  : selectedChannels.includes('imessage')
-                    ? 'Healthy Bob will save the assistant defaults you selected, add the local iMessage connector, and start the assistant automation loop after setup so new texts can create or continue an assistant conversation.'
-                    : selectedChannels.includes('telegram')
-                      ? 'Healthy Bob will save the assistant defaults you selected, configure the Telegram bot connector when a bot token is available, and then start the assistant automation loop after setup so Telegram chats can create or continue an assistant conversation.'
-                      : 'Healthy Bob will save the assistant defaults you selected and finish machine plus vault setup without enabling an external message channel yet.',
+                selectedNeedsEnv.length > 0
+                  ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
+                  : 'Healthy Bob will finish setup, then open any selected wearable connect flows that are ready.',
               ),
               createElement(Text, null, ''),
-              createElement(Text, null, 'Press Enter to run setup, or Esc to change the selection.'),
+              createElement(
+                Text,
+                null,
+                'Press Enter to run setup, or Esc to change the selection.',
+              ),
             )
           : null,
       )
+
+      function getChannelStatus(channel: SetupChannel): SetupWizardRuntimeStatus {
+        return normalizeSetupWizardRuntimeStatus(input.channelStatuses?.[channel])
+      }
+
+      function getWearableStatus(
+        wearable: SetupWearable,
+      ): SetupWizardRuntimeStatus {
+        return normalizeSetupWizardRuntimeStatus(input.wearableStatuses?.[wearable])
+      }
     }
 
     try {
@@ -479,9 +624,40 @@ export async function runSetupWizard(
   })
 }
 
+function normalizeSetupWizardRuntimeStatus(
+  status: SetupWizardRuntimeStatus | undefined,
+): SetupWizardRuntimeStatus {
+  return (
+    status ?? {
+      badge: 'optional',
+      detail: '',
+      missingEnv: [],
+      ready: true,
+    }
+  )
+}
+
 function sortSetupWizardChannels(channels: readonly SetupChannel[]): SetupChannel[] {
-  const order = new Map(setupChannelValues.map((channel, index) => [channel, index] as const))
+  const order = new Map<SetupChannel, number>(
+    setupChannelValues.map((channel, index) => [channel, index] as const),
+  )
   const unique = [...new Set(channels)]
+
+  return unique.sort(
+    (left, right) =>
+      (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right) ?? Number.MAX_SAFE_INTEGER),
+  )
+}
+
+function sortSetupWizardWearables(
+  wearables: readonly SetupWearable[],
+): SetupWearable[] {
+  const order = new Map<SetupWearable, number>(
+    setupWearableValues.map((wearable, index) => [wearable, index] as const),
+  )
+  const unique = [...new Set(wearables)]
+
   return unique.sort(
     (left, right) =>
       (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
@@ -505,8 +681,50 @@ function formatSetupAssistantPreset(preset: SetupAssistantPreset): string {
     case 'codex-oss':
       return 'Codex OSS / local model'
     case 'openai-compatible':
-      return 'OpenAI-compatible API or local endpoint'
+      return 'OpenAI-compatible endpoint'
     case 'skip':
       return 'Skip for now'
   }
+}
+
+function formatSetupChannel(channel: SetupChannel): string {
+  switch (channel) {
+    case 'imessage':
+      return 'iMessage'
+    case 'telegram':
+      return 'Telegram'
+    case 'email':
+      return 'Email'
+  }
+}
+
+function formatSetupWearable(wearable: SetupWearable): string {
+  return wearable === 'oura' ? 'Oura' : 'WHOOP'
+}
+
+function formatSelectionSummary(values: readonly string[]): string {
+  return values.length > 0 ? values.join(', ') : 'none'
+}
+
+function formatMissingEnv(values: readonly string[]): string {
+  if (values.length === 0) {
+    return 'none'
+  }
+
+  if (values.length === 1) {
+    return values[0] ?? ''
+  }
+
+  return values.join(' + ')
+}
+
+function formatSetupWizardStepper(step: SetupWizardStep): string {
+  const currentIndex = ['intro', 'assistant', 'channels', 'wearables', 'confirm'].indexOf(step)
+  const labels = ['Intro', 'Assistant', 'Channels', 'Wearables', 'Review']
+
+  return labels
+    .map((label, index) =>
+      index === currentIndex ? `[${label}]` : `${index + 1}.${label}`,
+    )
+    .join('  ')
 }

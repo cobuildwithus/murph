@@ -6,6 +6,10 @@ import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
 import { getAssistantChannelAdapter } from '../assistant/channel-adapters.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import { resolveTelegramBotToken } from '../telegram-runtime.js'
+import {
+  resolveSetupChannelMissingEnv,
+  SETUP_RUNTIME_ENV_NOTICE,
+} from '../setup-runtime-env.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   type SetupChannel,
@@ -118,6 +122,7 @@ async function configureIMessageChannel(input: {
       detail:
         'Would configure the local iMessage inbox connector and enable assistant auto-reply for new conversations.',
       enabled: true,
+      missingEnv: [],
     }
   }
 
@@ -162,6 +167,7 @@ async function configureIMessageChannel(input: {
       detail:
         `Reused the iMessage connector "${existingConnector.id}" and enabled assistant auto-reply for new iMessage conversations.`,
       enabled: true,
+      missingEnv: [],
     }
   }
 
@@ -193,6 +199,7 @@ async function configureIMessageChannel(input: {
     detail:
       `Configured the iMessage connector "${added.connector.id}" and enabled assistant auto-reply for new iMessage conversations.`,
     enabled: true,
+    missingEnv: [],
   }
 }
 
@@ -210,6 +217,7 @@ async function configureTelegramChannel(input: {
   const doctor = input.inboxServices.doctor
   const sourceList = input.inboxServices.sourceList
   const sourceAdd = input.inboxServices.sourceAdd
+  const missingEnv = resolveSetupChannelMissingEnv('telegram', input.env)
 
   if (input.dryRun) {
     input.steps.push(
@@ -231,8 +239,9 @@ async function configureTelegramChannel(input: {
       connectorId: TELEGRAM_SETUP_CONNECTOR_ID,
       detail: token
         ? 'Would configure the Telegram bot connector and enable assistant auto-reply for Telegram direct chats.'
-        : 'Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the shell or local `.env` before setup can enable the channel.',
+        : `Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
+      missingEnv,
     }
   }
 
@@ -274,9 +283,10 @@ async function configureTelegramChannel(input: {
       configured: existingConnector !== null,
       connectorId: existingConnector?.id ?? null,
       detail: existingConnector
-        ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is available in the shell or local \`.env\`.`
-        : 'Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the shell or local `.env` before setup can add the connector and enable assistant auto-reply.',
+        ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+        : `Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
+      missingEnv,
     }
   }
 
@@ -310,6 +320,7 @@ async function configureTelegramChannel(input: {
         ? `Reused the Telegram connector "${existingConnector.id}" and enabled assistant auto-reply for Telegram direct chats.`
         : `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
       enabled: true,
+      missingEnv: [],
     }
   }
 
@@ -350,6 +361,7 @@ async function configureTelegramChannel(input: {
       ? `Configured the Telegram connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
       : `Configured the Telegram connector "${added.connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
     enabled: true,
+    missingEnv: [],
   }
 }
 
@@ -365,6 +377,7 @@ async function configureEmailChannel(input: {
   const doctor = input.inboxServices.doctor
   const sourceList = input.inboxServices.sourceList
   const sourceAdd = input.inboxServices.sourceAdd
+  const missingEnv = resolveSetupChannelMissingEnv('email', input.env)
 
   if (input.dryRun) {
     input.steps.push(
@@ -386,8 +399,9 @@ async function configureEmailChannel(input: {
       connectorId: EMAIL_SETUP_CONNECTOR_ID,
       detail: apiKey
         ? 'Would provision the AgentMail inbox connector and enable assistant auto-reply for direct email threads.'
-        : 'Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the shell or local `.env` before setup can enable the channel.',
+        : `Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
+      missingEnv,
     }
   }
 
@@ -426,9 +440,10 @@ async function configureEmailChannel(input: {
       configured: existingConnector !== null,
       connectorId: existingConnector?.id ?? null,
       detail: existingConnector
-        ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is available in the shell or local \`.env\`.`
-        : 'Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the shell or local `.env` before setup can provision the connector and enable assistant auto-reply.',
+        ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+        : `Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the current environment before setup can provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
+      missingEnv,
     }
   }
 
@@ -462,6 +477,7 @@ async function configureEmailChannel(input: {
         ? `Reused the email connector "${existingConnector.id}" and enabled assistant auto-reply for direct email threads.`
         : `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
       enabled: true,
+      missingEnv: [],
     }
   }
 
@@ -504,6 +520,7 @@ async function configureEmailChannel(input: {
       ? `Configured the email connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
       : `Configured the email connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''}, but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
     enabled: true,
+    missingEnv: [],
   }
 }
 

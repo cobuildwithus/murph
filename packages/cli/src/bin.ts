@@ -9,6 +9,7 @@ loadCliEnvFiles()
 const cliModule = await import('./index.js')
 const operatorConfigModule = await import('./operator-config.js')
 const setupCliModule = await import('./setup-cli.js')
+const setupRuntimeEnvModule = await import('./setup-runtime-env.js')
 
 const cli = cliModule.default
 const {
@@ -20,9 +21,13 @@ const {
 const {
   createSetupCli,
   detectSetupProgramName,
+  formatSetupWearableLabel,
   isSetupInvocation,
+  listSetupPendingWearables,
+  listSetupReadyWearables,
   resolveSetupPostLaunchAction,
 } = setupCliModule
+const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
 
 type SuccessfulSetupContext = import('./setup-cli.js').SuccessfulSetupContext
 
@@ -54,15 +59,43 @@ async function actionMain(): Promise<void> {
 
     const setupContext = successfulSetup.current
     if (setupContext !== null) {
+      const launchVault =
+        (await resolveDefaultVault(homeDirectory)) ??
+        expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
+
+      const readyWearables = listSetupReadyWearables(setupContext.result)
+      const pendingWearables = listSetupPendingWearables(setupContext.result)
+
+      if (pendingWearables.length > 0) {
+        const pendingSummary = pendingWearables
+          .map(
+            (wearable) =>
+              `${formatSetupWearableLabel(wearable.wearable)} (${wearable.missingEnv.join(', ')})`,
+          )
+          .join(', ')
+        process.stderr.write(
+          `\nSelected wearable setup is waiting on credentials: ${pendingSummary}. ${SETUP_RUNTIME_ENV_NOTICE}\n`,
+        )
+      }
+
+      for (const wearable of readyWearables) {
+        process.stderr.write(
+          `\nOpening ${formatSetupWearableLabel(wearable)} connect flow in your browser.\n\n`,
+        )
+        try {
+          await cli.serve(['device', 'connect', wearable, '--vault', launchVault, '--open'])
+        } catch (error) {
+          process.stderr.write(
+            `Could not start the ${formatSetupWearableLabel(wearable)} connect flow: ${formatErrorMessage(error)}\n`,
+          )
+        }
+      }
+
       const launchAction = resolveSetupPostLaunchAction(setupContext)
       if (launchAction !== null) {
-        const launchVault =
-          (await resolveDefaultVault(homeDirectory)) ??
-          expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
-
         if (launchAction === 'assistant-run') {
           process.stderr.write(
-            '\nStarting Healthy Bob assistant automation. Leave this terminal open while channel auto-reply is active for iMessage and/or Telegram. Press Ctrl+C to stop.\n\n',
+            '\nStarting Healthy Bob assistant automation. Leave this terminal open while channel auto-reply is active for iMessage, Telegram, and/or email. Press Ctrl+C to stop.\n\n',
           )
           await cli.serve(['assistant', 'run', '--vault', launchVault])
           return
@@ -79,6 +112,14 @@ async function actionMain(): Promise<void> {
 
   const defaultVault = await resolveDefaultVault(homeDirectory)
   cli.serve(applyDefaultVaultToArgs(argv, defaultVault))
+}
+
+function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return typeof error === 'string' ? error : 'unknown error'
 }
 
 function loadCliEnvFiles(cwd = process.cwd()): void {

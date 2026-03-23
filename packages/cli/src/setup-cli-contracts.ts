@@ -24,6 +24,9 @@ export const whisperModelSchema = z.enum(whisperModelValues)
 export const setupChannelValues = ['imessage', 'telegram', 'email'] as const
 export const setupChannelSchema = z.enum(setupChannelValues)
 
+export const setupWearableValues = ['oura', 'whoop'] as const
+export const setupWearableSchema = z.enum(setupWearableValues)
+
 export const setupAssistantPresetValues = [
   'codex-cli',
   'codex-oss',
@@ -64,6 +67,15 @@ export const setupConfiguredChannelSchema = z.object({
   autoReply: z.boolean(),
   connectorId: z.string().min(1).nullable(),
   detail: z.string().min(1),
+  missingEnv: z.array(z.string().min(1)),
+})
+
+export const setupConfiguredWearableSchema = z.object({
+  wearable: setupWearableSchema,
+  enabled: z.boolean(),
+  ready: z.boolean(),
+  detail: z.string().min(1),
+  missingEnv: z.array(z.string().min(1)),
 })
 
 export const setupConfiguredAssistantSchema = z.object({
@@ -163,10 +175,12 @@ export const setupResultSchema = z.object({
   bootstrap: inboxBootstrapResultSchema.nullable(),
   assistant: setupConfiguredAssistantSchema.nullable(),
   channels: z.array(setupConfiguredChannelSchema),
+  wearables: z.array(setupConfiguredWearableSchema),
 })
 
 export type WhisperModel = z.infer<typeof whisperModelSchema>
 export type SetupChannel = z.infer<typeof setupChannelSchema>
+export type SetupWearable = z.infer<typeof setupWearableSchema>
 export type SetupAssistantPreset = z.infer<typeof setupAssistantPresetSchema>
 export type SetupConfiguredAssistant = z.infer<
   typeof setupConfiguredAssistantSchema
@@ -177,4 +191,5 @@ export type SetupStepStatus = z.infer<typeof setupStepStatusSchema>
 export type SetupStepResult = z.infer<typeof setupStepResultSchema>
 export type SetupTools = z.infer<typeof setupToolsSchema>
 export type SetupConfiguredChannel = z.infer<typeof setupConfiguredChannelSchema>
+export type SetupConfiguredWearable = z.infer<typeof setupConfiguredWearableSchema>
 export type SetupResult = z.infer<typeof setupResultSchema>

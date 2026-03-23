@@ -16,6 +16,8 @@ import {
   createSetupCli,
   detectSetupProgramName,
   isSetupInvocation,
+  listSetupPendingWearables,
+  listSetupReadyWearables,
   resolveSetupPostLaunchAction,
   shouldAutoLaunchAssistantAfterSetup,
   shouldRunSetupWizard,
@@ -24,6 +26,11 @@ import {
 import { readAssistantAutomationState } from '../src/assistant-state.js'
 import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
 import { createSetupServices } from '../src/setup-services.js'
+import {
+  describeSelectedSetupWearables,
+  resolveSetupChannelMissingEnv,
+  resolveSetupWearableMissingEnv,
+} from '../src/setup-runtime-env.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
 import {
   ensureCliRuntimeArtifacts,
@@ -276,6 +283,7 @@ function makeSetupResult(vault: string): SetupResult {
       whisperModelPath: '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
     },
     vault,
+    wearables: [],
     whisperModel: 'base.en',
   }
 }
@@ -698,6 +706,7 @@ test('setup wizard gating only enables interactive human onboarding runs', () =>
 test('onboard invokes the wizard for interactive runs and skips it for explicit JSON output', async () => {
   let wizardCalls = 0
   const receivedChannels: Array<string[] | null> = []
+  const receivedWearables: Array<string[] | null> = []
   const cli = createSetupCli({
     commandName: 'healthybob',
     terminal: {
@@ -709,6 +718,9 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
         receivedChannels.push(
           input.channels == null ? null : [...input.channels],
         )
+        receivedWearables.push(
+          input.wearables == null ? null : [...input.wearables],
+        )
         return makeSetupResult(input.vault)
       },
     } as ReturnType<typeof createSetupServices>,
@@ -717,6 +729,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
         wizardCalls += 1
         return {
           channels: ['imessage'],
+          wearables: [],
         }
       },
     },
@@ -730,6 +743,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 
   assert.equal(wizardCalls, 0)
   assert.deepEqual(receivedChannels[0], null)
+  assert.deepEqual(receivedWearables[0], null)
 
   await cli.serve(['onboard', '--verbose'], {
     env: process.env,
@@ -739,6 +753,183 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 
   assert.equal(wizardCalls, 1)
   assert.deepEqual(receivedChannels[1], ['imessage'])
+  assert.deepEqual(receivedWearables[1], [])
+})
+
+test('runtime env helpers honor channel aliases and require explicit wearable client credentials', () => {
+  assert.deepEqual(
+    resolveSetupChannelMissingEnv('telegram', {
+      TELEGRAM_BOT_TOKEN: 'bot-token',
+    }),
+    [],
+  )
+  assert.deepEqual(
+    resolveSetupChannelMissingEnv('email', {
+      AGENTMAIL_API_KEY: 'agentmail-key',
+    }),
+    [],
+  )
+  assert.deepEqual(resolveSetupChannelMissingEnv('telegram', {}), [
+    'HEALTHYBOB_TELEGRAM_BOT_TOKEN',
+  ])
+  assert.deepEqual(
+    resolveSetupWearableMissingEnv('oura', {
+      HEALTHYBOB_OURA_CLIENT_ID: 'oura-client',
+    }),
+    ['HEALTHYBOB_OURA_CLIENT_SECRET'],
+  )
+  assert.deepEqual(
+    describeSelectedSetupWearables({
+      env: {
+        HEALTHYBOB_WHOOP_CLIENT_ID: 'whoop-client',
+        HEALTHYBOB_WHOOP_CLIENT_SECRET: 'whoop-secret',
+      },
+      wearables: ['whoop'],
+    }),
+    [
+      {
+        detail: 'Selected WHOOP. Healthy Bob can open the connect flow after setup.',
+        enabled: true,
+        missingEnv: [],
+        ready: true,
+        wearable: 'whoop',
+      },
+    ],
+  )
+})
+
+test('interactive onboarding prompts for missing channel and wearable credentials and passes them into setup', async () => {
+  const promptedInputs: Array<{
+    channels: string[]
+    env: NodeJS.ProcessEnv
+    wearables: string[]
+  }> = []
+  const receivedInputs: Array<{
+    channels: string[] | null
+    envOverrides: NodeJS.ProcessEnv | undefined
+    wearables: string[] | null
+  }> = []
+  const previousEnv = {
+    HEALTHYBOB_AGENTMAIL_API_KEY: process.env.HEALTHYBOB_AGENTMAIL_API_KEY,
+    HEALTHYBOB_OURA_CLIENT_ID: process.env.HEALTHYBOB_OURA_CLIENT_ID,
+    HEALTHYBOB_OURA_CLIENT_SECRET: process.env.HEALTHYBOB_OURA_CLIENT_SECRET,
+  }
+  const cli = createSetupCli({
+    commandName: 'healthybob',
+    runtimeEnv: {
+      getCurrentEnv() {
+        return {}
+      },
+      async promptForMissing(input) {
+        promptedInputs.push({
+          channels: [...input.channels],
+          env: { ...input.env },
+          wearables: [...input.wearables],
+        })
+        return {
+          HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+          HEALTHYBOB_OURA_CLIENT_ID: 'oura-client',
+          HEALTHYBOB_OURA_CLIENT_SECRET: 'oura-secret',
+        }
+      },
+    },
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+    services: {
+      async setupMacos(input: any) {
+        receivedInputs.push({
+          channels: input.channels == null ? null : [...input.channels],
+          envOverrides: input.envOverrides,
+          wearables: input.wearables == null ? null : [...input.wearables],
+        })
+        return makeSetupResult(input.vault)
+      },
+    } as ReturnType<typeof createSetupServices>,
+    wizard: {
+      async run() {
+        return {
+          assistantPreset: 'skip',
+          channels: ['email'],
+          wearables: ['oura'],
+        }
+      },
+    },
+  })
+
+  try {
+    await cli.serve(['onboard', '--verbose'], {
+      env: process.env,
+      exit: () => {},
+      stdout() {},
+    })
+
+    assert.deepEqual(promptedInputs, [
+      {
+        channels: ['email'],
+        env: {},
+        wearables: ['oura'],
+      },
+    ])
+    assert.deepEqual(receivedInputs, [
+      {
+        channels: ['email'],
+        envOverrides: {
+          HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+          HEALTHYBOB_OURA_CLIENT_ID: 'oura-client',
+          HEALTHYBOB_OURA_CLIENT_SECRET: 'oura-secret',
+        },
+        wearables: ['oura'],
+      },
+    ])
+    assert.equal(process.env.HEALTHYBOB_AGENTMAIL_API_KEY, 'agentmail-key')
+    assert.equal(process.env.HEALTHYBOB_OURA_CLIENT_ID, 'oura-client')
+    assert.equal(process.env.HEALTHYBOB_OURA_CLIENT_SECRET, 'oura-secret')
+  } finally {
+    if (previousEnv.HEALTHYBOB_AGENTMAIL_API_KEY === undefined) {
+      delete process.env.HEALTHYBOB_AGENTMAIL_API_KEY
+    } else {
+      process.env.HEALTHYBOB_AGENTMAIL_API_KEY = previousEnv.HEALTHYBOB_AGENTMAIL_API_KEY
+    }
+
+    if (previousEnv.HEALTHYBOB_OURA_CLIENT_ID === undefined) {
+      delete process.env.HEALTHYBOB_OURA_CLIENT_ID
+    } else {
+      process.env.HEALTHYBOB_OURA_CLIENT_ID = previousEnv.HEALTHYBOB_OURA_CLIENT_ID
+    }
+
+    if (previousEnv.HEALTHYBOB_OURA_CLIENT_SECRET === undefined) {
+      delete process.env.HEALTHYBOB_OURA_CLIENT_SECRET
+    } else {
+      process.env.HEALTHYBOB_OURA_CLIENT_SECRET = previousEnv.HEALTHYBOB_OURA_CLIENT_SECRET
+    }
+  }
+})
+
+test('setup wearable helpers split ready and pending selections', () => {
+  const result = {
+    ...makeSetupResult('./vault'),
+    wearables: [
+      {
+        detail: 'Oura can connect now.',
+        enabled: true,
+        missingEnv: [],
+        ready: true,
+        wearable: 'oura' as const,
+      },
+      {
+        detail: 'WHOOP still needs client keys.',
+        enabled: true,
+        missingEnv: ['HEALTHYBOB_WHOOP_CLIENT_ID', 'HEALTHYBOB_WHOOP_CLIENT_SECRET'],
+        ready: false,
+        wearable: 'whoop' as const,
+      },
+    ],
+  }
+
+  assert.deepEqual(listSetupReadyWearables(result), ['oura'])
+  assert.deepEqual(listSetupPendingWearables(result), [result.wearables[1]])
 })
 
 test('setup resolves assistant defaults from explicit assistant options when the wizard is skipped', async () => {
@@ -846,6 +1037,7 @@ test('setup handoff launches assistant automation instead of chat when auto-repl
           connectorId: 'imessage:self',
           detail: 'Configured iMessage.',
           enabled: true,
+          missingEnv: [],
         },
       ],
     },
@@ -876,6 +1068,7 @@ test('setup handoff keeps the post-setup flow in assistant chat when a selected 
           connectorId: 'telegram:bot',
           detail: 'Telegram still needs a bot token.',
           enabled: true,
+          missingEnv: ['HEALTHYBOB_TELEGRAM_BOT_TOKEN'],
         },
       ],
     },
