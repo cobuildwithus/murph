@@ -61,6 +61,7 @@ import {
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '../src/assistant-runtime.js'
+import { bridgeAbortSignals } from '../src/assistant/automation/shared.js'
 import {
   CHAT_BANNER,
   CHAT_COMPOSER_HINT,
@@ -2254,6 +2255,77 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   assert.equal(result.replied, 0)
   assert.equal(result.replySkipped, 0)
   assert.equal(result.replyFailed, 0)
+})
+
+test('bridgeAbortSignals forces process exit after local SIGINT grace when teardown hangs', async () => {
+  vi.useFakeTimers()
+  const controller = new AbortController()
+  const exitCodes: number[] = []
+  const cleanup = bridgeAbortSignals(controller, undefined, {
+    exitProcess(code) {
+      exitCodes.push(code)
+    },
+    forceExitGraceMs: 25,
+  })
+
+  try {
+    process.emit('SIGINT')
+    assert.equal(controller.signal.aborted, true)
+    assert.deepEqual(exitCodes, [])
+
+    await vi.advanceTimersByTimeAsync(25)
+    assert.deepEqual(exitCodes, [130])
+  } finally {
+    cleanup()
+    vi.useRealTimers()
+  }
+})
+
+test('bridgeAbortSignals cancels forced exit when teardown completes inside the grace period', async () => {
+  vi.useFakeTimers()
+  const controller = new AbortController()
+  const exitCodes: number[] = []
+  const cleanup = bridgeAbortSignals(controller, undefined, {
+    exitProcess(code) {
+      exitCodes.push(code)
+    },
+    forceExitGraceMs: 25,
+  })
+
+  try {
+    process.emit('SIGINT')
+    assert.equal(controller.signal.aborted, true)
+
+    cleanup()
+    await vi.advanceTimersByTimeAsync(25)
+    assert.deepEqual(exitCodes, [])
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('bridgeAbortSignals keeps upstream aborts non-fatal', async () => {
+  vi.useFakeTimers()
+  const controller = new AbortController()
+  const upstream = new AbortController()
+  const exitCodes: number[] = []
+  const cleanup = bridgeAbortSignals(controller, upstream.signal, {
+    exitProcess(code) {
+      exitCodes.push(code)
+    },
+    forceExitGraceMs: 25,
+  })
+
+  try {
+    upstream.abort()
+    assert.equal(controller.signal.aborted, true)
+
+    await vi.advanceTimersByTimeAsync(25)
+    assert.deepEqual(exitCodes, [])
+  } finally {
+    cleanup()
+    vi.useRealTimers()
+  }
 })
 
 test('runAssistantChat delegates to the Ink UI implementation', async () => {

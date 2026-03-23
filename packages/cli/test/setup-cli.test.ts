@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import {
   chmod,
   mkdir,
@@ -70,6 +70,45 @@ function buildExpectedCliShimScript(cliBinPath: string): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
+run_supervised() {
+  "$@" &
+  child_pid=$!
+
+  forward_signal() {
+    local signal_name="$1"
+    local exit_code="$2"
+    local attempts=0
+
+    trap - INT TERM
+    kill "-$signal_name" "$child_pid" 2>/dev/null || true
+
+    while kill -0 "$child_pid" 2>/dev/null; do
+      if [ "$attempts" -ge 20 ]; then
+        kill -KILL "$child_pid" 2>/dev/null || true
+        break
+      fi
+
+      sleep 0.1
+      attempts=$((attempts + 1))
+    done
+
+    wait "$child_pid" 2>/dev/null || true
+    exit "$exit_code"
+  }
+
+  trap 'forward_signal INT 130' INT
+  trap 'forward_signal TERM 143' TERM
+
+  while kill -0 "$child_pid" 2>/dev/null; do
+    sleep 0.1
+  done
+
+  wait "$child_pid"
+  local exit_code=$?
+  trap - INT TERM
+  return "$exit_code"
+}
+
 if [ -f '${cliBinPath}' ]; then
   missing_packages=()
 ${workspaceCheckLines}
@@ -86,16 +125,19 @@ ${workspaceCheckLines}
     fi
   fi
 
-  exec node '${cliBinPath}' "$@"
+  run_supervised node '${cliBinPath}' "$@"
+  exit $?
 fi
 
 if [ -f '${cliSourceBinPath}' ]; then
   if command -v pnpm >/dev/null 2>&1; then
-    exec pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    run_supervised pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    exit $?
   fi
 
   if command -v corepack >/dev/null 2>&1; then
-    exec corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    run_supervised corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    exit $?
   fi
 fi
 
@@ -1571,6 +1613,7 @@ test.sequential('CLI shim rebuilds missing workspace package dist outputs before
   const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
   const shimPath = path.join(tempRoot, 'healthybob')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
+  const childPidPath = path.join(tempRoot, 'child.pid')
   const runtimeStateDistIndexPath = path.join(
     repoRoot,
     'packages',
@@ -1641,6 +1684,107 @@ exit 1
 
     assert.equal(result.stdout.trim(), 'built-ok')
     await readFile(runtimeStateDistIndexPath, 'utf8')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim force-stops a stubborn built child after SIGINT', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-sigint-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const shimPath = path.join(tempRoot, 'healthybob')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+  const childPidPath = path.join(tempRoot, 'child.pid')
+
+  try {
+    await mkdir(path.dirname(cliBinPath), { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'node'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$$" > ${JSON.stringify(childPidPath)}
+trap '' INT TERM
+while true; do
+  sleep 1
+done
+`,
+    )
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+
+    const child = spawn(shimPath, [], {
+      detached: true,
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      },
+      stdio: 'ignore',
+    })
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        await readFile(childPidPath, 'utf8')
+        break
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
+
+    process.kill(-child.pid!, 'SIGINT')
+
+    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve, reject) => {
+        const timer = setTimeout(() => {
+          process.kill(-child.pid!, 'SIGKILL')
+          reject(new Error('shim did not exit after SIGINT'))
+        }, 5000)
+
+        child.once('exit', (code, signal) => {
+          clearTimeout(timer)
+          resolve({ code, signal })
+        })
+        child.once('error', (error) => {
+          clearTimeout(timer)
+          reject(error)
+        })
+      },
+    )
+
+    const stubbornChildPid = Number.parseInt(
+      (await readFile(childPidPath, 'utf8')).trim(),
+      10,
+    )
+    let childStillAlive = true
+    try {
+      process.kill(stubbornChildPid, 0)
+    } catch {
+      childStillAlive = false
+    }
+
+    assert.equal(childStillAlive, false)
+    assert.equal(result.code === 130 || result.signal === 'SIGINT', true)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

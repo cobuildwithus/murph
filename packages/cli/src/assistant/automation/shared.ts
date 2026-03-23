@@ -1,5 +1,7 @@
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
 
+type ShutdownTimer = ReturnType<typeof setTimeout> | number
+
 export interface AssistantRunEvent {
   captureId?: string
   details?: string
@@ -54,10 +56,46 @@ export function normalizeEnabledChannels(channels: readonly string[]): string[] 
 export function bridgeAbortSignals(
   controller: AbortController,
   upstream?: AbortSignal,
+  options?: {
+    clearTimer?: (timer: ShutdownTimer) => void
+    exitProcess?: (code: number) => void
+    forceExitGraceMs?: number
+    setTimer?: (callback: () => void, delayMs: number) => ShutdownTimer
+  },
 ): () => void {
+  const forceExitGraceMs = Math.max(
+    0,
+    Math.trunc(options?.forceExitGraceMs ?? 2000),
+  )
+  const clearTimer = options?.clearTimer ?? clearTimeout
+  const setTimer = options?.setTimer ?? setTimeout
+  const exitProcess = options?.exitProcess ?? ((code: number) => process.exit(code))
   const abort = () => controller.abort()
-  const onSigint = () => controller.abort()
-  const onSigterm = () => controller.abort()
+  let forcedExitTimer: ShutdownTimer | null = null
+
+  const cancelForcedExit = () => {
+    if (forcedExitTimer !== null) {
+      clearTimer(forcedExitTimer)
+      forcedExitTimer = null
+    }
+  }
+
+  const armLocalSignalAbort = (exitCode: number) => {
+    if (!controller.signal.aborted) {
+      controller.abort()
+      forcedExitTimer = setTimer(() => {
+        forcedExitTimer = null
+        exitProcess(exitCode)
+      }, forceExitGraceMs)
+      return
+    }
+
+    cancelForcedExit()
+    exitProcess(exitCode)
+  }
+
+  const onSigint = () => armLocalSignalAbort(130)
+  const onSigterm = () => armLocalSignalAbort(143)
 
   process.on('SIGINT', onSigint)
   process.on('SIGTERM', onSigterm)
@@ -71,6 +109,7 @@ export function bridgeAbortSignals(
   }
 
   return () => {
+    cancelForcedExit()
     process.off('SIGINT', onSigint)
     process.off('SIGTERM', onSigterm)
     upstream?.removeEventListener('abort', abort)

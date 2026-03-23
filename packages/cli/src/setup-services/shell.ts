@@ -291,6 +291,45 @@ function buildCliShimScript(cliBinPath: string): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
+run_supervised() {
+  "$@" &
+  child_pid=$!
+
+  forward_signal() {
+    local signal_name="$1"
+    local exit_code="$2"
+    local attempts=0
+
+    trap - INT TERM
+    kill "-$signal_name" "$child_pid" 2>/dev/null || true
+
+    while kill -0 "$child_pid" 2>/dev/null; do
+      if [ "$attempts" -ge 20 ]; then
+        kill -KILL "$child_pid" 2>/dev/null || true
+        break
+      fi
+
+      sleep 0.1
+      attempts=$((attempts + 1))
+    done
+
+    wait "$child_pid" 2>/dev/null || true
+    exit "$exit_code"
+  }
+
+  trap 'forward_signal INT 130' INT
+  trap 'forward_signal TERM 143' TERM
+
+  while kill -0 "$child_pid" 2>/dev/null; do
+    sleep 0.1
+  done
+
+  wait "$child_pid"
+  local exit_code=$?
+  trap - INT TERM
+  return "$exit_code"
+}
+
 if [ -f ${quoteShellArgument(cliBinPath)} ]; then
   missing_packages=()
 ${workspaceCheckLines}
@@ -307,16 +346,19 @@ ${workspaceCheckLines}
     fi
   fi
 
-  exec node ${quoteShellArgument(cliBinPath)} "$@"
+  run_supervised node ${quoteShellArgument(cliBinPath)} "$@"
+  exit $?
 fi
 
 if [ -f ${quoteShellArgument(cliSourceBinPath)} ]; then
   if command -v pnpm >/dev/null 2>&1; then
-    exec pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+    run_supervised pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+    exit $?
   fi
 
   if command -v corepack >/dev/null 2>&1; then
-    exec corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+    run_supervised corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+    exit $?
   fi
 fi
 
