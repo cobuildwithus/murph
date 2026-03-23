@@ -268,11 +268,45 @@ ${HEALTHYBOB_PATH_BLOCK_END}
 function buildCliShimScript(cliBinPath: string): string {
   const cliSourceBinPath = resolveRepoCliSourceBinPath(cliBinPath)
   const repoRoot = resolveRepoRootFromCliBinPath(cliBinPath)
+  const workspacePackageNames = [
+    'contracts',
+    'core',
+    'device-syncd',
+    'importers',
+    'inboxd',
+    'parsers',
+    'query',
+    'runtime-state',
+  ]
+  const workspaceCheckLines = workspacePackageNames
+    .map((packageName) => {
+      const packageRoot = path.join(repoRoot, 'packages', packageName)
+      const packageDistIndexPath = path.join(packageRoot, 'dist', 'index.js')
+      return `  if [ ! -f ${quoteShellArgument(packageDistIndexPath)} ]; then
+    missing_packages+=(${quoteShellArgument(packageRoot)})
+  fi`
+    })
+    .join('\n')
 
   return `#!/usr/bin/env bash
 set -euo pipefail
 
 if [ -f ${quoteShellArgument(cliBinPath)} ]; then
+  missing_packages=()
+${workspaceCheckLines}
+
+  if [ "\${#missing_packages[@]}" -gt 0 ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        pnpm --dir "$package_dir" build >/dev/null
+      done
+    elif command -v corepack >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        corepack pnpm --dir "$package_dir" build >/dev/null
+      done
+    fi
+  fi
+
   exec node ${quoteShellArgument(cliBinPath)} "$@"
 fi
 

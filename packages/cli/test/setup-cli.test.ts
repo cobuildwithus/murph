@@ -47,11 +47,45 @@ async function writeExecutable(
 function buildExpectedCliShimScript(cliBinPath: string): string {
   const cliSourceBinPath = path.resolve(path.dirname(cliBinPath), '..', 'src', 'bin.ts')
   const repoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
+  const workspacePackageNames = [
+    'contracts',
+    'core',
+    'device-syncd',
+    'importers',
+    'inboxd',
+    'parsers',
+    'query',
+    'runtime-state',
+  ]
+  const workspaceCheckLines = workspacePackageNames
+    .map((packageName) => {
+      const packageRoot = path.join(repoRoot, 'packages', packageName)
+      const packageDistIndexPath = path.join(packageRoot, 'dist', 'index.js')
+      return `  if [ ! -f '${packageDistIndexPath}' ]; then
+    missing_packages+=('${packageRoot}')
+  fi`
+    })
+    .join('\n')
 
   return `#!/usr/bin/env bash
 set -euo pipefail
 
 if [ -f '${cliBinPath}' ]; then
+  missing_packages=()
+${workspaceCheckLines}
+
+  if [ "\${#missing_packages[@]}" -gt 0 ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        pnpm --dir "$package_dir" build >/dev/null
+      done
+    elif command -v corepack >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        corepack pnpm --dir "$package_dir" build >/dev/null
+      done
+    fi
+  fi
+
   exec node '${cliBinPath}' "$@"
 fi
 
@@ -1526,6 +1560,87 @@ export PATH="$HOME/.local/bin:$PATH"
       result.notes.includes('Open a new shell or run source ~/.zshrc to use healthybob immediately.'),
       false,
     )
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim rebuilds missing workspace package dist outputs before launching the built CLI', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-repair-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const shimPath = path.join(tempRoot, 'healthybob')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+  const runtimeStateDistIndexPath = path.join(
+    repoRoot,
+    'packages',
+    'runtime-state',
+    'dist',
+    'index.js',
+  )
+
+  try {
+    await mkdir(path.dirname(cliBinPath), { recursive: true })
+    await mkdir(path.dirname(runtimeStateDistIndexPath), { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(
+        packageDistIndexPath,
+        'export {}\n',
+        'utf8',
+      )
+    }
+
+    await writeFile(
+      cliBinPath,
+      `import fs from 'node:fs'
+const target = new URL('../../runtime-state/dist/index.js', import.meta.url)
+if (!fs.existsSync(target)) {
+  console.error('runtime-state dist missing')
+  process.exit(42)
+}
+console.log('built-ok')
+`,
+      'utf8',
+    )
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'pnpm'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
+  mkdir -p "$2/dist"
+  printf '%s\\n' 'export {}' > "$2/dist/index.js"
+  exit 0
+fi
+exit 1
+`,
+    )
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+
+    const result = await execFileAsync(shimPath, [], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      },
+    })
+
+    assert.equal(result.stdout.trim(), 'built-ok')
+    await readFile(runtimeStateDistIndexPath, 'utf8')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
