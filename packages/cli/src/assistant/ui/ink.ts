@@ -1,4 +1,6 @@
+import fs from 'node:fs'
 import path from 'node:path'
+import tty from 'node:tty'
 import { pathToFileURL } from 'node:url'
 import * as React from 'react'
 import {
@@ -184,6 +186,27 @@ function useAssistantInkTheme(): AssistantInkTheme {
 
 const BUSY_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const ASSISTANT_PLAIN_TEXT_WRAP_SLACK = 4
+const ASSISTANT_INK_TTY_PATH =
+  process.platform === 'win32' ? 'CONIN$' : '/dev/tty'
+
+type AssistantInkInputStream = NodeJS.ReadStream & {
+  destroy?: () => void
+  isTTY?: boolean
+  setRawMode?: (mode: boolean) => void
+}
+
+interface AssistantInkInputAdapter {
+  close: () => void
+  source: 'stdin' | 'tty' | 'unsupported'
+  stdin: AssistantInkInputStream | null
+}
+
+interface ResolveAssistantInkInputAdapterInput {
+  createTtyReadStream?: (fd: number) => AssistantInkInputStream
+  openTtyFd?: (path: string, flags: string) => number
+  stdin?: AssistantInkInputStream
+  ttyPath?: string
+}
 
 export function resolveChromePanelBoxProps(
   props: ChromePanelProps,
@@ -219,6 +242,81 @@ export function resolveChromePanelBoxProps(
   }
 
   return boxProps
+}
+
+export function supportsAssistantInkRawMode(
+  stdin: AssistantInkInputStream | null | undefined,
+): boolean {
+  return Boolean(stdin?.isTTY && typeof stdin.setRawMode === 'function')
+}
+
+export function resolveAssistantInkInputAdapter(
+  input: ResolveAssistantInkInputAdapterInput = {},
+): AssistantInkInputAdapter {
+  const stdin =
+    input.stdin ?? (process.stdin as AssistantInkInputStream)
+
+  if (supportsAssistantInkRawMode(stdin)) {
+    return {
+      close: () => {},
+      source: 'stdin',
+      stdin,
+    }
+  }
+
+  const ttyPath = input.ttyPath ?? ASSISTANT_INK_TTY_PATH
+  const openTtyFd =
+    input.openTtyFd ??
+    ((pathToOpen: string, flags: string) => fs.openSync(pathToOpen, flags))
+  const createTtyReadStream =
+    input.createTtyReadStream ??
+    ((fd: number) => new tty.ReadStream(fd) as AssistantInkInputStream)
+
+  let fd: number | null = null
+  let closed = false
+
+  const closeFallbackFd = () => {
+    if (fd === null || closed) {
+      return
+    }
+
+    closed = true
+    try {
+      fs.closeSync(fd)
+    } catch {}
+  }
+
+  try {
+    fd = openTtyFd(ttyPath, 'r')
+    const ttyInput = createTtyReadStream(fd)
+
+    if (!supportsAssistantInkRawMode(ttyInput)) {
+      ttyInput.destroy?.()
+      closeFallbackFd()
+      return {
+        close: () => {},
+        source: 'unsupported',
+        stdin: null,
+      }
+    }
+
+    return {
+      close: () => {
+        ttyInput.destroy?.()
+        closeFallbackFd()
+      },
+      source: 'tty',
+      stdin: ttyInput,
+    }
+  } catch {
+    closeFallbackFd()
+
+    return {
+      close: () => {},
+      source: 'unsupported',
+      stdin: null,
+    }
+  }
 }
 
 const ChromePanel = React.memo(function ChromePanel(
@@ -2275,6 +2373,14 @@ export async function runAssistantChatWithInk(
       defaults?.profile ??
       resolved.session.providerOptions.profile,
   })
+  const inkInput = resolveAssistantInkInputAdapter()
+
+  if (!inkInput.stdin) {
+    throw new Error(
+      'Healthy Bob chat requires interactive terminal input. process.stdin does not support raw mode, and Healthy Bob could not open the controlling terminal for Ink input.',
+    )
+  }
+  const inkStdin = inkInput.stdin
 
   return await new Promise<AssistantChatResult>((resolve, reject) => {
     let settled = false
@@ -2290,6 +2396,7 @@ export async function runAssistantChatWithInk(
       }
 
       settled = true
+      inkInput.close()
       resolve(result)
     }
 
@@ -2299,6 +2406,7 @@ export async function runAssistantChatWithInk(
       }
 
       settled = true
+      inkInput.close()
       reject(error)
     }
 
@@ -2726,6 +2834,7 @@ export async function runAssistantChatWithInk(
     try {
       instance = render(React.createElement(App), {
         stderr: process.stderr,
+        stdin: inkStdin,
         stdout: process.stderr,
         patchConsole: false,
       })

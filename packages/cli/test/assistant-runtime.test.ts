@@ -93,12 +93,14 @@ import {
   renderChatTranscriptFeed,
   renderComposerValue,
   renderWrappedTextBlock,
+  resolveAssistantInkInputAdapter,
   resolveChromePanelBoxProps,
   resolveMessageRoleLabel,
   resolveAssistantHyperlinkTarget,
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
   splitAssistantMarkdownLinks,
+  supportsAssistantInkRawMode,
   supportsAssistantTerminalHyperlinks,
   wrapAssistantPlainText,
 } from '../src/assistant/ui/ink.js'
@@ -2772,6 +2774,70 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     formatSessionBinding(session),
     'imessage · contact:bob · thread-123',
   )
+})
+
+test('assistant Ink raw-mode support helper only accepts TTY streams with setRawMode', () => {
+  assert.equal(
+    supportsAssistantInkRawMode({
+      isTTY: true,
+      setRawMode: () => {},
+    } as unknown as NodeJS.ReadStream),
+    true,
+  )
+  assert.equal(
+    supportsAssistantInkRawMode({
+      isTTY: true,
+    } as unknown as NodeJS.ReadStream),
+    false,
+  )
+  assert.equal(
+    supportsAssistantInkRawMode({
+      isTTY: false,
+      setRawMode: () => {},
+    } as unknown as NodeJS.ReadStream),
+    false,
+  )
+})
+
+test('assistant Ink input adapter reuses process stdin when raw mode is supported', () => {
+  const stdin = {
+    isTTY: true,
+    setRawMode: () => {},
+  } as unknown as NodeJS.ReadStream
+
+  const adapter = resolveAssistantInkInputAdapter({
+    stdin,
+  })
+
+  assert.equal(adapter.source, 'stdin')
+  assert.equal(adapter.stdin, stdin)
+})
+
+test('assistant Ink input adapter falls back to the controlling terminal when needed', () => {
+  const destroyTtyInput = vi.fn()
+  const ttyInput = {
+    destroy: destroyTtyInput,
+    isTTY: true,
+    setRawMode: () => {},
+  } as unknown as NodeJS.ReadStream
+  const openTtyFd = vi.fn(() => 42)
+  const createTtyReadStream = vi.fn(() => ttyInput)
+
+  const adapter = resolveAssistantInkInputAdapter({
+    createTtyReadStream,
+    openTtyFd,
+    stdin: {
+      isTTY: false,
+    } as unknown as NodeJS.ReadStream,
+    ttyPath: '/dev/test-tty',
+  })
+
+  assert.equal(adapter.source, 'tty')
+  assert.equal(adapter.stdin, ttyInput)
+  assert.deepEqual(openTtyFd.mock.calls, [['/dev/test-tty', 'r']])
+  assert.deepEqual(createTtyReadStream.mock.calls, [[42]])
+  adapter.close()
+  assert.equal(destroyTtyInput.mock.calls.length, 1)
 })
 
 test('assistant Ink view-model resolves composer submit actions and clear behavior', () => {
