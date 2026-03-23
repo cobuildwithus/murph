@@ -249,7 +249,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'inbox source add telegram --id telegram:bot --account bot',
       description:
-        'Add the Telegram poll connector after exporting HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.',
+        'Add the Telegram poll connector after setting HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the shell or local `.env`.',
     })
   }
 
@@ -257,7 +257,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'inbox source add email --id email:agentmail --provision --emailDisplayName "Healthy Bob"',
       description:
-        'Provision an AgentMail inbox after exporting HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY.',
+        'Provision an AgentMail inbox after setting HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the shell or local `.env`.',
     })
   }
 

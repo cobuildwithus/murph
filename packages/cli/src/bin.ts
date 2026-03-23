@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
+import path from 'node:path'
 import { Errors } from 'incur'
 
 installSqliteExperimentalWarningFilter()
+loadCliEnvFiles()
 
 const cliModule = await import('./index.js')
 const operatorConfigModule = await import('./operator-config.js')
@@ -77,6 +79,28 @@ async function actionMain(): Promise<void> {
 
   const defaultVault = await resolveDefaultVault(homeDirectory)
   cli.serve(applyDefaultVaultToArgs(argv, defaultVault))
+}
+
+function loadCliEnvFiles(cwd = process.cwd()): void {
+  // Keep exported shell variables authoritative while allowing repo-local
+  // `.env` files to provide defaults for local CLI setup and automation.
+  for (const fileName of ['.env.local', '.env']) {
+    const filePath = path.join(cwd, fileName)
+    try {
+      process.loadEnvFile(filePath)
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
+        continue
+      }
+
+      throw error
+    }
+  }
 }
 
 function installSqliteExperimentalWarningFilter(): void {

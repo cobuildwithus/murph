@@ -4,7 +4,7 @@ Last verified: 2026-03-23
 
 ## Non-Negotiable Rules
 
-- Never read or expose `.env` contents, tokens, private keys, or raw credentials.
+- Treat `.env` and `.env.*` files as secret inputs. Healthy Bob's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
 - Redact sensitive identifiers from logs, fixtures, examples, and screenshots.
 - Treat all auth, wallet, payment, and health-related data flows as high-sensitivity until documented otherwise.
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.

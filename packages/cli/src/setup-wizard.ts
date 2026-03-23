@@ -74,14 +74,14 @@ const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
     available: true,
     channel: 'telegram',
     description:
-      'Receive and deliver replies through a Telegram bot. Export HEALTHYBOB_TELEGRAM_BOT_TOKEN before setup to enable assistant auto-reply.',
+      'Receive and deliver replies through a Telegram bot. Set HEALTHYBOB_TELEGRAM_BOT_TOKEN in the shell or local `.env` before setup to enable assistant auto-reply.',
     title: 'Configure Telegram',
   },
   {
     available: true,
     channel: 'email',
     description:
-      'Provision an AgentMail inbox for summaries and email conversations. Export HEALTHYBOB_AGENTMAIL_API_KEY before setup to enable the channel.',
+      'Provision an AgentMail inbox for summaries and email conversations. Set HEALTHYBOB_AGENTMAIL_API_KEY in the shell or local `.env` before setup to enable the channel.',
     title: 'Configure email',
   },
 ]
@@ -387,7 +387,7 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'Codex CLI is preselected, iMessage is enabled by default, and Telegram or email can opt into the same assistant session surface when their environment credentials are exported before setup.',
+                'Codex CLI is preselected, iMessage is enabled by default, and Telegram or email can opt into the same assistant session surface when their credentials are available through the shell or a local `.env` before setup.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, 'Press Enter to continue, or q to cancel.'),

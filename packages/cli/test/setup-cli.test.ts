@@ -229,20 +229,24 @@ async function runSetupCli<TData>(
 async function runSetupAliasRaw(
   aliasName: string,
   args: string[],
+  options?: {
+    cwd?: string
+    env?: NodeJS.ProcessEnv
+  },
 ): Promise<string> {
   await ensureCliRuntimeArtifacts()
 
   const aliasRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-alias-'))
   const aliasPath = path.join(aliasRoot, aliasName)
+  const builtBinPath = JSON.stringify(path.join(repoRoot, 'packages/cli/dist/bin.js'))
 
   try {
     await writeFile(
       aliasPath,
       `#!/usr/bin/env node
 ;(async () => {
-  const { join } = await import('node:path')
   const { pathToFileURL } = await import('node:url')
-  await import(pathToFileURL(join(process.cwd(), 'packages/cli/src/bin.ts')).href)
+  await import(pathToFileURL(${builtBinPath}).href)
 })().catch((error) => {
   console.error(error)
   process.exitCode = 1
@@ -254,11 +258,14 @@ async function runSetupAliasRaw(
 
     const { stdout } = await execFileAsync(
       process.execPath,
-      ['--import=tsx', aliasPath, ...args],
+      [aliasPath, ...args],
       {
-        cwd: repoRoot,
+        cwd: options?.cwd ?? repoRoot,
         encoding: 'utf8',
-        env: withoutNodeV8Coverage(),
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          ...options?.env,
+        }),
       },
     )
     return stdout.trim()
@@ -1838,6 +1845,107 @@ test.sequential('healthybob alias routes empty and help invocations to setup hel
   assert.match(emptyInvocation, /Healthy Bob local machine setup helpers\./u)
   assert.doesNotMatch(inboxHelp, /Healthy Bob local machine setup helpers\./u)
   assert.match(inboxHelp, /vault-cli inbox doctor/u)
+})
+
+test.sequential('healthybob loads HEALTHYBOB_VAULT from a local .env file', async () => {
+  const originalVault = process.env.HEALTHYBOB_VAULT
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-vault-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-home-'))
+  const envVault = path.join(tempRoot, 'vault-from-dotenv')
+
+  delete process.env.HEALTHYBOB_VAULT
+  await writeFile(path.join(tempRoot, '.env'), 'HEALTHYBOB_VAULT=./vault-from-dotenv\n', 'utf8')
+
+  try {
+    await runSetupAliasRaw('healthybob', ['init'], {
+      cwd: tempRoot,
+      env: {
+        HOME: homeRoot,
+      },
+    })
+
+    await readFile(path.join(envVault, 'vault.json'), 'utf8')
+    await readFile(path.join(envVault, 'CORE.md'), 'utf8')
+  } finally {
+    if (originalVault === undefined) {
+      delete process.env.HEALTHYBOB_VAULT
+    } else {
+      process.env.HEALTHYBOB_VAULT = originalVault
+    }
+
+    await rm(tempRoot, { recursive: true, force: true })
+    await rm(homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('healthybob keeps exported HEALTHYBOB_VAULT values ahead of local .env files', async () => {
+  const originalVault = process.env.HEALTHYBOB_VAULT
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-precedence-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-precedence-home-'))
+  const shellVault = path.join(tempRoot, 'vault-from-shell')
+  const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
+
+  delete process.env.HEALTHYBOB_VAULT
+  await writeFile(path.join(tempRoot, '.env'), 'HEALTHYBOB_VAULT=./vault-from-dotenv\n', 'utf8')
+
+  try {
+    await runSetupAliasRaw('healthybob', ['init'], {
+      cwd: tempRoot,
+      env: {
+        HEALTHYBOB_VAULT: './vault-from-shell',
+        HOME: homeRoot,
+      },
+    })
+
+    await readFile(path.join(shellVault, 'vault.json'), 'utf8')
+    await assert.rejects(readFile(path.join(dotenvVault, 'vault.json'), 'utf8'))
+  } finally {
+    if (originalVault === undefined) {
+      delete process.env.HEALTHYBOB_VAULT
+    } else {
+      process.env.HEALTHYBOB_VAULT = originalVault
+    }
+
+    await rm(tempRoot, { recursive: true, force: true })
+    await rm(homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('healthybob prefers .env.local values over .env defaults', async () => {
+  const originalVault = process.env.HEALTHYBOB_VAULT
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-local-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-local-home-'))
+  const localVault = path.join(tempRoot, 'vault-from-dotenv-local')
+  const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
+
+  delete process.env.HEALTHYBOB_VAULT
+  await writeFile(path.join(tempRoot, '.env'), 'HEALTHYBOB_VAULT=./vault-from-dotenv\n', 'utf8')
+  await writeFile(
+    path.join(tempRoot, '.env.local'),
+    'HEALTHYBOB_VAULT=./vault-from-dotenv-local\n',
+    'utf8',
+  )
+
+  try {
+    await runSetupAliasRaw('healthybob', ['init'], {
+      cwd: tempRoot,
+      env: {
+        HOME: homeRoot,
+      },
+    })
+
+    await readFile(path.join(localVault, 'vault.json'), 'utf8')
+    await assert.rejects(readFile(path.join(dotenvVault, 'vault.json'), 'utf8'))
+  } finally {
+    if (originalVault === undefined) {
+      delete process.env.HEALTHYBOB_VAULT
+    } else {
+      process.env.HEALTHYBOB_VAULT = originalVault
+    }
+
+    await rm(tempRoot, { recursive: true, force: true })
+    await rm(homeRoot, { recursive: true, force: true })
+  }
 })
 
 test.sequential('setup-macos wrapper rejects non-macOS hosts before bootstrapping', async () => {
