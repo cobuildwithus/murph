@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { test, vi } from "vitest";
@@ -13,6 +14,7 @@ import {
   HEALTHYBOB_VAULT_ENV,
   HEALTHYBOB_WEB_LAUNCH_CWD_ENV,
   rememberLaunchCwd,
+  resolveConfiguredVaultRoot,
 } from "../src/lib/vault";
 import { createWebFixtureVault, destroyWebFixtureVault } from "./web-fixture";
 
@@ -53,6 +55,84 @@ test("getConfiguredVaultRoot resolves relative paths from the launch cwd when pr
 
 test("buildSuggestedCommand keeps the package-local example for direct package runs", () => {
   assert.equal(buildSuggestedCommand(), `${HEALTHYBOB_VAULT_ENV}=${FIXTURE_VAULT_EXAMPLE} pnpm dev`);
+});
+
+test("resolveConfiguredVaultRoot falls back to the saved default vault when env is unset", async () => {
+  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "hb-web-home-"));
+
+  try {
+    const savedVaultRoot = path.join(operatorHome, "vault");
+    await mkdir(path.join(operatorHome, ".healthybob"), { recursive: true });
+    await writeFile(
+      path.join(operatorHome, ".healthybob", "config.json"),
+      `${JSON.stringify({
+        schema: "healthybob.operator-config.v1",
+        defaultVault: "~/vault",
+        assistant: null,
+        updatedAt: "2026-03-23T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+
+    assert.equal(
+      await resolveConfiguredVaultRoot({
+        HOME: operatorHome,
+      }, "/repo/packages/web"),
+      savedVaultRoot,
+    );
+  } finally {
+    await rm(operatorHome, { force: true, recursive: true });
+  }
+});
+
+test("resolveConfiguredVaultRoot keeps explicit env precedence over the saved default vault", async () => {
+  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "hb-web-home-"));
+
+  try {
+    await mkdir(path.join(operatorHome, ".healthybob"), { recursive: true });
+    await writeFile(
+      path.join(operatorHome, ".healthybob", "config.json"),
+      `${JSON.stringify({
+        schema: "healthybob.operator-config.v1",
+        defaultVault: "~/vault",
+        assistant: null,
+        updatedAt: "2026-03-23T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+
+    assert.equal(
+      await resolveConfiguredVaultRoot(
+        {
+          HEALTHYBOB_VAULT: "fixtures/demo-web-vault",
+          [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
+          HOME: operatorHome,
+        },
+        "/repo/packages/web",
+      ),
+      "/repo/fixtures/demo-web-vault",
+    );
+  } finally {
+    await rm(operatorHome, { force: true, recursive: true });
+  }
+});
+
+test("resolveConfiguredVaultRoot ignores invalid saved operator config", async () => {
+  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "hb-web-home-"));
+
+  try {
+    await mkdir(path.join(operatorHome, ".healthybob"), { recursive: true });
+    await writeFile(path.join(operatorHome, ".healthybob", "config.json"), "{", "utf8");
+
+    assert.equal(
+      await resolveConfiguredVaultRoot({
+        HOME: operatorHome,
+      }, "/repo/packages/web"),
+      null,
+    );
+  } finally {
+    await rm(operatorHome, { force: true, recursive: true });
+  }
 });
 
 test("rememberLaunchCwd stores the first launch cwd only", () => {

@@ -216,6 +216,7 @@ test("HomePage renders the setup state when no vault is configured", async () =>
 
   assert.match(markup, /No vault configured/);
   assert.match(markup, /HEALTHYBOB_VAULT/);
+  assert.match(markup, /save a default Healthy Bob vault first/);
 });
 
 test("HomePage renders the unreadable-vault error state", async () => {

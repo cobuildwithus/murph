@@ -14,8 +14,8 @@ import {
 import {
   buildExampleVaultPath,
   buildSuggestedCommand,
-  getConfiguredVaultRoot,
   HEALTHYBOB_VAULT_ENV,
+  resolveConfiguredVaultRoot,
 } from "./vault";
 
 type VaultReadModel = Awaited<ReturnType<typeof readVaultTolerant>>;
@@ -163,7 +163,7 @@ export async function loadVaultOverviewFromEnv(
 ): Promise<OverviewResult> {
   return loadVaultOverview({
     ...options,
-    vaultRoot: getConfiguredVaultRoot(),
+    vaultRoot: await resolveConfiguredVaultRoot(),
   });
 }
 

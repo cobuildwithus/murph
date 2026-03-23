@@ -314,7 +314,7 @@ function MissingConfigState({
       <p className="text-accent font-display text-xs font-bold tracking-[0.14em] uppercase mb-3">Setup required</p>
       <h2 className="font-display text-[1.5rem] font-bold tracking-[-0.03em] mb-3">No vault configured</h2>
       <p className="text-muted leading-relaxed mb-5">
-        Start the app with <code className="font-mono text-[0.9em] bg-card-strong px-1.5 py-0.5 rounded">{overview.envVar}</code> pointing at a vault root.
+        Start the app with <code className="font-mono text-[0.9em] bg-card-strong px-1.5 py-0.5 rounded">{overview.envVar}</code> pointing at a vault root, or save a default Healthy Bob vault first.
       </p>
       <div className="bg-ink rounded-xl text-[#f7f1e9] overflow-x-auto py-3 px-4 mb-3">
         <code className="font-mono text-sm">{overview.suggestedCommand}</code>
