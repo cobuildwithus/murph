@@ -93,8 +93,6 @@ import {
   renderComposerValue,
   renderWrappedTextBlock,
   resolveChromePanelBoxProps,
-  resolveInkTranscriptRowWidth,
-  resolveUserEntryRowPanelProps,
   resolveMessageRoleLabel,
   resolveAssistantHyperlinkTarget,
   resolveComposerTerminalAction,
@@ -2620,18 +2618,6 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     paddingY: 1,
     width: '100%',
   })
-  assert.equal(resolveInkTranscriptRowWidth(undefined), 80)
-  assert.equal(resolveInkTranscriptRowWidth(48.9), 48)
-  assert.equal(resolveInkTranscriptRowWidth(0), 20)
-  assert.deepEqual(
-    resolveUserEntryRowPanelProps(LIGHT_ASSISTANT_INK_THEME, 48),
-    {
-      backgroundColor: LIGHT_ASSISTANT_INK_THEME.composerBackground,
-      marginBottom: 1,
-      paddingY: 1,
-      width: 48,
-    },
-  )
 
   assert.equal(
     formatFooterBadgeText({

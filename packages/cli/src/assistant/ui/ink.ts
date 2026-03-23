@@ -152,7 +152,7 @@ interface ChromePanelProps {
   marginBottom?: number
   paddingX?: number
   paddingY?: number
-  width?: number | string
+  width?: string
 }
 
 interface ComposerEditingState {
@@ -184,7 +184,6 @@ function useAssistantInkTheme(): AssistantInkTheme {
 
 const BUSY_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const ASSISTANT_PLAIN_TEXT_WRAP_SLACK = 4
-const MIN_INK_TRANSCRIPT_ROW_WIDTH = 20
 
 export function resolveChromePanelBoxProps(
   props: ChromePanelProps,
@@ -194,7 +193,7 @@ export function resolveChromePanelBoxProps(
   marginBottom: number
   paddingX: number
   paddingY: number
-  width: number | string
+  width: string
 } {
   const boxProps: {
     backgroundColor?: string
@@ -202,7 +201,7 @@ export function resolveChromePanelBoxProps(
     marginBottom: number
     paddingX: number
     paddingY: number
-    width: number | string
+    width: string
   } = {
     flexDirection: 'column',
     marginBottom: props.marginBottom ?? 1,
@@ -220,29 +219,6 @@ export function resolveChromePanelBoxProps(
   }
 
   return boxProps
-}
-
-export function resolveInkTranscriptRowWidth(
-  columns: number | null | undefined,
-): number {
-  const normalizedColumns =
-    typeof columns === 'number' && Number.isFinite(columns)
-      ? Math.floor(columns)
-      : 80
-
-  return Math.max(MIN_INK_TRANSCRIPT_ROW_WIDTH, normalizedColumns)
-}
-
-export function resolveUserEntryRowPanelProps(
-  theme: AssistantInkTheme,
-  columns: number | null | undefined,
-): ChromePanelProps {
-  return {
-    backgroundColor: theme.composerBackground,
-    marginBottom: 1,
-    paddingY: 1,
-    width: resolveInkTranscriptRowWidth(columns),
-  }
 }
 
 const ChromePanel = React.memo(function ChromePanel(
@@ -932,7 +908,6 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
 ): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
-  const { stdout } = useStdout()
 
   if (props.entry.kind === 'assistant') {
     return createElement(
@@ -1020,7 +995,11 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
 
   return createElement(
     ChromePanel,
-    resolveUserEntryRowPanelProps(theme, stdout?.columns),
+    {
+      backgroundColor: theme.composerBackground,
+      marginBottom: 1,
+      paddingY: 1,
+    },
     createElement(
       Box,
       {
