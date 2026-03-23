@@ -185,7 +185,6 @@ function useAssistantInkTheme(): AssistantInkTheme {
 }
 
 const BUSY_INDICATOR_CHARACTER = '•'
-const BUSY_INDICATOR_PULSE_INTERVAL_MS = 500
 const ASSISTANT_PLAIN_TEXT_WRAP_SLACK = 4
 const ASSISTANT_INK_TTY_PATH =
   process.platform === 'win32' ? 'CONIN$' : '/dev/tty'
@@ -332,44 +331,18 @@ const ChromePanel = React.memo(function ChromePanel(
   )
 })
 
-export function resolveBusyIndicatorProps(pulseOn: boolean): {
-  bold: boolean
-  dimColor: boolean
-  text: string
-} {
-  return {
-    bold: pulseOn,
-    dimColor: !pulseOn,
-    text: BUSY_INDICATOR_CHARACTER,
-  }
-}
-
 const BusySpinner = React.memo(function BusySpinner(input: {
   color?: string
 }): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
-  const [pulseOn, setPulseOn] = React.useState(true)
-
-  React.useEffect(() => {
-    const interval = setInterval(() => {
-      setPulseOn((current) => !current)
-    }, BUSY_INDICATOR_PULSE_INTERVAL_MS)
-
-    return () => {
-      clearInterval(interval)
-    }
-  }, [])
-  const indicatorProps = resolveBusyIndicatorProps(pulseOn)
 
   return createElement(
     Text,
     {
-      bold: indicatorProps.bold,
       color: input.color ?? theme.accentColor,
-      dimColor: indicatorProps.dimColor,
     },
-    indicatorProps.text,
+    BUSY_INDICATOR_CHARACTER,
   )
 })
 

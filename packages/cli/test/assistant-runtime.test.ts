@@ -94,7 +94,6 @@ import {
   renderComposerValue,
   renderWrappedTextBlock,
   resolveAssistantInkInputAdapter,
-  resolveBusyIndicatorProps,
   resolveChromePanelBoxProps,
   resolveMessageRoleLabel,
   resolveAssistantHyperlinkTarget,
@@ -3430,19 +3429,6 @@ test('assistant Ink transcript feed keeps the empty chat state free of an intro 
   assert.equal(fragmentChildren[1].type, Box)
   assert.equal(staticProps.items?.length, 1)
   assert.equal(liveChildren.length, 0)
-})
-
-test('assistant Ink busy indicator pulses a dot by toggling emphasis only', () => {
-  assert.deepEqual(resolveBusyIndicatorProps(true), {
-    bold: true,
-    dimColor: false,
-    text: '•',
-  })
-  assert.deepEqual(resolveBusyIndicatorProps(false), {
-    bold: false,
-    dimColor: true,
-    text: '•',
-  })
 })
 
 test('assistant Ink link helpers split markdown links and map absolute file paths to file URLs', () => {
