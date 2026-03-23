@@ -16,6 +16,7 @@ coverage/
 .test-dist/
 .codex-runs/
 .codex-worker-prompts/
+assistant-state/
 audit-packages/
 output-packages/
 vault/
