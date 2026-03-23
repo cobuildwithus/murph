@@ -130,7 +130,6 @@ interface AssistantMessageTextProps {
 
 interface ChatStatusProps {
   busy: boolean
-  busyStartedAt: number | null
   status: {
     kind: 'error' | 'info' | 'success'
     text: string
@@ -251,10 +250,6 @@ const BusySpinner = React.memo(function BusySpinner(input: {
 export function resolveMessageRoleLabel(
   kind: InkChatEntry['kind'],
 ): string | null {
-  if (kind === 'assistant') {
-    return 'healthy bob'
-  }
-
   if (kind === 'error') {
     return 'error'
   }
@@ -271,12 +266,6 @@ const MessageRoleLabel = React.memo(function MessageRoleLabel(input: {
   if (!label) {
     return null
   }
-  const color =
-    input.kind === 'assistant'
-      ? theme.assistantLabelColor
-      : input.kind === 'error'
-        ? theme.errorColor
-        : theme.userLabelColor
 
   return createElement(
     Box,
@@ -287,11 +276,44 @@ const MessageRoleLabel = React.memo(function MessageRoleLabel(input: {
       Text,
       {
         bold: true,
-        color,
+        color: theme.errorColor,
       },
       label,
     ),
   )
+})
+
+export function renderWrappedTextBlock(input: {
+  children?: React.ReactNode
+  color?: string
+  dimColor?: boolean
+}): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      width: '100%',
+    },
+    createElement(
+      Text,
+      {
+        color: input.color,
+        dimColor: input.dimColor,
+        wrap: 'wrap',
+      },
+      input.children,
+    ),
+  )
+}
+
+const WrappedTextBlock = React.memo(function WrappedTextBlock(input: {
+  children?: React.ReactNode
+  color?: string
+  dimColor?: boolean
+}): React.ReactElement {
+  return renderWrappedTextBlock(input)
 })
 
 const FooterBadge = React.memo(function FooterBadge(input: {
@@ -463,10 +485,8 @@ export function renderAssistantMessageText(
   const segments = splitAssistantMarkdownLinks(input.text)
 
   return createElement(
-    Text,
-    {
-      wrap: 'wrap',
-    },
+    WrappedTextBlock,
+    {},
     ...segments.map((segment, index) => {
       if (segment.kind === 'text') {
         return segment.text
@@ -818,9 +838,6 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
       {
         marginBottom: 1,
       },
-      createElement(MessageRoleLabel, {
-        kind: 'assistant',
-      }),
       createElement(AssistantMessageText, { text: props.entry.text }),
     )
   }
@@ -835,12 +852,9 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
       createElement(MessageRoleLabel, {
         kind: 'error',
       }),
-      createElement(
-        Text,
-        {
-          color: theme.errorColor,
-          wrap: 'wrap',
-        },
+      createElement(WrappedTextBlock, {
+        color: theme.errorColor,
+      },
         props.entry.text,
       ),
     )
@@ -891,10 +905,9 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
             flexShrink: 1,
           },
           createElement(
-            Text,
+            WrappedTextBlock,
             {
               dimColor: true,
-              wrap: 'wrap',
             },
             props.entry.text,
           ),
@@ -908,17 +921,37 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
     {
       backgroundColor: theme.composerBackground,
       marginBottom: 1,
+      paddingY: 1,
     },
-    createElement(MessageRoleLabel, {
-      kind: 'user',
-    }),
     createElement(
-      Text,
+      Box,
       {
-        color: theme.composerTextColor,
-        wrap: 'wrap',
+        flexDirection: 'row',
+        width: '100%',
       },
-      props.entry.text,
+      createElement(
+        Text,
+        {
+          color: theme.composerTextColor,
+        },
+        '› ',
+      ),
+      createElement(
+        Box,
+        {
+          flexDirection: 'column',
+          flexGrow: 1,
+          flexShrink: 1,
+        },
+        createElement(
+          Text,
+          {
+            color: theme.composerTextColor,
+            wrap: 'wrap',
+          },
+          props.entry.text,
+        ),
+      ),
     ),
   )
 })
@@ -1060,7 +1093,7 @@ const ChatStatus = React.memo(function ChatStatus(
         : props.status?.kind === 'success'
           ? theme.successColor
           : theme.infoColor
-    const busyDetail = props.status?.text ?? 'You can keep typing while the assistant works.'
+    const busyDetail = normalizeNullableString(props.status?.text)
     const busyLabel = 'Working'
 
     return createElement(
@@ -1073,26 +1106,42 @@ const ChatStatus = React.memo(function ChatStatus(
         Box,
         {
           flexDirection: 'row',
+          width: '100%',
         },
         createElement(BusySpinner, {
           color: busyColor,
         }),
         createElement(Text, {}, ' '),
         createElement(
-          Text,
+          Box,
           {
-            color: busyColor,
+            flexDirection: 'column',
+            flexGrow: 1,
+            flexShrink: 1,
           },
-          busyLabel,
+          createElement(
+            Text,
+            {
+              wrap: 'wrap',
+            },
+            createElement(
+              Text,
+              {
+                color: busyColor,
+              },
+              busyLabel,
+            ),
+            busyDetail
+              ? createElement(
+                  Text,
+                  {
+                    color: theme.mutedColor,
+                  },
+                  ` · ${busyDetail}`,
+                )
+              : null,
+          ),
         ),
-      ),
-      createElement(
-        Text,
-        {
-          color: theme.mutedColor,
-          wrap: 'wrap',
-        },
-        busyDetail,
       ),
     )
   }
@@ -1166,9 +1215,6 @@ const ChatComposer = React.memo(function ChatComposer(
         marginBottom: slashSuggestions.length > 0 ? 0 : 1,
         paddingY: 1,
       },
-      createElement(MessageRoleLabel, {
-        kind: 'user',
-      }),
       createElement(
         Box,
         {
@@ -2191,7 +2237,6 @@ export async function runAssistantChatWithInk(
         kind: 'error' | 'info' | 'success'
         text: string
       } | null>(null)
-      const [busyStartedAt, setBusyStartedAt] = React.useState<number | null>(null)
       const [activeModel, setActiveModel] = React.useState<string | null>(
         normalizeNullableString(input.model) ??
           normalizeNullableString(defaults?.model) ??
@@ -2379,7 +2424,6 @@ export async function runAssistantChatWithInk(
           },
         ])
         setBusy(true)
-        setBusyStartedAt(Date.now())
         setStatus(null)
 
         const turnTracePrefix = `turn:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
@@ -2522,7 +2566,6 @@ export async function runAssistantChatWithInk(
             }
           } finally {
             setBusy(false)
-            setBusyStartedAt(null)
           }
         })()
 
@@ -2577,7 +2620,6 @@ export async function runAssistantChatWithInk(
             },
             createElement(ChatStatus, {
               busy,
-              busyStartedAt,
               status,
             }),
             modelSwitcherState

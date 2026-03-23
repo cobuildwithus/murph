@@ -91,6 +91,7 @@ import {
   partitionChatTranscriptEntries,
   renderChatTranscriptFeed,
   renderComposerValue,
+  renderWrappedTextBlock,
   resolveChromePanelBoxProps,
   resolveMessageRoleLabel,
   resolveAssistantHyperlinkTarget,
@@ -2588,7 +2589,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   ])
   assert.equal(shouldShowChatComposerGuidance(0), true)
   assert.equal(shouldShowChatComposerGuidance(1), false)
-  assert.equal(resolveMessageRoleLabel('assistant'), 'healthy bob')
+  assert.equal(resolveMessageRoleLabel('assistant'), null)
   assert.equal(resolveMessageRoleLabel('error'), 'error')
   assert.equal(resolveMessageRoleLabel('user'), null)
 
@@ -3301,6 +3302,38 @@ test('assistant Ink link helpers split markdown links and map absolute file path
     ),
     '\u001B]8;;file:///tmp/mock-vault/packages/cli/src/usecases/workout.ts#L10\u0007workout.ts\u001B]8;;\u0007',
   )
+})
+
+test('assistant Ink wrapped text block keeps assistant replies in a single full-width wrapped block', () => {
+  const text =
+    'All good. What do you want to sort out: a health question, something in the vault, or a reminder/routine?'
+  const rendered = renderWrappedTextBlock({ children: text })
+
+  assert.equal(rendered.type, Box)
+
+  const wrapperProps = rendered.props as {
+    children?: React.ReactNode
+    flexDirection?: string
+    width?: string
+  }
+  const children = React.Children.toArray(wrapperProps.children)
+
+  assert.equal(wrapperProps.flexDirection, 'column')
+  assert.equal(wrapperProps.width, '100%')
+  assert.equal(children.length, 1)
+  assert.equal(React.isValidElement(children[0]), true)
+
+  if (!React.isValidElement(children[0])) {
+    throw new Error('Expected the wrapped assistant message child to render as a React element.')
+  }
+
+  const textProps = children[0].props as {
+    children?: React.ReactNode
+    wrap?: string
+  }
+
+  assert.equal(textProps.wrap, 'wrap')
+  assert.equal(textProps.children, text)
 })
 
 test('assistant Ink hyperlink support only enables terminal links on supported tty environments', () => {
