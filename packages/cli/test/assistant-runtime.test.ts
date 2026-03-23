@@ -99,6 +99,7 @@ import {
   resolveAssistantHyperlinkTarget,
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
+  shouldShowBusyStatus,
   splitAssistantMarkdownLinks,
   supportsAssistantInkRawMode,
   supportsAssistantTerminalHyperlinks,
@@ -3293,6 +3294,65 @@ test('assistant Ink transcript partition keeps all rows live when no user turn h
       liveEntries: entries,
       staticEntries: [],
     },
+  )
+})
+
+test('assistant Ink busy status hides once the current turn already has a visible assistant row', () => {
+  assert.equal(
+    shouldShowBusyStatus({
+      busy: true,
+      entries: [
+        {
+          kind: 'user',
+          text: 'current turn',
+        },
+        {
+          kind: 'assistant',
+          text: 'partial reply',
+          streamKey: 'assistant:1',
+        },
+      ],
+    }),
+    false,
+  )
+})
+
+test('assistant Ink busy status hides once the current turn already has a visible error row', () => {
+  assert.equal(
+    shouldShowBusyStatus({
+      busy: true,
+      entries: [
+        {
+          kind: 'user',
+          text: 'current turn',
+        },
+        {
+          kind: 'error',
+          text: 'provider blew up',
+        },
+      ],
+    }),
+    false,
+  )
+})
+
+test('assistant Ink busy status stays visible while the current turn has no visible reply yet', () => {
+  assert.equal(
+    shouldShowBusyStatus({
+      busy: true,
+      entries: [
+        {
+          kind: 'user',
+          text: 'current turn',
+        },
+        {
+          kind: 'thinking',
+          text: 'working on it',
+          streamKey: 'thinking:1',
+        },
+      ],
+    }),
+    true,
   )
 })
 

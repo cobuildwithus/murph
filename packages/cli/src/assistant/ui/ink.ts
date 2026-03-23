@@ -1226,6 +1226,40 @@ export function partitionChatTranscriptEntries(input: {
   }
 }
 
+export function shouldShowBusyStatus(input: {
+  busy: boolean
+  entries: readonly InkChatEntry[]
+}): boolean {
+  if (!input.busy) {
+    return false
+  }
+
+  let lastUserEntryIndex = -1
+  for (let index = input.entries.length - 1; index >= 0; index -= 1) {
+    if (input.entries[index]?.kind === 'user') {
+      lastUserEntryIndex = index
+      break
+    }
+  }
+
+  if (lastUserEntryIndex < 0) {
+    return true
+  }
+
+  for (let index = lastUserEntryIndex + 1; index < input.entries.length; index += 1) {
+    const entry = input.entries[index]
+    if (entry?.kind === 'assistant' && normalizeNullableString(entry.text)) {
+      return false
+    }
+
+    if (entry?.kind === 'error' && normalizeNullableString(entry.text)) {
+      return false
+    }
+  }
+
+  return true
+}
+
 function renderStaticTranscriptRow(
   item: StaticTranscriptRow,
   index: number,
@@ -2802,7 +2836,10 @@ export async function runAssistantChatWithInk(
               width: '100%',
             },
             createElement(ChatStatus, {
-              busy,
+              busy: shouldShowBusyStatus({
+                busy,
+                entries,
+              }),
               status,
             }),
             modelSwitcherState
