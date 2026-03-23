@@ -315,6 +315,23 @@ test("regimens support medication and supplement groups plus stop handling", asy
     dose: 1000,
     unit: "mg",
     schedule: "with breakfast",
+    brand: "Nordic Naturals",
+    manufacturer: "Nordic Naturals",
+    servingSize: "2 softgels",
+    ingredients: [
+      {
+        compound: "EPA",
+        label: "Eicosapentaenoic acid",
+        amount: 600,
+        unit: "mg",
+      },
+      {
+        compound: "DHA",
+        label: "Docosahexaenoic acid",
+        amount: 400,
+        unit: "mg",
+      },
+    ],
   });
   const stopped = await stopRegimenItem({
     vaultRoot,
@@ -353,13 +370,46 @@ test("regimens support medication and supplement groups plus stop handling", asy
   assert.equal(listed.length, 2);
   assert.equal(readMedication.group, "medication");
   assert.equal(readSupplement.group, "supplement");
+  assert.equal(readSupplement.brand, "Nordic Naturals");
+  assert.equal(readSupplement.manufacturer, "Nordic Naturals");
+  assert.equal(readSupplement.servingSize, "2 softgels");
+  assert.deepEqual(
+    readSupplement.ingredients?.map((ingredient) => ({
+      compound: ingredient.compound,
+      label: ingredient.label,
+      amount: ingredient.amount,
+      unit: ingredient.unit,
+    })),
+    [
+      {
+        compound: "EPA",
+        label: "Eicosapentaenoic acid",
+        amount: 600,
+        unit: "mg",
+      },
+      {
+        compound: "DHA",
+        label: "Docosahexaenoic acid",
+        amount: 400,
+        unit: "mg",
+      },
+    ],
+  );
   assert.equal(stopped.record.status, "stopped");
   assert.equal(stopped.record.stoppedOn, "2026-03-20");
   assert.equal(patchedSupplement.record.title, supplement.record.title);
   assert.equal(patchedSupplement.record.schedule, "with breakfast");
   assert.equal(patchedSupplement.record.startedOn, "2026-02-15");
+  assert.equal(patchedSupplement.record.brand, "Nordic Naturals");
+  assert.equal(patchedSupplement.record.servingSize, "2 softgels");
   assert.match(stopped.record.relativePath, /^bank\/regimens\/medication\//);
   assert.match(readMedication.markdown, /Stopped on: 2026-03-20/);
+  assert.match(readSupplement.markdown, /## Product/);
+  assert.match(readSupplement.markdown, /Brand: Nordic Naturals/);
+  assert.match(readSupplement.markdown, /Serving size: 2 softgels/);
+  assert.match(readSupplement.markdown, /## Ingredients/);
+  assert.match(readSupplement.markdown, /EPA — 600 mg/);
+  assert.match(readSupplement.markdown, /DHA — 400 mg/);
   assert.deepEqual(selectAuditMetadata(regimenAuditRecords, "regimen_upsert"), [
     { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "create" },
     { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "create" },

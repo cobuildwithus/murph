@@ -758,25 +758,42 @@ export const allergyFrontmatterSchema = withContractMetadata(
 );
 
 export const regimenFrontmatterSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.regimenFrontmatter),
-      docType: z.literal(FRONTMATTER_DOC_TYPES.regimen),
-      regimenId: idSchema(ID_PREFIXES.regimen),
-      slug: patternedString(SLUG_PATTERN),
-      title: boundedString(1, 160),
-      kind: z.enum(REGIMEN_KINDS),
-      status: z.enum(REGIMEN_STATUSES),
-      startedOn: isoDateString(),
-      stoppedOn: isoDateString().optional(),
-      substance: boundedString(1, 160).optional(),
-      dose: numberSchema(0).optional(),
-      unit: patternedString(UNIT_PATTERN).optional(),
-      schedule: boundedString(1, 160).optional(),
-      relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-      relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
-    })
-    .strict(),
+  (() => {
+    const supplementIngredientSchema = z
+      .object({
+        compound: boundedString(1, 160),
+        label: boundedString(1, 160).optional(),
+        amount: numberSchema(0).optional(),
+        unit: patternedString(UNIT_PATTERN).optional(),
+        active: z.boolean().optional(),
+        note: boundedString(1, 4000).optional(),
+      })
+      .strict();
+
+    return z
+      .object({
+        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.regimenFrontmatter),
+        docType: z.literal(FRONTMATTER_DOC_TYPES.regimen),
+        regimenId: idSchema(ID_PREFIXES.regimen),
+        slug: patternedString(SLUG_PATTERN),
+        title: boundedString(1, 160),
+        kind: z.enum(REGIMEN_KINDS),
+        status: z.enum(REGIMEN_STATUSES),
+        startedOn: isoDateString(),
+        stoppedOn: isoDateString().optional(),
+        substance: boundedString(1, 160).optional(),
+        dose: numberSchema(0).optional(),
+        unit: patternedString(UNIT_PATTERN).optional(),
+        schedule: boundedString(1, 160).optional(),
+        brand: boundedString(1, 160).optional(),
+        manufacturer: boundedString(1, 160).optional(),
+        servingSize: boundedString(1, 160).optional(),
+        ingredients: z.array(supplementIngredientSchema).optional(),
+        relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
+        relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
+      })
+      .strict();
+  })(),
   "@healthybob/contracts/frontmatter-regimen.schema.json",
   "Healthy Bob Regimen Frontmatter",
 );
@@ -861,5 +878,6 @@ export type GoalFrontmatter = z.infer<typeof goalFrontmatterSchema>;
 export type ConditionFrontmatter = z.infer<typeof conditionFrontmatterSchema>;
 export type AllergyFrontmatter = z.infer<typeof allergyFrontmatterSchema>;
 export type RegimenFrontmatter = z.infer<typeof regimenFrontmatterSchema>;
+export type SupplementIngredientFrontmatter = NonNullable<RegimenFrontmatter["ingredients"]>[number];
 export type FamilyMemberFrontmatter = z.infer<typeof familyMemberFrontmatterSchema>;
 export type GeneticVariantFrontmatter = z.infer<typeof geneticVariantFrontmatterSchema>;

@@ -20,10 +20,13 @@ export type QueryRuntimeModule = Pick<
   | 'listRecords'
   | 'lookupEntityById'
   | 'lookupRecordById'
+  | 'listSupplements'
   | 'readVault'
   | 'readVaultTolerant'
   | 'rebuildSqliteSearchIndex'
   | 'searchVaultRuntime'
+  | 'showSupplement'
+  | 'showSupplementCompound'
 >
 
 export type QueryVaultReadModel = Awaited<

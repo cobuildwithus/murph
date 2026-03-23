@@ -10,7 +10,10 @@ import { createDeviceSyncClient } from "../device-sync-client.js"
 import type {
   ListFilters,
 } from "../vault-cli-contracts.js"
-import type { CommandContext } from "../health-cli-method-types.js"
+import type {
+  CommandContext,
+  JsonObject,
+} from "../health-cli-method-types.js"
 import type {
   CoreWriteServices,
   DeviceSyncServices,
@@ -31,10 +34,16 @@ import {
   loadIntegratedRuntime,
 } from "./runtime.js"
 import {
+  asEntityEnvelope,
+  asListEnvelope,
+  assertNoReservedPayloadKeys,
+  buildEntityLinks,
   describeLookupConstraint,
   materializeExportPack,
   matchesGenericKindFilter,
   normalizeIssues,
+  readJsonPayload,
+  recordPath,
   toGenericListItem,
   toGenericShowEntity,
 } from "./shared.js"
@@ -76,6 +85,70 @@ import {
   unlinkJournalEventIds,
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
+
+const SUPPLEMENT_SCAFFOLD_PAYLOAD = Object.freeze({
+  title: "Magnesium glycinate",
+  kind: "supplement",
+  status: "active",
+  startedOn: "2026-03-12",
+  schedule: "nightly",
+  brand: "Thorne",
+  manufacturer: "Thorne Health",
+  servingSize: "2 capsules",
+  ingredients: [
+    {
+      compound: "Magnesium",
+      label: "Magnesium glycinate chelate",
+      amount: 200,
+      unit: "mg",
+    },
+  ],
+}) as JsonObject
+
+const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
+  "id",
+  "regimenId",
+  "slug",
+  "title",
+  "markdown",
+  "body",
+  "relativePath",
+  "path",
+  "attributes",
+])
+
+function firstRawString(value: unknown): string | null {
+  return typeof value === "string" ? value : null
+}
+
+function toSupplementEntityData(record: object) {
+  const rawRecord = record as Record<string, unknown>
+
+  return Object.fromEntries(
+    Object.entries(rawRecord).filter(
+      ([key, value]) => !SUPPLEMENT_ENTITY_OMIT_KEYS.has(key) && value !== undefined,
+    ),
+  )
+}
+
+function toSupplementReadEntity(record: object) {
+  const rawRecord = record as Record<string, unknown>
+  const data = toSupplementEntityData(record)
+  const id = firstRawString(rawRecord.id) ?? firstRawString(rawRecord.regimenId) ?? ""
+
+  return {
+    id,
+    kind: "supplement",
+    title: firstRawString(rawRecord.title),
+    occurredAt: firstRawString(rawRecord.startedOn),
+    path: firstRawString(rawRecord.relativePath) ?? firstRawString(rawRecord.path),
+    markdown: firstRawString(rawRecord.markdown) ?? firstRawString(rawRecord.body),
+    data,
+    links: buildEntityLinks({
+      data,
+    }),
+  }
+}
 
 function createIntegratedCoreServices(): CoreWriteServices {
   return {
@@ -253,6 +326,34 @@ function createIntegratedCoreServices(): CoreWriteServices {
       const { core } = await loadIntegratedRuntime()
       return { core }
     }),
+    async scaffoldSupplement(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: 'supplement' as const,
+        payload: SUPPLEMENT_SCAFFOLD_PAYLOAD,
+      }
+    },
+    async upsertSupplement(input: CommandContext & {
+      input: string
+    }) {
+      const { vault } = input
+      const payload = await readJsonPayload(input.input)
+      assertNoReservedPayloadKeys(payload)
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.upsertRegimenItem({
+        ...payload,
+        kind: payload.kind ?? 'supplement',
+        vaultRoot: vault,
+      })
+
+      return {
+        vault,
+        regimenId: String(result.record.regimenId),
+        lookupId: String(result.record.regimenId),
+        path: recordPath(result.record),
+        created: Boolean(result.created),
+      }
+    },
     async rebuildCurrentProfile(input: CommandContext) {
       const { vault } = input
       const { core } = await loadIntegratedRuntime()
@@ -268,6 +369,23 @@ function createIntegratedCoreServices(): CoreWriteServices {
       }
     },
     async stopRegimen(input: StopRegimenInput) {
+      const { vault, regimenId, stoppedOn } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.stopRegimenItem({
+        vaultRoot: vault,
+        regimenId,
+        stoppedOn,
+      })
+
+      return {
+        vault,
+        regimenId: String(result.record.regimenId),
+        lookupId: String(result.record.regimenId),
+        stoppedOn: result.record.stoppedOn ?? null,
+        status: String(result.record.status),
+      }
+    },
+    async stopSupplement(input: StopRegimenInput) {
       const { vault, regimenId, stoppedOn } = input
       const { core } = await loadIntegratedRuntime()
       const result = await core.stopRegimenItem({
@@ -361,6 +479,84 @@ function createIntegratedQueryServices(): QueryServices {
       const { query } = await loadIntegratedRuntime()
       return { query }
     }),
+    async showSupplement(input: CommandContext & {
+      id: string
+    }) {
+      const { query } = await loadIntegratedRuntime()
+      const record = await query.showSupplement(input.vault, input.id)
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toSupplementReadEntity(record) : null,
+        `No supplement found for "${input.id}".`,
+      )
+    },
+    async listSupplements(input: CommandContext & {
+      status?: string
+      limit: number
+    }) {
+      const { query } = await loadIntegratedRuntime()
+      const records = await query.listSupplements(input.vault, {
+        limit: input.limit,
+        status: input.status,
+      })
+
+      return asListEnvelope(
+        input.vault,
+        {
+          limit: input.limit,
+          status: input.status,
+        },
+        records.map((record) => toSupplementReadEntity(record)),
+      )
+    },
+    async showSupplementCompound(input: CommandContext & {
+      compound: string
+      status?: string
+    }) {
+      const effectiveStatus = input.status ?? 'active'
+      const { query } = await loadIntegratedRuntime()
+      const compound = await query.showSupplementCompound(input.vault, input.compound, {
+        status: effectiveStatus,
+      })
+
+      if (!compound) {
+        throw new VaultCliError(
+          'not_found',
+          `No supplement compound found for "${input.compound}".`,
+        )
+      }
+
+      return {
+        vault: input.vault,
+        filters: {
+          status: effectiveStatus,
+        },
+        compound,
+      }
+    },
+    async listSupplementCompounds(input: CommandContext & {
+      status?: string
+      limit: number
+    }) {
+      const effectiveStatus = input.status ?? 'active'
+      const { query } = await loadIntegratedRuntime()
+      const items = await query.listSupplementCompounds(input.vault, {
+        limit: input.limit,
+        status: effectiveStatus,
+      })
+
+      return {
+        vault: input.vault,
+        filters: {
+          status: effectiveStatus,
+          limit: input.limit,
+        },
+        items,
+        count: items.length,
+        nextCursor: null,
+      }
+    },
     async showDocument(input: CommandContext & {
       id: string
     }) {

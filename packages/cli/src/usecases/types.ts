@@ -26,11 +26,14 @@ import type {
 import type { RawImportManifestResult } from "./document-meal-read.js"
 import type {
   CommandContext,
+  HealthEntityEnvelope,
   HealthCoreRuntimeMethods,
   HealthCoreServiceMethods,
+  HealthListEnvelope,
   HealthQueryRuntimeMethods,
   HealthQueryServiceMethods,
   JsonObject,
+  UpsertRecordResult,
 } from "../health-cli-method-types.js"
 import type {
   QueryCanonicalEntity,
@@ -266,6 +269,54 @@ export interface StopRegimenResult {
   status: string
 }
 
+export interface SupplementCompoundSourceResult {
+  supplementId: string
+  supplementSlug: string
+  supplementTitle: string | null
+  brand: string | null
+  manufacturer: string | null
+  status: string | null
+  label: string | null
+  amount: number | null
+  unit: string | null
+  note: string | null
+}
+
+export interface SupplementCompoundTotalResult {
+  unit: string | null
+  totalAmount: number | null
+  sourceCount: number
+  incomplete: boolean
+}
+
+export interface SupplementCompoundRecordResult {
+  compound: string
+  lookupId: string
+  totals: SupplementCompoundTotalResult[]
+  supplementCount: number
+  supplementIds: string[]
+  sources: SupplementCompoundSourceResult[]
+}
+
+export interface SupplementCompoundFiltersResult {
+  status: string
+  limit?: number
+}
+
+export interface SupplementCompoundShowResult {
+  vault: string
+  filters: SupplementCompoundFiltersResult
+  compound: SupplementCompoundRecordResult
+}
+
+export interface SupplementCompoundListResult {
+  vault: string
+  filters: SupplementCompoundFiltersResult
+  items: SupplementCompoundRecordResult[]
+  count: number
+  nextCursor: string | null
+}
+
 export interface CoreWriteServices extends HealthCoreServiceMethods {
   init(input: CommandContext): Promise<VaultInitResult>
   validate(input: CommandContext): Promise<VaultValidateResult>
@@ -371,7 +422,20 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   rebuildCurrentProfile(
     input: CommandContext,
   ): Promise<RebuildCurrentProfileResult>
+  scaffoldSupplement(
+    input: CommandContext,
+  ): Promise<{
+    vault: string
+    noun: 'supplement'
+    payload: JsonObject
+  }>
+  upsertSupplement(
+    input: CommandContext & {
+      input: string
+    },
+  ): Promise<UpsertRecordResult & { regimenId: string }>
   stopRegimen(input: StopRegimenInput): Promise<StopRegimenResult>
+  stopSupplement(input: StopRegimenInput): Promise<StopRegimenResult>
 }
 
 export interface ImporterServices {
@@ -401,6 +465,29 @@ export interface ImporterServices {
 }
 
 export interface QueryServices extends HealthQueryServiceMethods {
+  showSupplement(
+    input: CommandContext & {
+      id: string
+    },
+  ): Promise<HealthEntityEnvelope>
+  listSupplements(
+    input: CommandContext & {
+      status?: string
+      limit: number
+    },
+  ): Promise<HealthListEnvelope>
+  showSupplementCompound(
+    input: CommandContext & {
+      compound: string
+      status?: string
+    },
+  ): Promise<SupplementCompoundShowResult>
+  listSupplementCompounds(
+    input: CommandContext & {
+      status?: string
+      limit: number
+    },
+  ): Promise<SupplementCompoundListResult>
   showDocument(
     input: CommandContext & {
       id: string
@@ -623,6 +710,23 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }>
 }
 
+interface QueryRuntimeSupplementMethods {
+  listSupplements(
+    vaultRoot: string,
+    options?: Record<string, unknown>,
+  ): Promise<JsonObject[]>
+  showSupplement(vaultRoot: string, lookup: string): Promise<JsonObject | null>
+  listSupplementCompounds(
+    vaultRoot: string,
+    options?: Record<string, unknown>,
+  ): Promise<SupplementCompoundRecordResult[]>
+  showSupplementCompound(
+    vaultRoot: string,
+    lookup: string,
+    options?: Record<string, unknown>,
+  ): Promise<SupplementCompoundRecordResult | null>
+}
+
 export interface ImportersRuntimeModule {
   createImporters(input?: {
     corePort?: CoreRuntimeModule
@@ -682,7 +786,10 @@ export type QueryRecord = QueryVaultRecord
 
 export type QueryEntity = QueryCanonicalEntity
 
-export type QueryRuntimeModule = SharedQueryRuntimeModule & HealthQueryRuntimeMethods
+export type QueryRuntimeModule =
+  SharedQueryRuntimeModule &
+  HealthQueryRuntimeMethods &
+  QueryRuntimeSupplementMethods
 
 export interface IntegratedRuntime {
   core: CoreRuntimeModule

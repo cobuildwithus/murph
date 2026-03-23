@@ -9,6 +9,7 @@ import {
 } from "@healthybob/contracts";
 import {
   applyLimit,
+  asObject,
   compareNullableStrings,
   firstBoolean,
   firstNumber,
@@ -391,6 +392,51 @@ export interface AllergyQueryRecord extends RegistryMarkdownRecord {
 export const allergyRegistryDefinition: RegistryDefinition<AllergyQueryRecord> =
   createHealthEntityRegistryDefinition("allergy");
 
+export interface SupplementIngredientQueryRecord {
+  compound: string;
+  label: string | null;
+  amount: number | null;
+  unit: string | null;
+  active: boolean;
+  note: string | null;
+}
+
+export function readSupplementIngredients(
+  attributes: FrontmatterObject,
+  keys: readonly string[] = ["ingredients"],
+): SupplementIngredientQueryRecord[] {
+  for (const key of keys) {
+    const value = attributes[key];
+
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    return value.flatMap((entry) => {
+      const ingredient = asObject(entry);
+      if (!ingredient) {
+        return [];
+      }
+
+      const compound = firstString(ingredient, ["compound"]);
+      if (!compound) {
+        return [];
+      }
+
+      return [{
+        compound,
+        label: firstString(ingredient, ["label"]),
+        amount: firstNumber(ingredient, ["amount"]),
+        unit: firstString(ingredient, ["unit"]),
+        active: firstBoolean(ingredient, ["active"]) ?? true,
+        note: firstString(ingredient, ["note"]),
+      }];
+    });
+  }
+
+  return [];
+}
+
 export interface RegimenQueryRecord extends RegistryMarkdownRecord {
   kind: string | null;
   startedOn: string | null;
@@ -399,6 +445,10 @@ export interface RegimenQueryRecord extends RegistryMarkdownRecord {
   dose: number | null;
   unit: string | null;
   schedule: string | null;
+  brand: string | null;
+  manufacturer: string | null;
+  servingSize: string | null;
+  ingredients: SupplementIngredientQueryRecord[];
   relatedGoalIds: string[];
   relatedConditionIds: string[];
   group: string | null;
@@ -562,6 +612,10 @@ export function regimenRecordFromEntity(entity: CanonicalEntity): RegimenQueryRe
     dose: firstNumber(base.attributes, ["dose"]),
     unit: firstString(base.attributes, ["unit"]),
     schedule: firstString(base.attributes, ["schedule"]),
+    brand: firstString(base.attributes, ["brand"]),
+    manufacturer: firstString(base.attributes, ["manufacturer"]),
+    servingSize: firstString(base.attributes, ["servingSize"]),
+    ingredients: readSupplementIngredients(base.attributes),
     relatedGoalIds: readRegistryStrings(base.attributes, ["relatedGoalIds"]),
     relatedConditionIds: readRegistryStrings(base.attributes, ["relatedConditionIds"]),
     group:

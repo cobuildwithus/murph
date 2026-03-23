@@ -10,11 +10,14 @@ import {
   getVaultEntities,
   listEntities,
   listRecords,
+  listSupplementCompounds,
+  listSupplements,
   readCurrentProfile,
   lookupEntityById,
   readVault,
   readVaultTolerant,
   searchVault,
+  showSupplementCompound,
   showProfile,
 } from "../src/index.js";
 import { collectCanonicalEntities } from "../src/health/canonical-collector.js";
@@ -314,6 +317,145 @@ updatedAt: 2026-03-12
 
   return vaultRoot;
 }
+
+test("supplement queries project product metadata and aggregate overlapping compounds", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-supplements-"));
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/regimens/supplements/liposomal-vitamin-c.md",
+      `---
+schemaVersion: hv/regimen@v1
+regimenId: reg_new
+slug: liposomal-vitamin-c
+title: Liposomal Vitamin C
+status: active
+kind: supplement
+startedOn: 2026-03-01
+brand: LivOn Labs
+manufacturer: LivOn Laboratories
+servingSize: 1 packet
+ingredients:
+  -
+    compound: Vitamin C
+    label: Ascorbic acid
+    amount: 500
+    unit: mg
+  -
+    compound: Phosphatidylcholine
+    amount: 1200
+    unit: mg
+---
+# Liposomal Vitamin C
+`,
+    );
+
+    await writeVaultFile(
+      vaultRoot,
+      "bank/regimens/supplements/electrolyte-c-mix.md",
+      `---
+schemaVersion: hv/regimen@v1
+regimenId: reg_legacy
+slug: electrolyte-c-mix
+title: Electrolyte C Mix
+status: active
+kind: supplement
+startedOn: 2026-03-02
+substance: Vitamin C
+dose: 250
+unit: mg
+schedule: post-training
+---
+# Electrolyte C Mix
+`,
+    );
+
+    await writeVaultFile(
+      vaultRoot,
+      "bank/regimens/supplements/cold-support.md",
+      `---
+schemaVersion: hv/regimen@v1
+regimenId: reg_stopped
+slug: cold-support
+title: Cold Support
+status: stopped
+kind: supplement
+startedOn: 2026-01-15
+stoppedOn: 2026-02-01
+ingredients:
+  -
+    compound: Vitamin C
+    amount: 1000
+    unit: mg
+---
+# Cold Support
+`,
+    );
+
+    const supplements = await listSupplements(vaultRoot);
+    const activeCompounds = await listSupplementCompounds(vaultRoot);
+    const vitaminC = await showSupplementCompound(vaultRoot, "vitamin-c");
+    const stoppedVitaminC = await showSupplementCompound(vaultRoot, "Vitamin C", {
+      status: "stopped",
+    });
+    const liposomal = supplements.find((record) => record.id === "reg_new") ?? null;
+
+    assert.equal(supplements.length, 3);
+    assert.equal(liposomal?.brand, "LivOn Labs");
+    assert.equal(liposomal?.manufacturer, "LivOn Laboratories");
+    assert.equal(liposomal?.servingSize, "1 packet");
+    assert.deepEqual(liposomal?.ingredients, [
+      {
+        compound: "Vitamin C",
+        label: "Ascorbic acid",
+        amount: 500,
+        unit: "mg",
+        active: true,
+        note: null,
+      },
+      {
+        compound: "Phosphatidylcholine",
+        label: null,
+        amount: 1200,
+        unit: "mg",
+        active: true,
+        note: null,
+      },
+    ]);
+    assert.deepEqual(
+      activeCompounds.map((record) => record.lookupId),
+      ["phosphatidylcholine", "vitamin-c"],
+    );
+    assert.deepEqual(vitaminC?.totals, [
+      {
+        unit: "mg",
+        totalAmount: 750,
+        sourceCount: 2,
+        incomplete: false,
+      },
+    ]);
+    assert.equal(vitaminC?.supplementCount, 2);
+    assert.deepEqual(vitaminC?.supplementIds, ["reg_legacy", "reg_new"]);
+    assert.deepEqual(
+      vitaminC?.sources.map((source) => source.supplementId),
+      ["reg_legacy", "reg_new"],
+    );
+    assert.equal(vitaminC?.sources[1]?.brand, "LivOn Labs");
+    assert.deepEqual(stoppedVitaminC?.totals, [
+      {
+        unit: "mg",
+        totalAmount: 1000,
+        sourceCount: 1,
+        incomplete: false,
+      },
+    ]);
+    assert.equal(stoppedVitaminC?.supplementCount, 1);
+    assert.deepEqual(stoppedVitaminC?.supplementIds, ["reg_stopped"]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displayId" | "recordType">): VaultRecord {
   const hasTitle = Object.prototype.hasOwnProperty.call(overrides, "title");

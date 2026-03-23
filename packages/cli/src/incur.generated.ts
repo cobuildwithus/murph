@@ -146,6 +146,13 @@ declare module 'incur' {
       'search index status': { args: {}; options: { vault: string; requestId: string } }
       'search query': { args: {}; options: { vault: string; requestId: string; text: string; backend: "auto" | "scan" | "sqlite"; recordType: string[]; kind: string[]; stream: string[]; experiment: string; from: string; to: string; tag: string[]; limit: number } }
       'show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'supplement compound list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
+      'supplement compound show': { args: { compound: string }; options: { vault: string; requestId: string; status: string } }
+      'supplement list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
+      'supplement scaffold': { args: {}; options: { vault: string; requestId: string } }
+      'supplement show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'supplement stop': { args: { regimenId: string }; options: { vault: string; requestId: string; stoppedOn: string } }
+      'supplement upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'timeline': { args: {}; options: { vault: string; requestId: string; from: string; to: string; experiment: string; kind: string[]; stream: string[]; entryType: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId: string } }
       'vault paths': { args: {}; options: { vault: string; requestId: string } }

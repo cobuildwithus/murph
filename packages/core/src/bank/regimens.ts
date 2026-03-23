@@ -17,6 +17,7 @@ import {
   buildMarkdownBody,
   detailList,
   groupFromRegimenPath,
+  requireObject,
   listSection,
   normalizeGroupPath,
   normalizeRecordIdList,
@@ -39,13 +40,111 @@ import type { FrontmatterObject } from "../types.js";
 import type {
   ReadRegimenItemInput,
   RegimenItemRecord,
+  SupplementIngredientRecord,
   StopRegimenItemInput,
   StopRegimenItemResult,
   UpsertRegimenItemInput,
   UpsertRegimenItemResult,
 } from "./types.js";
 
+function optionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function normalizeSupplementIngredients(
+  value: unknown,
+  fieldName = "ingredients",
+): SupplementIngredientRecord[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array of ingredient objects.`);
+  }
+
+  const ingredients = value.map((entry, index) => {
+    const objectValue = requireObject(entry, `${fieldName}[${index}]`);
+    return stripUndefined({
+      compound: requireString(objectValue.compound, `${fieldName}[${index}].compound`, 160),
+      label: optionalString(objectValue.label, `${fieldName}[${index}].label`, 160),
+      amount: optionalFiniteNumber(objectValue.amount, `${fieldName}[${index}].amount`, 0),
+      unit: optionalString(objectValue.unit, `${fieldName}[${index}].unit`, 40),
+      active: optionalBoolean(objectValue.active, `${fieldName}[${index}].active`),
+      note: optionalString(objectValue.note, `${fieldName}[${index}].note`, 4000),
+    }) as SupplementIngredientRecord;
+  });
+
+  return ingredients.length > 0 ? ingredients : undefined;
+}
+
+function ingredientAmountLabel(ingredient: SupplementIngredientRecord): string {
+  if (ingredient.amount === undefined) {
+    return "amount not specified";
+  }
+
+  return `${ingredient.amount}${ingredient.unit ? ` ${ingredient.unit}` : ""}`;
+}
+
+function formatIngredientLine(ingredient: SupplementIngredientRecord): string {
+  const parts = [
+    `${ingredient.compound} — ${ingredientAmountLabel(ingredient)}`,
+  ];
+
+  if (ingredient.label && ingredient.label !== ingredient.compound) {
+    parts.push(`label: ${ingredient.label}`);
+  }
+
+  if (ingredient.active === false) {
+    parts.push("inactive");
+  }
+
+  if (ingredient.note) {
+    parts.push(ingredient.note);
+  }
+
+  return parts.join("; ");
+}
+
 function buildBody(record: RegimenItemRecord): string {
+  const sections = [
+    (record.brand || record.manufacturer || record.servingSize)
+      ? section(
+          "Product",
+          detailList([
+            ["Brand", record.brand],
+            ["Manufacturer", record.manufacturer],
+            ["Serving size", record.servingSize],
+          ]),
+        )
+      : null,
+    (record.substance || record.dose !== undefined)
+      ? section(
+          "Substance",
+          detailList([
+            ["Name", record.substance],
+            ["Dose", record.dose !== undefined ? `${record.dose}${record.unit ? ` ${record.unit}` : ""}` : undefined],
+          ]),
+        )
+      : null,
+    record.ingredients?.length
+      ? listSection(
+          "Ingredients",
+          record.ingredients.map((ingredient) => formatIngredientLine(ingredient)),
+        )
+      : null,
+    listSection("Related Goals", record.relatedGoalIds),
+    listSection("Related Conditions", record.relatedConditionIds),
+  ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
+
   return buildMarkdownBody(
     record.title,
     detailList([
@@ -56,17 +155,7 @@ function buildBody(record: RegimenItemRecord): string {
       ["Stopped on", record.stoppedOn],
       ["Schedule", record.schedule],
     ]),
-    [
-      section(
-        "Substance",
-        detailList([
-          ["Name", record.substance],
-          ["Dose", record.dose !== undefined ? `${record.dose}${record.unit ? ` ${record.unit}` : ""}` : undefined],
-        ]),
-      ),
-      listSection("Related Goals", record.relatedGoalIds),
-      listSection("Related Conditions", record.relatedConditionIds),
-    ],
+    sections,
   );
 }
 
@@ -102,6 +191,10 @@ function parseRegimenItemRecord(
     dose: optionalFiniteNumber(attributes.dose, "dose", 0),
     unit: optionalString(attributes.unit, "unit", 40),
     schedule: optionalString(attributes.schedule, "schedule", 160),
+    brand: optionalString(attributes.brand, "brand", 160),
+    manufacturer: optionalString(attributes.manufacturer, "manufacturer", 160),
+    servingSize: optionalString(attributes.servingSize, "servingSize", 160),
+    ingredients: normalizeSupplementIngredients(attributes.ingredients),
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
     relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
     group: groupFromRegimenPath(relativePath, REGIMENS_DIRECTORY),
@@ -125,6 +218,19 @@ function buildAttributes(record: RegimenItemRecord): FrontmatterObject {
     dose: record.dose,
     unit: record.unit,
     schedule: record.schedule,
+    brand: record.brand,
+    manufacturer: record.manufacturer,
+    servingSize: record.servingSize,
+    ingredients: record.ingredients?.map((ingredient) =>
+      stripUndefined({
+        compound: ingredient.compound,
+        label: ingredient.label,
+        amount: ingredient.amount,
+        unit: ingredient.unit,
+        active: ingredient.active,
+        note: ingredient.note,
+      }),
+    ),
     relatedGoalIds: record.relatedGoalIds,
     relatedConditionIds: record.relatedConditionIds,
   }) as FrontmatterObject;
@@ -278,6 +384,20 @@ export async function upsertRegimenItem(
         ),
         schedule: resolveOptionalUpsertValue(input.schedule, existingRecord?.schedule, (value) =>
           optionalString(value, "schedule", 160),
+        ),
+        brand: resolveOptionalUpsertValue(input.brand, existingRecord?.brand, (value) =>
+          optionalString(value, "brand", 160),
+        ),
+        manufacturer: resolveOptionalUpsertValue(
+          input.manufacturer,
+          existingRecord?.manufacturer,
+          (value) => optionalString(value, "manufacturer", 160),
+        ),
+        servingSize: resolveOptionalUpsertValue(input.servingSize, existingRecord?.servingSize, (value) =>
+          optionalString(value, "servingSize", 160),
+        ),
+        ingredients: resolveOptionalUpsertValue(input.ingredients, existingRecord?.ingredients, (value) =>
+          normalizeSupplementIngredients(value),
         ),
         relatedGoalIds: resolveOptionalUpsertValue(
           input.relatedGoalIds,

@@ -70,6 +70,42 @@ export function deriveRegimenGroupFromRelativePath(relativePath: string): string
   return directories.length > 2 ? directories.slice(2).join("/") : null;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function projectSupplementIngredients(
+  value: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (!isPlainObject(entry)) {
+      return [];
+    }
+
+    const compound = typeof entry.compound === "string" ? entry.compound.trim() : "";
+    if (!compound) {
+      return [];
+    }
+
+    return [
+      Object.fromEntries(
+        Object.entries({
+          compound,
+          label: typeof entry.label === "string" && entry.label.trim().length > 0 ? entry.label.trim() : undefined,
+          amount: typeof entry.amount === "number" && Number.isFinite(entry.amount) ? entry.amount : undefined,
+          unit: typeof entry.unit === "string" && entry.unit.trim().length > 0 ? entry.unit.trim() : undefined,
+          active: typeof entry.active === "boolean" ? entry.active : undefined,
+          note: typeof entry.note === "string" && entry.note.trim().length > 0 ? entry.note.trim() : undefined,
+        }).filter(([, entryValue]) => entryValue !== undefined),
+      ),
+    ];
+  });
+}
+
 const checkedHealthEntityDefinitions = [
   {
     kind: "assessment",
@@ -219,6 +255,10 @@ const checkedHealthEntityDefinitions = [
           dose: helpers.firstNumber(attributes, ["dose"]),
           unit: helpers.firstString(attributes, ["unit"]),
           schedule: helpers.firstString(attributes, ["schedule"]),
+          brand: helpers.firstString(attributes, ["brand"]),
+          manufacturer: helpers.firstString(attributes, ["manufacturer"]),
+          servingSize: helpers.firstString(attributes, ["servingSize"]),
+          ingredients: projectSupplementIngredients(attributes.ingredients),
           relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
           relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
           group: deriveRegimenGroupFromRelativePath(relativePath),

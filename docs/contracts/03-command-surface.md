@@ -106,6 +106,13 @@ vault-cli intake raw <id> --vault <path> [--request-id <id>]
 vault-cli intake project <id> --vault <path> [--request-id <id>]
 vault-cli profile current rebuild --vault <path> [--request-id <id>]
 vault-cli regimen stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]
+vault-cli supplement scaffold --vault <path> [--request-id <id>]
+vault-cli supplement upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli supplement show <id> --vault <path> [--request-id <id>]
+vault-cli supplement list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
+vault-cli supplement stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]
+vault-cli supplement compound list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
+vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
 vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--pdftotextCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--paddleocrCommand <command>] [--request-id <id>]
 vault-cli inbox attachment list <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment show <attachmentId> --vault <path> [--request-id <id>]
@@ -156,6 +163,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `provider`, and `event` are payload-CRUD nouns.
 - `profile` is primarily payload CRUD and also exposes `rebuild` for the derived current-profile view.
 - `regimen` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
+- `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` and `meal` are artifact-import nouns.
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; it intentionally does not introduce a separate workout record family or follow-up read grammar.
 - `intake` is an artifact-import noun that also exposes `raw` and `project`.
@@ -181,6 +189,7 @@ Frozen health nouns remain:
 - `goal`
 - `condition`
 - `allergy`
+- `supplement`
 - `regimen`
 - `family`
 - `genetics`
@@ -612,7 +621,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `event upsert`, `samples add`, `workout add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, and `regimen stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives and canonical write locks.
+- `provider upsert`, `event upsert`, `samples add`, `workout add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `regimen stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives and canonical write locks.
 - `show`, `list`, `search query`, `search index status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

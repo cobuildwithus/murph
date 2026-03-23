@@ -30,6 +30,7 @@ import { registerReadCommands } from './commands/read.js'
 import { registerRegimenCommands } from './commands/regimen.js'
 import { registerSamplesCommands } from './commands/samples.js'
 import { registerSearchCommands } from './commands/search.js'
+import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
 import { registerWorkoutCommands } from './commands/workout.js'
 
@@ -459,6 +460,56 @@ export const vaultCliCommandDescriptors = [
     },
   }),
   ...genericHealthCommandDescriptors,
+  {
+    id: 'supplement',
+    bindingMode: 'direct',
+    rootCommandNames: ['supplement'],
+    leafCommands: [
+      {
+        path: ['supplement', 'list'],
+        description: 'List supplements through the health read model.',
+        output: healthListResultSchema,
+      },
+      {
+        path: ['supplement', 'scaffold'],
+        description: 'Emit a payload template for one supplement product.',
+        output: createHealthScaffoldResultSchema('supplement'),
+      },
+      {
+        path: ['supplement', 'show'],
+        description: 'Show one supplement by canonical id or slug.',
+        output: healthShowResultSchema,
+      },
+      {
+        path: ['supplement', 'upsert'],
+        description: 'Upsert one supplement from a JSON payload file or stdin.',
+      },
+      {
+        path: ['supplement', 'stop'],
+        description: 'Stop one supplement while preserving its canonical id.',
+      },
+      {
+        path: ['supplement', 'compound', 'list'],
+        description: 'List rolled-up supplement compounds across supplements.',
+      },
+      {
+        path: ['supplement', 'compound', 'show'],
+        description: 'Show one rolled-up supplement compound by name or lookup id.',
+      },
+    ],
+    directVaultServiceBindings: {
+      core: ['scaffoldSupplement', 'upsertSupplement', 'stopSupplement'],
+      query: [
+        'showSupplement',
+        'listSupplements',
+        'showSupplementCompound',
+        'listSupplementCompounds',
+      ],
+    },
+    register({ cli, services }) {
+      registerSupplementCommands(cli, services)
+    },
+  },
   buildHealthCommandManifestDescriptor({
     commandName: 'regimen',
     additionalVaultServiceBindings: {

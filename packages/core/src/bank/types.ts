@@ -41,6 +41,15 @@ export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type RegimenKind = (typeof REGIMEN_KINDS)[number];
 export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
 
+export interface SupplementIngredientRecord {
+  compound: string;
+  label?: string;
+  amount?: number;
+  unit?: string;
+  active?: boolean;
+  note?: string;
+}
+
 export interface GoalWindow {
   startAt: string;
   targetAt?: string;
@@ -198,6 +207,10 @@ export interface RegimenItemRecord {
   dose?: number;
   unit?: string;
   schedule?: string;
+  brand?: string;
+  manufacturer?: string;
+  servingSize?: string;
+  ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
   group: string;
@@ -218,6 +231,10 @@ export interface UpsertRegimenItemInput {
   dose?: number;
   unit?: string;
   schedule?: string;
+  brand?: string;
+  manufacturer?: string;
+  servingSize?: string;
+  ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
   group?: string;

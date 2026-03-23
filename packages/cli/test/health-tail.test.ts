@@ -820,6 +820,278 @@ test.sequential("profile list and current show preserve canonical links and stri
   }
 });
 
+test.sequential("supplement commands expose product metadata and a rolled-up compound ledger", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const primaryPayloadPath = path.join(vaultRoot, "supplement-primary.json");
+  const secondaryPayloadPath = path.join(vaultRoot, "supplement-secondary.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      primaryPayloadPath,
+      JSON.stringify({
+        title: "Liposomal Vitamin C",
+        kind: "supplement",
+        status: "active",
+        startedOn: "2026-03-01",
+        brand: "LivOn Labs",
+        manufacturer: "LivOn Laboratories",
+        servingSize: "1 packet",
+        ingredients: [
+          {
+            compound: "Vitamin C",
+            label: "Ascorbic acid",
+            amount: 500,
+            unit: "mg",
+          },
+          {
+            compound: "Phosphatidylcholine",
+            amount: 1200,
+            unit: "mg",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      secondaryPayloadPath,
+      JSON.stringify({
+        title: "Electrolyte C Mix",
+        status: "active",
+        startedOn: "2026-03-02",
+        substance: "Vitamin C",
+        dose: 250,
+        unit: "mg",
+        schedule: "post-training",
+      }),
+      "utf8",
+    );
+
+    const scaffoldResult = await runCli<{
+      noun: string;
+      payload: {
+        ingredients?: Array<Record<string, unknown>>;
+      };
+    }>([
+      "supplement",
+      "scaffold",
+      "--vault",
+      vaultRoot,
+    ]);
+    const primaryUpsert = await runCli<{
+      regimenId: string;
+    }>([
+      "supplement",
+      "upsert",
+      "--input",
+      `@${primaryPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const secondaryUpsert = await runCli<{
+      regimenId: string;
+    }>([
+      "supplement",
+      "upsert",
+      "--input",
+      `@${secondaryPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    const primarySupplementId = requireData(primaryUpsert).regimenId;
+    const secondarySupplementId = requireData(secondaryUpsert).regimenId;
+
+    const showResult = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown> & {
+          ingredients?: Array<Record<string, unknown>>;
+        };
+      };
+    }>([
+      "supplement",
+      "show",
+      primarySupplementId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const listResult = await runCli<{
+      count: number;
+      items: Array<{
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      }>;
+    }>([
+      "supplement",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
+    const compoundListResult = await runCli<{
+      count: number;
+      items: Array<{
+        lookupId: string;
+        supplementCount: number;
+        totals: Array<{
+          unit: string | null;
+          totalAmount: number | null;
+        }>;
+      }>;
+    }>([
+      "supplement",
+      "compound",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
+    const compoundShowResult = await runCli<{
+      compound: {
+        lookupId: string;
+        supplementCount: number;
+        totals: Array<{
+          unit: string | null;
+          totalAmount: number | null;
+          sourceCount: number;
+        }>;
+        sources: Array<{
+          supplementId: string;
+          brand: string | null;
+        }>;
+      };
+    }>([
+      "supplement",
+      "compound",
+      "show",
+      "vitamin-c",
+      "--vault",
+      vaultRoot,
+    ]);
+    const stopResult = await runCli<{
+      regimenId: string;
+      status: string;
+      stoppedOn: string | null;
+    }>([
+      "supplement",
+      "stop",
+      primarySupplementId,
+      "--stoppedOn",
+      "2026-03-20",
+      "--vault",
+      vaultRoot,
+    ]);
+    const stoppedCompoundList = await runCli<{
+      items: Array<{
+        lookupId: string;
+        totals: Array<{
+          unit: string | null;
+          totalAmount: number | null;
+        }>;
+      }>;
+    }>([
+      "supplement",
+      "compound",
+      "list",
+      "--status",
+      "stopped",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(scaffoldResult.ok, true);
+    assert.equal(requireData(scaffoldResult).noun, "supplement");
+    assert.equal(Array.isArray(requireData(scaffoldResult).payload.ingredients), true);
+
+    assert.equal(showResult.ok, true);
+    assert.equal(requireData(showResult).entity.id, primarySupplementId);
+    assert.equal(requireData(showResult).entity.kind, "supplement");
+    assert.equal(requireData(showResult).entity.data.brand, "LivOn Labs");
+    assert.equal(requireData(showResult).entity.data.manufacturer, "LivOn Laboratories");
+    assert.equal(requireData(showResult).entity.data.servingSize, "1 packet");
+    assert.equal(Array.isArray(requireData(showResult).entity.data.ingredients), true);
+
+    assert.equal(listResult.ok, true);
+    assert.equal(requireData(listResult).count, 2);
+    assert.deepEqual(
+      requireData(listResult).items.map((item) => item.id).sort(),
+      [primarySupplementId, secondarySupplementId].sort(),
+    );
+    assert.deepEqual(
+      requireData(listResult).items.map((item) => item.kind),
+      ["supplement", "supplement"],
+    );
+
+    assert.equal(compoundListResult.ok, true);
+    assert.deepEqual(
+      requireData(compoundListResult).items.map((item) => item.lookupId),
+      ["phosphatidylcholine", "vitamin-c"],
+    );
+
+    assert.equal(compoundShowResult.ok, true);
+    assert.equal(requireData(compoundShowResult).compound.lookupId, "vitamin-c");
+    assert.equal(requireData(compoundShowResult).compound.supplementCount, 2);
+    assert.deepEqual(
+      requireData(compoundShowResult).compound.totals.map((total) => ({
+        unit: total.unit,
+        totalAmount: total.totalAmount,
+        sourceCount: total.sourceCount,
+      })),
+      [
+        {
+          unit: "mg",
+          totalAmount: 750,
+          sourceCount: 2,
+        },
+      ],
+    );
+    assert.deepEqual(
+      requireData(compoundShowResult).compound.sources.map((source) => source.supplementId),
+      [secondarySupplementId, primarySupplementId],
+    );
+    assert.equal(requireData(compoundShowResult).compound.sources[1]?.brand, "LivOn Labs");
+
+    assert.equal(stopResult.ok, true);
+    assert.equal(requireData(stopResult).regimenId, primarySupplementId);
+    assert.equal(requireData(stopResult).status, "stopped");
+    assert.equal(requireData(stopResult).stoppedOn, "2026-03-20");
+
+    assert.equal(stoppedCompoundList.ok, true);
+    assert.deepEqual(
+      requireData(stoppedCompoundList).items.map((item) => ({
+        lookupId: item.lookupId,
+        totals: item.totals.map((total) => ({
+          unit: total.unit,
+          totalAmount: total.totalAmount,
+        })),
+      })),
+      [
+        {
+          lookupId: "phosphatidylcholine",
+          totals: [
+            {
+              unit: "mg",
+              totalAmount: 1200,
+            },
+          ],
+        },
+        {
+          lookupId: "vitamin-c",
+          totals: [
+            {
+              unit: "mg",
+              totalAmount: 500,
+            },
+          ],
+        },
+      ],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("profile upsert rejects malformed profile payloads instead of coercing them to {}", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
   const payloadPath = path.join(vaultRoot, "profile-invalid.json");

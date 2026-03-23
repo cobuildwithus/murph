@@ -74,6 +74,7 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'run',
   'samples',
   'search',
+  'supplement',
   'show',
   'timeline',
   'validate',
@@ -127,6 +128,8 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'samples batch',
   'search',
   'search index',
+  'supplement',
+  'supplement compound',
   'vault',
   'workout',
 ])

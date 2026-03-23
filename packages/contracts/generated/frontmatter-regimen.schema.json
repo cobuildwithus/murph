@@ -67,6 +67,59 @@
       "minLength": 1,
       "maxLength": 160
     },
+    "brand": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "manufacturer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "servingSize": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "ingredients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "compound": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "amount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "unit": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._/%-]+$"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "compound"
+        ],
+        "additionalProperties": false
+      }
+    },
     "relatedGoalIds": {
       "type": "array",
       "items": {

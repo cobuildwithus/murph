@@ -105,6 +105,10 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
       "lookupRecordById",
       "listRecords",
       "buildExportPack",
+      "showSupplement",
+      "listSupplements",
+      "showSupplementCompound",
+      "listSupplementCompounds",
       ...healthQueryRuntimeMethodNames,
     ])
   )

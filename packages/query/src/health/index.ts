@@ -10,6 +10,13 @@ export { listConditions, readCondition, showCondition } from "./conditions.js";
 export { listAllergies, readAllergy, showAllergy } from "./allergies.js";
 export { listRegimens, readRegimen, showRegimen } from "./regimens.js";
 export {
+  listSupplementCompounds,
+  listSupplements,
+  readSupplement,
+  showSupplement,
+  showSupplementCompound,
+} from "./supplements.js";
+export {
   listHistoryEvents,
   readHistoryEvent,
   showHistoryEvent,
@@ -39,9 +46,18 @@ export type {
   GoalQueryRecord,
   RegistryListOptions,
   RegimenQueryRecord,
+  SupplementIngredientQueryRecord,
 } from "./registries.js";
 export type {
   HealthHistoryKind,
   HistoryListOptions,
   HistoryQueryRecord,
 } from "./history.js";
+export type {
+  SupplementCompoundListOptions,
+  SupplementCompoundQueryRecord,
+  SupplementCompoundSourceRecord,
+  SupplementCompoundTotalRecord,
+  SupplementListOptions,
+  SupplementQueryRecord,
+} from "./supplements.js";

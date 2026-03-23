@@ -42,6 +42,7 @@ test('root help lists the simple health CRUD command groups', async () => {
     'goal',
     'condition',
     'allergy',
+    'supplement',
     'regimen',
     'history',
     'family',
@@ -226,6 +227,8 @@ test('profile show help exposes only the global format flag', async () => {
 
 test('health command help surfaces examples and hints through Incur metadata', async () => {
   const profileUpsertHelp = await runRawCli(['profile', 'upsert', '--help'])
+  const supplementUpsertHelp = await runRawCli(['supplement', 'upsert', '--help'])
+  const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
   const profileRebuildHelp = await runRawCli(['profile', 'current', 'rebuild', '--help'])
   const regimenStopHelp = await runRawCli(['regimen', 'stop', '--help'])
 
@@ -236,6 +239,14 @@ test('health command help surfaces examples and hints through Incur metadata', a
   assert.match(
     profileUpsertHelp,
     /--input accepts @file\.json or - so the CLI can load the structured profile snapshot payload from disk or stdin\./u,
+  )
+  assert.match(
+    supplementUpsertHelp,
+    /--input accepts @file\.json or - so the CLI can load a supplement payload with product metadata and ingredients\./u,
+  )
+  assert.match(
+    supplementCompoundListHelp,
+    /The compound ledger defaults to active supplements so overlapping ingredients sum into a single canonical row\./u,
   )
   assert.match(
     profileRebuildHelp,

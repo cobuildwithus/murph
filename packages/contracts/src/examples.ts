@@ -611,6 +611,23 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     dose: 200,
     unit: "mg",
     schedule: "nightly",
+    brand: "Thorne",
+    manufacturer: "Thorne Health",
+    servingSize: "2 capsules",
+    ingredients: [
+      {
+        compound: "Magnesium",
+        label: "Magnesium glycinate chelate",
+        amount: 200,
+        unit: "mg",
+      },
+      {
+        compound: "Glycine",
+        amount: 1000,
+        unit: "mg",
+        note: "Approximate amino acid contribution from the chelate.",
+      },
+    ],
     relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
   },
