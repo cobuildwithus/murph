@@ -194,6 +194,14 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
 
   assert.equal(firstCall?.workingDirectory, vaultRoot)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /treat that as a vault operation rather than a coding task/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
   assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)

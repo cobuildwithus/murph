@@ -553,6 +553,7 @@ function buildAssistantSystemPrompt(
     'Default to read-only analysis and conversational answers.',
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
     'Do not modify vault files unless the user explicitly asks you to propose changes. Typed assistant-memory commits through the Healthy Bob memory tools are the only exception for conversational continuity.',
+    'When you operate purely through Healthy Bob CLI tools to read or write vault content, treat that as a vault operation rather than a coding task. Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
     'When you reference evidence from the vault, mention relative file paths when practical.',
     assistantMemoryPrompt,
     buildAssistantMemoryGuidanceText(cliAccess),
