@@ -1,4 +1,4 @@
-import { deviceSyncError } from "./errors.js";
+import { deviceSyncError, isDeviceSyncError } from "./errors.js";
 import {
   addMilliseconds,
   generateStateCode,
@@ -131,83 +131,90 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    if (stateRecord.provider !== provider.provider) {
-      throw deviceSyncError({
-        code: "OAUTH_PROVIDER_MISMATCH",
-        message: `OAuth state belongs to provider ${stateRecord.provider}, not ${provider.provider}.`,
-        retryable: false,
-        httpStatus: 400,
+    try {
+      if (stateRecord.provider !== provider.provider) {
+        throw deviceSyncError({
+          code: "OAUTH_PROVIDER_MISMATCH",
+          message: `OAuth state belongs to provider ${stateRecord.provider}, not ${provider.provider}.`,
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const callbackError = normalizeString(input.error);
+
+      if (callbackError) {
+        throw deviceSyncError({
+          code: "OAUTH_CALLBACK_REJECTED",
+          message: normalizeString(input.errorDescription) ?? `OAuth authorization failed: ${callbackError}`,
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const code = normalizeString(input.code);
+
+      if (!code) {
+        throw deviceSyncError({
+          code: "OAUTH_CODE_MISSING",
+          message: "OAuth callback is missing the authorization code.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const grantedScopes = normalizeString(input.scope)
+        ? input.scope!
+            .split(/\s+/u)
+            .map((scope) => scope.trim())
+            .filter(Boolean)
+        : [];
+
+      const connection = await provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: descriptor.callbackUrl,
+          now,
+          grantedScopes,
+        },
+        code,
+      );
+
+      const ownerId =
+        typeof stateRecord.metadata?.ownerId === "string" ? normalizeString(stateRecord.metadata.ownerId) : null;
+
+      const account = await this.store.upsertConnection({
+        ownerId,
+        provider: provider.provider,
+        externalAccountId: connection.externalAccountId,
+        displayName: connection.displayName ?? null,
+        scopes: connection.scopes?.length
+          ? [...connection.scopes]
+          : grantedScopes.length > 0
+            ? [...grantedScopes]
+            : [...provider.defaultScopes],
+        tokens: connection.tokens,
+        metadata: connection.metadata ?? {},
+        connectedAt: now,
+        nextReconcileAt: connection.nextReconcileAt ?? null,
       });
-    }
 
-    const callbackError = normalizeString(input.error);
-
-    if (callbackError) {
-      throw deviceSyncError({
-        code: "OAUTH_CALLBACK_REJECTED",
-        message: normalizeString(input.errorDescription) ?? `OAuth authorization failed: ${callbackError}`,
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    const code = normalizeString(input.code);
-
-    if (!code) {
-      throw deviceSyncError({
-        code: "OAUTH_CODE_MISSING",
-        message: "OAuth callback is missing the authorization code.",
-        retryable: false,
-        httpStatus: 400,
-      });
-    }
-
-    const grantedScopes = normalizeString(input.scope)
-      ? input.scope!
-          .split(/\s+/u)
-          .map((scope) => scope.trim())
-          .filter(Boolean)
-      : [];
-
-    const connection = await provider.exchangeAuthorizationCode(
-      {
-        callbackUrl: descriptor.callbackUrl,
+      await this.hooks.onConnectionEstablished?.({
+        account,
+        connection,
+        provider,
         now,
-        grantedScopes,
-      },
-      code,
-    );
+      } satisfies DeviceSyncPublicIngressConnectionEstablishedInput);
 
-    const ownerId =
-      typeof stateRecord.metadata?.ownerId === "string" ? normalizeString(stateRecord.metadata.ownerId) : null;
-
-    const account = await this.store.upsertConnection({
-      ownerId,
-      provider: provider.provider,
-      externalAccountId: connection.externalAccountId,
-      displayName: connection.displayName ?? null,
-      scopes: connection.scopes?.length
-        ? [...connection.scopes]
-        : grantedScopes.length > 0
-          ? [...grantedScopes]
-          : [...provider.defaultScopes],
-      tokens: connection.tokens,
-      metadata: connection.metadata ?? {},
-      connectedAt: now,
-      nextReconcileAt: connection.nextReconcileAt ?? null,
-    });
-
-    await this.hooks.onConnectionEstablished?.({
-      account,
-      connection,
-      provider,
-      now,
-    } satisfies DeviceSyncPublicIngressConnectionEstablishedInput);
-
-    return {
-      account,
-      returnTo: stateRecord.returnTo ?? null,
-    };
+      return {
+        account,
+        returnTo: stateRecord.returnTo ?? null,
+      };
+    } catch (error) {
+      throw attachOAuthCallbackContext(error, {
+        provider: provider.provider,
+        returnTo: stateRecord.returnTo ?? null,
+      });
+    }
   }
 
   async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
@@ -235,7 +242,7 @@ export class DeviceSyncPublicIngress {
         traceId: parsed.traceId,
         externalAccountId: parsed.externalAccountId,
         eventType: parsed.eventType,
-        receivedAt: parsed.occurredAt ?? now,
+        receivedAt: now,
         payload: parsed.payload,
       });
 
@@ -275,7 +282,7 @@ export class DeviceSyncPublicIngress {
       };
     }
 
-    await this.store.markWebhookReceived(account.id, parsed.occurredAt ?? now);
+    await this.store.markWebhookReceived(account.id, now);
 
     if (account.status !== "active") {
       this.logger.warn?.("Ignoring webhook side effects for non-active device sync account.", {
@@ -343,4 +350,30 @@ export class DeviceSyncPublicIngress {
 
 export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngressInput): DeviceSyncPublicIngress {
   return new DeviceSyncPublicIngress(input);
+}
+
+function attachOAuthCallbackContext(
+  error: unknown,
+  context: {
+    provider: string;
+    returnTo: string | null;
+  },
+): unknown {
+  if (!isDeviceSyncError(error)) {
+    return error;
+  }
+
+  return deviceSyncError({
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+    httpStatus: error.httpStatus,
+    accountStatus: error.accountStatus,
+    details: {
+      ...(error.details ?? {}),
+      provider: context.provider,
+      returnTo: context.returnTo,
+    },
+    cause: error.cause,
+  });
 }

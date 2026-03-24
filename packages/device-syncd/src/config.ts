@@ -67,6 +67,7 @@ const OURA_AUTH_BASE_URL_ENV_KEYS = ["OURA_AUTH_BASE_URL"] as const;
 const OURA_BACKFILL_DAYS_ENV_KEYS = ["OURA_BACKFILL_DAYS"] as const;
 const OURA_CLIENT_ID_ENV_KEYS = ["OURA_CLIENT_ID"] as const;
 const OURA_CLIENT_SECRET_ENV_KEYS = ["OURA_CLIENT_SECRET"] as const;
+const OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS = ["OURA_WEBHOOK_VERIFICATION_TOKEN"] as const;
 const OURA_RECONCILE_DAYS_ENV_KEYS = [
   "OURA_RECONCILE_DAYS",
 ] as const;
@@ -172,6 +173,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
       host: optionalEnv(env, DEVICE_SYNC_HOST_ENV_KEYS) ?? DEFAULT_DEVICE_SYNC_HOST,
       port: parseIntegerEnv(env, DEVICE_SYNC_PORT_ENV_KEYS) ?? 8788,
       controlToken,
+      ouraWebhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
       ...publicListener,
     },
   };

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { DeviceSyncError } from "../src/errors.js";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.js";
 import { createDeviceSyncRegistry } from "../src/registry.js";
 
@@ -19,6 +20,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly accounts = new Map<string, PublicDeviceSyncAccount>();
   private readonly accountsByProviderExternal = new Map<string, string>();
   private readonly webhookTraces = new Set<string>();
+  lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
   private accountCounter = 0;
 
   deleteExpiredOAuthStates(now: string): number {
@@ -95,6 +97,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
 
     this.webhookTraces.add(key);
+    this.lastRecordedWebhookTrace = input;
     return true;
   }
 
@@ -319,4 +322,79 @@ test("public ingress accepts unknown-account webhooks and reports them through t
   assert.equal(webhook.accepted, true);
   assert.equal(webhook.duplicate, false);
   assert.deepEqual(unknownWebhooks, ["demo:demo-missing:demo.created"]);
+});
+
+test("public ingress preserves callback redirect context on OAuth callback failures", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    allowedReturnOrigins: ["https://app.healthybob.test"],
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "demo",
+    returnTo: "https://app.healthybob.test/settings/devices",
+  });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        error: "access_denied",
+        errorDescription: "The user canceled the OAuth flow.",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OAUTH_CALLBACK_REJECTED" &&
+      error.details?.provider === "demo" &&
+      error.details?.returnTo === "https://app.healthybob.test/settings/devices",
+  );
+});
+
+test("public ingress stores webhook receipt timestamps using ingestion time, not provider event time", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const observedAcceptedAt: string[] = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-received-at",
+            occurredAt: "2026-03-01T00:00:00.000Z",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted({ now }) {
+        observedAcceptedAt.push(now);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(observedAcceptedAt.length, 1);
+  assert.equal(store.lastRecordedWebhookTrace?.receivedAt, observedAcceptedAt[0]);
+  assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, observedAcceptedAt[0]);
+  assert.notEqual(store.lastRecordedWebhookTrace?.receivedAt, "2026-03-01T00:00:00.000Z");
+  assert.notEqual(
+    store.getConnectionByExternalAccount("demo", connected.account.externalAccountId)?.lastWebhookAt,
+    "2026-03-01T00:00:00.000Z",
+  );
 });

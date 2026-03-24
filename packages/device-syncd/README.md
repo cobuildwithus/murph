@@ -71,6 +71,7 @@ Common optional settings:
 - `DEVICE_SYNC_SESSION_TTL_MS`
 - `DEVICE_SYNC_WORKER_LEASE_MS`
 - `DEVICE_SYNC_PUBLIC_HOST` plus `DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
+- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the daemon to answer Oura's webhook verification challenge over `GET /webhooks/oura`
 
 WHOOP settings:
 - `WHOOP_CLIENT_ID`
@@ -129,6 +130,7 @@ Control routes: loopback-only plus `Authorization: Bearer <token>`
 
 Public routes: keep them on localhost unless you explicitly expose a separate callback/webhook listener
 - `GET /oauth/:provider/callback`
+- `GET /webhooks/:provider` for provider webhook verification/health checks (`GET /webhooks/oura` answers Oura's verification challenge when configured)
 - `POST /webhooks/:provider` for providers that support webhooks
 
 ## Notes for Oura
@@ -140,3 +142,5 @@ Healthy Bob's Oura connector is designed for the least-friction user path:
 - reconcile jobs poll recent windows so ongoing sync works even without webhook setup
 
 That keeps the user-facing experience at connect once, then auto-sync while still fitting the same provider lifecycle used by WHOOP.
+
+If you do enable Oura webhooks locally, set `OURA_WEBHOOK_VERIFICATION_TOKEN` and expose `GET /webhooks/oura` plus `POST /webhooks/oura` through your public listener or tunnel so Oura can complete its verification handshake.

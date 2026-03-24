@@ -539,7 +539,16 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
 
       const timestampMs = parseTimestampMillis(timestamp);
 
-      if (timestampMs !== null && Math.abs(Date.parse(context.now) - timestampMs) > webhookTimestampToleranceMs) {
+      if (timestampMs === null) {
+        throw deviceSyncError({
+          code: "OURA_WEBHOOK_TIMESTAMP_INVALID",
+          message: "Oura webhook timestamp header was invalid.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      if (Math.abs(Date.parse(context.now) - timestampMs) > webhookTimestampToleranceMs) {
         throw deviceSyncError({
           code: "OURA_WEBHOOK_TIMESTAMP_INVALID",
           message: "Oura webhook timestamp is outside the allowed tolerance window.",

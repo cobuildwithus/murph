@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vitest";
 
+import { DeviceSyncError } from "../src/errors.js";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.js";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext } from "../src/types.js";
@@ -312,5 +313,39 @@ test("Oura webhook verification challenge helper returns the challenge only for 
         verificationToken: "verify-token",
       }),
     /verification token/u,
+  );
+});
+
+test("Oura webhook rejects malformed timestamp headers even when the signature matches", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "daily_sleep.updated",
+      data_type: "daily_sleep",
+      object_id: "daily-sleep-1",
+      user_id: "oura-user-1",
+      timestamp: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+  const timestamp = "not-a-real-timestamp";
+  const signature = createHmac("sha256", "oura-client-secret")
+    .update(`${timestamp}${rawBody.toString("utf8")}`)
+    .digest("hex");
+
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers({
+          "x-oura-signature": signature,
+          "x-oura-timestamp": timestamp,
+        }),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) => error instanceof DeviceSyncError && error.code === "OURA_WEBHOOK_TIMESTAMP_INVALID",
   );
 });

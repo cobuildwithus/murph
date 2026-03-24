@@ -343,10 +343,11 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
       trace_id: `trace:${testCase.eventType}`,
     };
     const rawBody = Buffer.from(JSON.stringify(webhookPayload), "utf8");
+    const now = "2026-03-16T10:00:00.000Z";
     const result = await provider.verifyAndParseWebhook?.({
-      headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody),
+      headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, String(Date.parse(now))),
       rawBody,
-      now: "2026-03-16T10:00:00.000Z",
+      now,
     });
 
     assert.ok(result);
@@ -431,4 +432,37 @@ test("WHOOP provider turns missing resource imports into the existing delete sna
       ],
     },
   ]);
+});
+
+test("WHOOP webhook replay checks use the request context timestamp instead of process wall clock", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      user_id: "whoop-user-1",
+      type: "sleep.updated",
+      id: "resource-1",
+      trace_id: "trace-context-now",
+    }),
+    "utf8",
+  );
+  const timestamp = String(Date.parse("2026-03-16T10:00:00.000Z"));
+  const originalDateNow = Date.now;
+
+  Date.now = () => Date.parse("2027-03-16T10:00:00.000Z");
+
+  try {
+    const parsed = await provider.verifyAndParseWebhook?.({
+      headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
+      rawBody,
+      now: "2026-03-16T10:00:00.000Z",
+    });
+
+    assert.equal(parsed?.externalAccountId, "whoop-user-1");
+    assert.equal(parsed?.traceId, "trace-context-now");
+  } finally {
+    Date.now = originalDateNow;
+  }
 });

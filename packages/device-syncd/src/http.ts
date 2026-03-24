@@ -3,9 +3,11 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import { deviceSyncError, isDeviceSyncError } from "./errors.js";
+import { resolveOuraWebhookVerificationChallenge } from "./providers/oura.js";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.js";
 
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
+import type { DeviceSyncError } from "./errors.js";
 import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.js";
 import type { DeviceSyncService } from "./service.js";
 
@@ -69,6 +71,7 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
     bodyLimitBytes,
     controlToken,
     surface: publicListener ? "control" : "combined",
+    config: input.config,
   });
   const publicServer = publicListener
     ? await startListener({
@@ -78,6 +81,7 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
         bodyLimitBytes,
         controlToken,
         surface: "public",
+        config: input.config,
       })
     : null;
 
@@ -101,6 +105,7 @@ async function routeRequest(input: {
   bodyLimitBytes: number;
   controlToken: string;
   surface: DeviceSyncHttpListenerSurface;
+  config?: DeviceSyncHttpConfig;
 }): Promise<void> {
   const method = input.request.method ?? "GET";
   const url = new URL(input.request.url ?? "/", `${input.service.publicBaseUrl}/`);
@@ -176,46 +181,72 @@ async function routeRequest(input: {
   const callbackMatch = pathname.match(/^\/oauth\/([^/]+)\/callback$/u);
 
   if (method === "GET" && callbackMatch) {
-    const result = await input.service.handleOAuthCallback({
-      provider: decodeURIComponent(callbackMatch[1] ?? ""),
-      code: url.searchParams.get("code"),
-      state: url.searchParams.get("state"),
-      scope: url.searchParams.get("scope"),
-      error: url.searchParams.get("error"),
-      errorDescription: url.searchParams.get("error_description"),
-    });
+    const provider = decodeURIComponent(callbackMatch[1] ?? "");
 
-    if (result.returnTo) {
-      const destination = new URL(result.returnTo);
-      destination.searchParams.set("deviceSyncStatus", "connected");
-      destination.searchParams.set("deviceSyncProvider", result.account.provider);
-      destination.searchParams.set("deviceSyncAccountId", result.account.id);
-      redirect(input.response, destination.toString());
+    try {
+      const result = await input.service.handleOAuthCallback({
+        provider,
+        code: url.searchParams.get("code"),
+        state: url.searchParams.get("state"),
+        scope: url.searchParams.get("scope"),
+        error: url.searchParams.get("error"),
+        errorDescription: url.searchParams.get("error_description"),
+      });
+
+      if (result.returnTo) {
+        const destination = new URL(result.returnTo);
+        destination.searchParams.set("deviceSyncStatus", "connected");
+        destination.searchParams.set("deviceSyncProvider", result.account.provider);
+        destination.searchParams.set("deviceSyncAccountId", result.account.id);
+        redirect(input.response, destination.toString());
+        return;
+      }
+
+      sendHtml(
+        input.response,
+        200,
+        renderCallbackHtml({
+          title: `${formatProviderLabel(result.account.provider)} connected`,
+          body: `Connected ${escapeHtml(formatProviderLabel(result.account.provider))} account ${escapeHtml(result.account.id)} successfully.`,
+        }),
+      );
       return;
-    }
+    } catch (error) {
+      if (isDeviceSyncError(error)) {
+        sendCallbackErrorResponse(input.response, provider, error);
+        return;
+      }
 
-    sendHtml(
-      input.response,
-      200,
-      renderCallbackHtml({
-        title: `${formatProviderLabel(result.account.provider)} connected`,
-        body: `Connected ${escapeHtml(formatProviderLabel(result.account.provider))} account ${escapeHtml(result.account.id)} successfully.`,
-      }),
-    );
-    return;
+      throw error;
+    }
   }
 
   const webhookMatch = pathname.match(/^\/webhooks\/([^/]+)$/u);
 
-  if (method === "POST" && webhookMatch) {
-    const rawBody = await readRequestBody(input.request, input.bodyLimitBytes);
-    const result = await input.service.handleWebhook(
-      decodeURIComponent(webhookMatch[1] ?? ""),
-      toFetchHeaders(input.request),
-      rawBody,
-    );
-    sendJson(input.response, 202, result);
-    return;
+  if (webhookMatch) {
+    const provider = decodeURIComponent(webhookMatch[1] ?? "");
+
+    if (method === "GET") {
+      const challenge = resolveWebhookVerificationChallenge(provider, url, input.config);
+
+      if (challenge !== null) {
+        sendText(input.response, 200, challenge);
+        return;
+      }
+
+      sendJson(input.response, 200, {
+        ok: true,
+        provider,
+      });
+      return;
+    }
+
+    if (method === "POST") {
+      const rawBody = await readRequestBody(input.request, input.bodyLimitBytes);
+      const result = await input.service.handleWebhook(provider, toFetchHeaders(input.request), rawBody);
+      sendJson(input.response, 202, result);
+      return;
+    }
   }
 
   if (method === "GET" && pathname === "/accounts") {
@@ -268,6 +299,7 @@ async function startListener(input: {
   bodyLimitBytes: number;
   controlToken: string;
   surface: DeviceSyncHttpListenerSurface;
+  config?: DeviceSyncHttpConfig;
 }): Promise<{
   server: Server;
   address: NodeServerHandle["control"];
@@ -281,6 +313,7 @@ async function startListener(input: {
         bodyLimitBytes: input.bodyLimitBytes,
         controlToken: input.controlToken,
         surface: input.surface,
+        config: input.config,
       });
     } catch (error) {
       sendError(response, error);
@@ -377,7 +410,7 @@ function classifyDeviceSyncHttpRoute(method: string, pathname: string): DeviceSy
   }
 
   if (
-    (method === "GET" && /^\/oauth\/[^/]+\/callback$/u.test(pathname)) ||
+    (method === "GET" && (/^\/oauth\/[^/]+\/callback$/u.test(pathname) || /^\/webhooks\/[^/]+$/u.test(pathname))) ||
     (method === "POST" && /^\/webhooks\/[^/]+$/u.test(pathname))
   ) {
     return "public";
@@ -483,10 +516,56 @@ function sendHtml(response: ServerResponse, statusCode: number, body: string): v
   response.end(body);
 }
 
+function sendText(response: ServerResponse, statusCode: number, body: string): void {
+  response.statusCode = statusCode;
+  response.setHeader("Content-Type", "text/plain; charset=utf-8");
+  response.setHeader("Content-Length", Buffer.byteLength(body));
+  response.end(body);
+}
+
 function redirect(response: ServerResponse, location: string): void {
   response.statusCode = 302;
   response.setHeader("Location", location);
   response.end();
+}
+
+function resolveWebhookVerificationChallenge(
+  provider: string,
+  url: URL,
+  config: DeviceSyncHttpConfig | undefined,
+): string | null {
+  if (provider !== "oura") {
+    return null;
+  }
+
+  return resolveOuraWebhookVerificationChallenge({
+    url,
+    verificationToken: config?.ouraWebhookVerificationToken ?? null,
+  });
+}
+
+function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {
+  const provider = error.details ? readStringField(error.details, "provider") ?? fallbackProvider : fallbackProvider;
+  const returnTo = error.details ? readStringField(error.details, "returnTo") : null;
+
+  if (returnTo) {
+    const destination = new URL(returnTo);
+    destination.searchParams.set("deviceSyncStatus", "error");
+    destination.searchParams.set("deviceSyncProvider", provider);
+    destination.searchParams.set("deviceSyncError", error.code);
+    destination.searchParams.set("deviceSyncErrorMessage", error.message);
+    redirect(response, destination.toString());
+    return;
+  }
+
+  sendHtml(
+    response,
+    error.httpStatus,
+    renderCallbackHtml({
+      title: `${formatProviderLabel(provider)} connection failed`,
+      body: escapeHtml(error.message),
+    }),
+  );
 }
 
 function sendError(response: ServerResponse, error: unknown): void {

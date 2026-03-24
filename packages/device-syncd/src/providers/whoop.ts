@@ -719,7 +719,9 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
 
       const timestampNumber = rawTimestampNumber < 10_000_000_000 ? rawTimestampNumber * 1000 : rawTimestampNumber;
 
-      if (Math.abs(Date.now() - timestampNumber) > webhookToleranceMs) {
+      const nowMs = Date.parse(context.now);
+
+      if (Math.abs(nowMs - timestampNumber) > webhookToleranceMs) {
         throw deviceSyncError({
           code: "WHOOP_WEBHOOK_TIMESTAMP_STALE",
           message: "WHOOP webhook timestamp fell outside the allowed replay window.",

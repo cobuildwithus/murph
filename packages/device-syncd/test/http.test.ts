@@ -40,7 +40,7 @@ test("assertDeviceSyncControlRequest rejects non-loopback callers", () => {
         remoteAddress: "203.0.113.10",
         controlToken: "control-token-for-tests",
       }),
-    (error) =>
+    (error: unknown) =>
       error instanceof DeviceSyncError &&
       error.code === "CONTROL_PLANE_LOOPBACK_REQUIRED" &&
       error.httpStatus === 403,
@@ -229,3 +229,83 @@ function createStubService(
     ...overrides,
   } as DeviceSyncService;
 }
+
+test("device sync http server redirects OAuth callback errors back to the original returnTo", async () => {
+  const service = createStubService({
+    async handleOAuthCallback() {
+      throw new DeviceSyncError({
+        code: "OAUTH_CALLBACK_REJECTED",
+        message: "The user canceled the OAuth flow.",
+        retryable: false,
+        httpStatus: 400,
+        details: {
+          provider: "demo",
+          returnTo: "https://app.healthybob.test/settings/devices?tab=wearables",
+        },
+      });
+    },
+  });
+  const server = await startDeviceSyncHttpServer({
+    service,
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      controlToken: "control-token-for-tests",
+      publicHost: "127.0.0.1",
+      publicPort: 0,
+    },
+  });
+
+  try {
+    const publicBaseUrl = `http://127.0.0.1:${server.public?.port}`;
+    const response = await fetch(`${publicBaseUrl}/oauth/demo/callback?state=state-1&error=access_denied`, {
+      redirect: "manual",
+    });
+
+    assert.equal(response.status, 302);
+
+    const location = response.headers.get("location");
+
+    if (!location) {
+      throw new Error("OAuth callback error response did not include a redirect location.");
+    }
+
+    const destination = new URL(location);
+    assert.equal(destination.origin, "https://app.healthybob.test");
+    assert.equal(destination.pathname, "/settings/devices");
+    assert.equal(destination.searchParams.get("tab"), "wearables");
+    assert.equal(destination.searchParams.get("deviceSyncStatus"), "error");
+    assert.equal(destination.searchParams.get("deviceSyncProvider"), "demo");
+    assert.equal(destination.searchParams.get("deviceSyncError"), "OAUTH_CALLBACK_REJECTED");
+    assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), "The user canceled the OAuth flow.");
+  } finally {
+    await server.close();
+  }
+});
+
+test("device sync http server serves the Oura webhook verification challenge on the public listener", async () => {
+  const server = await startDeviceSyncHttpServer({
+    service: createStubService(),
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      controlToken: "control-token-for-tests",
+      publicHost: "127.0.0.1",
+      publicPort: 0,
+      ouraWebhookVerificationToken: "verify-token-for-tests",
+    },
+  });
+
+  try {
+    const publicBaseUrl = `http://127.0.0.1:${server.public?.port}`;
+    const response = await fetch(
+      `${publicBaseUrl}/webhooks/oura?verification_token=verify-token-for-tests&challenge=random-challenge`,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(await response.text(), "random-challenge");
+  } finally {
+    await server.close();
+  }
+});

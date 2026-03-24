@@ -1,16 +1,24 @@
-import { isDeviceSyncError } from "#device-syncd";
+import { isDeviceSyncError } from "@healthybob/device-syncd";
 
 import { createHostedDeviceSyncControlPlane } from "../../../../../../src/lib/device-sync/control-plane";
-import { callbackHtml, jsonError, providerCallbackRedirect, resolveRouteParams } from "../../../../../../src/lib/device-sync/http";
+import {
+  callbackHtml,
+  errorToCallbackRedirect,
+  jsonError,
+  providerCallbackRedirect,
+  resolveRouteParams,
+} from "../../../../../../src/lib/device-sync/http";
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) {
+  const { provider } = await resolveRouteParams(context.params);
+  const providerName = decodeURIComponent(provider);
+
   try {
-    const { provider } = await resolveRouteParams(context.params);
     const controlPlane = createHostedDeviceSyncControlPlane(request);
-    const result = await controlPlane.handleOAuthCallback(decodeURIComponent(provider));
+    const result = await controlPlane.handleOAuthCallback(providerName);
     const redirect = providerCallbackRedirect({
       returnTo: result.returnTo,
       provider: result.account.provider,
@@ -26,7 +34,13 @@ export async function GET(
     );
   } catch (error) {
     if (isDeviceSyncError(error)) {
-      return callbackHtml("Device connection failed", error.message, error.httpStatus);
+      const redirect = errorToCallbackRedirect({
+        returnTo: typeof error.details?.returnTo === "string" ? error.details.returnTo : null,
+        provider: typeof error.details?.provider === "string" ? error.details.provider : providerName,
+        error,
+      });
+
+      return redirect ?? callbackHtml("Device connection failed", error.message, error.httpStatus);
     }
 
     return jsonError(error);

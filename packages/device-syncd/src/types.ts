@@ -32,6 +32,7 @@ export interface DeviceSyncHttpConfig {
   controlToken?: string;
   publicHost?: string;
   publicPort?: number;
+  ouraWebhookVerificationToken?: string;
 }
 
 export interface DeviceSyncHttpListenerAddress {

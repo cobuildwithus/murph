@@ -113,3 +113,16 @@ test("loadDeviceSyncEnvironment requires at least one provider", () => {
     /No device sync providers are configured/u,
   );
 });
+
+test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification token on the HTTP config", () => {
+  const loaded = loadDeviceSyncEnvironment({
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+    DEVICE_SYNC_SECRET: "secret-for-tests",
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+    OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",
+  });
+
+  assert.equal(loaded.http.ouraWebhookVerificationToken, "verify-token-for-tests");
+});
