@@ -38,6 +38,10 @@ import {
   createAssistantMemoryTurnContextEnv,
   loadAssistantMemoryPromptBlock,
 } from './memory.js'
+import {
+  type AssistantOnboardingSummary,
+  updateAssistantOnboardingSummary,
+} from './onboarding.js'
 import type { ConversationRef } from './conversation-ref.js'
 import {
   attachRecoveredAssistantSession,
@@ -217,6 +221,13 @@ export async function sendAssistantMessage(
         vault: input.vault,
       })
     : undefined
+  const onboardingSummary =
+    input.enableFirstTurnOnboarding === true
+      ? await updateAssistantOnboardingSummary({
+          prompt: input.prompt,
+          vault: input.vault,
+        })
+      : null
   const allowSensitiveHealthContext = shouldExposeSensitiveHealthContext(
     resolved.session.binding,
   )
@@ -281,7 +292,10 @@ export async function sendAssistantMessage(
             cliAccess,
             assistantMemoryPrompt,
             channel: resolved.session.binding.channel,
-            includeFirstTurnOnboarding: shouldInjectFirstTurnOnboarding,
+            onboardingSummary:
+              shouldInjectFirstTurnOnboarding && onboardingSummary
+                ? onboardingSummary
+                : null,
           })
         : null,
       sessionContext: shouldInjectBootstrapContext
@@ -558,7 +572,7 @@ function buildAssistantSystemPrompt(input: {
   }
   assistantMemoryPrompt: string | null
   channel: string | null
-  includeFirstTurnOnboarding: boolean
+  onboardingSummary: AssistantOnboardingSummary | null
 }): string {
   return [
     'You are Healthy Bob, a local-first health assistant operating over the current working directory as a file-native health vault.',
@@ -569,9 +583,7 @@ function buildAssistantSystemPrompt(input: {
     'When you operate purely through Healthy Bob CLI tools to read or write vault content, treat that as a vault operation rather than a coding task. Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
     'When you reference evidence from the vault, mention relative file paths when practical.',
     buildOutboundReplyFormattingGuidance(input.channel),
-    input.includeFirstTurnOnboarding
-      ? buildAssistantFirstTurnOnboardingGuidanceText()
-      : null,
+    buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
     input.assistantMemoryPrompt,
     buildAssistantMemoryGuidanceText(input.cliAccess),
     buildAssistantCronGuidanceText(input.cliAccess),
@@ -581,13 +593,39 @@ function buildAssistantSystemPrompt(input: {
     .join('\n\n')
 }
 
-function buildAssistantFirstTurnOnboardingGuidanceText(): string {
+function buildAssistantFirstTurnOnboardingGuidanceText(
+  summary: AssistantOnboardingSummary | null,
+): string | null {
+  if (!summary || summary.missingSlots.length === 0) {
+    return null
+  }
+
+  const known = [
+    summary.answered.name ? `Name: ${summary.answered.name}` : null,
+    summary.answered.tone ? `Tone/style: ${summary.answered.tone}` : null,
+    summary.answered.goals.length > 0
+      ? `Goals: ${summary.answered.goals.join(' | ')}`
+      : null,
+  ].filter((value): value is string => value !== null)
+  const missing = summary.missingSlots.map((slot) => {
+    switch (slot) {
+      case 'name':
+        return 'whether they want to give you a name'
+      case 'tone':
+        return 'what tone or response style they want'
+      case 'goals':
+        return 'what goals they want help with'
+    }
+  })
+
   return [
-    'In the first reply of a brand-new interactive chat session, include one short optional onboarding check-in so you can personalize future replies.',
+    known.length > 0
+      ? `Known onboarding answers from prior sessions or the current message:\n- ${known.join('\n- ')}`
+      : null,
+    `On the first reply of a brand-new interactive chat session, include one short optional onboarding check-in only for the still-missing items:\n- ${missing.join('\n- ')}`,
     'If the first user message already asks for something concrete, answer that request first and then add the optional check-in as a brief closing note.',
-    'Ask at most three brief questions in one compact bundle, make it clear they are optional, and skip anything the user already told you.',
-    'Good defaults are: what tone they want, whether they want to give you a name, and what goals they want help with.',
-    'Do this only once for the new session. Do not repeat the onboarding questions or turn them into a longer interview on later turns.',
+    'Ask only about the missing items above, make it clear they are optional, and skip anything the user already told you.',
+    'Stop asking once all onboarding items are filled. Do not repeat answered items or turn the check-in into a longer interview.',
   ].join('\n\n')
 }
 

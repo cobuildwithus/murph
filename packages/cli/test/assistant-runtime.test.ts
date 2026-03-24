@@ -1268,7 +1268,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     true,
   )
   assert.match(providerCall?.systemPrompt ?? '', /optional onboarding check-in/u)
-  assert.match(providerCall?.systemPrompt ?? '', /what tone they want/u)
+  assert.match(providerCall?.systemPrompt ?? '', /what tone or response style they want/u)
   assert.deepEqual(listCalls, [
     {
       vault: vaultRoot,
@@ -1289,6 +1289,113 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
       oldestFirst: true,
     },
   ])
+})
+
+test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks only for missing items', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-onboarding-memory-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot, { recursive: true })
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-prefill',
+      response: 'prefill reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-auto',
+      response: 'auto reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'imessage',
+      target: '+15551239999',
+      targetKind: 'participant',
+      sentAt: '2026-03-18T10:00:01.000Z',
+      messageLength: 10,
+    },
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:onboarding-prefill',
+    enableFirstTurnOnboarding: true,
+    prompt: 'Call me Chris. Keep answers concise.',
+  })
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-new',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-9',
+            threadId: 'chat-9',
+            threadTitle: null,
+            actorId: '+15551239999',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T10:00:00Z',
+            receivedAt: null,
+            text: 'How are my macros today?',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/9.json',
+            eventId: 'evt-9',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show() {
+      return {
+        capture: {
+          captureId: 'cap-new',
+          source: 'imessage',
+          threadTitle: null,
+          threadId: 'chat-9',
+          threadIsDirect: true,
+          actorId: '+15551239999',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T10:00:00Z',
+          text: 'How are my macros today?',
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['imessage'],
+    inboxServices,
+    vault: vaultRoot,
+  })
+
+  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+  assert.match(providerCall?.systemPrompt ?? '', /Known onboarding answers/u)
+  assert.match(providerCall?.systemPrompt ?? '', /Name: Call the user Chris\./u)
+  assert.match(providerCall?.systemPrompt ?? '', /Tone\/style: Keep answers concise\./u)
+  assert.match(providerCall?.systemPrompt ?? '', /what goals they want help with/u)
+  assert.doesNotMatch(
+    providerCall?.systemPrompt ?? '',
+    /whether they want to give you a name/u,
+  )
+  assert.doesNotMatch(
+    providerCall?.systemPrompt ?? '',
+    /what tone or response style they want/u,
+  )
 })
 
 test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one reply', async () => {

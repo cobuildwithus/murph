@@ -215,6 +215,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /Older food logs may still live/u)
   assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /phrase `text` as the exact stored sentence you want committed/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
@@ -365,9 +369,9 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.match(firstCall?.systemPrompt ?? '', /You are Healthy Bob/u)
     assert.match(secondCall?.systemPrompt ?? '', /You are Healthy Bob/u)
     assert.match(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
-    assert.match(firstCall?.systemPrompt ?? '', /what tone they want/u)
-    assert.match(firstCall?.systemPrompt ?? '', /give you a name/u)
-    assert.match(firstCall?.systemPrompt ?? '', /goals they want help with/u)
+    assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
+    assert.match(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
+    assert.match(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
     assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
     assert.equal(firstCall?.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(secondCall?.baseUrl, 'http://127.0.0.1:11434/v1')
@@ -419,6 +423,112 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
+})
+
+test('sendAssistantMessage onboarding persists answered slots and asks only for missing items in later new sessions', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-partial-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-1',
+      response: 'Noted.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-2',
+      response: 'What should I remember?',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:onboarding-one',
+    enableFirstTurnOnboarding: true,
+    prompt: 'Call me Chris.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:onboarding-two',
+    enableFirstTurnOnboarding: true,
+    prompt: 'What should you know about me already?',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assert.match(firstCall?.systemPrompt ?? '', /Known onboarding answers/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Name: Call the user Chris\./u)
+  assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
+  assert.doesNotMatch(
+    firstCall?.systemPrompt ?? '',
+    /whether they want to give you a name/u,
+  )
+  assert.match(secondCall?.systemPrompt ?? '', /Name: Call the user Chris\./u)
+  assert.match(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
+  assert.doesNotMatch(
+    secondCall?.systemPrompt ?? '',
+    /whether they want to give you a name/u,
+  )
+})
+
+test('sendAssistantMessage suppresses onboarding once name, tone, and goals are already answered', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-complete-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-complete-1',
+      response: 'Noted.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-complete-2',
+      response: 'I remember.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:onboarding-complete-one',
+    enableFirstTurnOnboarding: true,
+    prompt:
+      'Call me Chris. Keep answers concise. I want help with training and cholesterol.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:onboarding-complete-two',
+    enableFirstTurnOnboarding: true,
+    prompt: 'What should you remember across sessions?',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
 })
 
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {
