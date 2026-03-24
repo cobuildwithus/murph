@@ -117,7 +117,7 @@ declare module 'incur' {
       'journal show': { args: { date: string }; options: { vault: string; requestId: string } }
       'journal unlink': { args: { date: string }; options: { vault: string; requestId: string; eventId: string[]; stream: string[] } }
       'list': { args: {}; options: { vault: string; requestId: string; recordType: string[]; kind: string; status: string; stream: string[]; experiment: string; from: string; to: string; tag: string[]; limit: number } }
-      'meal add': { args: {}; options: { vault: string; requestId: string; photo: string; audio: string; note: string; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'meal add': { args: {}; options: { vault: string; requestId: string; photo: string | undefined; audio: string; note: string; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
       'meal list': { args: {}; options: { vault: string; requestId: string; from: string; to: string } }
       'meal manifest': { args: { id: string }; options: { vault: string; requestId: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId: string } }

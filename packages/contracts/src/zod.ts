@@ -404,7 +404,7 @@ export const eventRecordSchema = withContractMetadata(
     }),
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
-      photoPaths: uniqueArray(patternedString(RAW_MEAL_PATH_PATTERN), { minItems: 1 }),
+      photoPaths: uniqueArray(patternedString(RAW_MEAL_PATH_PATTERN), { uniqueItems: true }),
       audioPaths: z.array(patternedString(RAW_MEAL_PATH_PATTERN)),
     }),
     eventSchema("symptom", {
@@ -649,7 +649,7 @@ export const rawImportManifestSchema = z
     importedAt: isoDateTimeString(),
     source: boundedString(1, 160).nullable(),
     rawDirectory: patternedString(RAW_PATH_PATTERN),
-    artifacts: uniqueArray(rawImportManifestArtifactSchema, { minItems: 1 }),
+    artifacts: uniqueArray(rawImportManifestArtifactSchema, { uniqueItems: true }),
     provenance: jsonObjectSchema,
   })
   .strict();

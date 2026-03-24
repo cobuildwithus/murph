@@ -271,6 +271,36 @@ test("photo-only meals preserve an empty audioPaths array in the stored event", 
   assert.equal(meal.audio, null);
 });
 
+test("note-only meals stay first-class meal events without raw artifacts", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    note: "toast and eggs",
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, meal.manifestPath), "utf8"),
+  ) as {
+    artifacts?: unknown[];
+  };
+
+  assert.equal(mealEvent.kind, "meal");
+  assert.deepEqual(mealEvent.photoPaths, []);
+  assert.deepEqual(mealEvent.audioPaths, []);
+  assert.deepEqual(mealEvent.rawRefs, [meal.manifestPath]);
+  assert.equal(meal.photo, null);
+  assert.equal(meal.audio, null);
+  assert.deepEqual(manifest.artifacts, []);
+});
+
 test("meal, journal, experiment, and samples mutations write expected contract data", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   const sourceRoot = await makeTempDirectory("healthybob-source");
@@ -1591,7 +1621,7 @@ test("applyCanonicalWriteBatch rolls back provider slug renames when deleting th
   await assert.rejects(() => fs.access(betaAbsolutePath));
 });
 
-test("validateVault reports malformed raw manifests", async () => {
+test("validateVault reports malformed raw manifests while allowing zero-artifact manifests", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });
 
@@ -1604,8 +1634,15 @@ test("validateVault reports malformed raw manifests", async () => {
     emptyManifestPath,
     JSON.stringify({
       schemaVersion: "hb.raw-import.v1",
+      importId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
+      importKind: "meal",
+      importedAt: "2026-03-12T12:33:00.000Z",
+      source: "manual",
       rawDirectory: "raw/documents/2026/03/empty",
       artifacts: [],
+      provenance: {
+        eventId: "evt_01JNV42F34M22V2PE9Q4KQ7H1X",
+      },
     }),
     "utf8",
   );
@@ -1631,13 +1668,13 @@ test("validateVault reports malformed raw manifests", async () => {
   const validation = await validateVault({ vaultRoot });
 
   assert.equal(validation.valid, false);
-  assert.ok(
+  assert.equal(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
-        issue.message.includes("must list at least one artifact") &&
-        issue.path === "raw/documents/2026/03/empty/manifest.json",
+        issue.path === "raw/documents/2026/03/empty/manifest.json" &&
+        issue.message.includes("must list at least one artifact"),
     ),
+    false,
   );
   assert.ok(
     validation.issues.some(
@@ -1674,6 +1711,26 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
   );
   await fs.mkdir(path.dirname(arrayManifestPath), { recursive: true });
   await fs.writeFile(arrayManifestPath, JSON.stringify(["not", "an", "object"]), "utf8");
+
+  const missingArtifactsManifestPath = path.join(
+    vaultRoot,
+    "raw/documents/2026/03/missing-artifacts/manifest.json",
+  );
+  await fs.mkdir(path.dirname(missingArtifactsManifestPath), { recursive: true });
+  await fs.writeFile(
+    missingArtifactsManifestPath,
+    JSON.stringify({
+      schemaVersion: "hb.raw-import.v1",
+      importId: "meal_01JNV42NP0KH6JQXMZM1G0V6SF",
+      importKind: "meal",
+      importedAt: "2026-03-12T12:33:00.000Z",
+      rawDirectory: "raw/documents/2026/03/missing-artifacts",
+      provenance: {
+        eventId: "evt_01JNV42F34M22V2PE9Q4KQ7H1Y",
+      },
+    }),
+    "utf8",
+  );
 
   const mismatchedManifestPath = path.join(
     vaultRoot,
@@ -1717,6 +1774,14 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
         issue.code === "HB_RAW_MANIFEST_INVALID" &&
         issue.message.includes("must be a JSON object") &&
         issue.path === "raw/documents/2026/03/array/manifest.json",
+    ),
+  );
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.message.includes("must provide an artifacts array") &&
+        issue.path === "raw/documents/2026/03/missing-artifacts/manifest.json",
     ),
   );
   assert.ok(
@@ -1856,7 +1921,7 @@ test("validateVault covers current profile success, missing-file, and unreadable
   );
 });
 
-test("mutation helpers reject missing meal photos and invalid sample batches", async () => {
+test("mutation helpers reject empty meal imports and invalid sample batches", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });
 
@@ -1866,7 +1931,7 @@ test("mutation helpers reject missing meal photos and invalid sample batches", a
         vaultRoot,
       }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "VAULT_MEAL_PHOTO_REQUIRED",
+      error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",
   );
 
   await assert.rejects(

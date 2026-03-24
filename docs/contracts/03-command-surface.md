@@ -64,7 +64,7 @@ vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at
 vault-cli document show <id> --vault <path> [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
 vault-cli document manifest <id> --vault <path> [--request-id <id>]
-vault-cli meal add --vault <path> --photo <path> [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli meal add --vault <path> [--photo <path>] [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli meal show <id> --vault <path> [--request-id <id>]
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
@@ -328,7 +328,7 @@ The examples below are the full successful non-verbose `--format json` response 
   "eventId": "evt_123",
   "lookupId": "evt_123",
   "occurredAt": "2026-03-12T09:30:00-05:00",
-  "photoPath": "<path>",
+  "photoPath": null,
   "audioPath": null,
   "manifestFile": "<path>",
   "note": "optional note"

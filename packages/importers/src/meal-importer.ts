@@ -7,12 +7,11 @@ import {
   optionalTimestampSchema,
   optionalTrimmedStringSchema,
   parseInputObject,
-  requiredTrimmedStringSchema,
   stripUndefined,
 } from "./shared.js";
 
 export interface MealImportInput {
-  photoPath: string;
+  photoPath?: string;
   audioPath?: string;
   vaultRoot?: string;
   vault?: string;
@@ -27,7 +26,7 @@ export interface ImporterExecutionOptions {
 
 const mealImportInputSchema = z
   .object({
-    photoPath: requiredTrimmedStringSchema("photoPath"),
+    photoPath: optionalTrimmedStringSchema("photoPath"),
     audioPath: optionalTrimmedStringSchema("audioPath"),
     vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
     vault: optionalTrimmedStringSchema("vault"),
@@ -43,14 +42,22 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
     "meal import input",
     mealImportInputSchema,
   );
-  const photo = await inspectFileAsset(request.photoPath, "photo");
+  if (!request.photoPath && !request.audioPath && !request.note) {
+    throw new TypeError(
+      "meal import input requires at least one of photoPath, audioPath, or note",
+    );
+  }
+
+  const photo = request.photoPath
+    ? await inspectFileAsset(request.photoPath, "photo")
+    : undefined;
   const audio = request.audioPath
     ? await inspectFileAsset(request.audioPath, "audio")
     : undefined;
 
   return stripUndefined({
     vaultRoot: request.vaultRoot ?? request.vault,
-    photoPath: photo.sourcePath,
+    photoPath: photo?.sourcePath,
     audioPath: audio?.sourcePath,
     occurredAt: request.occurredAt,
     note: request.note,

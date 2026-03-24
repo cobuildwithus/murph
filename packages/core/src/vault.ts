@@ -572,8 +572,8 @@ async function validateRawManifestFile(
     );
   }
 
-  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
-    issues.push(validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest must list at least one artifact.", relativePath));
+  if (!Array.isArray(manifest.artifacts)) {
+    issues.push(validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest must provide an artifacts array.", relativePath));
     return issues;
   }
 

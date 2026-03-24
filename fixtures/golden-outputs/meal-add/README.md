@@ -2,6 +2,7 @@
 
 Current smoke expectation:
 
-- `--photo` is required and `--audio` is optional
+- at least one of `--photo`, `--audio`, or `--note` is required
+- note-only meals are valid and surface `photoPath: null`
 - photo-only meals remain valid and surface `audioPath: null`
 - returns `mealId`, `eventId`, and a queryable `lookupId`

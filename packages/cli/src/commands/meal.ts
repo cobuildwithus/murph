@@ -22,7 +22,7 @@ const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 interface ImportersRuntimeModule {
   createImporters(): {
     importMeal(input: {
-      photoPath: string
+      photoPath?: string
       audioPath?: string
       vaultRoot: string
       occurredAt?: string
@@ -37,7 +37,7 @@ interface ImportersRuntimeModule {
       }
       photo: {
         relativePath: string
-      }
+      } | null
       audio?: {
         relativePath: string
       } | null
@@ -56,14 +56,20 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
     description: 'Meal capture commands routed through the core write API.',
     primaryAction: {
       name: 'add',
-      description: 'Record a meal event using media references plus optional notes.',
+      description: 'Record a meal event using optional media references and/or a freeform note.',
       args: z.object({}),
       options: {
-        photo: pathSchema.describe('Required meal photo path.'),
+        photo: pathSchema
+          .optional()
+          .describe('Optional meal photo path.'),
         audio: pathSchema
           .optional()
           .describe('Optional audio note path.'),
-        note: z.string().min(1).optional().describe('Optional freeform note.'),
+        note: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional freeform meal description when no media is available.'),
         occurredAt: isoTimestampSchema
           .optional()
           .describe('Optional occurrence timestamp in ISO 8601 form.'),
@@ -75,7 +81,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
       async run({ options }) {
         const importers = (await loadImportersRuntime()).createImporters()
         const result = await importers.importMeal({
-          photoPath: String(options.photo ?? ''),
+          photoPath: typeof options.photo === 'string' ? options.photo : undefined,
           audioPath: typeof options.audio === 'string' ? options.audio : undefined,
           vaultRoot: String(options.vault ?? ''),
           note: typeof options.note === 'string' ? options.note : undefined,
@@ -89,7 +95,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
           eventId: result.event.id,
           lookupId: result.event.id,
           occurredAt: result.event.occurredAt ?? null,
-          photoPath: result.photo.relativePath,
+          photoPath: result.photo?.relativePath ?? null,
           audioPath: result.audio?.relativePath ?? null,
           manifestFile: result.manifestPath,
           note:

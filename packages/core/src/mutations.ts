@@ -119,7 +119,7 @@ interface AddMealResult {
   mealId: string;
   event: EventRecordByKind<"meal">;
   eventPath: string;
-  photo: RawArtifact;
+  photo: RawArtifact | null;
   audio: RawArtifact | null;
   auditPath: string;
   manifestPath: string;
@@ -1002,18 +1002,23 @@ export async function addMeal({
 }: AddMealInput): Promise<AddMealResult> {
   await loadVault({ vaultRoot });
 
-  if (!photoPath) {
-    throw new VaultError("VAULT_MEAL_PHOTO_REQUIRED", "Meal imports require a photoPath.");
+  if (!photoPath && !audioPath && !note) {
+    throw new VaultError(
+      "VAULT_MEAL_CONTENT_REQUIRED",
+      "Meal imports require at least one of photoPath, audioPath, or note.",
+    );
   }
 
   const mealId = generateRecordId(ID_PREFIXES.meal);
-  const photo = prepareRawArtifact({
-    sourcePath: photoPath,
-    category: "meal-photo",
-    occurredAt,
-    recordId: mealId,
-    slot: "photo",
-  });
+  const photo = photoPath
+    ? prepareRawArtifact({
+        sourcePath: photoPath,
+        category: "meal-photo",
+        occurredAt,
+        recordId: mealId,
+        slot: "photo",
+      })
+    : null;
   const audio = audioPath
     ? prepareRawArtifact({
         sourcePath: audioPath,
@@ -1023,6 +1028,7 @@ export async function addMeal({
         slot: "audio",
       })
     : null;
+  const rawDirectory = resolveRawMealDirectory(occurredAt, mealId);
   const event = prepareEventRecord({
     kind: "meal",
     occurredAt,
@@ -1030,12 +1036,12 @@ export async function addMeal({
     title: "Meal",
     note,
     relatedIds: [mealId],
-    rawRefs: [photo.relativePath, audio?.relativePath].filter(
+    rawRefs: [photo?.relativePath, audio?.relativePath].filter(
       (value): value is string => typeof value === "string",
     ),
     fields: {
       mealId,
-      photoPaths: [photo.relativePath],
+      photoPaths: photo ? [photo.relativePath] : [],
       audioPaths: audio ? [audio.relativePath] : [],
     },
   });
@@ -1045,12 +1051,14 @@ export async function addMeal({
     summary: `Import meal ${mealId}`,
     occurredAt,
     mutate: async ({ batch }) => {
-      const stagedPhoto = await batch.stageRawCopy({
-        sourcePath: photoPath,
-        targetRelativePath: photo.relativePath,
-        originalFileName: photo.originalFileName,
-        mediaType: photo.mediaType,
-      });
+      const stagedPhoto = photo && photoPath
+        ? await batch.stageRawCopy({
+            sourcePath: photoPath,
+            targetRelativePath: photo.relativePath,
+            originalFileName: photo.originalFileName,
+            mediaType: photo.mediaType,
+          })
+        : null;
       const stagedAudio = audio
         ? await batch.stageRawCopy({
             sourcePath: audioPath as string,
@@ -1064,12 +1072,17 @@ export async function addMeal({
         importId: mealId,
         importKind: "meal",
         importedAt: event.record.recordedAt ?? event.record.occurredAt,
+        rawDirectory,
         source: event.record.source ?? source ?? null,
         artifacts: [
-          {
-            role: "photo",
-            raw: stagedPhoto,
-          },
+          ...(stagedPhoto
+            ? [
+                {
+                  role: "photo",
+                  raw: stagedPhoto,
+                },
+              ]
+            : []),
           ...(stagedAudio
             ? [
                 {
@@ -1086,8 +1099,11 @@ export async function addMeal({
           note: event.record.note ?? null,
         },
       });
+      if (!stagedPhoto && !stagedAudio) {
+        event.record.rawRefs = [manifestPath];
+      }
       await stageJsonlRecord(batch, event.relativePath, event.record);
-      const touchedFiles = [photo.relativePath, audio?.relativePath, manifestPath, event.relativePath].filter(
+      const touchedFiles = [photo?.relativePath, audio?.relativePath, manifestPath, event.relativePath].filter(
         (value): value is string => typeof value === "string",
       );
       const audit = await emitAuditRecord({
@@ -1112,6 +1128,11 @@ export async function addMeal({
       };
     },
   });
+}
+
+function resolveRawMealDirectory(occurredAt: DateInput, mealId: string): string {
+  const timestamp = toIsoTimestamp(occurredAt, "occurredAt");
+  return `${VAULT_LAYOUT.rawMealsDirectory}/${timestamp.slice(0, 4)}/${timestamp.slice(5, 7)}/${mealId}`;
 }
 
 export async function importSamples({

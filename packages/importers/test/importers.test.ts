@@ -106,18 +106,34 @@ test("importMeal validates attachments and maps to addMeal-compatible input", as
   assert.equal(mealPayload.note, "salmon and rice");
 });
 
-test("importMeal rejects requests without a baseline photo attachment", async () => {
+test("importMeal accepts text-only meal notes without requiring a photo", async () => {
+  const { calls, corePort } = createCorePortSpy();
+
+  await importMeal(
+    {
+      note: "soup",
+    },
+    { corePort },
+  );
+
+  const [mealPayload] = calls.meals;
+  assert.ok(mealPayload);
+  assert.equal(mealPayload.photoPath, undefined);
+  assert.equal(mealPayload.audioPath, undefined);
+  assert.equal(mealPayload.note, "soup");
+});
+
+test("importMeal rejects requests without a photo, audio note, or meal note", async () => {
   const { corePort } = createCorePortSpy();
 
   await assert.rejects(
     () =>
       importMeal(
         {
-          note: "soup",
         },
         { corePort },
       ),
-    /photoPath/,
+    /photoPath, audioPath, or note/,
   );
 });
 
@@ -350,6 +366,18 @@ test("prepareMealImport accepts the vault alias and omits missing audio", async 
   });
 
   assert.equal(payload.photoPath, photoPath);
+  assert.equal(payload.audioPath, undefined);
+  assert.equal(payload.vaultRoot, "/tmp/example-vault");
+  assert.equal(payload.note, "eggs and fruit");
+});
+
+test("prepareMealImport accepts note-only meal input", async () => {
+  const payload = await prepareMealImport({
+    vault: "/tmp/example-vault",
+    note: "  eggs and fruit  ",
+  });
+
+  assert.equal(payload.photoPath, undefined);
   assert.equal(payload.audioPath, undefined);
   assert.equal(payload.vaultRoot, "/tmp/example-vault");
   assert.equal(payload.note, "eggs and fruit");

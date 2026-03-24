@@ -376,12 +376,12 @@
           "pattern": "^meal_[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "photoPaths": {
-          "minItems": 1,
           "type": "array",
           "items": {
             "type": "string",
             "pattern": "^raw\\/meals\\/[A-Za-z0-9._/-]+$"
-          }
+          },
+          "uniqueItems": true
         },
         "audioPaths": {
           "type": "array",

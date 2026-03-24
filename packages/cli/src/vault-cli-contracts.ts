@@ -71,7 +71,7 @@ export const mealAddResultSchema = z.object({
   eventId: z.string().min(1),
   lookupId: z.string().min(1),
   occurredAt: isoTimestampSchema.nullable(),
-  photoPath: pathSchema,
+  photoPath: pathSchema.nullable(),
   audioPath: pathSchema.nullable(),
   manifestFile: pathSchema,
   note: z.string().nullable(),

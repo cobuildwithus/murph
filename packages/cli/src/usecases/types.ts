@@ -640,7 +640,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }>
   addMeal(input: {
     vaultRoot: string
-    photoPath: string
+    photoPath?: string
     audioPath?: string
     note?: string
     occurredAt?: string
@@ -654,7 +654,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     manifestPath: string
     photo: {
       relativePath: string
-    }
+    } | null
     audio?: {
       relativePath: string
     } | null

@@ -194,6 +194,27 @@ test.sequential(
       assert.equal(requireData(meal).manifestFile.length > 0, true)
       await access(path.join(fixture.vaultRoot, requireData(meal).manifestFile))
 
+      const noteOnlyMeal = await runCli<{
+        mealId: string
+        manifestFile: string
+        photoPath: string | null
+        note: string | null
+      }>([
+        'meal',
+        'add',
+        '--note',
+        'Coffee and toast.',
+        '--vault',
+        fixture.vaultRoot,
+      ])
+      assert.equal(noteOnlyMeal.ok, true)
+      assert.equal(noteOnlyMeal.meta?.command, 'meal add')
+      assert.match(requireData(noteOnlyMeal).mealId, /^meal_/u)
+      assert.equal(requireData(noteOnlyMeal).photoPath, null)
+      assert.equal(requireData(noteOnlyMeal).note, 'Coffee and toast.')
+      assert.equal(requireData(noteOnlyMeal).manifestFile.length > 0, true)
+      await access(path.join(fixture.vaultRoot, requireData(noteOnlyMeal).manifestFile))
+
       const samples = await runCli<{
         lookupIds: string[]
         ledgerFiles: string[]

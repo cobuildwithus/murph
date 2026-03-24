@@ -206,9 +206,13 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     /Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
-  assert.match(firstCall?.systemPrompt ?? '', /simply shares a meal photo/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /meal photo, audio note, or a text-only description/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli meal add/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what they ate or drank/u)
+  assert.match(firstCall?.systemPrompt ?? '', /no longer requires a photo/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Older food logs may still live/u)
   assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)

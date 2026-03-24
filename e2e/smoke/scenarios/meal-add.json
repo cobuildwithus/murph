@@ -1,11 +1,11 @@
 {
   "id": "meal-add",
-  "command": "vault-cli meal add --vault <path> --photo <path> [--audio <path>] [--note \"...\"] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli meal add --vault <path> [--photo <path>] [--audio <path>] [--note \"...\"] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/meals/meal-photo-placeholder.txt",
     "fixtures/sample-imports/meals/meal-audio-placeholder.txt"
   ],
   "goldenOutput": "fixtures/golden-outputs/meal-add",
-  "purpose": "Covers meal-add semantics where photo is required, audio is optional, photo-only meals are valid, and follow-on reads should use the returned lookupId/eventId."
+  "purpose": "Covers meal-add semantics where at least one of photo, audio, or note is required, note-only meals are valid, and follow-on reads should use the returned lookupId/eventId."
 }

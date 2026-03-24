@@ -12,6 +12,7 @@ import {
 } from "@healthybob/contracts";
 
 import type { WriteBatch } from "./write-batch.js";
+import { normalizeRelativeVaultPath } from "../path-safety.js";
 
 interface RawArtifactLike {
   relativePath: string;
@@ -25,6 +26,7 @@ interface StageRawImportManifestInput {
   importId: string;
   importKind: RawImportKind;
   importedAt: string;
+  rawDirectory?: string;
   source: string | null;
   artifacts: Array<{
     role: string;
@@ -49,9 +51,21 @@ async function describeRawArtifact(
   };
 }
 
-function resolveRawArtifactDirectory(artifacts: readonly { relativePath: string }[]): string {
+function resolveRawArtifactDirectory(
+  artifacts: readonly { relativePath: string }[],
+  rawDirectory?: string,
+): string {
+  const normalizedRawDirectory =
+    typeof rawDirectory === "string" && rawDirectory.trim().length > 0
+      ? normalizeRelativeVaultPath(rawDirectory)
+      : null;
+
   if (artifacts.length === 0) {
-    throw new TypeError("raw import manifest requires at least one raw artifact");
+    if (normalizedRawDirectory) {
+      return normalizedRawDirectory;
+    }
+
+    throw new TypeError("raw import manifest requires either a rawDirectory or at least one raw artifact");
   }
 
   const [firstDirectory, ...remainingDirectories] = artifacts.map((artifact) =>
@@ -68,11 +82,21 @@ function resolveRawArtifactDirectory(artifacts: readonly { relativePath: string 
     }
   }
 
+  if (normalizedRawDirectory && normalizedRawDirectory !== firstDirectory) {
+    throw new TypeError("raw import manifest rawDirectory must match the staged raw artifacts");
+  }
+
   return firstDirectory;
 }
 
-export function resolveRawManifestPath(artifacts: readonly { relativePath: string }[]): string {
-  return path.posix.join(resolveRawArtifactDirectory(artifacts), "manifest.json");
+export function resolveRawManifestPath(input: {
+  artifacts: readonly { relativePath: string }[];
+  rawDirectory?: string;
+}): string {
+  return path.posix.join(
+    resolveRawArtifactDirectory(input.artifacts, input.rawDirectory),
+    "manifest.json",
+  );
 }
 
 function sanitizeManifestProvenance(provenance: Record<string, unknown>): JsonObject {
@@ -97,18 +121,26 @@ export async function stageRawImportManifest({
   importId,
   importKind,
   importedAt,
+  rawDirectory,
   source,
   artifacts,
   provenance,
 }: StageRawImportManifestInput): Promise<string> {
-  const manifestPath = resolveRawManifestPath(artifacts.map(({ raw }) => raw));
+  const resolvedRawDirectory = resolveRawArtifactDirectory(
+    artifacts.map(({ raw }) => raw),
+    rawDirectory,
+  );
+  const manifestPath = resolveRawManifestPath({
+    artifacts: artifacts.map(({ raw }) => raw),
+    rawDirectory: resolvedRawDirectory,
+  });
   const manifest = rawImportManifestSchema.parse({
     schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
     importId,
     importKind,
     importedAt,
     source,
-    rawDirectory: resolveRawArtifactDirectory(artifacts.map(({ raw }) => raw)),
+    rawDirectory: resolvedRawDirectory,
     artifacts: await Promise.all(
       artifacts.map(({ raw, role }) => describeRawArtifact(raw, role)),
     ),

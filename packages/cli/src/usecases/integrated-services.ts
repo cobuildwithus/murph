@@ -174,7 +174,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
       }
     },
     async addMeal(input: CommandContext & {
-      photo: string
+      photo?: string
       audio?: string
       note?: string
       occurredAt?: string
@@ -195,7 +195,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
         eventId: result.event.id,
         lookupId: result.event.id,
         occurredAt: result.event.occurredAt ?? null,
-        photoPath: result.photo.relativePath,
+        photoPath: result.photo?.relativePath ?? null,
         audioPath: result.audio?.relativePath ?? null,
         manifestFile: result.manifestPath,
         note: result.event.note ?? note ?? null,

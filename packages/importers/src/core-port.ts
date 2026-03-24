@@ -9,7 +9,7 @@ export interface DocumentImportPayload {
 
 export interface MealImportPayload {
   vaultRoot?: string;
-  photoPath: string;
+  photoPath?: string;
   audioPath?: string;
   occurredAt?: string;
   note?: string;
