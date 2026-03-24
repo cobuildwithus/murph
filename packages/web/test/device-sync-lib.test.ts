@@ -130,3 +130,20 @@ test("buildWebReturnTo keeps relative paths on the current origin", () => {
 
   assert.equal(result, "http://127.0.0.1:3000/settings/devices");
 });
+
+test("buildWebReturnTo falls back to root for invalid returnTo values", () => {
+  assert.equal(
+    buildWebReturnTo(
+      new URL(
+        "http://127.0.0.1:3000/devices/connect/whoop?returnTo=https://example.com/settings",
+      ),
+    ),
+    "http://127.0.0.1:3000/",
+  );
+  assert.equal(
+    buildWebReturnTo(
+      new URL("http://127.0.0.1:3000/devices/connect/whoop?returnTo=settings"),
+    ),
+    "http://127.0.0.1:3000/",
+  );
+});

@@ -161,3 +161,69 @@ test("account action routes redirect back to the requested page", async () => {
     "http://127.0.0.1:3000/settings",
   );
 });
+
+test("account action routes fall back to root for invalid returnTo values", async () => {
+  const { POST: reconcile } = await import(
+    "../app/devices/accounts/[accountId]/reconcile/route"
+  );
+  const { POST: disconnect } = await import(
+    "../app/devices/accounts/[accountId]/disconnect/route"
+  );
+  const {
+    reconcileDeviceAccount,
+    disconnectDeviceAccount,
+  } = await import("../src/lib/device-sync");
+
+  const account = {
+    id: "acct_whoop_01",
+    provider: "whoop",
+    externalAccountId: "whoop-user-1",
+    displayName: "WHOOP Tester",
+    status: "active" as const,
+    scopes: [],
+    metadata: {},
+    connectedAt: "2026-03-17T12:00:00.000Z",
+    lastWebhookAt: null,
+    lastSyncStartedAt: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextReconcileAt: null,
+    createdAt: "2026-03-17T12:00:00.000Z",
+    updatedAt: "2026-03-17T12:00:00.000Z",
+  };
+
+  vi.mocked(reconcileDeviceAccount).mockResolvedValue({
+    account,
+  });
+  vi.mocked(disconnectDeviceAccount).mockResolvedValue({
+    account: {
+      ...account,
+      status: "disconnected",
+      updatedAt: "2026-03-17T12:05:00.000Z",
+    },
+  });
+
+  const reconcileResponse = await reconcile(
+    new Request(
+      "http://127.0.0.1:3000/devices/accounts/acct_whoop_01/reconcile?returnTo=https://example.com/settings",
+    ),
+    {
+      params: Promise.resolve({ accountId: "acct_whoop_01" }),
+    },
+  );
+  const disconnectResponse = await disconnect(
+    new Request(
+      "http://127.0.0.1:3000/devices/accounts/acct_whoop_01/disconnect?returnTo=settings",
+    ),
+    {
+      params: Promise.resolve({ accountId: "acct_whoop_01" }),
+    },
+  );
+
+  assert.equal(reconcileResponse.status, 307);
+  assert.equal(reconcileResponse.headers.get("Location"), "http://127.0.0.1:3000/");
+  assert.equal(disconnectResponse.status, 307);
+  assert.equal(disconnectResponse.headers.get("Location"), "http://127.0.0.1:3000/");
+});
