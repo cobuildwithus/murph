@@ -1,0 +1,11 @@
+{
+  "id": "recipe-upsert",
+  "command": "vault-cli recipe upsert --vault <path> --input @file.json [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/recipe-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/experiment-create",
+  "purpose": "Documents recipe creation and updates through the first-class recipe noun with stable rcp_* ids."
+}

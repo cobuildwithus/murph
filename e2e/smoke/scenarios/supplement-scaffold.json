@@ -1,0 +1,11 @@
+{
+  "id": "supplement-scaffold",
+  "command": "vault-cli supplement scaffold --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/supplement-upsert.json",
+    "fixtures/health-extensions/vault-overlay/bank/regimens/sleep/magnesium-glycinate.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents supplement payload scaffolding before operators upsert a canonical supplement product."
+}

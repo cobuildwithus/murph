@@ -1,0 +1,11 @@
+{
+  "id": "recipe-list",
+  "command": "vault-cli recipe list --vault <path> [--status draft|saved|archived] [--limit <n>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/recipe-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/list",
+  "purpose": "Documents recipe registry listing with optional status filtering."
+}

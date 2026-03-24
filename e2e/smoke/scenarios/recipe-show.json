@@ -1,0 +1,11 @@
+{
+  "id": "recipe-show",
+  "command": "vault-cli recipe show <id> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/recipe-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents direct recipe follow-up reads by canonical rcp_* id or recipe slug."
+}

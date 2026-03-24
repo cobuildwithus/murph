@@ -1,0 +1,11 @@
+{
+  "id": "recipe-scaffold",
+  "command": "vault-cli recipe scaffold --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/recipe-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents recipe payload scaffolding before operators or agents upsert a canonical bank/recipes record."
+}
