@@ -1,4 +1,10 @@
-export type DeviceSyncAccountStatus = "active" | "reauthorization_required" | "disconnected";
+import type {
+  DeviceSyncAccountStatus,
+  DeviceSyncAccountRecord,
+  DeviceSyncProviderDescriptor,
+} from "@healthybob/runtime-state";
+
+export type { DeviceSyncAccountStatus } from "@healthybob/runtime-state";
 
 export interface DeviceSyncLogger {
   debug?(message: string, context?: Record<string, unknown>): void;
@@ -33,15 +39,7 @@ export interface DeviceSyncHttpListenerAddress {
   port: number;
 }
 
-export interface PublicProviderDescriptor {
-  provider: string;
-  callbackPath: string;
-  callbackUrl: string;
-  webhookPath: string | null;
-  webhookUrl: string | null;
-  supportsWebhooks: boolean;
-  defaultScopes: string[];
-}
+export type PublicProviderDescriptor = DeviceSyncProviderDescriptor;
 
 export interface OAuthStateRecord {
   state: string;
@@ -52,26 +50,7 @@ export interface OAuthStateRecord {
   expiresAt: string;
 }
 
-export interface PublicDeviceSyncAccount {
-  id: string;
-  provider: string;
-  externalAccountId: string;
-  displayName: string | null;
-  status: DeviceSyncAccountStatus;
-  scopes: string[];
-  accessTokenExpiresAt?: string | null;
-  metadata: Record<string, unknown>;
-  connectedAt: string;
-  lastWebhookAt: string | null;
-  lastSyncStartedAt: string | null;
-  lastSyncCompletedAt: string | null;
-  lastSyncErrorAt: string | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  nextReconcileAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
 
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   accessTokenEncrypted: string;

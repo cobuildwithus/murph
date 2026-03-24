@@ -14,6 +14,11 @@ export interface DeviceSyncApiErrorPayload {
   };
 }
 
+export type DeviceSyncAccountStatus =
+  | "active"
+  | "reauthorization_required"
+  | "disconnected";
+
 export interface DeviceSyncProviderDescriptor {
   provider: string;
   callbackPath: string;
@@ -29,7 +34,7 @@ export interface DeviceSyncAccountRecord {
   provider: string;
   externalAccountId: string;
   displayName: string | null;
-  status: "active" | "reauthorization_required" | "disconnected";
+  status: DeviceSyncAccountStatus;
   scopes: string[];
   accessTokenExpiresAt?: string | null;
   metadata: Record<string, unknown>;
