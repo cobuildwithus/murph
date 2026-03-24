@@ -55,14 +55,14 @@ Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so t
 Required:
 - `DEVICE_SYNC_VAULT_ROOT`
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
-- `DEVICE_SYNC_SECRET`
+- `DEVICE_SYNC_SECRET` for the daemon's local bootstrap/service secret
 
 At least one provider must be configured.
 
 Common optional settings:
 - `DEVICE_SYNC_PORT`
 - `DEVICE_SYNC_HOST` (defaults to `127.0.0.1`)
-- `DEVICE_SYNC_CONTROL_TOKEN` (defaults to `DEVICE_SYNC_SECRET` if omitted)
+- `DEVICE_SYNC_CONTROL_TOKEN` for the control-plane bearer token; if omitted, the daemon falls back to `DEVICE_SYNC_SECRET` for local bootstrap compatibility
 - `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`
 - `DEVICE_SYNC_STATE_DB_PATH`
 - `DEVICE_SYNC_WORKER_POLL_MS`
@@ -112,7 +112,7 @@ The published bin name is also `healthybob-device-syncd`.
 ## Control-plane clients
 
 - `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `DEVICE_SYNC_BASE_URL`
-- `vault-cli` and `packages/web` authenticate local control routes with `DEVICE_SYNC_CONTROL_TOKEN` (or, for local bootstrap compatibility, `DEVICE_SYNC_SECRET`)
+- `vault-cli` and `packages/web` should authenticate local control routes with `DEVICE_SYNC_CONTROL_TOKEN`; they still accept `DEVICE_SYNC_SECRET` only as a local bootstrap compatibility alias
 - `packages/web` can show provider/account status and redirect through this daemon for one-click auth
 - cross-origin `returnTo` URLs are accepted only when their origin appears in `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`; relative paths remain allowed by default
 

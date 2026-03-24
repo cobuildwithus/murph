@@ -105,6 +105,64 @@ test.sequential(
 )
 
 test.sequential(
+  'startManagedDeviceSyncDaemon preserves a distinct DEVICE_SYNC_SECRET when DEVICE_SYNC_CONTROL_TOKEN is also configured',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
+    const livePids = new Set<number>()
+    let healthy = false
+    let spawned: SpawnProcessInput | null = null
+
+    try {
+      await startManagedDeviceSyncDaemon({
+        vault: vaultRoot,
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          DEVICE_SYNC_SECRET: 'service-secret-for-tests',
+        },
+        dependencies: {
+          fetchImpl: async () =>
+            new Response(
+              JSON.stringify({
+                ok: healthy,
+              }),
+              {
+                status: healthy ? 200 : 503,
+              },
+            ),
+          isProcessAlive(pid) {
+            return livePids.has(pid)
+          },
+          resolveDeviceSyncPackageEntry() {
+            return '/virtual/device-syncd/dist/index.js'
+          },
+          async spawnProcess(input) {
+            spawned = input
+            livePids.add(4343)
+            healthy = true
+            return { pid: 4343 }
+          },
+        },
+      })
+
+      if (spawned === null) {
+        throw new Error('expected spawnProcess to be called')
+      }
+      const spawnedProcess = spawned as unknown as SpawnProcessInput
+      assert.equal(
+        spawnedProcess.env.DEVICE_SYNC_CONTROL_TOKEN,
+        'control-token-for-tests',
+      )
+      assert.equal(
+        spawnedProcess.env.DEVICE_SYNC_SECRET,
+        'service-secret-for-tests',
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'ensureManagedDeviceSyncControlPlane honors explicit unmanaged targets without a vault',
   async () => {
     const controlPlane = await ensureManagedDeviceSyncControlPlane({

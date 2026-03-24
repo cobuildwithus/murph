@@ -1,8 +1,12 @@
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { URL } from 'node:url'
-import { resolveDeviceSyncRuntimePaths } from '@healthybob/runtime-state'
-import { DEVICE_SYNC_CONTROL_TOKEN_ENV } from '../device-sync-client.js'
+import {
+  DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  DEVICE_SYNC_SECRET_ENV,
+  DEVICE_SYNC_SECRET_ENV_KEYS,
+  resolveDeviceSyncRuntimePaths,
+} from '@healthybob/runtime-state'
 import {
   DEVICE_SYNC_HOST_ENV,
   DEVICE_SYNC_HOST_ENV_KEYS,
@@ -10,8 +14,6 @@ import {
   DEVICE_SYNC_PORT_ENV_KEYS,
   DEVICE_SYNC_PUBLIC_BASE_URL_ENV,
   DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS,
-  DEVICE_SYNC_SECRET_ENV,
-  DEVICE_SYNC_SECRET_ENV_KEYS,
   DEVICE_SYNC_STATE_DB_PATH_ENV,
   DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS,
   type DeviceDaemonDependencies,
@@ -72,6 +74,10 @@ export function buildManagedDeviceSyncEnvironment(input: {
     [DEVICE_SYNC_PUBLIC_BASE_URL_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ||
       input.baseUrl,
+    // Keep mirroring the chosen control token into DEVICE_SYNC_SECRET unless
+    // the operator already provided a distinct secret, because device-syncd
+    // still requires DEVICE_SYNC_SECRET and treats it as the control-token
+    // fallback for local bootstrap compatibility.
     [DEVICE_SYNC_SECRET_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_SECRET_ENV_KEYS) ||
       input.controlToken,

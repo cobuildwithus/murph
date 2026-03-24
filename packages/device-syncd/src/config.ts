@@ -1,3 +1,8 @@
+import {
+  DEVICE_SYNC_SECRET_ENV_KEYS,
+  resolveDeviceSyncControlToken,
+} from "@healthybob/runtime-state";
+
 import { createOuraDeviceSyncProvider } from "./providers/oura.js";
 import { createWhoopDeviceSyncProvider } from "./providers/whoop.js";
 import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.js";
@@ -25,9 +30,6 @@ interface DeviceSyncProviderFactoryEntry {
 const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
   "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
 ] as const;
-const DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS = [
-  "DEVICE_SYNC_CONTROL_TOKEN",
-] as const;
 const DEVICE_SYNC_HOST_ENV_KEYS = ["DEVICE_SYNC_HOST"] as const;
 const DEVICE_SYNC_PORT_ENV_KEYS = ["DEVICE_SYNC_PORT", "PORT"] as const;
 const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS = [
@@ -42,7 +44,6 @@ const DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS = [
 const DEVICE_SYNC_SCHEDULER_POLL_MS_ENV_KEYS = [
   "DEVICE_SYNC_SCHEDULER_POLL_MS",
 ] as const;
-const DEVICE_SYNC_SECRET_ENV_KEYS = ["DEVICE_SYNC_SECRET"] as const;
 const DEVICE_SYNC_SESSION_TTL_MS_ENV_KEYS = [
   "DEVICE_SYNC_SESSION_TTL_MS",
 ] as const;
@@ -139,7 +140,9 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
   const vaultRoot = requireEnv(env, DEVICE_SYNC_VAULT_ROOT_ENV_KEYS);
   const publicBaseUrl = requireEnv(env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS);
   const secret = requireEnv(env, DEVICE_SYNC_SECRET_ENV_KEYS);
-  const controlToken = optionalEnv(env, DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS) ?? secret;
+  // Keep DEVICE_SYNC_SECRET as the control-token fallback for local bootstrap
+  // compatibility until callers fully migrate to DEVICE_SYNC_CONTROL_TOKEN.
+  const controlToken = resolveDeviceSyncControlToken({ env }) ?? secret;
   const logger = createConsoleDeviceSyncLogger();
   const providers = createConfiguredProviders(env);
   const publicListener = readOptionalPublicListener(env);
