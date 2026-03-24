@@ -7,7 +7,7 @@ import type {
   InboxRuntimeModule,
   PollConnector,
   TelegramDriver,
-} from '../inbox-services.js'
+} from '../inbox-app/types.js'
 import { normalizeBackfillLimit } from './shared.js'
 
 export async function instantiateConnector(input: {

@@ -10,7 +10,7 @@ import type {
   InboxPaths,
   InboxRuntimeModule,
   RuntimeStore,
-} from '../inbox-services.js'
+} from '../inbox-app/types.js'
 import {
   connectorNamespaceKey,
   fileExists,

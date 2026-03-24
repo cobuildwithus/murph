@@ -22,7 +22,7 @@ import type {
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
-} from '../inbox-services.js'
+} from '../inbox-app/types.js'
 import { ensureInitialized } from './state.js'
 import {
   fileExists,

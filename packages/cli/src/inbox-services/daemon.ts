@@ -1,5 +1,5 @@
 import { inboxDaemonStateSchema, type InboxDaemonState } from '../inbox-cli-contracts.js'
-import type { InboxPaths } from '../inbox-services.js'
+import type { InboxPaths } from '../inbox-app/types.js'
 import {
   fileExists,
   readJsonWithSchema,

@@ -15,7 +15,7 @@ import type {
   RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
   RuntimeStore,
-} from '../inbox-services.js'
+} from '../inbox-app/types.js'
 import {
   isParseableAttachment,
   normalizeVaultPathOutput,

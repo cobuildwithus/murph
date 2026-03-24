@@ -12,7 +12,7 @@ import type {
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
-} from '../inbox-services.js'
+} from '../inbox-app/types.js'
 
 export async function readJsonWithSchema<T>(
   absolutePath: string,
