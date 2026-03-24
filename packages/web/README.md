@@ -15,12 +15,12 @@ Local-only Next.js read surface for the Healthy Bob vault.
 Run the app from this package with an explicit vault root:
 
 ```bash
-HEALTHYBOB_VAULT=../../fixtures/demo-web-vault pnpm dev
+VAULT=../../fixtures/demo-web-vault pnpm dev
 ```
 
-The package launch wrapper blocks framework `.env*` reads and otherwise leaves host selection to Next or any explicit CLI flags you pass. If `HEALTHYBOB_VAULT` is unset, the app falls back to the saved Healthy Bob CLI default vault when one exists. If neither is available, the app shows a setup screen instead of guessing paths.
-The local launcher keeps `@healthybob/query` on its normal package export and will ensure the built runtime closure for `@healthybob/contracts`, `@healthybob/runtime-state`, and `@healthybob/query` exists before Next starts.
+The package launch wrapper blocks framework `.env*` reads and otherwise leaves host selection to Next or any explicit CLI flags you pass. If `VAULT` is unset, the app falls back to the saved Healthy Bob CLI default vault when one exists. If neither is available, the app shows a setup screen instead of guessing paths.
+Within this repo, the app resolves workspace packages from source and lets Next transpile them directly. The local launcher no longer rebuilds workspace `dist/` trees before startup.
 The wrapper also preserves the original `pnpm` launch cwd so package-local relative vault paths like `../../fixtures/demo-web-vault` keep resolving from `packages/web`.
-The Next webpack config also pins `@healthybob/query` to that built `dist/index.js` entry so repo-wide workspace source aliases do not leak `packages/query/src` into the local app.
+Legacy `HEALTHYBOB_*` env names remain accepted as compatibility aliases for now.
 
-If `HEALTHYBOB_DEVICE_SYNC_BASE_URL` points at a running local device-sync daemon and the server environment also has `HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN` (or the same local bootstrap secret the daemon uses), the home page also renders a wearable section with one-click connect, reconcile, and disconnect actions. Those actions call the separate authenticated local device control plane and do not bypass the vault/query read boundary.
+If `DEVICE_SYNC_BASE_URL` points at a running local device-sync daemon and the server environment also has `DEVICE_SYNC_CONTROL_TOKEN` (or the same local bootstrap secret the daemon uses), the home page also renders a wearable section with one-click connect, reconcile, and disconnect actions. Those actions call the separate authenticated local device control plane and do not bypass the vault/query read boundary.

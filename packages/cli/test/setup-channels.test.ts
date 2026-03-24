@@ -17,7 +17,7 @@ test('configureSetupChannels enables Telegram auto-reply only after the doctor p
       channels: ['telegram'],
       dryRun: false,
       env: {
-        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'bot-token',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
       },
       inboxServices: {
         async bootstrap() {
@@ -90,7 +90,7 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
       channels: ['telegram'],
       dryRun: false,
       env: {
-        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'bot-token',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
       },
       inboxServices: {
         async bootstrap() {
@@ -161,7 +161,7 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
       channels: ['email'],
       dryRun: false,
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+        AGENTMAIL_API_KEY: 'am_test_123',
       },
       inboxServices: {
         async bootstrap() {
@@ -249,7 +249,7 @@ test('configureSetupChannels keeps email selected in onboarding preferences even
       channels: ['email'],
       dryRun: false,
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+        AGENTMAIL_API_KEY: 'am_test_123',
       },
       inboxServices: {
         async bootstrap() {
@@ -338,7 +338,7 @@ test('configureSetupChannels treats an empty but reachable AgentMail inbox as co
       channels: ['email'],
       dryRun: false,
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+        AGENTMAIL_API_KEY: 'am_test_123',
       },
       inboxServices: {
         async bootstrap() {
@@ -429,7 +429,7 @@ test('configureSetupChannels disables stale setup connectors that were not selec
       channels: ['email'],
       dryRun: false,
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+        AGENTMAIL_API_KEY: 'am_test_123',
       },
       inboxServices: {
         async bootstrap() {
@@ -546,7 +546,7 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
       channels: ['email'],
       dryRun: false,
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+        AGENTMAIL_API_KEY: 'am_test_123',
       },
       inboxServices: {
         async bootstrap() {
@@ -658,7 +658,7 @@ test('createSetupAgentmailSelectionResolver returns a manual inbox id when disco
   const selected = await resolver({
     allowPrompt: true,
     env: {
-      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+      AGENTMAIL_API_KEY: 'agentmail-key',
     },
   })
 
@@ -686,7 +686,7 @@ test('createSetupAgentmailSelectionResolver rethrows unexpected discovery failur
     resolver({
       allowPrompt: true,
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+        AGENTMAIL_API_KEY: 'agentmail-key',
       },
     }),
     /agentmail unavailable/u,

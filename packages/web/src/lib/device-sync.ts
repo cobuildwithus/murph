@@ -1,7 +1,7 @@
 import {
   DEFAULT_DEVICE_SYNC_BASE_URL,
-  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
-  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  DEVICE_SYNC_BASE_URL_ENV,
+  DEVICE_SYNC_CONTROL_TOKEN_ENV,
   normalizeDeviceSyncBaseUrl,
   requestDeviceSyncJson as requestSharedDeviceSyncJson,
   resolveDeviceSyncBaseUrl as resolveSharedDeviceSyncBaseUrl,
@@ -12,8 +12,8 @@ import {
 
 export {
   DEFAULT_DEVICE_SYNC_BASE_URL,
-  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
-  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  DEVICE_SYNC_BASE_URL_ENV,
+  DEVICE_SYNC_CONTROL_TOKEN_ENV,
   normalizeDeviceSyncBaseUrl,
   type DeviceSyncAccountRecord,
   type DeviceSyncProviderDescriptor,
@@ -120,10 +120,10 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
       baseUrl,
       message,
       hint: isAuthError
-        ? "Set HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
+        ? "Set DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
         : "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
       suggestedCommand: isAuthError
-        ? "HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
+        ? "DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
         : "healthybob device daemon start --vault <your-vault>",
     };
   }

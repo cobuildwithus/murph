@@ -38,7 +38,7 @@ Runtime: Node >= 22.16.0.
 ```bash
 pnpm onboard --vault ./vault
 
-HEALTHYBOB_VAULT=./vault pnpm web:dev
+VAULT=./vault pnpm web:dev
 
 pnpm chat
 healthybob chat
@@ -49,7 +49,7 @@ vault-cli vault stats
 For a quick web-only demo against the included fixture vault:
 
 ```bash
-HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev
+VAULT=fixtures/demo-web-vault pnpm web:dev
 ```
 
 ## ChatGPT Bundles
@@ -61,7 +61,7 @@ The repo now has two separate ChatGPT upload paths:
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
   packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
 
-`review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Healthy Bob precedence order: explicit `--vault`, then `HEALTHYBOB_VAULT`, then the saved default vault.
+`review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Healthy Bob precedence order: explicit `--vault`, then `VAULT`, then the saved default vault.
 
 The data bundle intentionally excludes `.runtime/**`, `.env*`, archive files, and `exports/packs/**` so machine-local runtime/auth material and already-derived export packs are not uploaded by default. Generated ZIPs are written under `output-packages/`.
 
@@ -239,7 +239,7 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 The repo now includes two web surfaces: a local-only app under `packages/web` and a hosted device-sync control plane under `apps/web`.
 
 - It is read-only and uses the query layer on the server.
-- It requires an explicit `HEALTHYBOB_VAULT` environment variable.
+- It requires an explicit `VAULT` environment variable.
 - Its wrapper scripts bind to `127.0.0.1` and block framework `.env*` reads.
 - Its search surface only indexes safe record fields and does not expose path-derived matches.
 
@@ -253,7 +253,7 @@ Example local run:
 
 ```bash
 cd packages/web
-HEALTHYBOB_VAULT=../../fixtures/demo-web-vault pnpm dev
+VAULT=../../fixtures/demo-web-vault pnpm dev
 ```
 
 ## Implemented Command Surface

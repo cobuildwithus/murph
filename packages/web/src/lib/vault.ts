@@ -2,8 +2,15 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 
+export const VAULT_ENV = "VAULT";
 export const HEALTHYBOB_VAULT_ENV = "HEALTHYBOB_VAULT";
+export const VAULT_ENV_KEYS = [VAULT_ENV, HEALTHYBOB_VAULT_ENV] as const;
+export const WEB_LAUNCH_CWD_ENV = "WEB_LAUNCH_CWD";
 export const HEALTHYBOB_WEB_LAUNCH_CWD_ENV = "HEALTHYBOB_WEB_LAUNCH_CWD";
+export const WEB_LAUNCH_CWD_ENV_KEYS = [
+  WEB_LAUNCH_CWD_ENV,
+  HEALTHYBOB_WEB_LAUNCH_CWD_ENV,
+] as const;
 export const FIXTURE_VAULT_EXAMPLE = "../../fixtures/demo-web-vault";
 const INIT_CWD_ENV = "INIT_CWD";
 const OPERATOR_CONFIG_RELATIVE_PATH = path.join(".healthybob", "config.json");
@@ -12,12 +19,7 @@ export function getConfiguredVaultRoot(
   env: Record<string, string | undefined> = process.env,
   cwd = process.cwd(),
 ): string | null {
-  const configured = env[HEALTHYBOB_VAULT_ENV];
-  if (typeof configured !== "string") {
-    return null;
-  }
-
-  const trimmed = configured.trim();
+  const trimmed = getEnvValue(env, VAULT_ENV_KEYS);
   if (!trimmed) {
     return null;
   }
@@ -55,19 +57,21 @@ export function buildSuggestedCommand(
   const command =
     launchCwd === cwd ? "pnpm dev" : launchCwd === repoRoot ? "pnpm web:dev" : "pnpm --dir packages/web dev";
 
-  return `${HEALTHYBOB_VAULT_ENV}=${buildExampleVaultPath(env, cwd)} ${command}`;
+  return `${VAULT_ENV}=${buildExampleVaultPath(env, cwd)} ${command}`;
 }
 
 export function rememberLaunchCwd(
   env: Record<string, string | undefined> = process.env,
   cwd = process.cwd(),
 ): void {
-  if (typeof env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV] === "string") {
+  if (getEnvValue(env, WEB_LAUNCH_CWD_ENV_KEYS)) {
     return;
   }
 
   const initCwd = env[INIT_CWD_ENV]?.trim();
-  env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV] = initCwd ? path.resolve(cwd, initCwd) : cwd;
+  const resolvedLaunchCwd = initCwd ? path.resolve(cwd, initCwd) : cwd;
+  env[WEB_LAUNCH_CWD_ENV] = resolvedLaunchCwd;
+  env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV] = resolvedLaunchCwd;
 }
 
 async function resolveSavedDefaultVaultRoot(
@@ -89,12 +93,26 @@ function getLaunchCwd(
   env: Record<string, string | undefined>,
   cwd: string,
 ): string {
-  const configured = env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV];
-  if (typeof configured !== "string" || configured.trim().length === 0) {
+  const configured = getEnvValue(env, WEB_LAUNCH_CWD_ENV_KEYS);
+  if (!configured) {
     return cwd;
   }
 
   return path.resolve(cwd, configured);
+}
+
+function getEnvValue(
+  env: Record<string, string | undefined>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 function normalizeDisplayPath(value: string): string {

@@ -63,10 +63,10 @@ test("overview route maps missing config to 503", async () => {
   const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
-    envVar: "HEALTHYBOB_VAULT",
+    envVar: "VAULT",
     exampleVaultPath: "fixtures/demo-web-vault",
     status: "missing-config",
-    suggestedCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
+    suggestedCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
   });
 
   const response = await GET(new Request("http://localhost/api/overview"));
@@ -80,10 +80,10 @@ test("overview route maps unreadable vaults to 500", async () => {
   const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
-    envVar: "HEALTHYBOB_VAULT",
+    envVar: "VAULT",
     hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
     message: "The configured vault could not be read.",
-    recoveryCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
+    recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
     status: "error",
   });
 

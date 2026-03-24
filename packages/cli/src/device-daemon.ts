@@ -8,6 +8,7 @@ import {
 import { writeTextFileAtomic } from '@healthybob/runtime-state'
 
 import {
+  DEVICE_SYNC_BASE_URL_ENV,
   HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
   resolveDeviceSyncBaseUrl,
   resolveDeviceSyncControlToken,
@@ -204,7 +205,7 @@ export async function startManagedDeviceSyncDaemon(input: {
 
     throw new VaultCliError(
       'DEVICE_SYNC_DAEMON_CONFLICT',
-      'A device sync control plane is already reachable at this base URL, but Healthy Bob does not own it. Set HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN to reuse it or stop the conflicting process first.',
+      'A device sync control plane is already reachable at this base URL, but Healthy Bob does not own it. Set DEVICE_SYNC_CONTROL_TOKEN to reuse it or stop the conflicting process first.',
       { baseUrl },
     )
   }
@@ -397,6 +398,7 @@ function hasExplicitControlPlaneTarget(
 ): boolean {
   return (
     (typeof baseUrl === 'string' && baseUrl.trim().length > 0) ||
+    typeof env[DEVICE_SYNC_BASE_URL_ENV] === 'string' ||
     typeof env[HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV] === 'string'
   )
 }

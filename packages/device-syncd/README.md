@@ -53,46 +53,48 @@ Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so t
 ## Environment
 
 Required:
-- `HEALTHYBOB_VAULT_ROOT`
-- `HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL`
-- `HEALTHYBOB_DEVICE_SYNC_SECRET`
+- `DEVICE_SYNC_VAULT_ROOT`
+- `DEVICE_SYNC_PUBLIC_BASE_URL`
+- `DEVICE_SYNC_SECRET`
 
 At least one provider must be configured.
 
 Common optional settings:
-- `HEALTHYBOB_DEVICE_SYNC_PORT`
-- `HEALTHYBOB_DEVICE_SYNC_HOST` (defaults to `127.0.0.1`)
-- `HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN` (defaults to `HEALTHYBOB_DEVICE_SYNC_SECRET` if omitted)
-- `HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`
-- `HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH`
-- `HEALTHYBOB_DEVICE_SYNC_WORKER_POLL_MS`
-- `HEALTHYBOB_DEVICE_SYNC_WORKER_BATCH_SIZE`
-- `HEALTHYBOB_DEVICE_SYNC_SCHEDULER_POLL_MS`
-- `HEALTHYBOB_DEVICE_SYNC_SESSION_TTL_MS`
-- `HEALTHYBOB_DEVICE_SYNC_WORKER_LEASE_MS`
-- `HEALTHYBOB_DEVICE_SYNC_PUBLIC_HOST` plus `HEALTHYBOB_DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
+- `DEVICE_SYNC_PORT`
+- `DEVICE_SYNC_HOST` (defaults to `127.0.0.1`)
+- `DEVICE_SYNC_CONTROL_TOKEN` (defaults to `DEVICE_SYNC_SECRET` if omitted)
+- `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`
+- `DEVICE_SYNC_STATE_DB_PATH`
+- `DEVICE_SYNC_WORKER_POLL_MS`
+- `DEVICE_SYNC_WORKER_BATCH_SIZE`
+- `DEVICE_SYNC_SCHEDULER_POLL_MS`
+- `DEVICE_SYNC_SESSION_TTL_MS`
+- `DEVICE_SYNC_WORKER_LEASE_MS`
+- `DEVICE_SYNC_PUBLIC_HOST` plus `DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
 
 WHOOP settings:
-- `HEALTHYBOB_WHOOP_CLIENT_ID`
-- `HEALTHYBOB_WHOOP_CLIENT_SECRET`
-- `HEALTHYBOB_WHOOP_BASE_URL`
-- `HEALTHYBOB_WHOOP_SCOPES`
-- `HEALTHYBOB_WHOOP_BACKFILL_DAYS`
-- `HEALTHYBOB_WHOOP_RECONCILE_DAYS`
-- `HEALTHYBOB_WHOOP_RECONCILE_INTERVAL_MS`
-- `HEALTHYBOB_WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-- `HEALTHYBOB_WHOOP_REQUEST_TIMEOUT_MS`
+- `WHOOP_CLIENT_ID`
+- `WHOOP_CLIENT_SECRET`
+- `WHOOP_BASE_URL`
+- `WHOOP_SCOPES`
+- `WHOOP_BACKFILL_DAYS`
+- `WHOOP_RECONCILE_DAYS`
+- `WHOOP_RECONCILE_INTERVAL_MS`
+- `WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
+- `WHOOP_REQUEST_TIMEOUT_MS`
 
 Oura settings:
-- `HEALTHYBOB_OURA_CLIENT_ID`
-- `HEALTHYBOB_OURA_CLIENT_SECRET`
-- `HEALTHYBOB_OURA_AUTH_BASE_URL`
-- `HEALTHYBOB_OURA_API_BASE_URL`
-- `HEALTHYBOB_OURA_SCOPES`
-- `HEALTHYBOB_OURA_BACKFILL_DAYS`
-- `HEALTHYBOB_OURA_RECONCILE_DAYS`
-- `HEALTHYBOB_OURA_RECONCILE_INTERVAL_MS`
-- `HEALTHYBOB_OURA_REQUEST_TIMEOUT_MS`
+- `OURA_CLIENT_ID`
+- `OURA_CLIENT_SECRET`
+- `OURA_AUTH_BASE_URL`
+- `OURA_API_BASE_URL`
+- `OURA_SCOPES`
+- `OURA_BACKFILL_DAYS`
+- `OURA_RECONCILE_DAYS`
+- `OURA_RECONCILE_INTERVAL_MS`
+- `OURA_REQUEST_TIMEOUT_MS`
+
+Legacy `HEALTHYBOB_*` env names remain accepted as compatibility aliases for now.
 
 ## Run
 
@@ -110,10 +112,10 @@ The published bin name is also `healthybob-device-syncd`.
 
 ## Control-plane clients
 
-- `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `HEALTHYBOB_DEVICE_SYNC_BASE_URL`
-- `vault-cli` and `packages/web` authenticate local control routes with `HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN` (or, for local bootstrap compatibility, `HEALTHYBOB_DEVICE_SYNC_SECRET`)
+- `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `DEVICE_SYNC_BASE_URL`
+- `vault-cli` and `packages/web` authenticate local control routes with `DEVICE_SYNC_CONTROL_TOKEN` (or, for local bootstrap compatibility, `DEVICE_SYNC_SECRET`)
 - `packages/web` can show provider/account status and redirect through this daemon for one-click auth
-- cross-origin `returnTo` URLs are accepted only when their origin appears in `HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`; relative paths remain allowed by default
+- cross-origin `returnTo` URLs are accepted only when their origin appears in `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`; relative paths remain allowed by default
 
 ## HTTP routes
 

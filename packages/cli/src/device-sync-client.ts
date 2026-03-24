@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process'
 import {
   DEFAULT_DEVICE_SYNC_BASE_URL,
+  DEVICE_SYNC_BASE_URL_ENV,
+  DEVICE_SYNC_CONTROL_TOKEN_ENV,
   HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
   HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
   normalizeDeviceSyncBaseUrl,
@@ -45,6 +47,8 @@ export interface DeviceSyncClientOptions {
 
 export {
   DEFAULT_DEVICE_SYNC_BASE_URL,
+  DEVICE_SYNC_BASE_URL_ENV,
+  DEVICE_SYNC_CONTROL_TOKEN_ENV,
   HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
   HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
   normalizeDeviceSyncBaseUrl,
@@ -96,7 +100,7 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
         new VaultCliError(
           errorPayload.code ?? 'device_sync_request_failed',
           status === 401 && !controlToken
-            ? 'Device sync control plane requires HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
+            ? 'Device sync control plane requires DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
             : errorPayload.message ??
                 `Device sync request failed with HTTP ${status}.`,
           {
@@ -219,6 +223,7 @@ function trySpawn(command: string, args: string[]): Promise<boolean> {
     try {
       const child = spawn(command, args, {
         detached: true,
+        env: sanitizeChildProcessEnv(),
         stdio: 'ignore',
       })
 
@@ -231,4 +236,10 @@ function trySpawn(command: string, args: string[]): Promise<boolean> {
       resolve(false)
     }
   })
+}
+
+function sanitizeChildProcessEnv(): NodeJS.ProcessEnv {
+  const nextEnv = { ...process.env }
+  delete nextEnv.NODE_V8_COVERAGE
+  return nextEnv
 }

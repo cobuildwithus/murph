@@ -1022,7 +1022,7 @@ export function createIntegratedInboxCliServices(
     if (!token) {
       throw new VaultCliError(
         'INBOX_TELEGRAM_TOKEN_MISSING',
-        `Telegram requires a bot token in HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        `Telegram requires a bot token in TELEGRAM_BOT_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
       )
     }
 
@@ -1043,7 +1043,7 @@ export function createIntegratedInboxCliServices(
     if (!resolvedApiKey) {
       throw new VaultCliError(
         'INBOX_EMAIL_API_KEY_MISSING',
-        `Email requires HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        `Email requires AGENTMAIL_API_KEY. ${SETUP_RUNTIME_ENV_NOTICE}`,
       )
     }
 
@@ -1692,7 +1692,7 @@ export function createIntegratedInboxCliServices(
       context.checks.push(
         failCheck(
           'token',
-          `Telegram bot token is missing from HEALTHYBOB_TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
+          `Telegram bot token is missing from TELEGRAM_BOT_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
         ),
       )
     } else if (usesInjectedTelegramDriver) {
@@ -1811,7 +1811,7 @@ export function createIntegratedInboxCliServices(
       context.checks.push(
         failCheck(
           'token',
-          `AgentMail API key is missing from HEALTHYBOB_AGENTMAIL_API_KEY and AGENTMAIL_API_KEY. ${SETUP_RUNTIME_ENV_NOTICE}`,
+          `AgentMail API key is missing from AGENTMAIL_API_KEY. ${SETUP_RUNTIME_ENV_NOTICE}`,
         ),
       )
     } else if (usesInjectedEmailDriver) {

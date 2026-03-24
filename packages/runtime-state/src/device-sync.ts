@@ -1,9 +1,24 @@
+export const DEVICE_SYNC_BASE_URL_ENV = "DEVICE_SYNC_BASE_URL";
 export const HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV =
   "HEALTHYBOB_DEVICE_SYNC_BASE_URL";
+export const DEVICE_SYNC_BASE_URL_ENV_KEYS = [
+  DEVICE_SYNC_BASE_URL_ENV,
+  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
+] as const;
+export const DEVICE_SYNC_CONTROL_TOKEN_ENV = "DEVICE_SYNC_CONTROL_TOKEN";
 export const HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV =
   "HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN";
+export const DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS = [
+  DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
+] as const;
 export const DEFAULT_DEVICE_SYNC_BASE_URL = "http://127.0.0.1:8788";
+export const DEVICE_SYNC_SECRET_ENV = "DEVICE_SYNC_SECRET";
 const HEALTHYBOB_DEVICE_SYNC_SECRET_ENV = "HEALTHYBOB_DEVICE_SYNC_SECRET";
+const DEVICE_SYNC_SECRET_ENV_KEYS = [
+  DEVICE_SYNC_SECRET_ENV,
+  HEALTHYBOB_DEVICE_SYNC_SECRET_ENV,
+] as const;
 
 export interface DeviceSyncApiErrorPayload {
   error?: {
@@ -115,7 +130,7 @@ export function resolveDeviceSyncBaseUrl(
 ): string {
   const configured =
     (typeof input.value === "string" && input.value.trim()) ||
-    input.env?.[HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV]?.trim() ||
+    readEnvValue(input.env, DEVICE_SYNC_BASE_URL_ENV_KEYS) ||
     DEFAULT_DEVICE_SYNC_BASE_URL;
 
   return normalizeDeviceSyncBaseUrl(configured);
@@ -126,11 +141,25 @@ export function resolveDeviceSyncControlToken(
 ): string | null {
   const configured =
     (typeof input.value === "string" && input.value.trim()) ||
-    input.env?.[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
-    input.env?.[HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]?.trim() ||
+    readEnvValue(input.env, DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS) ||
+    readEnvValue(input.env, DEVICE_SYNC_SECRET_ENV_KEYS) ||
     null;
 
   return configured || null;
+}
+
+function readEnvValue(
+  env: NodeJS.ProcessEnv | undefined,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = env?.[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 export function withControlPlaneAuth(

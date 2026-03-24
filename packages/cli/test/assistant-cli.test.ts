@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
-  HEALTHYBOB_VAULT_ENV,
+  VAULT_ENV,
   applyDefaultVaultToArgs,
   readOperatorConfig,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from '../src/operator-config.js'
 import {
+  assistantMemoryTurnEnvKeys,
   createAssistantMemoryTurnContextEnv,
   resolveAssistantMemoryStoragePaths,
 } from '../src/assistant/memory.js'
@@ -25,7 +27,6 @@ import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
 import {
   ensureCliRuntimeArtifacts,
-  rebuildCliRuntimeArtifacts,
   repoRoot,
   requireData,
   runCli,
@@ -33,9 +34,25 @@ import {
 } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
+const require = createRequire(import.meta.url)
 const execFileAsync = promisify(execFile)
 const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
+const tsxCliPath = require.resolve('tsx/cli')
 const ASSISTANT_CLI_TIMEOUT_MS = 40_000
+
+function isolateAssistantMemoryEnv(
+  env: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  const clearedKeys = Object.fromEntries(
+    assistantMemoryTurnEnvKeys.map((key) => [key, undefined]),
+  ) as NodeJS.ProcessEnv
+
+  return {
+    ...clearedKeys,
+    ...env,
+  }
+}
+
 const runtimeMocks = vi.hoisted(() => ({
   runAssistantChat: vi.fn(),
 }))
@@ -227,7 +244,9 @@ test.sequential(
           sessions: Array<{
             sessionId: string
           }>
-        }>(['assistant', 'session', 'list']),
+        }>(['assistant', 'session', 'list'], {
+          env: isolateAssistantMemoryEnv(),
+        }),
       )
       assert.equal(defaultListed.vault, path.join('~', 'default-vault'))
       assert.equal(defaultListed.sessions.length, 1)
@@ -239,7 +258,9 @@ test.sequential(
           sessions: Array<{
             sessionId: string
           }>
-        }>(['assistant', 'session', 'list', '--vault', overrideVaultRoot]),
+        }>(['assistant', 'session', 'list', '--vault', overrideVaultRoot], {
+          env: isolateAssistantMemoryEnv(),
+        }),
       )
       assert.equal(overrideListed.vault, path.join('~', 'override-vault'))
       assert.equal(overrideListed.sessions.length, 1)
@@ -360,7 +381,7 @@ test.sequential(
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
 
-    await rebuildCliRuntimeArtifacts()
+    await ensureCliRuntimeArtifacts()
 
     const upserted = requireData(
       await runCli<{
@@ -390,7 +411,9 @@ test.sequential(
         'Identity',
         '--sourcePrompt',
         'Call me Alex from now on.',
-      ]),
+      ], {
+        env: isolateAssistantMemoryEnv(),
+      }),
     )
 
     assert.equal(upserted.stateRoot.includes(path.join(parent, 'assistant-state')), true)
@@ -420,7 +443,9 @@ test.sequential(
         'long-term',
         '--text',
         'Alex',
-      ]),
+      ], {
+        env: isolateAssistantMemoryEnv(),
+      }),
     )
     assert.equal(search.stateRoot, upserted.stateRoot)
     assert.equal(search.query, 'Alex')
@@ -443,7 +468,9 @@ test.sequential(
         search.results[0]?.id ?? '',
         '--vault',
         vaultRoot,
-      ]),
+      ], {
+        env: isolateAssistantMemoryEnv(),
+      }),
     )
     assert.equal(fetched.stateRoot, upserted.stateRoot)
     assert.equal(fetched.memory.id, search.results[0]?.id)
@@ -463,7 +490,9 @@ test.sequential(
         search.results[0]?.id ?? '',
         '--vault',
         vaultRoot,
-      ]),
+      ], {
+        env: isolateAssistantMemoryEnv(),
+      }),
     )
     assert.equal(forgotten.stateRoot, upserted.stateRoot)
     assert.equal(forgotten.removed.id, search.results[0]?.id)
@@ -479,7 +508,7 @@ test.sequential(
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
 
-    await rebuildCliRuntimeArtifacts()
+    await ensureCliRuntimeArtifacts()
 
     const boundEnv = createAssistantMemoryTurnContextEnv({
       allowSensitiveHealthContext: true,
@@ -517,7 +546,7 @@ test.sequential(
           'Remember that I have diabetes.',
         ],
         {
-          env: boundEnv,
+          env: isolateAssistantMemoryEnv(boundEnv),
         },
       ),
     )
@@ -546,7 +575,7 @@ test.sequential(
           'blood pressure',
         ],
         {
-          env: boundEnv,
+          env: isolateAssistantMemoryEnv(boundEnv),
         },
       ),
     )
@@ -617,9 +646,9 @@ test.sequential(
         vault: string
         results: unknown[]
       }>(['assistant', 'memory', 'search'], {
-        env: {
-          [HEALTHYBOB_VAULT_ENV]: vaultRoot,
-        },
+        env: isolateAssistantMemoryEnv({
+          [VAULT_ENV]: vaultRoot,
+        }),
       }),
     )
 
@@ -806,6 +835,9 @@ async function runInProcessCliWithTty(args: string[]): Promise<{
 
 async function runSourceCli<TData = Record<string, unknown>>(
   args: string[],
+  options?: {
+    env?: NodeJS.ProcessEnv
+  },
 ): Promise<{
   ok: true
   data: TData
@@ -828,11 +860,14 @@ async function runSourceCli<TData = Record<string, unknown>>(
 
   try {
     const { stdout } = await execFileAsync(
-      'pnpm',
-      ['exec', 'tsx', sourceBinPath, ...withMachineOutput(args)],
+      process.execPath,
+      [tsxCliPath, sourceBinPath, ...withMachineOutput(args)],
       {
         cwd: repoRoot,
-        env: withoutNodeV8Coverage(),
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          ...options?.env,
+        }),
       },
     )
 

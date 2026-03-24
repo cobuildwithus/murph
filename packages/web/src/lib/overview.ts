@@ -14,7 +14,7 @@ import {
 import {
   buildExampleVaultPath,
   buildSuggestedCommand,
-  HEALTHYBOB_VAULT_ENV,
+  VAULT_ENV,
   resolveConfiguredVaultRoot,
 } from "./vault";
 
@@ -117,14 +117,14 @@ export interface ReadyOverview {
 }
 
 export interface MissingConfigOverview {
-  envVar: typeof HEALTHYBOB_VAULT_ENV;
+  envVar: typeof VAULT_ENV;
   exampleVaultPath: string;
   status: "missing-config";
   suggestedCommand: string;
 }
 
 export interface ErrorOverview {
-  envVar: typeof HEALTHYBOB_VAULT_ENV;
+  envVar: typeof VAULT_ENV;
   hint: string;
   message: string;
   recoveryCommand: string;
@@ -174,7 +174,7 @@ export async function loadVaultOverview(
 
   if (!vaultRoot) {
     return {
-      envVar: HEALTHYBOB_VAULT_ENV,
+      envVar: VAULT_ENV,
       exampleVaultPath: buildExampleVaultPath(),
       status: "missing-config",
       suggestedCommand: buildSuggestedCommand(),
@@ -215,7 +215,7 @@ export async function loadVaultOverview(
     };
   } catch {
     return {
-      envVar: HEALTHYBOB_VAULT_ENV,
+      envVar: VAULT_ENV,
       hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
       message: "The configured vault could not be read.",
       recoveryCommand: buildSuggestedCommand(),

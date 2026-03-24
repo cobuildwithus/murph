@@ -236,8 +236,8 @@ test('sendEmailMessage sends new outbound email through the configured AgentMail
     },
     {
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
-        HEALTHYBOB_AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
       },
       fetchImplementation: async (url, init) => {
         requests.push({
@@ -288,8 +288,8 @@ test('sendEmailMessage resolves a thread and replies to the latest AgentMail mes
     },
     {
       env: {
-        HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
-        HEALTHYBOB_AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
       },
       fetchImplementation: async (url, init) => {
         requests.push({
@@ -355,8 +355,8 @@ test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including
     },
     {
       env: {
-        HEALTHYBOB_TELEGRAM_API_BASE_URL: 'https://bot.example.test/',
-        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+        TELEGRAM_API_BASE_URL: 'https://bot.example.test/',
+        TELEGRAM_BOT_TOKEN: 'token-123',
       },
       fetchImplementation: async (url, init) => {
         requests.push({
@@ -399,7 +399,7 @@ test('sendTelegramMessage posts business and direct-message topic routing fields
     },
     {
       env: {
-        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+        TELEGRAM_BOT_TOKEN: 'token-123',
       },
       fetchImplementation: async (_url, init) => {
         requests.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
@@ -434,7 +434,7 @@ test('sendTelegramMessage splits long replies and retries transient Telegram fai
     },
     {
       env: {
-        HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+        TELEGRAM_BOT_TOKEN: 'token-123',
       },
       fetchImplementation: async (_url, init) => {
         callCount += 1
@@ -491,7 +491,7 @@ test('sendTelegramMessage requires a bot token before attempting delivery', asyn
       assert.equal((error as VaultCliError).code, 'ASSISTANT_TELEGRAM_TOKEN_REQUIRED')
       assert.match(
         (error as VaultCliError).message,
-        /HEALTHYBOB_TELEGRAM_BOT_TOKEN|TELEGRAM_BOT_TOKEN/iu,
+        /TELEGRAM_BOT_TOKEN|TELEGRAM_BOT_TOKEN/iu,
       )
       return true
     },

@@ -1428,7 +1428,7 @@ test.sequential('source add email --provision reuses the single discovered Agent
       } as any
     },
     getEnvironment: () => ({
-      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+      AGENTMAIL_API_KEY: 'agentmail-key',
     }),
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
@@ -1493,7 +1493,7 @@ test.sequential('source add email --provision requires --account when multiple d
       } as any
     },
     getEnvironment: () => ({
-      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+      AGENTMAIL_API_KEY: 'agentmail-key',
     }),
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
@@ -1549,7 +1549,7 @@ test.sequential('source add email --provision surfaces scoped-key recovery guida
       } as any
     },
     getEnvironment: () => ({
-      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+      AGENTMAIL_API_KEY: 'agentmail-key',
     }),
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })

@@ -19,7 +19,9 @@ export {
 const OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
 const OPERATOR_CONFIG_DIRECTORY = '.healthybob'
 const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
+export const VAULT_ENV = 'VAULT'
 export const HEALTHYBOB_VAULT_ENV = 'HEALTHYBOB_VAULT'
+export const VAULT_ENV_KEYS = [VAULT_ENV, HEALTHYBOB_VAULT_ENV] as const
 
 const assistantOperatorDefaultsSchema = z.object({
   provider: z.enum(assistantChatProviderValues).nullable(),
@@ -267,7 +269,7 @@ export async function resolveDefaultVault(
   homeDirectory = resolveOperatorHomeDirectory(),
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
-  const envVault = env[HEALTHYBOB_VAULT_ENV]?.trim()
+  const envVault = readEnvValue(env, VAULT_ENV_KEYS)
   if (envVault) {
     return expandConfiguredVaultPath(envVault, homeDirectory)
   }
@@ -285,6 +287,20 @@ export async function resolveAssistantOperatorDefaults(
 ): Promise<AssistantOperatorDefaults | null> {
   const config = await readOperatorConfig(homeDirectory)
   return config?.assistant ?? null
+}
+
+function readEnvValue(
+  env: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = env[key]?.trim()
+    if (value) {
+      return value
+    }
+  }
+
+  return null
 }
 
 function mergeAssistantOperatorDefaults(

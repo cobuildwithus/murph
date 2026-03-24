@@ -59,7 +59,7 @@ The Telegram connector is local-first and poll-first by default.
 - Downloaded media can be persisted directly from in-memory bytes, so remote transports do not need temp files just to enter the vault.
 - Telegram backfill drains pending updates page-by-page so source-native cursors only advance after captures have been normalized and persisted locally.
 - Local Bot API servers that return absolute file paths from `getFile` are supported during attachment hydration.
-- The CLI runtime expects a bot token in `HEALTHYBOB_TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` when it instantiates the grammY-backed Telegram poll driver.
+- The CLI runtime expects a bot token in `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` when it instantiates the grammY-backed Telegram poll driver.
 
 ## iMessage adapter contract
 

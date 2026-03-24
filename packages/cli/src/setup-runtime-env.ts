@@ -9,21 +9,19 @@ import {
 } from './setup-cli-contracts.js'
 
 const TELEGRAM_TOKEN_KEYS = [
-  'HEALTHYBOB_TELEGRAM_BOT_TOKEN',
   'TELEGRAM_BOT_TOKEN',
+  'HEALTHYBOB_TELEGRAM_BOT_TOKEN',
 ] as const
 const EMAIL_API_KEY_KEYS = [
-  'HEALTHYBOB_AGENTMAIL_API_KEY',
   'AGENTMAIL_API_KEY',
+  'HEALTHYBOB_AGENTMAIL_API_KEY',
 ] as const
-const WHOOP_CLIENT_KEYS = [
-  'HEALTHYBOB_WHOOP_CLIENT_ID',
-  'HEALTHYBOB_WHOOP_CLIENT_SECRET',
-] as const
-const OURA_CLIENT_KEYS = [
-  'HEALTHYBOB_OURA_CLIENT_ID',
-  'HEALTHYBOB_OURA_CLIENT_SECRET',
-] as const
+const WHOOP_CLIENT_ID_KEYS = ['WHOOP_CLIENT_ID', 'HEALTHYBOB_WHOOP_CLIENT_ID'] as const
+const WHOOP_CLIENT_SECRET_KEYS = ['WHOOP_CLIENT_SECRET', 'HEALTHYBOB_WHOOP_CLIENT_SECRET'] as const
+const WHOOP_CLIENT_KEY_GROUPS = [WHOOP_CLIENT_ID_KEYS, WHOOP_CLIENT_SECRET_KEYS] as const
+const OURA_CLIENT_ID_KEYS = ['OURA_CLIENT_ID', 'HEALTHYBOB_OURA_CLIENT_ID'] as const
+const OURA_CLIENT_SECRET_KEYS = ['OURA_CLIENT_SECRET', 'HEALTHYBOB_OURA_CLIENT_SECRET'] as const
+const OURA_CLIENT_KEY_GROUPS = [OURA_CLIENT_ID_KEYS, OURA_CLIENT_SECRET_KEYS] as const
 
 export const SETUP_RUNTIME_ENV_NOTICE =
   'Healthy Bob uses the current process environment for this run, including shell exports and any CLI-loaded .env.local/.env values. Prompts here are current-run only and do not write env files.'
@@ -99,11 +97,11 @@ export function resolveSetupChannelMissingEnv(
     case 'telegram':
       return hasAnyEnv(env, TELEGRAM_TOKEN_KEYS)
         ? []
-        : ['HEALTHYBOB_TELEGRAM_BOT_TOKEN']
+        : [TELEGRAM_TOKEN_KEYS[0]]
     case 'email':
       return hasAnyEnv(env, EMAIL_API_KEY_KEYS)
         ? []
-        : ['HEALTHYBOB_AGENTMAIL_API_KEY']
+        : [EMAIL_API_KEY_KEYS[0]]
   }
 }
 
@@ -113,9 +111,9 @@ export function resolveSetupWearableMissingEnv(
 ): string[] {
   switch (wearable) {
     case 'oura':
-      return resolveExactEnvKeys(env, OURA_CLIENT_KEYS)
+      return resolvePreferredEnvKeys(env, OURA_CLIENT_KEY_GROUPS)
     case 'whoop':
-      return resolveExactEnvKeys(env, WHOOP_CLIENT_KEYS)
+      return resolvePreferredEnvKeys(env, WHOOP_CLIENT_KEY_GROUPS)
   }
 }
 
@@ -144,7 +142,7 @@ export function describeSetupChannelStatus(
         : {
             badge: 'needs token',
             detail:
-              'Add HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN to the current environment to enable Telegram auto-reply.',
+              'Add TELEGRAM_BOT_TOKEN to the current environment to enable Telegram auto-reply.',
             missingEnv,
             ready: false,
           }
@@ -160,7 +158,7 @@ export function describeSetupChannelStatus(
         : {
             badge: 'needs key',
             detail:
-              'Add HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY to the current environment to enable the email channel.',
+              'Add AGENTMAIL_API_KEY to the current environment to enable the email channel.',
             missingEnv,
             ready: false,
           }
@@ -184,7 +182,7 @@ export function describeSetupWearableStatus(
       : {
           badge: 'needs client keys',
           detail:
-            'Add HEALTHYBOB_OURA_CLIENT_ID and HEALTHYBOB_OURA_CLIENT_SECRET to the current environment to enable Oura connect.',
+            'Add OURA_CLIENT_ID and OURA_CLIENT_SECRET to the current environment to enable Oura connect.',
           missingEnv,
           ready: false,
         }
@@ -200,7 +198,7 @@ export function describeSetupWearableStatus(
     : {
         badge: 'needs client keys',
         detail:
-          'Add HEALTHYBOB_WHOOP_CLIENT_ID and HEALTHYBOB_WHOOP_CLIENT_SECRET to the current environment to enable WHOOP connect.',
+          'Add WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET to the current environment to enable WHOOP connect.',
         missingEnv,
         ready: false,
       }
@@ -267,11 +265,11 @@ function collectSetupPromptKeys(input: {
   return keys
 }
 
-function resolveExactEnvKeys(
+function resolvePreferredEnvKeys(
   env: NodeJS.ProcessEnv,
-  keys: readonly string[],
+  envGroups: readonly (readonly string[])[],
 ): string[] {
-  return keys.filter((key) => normalizeEnvValue(env[key]) === null)
+  return envGroups.flatMap((keys) => (hasAnyEnv(env, keys) ? [] : [keys[0] ?? '']))
 }
 
 function hasAnyEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): boolean {

@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { ParserArtifactRef } from "../contracts/artifact.js";
-import { ensureDirectory, resolveConfiguredExecutable, runCommand } from "../shared.js";
+import { ensureDirectory, readConfiguredEnvValue, resolveConfiguredExecutable, runCommand } from "../shared.js";
 
 export interface FfmpegToolOptions {
   commandCandidates?: string[];
@@ -14,7 +14,9 @@ export async function resolveFfmpegCommand(
   return resolveConfiguredExecutable({
     explicitCandidates: options.commandCandidates,
     envValue: () =>
-      options.allowSystemLookup === false ? null : process.env.HEALTHYBOB_FFMPEG_COMMAND,
+      options.allowSystemLookup === false
+        ? null
+        : readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND", "HEALTHYBOB_FFMPEG_COMMAND"]),
     fallbackCommands: options.allowSystemLookup === false ? [] : ["ffmpeg"],
   });
 }

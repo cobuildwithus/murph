@@ -8,7 +8,7 @@ import { createTextFileProvider } from "../adapters/text-file.js";
 import { createWhisperCppProvider } from "../adapters/whisper-cpp.js";
 import type { ParserRegistry } from "../registry/registry.js";
 import { createParserRegistry } from "../registry/registry.js";
-import { resolveExecutable } from "../shared.js";
+import { readConfiguredEnvValue, resolveExecutable } from "../shared.js";
 import type {
   ParserToolName,
   ParserToolchainConfig,
@@ -48,14 +48,14 @@ export async function discoverParserToolchain(input: {
     tools: {
       ffmpeg: await discoverCommandTool({
         config: config?.tools.ffmpeg,
-        envValue: process.env.HEALTHYBOB_FFMPEG_COMMAND,
+        envValue: readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND", "HEALTHYBOB_FFMPEG_COMMAND"]),
         fallbackCommands: ["ffmpeg"],
         availableReason: "ffmpeg CLI available.",
         missingReason: "ffmpeg CLI not found.",
       }),
       pdftotext: await discoverCommandTool({
         config: config?.tools.pdftotext,
-        envValue: process.env.HEALTHYBOB_PDFTOTEXT_COMMAND,
+        envValue: readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND", "HEALTHYBOB_PDFTOTEXT_COMMAND"]),
         fallbackCommands: ["pdftotext"],
         availableReason: "pdftotext CLI available.",
         missingReason: "pdftotext CLI not found.",
@@ -63,7 +63,7 @@ export async function discoverParserToolchain(input: {
       whisper: await discoverWhisperTool(config, input.vaultRoot),
       paddleocr: await discoverCommandTool({
         config: config?.tools.paddleocr,
-        envValue: process.env.HEALTHYBOB_PADDLEOCR_COMMAND,
+        envValue: readConfiguredEnvValue(process.env, ["PADDLEOCR_COMMAND", "HEALTHYBOB_PADDLEOCR_COMMAND"]),
         fallbackCommands: ["paddleocr", "paddlex"],
         availableReason: "PaddleOCR CLI available.",
         missingReason: "PaddleOCR CLI not found.",
@@ -84,7 +84,7 @@ export async function createConfiguredParserRegistry(input: {
   const doctor = await discoverParserToolchain(input);
   const whisperModelResolution = resolveModelPath(
     config?.tools.whisper?.modelPath,
-    process.env.HEALTHYBOB_WHISPER_MODEL_PATH,
+    readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH", "HEALTHYBOB_WHISPER_MODEL_PATH"]),
   );
 
   return {
@@ -129,12 +129,12 @@ async function discoverWhisperTool(
   const toolConfig = config?.tools.whisper;
   const commandResolution = await resolveCommand({
     configCommand: toolConfig?.command,
-    envValue: process.env.HEALTHYBOB_WHISPER_COMMAND,
+    envValue: readConfiguredEnvValue(process.env, ["WHISPER_COMMAND", "HEALTHYBOB_WHISPER_COMMAND"]),
     fallbackCommands: ["whisper-cli", "whisper-cpp"],
   });
   const modelResolution = resolveModelPath(
     toolConfig?.modelPath,
-    process.env.HEALTHYBOB_WHISPER_MODEL_PATH,
+    readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH", "HEALTHYBOB_WHISPER_MODEL_PATH"]),
   );
   const source = selectCompositeSource(commandResolution.source, modelResolution.source);
 

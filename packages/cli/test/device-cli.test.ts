@@ -197,8 +197,8 @@ test.sequential(
 
     const baseUrl = `http://127.0.0.1:${address.port}`
     const env = {
-      HEALTHYBOB_DEVICE_SYNC_BASE_URL: baseUrl,
-      HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+      DEVICE_SYNC_BASE_URL: baseUrl,
+      DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
     }
 
     try {

@@ -186,7 +186,7 @@ export function resolveOuraWebhookVerificationChallenge(input: {
   if (!expectedToken) {
     throw deviceSyncError({
       code: "OURA_WEBHOOK_VERIFICATION_TOKEN_MISSING",
-      message: "Oura webhook verification requires HEALTHYBOB_OURA_WEBHOOK_VERIFICATION_TOKEN.",
+      message: "Oura webhook verification requires OURA_WEBHOOK_VERIFICATION_TOKEN.",
       retryable: false,
       httpStatus: 500,
     });

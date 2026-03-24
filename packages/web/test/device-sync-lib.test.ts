@@ -12,7 +12,7 @@ test("loadDeviceSyncOverviewFromEnv returns provider and account state from the 
   const result = await loadDeviceSyncOverviewFromEnv({
     env: {
       NODE_ENV: "test",
-      HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+      DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     },
     fetchImpl: async (input, init) => {
       const url = String(input);
@@ -119,7 +119,7 @@ test("loadDeviceSyncOverviewFromEnv explains missing control-plane auth", async 
   }
 
   assert.match(result.message, /authentication failed/u);
-  assert.match(result.hint, /HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN/u);
+  assert.match(result.hint, /DEVICE_SYNC_CONTROL_TOKEN/u);
   assert.match(result.suggestedCommand, /pnpm web:dev/u);
 });
 

@@ -19,6 +19,12 @@ const USER_PATH_PATTERNS = [
   /^[A-Za-z]:\\Users\\[^\\]+/u,
 ];
 
+function sanitizeChildProcessEnv(): NodeJS.ProcessEnv {
+  const nextEnv = { ...process.env };
+  delete nextEnv.NODE_V8_COVERAGE;
+  return nextEnv;
+}
+
 export async function ensureDirectory(directoryPath: string): Promise<void> {
   await fs.mkdir(directoryPath, { recursive: true });
 }
@@ -110,6 +116,7 @@ export async function runCommand(
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
+      env: sanitizeChildProcessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -174,6 +181,20 @@ export async function resolveConfiguredExecutable(input: {
     envValue ?? "",
     ...(input.fallbackCommands ?? []),
   ]);
+}
+
+export function readConfiguredEnvValue(
+  env: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 export function describeExecutableAvailability(input: {

@@ -32,7 +32,7 @@ test.sequential(
       const result = await startManagedDeviceSyncDaemon({
         vault: vaultRoot,
         env: {
-          HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
         },
         dependencies: {
           fetchImpl: async () =>
@@ -70,17 +70,17 @@ test.sequential(
       const spawnedProcess = spawned as unknown as SpawnProcessInput
       assert.equal(spawnedProcess.command, process.execPath)
       assert.deepEqual(spawnedProcess.args, ['/virtual/device-syncd/dist/bin.js'])
-      assert.equal(spawnedProcess.env.HEALTHYBOB_VAULT_ROOT, vaultRoot)
+      assert.equal(spawnedProcess.env.VAULT_ROOT, vaultRoot)
       assert.equal(
-        spawnedProcess.env.HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL,
+        spawnedProcess.env.DEVICE_SYNC_PUBLIC_BASE_URL,
         'http://127.0.0.1:8788',
       )
       assert.equal(
-        spawnedProcess.env.HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN,
+        spawnedProcess.env.DEVICE_SYNC_CONTROL_TOKEN,
         'control-token-for-tests',
       )
       assert.equal(
-        spawnedProcess.env.HEALTHYBOB_DEVICE_SYNC_SECRET,
+        spawnedProcess.env.DEVICE_SYNC_SECRET,
         'control-token-for-tests',
       )
 
@@ -109,8 +109,8 @@ test.sequential(
   async () => {
     const controlPlane = await ensureManagedDeviceSyncControlPlane({
       env: {
-        HEALTHYBOB_DEVICE_SYNC_BASE_URL: 'http://127.0.0.1:9911',
-        HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+        DEVICE_SYNC_BASE_URL: 'http://127.0.0.1:9911',
+        DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
       },
     })
 
@@ -133,7 +133,7 @@ test.sequential(
       await startManagedDeviceSyncDaemon({
         vault: vaultRoot,
         env: {
-          HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
         },
         dependencies: {
           fetchImpl: async () =>
@@ -198,7 +198,7 @@ test.sequential(
       await startManagedDeviceSyncDaemon({
         vault: vaultRoot,
         env: {
-          HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
         },
         dependencies: {
           fetchImpl: async () =>

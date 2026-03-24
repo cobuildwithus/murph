@@ -216,15 +216,15 @@ export interface AgentmailApiClient {
 
 export function resolveAgentmailApiKey(env: NodeJS.ProcessEnv): string | null {
   return (
-    normalizeNullableString(env.HEALTHYBOB_AGENTMAIL_API_KEY) ??
-    normalizeNullableString(env.AGENTMAIL_API_KEY)
+    normalizeNullableString(env.AGENTMAIL_API_KEY) ??
+    normalizeNullableString(env.HEALTHYBOB_AGENTMAIL_API_KEY)
   )
 }
 
 export function resolveAgentmailBaseUrl(env: NodeJS.ProcessEnv): string | null {
   return (
-    normalizeNullableString(env.HEALTHYBOB_AGENTMAIL_BASE_URL) ??
-    normalizeNullableString(env.AGENTMAIL_BASE_URL)
+    normalizeNullableString(env.AGENTMAIL_BASE_URL) ??
+    normalizeNullableString(env.HEALTHYBOB_AGENTMAIL_BASE_URL)
   )
 }
 
@@ -236,7 +236,7 @@ export function createAgentmailApiClient(
   if (!normalizedApiKey) {
     throw new VaultCliError(
       'AGENTMAIL_API_KEY_REQUIRED',
-      'AgentMail access requires HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY.',
+      'AgentMail access requires AGENTMAIL_API_KEY.',
     )
   }
 

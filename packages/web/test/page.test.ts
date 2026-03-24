@@ -199,10 +199,10 @@ test("HomePage renders the setup state when no vault is configured", async () =>
   const mockedLoadDeviceSyncOverviewFromEnv = vi.mocked(loadDeviceSyncOverviewFromEnv);
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
-    envVar: "HEALTHYBOB_VAULT",
+    envVar: "VAULT",
     exampleVaultPath: "fixtures/demo-web-vault",
     status: "missing-config",
-    suggestedCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
+    suggestedCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
   });
   mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({
     status: "unavailable",
@@ -215,7 +215,7 @@ test("HomePage renders the setup state when no vault is configured", async () =>
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /No vault configured/);
-  assert.match(markup, /HEALTHYBOB_VAULT/);
+  assert.match(markup, /VAULT/);
   assert.match(markup, /save a default Healthy Bob vault first/);
 });
 
@@ -227,10 +227,10 @@ test("HomePage renders the unreadable-vault error state", async () => {
   const mockedLoadDeviceSyncOverviewFromEnv = vi.mocked(loadDeviceSyncOverviewFromEnv);
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
-    envVar: "HEALTHYBOB_VAULT",
+    envVar: "VAULT",
     hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
     message: "The configured vault could not be read.",
-    recoveryCommand: "HEALTHYBOB_VAULT=fixtures/demo-web-vault pnpm web:dev",
+    recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
     status: "error",
   });
   mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({

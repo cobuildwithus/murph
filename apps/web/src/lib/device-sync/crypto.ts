@@ -16,7 +16,7 @@ export function decodeHostedEncryptionKey(value: string): Buffer {
   const normalized = value.trim();
 
   if (!normalized) {
-    throw new TypeError("HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY must not be empty.");
+    throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY must not be empty.");
   }
 
   if (/^[0-9a-f]{64}$/iu.test(normalized)) {
@@ -38,7 +38,7 @@ export function decodeHostedEncryptionKey(value: string): Buffer {
   }
 
   throw new TypeError(
-    "HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY must decode to exactly 32 bytes (hex, base64/base64url, or raw 32-byte text).",
+    "DEVICE_SYNC_ENCRYPTION_KEY must decode to exactly 32 bytes (hex, base64/base64url, or raw 32-byte text).",
   );
 }
 
@@ -50,7 +50,7 @@ export function createHostedSecretCodec(input: { key: Buffer; keyVersion: string
   const keyVersion = normalizeString(input.keyVersion);
 
   if (!keyVersion) {
-    throw new TypeError("HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY_VERSION must not be empty.");
+    throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY_VERSION must not be empty.");
   }
 
   return {

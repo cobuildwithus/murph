@@ -25,41 +25,97 @@ export interface HostedDeviceSyncEnvironment {
   };
 }
 
+const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
+  "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
+  "HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
+] as const;
+const DEVICE_SYNC_DEV_USER_EMAIL_ENV_KEYS = [
+  "DEVICE_SYNC_DEV_USER_EMAIL",
+  "HEALTHYBOB_DEVICE_SYNC_DEV_USER_EMAIL",
+] as const;
+const DEVICE_SYNC_DEV_USER_ID_ENV_KEYS = [
+  "DEVICE_SYNC_DEV_USER_ID",
+  "HEALTHYBOB_DEVICE_SYNC_DEV_USER_ID",
+] as const;
+const DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS = [
+  "DEVICE_SYNC_DEV_USER_NAME",
+  "HEALTHYBOB_DEVICE_SYNC_DEV_USER_NAME",
+] as const;
+const DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS = [
+  "DEVICE_SYNC_ENCRYPTION_KEY",
+  "HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY",
+] as const;
+const DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
+  "DEVICE_SYNC_ENCRYPTION_KEY_VERSION",
+  "HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY_VERSION",
+] as const;
+const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS = [
+  "DEVICE_SYNC_PUBLIC_BASE_URL",
+  "HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL",
+] as const;
+const DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER_ENV_KEYS = [
+  "DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER",
+  "HEALTHYBOB_DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER",
+] as const;
+const DEVICE_SYNC_TRUSTED_USER_ID_HEADER_ENV_KEYS = [
+  "DEVICE_SYNC_TRUSTED_USER_ID_HEADER",
+  "HEALTHYBOB_DEVICE_SYNC_TRUSTED_USER_ID_HEADER",
+] as const;
+const DEVICE_SYNC_TRUSTED_USER_NAME_HEADER_ENV_KEYS = [
+  "DEVICE_SYNC_TRUSTED_USER_NAME_HEADER",
+  "HEALTHYBOB_DEVICE_SYNC_TRUSTED_USER_NAME_HEADER",
+] as const;
+const OURA_CLIENT_ID_ENV_KEYS = ["OURA_CLIENT_ID", "HEALTHYBOB_OURA_CLIENT_ID"] as const;
+const OURA_CLIENT_SECRET_ENV_KEYS = [
+  "OURA_CLIENT_SECRET",
+  "HEALTHYBOB_OURA_CLIENT_SECRET",
+] as const;
+const OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS = [
+  "OURA_WEBHOOK_VERIFICATION_TOKEN",
+  "HEALTHYBOB_OURA_WEBHOOK_VERIFICATION_TOKEN",
+] as const;
+const WHOOP_CLIENT_ID_ENV_KEYS = ["WHOOP_CLIENT_ID", "HEALTHYBOB_WHOOP_CLIENT_ID"] as const;
+const WHOOP_CLIENT_SECRET_ENV_KEYS = [
+  "WHOOP_CLIENT_SECRET",
+  "HEALTHYBOB_WHOOP_CLIENT_SECRET",
+] as const;
+
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
-  const encryptionKey = normalizeString(source.HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY);
-  const encryptionKeyVersion = normalizeString(source.HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY_VERSION) ?? "v1";
+  const encryptionKey = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS);
+  const encryptionKeyVersion = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS) ?? "v1";
 
   if (!encryptionKey) {
-    throw new TypeError("HEALTHYBOB_DEVICE_SYNC_ENCRYPTION_KEY is required for the hosted device-sync control plane.");
+    throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY is required for the hosted device-sync control plane.");
   }
 
   return {
-    allowedReturnOrigins: parseCommaSeparatedList(source.HEALTHYBOB_DEVICE_SYNC_ALLOWED_RETURN_ORIGINS),
+    allowedReturnOrigins: parseCommaSeparatedList(readEnv(source, DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS)),
     encryptionKey: decodeHostedEncryptionKey(encryptionKey),
     encryptionKeyVersion,
     isProduction: (source.NODE_ENV ?? "development") === "production",
-    ouraWebhookVerificationToken: normalizeString(source.HEALTHYBOB_OURA_WEBHOOK_VERIFICATION_TOKEN),
-    publicBaseUrl: normalizeString(source.HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL),
-    trustedUserEmailHeader: normalizeHeaderName(source.HEALTHYBOB_DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER),
+    ouraWebhookVerificationToken: readEnv(source, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS) ?? null,
+    publicBaseUrl: readEnv(source, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ?? null,
+    trustedUserEmailHeader: normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER_ENV_KEYS)),
     trustedUserIdHeader:
-      normalizeHeaderName(source.HEALTHYBOB_DEVICE_SYNC_TRUSTED_USER_ID_HEADER) ?? "x-healthybob-user-id",
-    trustedUserNameHeader: normalizeHeaderName(source.HEALTHYBOB_DEVICE_SYNC_TRUSTED_USER_NAME_HEADER),
-    devUserEmail: normalizeString(source.HEALTHYBOB_DEVICE_SYNC_DEV_USER_EMAIL),
-    devUserId: normalizeString(source.HEALTHYBOB_DEVICE_SYNC_DEV_USER_ID),
-    devUserName: normalizeString(source.HEALTHYBOB_DEVICE_SYNC_DEV_USER_NAME),
+      normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ID_HEADER_ENV_KEYS)) ?? "x-healthybob-user-id",
+    trustedUserNameHeader: normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_NAME_HEADER_ENV_KEYS)),
+    devUserEmail: readEnv(source, DEVICE_SYNC_DEV_USER_EMAIL_ENV_KEYS) ?? null,
+    devUserId: readEnv(source, DEVICE_SYNC_DEV_USER_ID_ENV_KEYS) ?? null,
+    devUserName: readEnv(source, DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS) ?? null,
     providers: {
-      whoop: buildProviderEnvironment(source.HEALTHYBOB_WHOOP_CLIENT_ID, source.HEALTHYBOB_WHOOP_CLIENT_SECRET),
-      oura: buildProviderEnvironment(source.HEALTHYBOB_OURA_CLIENT_ID, source.HEALTHYBOB_OURA_CLIENT_SECRET),
+      whoop: buildProviderEnvironment(source, WHOOP_CLIENT_ID_ENV_KEYS, WHOOP_CLIENT_SECRET_ENV_KEYS),
+      oura: buildProviderEnvironment(source, OURA_CLIENT_ID_ENV_KEYS, OURA_CLIENT_SECRET_ENV_KEYS),
     },
   };
 }
 
 function buildProviderEnvironment(
-  clientId: string | undefined,
-  clientSecret: string | undefined,
+  source: NodeJS.ProcessEnv,
+  clientIdKeys: readonly string[],
+  clientSecretKeys: readonly string[],
 ): HostedOAuthProviderEnvironment | null {
-  const normalizedClientId = normalizeString(clientId);
-  const normalizedClientSecret = normalizeString(clientSecret);
+  const normalizedClientId = readEnv(source, clientIdKeys);
+  const normalizedClientSecret = readEnv(source, clientSecretKeys);
 
   if (!normalizedClientId && !normalizedClientSecret) {
     return null;
@@ -75,7 +131,21 @@ function buildProviderEnvironment(
   };
 }
 
-function normalizeHeaderName(value: string | undefined): string | null {
+function readEnv(
+  source: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = normalizeString(source[key]);
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeHeaderName(value: string | null | undefined): string | null {
   const normalized = normalizeString(value);
   return normalized ? normalized.toLowerCase() : null;
 }

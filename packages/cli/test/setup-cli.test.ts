@@ -867,19 +867,19 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
     [],
   )
   assert.deepEqual(resolveSetupChannelMissingEnv('telegram', {}), [
-    'HEALTHYBOB_TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_BOT_TOKEN',
   ])
   assert.deepEqual(
     resolveSetupWearableMissingEnv('oura', {
-      HEALTHYBOB_OURA_CLIENT_ID: 'oura-client',
+      OURA_CLIENT_ID: 'oura-client',
     }),
-    ['HEALTHYBOB_OURA_CLIENT_SECRET'],
+    ['OURA_CLIENT_SECRET'],
   )
   assert.deepEqual(
     describeSelectedSetupWearables({
       env: {
-        HEALTHYBOB_WHOOP_CLIENT_ID: 'whoop-client',
-        HEALTHYBOB_WHOOP_CLIENT_SECRET: 'whoop-secret',
+        WHOOP_CLIENT_ID: 'whoop-client',
+        WHOOP_CLIENT_SECRET: 'whoop-secret',
       },
       wearables: ['whoop'],
     }),
@@ -909,9 +909,9 @@ test('interactive onboarding prompts for missing channel and wearable credential
     wearables: string[] | null
   }> = []
   const previousEnv = {
-    HEALTHYBOB_AGENTMAIL_API_KEY: process.env.HEALTHYBOB_AGENTMAIL_API_KEY,
-    HEALTHYBOB_OURA_CLIENT_ID: process.env.HEALTHYBOB_OURA_CLIENT_ID,
-    HEALTHYBOB_OURA_CLIENT_SECRET: process.env.HEALTHYBOB_OURA_CLIENT_SECRET,
+    AGENTMAIL_API_KEY: process.env.AGENTMAIL_API_KEY,
+    OURA_CLIENT_ID: process.env.OURA_CLIENT_ID,
+    OURA_CLIENT_SECRET: process.env.OURA_CLIENT_SECRET,
   }
   const cli = createSetupCli({
     commandName: 'healthybob',
@@ -926,9 +926,9 @@ test('interactive onboarding prompts for missing channel and wearable credential
           wearables: [...input.wearables],
         })
         return {
-          HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
-          HEALTHYBOB_OURA_CLIENT_ID: 'oura-client',
-          HEALTHYBOB_OURA_CLIENT_SECRET: 'oura-secret',
+          AGENTMAIL_API_KEY: 'agentmail-key',
+          OURA_CLIENT_ID: 'oura-client',
+          OURA_CLIENT_SECRET: 'oura-secret',
         }
       },
     },
@@ -977,35 +977,35 @@ test('interactive onboarding prompts for missing channel and wearable credential
         allowChannelPrompts: true,
         channels: ['email'],
         envOverrides: {
-          HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
-          HEALTHYBOB_OURA_CLIENT_ID: 'oura-client',
-          HEALTHYBOB_OURA_CLIENT_SECRET: 'oura-secret',
+          AGENTMAIL_API_KEY: 'agentmail-key',
+          OURA_CLIENT_ID: 'oura-client',
+          OURA_CLIENT_SECRET: 'oura-secret',
         },
         wearables: ['oura'],
       },
     ])
-    assert.equal(process.env.HEALTHYBOB_AGENTMAIL_API_KEY, 'agentmail-key')
-    assert.equal(process.env.HEALTHYBOB_OURA_CLIENT_ID, 'oura-client')
-    assert.equal(process.env.HEALTHYBOB_OURA_CLIENT_SECRET, 'oura-secret')
+    assert.equal(process.env.AGENTMAIL_API_KEY, 'agentmail-key')
+    assert.equal(process.env.OURA_CLIENT_ID, 'oura-client')
+    assert.equal(process.env.OURA_CLIENT_SECRET, 'oura-secret')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
 
-    if (previousEnv.HEALTHYBOB_AGENTMAIL_API_KEY === undefined) {
-      delete process.env.HEALTHYBOB_AGENTMAIL_API_KEY
+    if (previousEnv.AGENTMAIL_API_KEY === undefined) {
+      delete process.env.AGENTMAIL_API_KEY
     } else {
-      process.env.HEALTHYBOB_AGENTMAIL_API_KEY = previousEnv.HEALTHYBOB_AGENTMAIL_API_KEY
+      process.env.AGENTMAIL_API_KEY = previousEnv.AGENTMAIL_API_KEY
     }
 
-    if (previousEnv.HEALTHYBOB_OURA_CLIENT_ID === undefined) {
-      delete process.env.HEALTHYBOB_OURA_CLIENT_ID
+    if (previousEnv.OURA_CLIENT_ID === undefined) {
+      delete process.env.OURA_CLIENT_ID
     } else {
-      process.env.HEALTHYBOB_OURA_CLIENT_ID = previousEnv.HEALTHYBOB_OURA_CLIENT_ID
+      process.env.OURA_CLIENT_ID = previousEnv.OURA_CLIENT_ID
     }
 
-    if (previousEnv.HEALTHYBOB_OURA_CLIENT_SECRET === undefined) {
-      delete process.env.HEALTHYBOB_OURA_CLIENT_SECRET
+    if (previousEnv.OURA_CLIENT_SECRET === undefined) {
+      delete process.env.OURA_CLIENT_SECRET
     } else {
-      process.env.HEALTHYBOB_OURA_CLIENT_SECRET = previousEnv.HEALTHYBOB_OURA_CLIENT_SECRET
+      process.env.OURA_CLIENT_SECRET = previousEnv.OURA_CLIENT_SECRET
     }
   }
 })
@@ -1024,7 +1024,7 @@ test('setup wearable helpers split ready and pending selections', () => {
       {
         detail: 'WHOOP still needs client keys.',
         enabled: true,
-        missingEnv: ['HEALTHYBOB_WHOOP_CLIENT_ID', 'HEALTHYBOB_WHOOP_CLIENT_SECRET'],
+        missingEnv: ['WHOOP_CLIENT_ID', 'WHOOP_CLIENT_SECRET'],
         ready: false,
         wearable: 'whoop' as const,
       },
@@ -1171,7 +1171,7 @@ test('setup handoff keeps the post-setup flow in assistant chat when a selected 
           connectorId: 'telegram:bot',
           detail: 'Telegram still needs a bot token.',
           enabled: true,
-          missingEnv: ['HEALTHYBOB_TELEGRAM_BOT_TOKEN'],
+          missingEnv: ['TELEGRAM_BOT_TOKEN'],
         },
       ],
     },
@@ -1219,7 +1219,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
       await writeFile(destinationPath, 'model', 'utf8')
     },
     env: () => ({
-      HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+      TELEGRAM_BOT_TOKEN: 'token-123',
       PATH: homebrewBin,
     }),
     getHomeDirectory: () => homeRoot,
@@ -1388,7 +1388,7 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
       await writeFile(destinationPath, 'model', 'utf8')
     },
     env: () => ({
-      HEALTHYBOB_TELEGRAM_BOT_TOKEN: 'token-123',
+      TELEGRAM_BOT_TOKEN: 'token-123',
       PATH: homebrewBin,
     }),
     getHomeDirectory: () => homeRoot,
@@ -1984,10 +1984,10 @@ exit 1
     await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
 
     const result = await execFileAsync(shimPath, [], {
-      env: {
+      env: withoutNodeV8Coverage({
         ...process.env,
         PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      },
+      }),
     })
 
     assert.equal(result.stdout.trim(), 'built-ok')
@@ -2060,10 +2060,10 @@ exit 1
     await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
 
     const result = await execFileAsync(shimPath, [], {
-      env: {
+      env: withoutNodeV8Coverage({
         ...process.env,
         PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      },
+      }),
     })
 
     assert.equal(result.stdout.trim(), 'built-ok')
@@ -2133,10 +2133,10 @@ done
 
     const child = spawn(shimPath, [], {
       detached: true,
-      env: {
+      env: withoutNodeV8Coverage({
         ...process.env,
         PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
-      },
+      }),
       stdio: 'ignore',
     })
 
@@ -2503,14 +2503,14 @@ test.sequential('healthybob alias routes empty and help invocations to setup hel
   assert.match(inboxHelp, /vault-cli inbox doctor/u)
 })
 
-test.sequential('healthybob loads HEALTHYBOB_VAULT from a local .env file', async () => {
-  const originalVault = process.env.HEALTHYBOB_VAULT
+test.sequential('healthybob loads VAULT from a local .env file', async () => {
+  const originalVault = process.env.VAULT
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-vault-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-home-'))
   const envVault = path.join(tempRoot, 'vault-from-dotenv')
 
-  delete process.env.HEALTHYBOB_VAULT
-  await writeFile(path.join(tempRoot, '.env'), 'HEALTHYBOB_VAULT=./vault-from-dotenv\n', 'utf8')
+  delete process.env.VAULT
+  await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
 
   try {
     await runSetupAliasRaw('healthybob', ['init'], {
@@ -2524,9 +2524,9 @@ test.sequential('healthybob loads HEALTHYBOB_VAULT from a local .env file', asyn
     await readFile(path.join(envVault, 'CORE.md'), 'utf8')
   } finally {
     if (originalVault === undefined) {
-      delete process.env.HEALTHYBOB_VAULT
+      delete process.env.VAULT
     } else {
-      process.env.HEALTHYBOB_VAULT = originalVault
+      process.env.VAULT = originalVault
     }
 
     await rm(tempRoot, { recursive: true, force: true })
@@ -2534,21 +2534,21 @@ test.sequential('healthybob loads HEALTHYBOB_VAULT from a local .env file', asyn
   }
 })
 
-test.sequential('healthybob keeps exported HEALTHYBOB_VAULT values ahead of local .env files', async () => {
-  const originalVault = process.env.HEALTHYBOB_VAULT
+test.sequential('healthybob keeps exported VAULT values ahead of local .env files', async () => {
+  const originalVault = process.env.VAULT
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-precedence-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-precedence-home-'))
   const shellVault = path.join(tempRoot, 'vault-from-shell')
   const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
 
-  delete process.env.HEALTHYBOB_VAULT
-  await writeFile(path.join(tempRoot, '.env'), 'HEALTHYBOB_VAULT=./vault-from-dotenv\n', 'utf8')
+  delete process.env.VAULT
+  await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
 
   try {
     await runSetupAliasRaw('healthybob', ['init'], {
       cwd: tempRoot,
       env: {
-        HEALTHYBOB_VAULT: './vault-from-shell',
+        VAULT: './vault-from-shell',
         HOME: homeRoot,
       },
     })
@@ -2557,9 +2557,9 @@ test.sequential('healthybob keeps exported HEALTHYBOB_VAULT values ahead of loca
     await assert.rejects(readFile(path.join(dotenvVault, 'vault.json'), 'utf8'))
   } finally {
     if (originalVault === undefined) {
-      delete process.env.HEALTHYBOB_VAULT
+      delete process.env.VAULT
     } else {
-      process.env.HEALTHYBOB_VAULT = originalVault
+      process.env.VAULT = originalVault
     }
 
     await rm(tempRoot, { recursive: true, force: true })
@@ -2568,17 +2568,17 @@ test.sequential('healthybob keeps exported HEALTHYBOB_VAULT values ahead of loca
 })
 
 test.sequential('healthybob prefers .env.local values over .env defaults', async () => {
-  const originalVault = process.env.HEALTHYBOB_VAULT
+  const originalVault = process.env.VAULT
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-local-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-local-home-'))
   const localVault = path.join(tempRoot, 'vault-from-dotenv-local')
   const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
 
-  delete process.env.HEALTHYBOB_VAULT
-  await writeFile(path.join(tempRoot, '.env'), 'HEALTHYBOB_VAULT=./vault-from-dotenv\n', 'utf8')
+  delete process.env.VAULT
+  await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
   await writeFile(
     path.join(tempRoot, '.env.local'),
-    'HEALTHYBOB_VAULT=./vault-from-dotenv-local\n',
+    'VAULT=./vault-from-dotenv-local\n',
     'utf8',
   )
 
@@ -2594,9 +2594,9 @@ test.sequential('healthybob prefers .env.local values over .env defaults', async
     await assert.rejects(readFile(path.join(dotenvVault, 'vault.json'), 'utf8'))
   } finally {
     if (originalVault === undefined) {
-      delete process.env.HEALTHYBOB_VAULT
+      delete process.env.VAULT
     } else {
-      process.env.HEALTHYBOB_VAULT = originalVault
+      process.env.VAULT = originalVault
     }
 
     await rm(tempRoot, { recursive: true, force: true })

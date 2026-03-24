@@ -1,4 +1,4 @@
-import { deviceSyncError } from "#device-syncd";
+import { deviceSyncError } from "@healthybob/device-syncd";
 
 import type { HostedDeviceSyncEnvironment } from "./env";
 
@@ -36,7 +36,7 @@ export function requireAuthenticatedHostedUser(
   throw deviceSyncError({
     code: "AUTH_REQUIRED",
     message:
-      "Hosted device-sync browser routes require an authenticated user injected by the hosting layer or HEALTHYBOB_DEVICE_SYNC_DEV_USER_ID in development.",
+      "Hosted device-sync browser routes require an authenticated user injected by the hosting layer or DEVICE_SYNC_DEV_USER_ID in development.",
     retryable: false,
     httpStatus: 401,
   });

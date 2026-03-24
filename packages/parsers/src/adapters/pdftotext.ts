@@ -3,6 +3,7 @@ import type { ParserProvider } from "../contracts/provider.js";
 import {
   buildMarkdown,
   describeExecutableAvailability,
+  readConfiguredEnvValue,
   requireExecutable,
   resolveConfiguredExecutable,
   runCommand,
@@ -20,7 +21,7 @@ export function createPdfToTextProvider(
   async function resolveCommand(): Promise<string | null> {
     return resolveConfiguredExecutable({
       explicitCandidates: options.commandCandidates,
-      envValue: () => process.env.HEALTHYBOB_PDFTOTEXT_COMMAND,
+      envValue: () => readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND", "HEALTHYBOB_PDFTOTEXT_COMMAND"]),
       fallbackCommands: ["pdftotext"],
     });
   }

@@ -6,6 +6,7 @@ import {
   buildMarkdown,
   collectFilesRecursively,
   describeExecutableAvailability,
+  readConfiguredEnvValue,
   requireExecutable,
   readUtf8IfExists,
   resolveConfiguredExecutable,
@@ -25,7 +26,7 @@ export function createPaddleOcrProvider(
   async function resolveCommand(): Promise<string | null> {
     return resolveConfiguredExecutable({
       explicitCandidates: options.commandCandidates,
-      envValue: () => process.env.HEALTHYBOB_PADDLEOCR_COMMAND,
+      envValue: () => readConfiguredEnvValue(process.env, ["PADDLEOCR_COMMAND", "HEALTHYBOB_PADDLEOCR_COMMAND"]),
       fallbackCommands: ["paddleocr", "paddlex"],
     });
   }

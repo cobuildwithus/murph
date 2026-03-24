@@ -250,7 +250,7 @@ async function configureTelegramChannel(input: {
       createStep({
         detail: token
           ? 'Would verify the Telegram bot token, add or reuse the telegram:bot inbox connector, and enable assistant auto-reply for Telegram direct chats.'
-          : 'Would configure Telegram once HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN is available in the shell or local `.env`.',
+          : 'Would configure Telegram once TELEGRAM_BOT_TOKEN is available in the shell or local `.env`.',
         id: 'channel-telegram',
         kind: 'configure',
         status: 'planned',
@@ -265,7 +265,7 @@ async function configureTelegramChannel(input: {
       connectorId: TELEGRAM_SETUP_CONNECTOR_ID,
       detail: token
         ? 'Would configure the Telegram bot connector and enable assistant auto-reply for Telegram direct chats.'
-        : `Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
       missingEnv,
     }
@@ -294,8 +294,8 @@ async function configureTelegramChannel(input: {
     input.steps.push(
       createStep({
         detail: existingConnector
-          ? `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN was not available in the shell or local \`.env\`.`
-          : 'Telegram was selected, but setup did not add the connector because HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN was not available in the shell or local `.env`.',
+          ? `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because TELEGRAM_BOT_TOKEN was not available in the shell or local \`.env\`.`
+          : 'Telegram was selected, but setup did not add the connector because TELEGRAM_BOT_TOKEN was not available in the shell or local `.env`.',
         id: 'channel-telegram',
         kind: 'configure',
         status: existingConnector ? 'reused' : 'skipped',
@@ -310,7 +310,7 @@ async function configureTelegramChannel(input: {
       connectorId: existingConnector?.id ?? null,
       detail: existingConnector
         ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-        : `Telegram needs HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
       missingEnv,
     }
@@ -420,7 +420,7 @@ async function configureEmailChannel(input: {
       createStep({
         detail: apiKey
           ? 'Would provision or reuse an AgentMail inbox, verify email polling, and enable assistant auto-reply for direct email threads.'
-          : 'Would configure email once HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY is available in the shell or local `.env`.',
+          : 'Would configure email once AGENTMAIL_API_KEY is available in the shell or local `.env`.',
         id: 'channel-email',
         kind: 'configure',
         status: 'planned',
@@ -435,7 +435,7 @@ async function configureEmailChannel(input: {
       connectorId: EMAIL_SETUP_CONNECTOR_ID,
       detail: apiKey
         ? 'Would reuse an existing AgentMail inbox when possible, or provision a new inbox connector and enable assistant auto-reply for direct email threads.'
-        : `Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        : `Email needs AGENTMAIL_API_KEY in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
       missingEnv,
     }
@@ -461,8 +461,8 @@ async function configureEmailChannel(input: {
     input.steps.push(
       createStep({
         detail: existingConnector
-          ? `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY was not available in the shell or local \`.env\`.`
-          : 'Email was selected, but setup did not add the connector because HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY was not available in the shell or local `.env`.',
+          ? `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because AGENTMAIL_API_KEY was not available in the shell or local \`.env\`.`
+          : 'Email was selected, but setup did not add the connector because AGENTMAIL_API_KEY was not available in the shell or local `.env`.',
         id: 'channel-email',
         kind: 'configure',
         status: existingConnector ? 'reused' : 'skipped',
@@ -477,7 +477,7 @@ async function configureEmailChannel(input: {
       connectorId: existingConnector?.id ?? null,
       detail: existingConnector
         ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-        : `Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the current environment before setup can reuse or provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        : `Email needs AGENTMAIL_API_KEY in the current environment before setup can reuse or provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
       missingEnv,
     }

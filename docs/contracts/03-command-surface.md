@@ -209,7 +209,7 @@ Every command now uses native `incur` command definitions directly:
 ## Shared Option Rules
 
 - `--vault <path>` is required for canonical vault commands so the target vault is explicit. `device` commands also require it so Healthy Bob can manage the local daemon and its launcher state for that vault, even when callers override the control-plane endpoint with `--baseUrl`.
-- `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `HEALTHYBOB_DEVICE_SYNC_BASE_URL` and then the Healthy Bob-managed local daemon default.
+- `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `DEVICE_SYNC_BASE_URL` and then the Healthy Bob-managed local daemon default.
 - `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
 - Machine-stable callers that need metadata or CTA suggestions should prefer `--verbose --format json`. The payload examples below describe the `data` body emitted by non-verbose JSON mode.

@@ -340,7 +340,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'inbox source add telegram --id telegram:bot --account bot',
       description:
-        'Add the Telegram poll connector after setting HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN in the shell or local `.env`.',
+        'Add the Telegram poll connector after setting TELEGRAM_BOT_TOKEN in the shell or local `.env`.',
     })
   }
 
@@ -348,7 +348,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'inbox source add email --id email:agentmail --provision --emailDisplayName "Healthy Bob"',
       description:
-        'Reuse an existing AgentMail inbox or provision a new one after setting HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the shell or local `.env`. Use `--account <inbox_id>` when the API key is scoped to an existing inbox.',
+        'Reuse an existing AgentMail inbox or provision a new one after setting AGENTMAIL_API_KEY in the shell or local `.env`. Use `--account <inbox_id>` when the API key is scoped to an existing inbox.',
     })
   }
 

@@ -5,6 +5,7 @@ import type { ParserProvider } from "../contracts/provider.js";
 import {
   buildMarkdown,
   describeExecutableAvailability,
+  readConfiguredEnvValue,
   requireExecutable,
   readUtf8IfExists,
   resolveConfiguredExecutable,
@@ -26,13 +27,15 @@ export function createWhisperCppProvider(
   async function resolveCommand(): Promise<string | null> {
     return resolveConfiguredExecutable({
       explicitCandidates: options.commandCandidates,
-      envValue: () => process.env.HEALTHYBOB_WHISPER_COMMAND,
+      envValue: () => readConfiguredEnvValue(process.env, ["WHISPER_COMMAND", "HEALTHYBOB_WHISPER_COMMAND"]),
       fallbackCommands: ["whisper-cli", "whisper-cpp"],
     });
   }
 
   function resolveModelPath(): string | null {
-    const candidate = options.modelPath ?? process.env.HEALTHYBOB_WHISPER_MODEL_PATH ?? null;
+    const candidate =
+      options.modelPath ??
+      readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH", "HEALTHYBOB_WHISPER_MODEL_PATH"]);
     return candidate && candidate.trim().length > 0 ? candidate.trim() : null;
   }
 

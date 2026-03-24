@@ -60,7 +60,7 @@ Connectors can now emit an explicit checkpoint alongside each normalized capture
 Use the built-in grammY-backed poll driver from the CLI/runtime:
 
 ```bash
-export HEALTHYBOB_TELEGRAM_BOT_TOKEN='123456:abc...'
+export TELEGRAM_BOT_TOKEN='123456:abc...'
 vault-cli inbox source add telegram --id telegram:bot --account bot --vault ./vault
 vault-cli inbox doctor --source-id telegram:bot --vault ./vault
 vault-cli inbox backfill --source telegram:bot --vault ./vault
@@ -83,11 +83,11 @@ That keeps grammY as the transport/runtime layer while `@healthybob/inboxd` stay
 
 The CLI/runtime now looks for these Telegram settings:
 
-- `HEALTHYBOB_TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_BOT_TOKEN`
-- `HEALTHYBOB_TELEGRAM_API_BASE_URL` (optional; useful for a local Bot API server)
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_API_BASE_URL` (optional; useful for a local Bot API server)
 - `TELEGRAM_API_BASE_URL` (optional)
-- `HEALTHYBOB_TELEGRAM_FILE_BASE_URL` (optional)
+- `TELEGRAM_FILE_BASE_URL` (optional)
 - `TELEGRAM_FILE_BASE_URL` (optional)
 
 ## Operational notes

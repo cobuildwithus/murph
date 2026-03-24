@@ -50,6 +50,6 @@ test("createDeviceSyncClient explains missing control-plane auth", async () => {
     (error) =>
       error instanceof VaultCliError &&
       error.code === "CONTROL_PLANE_AUTH_REQUIRED" &&
-      /HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN/u.test(error.message),
+      /DEVICE_SYNC_CONTROL_TOKEN/u.test(error.message),
   );
 });

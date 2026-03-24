@@ -11,8 +11,8 @@ import {
   buildExampleVaultPath,
   FIXTURE_VAULT_EXAMPLE,
   getConfiguredVaultRoot,
-  HEALTHYBOB_VAULT_ENV,
-  HEALTHYBOB_WEB_LAUNCH_CWD_ENV,
+  VAULT_ENV,
+  WEB_LAUNCH_CWD_ENV,
   rememberLaunchCwd,
   resolveConfiguredVaultRoot,
 } from "../src/lib/vault";
@@ -32,29 +32,41 @@ async function writeFixtureFile(
 test("getConfiguredVaultRoot resolves relative paths from the launch cwd when preserved", () => {
   const resolved = getConfiguredVaultRoot(
     {
-      [HEALTHYBOB_VAULT_ENV]: "fixtures/demo-web-vault",
-      [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
+      [VAULT_ENV]: "fixtures/demo-web-vault",
+      [WEB_LAUNCH_CWD_ENV]: "/repo",
     },
     "/repo/packages/web",
   );
 
   assert.equal(resolved, "/repo/fixtures/demo-web-vault");
   assert.equal(buildExampleVaultPath({
-    [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
+    [WEB_LAUNCH_CWD_ENV]: "/repo",
   }, "/repo/packages/web"), "fixtures/demo-web-vault");
   assert.equal(
     buildSuggestedCommand(
       {
-        [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
+        [WEB_LAUNCH_CWD_ENV]: "/repo",
       },
       "/repo/packages/web",
     ),
-    `${HEALTHYBOB_VAULT_ENV}=fixtures/demo-web-vault pnpm web:dev`,
+    `${VAULT_ENV}=fixtures/demo-web-vault pnpm web:dev`,
   );
 });
 
+test("getConfiguredVaultRoot accepts legacy HEALTHYBOB_* vault and launch-cwd aliases", () => {
+  const resolved = getConfiguredVaultRoot(
+    {
+      HEALTHYBOB_VAULT: "fixtures/demo-web-vault",
+      HEALTHYBOB_WEB_LAUNCH_CWD: "/repo",
+    },
+    "/repo/packages/web",
+  );
+
+  assert.equal(resolved, "/repo/fixtures/demo-web-vault");
+});
+
 test("buildSuggestedCommand keeps the package-local example for direct package runs", () => {
-  assert.equal(buildSuggestedCommand(), `${HEALTHYBOB_VAULT_ENV}=${FIXTURE_VAULT_EXAMPLE} pnpm dev`);
+  assert.equal(buildSuggestedCommand(), `${VAULT_ENV}=${FIXTURE_VAULT_EXAMPLE} pnpm dev`);
 });
 
 test("resolveConfiguredVaultRoot falls back to the saved default vault when env is unset", async () => {
@@ -104,8 +116,8 @@ test("resolveConfiguredVaultRoot keeps explicit env precedence over the saved de
     assert.equal(
       await resolveConfiguredVaultRoot(
         {
-          HEALTHYBOB_VAULT: "fixtures/demo-web-vault",
-          [HEALTHYBOB_WEB_LAUNCH_CWD_ENV]: "/repo",
+          VAULT: "fixtures/demo-web-vault",
+          [WEB_LAUNCH_CWD_ENV]: "/repo",
           HOME: operatorHome,
         },
         "/repo/packages/web",
@@ -141,18 +153,18 @@ test("rememberLaunchCwd stores the first launch cwd only", () => {
   rememberLaunchCwd(env, "/repo");
   rememberLaunchCwd(env, "/repo/packages/web");
 
-  assert.equal(env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV], "/repo");
+  assert.equal(env[WEB_LAUNCH_CWD_ENV], "/repo");
 });
 
 test("rememberLaunchCwd prefers INIT_CWD for package-local pnpm runs", () => {
   const env: Record<string, string | undefined> = {
-    HEALTHYBOB_VAULT: "../../fixtures/demo-web-vault",
+    VAULT: "../../fixtures/demo-web-vault",
     INIT_CWD: "/repo/packages/web",
   };
 
   rememberLaunchCwd(env, "/repo");
 
-  assert.equal(env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV], "/repo/packages/web");
+  assert.equal(env[WEB_LAUNCH_CWD_ENV], "/repo/packages/web");
   assert.equal(getConfiguredVaultRoot(env, "/repo/packages/web"), "/repo/fixtures/demo-web-vault");
 });
 
@@ -160,7 +172,7 @@ test("loadVaultOverview reports missing config when no vault root is set", async
   const result = await loadVaultOverview();
 
   assert.equal(result.status, "missing-config");
-  assert.equal(result.envVar, HEALTHYBOB_VAULT_ENV);
+  assert.equal(result.envVar, VAULT_ENV);
   assert.match(result.suggestedCommand, /pnpm dev/);
 });
 

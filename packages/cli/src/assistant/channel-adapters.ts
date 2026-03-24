@@ -216,7 +216,7 @@ export async function sendTelegramMessage(
   if (!token) {
     throw new VaultCliError(
       'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
-      'Outbound Telegram delivery requires HEALTHYBOB_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
     )
   }
 
@@ -279,7 +279,7 @@ export async function sendEmailMessage(
   if (!apiKey) {
     throw new VaultCliError(
       'ASSISTANT_EMAIL_API_KEY_REQUIRED',
-      'Outbound email delivery requires HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY.',
+      'Outbound email delivery requires AGENTMAIL_API_KEY.',
     )
   }
 
