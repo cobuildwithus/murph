@@ -8,12 +8,11 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "ensure:query": "pnpm --dir ../query build",
     "build:app": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts build",
-    "dev": "pnpm ensure:query && pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts dev",
-    "build": "pnpm ensure:query && pnpm build:app",
+    "dev": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts dev",
+    "build": "pnpm build:app",
     "start": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts start",
-    "typecheck": "pnpm ensure:query && tsc -p tsconfig.json --pretty false",
+    "typecheck": "tsc -p tsconfig.json --pretty false",
     "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config packages/web/vitest.config.ts --no-coverage --maxWorkers 1 && pnpm build:app"
   },
   "dependencies": {

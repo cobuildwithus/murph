@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-import { resolveWorkspaceRuntimeAliases } from "./next.config";
+import { resolveWorkspaceSourceEntries } from "./next.config";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,10 +12,10 @@ function escapeRegex(value: string): string {
 }
 
 function createVitestWorkspaceRuntimeAliases(packageDir: string) {
-  const runtimeAliases = resolveWorkspaceRuntimeAliases(packageDir);
+  const sourceEntries = resolveWorkspaceSourceEntries(packageDir);
 
-  return Object.entries(runtimeAliases).flatMap(([packageName, entryPath]) => {
-    const distDir = path.dirname(entryPath);
+  return Object.entries(sourceEntries).flatMap(([packageName, entryPath]) => {
+    const sourceDir = path.dirname(entryPath);
     const escapedPackageName = escapeRegex(packageName);
 
     return [
@@ -25,7 +25,7 @@ function createVitestWorkspaceRuntimeAliases(packageDir: string) {
       },
       {
         find: new RegExp(`^${escapedPackageName}/(.+)$`),
-        replacement: `${distDir}/$1.js`,
+        replacement: `${sourceDir}/$1.ts`,
       },
     ];
   });

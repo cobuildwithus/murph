@@ -26,37 +26,34 @@
         "apps/web/*"
       ],
       "@healthybob/contracts": [
-        "packages/contracts/dist/index.d.ts"
+        "packages/contracts/src/index.ts"
       ],
       "@healthybob/contracts/*": [
-        "packages/contracts/dist/*"
+        "packages/contracts/src/*"
       ],
       "@healthybob/runtime-state": [
-        "packages/runtime-state/dist/index.d.ts"
+        "packages/runtime-state/src/index.ts"
       ],
       "@healthybob/runtime-state/*": [
-        "packages/runtime-state/dist/*"
+        "packages/runtime-state/src/*"
       ],
       "@healthybob/core": [
-        "packages/core/dist/index.d.ts"
+        "packages/core/src/index.ts"
       ],
       "@healthybob/core/*": [
-        "packages/core/dist/*"
+        "packages/core/src/*"
       ],
       "@healthybob/importers": [
-        "packages/importers/dist/index.d.ts"
+        "packages/importers/src/index.ts"
       ],
       "@healthybob/importers/*": [
-        "packages/importers/dist/*"
-      ],
-      "#device-syncd": [
-        "packages/device-syncd/dist/index.d.ts"
+        "packages/importers/src/*"
       ],
       "@healthybob/device-syncd": [
-        "packages/device-syncd/dist/index.d.ts"
+        "packages/device-syncd/src/index.ts"
       ],
       "@healthybob/device-syncd/*": [
-        "packages/device-syncd/dist/*"
+        "packages/device-syncd/src/*"
       ]
     },
     "sourceMap": false,

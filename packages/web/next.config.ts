@@ -4,68 +4,45 @@ import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
-const WORKSPACE_RUNTIME_ENTRY_RELATIVE_PATHS = {
-  "@healthybob/contracts": "../contracts/dist/index.js",
-  "@healthybob/runtime-state": "../runtime-state/dist/index.js",
-  "@healthybob/query": "../query/dist/index.js",
+const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@healthybob/contracts": "../contracts/src/index.ts",
+  "@healthybob/runtime-state": "../runtime-state/src/index.ts",
+  "@healthybob/query": "../query/src/index.ts",
 } as const;
+const SOURCE_EXTENSION_ALIAS: Record<string, string[]> = {
+  ".js": [".ts", ".tsx", ".js"],
+  ".mjs": [".mts", ".mjs"],
+  ".cjs": [".cts", ".cjs"],
+};
 
-interface ResolveConfigLike {
-  alias?: Record<string, unknown> | readonly WebpackAliasLike[];
-}
+export const WORKSPACE_SOURCE_PACKAGE_NAMES = Object.freeze(
+  Object.keys(WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
+);
 
-interface WebpackConfigLike {
-  resolve?: ResolveConfigLike;
-}
-
-interface WebpackAliasLike {
-  alias: string;
-  name: string;
-  onlyModule?: boolean;
-}
-
-export function resolveQueryRuntimeEntryPath(packageDir: string): string {
-  return resolveWorkspaceRuntimeAliases(packageDir)["@healthybob/query"];
-}
-
-export function resolveWorkspaceRuntimeAliases(packageDir: string): Record<string, string> {
+export function resolveWorkspaceSourceEntries(packageDir: string): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(WORKSPACE_RUNTIME_ENTRY_RELATIVE_PATHS).map(([packageName, relativePath]) => [
+    Object.entries(WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS).map(([packageName, relativePath]) => [
       packageName,
       path.resolve(packageDir, relativePath),
     ]),
   );
 }
 
-export function installQueryRuntimeAlias<T extends WebpackConfigLike>(
-  config: T,
-  packageDir: string,
-): T {
-  const currentAlias = config.resolve?.alias;
-  const workspaceRuntimeAliases = resolveWorkspaceRuntimeAliases(packageDir);
+interface ResolveConfigLike {
+  extensionAlias?: Record<string, string[]>;
+}
 
-  const nextAlias = Array.isArray(currentAlias)
-    ? [
-        ...currentAlias.filter((entry) => !(entry.name in workspaceRuntimeAliases)),
-        ...Object.entries(workspaceRuntimeAliases).map(([packageName, alias]) => ({
-          alias,
-          name: packageName,
-          onlyModule: true,
-        })),
-      ]
-    : {
-        ...(currentAlias ?? {}),
-        ...Object.fromEntries(
-          Object.entries(workspaceRuntimeAliases).map(([packageName, alias]) => [
-            `${packageName}$`,
-            alias,
-          ]),
-        ),
-      };
+interface WebpackConfigLike {
+  resolve?: ResolveConfigLike;
+}
 
+export function installSourceExtensionAliases<T extends WebpackConfigLike>(config: T): T {
   config.resolve = {
     ...config.resolve,
-    alias: nextAlias,
+    extensionAlias: {
+      ...(config.resolve?.extensionAlias ?? {}),
+      ...SOURCE_EXTENSION_ALIAS,
+    },
   };
 
   return config;
@@ -73,11 +50,12 @@ export function installQueryRuntimeAlias<T extends WebpackConfigLike>(
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(packageDir, "../.."),
+  transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
   typescript: {
     // Repo verification runs a dedicated package-local typecheck before build.
     ignoreBuildErrors: true,
   },
-  webpack: (config) => installQueryRuntimeAlias(config, packageDir),
+  webpack: (config) => installSourceExtensionAliases(config),
 };
 
 export default nextConfig;

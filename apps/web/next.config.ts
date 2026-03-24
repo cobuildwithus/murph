@@ -4,79 +4,47 @@ import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
-const WORKSPACE_RUNTIME_ALIASES = [
-  {
-    alias: path.resolve(appDir, "../../packages/contracts/dist/index.js"),
-    name: "@healthybob/contracts",
-    onlyModule: true,
-  },
-  {
-    alias: path.resolve(appDir, "../../packages/runtime-state/dist/index.js"),
-    name: "@healthybob/runtime-state",
-    onlyModule: true,
-  },
-  {
-    alias: path.resolve(appDir, "../../packages/core/dist/index.js"),
-    name: "@healthybob/core",
-    onlyModule: true,
-  },
-  {
-    alias: path.resolve(appDir, "../../packages/importers/dist/index.js"),
-    name: "@healthybob/importers",
-    onlyModule: true,
-  },
-  {
-    alias: path.resolve(appDir, "node_modules/@healthybob/device-syncd"),
-    name: "@healthybob/device-syncd",
-    onlyModule: true,
-  },
-  {
-    alias: path.resolve(appDir, "node_modules/@healthybob/device-syncd"),
-    name: "#device-syncd",
-    onlyModule: true,
-  },
-  {
-    alias: appDir,
-    name: "apps/web",
-    onlyModule: false,
-  },
-] as const;
+const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@healthybob/contracts": "../../packages/contracts/src/index.ts",
+  "@healthybob/runtime-state": "../../packages/runtime-state/src/index.ts",
+  "@healthybob/core": "../../packages/core/src/index.ts",
+  "@healthybob/importers": "../../packages/importers/src/index.ts",
+  "@healthybob/device-syncd": "../../packages/device-syncd/src/index.ts",
+} as const;
+const SOURCE_EXTENSION_ALIAS: Record<string, string[]> = {
+  ".js": [".ts", ".tsx", ".js"],
+  ".mjs": [".mts", ".mjs"],
+  ".cjs": [".cts", ".cjs"],
+};
+
+export const WORKSPACE_SOURCE_PACKAGE_NAMES = Object.freeze(
+  Object.keys(WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
+);
+
+export function resolveWorkspaceSourceEntries(appDir: string): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS).map(([packageName, relativePath]) => [
+      packageName,
+      path.resolve(appDir, relativePath),
+    ]),
+  );
+}
 
 interface ResolveConfigLike {
-  alias?: Record<string, unknown> | readonly WebpackAliasLike[];
+  extensionAlias?: Record<string, string[]>;
 }
 
 interface WebpackConfigLike {
   resolve?: ResolveConfigLike;
 }
 
-interface WebpackAliasLike {
-  alias: string;
-  name: string;
-  onlyModule?: boolean;
-}
-
-function installRuntimeAliases<T extends WebpackConfigLike>(config: T): T {
-  const currentAlias = config.resolve?.alias;
-
-  const nextAlias = Array.isArray(currentAlias)
-    ? [
-        ...currentAlias.filter((entry) => !WORKSPACE_RUNTIME_ALIASES.some((alias) => alias.name === entry.name)),
-        ...WORKSPACE_RUNTIME_ALIASES,
-      ]
-    : {
-        ...(currentAlias ?? {}),
-        ...Object.fromEntries(
-          WORKSPACE_RUNTIME_ALIASES.map((entry) => [
-            entry.onlyModule ? `${entry.name}$` : entry.name,
-            entry.alias,
-          ]),
-        ),
-      };
-
+function installSourceExtensionAliases<T extends WebpackConfigLike>(config: T): T {
   config.resolve = {
     ...config.resolve,
-    alias: nextAlias,
+    extensionAlias: {
+      ...(config.resolve?.extensionAlias ?? {}),
+      ...SOURCE_EXTENSION_ALIAS,
+    },
   };
 
   return config;
@@ -84,10 +52,11 @@ function installRuntimeAliases<T extends WebpackConfigLike>(config: T): T {
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(appDir, "../.."),
+  transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
   typescript: {
     ignoreBuildErrors: true,
   },
-  webpack: (config) => installRuntimeAliases(config),
+  webpack: (config) => installSourceExtensionAliases(config),
 };
 
 export default nextConfig;

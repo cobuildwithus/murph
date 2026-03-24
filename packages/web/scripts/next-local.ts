@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,44 +10,6 @@ const fsPromises = require("node:fs/promises") as typeof import("node:fs/promise
 
 let dotEnvGuardsInstalled = false;
 
-const WORKSPACE_RUNTIME_BUILD_TARGETS = [
-  {
-    buildDir: "../contracts",
-    entryRelativePath: "../contracts/dist/index.js",
-    packageName: "@healthybob/contracts",
-    requiredRelativePaths: ["../contracts/dist/index.js"],
-  },
-  {
-    buildDir: "../runtime-state",
-    entryRelativePath: "../runtime-state/dist/index.js",
-    packageName: "@healthybob/runtime-state",
-    requiredRelativePaths: ["../runtime-state/dist/index.js"],
-  },
-  {
-    buildDir: "../query",
-    entryRelativePath: "../query/dist/index.js",
-    packageName: "@healthybob/query",
-    requiredRelativePaths: [
-      "../query/dist/index.js",
-      "../query/dist/canonical-entities.js",
-      "../query/dist/export-pack.js",
-      "../query/dist/export-pack-health.js",
-      "../query/dist/health-library.js",
-      "../query/dist/health/canonical-collector.js",
-      "../query/dist/health/comparators.js",
-      "../query/dist/health/loaders.js",
-      "../query/dist/health/shared.js",
-    ],
-  },
-] as const;
-
-interface RuntimeBuildTarget {
-  buildDir: string;
-  entryPath: string;
-  packageName: string;
-  requiredPaths: string[];
-}
-
 export function buildNextCliArgs(argv: readonly string[]): string[] {
   const [command = "dev", ...rest] = argv;
   const args = [command];
@@ -59,25 +20,6 @@ export function buildNextCliArgs(argv: readonly string[]): string[] {
 
   args.push(...rest);
   return args;
-}
-
-export function shouldEnsureRuntimeBuild(command: string): boolean {
-  return command === "dev" || command === "build" || command === "start";
-}
-
-export function resolveQueryBuildEntryPath(packageDir: string): string {
-  return resolveRuntimeBuildTargets(packageDir).at(-1)!.entryPath;
-}
-
-export function resolveRuntimeBuildTargets(packageDir: string): RuntimeBuildTarget[] {
-  return WORKSPACE_RUNTIME_BUILD_TARGETS.map((target) => ({
-    buildDir: target.buildDir,
-    entryPath: path.resolve(packageDir, target.entryRelativePath),
-    packageName: target.packageName,
-    requiredPaths: target.requiredRelativePaths.map((relativePath) =>
-      path.resolve(packageDir, relativePath),
-    ),
-  }));
 }
 
 export function isBlockedDotEnvPath(value: unknown): boolean {
@@ -171,93 +113,13 @@ export function installDotEnvGuards(): void {
 async function main(): Promise<void> {
   const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const nextBinPath = path.join(packageDir, "node_modules/next/dist/bin/next");
-  const [command = "dev"] = process.argv.slice(2);
 
   rememberLaunchCwd();
   process.chdir(packageDir);
   installDotEnvGuards();
-  await ensureRuntimeBuild(packageDir, command);
   process.argv = [process.execPath, nextBinPath, ...buildNextCliArgs(process.argv.slice(2))];
 
   await import(pathToFileURL(nextBinPath).href);
-}
-
-async function ensureRuntimeBuild(packageDir: string, command: string): Promise<void> {
-  if (!shouldEnsureRuntimeBuild(command)) {
-    return;
-  }
-
-  const missingTargets = await findMissingRuntimeBuildTargets(packageDir);
-  if (missingTargets.length === 0) {
-    return;
-  }
-
-  const invocation = resolvePnpmInvocation();
-  for (const target of missingTargets) {
-    const result = spawnSync(
-      invocation.command,
-      [...invocation.prefixArgs, "--dir", target.buildDir, "build"],
-      {
-        cwd: packageDir,
-        stdio: "inherit",
-      },
-    );
-
-    if (result.error) {
-      throw result.error;
-    }
-
-    if (result.status !== 0) {
-      throw new Error(
-        `Failed to rebuild ${target.packageName} after missing ${target.entryPath}.`,
-      );
-    }
-  }
-
-  const unresolvedTargets = await findMissingRuntimeBuildTargets(packageDir);
-  if (unresolvedTargets.length === 0) {
-    return;
-  }
-
-  throw new Error(
-    `Missing runtime build output after rebuild: ${unresolvedTargets.map((target) => target.packageName).join(", ")}.`,
-  );
-}
-
-async function findMissingRuntimeBuildTargets(packageDir: string): Promise<RuntimeBuildTarget[]> {
-  const targets = resolveRuntimeBuildTargets(packageDir);
-  const checks = await Promise.all(
-    targets.map(async (target) => ({
-      missing: !(await Promise.all(target.requiredPaths.map(pathExists))).every(Boolean),
-      target,
-    })),
-  );
-
-  return checks.filter((check) => check.missing).map((check) => check.target);
-}
-
-async function pathExists(entryPath: string): Promise<boolean> {
-  try {
-    await fsPromises.access(entryPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function resolvePnpmInvocation(): { command: string; prefixArgs: string[] } {
-  const npmExecPath = process.env.npm_execpath;
-  if (npmExecPath && path.basename(npmExecPath).startsWith("pnpm")) {
-    return {
-      command: process.execPath,
-      prefixArgs: [npmExecPath],
-    };
-  }
-
-  return {
-    command: "pnpm",
-    prefixArgs: [],
-  };
 }
 
 function hasBundlerFlag(args: readonly string[]): boolean {

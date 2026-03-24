@@ -8,12 +8,11 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "ensure:device-syncd": "pnpm --dir ../../packages/device-syncd build",
-    "dev": "pnpm ensure:device-syncd && next dev --webpack",
-    "build": "pnpm ensure:device-syncd && prisma generate && next build --webpack",
+    "dev": "next dev --webpack",
+    "build": "prisma generate && next build --webpack",
     "start": "next start",
-    "typecheck": "pnpm ensure:device-syncd && prisma generate && tsc -p tsconfig.json --pretty false",
-    "test": "pnpm ensure:device-syncd && pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/web/vitest.config.ts --no-coverage --maxWorkers 1 && pnpm build",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --pretty false",
+    "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/web/vitest.config.ts --no-coverage --maxWorkers 1 && pnpm build",
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev"

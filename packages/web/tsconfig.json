@@ -18,22 +18,22 @@
     "noEmit": true,
     "paths": {
       "@healthybob/contracts": [
-        "packages/contracts/dist/index.d.ts"
+        "packages/contracts/src/index.ts"
       ],
       "@healthybob/contracts/*": [
-        "packages/contracts/dist/*"
+        "packages/contracts/src/*"
       ],
       "@healthybob/query": [
-        "packages/query/dist/index.d.ts"
+        "packages/query/src/index.ts"
       ],
       "@healthybob/query/*": [
-        "packages/query/dist/*"
+        "packages/query/src/*"
       ],
       "@healthybob/runtime-state": [
-        "packages/runtime-state/dist/index.d.ts"
+        "packages/runtime-state/src/index.ts"
       ],
       "@healthybob/runtime-state/*": [
-        "packages/runtime-state/dist/*"
+        "packages/runtime-state/src/*"
       ]
     },
     "plugins": [

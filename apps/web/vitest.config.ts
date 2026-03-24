@@ -3,20 +3,44 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
+import { resolveWorkspaceSourceEntries } from "./next.config";
+
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function createVitestWorkspaceRuntimeAliases(appDir: string) {
+  const sourceEntries = resolveWorkspaceSourceEntries(appDir);
+
+  return Object.entries(sourceEntries).flatMap(([packageName, entryPath]) => {
+    const sourceDir = path.dirname(entryPath);
+    const escapedPackageName = escapeRegex(packageName);
+
+    return [
+      {
+        find: new RegExp(`^${escapedPackageName}$`),
+        replacement: entryPath,
+      },
+      {
+        find: new RegExp(`^${escapedPackageName}/(.+)$`),
+        replacement: `${sourceDir}/$1.ts`,
+      },
+    ];
+  });
+}
+
 export default defineConfig({
   resolve: {
-    alias: {
-      "@": path.resolve(repoRoot, "apps/web"),
-      "@healthybob/contracts": path.resolve(repoRoot, "packages/contracts/dist/index.js"),
-      "@healthybob/runtime-state": path.resolve(repoRoot, "packages/runtime-state/dist/index.js"),
-      "@healthybob/core": path.resolve(repoRoot, "packages/core/dist/index.js"),
-      "@healthybob/importers": path.resolve(repoRoot, "packages/importers/dist/index.js"),
-      "@healthybob/device-syncd": path.resolve(repoRoot, "apps/web/node_modules/@healthybob/device-syncd"),
-      "#device-syncd": path.resolve(repoRoot, "apps/web/node_modules/@healthybob/device-syncd"),
-    },
+    alias: [
+      {
+        find: "@",
+        replacement: path.resolve(repoRoot, "apps/web"),
+      },
+      ...createVitestWorkspaceRuntimeAliases(appDir),
+    ],
   },
   test: {
     environment: "node",
