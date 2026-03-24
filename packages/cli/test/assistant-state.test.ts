@@ -23,9 +23,11 @@ import {
   loadAssistantMemoryPromptBlock,
   resolveAssistantMemoryTurnContext,
   resolveAssistantDailyMemoryPath,
+  resolveAssistantMemoryStoragePaths,
   searchAssistantMemory,
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
+import { withAssistantMemoryWriteLock } from '../src/assistant/memory/locking.js'
 
 const cleanupPaths: string[] = []
 
@@ -293,6 +295,60 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
   assert.equal(listed.length, 2)
 })
 
+test('assistant memory write locks allow nested reentry while serializing concurrent same-root callers', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-lock-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const paths = resolveAssistantMemoryStoragePaths(vaultRoot)
+  const events: string[] = []
+  const firstHolding = createDeferred<void>()
+  const releaseFirst = createDeferred<void>()
+
+  const first = withAssistantMemoryWriteLock(paths, async () => {
+    events.push('first:start')
+
+    await withAssistantMemoryWriteLock(paths, async () => {
+      events.push('nested:start')
+      events.push('nested:end')
+    })
+
+    events.push('first:after-nested')
+    firstHolding.resolve()
+    await releaseFirst.promise
+    events.push('first:end')
+  })
+
+  await firstHolding.promise
+
+  const second = withAssistantMemoryWriteLock(paths, async () => {
+    events.push('second:start')
+    events.push('second:end')
+  })
+
+  await Promise.resolve()
+  assert.deepEqual(events, [
+    'first:start',
+    'nested:start',
+    'nested:end',
+    'first:after-nested',
+  ])
+
+  releaseFirst.resolve()
+  await Promise.all([first, second])
+
+  assert.deepEqual(events, [
+    'first:start',
+    'nested:start',
+    'nested:end',
+    'first:after-nested',
+    'first:end',
+    'second:start',
+    'second:end',
+  ])
+})
+
 test('assistant transcripts are stored separately from session metadata', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-transcript-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -351,6 +407,21 @@ test('assistant transcripts are stored separately from session metadata', async 
   assert.equal('lastUserMessage' in persistedSession, false)
   assert.equal('lastAssistantMessage' in persistedSession, false)
 })
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve
+    reject = nextReject
+  })
+
+  return {
+    promise,
+    reject,
+    resolve,
+  }
+}
 
 test('getAssistantSession explains vault-scoped session drift when only a transcript remains', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-missing-session-'))
