@@ -1472,20 +1472,33 @@ test.sequential('source add email --provision requires --account when multiple d
             message: 'Forbidden',
           })
         },
-        async listInboxes() {
-          return {
-            count: 2,
-            inboxes: [
-              {
-                inbox_id: 'one@example.test',
-                email: 'one@example.test',
-              },
-              {
-                inbox_id: 'two@example.test',
-                email: 'two@example.test',
-              },
-            ],
+        async listInboxes(input?: { pageToken?: string | null }) {
+          if (!input?.pageToken) {
+            return {
+              count: 1,
+              inboxes: [
+                {
+                  inbox_id: 'one@example.test',
+                  email: 'one@example.test',
+                },
+              ],
+              next_page_token: 'page-2',
+            }
           }
+
+          if (input.pageToken === 'page-2') {
+            return {
+              count: 1,
+              inboxes: [
+                {
+                  inbox_id: 'two@example.test',
+                  email: 'two@example.test',
+                },
+              ],
+            }
+          }
+
+          throw new Error(`unexpected page token: ${String(input.pageToken)}`)
         },
         async getInbox() {
           throw new Error('getInbox should not be called in this test')
@@ -1514,6 +1527,67 @@ test.sequential('source add email --provision requires --account when multiple d
       }),
       'INBOX_EMAIL_ACCOUNT_SELECTION_REQUIRED',
     )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('source add email --provision honors --account when AgentMail create is forbidden', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-explicit-account')
+  const getInboxCalls: string[] = []
+  const services = createIntegratedInboxCliServices({
+    createAgentmailClient() {
+      return {
+        apiKey: 'agentmail-key',
+        baseUrl: 'https://api.agentmail.to/v0',
+        async createInbox() {
+          throw createAgentmailHttpError({
+            status: 403,
+            method: 'POST',
+            path: '/inboxes',
+            message: 'Forbidden',
+          })
+        },
+        async listInboxes() {
+          throw new Error('listInboxes should not be called when --account is provided')
+        },
+        async getInbox(inboxId: string) {
+          getInboxCalls.push(inboxId)
+          return {
+            inbox_id: inboxId,
+            email: 'existing@example.test',
+            display_name: 'Existing Inbox',
+          }
+        },
+      } as any
+    },
+    getEnvironment: () => ({
+      AGENTMAIL_API_KEY: 'agentmail-key',
+    }),
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    const added = await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'email',
+      id: 'email:agentmail',
+      provision: true,
+      account: 'existing@example.test',
+    })
+
+    assert.equal(added.connector.accountId, 'existing@example.test')
+    assert.equal(added.connector.options.emailAddress, 'existing@example.test')
+    assert.equal(added.provisionedMailbox ?? null, null)
+    assert.equal(added.reusedMailbox?.emailAddress, 'existing@example.test')
+    assert.deepEqual(getInboxCalls, ['existing@example.test'])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

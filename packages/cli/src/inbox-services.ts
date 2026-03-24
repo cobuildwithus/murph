@@ -8,6 +8,7 @@ import {
 } from './assistant-state.js'
 import {
   createAgentmailApiClient,
+  listAllAgentmailInboxes,
   matchesAgentmailHttpError,
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
@@ -1149,16 +1150,60 @@ export function createIntegratedInboxCliServices(
     }
   }
 
-  const recoverForbiddenAgentmailProvision = async (): Promise<{
+  const toRecoveredMailbox = (input: {
+    accountId: string
+    emailAddress: string | null
+  }): InboxProvisionedMailbox | null => {
+    const emailAddress = normalizeNullableString(input.emailAddress)
+    if (!emailAddress) {
+      return null
+    }
+
+    return {
+      inboxId: input.accountId,
+      emailAddress,
+      displayName: null,
+      clientId: null,
+      provider: 'agentmail',
+    }
+  }
+
+  const recoverForbiddenAgentmailProvision = async (input: {
+    preferredAccountId?: string | null
+    preferredEmailAddress?: string | null
+  } = {}): Promise<{
     accountId: string
     emailAddress: string | null
     mailbox: InboxProvisionedMailbox | null
   }> => {
-    try {
-      const listed = await createConfiguredAgentmailClient().listInboxes()
+    const preferredAccountId = normalizeNullableString(input.preferredAccountId)
+    const preferredEmailAddress = normalizeNullableString(input.preferredEmailAddress)
 
-      if (listed.inboxes.length === 1) {
-        const inbox = listed.inboxes[0]!
+    if (preferredAccountId) {
+      try {
+        const inbox = await createConfiguredAgentmailClient().getInbox(preferredAccountId)
+        return {
+          accountId: inbox.inbox_id,
+          emailAddress: normalizeNullableString(inbox.email),
+          mailbox: toProvisionedMailbox(inbox),
+        }
+      } catch {
+        return {
+          accountId: preferredAccountId,
+          emailAddress: preferredEmailAddress,
+          mailbox: toRecoveredMailbox({
+            accountId: preferredAccountId,
+            emailAddress: preferredEmailAddress,
+          }),
+        }
+      }
+    }
+
+    try {
+      const inboxes = await listAllAgentmailInboxes(createConfiguredAgentmailClient())
+
+      if (inboxes.length === 1) {
+        const inbox = inboxes[0]!
         return {
           accountId: inbox.inbox_id,
           emailAddress: normalizeNullableString(inbox.email),
@@ -1166,11 +1211,11 @@ export function createIntegratedInboxCliServices(
         }
       }
 
-      if (listed.inboxes.length > 1) {
+      if (inboxes.length > 1) {
         throw new VaultCliError(
           'INBOX_EMAIL_ACCOUNT_SELECTION_REQUIRED',
           'AgentMail rejected inbox creation for this API key, but multiple existing inboxes are available. Rerun with --account <inbox_id> to choose one, or use `healthybob onboard` to select an inbox interactively.',
-          { inboxCount: listed.inboxes.length },
+          { inboxCount: inboxes.length },
         )
       }
 
@@ -2044,7 +2089,10 @@ export function createIntegratedInboxCliServices(
               throw error
             }
 
-            const recovered = await recoverForbiddenAgentmailProvision()
+            const recovered = await recoverForbiddenAgentmailProvision({
+              preferredAccountId: accountId,
+              preferredEmailAddress: emailAddress,
+            })
             accountId = recovered.accountId
             emailAddress = recovered.emailAddress
             reusedMailbox = recovered.mailbox

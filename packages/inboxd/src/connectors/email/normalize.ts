@@ -97,8 +97,9 @@ export function buildAgentmailMessageText(
 ): string | null {
   return (
     normalizeTextValue(message.extracted_text ?? null) ??
+    normalizeTextValue(stripHtml(message.extracted_html ?? null)) ??
     normalizeTextValue(message.text ?? null) ??
-    normalizeTextValue(stripHtml(message.html ?? message.extracted_html ?? null)) ??
+    normalizeTextValue(stripHtml(message.html ?? null)) ??
     normalizeTextValue(message.preview ?? null) ??
     null
   );
@@ -108,7 +109,8 @@ export function inferDirectEmailThread(
   message: AgentmailMessageLike,
   accountAddress: string | null,
 ): boolean {
-  const participants = new Set<string>();
+  const allParticipants = new Set<string>();
+  const otherParticipants = new Set<string>();
 
   const appendParticipant = (value: string | null | undefined) => {
     const normalized = resolveAgentmailAddress(value ?? null);
@@ -116,14 +118,17 @@ export function inferDirectEmailThread(
       return;
     }
 
+    const normalizedLower = normalized.toLowerCase();
+    allParticipants.add(normalizedLower);
+
     if (
       accountAddress !== null &&
-      normalized.toLowerCase() === accountAddress.toLowerCase()
+      normalizedLower === accountAddress.toLowerCase()
     ) {
       return;
     }
 
-    participants.add(normalized.toLowerCase());
+    otherParticipants.add(normalizedLower);
   };
 
   appendParticipant(message.from ?? null);
@@ -137,8 +142,12 @@ export function inferDirectEmailThread(
     appendParticipant(value);
   }
 
-  if (participants.size > 0) {
-    return participants.size <= 1;
+  if (accountAddress !== null && otherParticipants.size > 0) {
+    return otherParticipants.size <= 1;
+  }
+
+  if (accountAddress === null && allParticipants.size > 0) {
+    return allParticipants.size <= 2;
   }
 
   const recipientCount = [

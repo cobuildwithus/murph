@@ -65,6 +65,42 @@ test("normalizeAgentmailMessage builds direct email captures and hydrates downlo
   assert.equal(capture.attachments[0]?.data?.byteLength, 4);
 });
 
+test("normalizeAgentmailMessage keeps direct-thread detection when the inbox address is unknown", async () => {
+  const capture = await normalizeAgentmailMessage({
+    accountAddress: null,
+    message: {
+      inbox_id: "inbox_123",
+      thread_id: "thread_123",
+      message_id: "msg_direct",
+      from: "Alice Example <alice@example.test>",
+      to: ["healthybob@example.test"],
+      cc: [],
+      bcc: [],
+      text: "Ping",
+    },
+  });
+
+  assert.equal(capture.thread.isDirect, true);
+});
+
+test("normalizeAgentmailMessage prefers extracted reply content over full-thread text fallbacks", async () => {
+  const capture = await normalizeAgentmailMessage({
+    accountAddress: "healthybob@example.test",
+    message: {
+      inbox_id: "inbox_123",
+      thread_id: "thread_123",
+      message_id: "msg_extracted",
+      from: "Alice Example <alice@example.test>",
+      to: ["healthybob@example.test"],
+      text: "Newest reply\n\nOn Mon, Healthy Bob wrote: quoted history",
+      extracted_html: "<p>Newest reply</p>",
+      html: "<div>Newest reply</div><blockquote>quoted history</blockquote>",
+    },
+  });
+
+  assert.equal(capture.text, "Newest reply");
+});
+
 test("createEmailPollConnector backfills unread AgentMail messages and marks them processed", async () => {
   const processedMessageIds: string[] = [];
   const emitted: Array<{ capture: InboundCapture; checkpoint: Record<string, unknown> | null | undefined }> = [];

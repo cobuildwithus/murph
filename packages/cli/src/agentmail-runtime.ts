@@ -74,6 +74,12 @@ export interface AgentmailListInboxesResponse {
   next_page_token?: string | null
 }
 
+export interface ListAgentmailInboxesInput {
+  limit?: number | null
+  pageToken?: string | null
+  ascending?: boolean | null
+}
+
 export interface AgentmailListMessagesResponse {
   count: number
   messages: AgentmailMessage[]
@@ -187,6 +193,10 @@ export interface AgentmailApiClient {
   readonly apiKey: string
   readonly baseUrl: string
   listInboxes(signal?: AbortSignal): Promise<AgentmailListInboxesResponse>
+  listInboxes(
+    input: ListAgentmailInboxesInput,
+    signal?: AbortSignal,
+  ): Promise<AgentmailListInboxesResponse>
   getInbox(inboxId: string, signal?: AbortSignal): Promise<AgentmailInbox>
   createInbox(input?: CreateAgentmailInboxInput, signal?: AbortSignal): Promise<AgentmailInbox>
   sendMessage(
@@ -293,11 +303,29 @@ export function createAgentmailApiClient(
     apiKey: normalizedApiKey,
     baseUrl,
 
-    async listInboxes(signal) {
+    async listInboxes(
+      inputOrSignal?: ListAgentmailInboxesInput | AbortSignal,
+      signal?: AbortSignal,
+    ) {
+      const input = isAbortSignal(inputOrSignal) ? undefined : inputOrSignal
+      const resolvedSignal = isAbortSignal(inputOrSignal) ? inputOrSignal : signal
+      const query = new URLSearchParams()
+      if (input?.limit !== undefined && input.limit !== null) {
+        query.set('limit', String(Math.max(1, Math.floor(input.limit))))
+      }
+      const pageToken = normalizeNullableString(input?.pageToken)
+      if (pageToken) {
+        query.set('page_token', pageToken)
+      }
+      if (typeof input?.ascending === 'boolean') {
+        query.set('ascending', String(input.ascending))
+      }
+
       return request<AgentmailListInboxesResponse>({
         path: '/inboxes',
         method: 'GET',
-        signal,
+        signal: resolvedSignal,
+        query,
       })
     },
 
@@ -535,6 +563,41 @@ function normalizeAgentmailBaseUrl(value: string): string {
   return normalized.replace(/\/+$/u, '')
 }
 
+export async function listAllAgentmailInboxes(
+  client: Pick<AgentmailApiClient, 'listInboxes'>,
+  signal?: AbortSignal,
+): Promise<AgentmailInbox[]> {
+  const inboxesById = new Map<string, AgentmailInbox>()
+  const seenPageTokens = new Set<string>()
+  let pageToken: string | null = null
+
+  while (true) {
+    const listed = await client.listInboxes(pageToken ? { pageToken } : {}, signal)
+
+    for (const inbox of listed.inboxes) {
+      if (!inboxesById.has(inbox.inbox_id)) {
+        inboxesById.set(inbox.inbox_id, inbox)
+      }
+    }
+
+    const nextPageToken = normalizeNullableString(listed.next_page_token)
+    if (!nextPageToken) {
+      return [...inboxesById.values()]
+    }
+
+    if (seenPageTokens.has(nextPageToken)) {
+      throw new VaultCliError(
+        'AGENTMAIL_PAGINATION_INVALID',
+        'AgentMail inbox pagination returned a repeated next_page_token.',
+        { nextPageToken },
+      )
+    }
+
+    seenPageTokens.add(nextPageToken)
+    pageToken = nextPageToken
+  }
+}
+
 export function matchesAgentmailHttpError(
   error: unknown,
   input: {
@@ -568,6 +631,15 @@ export function matchesAgentmailHttpError(
   }
 
   return true
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'aborted' in value &&
+    typeof (value as { aborted?: unknown }).aborted === 'boolean'
+  )
 }
 
 function normalizeRequiredText(

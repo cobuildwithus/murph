@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline'
 import {
   createAgentmailApiClient,
+  listAllAgentmailInboxes,
   matchesAgentmailHttpError,
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
@@ -59,9 +60,9 @@ export function createSetupAgentmailSelectionResolver(
     })
 
     try {
-      const listed = await client.listInboxes()
-      if (listed.inboxes.length === 1) {
-        const inbox = listed.inboxes[0]!
+      const inboxes = await listAllAgentmailInboxes(client)
+      if (inboxes.length === 1) {
+        const inbox = inboxes[0]!
         return {
           accountId: inbox.inbox_id,
           emailAddress: normalizeNullableString(inbox.email),
@@ -69,9 +70,9 @@ export function createSetupAgentmailSelectionResolver(
         }
       }
 
-      if (listed.inboxes.length > 1 && input.allowPrompt) {
+      if (inboxes.length > 1 && input.allowPrompt) {
         const selected = await prompter.chooseInbox({
-          inboxes: listed.inboxes,
+          inboxes,
         })
         if (selected) {
           return {

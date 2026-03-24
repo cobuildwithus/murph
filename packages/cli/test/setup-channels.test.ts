@@ -630,6 +630,72 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
   }
 })
 
+test('createSetupAgentmailSelectionResolver paginates AgentMail inbox discovery before prompting for selection', async () => {
+  const listInboxesCalls: Array<{ pageToken?: string | null }> = []
+  const chooserCalls: string[][] = []
+  const resolver = createSetupAgentmailSelectionResolver({
+    createClient() {
+      return {
+        apiKey: 'agentmail-key',
+        baseUrl: 'https://api.agentmail.to/v0',
+        async listInboxes(input?: { pageToken?: string | null }) {
+          listInboxesCalls.push(input ?? {})
+          if (!input?.pageToken) {
+            return {
+              count: 1,
+              inboxes: [
+                {
+                  inbox_id: 'page-1@example.test',
+                  email: 'page-1@example.test',
+                },
+              ],
+              next_page_token: 'page-2',
+            }
+          }
+
+          if (input.pageToken === 'page-2') {
+            return {
+              count: 1,
+              inboxes: [
+                {
+                  inbox_id: 'page-2@example.test',
+                  email: 'page-2@example.test',
+                },
+              ],
+            }
+          }
+
+          throw new Error(`unexpected page token: ${String(input.pageToken)}`)
+        },
+      } as any
+    },
+    prompter: {
+      async chooseInbox(input) {
+        chooserCalls.push(input.inboxes.map((inbox) => inbox.inbox_id))
+        return input.inboxes[1] ?? null
+      },
+      async promptManualInboxId() {
+        throw new Error('promptManualInboxId should not be called in this test')
+      },
+    },
+  })
+
+  const selected = await resolver({
+    allowPrompt: true,
+    env: {
+      AGENTMAIL_API_KEY: 'agentmail-key',
+    },
+  })
+
+  assert.deepEqual(listInboxesCalls, [{}, { pageToken: 'page-2' }])
+  assert.deepEqual(chooserCalls, [['page-1@example.test', 'page-2@example.test']])
+  assert.deepEqual(selected, {
+    accountId: 'page-2@example.test',
+    emailAddress: 'page-2@example.test',
+    mode: 'selected',
+  })
+})
+
 test('createSetupAgentmailSelectionResolver returns a manual inbox id when discovery is forbidden and the operator enters one', async () => {
   const resolver = createSetupAgentmailSelectionResolver({
     createClient() {
