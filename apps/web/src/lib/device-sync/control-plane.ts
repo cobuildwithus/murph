@@ -3,7 +3,7 @@ import {
   deviceSyncError,
   isDeviceSyncError,
   resolveOuraWebhookVerificationChallenge,
-} from "#device-syncd";
+} from "@healthybob/device-syncd";
 
 import type {
   BeginConnectionResult,
@@ -13,7 +13,7 @@ import type {
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
   ProviderAuthTokens,
-} from "#device-syncd";
+} from "@healthybob/device-syncd";
 import { getPrisma } from "../prisma";
 import { assertBrowserMutationOrigin, requireAuthenticatedHostedUser } from "./auth";
 import { createHostedSecretCodec } from "./crypto";

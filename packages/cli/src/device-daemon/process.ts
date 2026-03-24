@@ -7,6 +7,14 @@ import {
   type DeviceDaemonDependencies,
 } from './types.js'
 
+function sanitizeChildProcessEnv(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const nextEnv = { ...env }
+  delete nextEnv.NODE_V8_COVERAGE
+  return nextEnv
+}
+
 export function defaultIsProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
@@ -32,7 +40,7 @@ export async function defaultSpawnDeviceDaemonProcess(input: {
       const child = spawn(input.command, input.args, {
         detached: true,
         stdio: ['ignore', stdoutFd, stderrFd],
-        env: input.env,
+        env: sanitizeChildProcessEnv(input.env),
       })
 
       child.once('error', (error) => {

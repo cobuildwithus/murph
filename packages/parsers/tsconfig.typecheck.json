@@ -15,6 +15,18 @@
       ],
       "@healthybob/core/*": [
         "packages/core/dist/*"
+      ],
+      "@healthybob/inboxd": [
+        "packages/inboxd/dist/index.d.ts"
+      ],
+      "@healthybob/inboxd/*": [
+        "packages/inboxd/dist/*"
+      ],
+      "@healthybob/runtime-state": [
+        "packages/runtime-state/dist/index.d.ts"
+      ],
+      "@healthybob/runtime-state/*": [
+        "packages/runtime-state/dist/*"
       ]
     },
     "rootDir": ".",
@@ -26,14 +38,20 @@
       "path": "../contracts/tsconfig.build.json"
     },
     {
+      "path": "../runtime-state"
+    },
+    {
       "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../inboxd"
     }
   ],
   "include": [
-    "src/**/*.ts",
-    "test/**/*.ts"
+    "src/**/*.ts"
   ],
   "exclude": [
-    "dist"
+    "dist",
+    ".test-dist"
   ]
 }

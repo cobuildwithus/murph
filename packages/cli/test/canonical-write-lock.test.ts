@@ -16,13 +16,18 @@ import {
   validateVault,
   VaultError,
 } from "@healthybob/core";
-import { repoRoot, withoutNodeV8Coverage } from "./cli-test-helpers.js";
+import {
+  ensureCliRuntimeArtifacts,
+  repoRoot,
+  withoutNodeV8Coverage,
+} from "./cli-test-helpers.js";
 
 async function makeVaultRoot(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "healthybob-lock-test-"));
 }
 
 async function holdCanonicalWriteLock(vaultRoot: string) {
+  await ensureCliRuntimeArtifacts();
   const coreModuleUrl = pathToFileURL(path.join(repoRoot, "packages/core/dist/index.js")).href;
   const script = `
     const { acquireCanonicalWriteLock } = await import(${JSON.stringify(coreModuleUrl)});

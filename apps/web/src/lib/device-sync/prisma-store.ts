@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { Prisma, PrismaClient } from "@prisma/client";
-import { deviceSyncError } from "#device-syncd";
+import { deviceSyncError } from "@healthybob/device-syncd";
 
 import type {
   DeviceSyncAccount,
@@ -11,7 +11,7 @@ import type {
   OAuthStateRecord,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
-} from "#device-syncd";
+} from "@healthybob/device-syncd";
 import type { HostedSecretCodec } from "./crypto";
 import type { AuthenticatedHostedUser } from "./auth";
 import { generatePrefixedId, maybeIsoTimestamp, toIsoTimestamp, toJsonRecord } from "./shared";

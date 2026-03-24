@@ -57,7 +57,7 @@
     "./generated/*": "./generated/*"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.build.json --pretty false && tsc -p tsconfig.scripts.json --pretty false",
+    "build": "rimraf dist && tsc -b tsconfig.build.json --force --pretty false && tsc -p tsconfig.scripts.json --pretty false",
     "typecheck": "tsc -p tsconfig.json --pretty false",
     "generate": "pnpm build && node ./dist/scripts/generate-json-schema.js",
     "test": "pnpm build && node ./dist/scripts/verify.js",

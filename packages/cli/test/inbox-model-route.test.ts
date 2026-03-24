@@ -54,6 +54,9 @@ function createStubInboxServices(input: {
     sourceRemove: async () => {
       throw new Error('not implemented')
     },
+    sourceSetEnabled: async () => {
+      throw new Error('not implemented')
+    },
     sourceList: async () => {
       throw new Error('not implemented')
     },

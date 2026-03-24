@@ -28,8 +28,8 @@ export function parseMarkdownDocument(source: string): ParsedMarkdownDocument {
     mode: "tolerant",
     bodyNormalization: "trim",
     allowSameIndentArrayItems: true,
-    isIgnorableLine: (line) => line.startsWith("#"),
-    parseScalar: (value) => parseMarkdownScalar(value),
+    isIgnorableLine: (line: string) => line.startsWith("#"),
+    parseScalar: (value: string) => parseMarkdownScalar(value),
   });
 
   return {

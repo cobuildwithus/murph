@@ -10,11 +10,11 @@
       "@healthybob/contracts/*": [
         "packages/contracts/dist/*"
       ],
-      "@healthybob/core": [
-        "packages/core/dist/index.d.ts"
+      "@healthybob/runtime-state": [
+        "packages/runtime-state/dist/index.d.ts"
       ],
-      "@healthybob/core/*": [
-        "packages/core/dist/*"
+      "@healthybob/runtime-state/*": [
+        "packages/runtime-state/dist/*"
       ]
     },
     "rootDir": ".",
@@ -26,7 +26,7 @@
       "path": "../contracts/tsconfig.build.json"
     },
     {
-      "path": "../core/tsconfig.build.json"
+      "path": "../runtime-state"
     }
   ],
   "include": [
@@ -34,6 +34,7 @@
     "test/**/*.ts"
   ],
   "exclude": [
-    "dist"
+    "dist",
+    ".test-dist"
   ]
 }

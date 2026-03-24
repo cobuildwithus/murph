@@ -3,9 +3,8 @@ import {
   createOuraDeviceSyncProvider,
   createWhoopDeviceSyncProvider,
   deviceSyncError,
-} from "#device-syncd";
-
-import type { DeviceSyncProvider, DeviceSyncRegistry } from "#device-syncd";
+} from "@healthybob/device-syncd";
+import type { DeviceSyncProvider, DeviceSyncRegistry } from "@healthybob/device-syncd";
 import type { HostedDeviceSyncEnvironment } from "./env";
 
 export function createHostedDeviceSyncRegistry(env: HostedDeviceSyncEnvironment): DeviceSyncRegistry {

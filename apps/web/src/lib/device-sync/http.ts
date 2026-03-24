@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { DeviceSyncError, isDeviceSyncError } from "#device-syncd";
+import { DeviceSyncError, isDeviceSyncError } from "@healthybob/device-syncd";
 import { NextResponse } from "next/server";
 
 import { isRecord } from "./shared";

@@ -134,7 +134,7 @@ test('document and meal command schemas expose the expansion surface', async () 
   assert.deepEqual(documentListSchema.options.required, ['vault'])
 
   assert.equal('source' in mealAddSchema.options.properties, true)
-  assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['photo', 'vault'])
+  assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
 
   assert.equal('from' in mealListSchema.options.properties, true)
   assert.equal('to' in mealListSchema.options.properties, true)

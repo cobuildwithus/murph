@@ -270,7 +270,7 @@ export function splitTextIntoBlocks(
 }
 
 function toTypeError(error: unknown): Error {
-  if (isVaultError(error)) {
+  if (error instanceof Error && isVaultError(error)) {
     return new TypeError(error.message);
   }
 

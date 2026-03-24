@@ -68,6 +68,8 @@ function formatFrontmatterProblem(problem: FrontmatterParseProblem): Error {
     case "unexpected_trailing_content":
       return new Error(`Unexpected trailing frontmatter content at line ${lineNumber}.`);
   }
+
+  return new Error(problem.message);
 }
 
 export function parseFrontmatterDocument(

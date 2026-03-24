@@ -6,6 +6,14 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { VaultCliError } from '../vault-cli-errors.js'
 
+function sanitizeChildProcessEnv(
+  env: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv {
+  const nextEnv = { ...(env ?? process.env) }
+  delete nextEnv.NODE_V8_COVERAGE
+  return nextEnv
+}
+
 export interface CommandRunInput {
   file: string
   args: string[]
@@ -49,7 +57,7 @@ export function createDefaultCommandRunner(
     return await new Promise<CommandRunResult>((resolve, reject) => {
       const child = spawn(input.file, input.args, {
         cwd: input.cwd,
-        env: input.env,
+        env: sanitizeChildProcessEnv(input.env),
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
