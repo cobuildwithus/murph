@@ -306,7 +306,7 @@ function isBotActor(message: TelegramMessageLike, botUser: TelegramUser | null):
     return message.sender_business_bot.id === botUser.id;
   }
 
-  return Boolean(message.sender_business_bot?.is_bot ?? message.from?.is_bot);
+  return message.sender_business_bot?.is_bot === true;
 }
 
 async function buildTelegramAttachments(

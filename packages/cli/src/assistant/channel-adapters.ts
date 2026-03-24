@@ -17,6 +17,7 @@ import {
   mapImessageMessagesDbRuntimeError,
 } from '../imessage-readiness.js'
 import {
+  formatTelegramSendTarget,
   parseTelegramSendTarget,
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
@@ -67,7 +68,15 @@ interface EmailRuntimeDependencies {
 
 export interface AssistantChannelDependencies {
   sendImessage?: (input: { message: string; target: string }) => Promise<void>
-  sendTelegram?: (input: { message: string; target: string }) => Promise<void>
+  sendTelegram?: (input: {
+    message: string
+    target: string
+  }) => Promise<
+    | {
+        target: string
+      }
+    | void
+  >
   sendEmail?: (input: {
     identityId: string
     message: string
@@ -211,6 +220,18 @@ export async function sendTelegramMessage(
   },
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<void> {
+  await sendTelegramMessageDetailed(input, dependencies)
+}
+
+async function sendTelegramMessageDetailed(
+  input: {
+    message: string
+    target: string
+  },
+  dependencies: TelegramRuntimeDependencies = {},
+): Promise<{
+  target: string
+}> {
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -233,18 +254,25 @@ export async function sendTelegramMessage(
     /\/$/u,
     '',
   )
-  const target = parseTelegramSendTarget(input.target)
+  let target = parseTelegramSendTarget(input.target)
+  let targetLabel = formatTelegramSendTarget(target)
 
   const chunks = splitTelegramMessageText(input.message)
   for (const chunk of chunks) {
-    await sendTelegramTextChunk({
+    const delivered = await sendTelegramTextChunk({
       baseUrl,
       fetchImplementation,
       target,
-      targetLabel: input.target,
+      targetLabel,
       text: chunk,
       token,
     })
+    target = delivered.target
+    targetLabel = delivered.targetLabel
+  }
+
+  return {
+    target: targetLabel,
   }
 }
 
@@ -404,14 +432,15 @@ const TELEGRAM_CHANNEL_ADAPTER: AssistantChannelAdapter = {
     }
 
     const candidate = candidates[0]!
-    await send({
+    const delivered = await send({
       target: candidate.target,
       message: input.message,
     })
+    const deliveredTarget = delivered?.target ?? candidate.target
 
     return assistantChannelDeliverySchema.parse({
       channel: 'telegram',
-      target: candidate.target,
+      target: deliveredTarget,
       targetKind: candidate.kind,
       sentAt: new Date().toISOString(),
       messageLength: input.message.length,
@@ -600,8 +629,13 @@ async function sendTelegramTextChunk(input: {
   targetLabel: string
   text: string
   token: string
-}): Promise<void> {
+}): Promise<{
+  target: ReturnType<typeof parseTelegramSendTarget>
+  targetLabel: string
+}> {
   let lastFailure: VaultCliError | null = null
+  let target = input.target
+  let targetLabel = input.targetLabel
 
   for (let attempt = 0; attempt < TELEGRAM_MAX_DELIVERY_ATTEMPTS; attempt += 1) {
     let response: FetchLikeResponse
@@ -612,10 +646,10 @@ async function sendTelegramTextChunk(input: {
         baseUrl: input.baseUrl,
         fetchImplementation: input.fetchImplementation,
         payload: {
-          business_connection_id: input.target.businessConnectionId ?? undefined,
-          chat_id: input.target.chatId,
-          direct_messages_topic_id: input.target.directMessagesTopicId ?? undefined,
-          message_thread_id: input.target.messageThreadId ?? undefined,
+          business_connection_id: target.businessConnectionId ?? undefined,
+          chat_id: target.chatId,
+          direct_messages_topic_id: target.directMessagesTopicId ?? undefined,
+          message_thread_id: target.messageThreadId ?? undefined,
           text: input.text,
         },
         token: input.token,
@@ -627,7 +661,7 @@ async function sendTelegramTextChunk(input: {
         'Outbound Telegram delivery failed while calling the Bot API.',
         {
           error: describeUnknownError(error),
-          target: input.targetLabel,
+          target: targetLabel,
         },
       )
       if (attempt >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1) {
@@ -640,18 +674,35 @@ async function sendTelegramTextChunk(input: {
     }
 
     if (response.ok && isTelegramSuccessResponse(payload)) {
-      return
+      return {
+        target,
+        targetLabel,
+      }
     }
 
     const errorContext = extractTelegramErrorContext(payload)
+    if (
+      errorContext.migrateToChatId &&
+      errorContext.migrateToChatId !== target.chatId
+    ) {
+      target = {
+        ...target,
+        chatId: errorContext.migrateToChatId,
+      }
+      targetLabel = formatTelegramSendTarget(target)
+      attempt -= 1
+      continue
+    }
+
     const failure = new VaultCliError(
       'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
       errorContext.description ??
         `Telegram Bot API sendMessage failed with HTTP ${response.status}.`,
       {
         errorCode: errorContext.errorCode,
+        migrateToChatId: errorContext.migrateToChatId,
         status: response.status,
-        target: input.targetLabel,
+        target: targetLabel,
       },
     )
 
@@ -668,6 +719,11 @@ async function sendTelegramTextChunk(input: {
 
   if (lastFailure) {
     throw lastFailure
+  }
+
+  return {
+    target,
+    targetLabel,
   }
 }
 
@@ -697,12 +753,14 @@ function isTelegramSuccessResponse(
 function extractTelegramErrorContext(value: unknown): {
   description: string | null
   errorCode: number | null
+  migrateToChatId: string | null
   retryAfterSeconds: number | null
 } {
   if (!value || typeof value !== 'object') {
     return {
       description: null,
       errorCode: null,
+      migrateToChatId: null,
       retryAfterSeconds: null,
     }
   }
@@ -715,6 +773,9 @@ function extractTelegramErrorContext(value: unknown): {
     'error_code' in value && typeof (value as { error_code?: unknown }).error_code === 'number'
       ? (value as { error_code: number }).error_code
       : null
+  const migrateToChatId = extractTelegramMigrateToChatId(
+    value as Record<string, unknown>,
+  )
   const retryAfterSeconds = extractTelegramRetryAfter(
     value as Record<string, unknown>,
   )
@@ -722,6 +783,7 @@ function extractTelegramErrorContext(value: unknown): {
   return {
     description,
     errorCode,
+    migrateToChatId,
     retryAfterSeconds,
   }
 }
@@ -784,6 +846,27 @@ function shouldRetryTelegramSend(
   errorCode: number | null,
 ): boolean {
   return status >= 500 || status === 429 || errorCode === 429
+}
+
+function extractTelegramMigrateToChatId(
+  value: Record<string, unknown>,
+): string | null {
+  if (!('parameters' in value) || typeof value.parameters !== 'object' || value.parameters === null) {
+    return null
+  }
+
+  const migrateToChatId =
+    'migrate_to_chat_id' in value.parameters
+      ? (value.parameters as { migrate_to_chat_id?: unknown }).migrate_to_chat_id
+      : null
+
+  if (typeof migrateToChatId === 'string' && migrateToChatId.trim().length > 0) {
+    return migrateToChatId.trim()
+  }
+
+  return typeof migrateToChatId === 'number' && Number.isSafeInteger(migrateToChatId)
+    ? String(migrateToChatId)
+    : null
 }
 
 function extractTelegramRetryAfter(value: Record<string, unknown>): number | null {

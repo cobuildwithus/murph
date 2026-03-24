@@ -1,5 +1,6 @@
 import {
   assistantDeliverResultSchema,
+  type AssistantChannelDelivery,
   type AssistantSession,
 } from './assistant-cli-contracts.js'
 import {
@@ -10,7 +11,10 @@ import {
   sendTelegramMessage,
   type AssistantChannelDependencies,
 } from './assistant/channel-adapters.js'
-import { createAssistantBinding } from './assistant/bindings.js'
+import {
+  createAssistantBinding,
+  mergeAssistantBinding,
+} from './assistant/bindings.js'
 import type { ConversationRef } from './assistant/conversation-ref.js'
 import {
   mergeConversationRefs,
@@ -92,10 +96,11 @@ export async function deliverAssistantMessage(
 
   const updatedSession = await saveAssistantSession(input.vault, {
     ...resolved.session,
-    binding: {
-      ...resolved.session.binding,
-      channel: delivery.channel,
-    },
+    binding: resolvePersistedBinding(
+      resolved.session.binding,
+      delivery,
+      explicitTarget,
+    ),
     updatedAt: delivery.sentAt,
     lastTurnAt: delivery.sentAt,
   })
@@ -105,6 +110,47 @@ export async function deliverAssistantMessage(
     message: normalizedMessage,
     session: updatedSession,
     delivery,
+  })
+}
+
+function resolvePersistedBinding(
+  binding: AssistantSession['binding'],
+  delivery: AssistantChannelDelivery,
+  explicitTarget: string | null,
+): AssistantSession['binding'] {
+  if (explicitTarget) {
+    return mergeAssistantBinding(binding, {
+      channel: delivery.channel,
+    })
+  }
+
+  if (
+    binding.delivery?.kind === 'thread' &&
+    delivery.targetKind === 'thread' &&
+    (binding.threadId !== delivery.target || binding.delivery.target !== delivery.target)
+  ) {
+    return mergeAssistantBinding(binding, {
+      channel: delivery.channel,
+      threadId: delivery.target,
+      deliveryKind: 'thread',
+      deliveryTarget: delivery.target,
+    })
+  }
+
+  if (
+    binding.delivery?.kind === 'participant' &&
+    delivery.targetKind === 'participant' &&
+    binding.delivery.target !== delivery.target
+  ) {
+    return mergeAssistantBinding(binding, {
+      channel: delivery.channel,
+      deliveryKind: 'participant',
+      deliveryTarget: delivery.target,
+    })
+  }
+
+  return mergeAssistantBinding(binding, {
+    channel: delivery.channel,
   })
 }
 

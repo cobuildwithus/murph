@@ -454,15 +454,31 @@ function shouldRetryTelegramPollingError(error: unknown): boolean {
     return true;
   }
 
-  if (/webhook/u.test(error.message) || /\b409\b/u.test(error.message)) {
+  const statusCode = extractTelegramPollingStatusCode(error);
+  if (statusCode === 409 || /webhook/u.test(error.message)) {
     return false;
   }
 
-  if (/\b401\b/u.test(error.message) || /\b403\b/u.test(error.message)) {
+  if (statusCode !== null && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
     return false;
   }
 
   return true;
+}
+
+function extractTelegramPollingStatusCode(error: Error): number | null {
+  const match =
+    /^\s*(\d{3})\b/u.exec(error.message) ??
+    /\((\d{3}):/u.exec(error.message) ??
+    /\bHTTP\s+(\d{3})\b/iu.exec(error.message) ??
+    /\bstatus\s+(\d{3})\b/iu.exec(error.message);
+
+  if (!match) {
+    return null;
+  }
+
+  const statusCode = Number.parseInt(match[1], 10);
+  return Number.isSafeInteger(statusCode) ? statusCode : null;
 }
 
 async function waitForTelegramRetryDelay(

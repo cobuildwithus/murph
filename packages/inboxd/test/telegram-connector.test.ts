@@ -298,6 +298,34 @@ test("normalizeTelegramUpdate rejects unsupported edited Telegram updates", asyn
   );
 });
 
+test("normalizeTelegramUpdate does not treat third-party bot senders as self without bot identity context", async () => {
+  const capture = await normalizeTelegramUpdate({
+    update: {
+      update_id: 128,
+      message: {
+        message_id: 22,
+        date: 1_773_397_205,
+        text: "Helpful automation",
+        chat: {
+          id: -100321,
+          type: "supergroup",
+          title: "Meals",
+        },
+        from: {
+          id: 777,
+          first_name: "Notifier",
+          is_bot: true,
+        },
+      },
+    },
+    botUser: null,
+  });
+
+  assert.equal(capture.actor.id, "777");
+  assert.equal(capture.actor.displayName, "Notifier");
+  assert.equal(capture.actor.isSelf, false);
+});
+
 test("createTelegramPollConnector backfills in update order and emits Telegram update checkpoints", async () => {
   const emitted: Array<{ capture: InboundCapture; checkpoint?: Record<string, unknown> | null }> = [];
   let watcher:
@@ -603,6 +631,42 @@ test("createTelegramApiPollDriver retries transient polling failures before resu
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("createTelegramApiPollDriver stops retrying fatal 4xx polling failures", async () => {
+  let attempts = 0;
+  const driver = createTelegramApiPollDriver({
+    api: {
+      token: "bot-token",
+      async getMe() {
+        return {
+          id: 999,
+          username: "healthybob_bot",
+        };
+      },
+      async getUpdates() {
+        attempts += 1;
+        throw new Error("400 Bad Request: offset must be non-negative");
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+    } as unknown as TelegramApiClient,
+  });
+
+  const watcher = await driver.startWatching({
+    cursor: null,
+    onMessage: async () => {
+      throw new Error("onMessage should not be called in this test");
+    },
+    signal: new AbortController().signal,
+  });
+
+  await assert.rejects(
+    watcher.done,
+    /400 Bad Request: offset must be non-negative/u,
+  );
+  assert.equal(attempts, 1);
 });
 
 test("createTelegramPollConnector backfills page-by-page so cursors advance after persisted captures", async () => {

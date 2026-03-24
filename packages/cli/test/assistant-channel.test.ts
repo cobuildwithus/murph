@@ -173,6 +173,46 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
   assert.equal(result.session.turnCount, 0)
 })
 
+test('deliverAssistantMessage persists canonical Telegram thread targets returned by the sender', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-telegram-migrate-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sent: Array<{ message: string; target: string }> = []
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'telegram',
+      participantId: '123456789',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
+      message: 'Telegram thread reply.',
+    },
+    {
+      sendTelegram: async (input: { message: string; target: string }) => {
+        sent.push(input)
+        return {
+          target: '-1009876543210:topic:42',
+        }
+      },
+    },
+  )
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0], {
+    target: '-1001234567890:topic:42',
+    message: 'Telegram thread reply.',
+  })
+  assert.equal(result.delivery.target, '-1009876543210:topic:42')
+  assert.equal(result.session.binding.threadId, '-1009876543210:topic:42')
+  assert.equal(result.session.binding.delivery?.target, '-1009876543210:topic:42')
+  assert.equal(
+    result.session.binding.conversationKey,
+    'channel:telegram|thread:-1009876543210%3Atopic%3A42',
+  )
+})
+
 test('deliverAssistantMessage uses stored email thread bindings so one assistant session can reply back into the same email thread', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-email-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -472,6 +512,132 @@ test('sendTelegramMessage splits long replies and retries transient Telegram fai
     `${requests[1]?.text as string}${requests[2]?.text as string}`,
     longMessage,
   )
+})
+
+test('sendTelegramMessage retries migrated chat ids and preserves topic routing across chunks', async () => {
+  const longMessage = `${'A'.repeat(4096)}B`
+  const requests: Array<Record<string, unknown>> = []
+  let callCount = 0
+
+  await sendTelegramMessage(
+    {
+      message: longMessage,
+      target: '-1001234567890:topic:42',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'token-123',
+      },
+      fetchImplementation: async (_url, init) => {
+        callCount += 1
+        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+        requests.push(body)
+
+        if (callCount === 1) {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({
+              ok: false,
+              error_code: 400,
+              description: 'Bad Request: group chat was upgraded to a supergroup chat',
+              parameters: {
+                migrate_to_chat_id: -1009876543210,
+              },
+            }),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: { message_id: callCount } }),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 3)
+  assert.deepEqual(requests, [
+    {
+      chat_id: '-1001234567890',
+      message_thread_id: 42,
+      text: 'A'.repeat(4096),
+    },
+    {
+      chat_id: '-1009876543210',
+      message_thread_id: 42,
+      text: 'A'.repeat(4096),
+    },
+    {
+      chat_id: '-1009876543210',
+      message_thread_id: 42,
+      text: 'B',
+    },
+  ])
+})
+
+test('sendTelegramMessage keeps retry budget available after Telegram reports a migrated chat id', async () => {
+  const requests: Array<Record<string, unknown>> = []
+  let callCount = 0
+
+  await sendTelegramMessage(
+    {
+      message: 'Retry after migration.',
+      target: '-1001234567890:topic:42',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'token-123',
+      },
+      fetchImplementation: async (_url, init) => {
+        callCount += 1
+        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+        requests.push(body)
+
+        if (callCount <= 2) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({
+              ok: false,
+              error_code: 500,
+              description: 'Internal Server Error',
+            }),
+          }
+        }
+
+        if (callCount === 3) {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({
+              ok: false,
+              error_code: 400,
+              description: 'Bad Request: group chat was upgraded to a supergroup chat',
+              parameters: {
+                migrate_to_chat_id: -1009876543210,
+              },
+            }),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: { message_id: callCount } }),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 4)
+  assert.deepEqual(requests.map((request) => request.chat_id), [
+    '-1001234567890',
+    '-1001234567890',
+    '-1001234567890',
+    '-1009876543210',
+  ])
 })
 
 test('sendTelegramMessage requires a bot token before attempting delivery', async () => {
