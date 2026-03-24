@@ -154,7 +154,7 @@ interface ChromePanelProps {
   marginBottom?: number
   paddingX?: number
   paddingY?: number
-  width?: string
+  width?: number | string
 }
 
 interface ComposerEditingState {
@@ -185,7 +185,8 @@ function useAssistantInkTheme(): AssistantInkTheme {
 }
 
 const BUSY_INDICATOR_CHARACTER = '•'
-const ASSISTANT_PLAIN_TEXT_WRAP_SLACK = 4
+const ASSISTANT_CHAT_VIEW_PADDING_X = 1
+const ASSISTANT_PLAIN_TEXT_WRAP_SLACK = 1
 const ASSISTANT_INK_TTY_PATH =
   process.platform === 'win32' ? 'CONIN$' : '/dev/tty'
 
@@ -216,7 +217,7 @@ export function resolveChromePanelBoxProps(
   marginBottom: number
   paddingX: number
   paddingY: number
-  width: string
+  width: number | string
 } {
   const boxProps: {
     backgroundColor?: string
@@ -224,7 +225,7 @@ export function resolveChromePanelBoxProps(
     marginBottom: number
     paddingX: number
     paddingY: number
-    width: string
+    width: number | string
   } = {
     flexDirection: 'column',
     marginBottom: props.marginBottom ?? 1,
@@ -470,13 +471,28 @@ function wrapAssistantPlainTextLine(input: string, columns: number): string {
   return lines.join('\n')
 }
 
-function resolveAssistantPlainTextWrapColumns(columns: number | null | undefined): number {
-  const normalizedColumns =
-    typeof columns === 'number' && Number.isFinite(columns)
-      ? Math.max(1, Math.floor(columns))
-      : 80
+function resolveAssistantTerminalColumns(columns: number | null | undefined): number {
+  return typeof columns === 'number' && Number.isFinite(columns)
+    ? Math.max(1, Math.floor(columns))
+    : 80
+}
 
-  return Math.max(20, normalizedColumns - ASSISTANT_PLAIN_TEXT_WRAP_SLACK)
+export function resolveAssistantChatViewportWidth(
+  columns: number | null | undefined,
+): number {
+  return Math.max(
+    1,
+    resolveAssistantTerminalColumns(columns) - ASSISTANT_CHAT_VIEW_PADDING_X * 2,
+  )
+}
+
+export function resolveAssistantPlainTextWrapColumns(
+  columns: number | null | undefined,
+): number {
+  return Math.max(
+    1,
+    resolveAssistantChatViewportWidth(columns) - ASSISTANT_PLAIN_TEXT_WRAP_SLACK,
+  )
 }
 
 const WrappedTextBlock = React.memo(function WrappedTextBlock(input: {
@@ -1006,12 +1022,15 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
 ): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const { stdout } = useStdout()
+  const rowWidth = resolveAssistantChatViewportWidth(stdout?.columns)
 
   if (props.entry.kind === 'assistant') {
     return createElement(
       ChromePanel,
       {
         marginBottom: 1,
+        width: rowWidth,
       },
       createElement(AssistantMessageText, { text: props.entry.text }),
     )
@@ -1023,6 +1042,7 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
       {
         backgroundColor: theme.switcherBackground,
         marginBottom: 1,
+        width: rowWidth,
       },
       createElement(MessageRoleLabel, {
         kind: 'error',
@@ -1041,7 +1061,7 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
       {
         marginBottom: 1,
         paddingLeft: 2,
-        width: '100%',
+        width: rowWidth,
       },
       createElement(
         Text,
@@ -1059,13 +1079,13 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
       Box,
       {
         marginBottom: 1,
-        width: '100%',
+        width: rowWidth,
       },
       createElement(
         Box,
         {
           flexDirection: 'row',
-          width: '100%',
+          width: rowWidth,
         },
         createElement(
           Text,
@@ -1097,6 +1117,7 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
       backgroundColor: theme.composerBackground,
       marginBottom: 1,
       paddingY: 1,
+      width: rowWidth,
     },
     createElement(
       Box,
@@ -2819,7 +2840,7 @@ export async function runAssistantChatWithInk(
           Box,
           {
             flexDirection: 'column',
-            paddingX: 1,
+            paddingX: ASSISTANT_CHAT_VIEW_PADDING_X,
             paddingY: 1,
             width: '100%',
           },

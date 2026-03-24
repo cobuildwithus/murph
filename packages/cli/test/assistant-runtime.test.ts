@@ -93,7 +93,9 @@ import {
   renderChatTranscriptFeed,
   renderComposerValue,
   renderWrappedTextBlock,
+  resolveAssistantChatViewportWidth,
   resolveAssistantInkInputAdapter,
+  resolveAssistantPlainTextWrapColumns,
   resolveChromePanelBoxProps,
   resolveMessageRoleLabel,
   resolveAssistantHyperlinkTarget,
@@ -2675,9 +2677,17 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     marginBottom: 0,
     paddingY: 1,
   })
+  const fixedWidthPanel = resolveChromePanelBoxProps({
+    backgroundColor: LIGHT_ASSISTANT_INK_THEME.switcherBackground,
+    width: 78,
+  })
 
   assert.equal('borderColor' in plainPanel, false)
   assert.equal('borderStyle' in plainPanel, false)
+  assert.equal(resolveAssistantChatViewportWidth(80), 78)
+  assert.equal(resolveAssistantChatViewportWidth(2), 1)
+  assert.equal(resolveAssistantPlainTextWrapColumns(80), 77)
+  assert.equal(resolveAssistantPlainTextWrapColumns(2), 1)
   assert.deepEqual(plainPanel, {
     flexDirection: 'column',
     marginBottom: 1,
@@ -2692,6 +2702,14 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     paddingX: 1,
     paddingY: 1,
     width: '100%',
+  })
+  assert.deepEqual(fixedWidthPanel, {
+    backgroundColor: LIGHT_ASSISTANT_INK_THEME.switcherBackground,
+    flexDirection: 'column',
+    marginBottom: 1,
+    paddingX: 1,
+    paddingY: 0,
+    width: 78,
   })
 
   assert.equal(
