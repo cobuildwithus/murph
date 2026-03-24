@@ -1,26 +1,13 @@
 import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.js";
 import {
   addMeal as addMealInternal,
-  createExperiment as createExperimentViaLegacyMutationsInternal,
-  ensureJournalDay as ensureJournalDayInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
 } from "./mutations.js";
 import {
-  appendJournal as appendJournalInternal,
-  checkpointExperiment as checkpointExperimentInternal,
-  linkJournalEventIds as linkJournalEventIdsInternal,
-  linkJournalStreams as linkJournalStreamsInternal,
   promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
   promoteInboxJournal as promoteInboxJournalInternal,
-  stopExperiment as stopExperimentViaCanonicalMutationsInternal,
-  unlinkJournalEventIds as unlinkJournalEventIdsInternal,
-  unlinkJournalStreams as unlinkJournalStreamsInternal,
-  updateExperiment as updateExperimentViaCanonicalMutationsInternal,
-  updateVaultSummary as updateVaultSummaryInternal,
-  upsertEvent as upsertEventInternal,
-  upsertProvider as upsertProviderInternal,
 } from "./canonical-mutations.js";
 import {
   acquireCanonicalWriteLock,
@@ -32,6 +19,7 @@ import { importAssessmentResponse as importAssessmentResponseInternal } from "./
 import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.js";
 import { upsertCondition as upsertConditionInternal } from "./bank/conditions.js";
 import { upsertGoal as upsertGoalInternal } from "./bank/goals.js";
+import { upsertProvider as upsertProviderInternal } from "./bank/providers.js";
 import { upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
 import {
   stopRegimenItem as stopRegimenItemInternal,
@@ -43,6 +31,22 @@ import {
   appendBloodTest as appendBloodTestInternal,
   appendHistoryEvent as appendHistoryEventInternal,
 } from "./history/api.js";
+import {
+  checkpointExperiment as checkpointExperimentInternal,
+  createExperiment as createExperimentViaLegacyMutationsInternal,
+  stopExperiment as stopExperimentViaCanonicalMutationsInternal,
+  updateExperiment as updateExperimentViaCanonicalMutationsInternal,
+} from "./domains/experiments.js";
+import {
+  appendJournal as appendJournalInternal,
+  ensureJournalDay as ensureJournalDayInternal,
+  linkJournalEventIds as linkJournalEventIdsInternal,
+  linkJournalStreams as linkJournalStreamsInternal,
+  unlinkJournalEventIds as unlinkJournalEventIdsInternal,
+  unlinkJournalStreams as unlinkJournalStreamsInternal,
+} from "./domains/journal.js";
+import { upsertEvent as upsertEventInternal } from "./domains/events.js";
+import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.js";
 import {
   appendProfileSnapshot as appendProfileSnapshotInternal,
   rebuildCurrentProfile as rebuildCurrentProfileInternal,

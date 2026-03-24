@@ -10,15 +10,21 @@ import {
   listAllergies,
   listConditions,
   listGoals,
+  listProviders,
+  listRecipes,
   listRegimenItems,
   readAllergy,
   readCondition,
   readGoal,
+  readProvider,
+  readRecipe,
   readRegimenItem,
   stopRegimenItem,
   upsertAllergy,
   upsertCondition,
   upsertGoal,
+  upsertProvider,
+  upsertRecipe,
   upsertRegimenItem,
 } from "../src/bank/index.js";
 
@@ -180,6 +186,99 @@ test("goal id-or-slug resolution preserves conflict, missing, and read-preferenc
       error instanceof VaultError &&
       error.code === "VAULT_GOAL_MISSING" &&
       error.message === "Goal was not found.",
+  );
+});
+
+test("providers and recipes use first-class markdown registry reads without changing selector behavior", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-provider-recipe-registry");
+  await initializeVault({ vaultRoot });
+
+  const createdProvider = await upsertProvider({
+    vaultRoot,
+    title: "Labcorp",
+    slug: "labcorp",
+    status: "active",
+    specialty: "lab",
+    organization: "Labcorp",
+    note: "Primary lab partner.",
+    body: "# Labcorp\n\nPrimary lab partner.\n",
+  });
+  const renamedProvider = await upsertProvider({
+    vaultRoot,
+    providerId: createdProvider.providerId,
+    slug: "labcorp-west",
+    title: "Labcorp West",
+    status: "active",
+    specialty: "lab",
+    organization: "Labcorp",
+    note: "Primary lab partner.",
+    body: "# Labcorp West\n\nPrimary lab partner.\n",
+  });
+  const secondProvider = await upsertProvider({
+    vaultRoot,
+    title: "Quest Diagnostics",
+    slug: "quest-diagnostics",
+    status: "active",
+  });
+  const createdRecipe = await upsertRecipe({
+    vaultRoot,
+    title: "Sheet Pan Salmon Bowls",
+    slug: "sheet-pan-salmon-bowls",
+    status: "saved",
+    cuisine: "mediterranean",
+    dishType: "dinner",
+    summary: "A reliable high-protein salmon bowl with roasted vegetables and rice.",
+    ingredients: ["2 salmon fillets", "2 cups cooked rice"],
+    steps: ["Roast the broccoli.", "Add the salmon and finish roasting."],
+  });
+
+  const listedProviders = await listProviders(vaultRoot);
+  const readProviderById = await readProvider({
+    vaultRoot,
+    providerId: createdProvider.providerId,
+  });
+  const readProviderBySlug = await readProvider({
+    vaultRoot,
+    slug: "labcorp-west",
+  });
+  const listedRecipes = await listRecipes(vaultRoot);
+  const readRecipeById = await readRecipe({
+    vaultRoot,
+    recipeId: createdRecipe.record.recipeId,
+  });
+  const readRecipeBySlug = await readRecipe({
+    vaultRoot,
+    slug: "sheet-pan-salmon-bowls",
+  });
+
+  assert.equal(createdProvider.created, true);
+  assert.equal(renamedProvider.created, false);
+  assert.equal(renamedProvider.relativePath, "bank/providers/labcorp-west.md");
+  assert.equal(listedProviders.length, 2);
+  assert.equal(readProviderById.providerId, createdProvider.providerId);
+  assert.equal(readProviderById.slug, "labcorp-west");
+  assert.equal(readProviderBySlug.providerId, createdProvider.providerId);
+  assert.equal(readProviderBySlug.title, "Labcorp West");
+  assert.equal(listedProviders[0]?.providerId, createdProvider.providerId);
+  assert.equal(listedProviders[1]?.providerId, secondProvider.providerId);
+  assert.equal(listedRecipes.length, 1);
+  assert.equal(readRecipeById.recipeId, createdRecipe.record.recipeId);
+  assert.equal(readRecipeById.slug, "sheet-pan-salmon-bowls");
+  assert.equal(readRecipeBySlug.recipeId, createdRecipe.record.recipeId);
+  assert.equal(readRecipeBySlug.title, "Sheet Pan Salmon Bowls");
+
+  await assert.rejects(
+    () =>
+      upsertProvider({
+        vaultRoot,
+        providerId: createdProvider.providerId,
+        slug: secondProvider.relativePath
+          .replace("bank/providers/", "")
+          .replace(".md", ""),
+        title: "Labcorp West",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "HB_PROVIDER_CONFLICT",
   );
 });
 

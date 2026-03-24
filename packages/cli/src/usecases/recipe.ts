@@ -1,27 +1,25 @@
-import { readFile, readdir } from 'node:fs/promises'
-import path from 'node:path'
-
-import {
-  RECIPE_STATUSES,
-  recipeFrontmatterSchema,
-  type RecipeFrontmatter,
-} from '@healthybob/contracts'
+import { RECIPE_STATUSES } from '@healthybob/contracts'
 import { z } from 'incur'
 
 import { loadJsonInputObject } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { buildEntityLinks } from './shared.js'
-import {
-  resolveVaultRelativePath,
-  toVaultCliError,
-} from './vault-usecase-helpers.js'
+import { toVaultCliError } from './vault-usecase-helpers.js'
+
+interface RecipeReadModel {
+  recipeId: string
+  slug: string
+  title: string
+  status: string
+  relativePath: string
+  markdown: string
+  [key: string]: unknown
+}
+
+const RECIPE_ID_PATTERN = /^rcp_[0-9A-Za-z]+$/u
 
 interface RecipeCoreRuntime {
-  parseFrontmatterDocument(markdown: string): {
-    attributes: Record<string, unknown>
-    body: string
-  }
   upsertRecipe(input: {
     vaultRoot: string
     recipeId?: string
@@ -48,6 +46,12 @@ interface RecipeCoreRuntime {
       relativePath: string
     }
   }>
+  listRecipes(vaultRoot: string): Promise<RecipeReadModel[]>
+  readRecipe(input: {
+    vaultRoot: string
+    recipeId?: string
+    slug?: string
+  }): Promise<RecipeReadModel>
 }
 
 const slugSchema = z
@@ -193,16 +197,14 @@ export async function upsertRecipeRecordFromInput(input: {
 
 export async function showRecipeRecord(vault: string, lookup: string) {
   const recipe = await requireRecipeRecord(vault, lookup)
-  const data = {
-    ...recipe.attributes,
-  }
+  const data = buildRecipeData(recipe)
 
   return {
     vault,
     entity: {
-      id: recipe.attributes.recipeId,
+      id: recipe.recipeId,
       kind: 'recipe',
-      title: recipe.attributes.title,
+      title: recipe.title,
       occurredAt: null,
       path: recipe.relativePath,
       markdown: recipe.markdown,
@@ -222,21 +224,19 @@ export async function listRecipeRecords(input: {
   const recipes = await readRecipeEntries(input.vault)
   const items = recipes
     .filter((entry) =>
-      input.status ? entry.attributes.status === input.status : true,
+      input.status ? entry.status === input.status : true,
     )
     .sort((left, right) =>
-      left.attributes.title.localeCompare(right.attributes.title),
+      left.title.localeCompare(right.title),
     )
     .slice(0, input.limit)
     .map((entry) => {
-      const data = {
-        ...entry.attributes,
-      }
+      const data = buildRecipeData(entry)
 
       return {
-        id: entry.attributes.recipeId,
+        id: entry.recipeId,
         kind: 'recipe',
-        title: entry.attributes.title,
+        title: entry.title,
         occurredAt: null,
         path: entry.relativePath,
         markdown: entry.markdown,
@@ -260,75 +260,38 @@ export async function listRecipeRecords(input: {
 }
 
 async function requireRecipeRecord(vault: string, lookup: string) {
-  const entries = await readRecipeEntries(vault)
   const normalizedLookup = lookup.trim()
-  const entry = entries.find(
-    (candidate) =>
-      candidate.attributes.recipeId === normalizedLookup ||
-      candidate.attributes.slug === normalizedLookup,
-  )
+  const core = await loadRecipeCoreRuntime()
 
-  if (!entry) {
-    throw new VaultCliError('not_found', `No recipe found for "${lookup}".`)
+  try {
+    return await core.readRecipe({
+      vaultRoot: vault,
+      recipeId: RECIPE_ID_PATTERN.test(normalizedLookup) ? normalizedLookup : undefined,
+      slug: normalizedLookup,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      VAULT_RECIPE_MISSING: {
+        code: 'not_found',
+        message: `No recipe found for "${lookup}".`,
+      },
+      VAULT_INVALID_RECIPE: {
+        code: 'contract_invalid',
+      },
+    })
   }
-
-  return entry
 }
 
 async function readRecipeEntries(vaultRoot: string) {
   const core = await loadRecipeCoreRuntime()
-  const recipesRoot = await resolveVaultRelativePath(vaultRoot, 'bank/recipes')
-  const files = await safeReadMarkdownFiles(recipesRoot)
-  const entries: Array<{
-    relativePath: string
-    markdown: string
-    body: string
-    attributes: RecipeFrontmatter
-  }> = []
-
-  for (const fileName of files) {
-    const relativePath = path.posix.join('bank/recipes', fileName)
-    const markdown = await readFile(
-      await resolveVaultRelativePath(vaultRoot, relativePath),
-      'utf8',
-    )
-    const document = core.parseFrontmatterDocument(markdown)
-    entries.push({
-      relativePath,
-      markdown,
-      body: document.body,
-      attributes: validateRecipeFrontmatter(document.attributes),
-    })
-  }
-
-  return entries
-}
-
-function validateRecipeFrontmatter(value: unknown) {
-  const result = recipeFrontmatterSchema.safeParse(value)
-
-  if (!result.success) {
-    throw new VaultCliError('contract_invalid', 'Recipe frontmatter is invalid.', {
-      errors: result.error.flatten(),
-    })
-  }
-
-  return result.data
-}
-
-async function safeReadMarkdownFiles(directory: string) {
   try {
-    const entries = await readdir(directory, { withFileTypes: true })
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-      .map((entry) => entry.name)
-      .sort((left, right) => left.localeCompare(right))
+    return await core.listRecipes(vaultRoot)
   } catch (error) {
-    if (isMissingPathError(error)) {
-      return []
-    }
-
-    throw error
+    throw toVaultCliError(error, {
+      VAULT_INVALID_RECIPE: {
+        code: 'contract_invalid',
+      },
+    })
   }
 }
 
@@ -336,11 +299,9 @@ async function loadRecipeCoreRuntime(): Promise<RecipeCoreRuntime> {
   return loadRuntimeModule<RecipeCoreRuntime>('@healthybob/core')
 }
 
-function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'ENOENT'
-  )
+function buildRecipeData(recipe: RecipeReadModel) {
+  const { relativePath: _relativePath, markdown: _markdown, ...data } = recipe
+  return {
+    ...data,
+  }
 }

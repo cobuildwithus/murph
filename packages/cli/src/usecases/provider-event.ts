@@ -1,10 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises'
-import path from 'node:path'
-import {
-  EVENT_KINDS,
-  providerFrontmatterSchema,
-  type ProviderFrontmatter,
-} from '@healthybob/contracts'
+import { EVENT_KINDS } from '@healthybob/contracts'
 import { z } from 'incur'
 import { loadJsonInputObject } from '../json-input.js'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
@@ -21,7 +15,6 @@ import {
   isVaultQueryableRecordId,
   normalizeIsoTimestamp,
   normalizeOptionalText,
-  resolveVaultRelativePath,
   toVaultCliError,
   stringArray,
   uniqueStrings,
@@ -29,11 +22,17 @@ import {
 
 type JsonObject = Record<string, unknown>
 
+interface ProviderReadModel {
+  providerId: string
+  slug: string
+  title: string
+  status?: string
+  relativePath: string
+  markdown: string
+  [key: string]: unknown
+}
+
 interface ProviderEventCoreRuntime {
-  parseFrontmatterDocument(markdown: string): {
-    attributes: Record<string, unknown>
-    body: string
-  }
   upsertProvider(input: {
     vaultRoot: string
     providerId?: string
@@ -77,6 +76,12 @@ interface ProviderEventCoreRuntime {
     }>
     shardPaths: string[]
   }>
+  listProviders(vaultRoot: string): Promise<ProviderReadModel[]>
+  readProvider(input: {
+    vaultRoot: string
+    providerId?: string
+    slug?: string
+  }): Promise<ProviderReadModel>
 }
 
 const providerStatusSchema = z.string().min(1)
@@ -342,18 +347,17 @@ export async function upsertProviderRecordFromInput(input: {
 
 export async function showProviderRecord(vault: string, lookup: string) {
   const provider = await requireProviderRecord(vault, lookup)
+  const data = buildProviderData(provider)
   return {
     vault,
     entity: {
-      id: provider.attributes.providerId,
+      id: provider.providerId,
       kind: 'provider',
-      title: provider.attributes.title,
+      title: provider.title,
       occurredAt: null,
       path: provider.relativePath,
       markdown: provider.markdown,
-      data: {
-        ...provider.attributes,
-      },
+      data,
       links: [],
     },
   }
@@ -361,30 +365,32 @@ export async function showProviderRecord(vault: string, lookup: string) {
 
 export async function listProviderRecords(input: {
   vault: string
-  status?: ProviderFrontmatter['status']
+  status?: string
   limit: number
 }) {
   const providers = await readProviderEntries(input.vault)
   const items = providers
     .filter((entry) =>
-      input.status ? entry.attributes.status === input.status : true,
+      input.status ? entry.status === input.status : true,
     )
     .sort((left, right) =>
-      left.attributes.title.localeCompare(right.attributes.title),
+      left.title.localeCompare(right.title),
     )
     .slice(0, input.limit)
-    .map((entry) => ({
-      id: entry.attributes.providerId,
-      kind: 'provider',
-      title: entry.attributes.title,
-      occurredAt: null,
-      path: entry.relativePath,
-      markdown: entry.markdown,
-      data: {
-        ...entry.attributes,
-      },
-      links: [],
-    }))
+    .map((entry) => {
+      const data = buildProviderData(entry)
+
+      return {
+        id: entry.providerId,
+        kind: 'provider',
+        title: entry.title,
+        occurredAt: null,
+        path: entry.relativePath,
+        markdown: entry.markdown,
+        data,
+        links: [],
+      }
+    })
 
   return {
     vault: input.vault,
@@ -573,76 +579,38 @@ export async function addSampleRecordsFromInput(input: {
 }
 
 async function requireProviderRecord(vault: string, lookup: string) {
-  const entries = await readProviderEntries(vault)
   const normalizedLookup = lookup.trim()
-  const entry = entries.find(
-    (candidate) =>
-      candidate.attributes.providerId === normalizedLookup ||
-      candidate.attributes.slug === normalizedLookup,
-  )
+  const core = await loadProviderEventCoreRuntime()
 
-  if (!entry) {
-    throw new VaultCliError('not_found', `No provider found for "${lookup}".`)
+  try {
+    return await core.readProvider({
+      vaultRoot: vault,
+      providerId: normalizedLookup,
+      slug: normalizedLookup,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      HB_PROVIDER_MISSING: {
+        code: 'not_found',
+        message: `No provider found for "${lookup}".`,
+      },
+      HB_PROVIDER_FRONTMATTER_INVALID: {
+        code: 'contract_invalid',
+      },
+    })
   }
-
-  return entry
 }
 
 async function readProviderEntries(vaultRoot: string) {
   const core = await loadProviderEventCoreRuntime()
-  const providersRoot = await resolveVaultRelativePath(vaultRoot, 'bank/providers')
-  const files = await safeReadMarkdownFiles(providersRoot)
-  const entries: Array<{
-    relativePath: string
-    markdown: string
-    body: string
-    attributes: ProviderFrontmatter
-  }> = []
-
-  for (const fileName of files) {
-    const relativePath = path.posix.join('bank/providers', fileName)
-    const markdown = await readFile(
-      await resolveVaultRelativePath(vaultRoot, relativePath),
-      'utf8',
-    )
-    const document = core.parseFrontmatterDocument(markdown)
-    entries.push({
-      relativePath,
-      markdown,
-      body: document.body,
-      attributes: validateProviderFrontmatter(document.attributes),
-    })
-  }
-
-  return entries
-}
-
-function validateProviderFrontmatter(value: unknown) {
-  const result = providerFrontmatterSchema.safeParse(value)
-  if (!result.success) {
-    throw new VaultCliError(
-      'contract_invalid',
-      'Provider frontmatter is invalid.',
-      { errors: result.error.flatten() },
-    )
-  }
-
-  return result.data
-}
-
-async function safeReadMarkdownFiles(directory: string) {
   try {
-    const entries = await readdir(directory, { withFileTypes: true })
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-      .map((entry) => entry.name)
-      .sort((left, right) => left.localeCompare(right))
+    return await core.listProviders(vaultRoot)
   } catch (error) {
-    if (isMissingPathError(error)) {
-      return []
-    }
-
-    throw error
+    throw toVaultCliError(error, {
+      HB_PROVIDER_FRONTMATTER_INVALID: {
+        code: 'contract_invalid',
+      },
+    })
   }
 }
 
@@ -703,11 +671,14 @@ async function loadProviderEventCoreRuntime(): Promise<ProviderEventCoreRuntime>
   return loadRuntimeModule<ProviderEventCoreRuntime>('@healthybob/core')
 }
 
-function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'ENOENT'
-  )
+function buildProviderData(provider: ProviderReadModel) {
+  const {
+    relativePath: _relativePath,
+    markdown: _markdown,
+    body: _body,
+    ...data
+  } = provider as ProviderReadModel & { body?: string }
+  return {
+    ...data,
+  }
 }
