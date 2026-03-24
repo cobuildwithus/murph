@@ -290,6 +290,97 @@ test("conditions and allergies are stored as deterministic markdown registry pag
   assert.ok(allergyOperations.every((operation) => operation.status === "committed"));
 });
 
+test("condition and allergy id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-condition-allergy-resolution");
+  await initializeVault({ vaultRoot });
+
+  const firstCondition = await upsertCondition({
+    vaultRoot,
+    title: "Migraine",
+  });
+  const secondCondition = await upsertCondition({
+    vaultRoot,
+    title: "Asthma",
+  });
+
+  await assert.rejects(
+    () =>
+      upsertCondition({
+        vaultRoot,
+        conditionId: firstCondition.record.conditionId,
+        slug: secondCondition.record.slug,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_CONDITION_CONFLICT" &&
+      error.message === "Condition id and slug resolve to different records.",
+  );
+
+  const readConditionByConflictingSelectors = await readCondition({
+    vaultRoot,
+    conditionId: firstCondition.record.conditionId,
+    slug: secondCondition.record.slug,
+  });
+
+  assert.equal(readConditionByConflictingSelectors.conditionId, firstCondition.record.conditionId);
+
+  await assert.rejects(
+    () =>
+      readCondition({
+        vaultRoot,
+        slug: "missing-condition",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_CONDITION_MISSING" &&
+      error.message === "Condition was not found.",
+  );
+
+  const firstAllergy = await upsertAllergy({
+    vaultRoot,
+    title: "Peanut allergy",
+    substance: "peanut",
+  });
+  const secondAllergy = await upsertAllergy({
+    vaultRoot,
+    title: "Shellfish allergy",
+    substance: "shellfish",
+  });
+
+  await assert.rejects(
+    () =>
+      upsertAllergy({
+        vaultRoot,
+        allergyId: firstAllergy.record.allergyId,
+        slug: secondAllergy.record.slug,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_ALLERGY_CONFLICT" &&
+      error.message === "Allergy id and slug resolve to different records.",
+  );
+
+  const readAllergyByConflictingSelectors = await readAllergy({
+    vaultRoot,
+    allergyId: firstAllergy.record.allergyId,
+    slug: secondAllergy.record.slug,
+  });
+
+  assert.equal(readAllergyByConflictingSelectors.allergyId, firstAllergy.record.allergyId);
+
+  await assert.rejects(
+    () =>
+      readAllergy({
+        vaultRoot,
+        slug: "missing-allergy",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_ALLERGY_MISSING" &&
+      error.message === "Allergy was not found.",
+  );
+});
+
 test("regimens support medication and supplement groups plus stop handling", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-regimens");
   await initializeVault({ vaultRoot });

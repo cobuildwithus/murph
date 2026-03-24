@@ -1,12 +1,6 @@
 import { VaultError } from "../errors.js";
 import { generateRecordId } from "../ids.js";
-import {
-  loadMarkdownRegistryDocuments,
-  readRegistryRecord,
-  resolveMarkdownRegistryUpsertTarget,
-  selectExistingRegistryRecord,
-  writeMarkdownRegistryRecord,
-} from "../registry/markdown.js";
+import { createMarkdownRegistryApi } from "../registry/api.js";
 
 import {
   CONDITIONS_DIRECTORY,
@@ -132,121 +126,114 @@ function validateConditionTimeline(record: ConditionRecord): ConditionRecord {
   return record;
 }
 
-async function loadConditions(vaultRoot: string): Promise<ConditionRecord[]> {
-  const records = await loadMarkdownRegistryDocuments({
-    vaultRoot,
-    directory: CONDITIONS_DIRECTORY,
-    recordFromParts: parseConditionRecord,
-    isExpectedRecord: (record) =>
-      record.docType === CONDITION_DOC_TYPE && record.schemaVersion === CONDITION_SCHEMA_VERSION,
-    invalidCode: "VAULT_INVALID_CONDITION",
-    invalidMessage: "Condition registry document has an unexpected shape.",
-  });
-
-  records.sort((left, right) => left.title.localeCompare(right.title) || left.conditionId.localeCompare(right.conditionId));
-  return records;
-}
+const conditionRegistryApi = createMarkdownRegistryApi<ConditionRecord>({
+  directory: CONDITIONS_DIRECTORY,
+  recordFromParts: parseConditionRecord,
+  isExpectedRecord: (record) =>
+    record.docType === CONDITION_DOC_TYPE && record.schemaVersion === CONDITION_SCHEMA_VERSION,
+  invalidCode: "VAULT_INVALID_CONDITION",
+  invalidMessage: "Condition registry document has an unexpected shape.",
+  sortRecords: (records) =>
+    records.sort(
+      (left, right) =>
+        left.title.localeCompare(right.title) || left.conditionId.localeCompare(right.conditionId),
+    ),
+  getRecordId: (record) => record.conditionId,
+  conflictCode: "VAULT_CONDITION_CONFLICT",
+  conflictMessage: "Condition id and slug resolve to different records.",
+  readMissingCode: "VAULT_CONDITION_MISSING",
+  readMissingMessage: "Condition was not found.",
+  createRecordId: () => generateRecordId("cond"),
+  operationType: "condition_upsert",
+  summary: (recordId) => `Upsert condition ${recordId}`,
+  audit: {
+    action: "condition_upsert",
+    commandName: "core.upsertCondition",
+    summary: (_created, recordId) => `Upserted condition ${recordId}.`,
+  },
+});
 
 export async function upsertCondition(
   input: UpsertConditionInput,
 ): Promise<UpsertConditionResult> {
   const normalizedConditionId = normalizeId(input.conditionId, "conditionId", "cond");
-  const existingRecords = await loadConditions(input.vaultRoot);
+  const existingRecords = await conditionRegistryApi.loadRecords(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const existingRecord = selectExistingRegistryRecord({
-    records: existingRecords,
-    recordId: normalizedConditionId,
-    slug: requestedSlug,
-    getRecordId: (record) => record.conditionId,
-    conflictCode: "VAULT_CONDITION_CONFLICT",
-    conflictMessage: "Condition id and slug resolve to different records.",
-  });
+  const existingRecord = conditionRegistryApi.selectExistingRecord(
+    existingRecords,
+    normalizedConditionId,
+    requestedSlug,
+  );
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const target = resolveMarkdownRegistryUpsertTarget({
+  return conditionRegistryApi.upsertRecord({
+    vaultRoot: input.vaultRoot,
     existingRecord,
     recordId: normalizedConditionId,
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
-    directory: CONDITIONS_DIRECTORY,
-    getRecordId: (record) => record.conditionId,
-    createRecordId: () => generateRecordId("cond"),
-  });
-  const attributes = buildAttributes(
-    validateConditionTimeline(
-      stripUndefined({
-        schemaVersion: CONDITION_SCHEMA_VERSION,
-        docType: CONDITION_DOC_TYPE,
-        conditionId: target.recordId,
-        slug: target.slug,
-        title,
-        clinicalStatus: resolveRequiredUpsertValue(
-          input.clinicalStatus,
-          existingRecord?.clinicalStatus,
-          "active",
-          (value) => optionalEnum(value, CONDITION_CLINICAL_STATUSES, "clinicalStatus") ?? "active",
+    buildDocument: (target) => {
+      const attributes = buildAttributes(
+        validateConditionTimeline(
+          stripUndefined({
+            schemaVersion: CONDITION_SCHEMA_VERSION,
+            docType: CONDITION_DOC_TYPE,
+            conditionId: target.recordId,
+            slug: target.slug,
+            title,
+            clinicalStatus: resolveRequiredUpsertValue(
+              input.clinicalStatus,
+              existingRecord?.clinicalStatus,
+              "active",
+              (value) => optionalEnum(value, CONDITION_CLINICAL_STATUSES, "clinicalStatus") ?? "active",
+            ),
+            verificationStatus: resolveOptionalUpsertValue(
+              input.verificationStatus,
+              existingRecord?.verificationStatus,
+              (value) => optionalEnum(value, CONDITION_VERIFICATION_STATUSES, "verificationStatus"),
+            ),
+            assertedOn: resolveOptionalUpsertValue(input.assertedOn, existingRecord?.assertedOn, (value) =>
+              optionalDateOnly(value, "assertedOn"),
+            ),
+            resolvedOn: resolveOptionalUpsertValue(input.resolvedOn, existingRecord?.resolvedOn, (value) =>
+              optionalDateOnly(value, "resolvedOn"),
+            ),
+            severity: resolveOptionalUpsertValue(input.severity, existingRecord?.severity, (value) =>
+              optionalEnum(value, CONDITION_SEVERITIES, "severity"),
+            ),
+            bodySites: resolveOptionalUpsertValue(input.bodySites, existingRecord?.bodySites, (value) =>
+              validateSortedStringList(value, "bodySites", "bodySite", 16, 120),
+            ),
+            relatedGoalIds: resolveOptionalUpsertValue(
+              input.relatedGoalIds,
+              existingRecord?.relatedGoalIds,
+              (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+            ),
+            relatedRegimenIds: resolveOptionalUpsertValue(
+              input.relatedRegimenIds,
+              existingRecord?.relatedRegimenIds,
+              (value) => normalizeRecordIdList(value, "relatedRegimenIds", "reg"),
+            ),
+            note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
+              optionalString(value, "note", 4000),
+            ),
+          }) as ConditionRecord,
         ),
-        verificationStatus: resolveOptionalUpsertValue(
-          input.verificationStatus,
-          existingRecord?.verificationStatus,
-          (value) => optionalEnum(value, CONDITION_VERIFICATION_STATUSES, "verificationStatus"),
-        ),
-        assertedOn: resolveOptionalUpsertValue(input.assertedOn, existingRecord?.assertedOn, (value) =>
-          optionalDateOnly(value, "assertedOn"),
-        ),
-        resolvedOn: resolveOptionalUpsertValue(input.resolvedOn, existingRecord?.resolvedOn, (value) =>
-          optionalDateOnly(value, "resolvedOn"),
-        ),
-        severity: resolveOptionalUpsertValue(input.severity, existingRecord?.severity, (value) =>
-          optionalEnum(value, CONDITION_SEVERITIES, "severity"),
-        ),
-        bodySites: resolveOptionalUpsertValue(input.bodySites, existingRecord?.bodySites, (value) =>
-          validateSortedStringList(value, "bodySites", "bodySite", 16, 120),
-        ),
-        relatedGoalIds: resolveOptionalUpsertValue(
-          input.relatedGoalIds,
-          existingRecord?.relatedGoalIds,
-          (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
-        ),
-        relatedRegimenIds: resolveOptionalUpsertValue(
-          input.relatedRegimenIds,
-          existingRecord?.relatedRegimenIds,
-          (value) => normalizeRecordIdList(value, "relatedRegimenIds", "reg"),
-        ),
-        note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
-          optionalString(value, "note", 4000),
-        ),
-      }) as ConditionRecord,
-    ),
-  );
-  const { auditPath, record } = await writeMarkdownRegistryRecord({
-    vaultRoot: input.vaultRoot,
-    target,
-    attributes,
-    body: buildBody({
-      ...attributes,
-      relativePath: target.relativePath,
-      markdown: existingRecord?.markdown ?? "",
-    } as ConditionRecord),
-    recordFromParts: parseConditionRecord,
-    operationType: "condition_upsert",
-    summary: `Upsert condition ${target.recordId}`,
-    audit: {
-      action: "condition_upsert",
-      commandName: "core.upsertCondition",
-      summary: `Upserted condition ${target.recordId}.`,
-      targetIds: [target.recordId],
+      );
+
+      return {
+        attributes,
+        body: buildBody({
+          ...attributes,
+          relativePath: target.relativePath,
+          markdown: existingRecord?.markdown ?? "",
+        } as ConditionRecord),
+      };
     },
   });
-
-  return {
-    created: target.created,
-    auditPath,
-    record,
-  };
 }
 
 export async function listConditions(vaultRoot: string): Promise<ConditionRecord[]> {
-  return loadConditions(vaultRoot);
+  return conditionRegistryApi.listRecords(vaultRoot);
 }
 
 export async function readCondition({
@@ -256,13 +243,9 @@ export async function readCondition({
 }: ReadConditionInput): Promise<ConditionRecord> {
   const normalizedConditionId = normalizeId(conditionId, "conditionId", "cond");
   const normalizedSlug = normalizeSelectorSlug(slug);
-  const records = await loadConditions(vaultRoot);
-  return readRegistryRecord({
-    records,
+  return conditionRegistryApi.readRecord({
+    vaultRoot,
     recordId: normalizedConditionId,
     slug: normalizedSlug,
-    getRecordId: (record) => record.conditionId,
-    readMissingCode: "VAULT_CONDITION_MISSING",
-    readMissingMessage: "Condition was not found.",
   });
 }

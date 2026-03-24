@@ -34,7 +34,7 @@ interface CreateMarkdownRegistryApiOptions<TRecord extends RegistryApiRecord> {
   audit: {
     action: MarkdownRegistryAuditAction;
     commandName: string;
-    summary: (created: boolean) => string;
+    summary: (created: boolean, recordId: string) => string;
   };
 }
 
@@ -135,7 +135,7 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
       audit: {
         action: audit.action,
         commandName: audit.commandName,
-        summary: audit.summary(target.created),
+        summary: audit.summary(target.created, target.recordId),
         targetIds: [target.recordId],
       },
     });

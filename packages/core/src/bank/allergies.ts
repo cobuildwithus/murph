@@ -1,11 +1,5 @@
 import { generateRecordId } from "../ids.js";
-import {
-  loadMarkdownRegistryDocuments,
-  readRegistryRecord,
-  resolveMarkdownRegistryUpsertTarget,
-  selectExistingRegistryRecord,
-  writeMarkdownRegistryRecord,
-} from "../registry/markdown.js";
+import { createMarkdownRegistryApi } from "../registry/api.js";
 
 import {
   ALLERGIES_DIRECTORY,
@@ -101,114 +95,102 @@ function buildAttributes(record: AllergyRecord): FrontmatterObject {
   }) as FrontmatterObject;
 }
 
-async function loadAllergies(vaultRoot: string): Promise<AllergyRecord[]> {
-  const records = await loadMarkdownRegistryDocuments({
-    vaultRoot,
-    directory: ALLERGIES_DIRECTORY,
-    recordFromParts: parseAllergyRecord,
-    isExpectedRecord: (record) =>
-      record.docType === ALLERGY_DOC_TYPE && record.schemaVersion === ALLERGY_SCHEMA_VERSION,
-    invalidCode: "VAULT_INVALID_ALLERGY",
-    invalidMessage: "Allergy registry document has an unexpected shape.",
-  });
-
-  records.sort((left, right) => left.title.localeCompare(right.title) || left.allergyId.localeCompare(right.allergyId));
-  return records;
-}
+const allergyRegistryApi = createMarkdownRegistryApi<AllergyRecord>({
+  directory: ALLERGIES_DIRECTORY,
+  recordFromParts: parseAllergyRecord,
+  isExpectedRecord: (record) =>
+    record.docType === ALLERGY_DOC_TYPE && record.schemaVersion === ALLERGY_SCHEMA_VERSION,
+  invalidCode: "VAULT_INVALID_ALLERGY",
+  invalidMessage: "Allergy registry document has an unexpected shape.",
+  sortRecords: (records) =>
+    records.sort(
+      (left, right) => left.title.localeCompare(right.title) || left.allergyId.localeCompare(right.allergyId),
+    ),
+  getRecordId: (record) => record.allergyId,
+  conflictCode: "VAULT_ALLERGY_CONFLICT",
+  conflictMessage: "Allergy id and slug resolve to different records.",
+  readMissingCode: "VAULT_ALLERGY_MISSING",
+  readMissingMessage: "Allergy was not found.",
+  createRecordId: () => generateRecordId("alg"),
+  operationType: "allergy_upsert",
+  summary: (recordId) => `Upsert allergy ${recordId}`,
+  audit: {
+    action: "allergy_upsert",
+    commandName: "core.upsertAllergy",
+    summary: (_created, recordId) => `Upserted allergy ${recordId}.`,
+  },
+});
 
 export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAllergyResult> {
   const normalizedAllergyId = normalizeId(input.allergyId, "allergyId", "alg");
-  const existingRecords = await loadAllergies(input.vaultRoot);
+  const existingRecords = await allergyRegistryApi.loadRecords(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const existingRecord = selectExistingRegistryRecord({
-    records: existingRecords,
-    recordId: normalizedAllergyId,
-    slug: requestedSlug,
-    getRecordId: (record) => record.allergyId,
-    conflictCode: "VAULT_ALLERGY_CONFLICT",
-    conflictMessage: "Allergy id and slug resolve to different records.",
-  });
+  const existingRecord = allergyRegistryApi.selectExistingRecord(
+    existingRecords,
+    normalizedAllergyId,
+    requestedSlug,
+  );
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const target = resolveMarkdownRegistryUpsertTarget({
+  return allergyRegistryApi.upsertRecord({
+    vaultRoot: input.vaultRoot,
     existingRecord,
     recordId: normalizedAllergyId,
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
-    directory: ALLERGIES_DIRECTORY,
-    getRecordId: (record) => record.allergyId,
-    createRecordId: () => generateRecordId("alg"),
-  });
-  const attributes = buildAttributes(
-    stripUndefined({
-      schemaVersion: ALLERGY_SCHEMA_VERSION,
-      docType: ALLERGY_DOC_TYPE,
-      allergyId: target.recordId,
-      slug: target.slug,
-      title,
-      substance: requireString(input.substance ?? existingRecord?.substance, "substance", 160),
-      status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
-        optionalEnum(value, ALLERGY_STATUSES, "status") ?? "active",
-      ),
-      criticality: resolveOptionalUpsertValue(input.criticality, existingRecord?.criticality, (value) =>
-        optionalEnum(value, ALLERGY_CRITICALITIES, "criticality"),
-      ),
-      reaction: resolveOptionalUpsertValue(input.reaction, existingRecord?.reaction, (value) =>
-        optionalString(value, "reaction", 160),
-      ),
-      recordedOn: resolveOptionalUpsertValue(input.recordedOn, existingRecord?.recordedOn, (value) =>
-        optionalDateOnly(value, "recordedOn"),
-      ),
-      relatedConditionIds: resolveOptionalUpsertValue(
-        input.relatedConditionIds,
-        existingRecord?.relatedConditionIds,
-        (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
-      ),
-      note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
-        optionalString(value, "note", 4000),
-      ),
-    }) as AllergyRecord,
-  );
-  const { auditPath, record } = await writeMarkdownRegistryRecord({
-    vaultRoot: input.vaultRoot,
-    target,
-    attributes,
-    body: buildBody({
-      ...attributes,
-      relativePath: target.relativePath,
-      markdown: existingRecord?.markdown ?? "",
-    } as AllergyRecord),
-    recordFromParts: parseAllergyRecord,
-    operationType: "allergy_upsert",
-    summary: `Upsert allergy ${target.recordId}`,
-    audit: {
-      action: "allergy_upsert",
-      commandName: "core.upsertAllergy",
-      summary: `Upserted allergy ${target.recordId}.`,
-      targetIds: [target.recordId],
+    buildDocument: (target) => {
+      const attributes = buildAttributes(
+        stripUndefined({
+          schemaVersion: ALLERGY_SCHEMA_VERSION,
+          docType: ALLERGY_DOC_TYPE,
+          allergyId: target.recordId,
+          slug: target.slug,
+          title,
+          substance: requireString(input.substance ?? existingRecord?.substance, "substance", 160),
+          status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
+            optionalEnum(value, ALLERGY_STATUSES, "status") ?? "active",
+          ),
+          criticality: resolveOptionalUpsertValue(input.criticality, existingRecord?.criticality, (value) =>
+            optionalEnum(value, ALLERGY_CRITICALITIES, "criticality"),
+          ),
+          reaction: resolveOptionalUpsertValue(input.reaction, existingRecord?.reaction, (value) =>
+            optionalString(value, "reaction", 160),
+          ),
+          recordedOn: resolveOptionalUpsertValue(input.recordedOn, existingRecord?.recordedOn, (value) =>
+            optionalDateOnly(value, "recordedOn"),
+          ),
+          relatedConditionIds: resolveOptionalUpsertValue(
+            input.relatedConditionIds,
+            existingRecord?.relatedConditionIds,
+            (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
+          ),
+          note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
+            optionalString(value, "note", 4000),
+          ),
+        }) as AllergyRecord,
+      );
+
+      return {
+        attributes,
+        body: buildBody({
+          ...attributes,
+          relativePath: target.relativePath,
+          markdown: existingRecord?.markdown ?? "",
+        } as AllergyRecord),
+      };
     },
   });
-
-  return {
-    created: target.created,
-    auditPath,
-    record,
-  };
 }
 
 export async function listAllergies(vaultRoot: string): Promise<AllergyRecord[]> {
-  return loadAllergies(vaultRoot);
+  return allergyRegistryApi.listRecords(vaultRoot);
 }
 
 export async function readAllergy({ vaultRoot, allergyId, slug }: ReadAllergyInput): Promise<AllergyRecord> {
   const normalizedAllergyId = normalizeId(allergyId, "allergyId", "alg");
   const normalizedSlug = normalizeSelectorSlug(slug);
-  const records = await loadAllergies(vaultRoot);
-  return readRegistryRecord({
-    records,
+  return allergyRegistryApi.readRecord({
+    vaultRoot,
     recordId: normalizedAllergyId,
     slug: normalizedSlug,
-    getRecordId: (record) => record.allergyId,
-    readMissingCode: "VAULT_ALLERGY_MISSING",
-    readMissingMessage: "Allergy was not found.",
   });
 }
