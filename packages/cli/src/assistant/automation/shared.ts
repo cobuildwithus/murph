@@ -14,6 +14,7 @@ export interface AssistantRunEvent {
     | 'capture.reply-skipped'
     | 'capture.routed'
     | 'capture.skipped'
+    | 'daemon.failed'
     | 'reply.scan.primed'
     | 'reply.scan.started'
     | 'scan.started'

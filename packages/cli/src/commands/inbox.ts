@@ -41,6 +41,10 @@ import {
   routeInboxCaptureWithModel,
 } from '../inbox-model-harness.js'
 import type { InboxCliServices } from '../inbox-services.js'
+import {
+  formatForegroundLogLine,
+  formatInboxRunEventForTerminal,
+} from '../run-terminal-logging.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
 const inboxInitOptionFields = {
@@ -285,7 +289,8 @@ export function registerInboxCommands(
           enableAutoReply: true,
           vault: './vault',
         },
-        description: 'Provision an AgentMail inbox, configure email polling, and enable assistant auto-reply.',
+        description:
+          'Provision an AgentMail inbox or recover a single existing inbox when create permission is unavailable, then configure email polling and assistant auto-reply.',
       },
     ],
     hint:
@@ -296,7 +301,7 @@ export function registerInboxCommands(
         .string()
         .min(1)
         .optional()
-        .describe('Optional account identity for the connector. Defaults to `self` for iMessage, `bot` for Telegram, and should be an AgentMail inbox id for email unless `--provision` is used.'),
+        .describe('Optional account identity for the connector. Defaults to `self` for iMessage, `bot` for Telegram, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.'),
       address: z
         .string()
         .min(1)
@@ -316,7 +321,7 @@ export function registerInboxCommands(
       provision: z
         .boolean()
         .optional()
-        .describe('Provision a new AgentMail inbox when adding an email connector.'),
+        .describe('Attempt to provision a new AgentMail inbox when adding an email connector. If create permission is unavailable but the API key can access exactly one existing inbox, Healthy Bob reuses that inbox automatically.'),
       emailDisplayName: z
         .string()
         .min(1)
@@ -546,10 +551,20 @@ export function registerInboxCommands(
     options: withBaseOptions(),
     output: inboxRunResultSchema,
     async run(context) {
-      return services.run({
-        vault: context.options.vault,
-        requestId: requestIdFromOptions(context.options),
-      })
+      return services.run(
+        {
+          vault: context.options.vault,
+          requestId: requestIdFromOptions(context.options),
+        },
+        {
+          onEvent(event) {
+            const message = formatInboxRunEventForTerminal(event)
+            if (message) {
+              console.error(formatForegroundLogLine('inbox', message))
+            }
+          },
+        },
+      )
     },
   })
 

@@ -8,6 +8,7 @@ import {
   resolveRuntimePaths,
 } from '@healthybob/runtime-state'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { VaultCliError } from '../src/vault-cli-errors.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
@@ -281,6 +282,21 @@ function createFakeParsersRuntimeModule(input?: {
       accountId?: string | null
       id: string
       source: string
+      backfill?(
+        cursor: Record<string, unknown> | null,
+        emit: (
+          capture: any,
+          checkpoint?: Record<string, unknown> | null,
+        ) => Promise<{ captureId?: string; deduped: boolean }>,
+      ): Promise<Record<string, unknown> | null>
+      watch?(
+        cursor: Record<string, unknown> | null,
+        emit: (
+          capture: any,
+          checkpoint?: Record<string, unknown> | null,
+        ) => Promise<{ captureId?: string; deduped: boolean }>,
+        signal: AbortSignal,
+      ): Promise<void>
     }>
     runtime: {
       getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
@@ -433,6 +449,21 @@ function createFakeParsersRuntimeModule(input?: {
         accountId?: string | null
         id: string
         source: string
+        backfill?(
+          cursor: Record<string, unknown> | null,
+          emit: (
+            capture: any,
+            checkpoint?: Record<string, unknown> | null,
+          ) => Promise<{ captureId?: string; deduped: boolean }>,
+        ): Promise<Record<string, unknown> | null>
+        watch?(
+          cursor: Record<string, unknown> | null,
+          emit: (
+            capture: any,
+            checkpoint?: Record<string, unknown> | null,
+          ) => Promise<{ captureId?: string; deduped: boolean }>,
+          signal: AbortSignal,
+        ): Promise<void>
       }>
       runtime: {
         getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
@@ -1419,6 +1450,192 @@ test.sequential('run forwards the configured connector id and account namespace 
     assert.equal(createdConnectorAccountId, 'work')
     assert.equal(seenDaemonConnectorId, 'imessage:work')
     assert.equal(seenDaemonConnectorAccountId, 'work')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('run emits foreground connector events for backfill summaries and new watch imports', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-run-events')
+  const events: Array<{
+    type: string
+    connectorId?: string
+    source?: string
+    phase?: string
+    counts?: {
+      deduped: number
+      imported: number
+    }
+    capture?: {
+      text?: string | null
+      attachments?: Array<unknown>
+    }
+  }> = []
+  const baseInboxModule = createFakeInboxRuntimeModule()
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPid: () => 4242,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => ({
+      ...baseInboxModule,
+      createImessageConnector(options: {
+        id?: string
+        accountId?: string | null
+        includeOwnMessages?: boolean
+        backfillLimit?: number
+      }) {
+        const connector = baseInboxModule.createImessageConnector(options)
+        return {
+          ...connector,
+          async backfill(
+            _cursor: Record<string, unknown> | null,
+            emit: (
+              capture: any,
+              checkpoint?: Record<string, unknown> | null,
+            ) => Promise<{ captureId?: string; deduped: boolean }>,
+          ) {
+            await emit(
+              {
+                source: 'imessage',
+                externalId: 'backfill-1',
+                accountId: 'self',
+                occurredAt: '2026-03-13T08:00:00.000Z',
+                receivedAt: '2026-03-13T08:00:01.000Z',
+                thread: {
+                  id: 'thread-1',
+                  title: 'Family',
+                  isDirect: false,
+                },
+                actor: {
+                  id: 'contact:alice',
+                  displayName: 'Alice',
+                  isSelf: false,
+                },
+                text: 'Earlier backlog note',
+                attachments: [],
+                raw: {},
+              },
+              {
+                externalId: 'backfill-1',
+              },
+            )
+            return {
+              externalId: 'backfill-1',
+            }
+          },
+          async watch(
+            _cursor: Record<string, unknown> | null,
+            emit: (
+              capture: any,
+              checkpoint?: Record<string, unknown> | null,
+            ) => Promise<{ captureId?: string; deduped: boolean }>,
+            _signal: AbortSignal,
+          ) {
+            await emit(
+              {
+                source: 'imessage',
+                externalId: 'watch-1',
+                accountId: 'self',
+                occurredAt: '2026-03-13T09:00:00.000Z',
+                receivedAt: '2026-03-13T09:00:01.000Z',
+                thread: {
+                  id: 'thread-1',
+                  title: 'Family',
+                  isDirect: false,
+                },
+                actor: {
+                  id: 'contact:alice',
+                  displayName: 'Alice',
+                  isSelf: false,
+                },
+                text: 'Dinner at 7?',
+                attachments: [
+                  {
+                    kind: 'image',
+                    fileName: 'menu.jpg',
+                  },
+                ],
+                raw: {},
+              },
+              {
+                externalId: 'watch-1',
+              },
+            )
+          },
+        }
+      },
+    }),
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+      }),
+    loadParsersModule: async () =>
+      createFakeParsersRuntimeModule({
+        async onRunInboxDaemonWithParsers({ connectors, signal }) {
+          const connector = connectors[0]
+          assert.ok(connector)
+          await connector.backfill?.(
+            null,
+            async () => ({
+              captureId: 'cap-backfill',
+              deduped: false,
+            }),
+          )
+          await connector.watch?.(
+            null,
+            async () => ({
+              captureId: 'cap-watch',
+              deduped: false,
+            }),
+            signal,
+          )
+        },
+      }),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'imessage',
+      id: 'imessage:self',
+      account: 'self',
+      includeOwn: true,
+    })
+
+    await services.run(
+      {
+        vault: fixture.vaultRoot,
+        requestId: null,
+      },
+      {
+        onEvent(event) {
+          events.push(event)
+        },
+      },
+    )
+
+    assert.deepEqual(events.map((event) => event.type), [
+      'connector.backfill.started',
+      'connector.backfill.finished',
+      'connector.watch.started',
+      'capture.imported',
+    ])
+    assert.deepEqual(events[1]?.counts, {
+      deduped: 0,
+      imported: 1,
+    })
+    assert.equal(events[3]?.connectorId, 'imessage:self')
+    assert.equal(events[3]?.source, 'imessage')
+    assert.equal(events[3]?.phase, 'watch')
+    assert.equal(events[3]?.capture?.text, 'Dinner at 7?')
+    assert.equal(events[3]?.capture?.attachments?.length, 1)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

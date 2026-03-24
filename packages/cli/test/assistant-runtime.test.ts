@@ -15,6 +15,10 @@ import {
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
 } from '../src/operator-config.js'
+import {
+  extractRecoveredAssistantSession,
+  isAssistantProviderInterruptedError,
+} from '../src/assistant/provider-turn-recovery.js'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -88,6 +92,7 @@ import {
   applyComposerEditingInput,
   formatFooterBadgeText,
   formatAssistantTerminalHyperlink,
+  mergeComposerDraftWithQueuedPrompts,
   normalizeComposerInsertedText,
   partitionChatTranscriptEntries,
   renderChatTranscriptFeed,
@@ -225,6 +230,60 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(firstCall.sessionContext?.binding.channel, 'imessage')
   assert.equal(secondCall.systemPrompt, null)
   assert.equal(secondCall.userPrompt, 'What about today?')
+})
+
+test('sendAssistantMessage recovers provider sessions after user interruptions and preserves the interrupt marker', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-interrupt-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const abortController = new AbortController()
+  runtimeMocks.executeAssistantProviderTurn.mockRejectedValue(
+    new VaultCliError(
+      'ASSISTANT_CODEX_INTERRUPTED',
+      'Codex CLI was interrupted.',
+      {
+        interrupted: true,
+        providerSessionId: 'thread-pause-1',
+      },
+    ),
+  )
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'imessage:bob',
+      prompt: 'Pause this turn.',
+      abortSignal: abortController.signal,
+      provider: 'codex-cli',
+    }),
+    (error: any) => {
+      assert.equal(isAssistantProviderInterruptedError(error), true)
+      const recoveredSession = extractRecoveredAssistantSession(error)
+      assert.equal(recoveredSession?.providerSessionId, 'thread-pause-1')
+      return true
+    },
+  )
+
+  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(providerCall?.abortSignal, abortController.signal)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'imessage:bob',
+    provider: 'codex-cli',
+    model: null,
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    maxSessionAgeMs: null,
+  })
+
+  assert.equal(resolved.session.providerSessionId, 'thread-pause-1')
+  assert.equal(resolved.session.turnCount, 0)
 })
 
 test('sendAssistantMessage can optionally deliver the provider reply over the mapped outbound channel', async () => {
@@ -2235,6 +2294,9 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
+  const assistantEvents: Array<{ type: string; details?: string }> = []
+  const inboxEvents: Array<{ type: string; connectorId?: string; source?: string }> = []
+
   const result = await runAssistantAutomation({
     vault: vaultRoot,
     once: false,
@@ -2246,10 +2308,21 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
       list: async () => ({
         items: [],
       }),
-      run: async () => {
+      run: async (_input: unknown, options?: { onEvent?: (event: unknown) => void }) => {
+        options?.onEvent?.({
+          type: 'connector.watch.started',
+          connectorId: 'imessage:self',
+          source: 'imessage',
+        })
         throw new Error('daemon exploded')
       },
     } as any,
+    onEvent(event) {
+      assistantEvents.push(event)
+    },
+    onInboxEvent(event) {
+      inboxEvents.push(event)
+    },
   })
 
   assert.equal(result.reason, 'error')
@@ -2260,6 +2333,21 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   assert.equal(result.replied, 0)
   assert.equal(result.replySkipped, 0)
   assert.equal(result.replyFailed, 0)
+  assert.equal(
+    inboxEvents.some(
+      (event) =>
+        event.type === 'connector.watch.started' &&
+        event.connectorId === 'imessage:self' &&
+        event.source === 'imessage',
+    ),
+    true,
+  )
+  assert.equal(
+    assistantEvents.some(
+      (event) => event.type === 'daemon.failed' && event.details === 'daemon exploded',
+    ),
+    true,
+  )
 })
 
 test('bridgeAbortSignals forces process exit after local SIGINT grace when teardown hangs', async () => {
@@ -2658,7 +2746,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   )
   assert.equal(
     CHAT_COMPOSER_HINT,
-    'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit',
+    'Enter send · Tab queue when busy · Shift+Enter newline · Esc pause · /model switch model · /session show session · /exit quit',
   )
   assert.deepEqual(CHAT_STARTER_SUGGESTIONS, [
     'Summarize recent sleep and recovery',
@@ -2866,6 +2954,25 @@ test('assistant Ink view-model resolves composer submit actions and clear behavi
   assert.deepEqual(resolveChatSubmitAction('hello', true), {
     kind: 'ignore',
   })
+  assert.deepEqual(
+    resolveChatSubmitAction('hello', {
+      busy: true,
+      trigger: 'tab',
+    }),
+    {
+      kind: 'queue',
+      prompt: 'hello',
+    },
+  )
+  assert.deepEqual(
+    resolveChatSubmitAction('/model', {
+      busy: true,
+      trigger: 'tab',
+    }),
+    {
+      kind: 'ignore',
+    },
+  )
   assert.deepEqual(resolveChatSubmitAction('/quit', false), {
     kind: 'exit',
   })
@@ -2875,6 +2982,10 @@ test('assistant Ink view-model resolves composer submit actions and clear behavi
 
   const modelAction = resolveChatSubmitAction('/model', false)
   const promptAction = resolveChatSubmitAction('  hello Bob  ', false)
+  const queueAction = resolveChatSubmitAction('  hello Bob  ', {
+    busy: true,
+    trigger: 'tab',
+  })
 
   assert.deepEqual(modelAction, {
     kind: 'model',
@@ -2885,9 +2996,26 @@ test('assistant Ink view-model resolves composer submit actions and clear behavi
     prompt: 'hello Bob',
   })
   assert.equal(shouldClearComposerForSubmitAction(promptAction), true)
+  assert.deepEqual(queueAction, {
+    kind: 'queue',
+    prompt: 'hello Bob',
+  })
+  assert.equal(shouldClearComposerForSubmitAction(queueAction), true)
   assert.equal(
     shouldClearComposerForSubmitAction(resolveChatSubmitAction('/session', false)),
     false,
+  )
+})
+
+test('assistant Ink merges queued follow-ups back into the composer draft with blank lines', () => {
+  assert.equal(mergeComposerDraftWithQueuedPrompts('', []), '')
+  assert.equal(
+    mergeComposerDraftWithQueuedPrompts('', ['first follow-up', 'second follow-up']),
+    'first follow-up\n\nsecond follow-up',
+  )
+  assert.equal(
+    mergeComposerDraftWithQueuedPrompts('existing draft', ['queued follow-up']),
+    'existing draft\n\nqueued follow-up',
   )
 })
 
@@ -3708,6 +3836,20 @@ test('assistant Ink composer vertical cursor movement preserves preferred column
       preferredColumn: 5,
     },
   )
+})
+
+test('assistant Ink composer terminal actions treat tab as a queue submit', () => {
+  const action = resolveComposerTerminalAction(
+    '',
+    createComposerKey({
+      tab: true,
+    }),
+  )
+
+  assert.deepEqual(action, {
+    kind: 'submit',
+    mode: 'tab',
+  })
 })
 
 test('assistant Ink composer terminal actions treat shift+enter as a newline edit', () => {

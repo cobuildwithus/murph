@@ -65,6 +65,11 @@ import {
   withBaseOptions,
 } from '../command-helpers.js'
 import type { InboxCliServices } from '../inbox-services.js'
+import {
+  formatAssistantRunEventForTerminal,
+  formatForegroundLogLine,
+  formatInboxRunEventForTerminal,
+} from '../run-terminal-logging.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
 const assistantSessionOptionFields = {
@@ -410,36 +415,16 @@ function createAssistantRunCommandDefinition(
         once: context.options.once,
         startDaemon: context.options.skipDaemon ? false : true,
         onEvent(event) {
-          if (event.type === 'scan.started') {
-            console.error(`[assistant] scanning canonical inbox routing: ${event.details ?? ''}`)
-            return
+          const message = formatAssistantRunEventForTerminal(event)
+          if (message) {
+            console.error(formatForegroundLogLine('assistant', message))
           }
-
-          if (event.type === 'reply.scan.started') {
-            console.error(`[assistant] scanning channel auto-reply: ${event.details ?? ''}`)
-            return
+        },
+        onInboxEvent(event) {
+          const message = formatInboxRunEventForTerminal(event)
+          if (message) {
+            console.error(formatForegroundLogLine('assistant', message))
           }
-
-          if (event.type === 'reply.scan.primed') {
-            console.error(`[assistant] primed channel auto-reply: ${event.details ?? ''}`)
-            return
-          }
-
-          if (event.type === 'capture.routed') {
-            console.error(
-              `[assistant] routed ${event.captureId}: ${(event.tools ?? []).join(', ')}`,
-            )
-            return
-          }
-
-          if (event.type === 'capture.replied') {
-            console.error(`[assistant] replied ${event.captureId}: ${event.details ?? ''}`)
-            return
-          }
-
-          console.error(
-            `[assistant] ${event.type.replace(/^(capture|reply\.scan)\./u, '')} ${event.captureId ?? ''}: ${event.details ?? ''}`.trim(),
-          )
         },
       })
     },

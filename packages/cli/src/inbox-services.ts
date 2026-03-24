@@ -8,6 +8,7 @@ import {
 } from './assistant-state.js'
 import {
   createAgentmailApiClient,
+  matchesAgentmailHttpError,
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
   type AgentmailApiClient,
@@ -322,6 +323,41 @@ export interface RuntimeCaptureRecordInput {
   accountId?: string | null
   occurredAt: string
   receivedAt?: string | null
+  thread?: {
+    id: string
+    title?: string | null
+    isDirect?: boolean
+  }
+  actor?: {
+    id?: string | null
+    displayName?: string | null
+    isSelf?: boolean
+  }
+  text?: string | null
+  attachments?: Array<{
+    kind: 'image' | 'audio' | 'video' | 'document' | 'other'
+    fileName?: string | null
+  }>
+  raw?: Record<string, unknown>
+}
+
+export interface InboxRunEvent {
+  capture?: RuntimeCaptureRecordInput
+  connectorId: string
+  counts?: {
+    deduped: number
+    imported: number
+  }
+  details?: string
+  persisted?: PersistedCapture
+  phase?: 'backfill' | 'watch'
+  source: string
+  type:
+    | 'capture.imported'
+    | 'connector.backfill.finished'
+    | 'connector.backfill.started'
+    | 'connector.failed'
+    | 'connector.watch.started'
 }
 
 export interface InboxPipeline {
@@ -627,6 +663,11 @@ interface InboxServicesDependencies {
   loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
+  createAgentmailClient?: (input: {
+    apiKey: string
+    baseUrl?: string
+    env: NodeJS.ProcessEnv
+  }) => AgentmailApiClient
   probeImessageMessagesDb?: (targetPath: string) => Promise<void>
   getEnvironment?: () => NodeJS.ProcessEnv
 }
@@ -740,6 +781,7 @@ export interface InboxCliServices {
   run(
     input: CommandContext,
     options?: {
+      onEvent?: (event: InboxRunEvent) => void
       signal?: AbortSignal
     },
   ): Promise<InboxRunResult>
@@ -795,6 +837,104 @@ function createParserRuntimeUnavailableError(
     `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @healthybob/inboxd and @healthybob/parsers.`,
     details,
   )
+}
+
+function instrumentConnectorForRunEvents(
+  connector: PollConnector,
+  onEvent?: ((event: InboxRunEvent) => void) | null,
+): PollConnector {
+  if (!onEvent) {
+    return connector
+  }
+
+  const baseEvent = {
+    connectorId: connector.id,
+    source: connector.source,
+  } as const
+
+  return {
+    ...connector,
+    async backfill(cursor, emit) {
+      onEvent({
+        ...baseEvent,
+        phase: 'backfill',
+        type: 'connector.backfill.started',
+      })
+
+      let imported = 0
+      let deduped = 0
+
+      try {
+        const nextCursor = await connector.backfill?.(
+          cursor,
+          async (capture, checkpoint) => {
+            const persisted = await emit(capture, checkpoint)
+            if (persisted.deduped) {
+              deduped += 1
+            } else {
+              imported += 1
+            }
+            return persisted
+          },
+        )
+
+        onEvent({
+          ...baseEvent,
+          counts: {
+            deduped,
+            imported,
+          },
+          phase: 'backfill',
+          type: 'connector.backfill.finished',
+        })
+
+        return nextCursor ?? null
+      } catch (error) {
+        onEvent({
+          ...baseEvent,
+          details: errorMessage(error),
+          phase: 'backfill',
+          type: 'connector.failed',
+        })
+        throw error
+      }
+    },
+    async watch(cursor, emit, signal) {
+      onEvent({
+        ...baseEvent,
+        phase: 'watch',
+        type: 'connector.watch.started',
+      })
+
+      try {
+        return await connector.watch?.(
+          cursor,
+          async (capture, checkpoint) => {
+            const persisted = await emit(capture, checkpoint)
+            if (!persisted.deduped) {
+              onEvent({
+                ...baseEvent,
+                capture,
+                persisted,
+                phase: 'watch',
+                type: 'capture.imported',
+              })
+            }
+            return persisted
+          },
+          signal,
+        )
+      } catch (error) {
+        onEvent({
+          ...baseEvent,
+          details: errorMessage(error),
+          phase: 'watch',
+          type: 'connector.failed',
+        })
+        throw error
+      }
+    },
+  }
 }
 
 export function createIntegratedInboxCliServices(
@@ -892,9 +1032,17 @@ export function createIntegratedInboxCliServices(
       )
     }
 
-    return createAgentmailApiClient(resolvedApiKey, {
-      baseUrl: resolveAgentmailBaseUrl(env) ?? undefined,
-    })
+    const baseUrl = resolveAgentmailBaseUrl(env) ?? undefined
+
+    return dependencies.createAgentmailClient
+      ? dependencies.createAgentmailClient({
+          apiKey: resolvedApiKey,
+          baseUrl,
+          env,
+        })
+      : createAgentmailApiClient(resolvedApiKey, {
+          baseUrl,
+        })
   }
 
   const loadConfiguredEmailDriver = async (
@@ -956,6 +1104,73 @@ export function createIntegratedInboxCliServices(
     clientId: normalizeNullableString(inbox.client_id),
     provider: 'agentmail',
   })
+
+  const tryResolveAgentmailInboxAddress = async (input: {
+    accountId: string
+    emailAddress: string | null
+  }): Promise<string | null> => {
+    if (input.emailAddress) {
+      return input.emailAddress
+    }
+
+    try {
+      const inbox = await createConfiguredAgentmailClient().getInbox(input.accountId)
+      return normalizeNullableString(inbox.email)
+    } catch {
+      return input.emailAddress
+    }
+  }
+
+  const recoverForbiddenAgentmailProvision = async (): Promise<{
+    accountId: string
+    emailAddress: string | null
+    mailbox: InboxProvisionedMailbox | null
+  }> => {
+    try {
+      const listed = await createConfiguredAgentmailClient().listInboxes()
+
+      if (listed.inboxes.length === 1) {
+        const inbox = listed.inboxes[0]!
+        return {
+          accountId: inbox.inbox_id,
+          emailAddress: normalizeNullableString(inbox.email),
+          mailbox: toProvisionedMailbox(inbox),
+        }
+      }
+
+      if (listed.inboxes.length > 1) {
+        throw new VaultCliError(
+          'INBOX_EMAIL_ACCOUNT_SELECTION_REQUIRED',
+          'AgentMail rejected inbox creation for this API key, but multiple existing inboxes are available. Rerun with --account <inbox_id> to choose one, or use `healthybob onboard` to select an inbox interactively.',
+          { inboxCount: listed.inboxes.length },
+        )
+      }
+
+      throw new VaultCliError(
+        'INBOX_EMAIL_ACCOUNT_REQUIRED',
+        'AgentMail rejected inbox creation for this API key and no existing inboxes were returned. Rerun with --account <inbox_id> for an existing inbox, or check whether this key can create inboxes.',
+      )
+    } catch (error) {
+      if (
+        matchesAgentmailHttpError(error, {
+          status: 403,
+          method: 'GET',
+          path: '/inboxes',
+        })
+      ) {
+        throw new VaultCliError(
+          'INBOX_EMAIL_SCOPED_KEY_ACCOUNT_REQUIRED',
+          'AgentMail rejected both inbox creation and inbox discovery for this API key. This key may be scoped to an existing inbox. Rerun with --account <inbox_id> (often the inbox email address), or use `healthybob onboard`.',
+        )
+      }
+
+      if (error instanceof VaultCliError) {
+        throw error
+      }
+
+      throw error
+    }
+  }
 
   const ensureConfiguredImessageReady = async (): Promise<void> => {
     await ensureImessageMessagesDbReadable(
@@ -1773,21 +1988,39 @@ export function createIntegratedInboxCliServices(
       }
 
       let provisionedMailbox: InboxProvisionedMailbox | null = null
+      let reusedMailbox: InboxProvisionedMailbox | null = null
       let accountId = normalizeConnectorAccountId(input.source, input.account)
       let emailAddress = normalizeNullableString(input.address)
 
       if (input.source === 'email') {
         if (input.provision) {
           const client = createConfiguredAgentmailClient()
-          const inbox = await client.createInbox({
-            displayName: normalizeNullableString(input.emailDisplayName),
-            username: normalizeNullableString(input.emailUsername),
-            domain: normalizeNullableString(input.emailDomain),
-            clientId: normalizeNullableString(input.emailClientId),
-          })
-          provisionedMailbox = toProvisionedMailbox(inbox)
-          accountId = inbox.inbox_id
-          emailAddress = inbox.email
+          try {
+            const inbox = await client.createInbox({
+              displayName: normalizeNullableString(input.emailDisplayName),
+              username: normalizeNullableString(input.emailUsername),
+              domain: normalizeNullableString(input.emailDomain),
+              clientId: normalizeNullableString(input.emailClientId),
+            })
+            provisionedMailbox = toProvisionedMailbox(inbox)
+            accountId = inbox.inbox_id
+            emailAddress = inbox.email
+          } catch (error) {
+            if (
+              !matchesAgentmailHttpError(error, {
+                status: 403,
+                method: 'POST',
+                path: '/inboxes',
+              })
+            ) {
+              throw error
+            }
+
+            const recovered = await recoverForbiddenAgentmailProvision()
+            accountId = recovered.accountId
+            emailAddress = recovered.emailAddress
+            reusedMailbox = recovered.mailbox
+          }
         }
 
         if (!accountId) {
@@ -1796,6 +2029,11 @@ export function createIntegratedInboxCliServices(
             'Email connectors require --account with an existing AgentMail inbox id, or --provision to create one.',
           )
         }
+
+        emailAddress = await tryResolveAgentmailInboxAddress({
+          accountId,
+          emailAddress,
+        })
       }
 
       const connector: InboxConnectorConfig = {
@@ -1826,6 +2064,7 @@ export function createIntegratedInboxCliServices(
         connector,
         connectorCount: config.connectors.length,
         provisionedMailbox,
+        reusedMailbox,
         autoReplyEnabled: input.enableAutoReply ? true : undefined,
       }
     },
@@ -2064,6 +2303,9 @@ export function createIntegratedInboxCliServices(
           }),
         ),
       )
+      const instrumentedConnectors = connectors.map((connector) =>
+        instrumentConnectorForRunEvents(connector, options?.onEvent),
+      )
 
       const connectorIds = enabledConnectors.map((connector) => connector.id)
       const startedAt = clock().toISOString()
@@ -2095,7 +2337,7 @@ export function createIntegratedInboxCliServices(
           runtime,
           registry: configured.registry,
           ffmpeg: configured.ffmpeg,
-          connectors,
+          connectors: instrumentedConnectors,
           signal: runSignal,
         })
       } catch (error) {

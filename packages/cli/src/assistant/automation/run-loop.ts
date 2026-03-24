@@ -1,7 +1,10 @@
 import {
   assistantRunResultSchema,
 } from '../../assistant-cli-contracts.js'
-import type { InboxCliServices } from '../../inbox-services.js'
+import type {
+  InboxCliServices,
+  InboxRunEvent,
+} from '../../inbox-services.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultCliServices } from '../../vault-cli-services.js'
 import { processDueAssistantCronJobs } from '../cron.js'
@@ -30,6 +33,7 @@ export interface RunAssistantAutomationInput {
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
+  onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
   requestId?: string | null
   scanIntervalMs?: number
@@ -61,11 +65,17 @@ export async function runAssistantAutomation(
           requestId: input.requestId ?? null,
         },
         {
+          onEvent: input.onInboxEvent,
           signal: controller.signal,
         },
       )
       .catch((error) => {
-        lastError = errorMessage(error)
+        const detail = errorMessage(error)
+        lastError = detail
+        input.onEvent?.({
+          type: 'daemon.failed',
+          details: detail,
+        })
         controller.abort()
       })
   }
