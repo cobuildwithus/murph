@@ -40,7 +40,10 @@ import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
-import { HEALTHYBOB_VAULT_ENV } from '../src/operator-config.js'
+import {
+  VAULT_ENV,
+  saveAssistantOperatorDefaultsPatch,
+} from '../src/operator-config.js'
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
@@ -208,7 +211,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
-  assert.equal(firstCall?.env?.[HEALTHYBOB_VAULT_ENV], path.resolve(vaultRoot))
+  assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
@@ -232,14 +235,69 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],
     expectedUserBinDirectory,
   )
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /Never include citations, source lists, footnotes/u)
 })
 
-test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-openai-compatible-'))
+test('sendAssistantMessage adds no-citations formatting guidance for outbound channel replies only', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-channel-formatting-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
   await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-outbound-formatting',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'email',
+    identityId: 'assistant@example.test',
+    participantId: 'person@example.test',
+    sourceThreadId: 'thread-email-formatting',
+    threadIsDirect: true,
+    prompt: 'Reply to the latest message.',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:local-formatting',
+    prompt: 'Reply in the local chat UI.',
+  })
+
+  const outboundCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const localChatCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assert.match(
+    outboundCall?.systemPrompt ?? '',
+    /Never include citations, source lists, footnotes, bracketed references/u,
+  )
+  assert.match(
+    outboundCall?.systemPrompt ?? '',
+    /user-facing messaging channel, not the local terminal chat UI/u,
+  )
+  assert.doesNotMatch(
+    localChatCall?.systemPrompt ?? '',
+    /Never include citations, source lists, footnotes, bracketed references/u,
+  )
+})
+
+test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-openai-compatible-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
 
   serviceMocks.executeAssistantProviderTurn
     .mockResolvedValueOnce({
@@ -259,75 +317,87 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
       rawEvents: [],
     })
 
-  const first = await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:openai-compatible',
-    provider: 'openai-compatible',
-    model: 'gpt-oss:20b',
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    prompt: 'first question',
-  })
-
-  const second = await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:openai-compatible',
-    prompt: 'second question',
-  })
-
-  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
-
-  assert.equal(firstCall?.resumeProviderSessionId, null)
-  assert.equal(secondCall?.resumeProviderSessionId, null)
-  assert.match(firstCall?.systemPrompt ?? '', /You are Healthy Bob/u)
-  assert.match(secondCall?.systemPrompt ?? '', /You are Healthy Bob/u)
-  assert.equal(firstCall?.baseUrl, 'http://127.0.0.1:11434/v1')
-  assert.equal(secondCall?.baseUrl, 'http://127.0.0.1:11434/v1')
-  assert.equal(firstCall?.model, 'gpt-oss:20b')
-  assert.equal(secondCall?.model, 'gpt-oss:20b')
-  assert.deepEqual(secondCall?.conversationMessages, [
-    {
-      role: 'user',
-      content: 'first question',
-    },
-    {
-      role: 'assistant',
-      content: 'first reply',
-    },
-  ])
-  assert.equal(first.session.providerSessionId, null)
-  assert.equal(second.session.providerSessionId, null)
-  assert.equal(second.session.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
-  assert.equal(second.session.providerOptions.model, 'gpt-oss:20b')
-
-  const transcript = await listAssistantTranscriptEntries(
-    vaultRoot,
-    second.session.sessionId,
-  )
-  assert.deepEqual(
-    transcript.map((entry) => ({
-      kind: entry.kind,
-      text: entry.text,
-    })),
-    [
+  try {
+    await saveAssistantOperatorDefaultsPatch(
       {
-        kind: 'user',
-        text: 'first question',
+        provider: 'codex-cli',
+      },
+      homeRoot,
+    )
+
+    const first = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:openai-compatible',
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      prompt: 'first question',
+    })
+
+    const second = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:openai-compatible',
+      prompt: 'second question',
+    })
+
+    const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+    assert.equal(firstCall?.resumeProviderSessionId, null)
+    assert.equal(secondCall?.resumeProviderSessionId, null)
+    assert.equal(secondCall?.provider, 'openai-compatible')
+    assert.match(firstCall?.systemPrompt ?? '', /You are Healthy Bob/u)
+    assert.match(secondCall?.systemPrompt ?? '', /You are Healthy Bob/u)
+    assert.equal(firstCall?.baseUrl, 'http://127.0.0.1:11434/v1')
+    assert.equal(secondCall?.baseUrl, 'http://127.0.0.1:11434/v1')
+    assert.equal(firstCall?.model, 'gpt-oss:20b')
+    assert.equal(secondCall?.model, 'gpt-oss:20b')
+    assert.deepEqual(secondCall?.conversationMessages, [
+      {
+        role: 'user',
+        content: 'first question',
       },
       {
-        kind: 'assistant',
-        text: 'first reply',
+        role: 'assistant',
+        content: 'first reply',
       },
-      {
-        kind: 'user',
-        text: 'second question',
-      },
-      {
-        kind: 'assistant',
-        text: 'second reply',
-      },
-    ],
-  )
+    ])
+    assert.equal(first.session.providerSessionId, null)
+    assert.equal(second.session.providerSessionId, null)
+    assert.equal(second.session.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
+    assert.equal(second.session.providerOptions.model, 'gpt-oss:20b')
+
+    const transcript = await listAssistantTranscriptEntries(
+      vaultRoot,
+      second.session.sessionId,
+    )
+    assert.deepEqual(
+      transcript.map((entry) => ({
+        kind: entry.kind,
+        text: entry.text,
+      })),
+      [
+        {
+          kind: 'user',
+          text: 'first question',
+        },
+        {
+          kind: 'assistant',
+          text: 'first reply',
+        },
+        {
+          kind: 'user',
+          text: 'second question',
+        },
+        {
+          kind: 'assistant',
+          text: 'second reply',
+        },
+      ],
+    )
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
 })
 
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {

@@ -163,7 +163,7 @@ export async function sendAssistantMessage(
   const cliAccess = resolveAssistantCliAccessContext()
   const resolved = await resolveAssistantSessionForMessage(input, defaults)
 
-  const provider = input.provider ?? defaults?.provider ?? resolved.session.provider
+  const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
   const providerOptions = resolveAssistantProviderOptions({
     model: input.model ?? resolved.session.providerOptions.model ?? defaults?.model,
     reasoningEffort:
@@ -273,7 +273,11 @@ export async function sendAssistantMessage(
       },
       userPrompt: input.prompt,
       systemPrompt: shouldInjectBootstrapContext
-        ? buildAssistantSystemPrompt(cliAccess, assistantMemoryPrompt)
+        ? buildAssistantSystemPrompt(
+            cliAccess,
+            assistantMemoryPrompt,
+            resolved.session.binding.channel,
+          )
         : null,
       sessionContext: shouldInjectBootstrapContext
         ? {
@@ -548,6 +552,7 @@ function buildAssistantSystemPrompt(
     setupCommand: 'healthybob'
   },
   assistantMemoryPrompt: string | null,
+  channel: string | null,
 ): string {
   return [
     'You are Healthy Bob, a local-first health assistant operating over the current working directory as a file-native health vault.',
@@ -557,6 +562,7 @@ function buildAssistantSystemPrompt(
     'Do not modify vault files unless the user explicitly asks you to propose changes. Typed assistant-memory commits through the Healthy Bob memory tools are the only exception for conversational continuity.',
     'When you operate purely through Healthy Bob CLI tools to read or write vault content, treat that as a vault operation rather than a coding task. Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
     'When you reference evidence from the vault, mention relative file paths when practical.',
+    buildOutboundReplyFormattingGuidance(channel),
     assistantMemoryPrompt,
     buildAssistantMemoryGuidanceText(cliAccess),
     buildAssistantCronGuidanceText(cliAccess),
@@ -564,6 +570,22 @@ function buildAssistantSystemPrompt(
   ]
     .filter((value): value is string => Boolean(value))
     .join('\n\n')
+}
+
+function buildOutboundReplyFormattingGuidance(channel: string | null): string | null {
+  if (!isAssistantOutboundReplyChannel(channel)) {
+    return null
+  }
+
+  return [
+    'You are replying through a user-facing messaging channel, not the local terminal chat UI.',
+    'Never include citations, source lists, footnotes, bracketed references, or appended file-path/source callouts in the reply unless the user explicitly asks for them.',
+    'Reply naturally in plain conversational prose that fits the channel.',
+  ].join('\n')
+}
+
+function isAssistantOutboundReplyChannel(channel: string | null): boolean {
+  return channel === 'email' || channel === 'imessage' || channel === 'telegram'
 }
 
 function buildAssistantMemoryGuidanceText(
