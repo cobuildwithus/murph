@@ -476,7 +476,10 @@ test('sendAssistantMessage onboarding persists answered slots and asks only for 
     /whether they want to give you a name/u,
   )
   assert.match(secondCall?.systemPrompt ?? '', /Name: Call the user Chris\./u)
-  assert.match(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.doesNotMatch(
+    secondCall?.systemPrompt ?? '',
+    /what tone or response style they want/u,
+  )
   assert.match(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
   assert.doesNotMatch(
     secondCall?.systemPrompt ?? '',
@@ -531,8 +534,8 @@ test('sendAssistantMessage suppresses onboarding once name, tone, and goals are 
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
 })
 
-test('sendAssistantMessage asks for an optional name only once even when later new sessions still need onboarding', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-name-once-'))
+test('sendAssistantMessage asks for optional name and tone only once even when later new sessions still need onboarding', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-optional-once-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -580,7 +583,10 @@ test('sendAssistantMessage asks for an optional name only once even when later n
     secondCall?.systemPrompt ?? '',
     /whether they want to give you a name/u,
   )
-  assert.match(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.doesNotMatch(
+    secondCall?.systemPrompt ?? '',
+    /what tone or response style they want/u,
+  )
   assert.match(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
 })
 

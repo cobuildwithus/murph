@@ -16,6 +16,7 @@ const assistantOnboardingProfileSchema = z
     name: z.string().min(1).nullable(),
     nameAsked: z.boolean().optional().default(false),
     tone: z.string().min(1).nullable(),
+    toneAsked: z.boolean().optional().default(false),
     goals: z.array(z.string().min(1)),
     updatedAt: z.string().min(1).nullable(),
   })
@@ -63,6 +64,7 @@ export async function updateAssistantOnboardingSummary(input: {
     })
     const next = mergeAssistantOnboardingProfile(current, extracted, {
       markNameAsked: summary.missingSlots.includes('name'),
+      markToneAsked: summary.missingSlots.includes('tone'),
     })
     if (JSON.stringify(next) !== JSON.stringify(current)) {
       await mkdir(paths.assistantStateRoot, { recursive: true })
@@ -100,6 +102,7 @@ function createEmptyAssistantOnboardingProfile() {
     name: null,
     nameAsked: false,
     tone: null,
+    toneAsked: false,
     goals: [],
     updatedAt: null,
   })
@@ -114,16 +117,19 @@ function mergeAssistantOnboardingProfile(
   },
   options?: {
     markNameAsked?: boolean
+    markToneAsked?: boolean
   },
 ) {
   const goals = [...new Set([...current.goals, ...extracted.goals])]
   const name = extracted.name ?? current.name
   const nameAsked = current.nameAsked || Boolean(options?.markNameAsked) || name !== null
   const tone = extracted.tone ?? current.tone
+  const toneAsked = current.toneAsked || Boolean(options?.markToneAsked) || tone !== null
   const changed =
     name !== current.name ||
     nameAsked !== current.nameAsked ||
     tone !== current.tone ||
+    toneAsked !== current.toneAsked ||
     goals.length !== current.goals.length ||
     goals.some((goal, index) => goal !== current.goals[index])
 
@@ -132,6 +138,7 @@ function mergeAssistantOnboardingProfile(
     name,
     nameAsked,
     tone,
+    toneAsked,
     goals,
     updatedAt: changed ? new Date().toISOString() : current.updatedAt,
   })
@@ -159,6 +166,7 @@ async function buildAssistantOnboardingSummary(
     goals: [...new Set([...profile.goals, ...input.extracted.goals])],
   }
   const shouldAskName = answered.name === null && profile.nameAsked !== true
+  const shouldAskTone = answered.tone === null && profile.toneAsked !== true
 
   return {
     answered,
@@ -167,7 +175,7 @@ async function buildAssistantOnboardingSummary(
         case 'name':
           return shouldAskName
         case 'tone':
-          return answered.tone === null
+          return shouldAskTone
         case 'goals':
           return answered.goals.length === 0
       }
