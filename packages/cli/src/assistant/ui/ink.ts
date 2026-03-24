@@ -79,6 +79,7 @@ const AssistantInkThemeContext =
 interface ComposerInputProps {
   disabled: boolean
   onChange: (value: string) => void
+  onEditLastQueuedPrompt: () => void
   onSubmit: (value: string, mode: ComposerSubmitMode) => ComposerSubmitDisposition
   placeholder: string
   value: string
@@ -146,12 +147,18 @@ interface ChatComposerProps {
   entryCount: number
   modelSwitcherActive: boolean
   onChange: (value: string) => void
+  onEditLastQueuedPrompt: () => void
   onSubmit: (value: string, mode: ComposerSubmitMode) => ComposerSubmitDisposition
   value: string
 }
 
 interface ChatFooterProps {
   badges: readonly ChatMetadataBadge[]
+}
+
+interface QueuedFollowUpStatusProps {
+  latestPrompt: string | null
+  queuedPromptCount: number
 }
 
 interface ChromePanelProps {
@@ -180,12 +187,17 @@ type ComposerTerminalAction =
       key: Key
     }
   | {
+      kind: 'edit-last-queued'
+    }
+  | {
       mode: ComposerSubmitMode
       kind: 'submit'
     }
 
 const COMPOSER_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\\\|;:'\\\",.<>/?"
 const MODIFIED_RETURN_SEQUENCE = /^\u001b?\[27;(\d+);13~$/u
+const QUEUED_FOLLOW_UP_SHORTCUT_HINT = '⌥ + ↑ edit last queued message'
+const MAX_QUEUED_FOLLOW_UP_PREVIEW_LENGTH = 88
 
 function useAssistantInkTheme(): AssistantInkTheme {
   return React.useContext(AssistantInkThemeContext)
@@ -785,6 +797,12 @@ export function resolveComposerTerminalAction(
     }
   }
 
+  if (key.meta && key.upArrow) {
+    return {
+      kind: 'edit-last-queued',
+    }
+  }
+
   if (key.tab && !key.shift) {
     return {
       kind: 'submit',
@@ -831,6 +849,25 @@ export function resolveComposerTerminalAction(
   }
 }
 
+export function formatQueuedFollowUpPreview(prompt: string): string {
+  const normalized = prompt.trim().replace(/\s+/gu, ' ')
+
+  if (normalized.length <= MAX_QUEUED_FOLLOW_UP_PREVIEW_LENGTH) {
+    return normalized
+  }
+
+  const truncated = normalized
+    .slice(0, MAX_QUEUED_FOLLOW_UP_PREVIEW_LENGTH - 1)
+    .trimEnd()
+  const boundary = truncated.lastIndexOf(' ')
+  const preview =
+    boundary >= Math.floor(MAX_QUEUED_FOLLOW_UP_PREVIEW_LENGTH / 2)
+      ? truncated.slice(0, boundary).trimEnd()
+      : truncated
+
+  return `${preview}…`
+}
+
 function ComposerInput(props: ComposerInputProps): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
@@ -840,10 +877,12 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
   const killBufferRef = React.useRef('')
   const preferredColumnRef = React.useRef<number | null>(null)
   const onChangeRef = React.useRef(props.onChange)
+  const onEditLastQueuedPromptRef = React.useRef(props.onEditLastQueuedPrompt)
   const onSubmitRef = React.useRef(props.onSubmit)
   const disabledRef = React.useRef(props.disabled)
 
   onChangeRef.current = props.onChange
+  onEditLastQueuedPromptRef.current = props.onEditLastQueuedPrompt
   onSubmitRef.current = props.onSubmit
   disabledRef.current = props.disabled
 
@@ -874,10 +913,20 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
     const currentValue = valueRef.current
     const currentCursorOffset = cursorOffsetRef.current
 
-    if (key.upArrow || key.downArrow) {
+    const action = resolveComposerTerminalAction(input, key)
+
+    if (action.kind === 'edit-last-queued') {
+      onEditLastQueuedPromptRef.current()
+      return
+    }
+
+    if (
+      action.kind === 'edit' &&
+      (action.key.upArrow || action.key.downArrow)
+    ) {
       const verticalMovement = resolveComposerVerticalCursorMove({
         cursorOffset: currentCursorOffset,
-        direction: key.upArrow ? 'up' : 'down',
+        direction: action.key.upArrow ? 'up' : 'down',
         preferredColumn: preferredColumnRef.current,
         value: currentValue,
       })
@@ -891,8 +940,6 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
       return
     }
 
-    const action = resolveComposerTerminalAction(input, key)
-
     if (action.kind === 'submit') {
       if (onSubmitRef.current(currentValue, action.mode) === 'clear') {
         valueRef.current = ''
@@ -902,6 +949,10 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
         setCursorOffset(0)
         onChangeRef.current('')
       }
+      return
+    }
+
+    if (action.kind !== 'edit') {
       return
     }
 
@@ -1483,6 +1534,7 @@ const ChatComposer = React.memo(function ChatComposer(
           value: props.value,
           placeholder: 'Type a message',
           onChange: props.onChange,
+          onEditLastQueuedPrompt: props.onEditLastQueuedPrompt,
           onSubmit: props.onSubmit,
         }),
       ),
@@ -1541,6 +1593,69 @@ const ChatComposer = React.memo(function ChatComposer(
     createElement(SlashCommandSuggestions, {
       commands: slashSuggestions,
     }),
+  )
+})
+
+const QueuedFollowUpStatus = React.memo(function QueuedFollowUpStatus(
+  props: QueuedFollowUpStatusProps,
+): React.ReactElement | null {
+  const createElement = React.createElement
+  const theme = useAssistantInkTheme()
+
+  if (props.queuedPromptCount === 0 || !props.latestPrompt) {
+    return null
+  }
+
+  const extraQueuedCount = props.queuedPromptCount - 1
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      marginBottom: 1,
+      width: '100%',
+    },
+    createElement(
+      Text,
+      {
+        wrap: 'wrap',
+      },
+      createElement(Text, { color: theme.composerTextColor }, '• '),
+      'Queued follow-up messages',
+    ),
+    createElement(
+      Text,
+      {
+        color: theme.mutedColor,
+        wrap: 'wrap',
+      },
+      '  ↳ ',
+      createElement(
+        Text,
+        {
+          color: theme.composerTextColor,
+        },
+        formatQueuedFollowUpPreview(props.latestPrompt),
+      ),
+    ),
+    extraQueuedCount > 0
+      ? createElement(
+          Text,
+          {
+            color: theme.mutedColor,
+            wrap: 'wrap',
+          },
+          `    +${extraQueuedCount} more queued`,
+        )
+      : null,
+    createElement(
+      Text,
+      {
+        color: theme.mutedColor,
+        wrap: 'wrap',
+      },
+      `    ${QUEUED_FOLLOW_UP_SHORTCUT_HINT}`,
+    ),
   )
 })
 
@@ -2499,6 +2614,8 @@ export async function runAssistantChatWithInk(
         kind: 'error' | 'info' | 'success'
         text: string
       } | null>(null)
+      const [queuedPromptCount, setQueuedPromptCount] = React.useState(0)
+      const [lastQueuedPrompt, setLastQueuedPrompt] = React.useState<string | null>(null)
       const [composerValue, setComposerValue] = React.useState('')
       const [activeModel, setActiveModel] = React.useState<string | null>(
         normalizeNullableString(input.model) ??
@@ -2521,6 +2638,13 @@ export async function runAssistantChatWithInk(
       const queuedPromptsRef = React.useRef<string[]>([])
       const activeTurnAbortControllerRef = React.useRef<AbortController | null>(null)
       const pauseRequestedRef = React.useRef(false)
+
+      const syncQueuedPromptState = React.useCallback((queuedPrompts: readonly string[]) => {
+        setQueuedPromptCount(queuedPrompts.length)
+        setLastQueuedPrompt(
+          queuedPrompts.length > 0 ? queuedPrompts[queuedPrompts.length - 1] ?? null : null,
+        )
+      }, [])
 
       React.useEffect(() => {
         latestSessionRef.current = session
@@ -2657,15 +2781,9 @@ export async function runAssistantChatWithInk(
       }
 
       const queuePrompt = (prompt: string) => {
-        queuedPromptsRef.current = [...queuedPromptsRef.current, prompt]
-        const queuedPromptCount = queuedPromptsRef.current.length
-        setStatus({
-          kind: 'info',
-          text:
-            queuedPromptCount === 1
-              ? 'Queued 1 follow-up for after the current turn.'
-              : `Queued ${queuedPromptCount} follow-up messages for after the current turn.`,
-        })
+        const nextQueuedPrompts = [...queuedPromptsRef.current, prompt]
+        queuedPromptsRef.current = nextQueuedPrompts
+        syncQueuedPromptState(nextQueuedPrompts)
       }
 
       const dequeueQueuedPrompt = (): string | null => {
@@ -2675,6 +2793,7 @@ export async function runAssistantChatWithInk(
         }
 
         queuedPromptsRef.current = remainingPrompts
+        syncQueuedPromptState(remainingPrompts)
         return nextPrompt
       }
 
@@ -2685,10 +2804,27 @@ export async function runAssistantChatWithInk(
         }
 
         queuedPromptsRef.current = []
+        syncQueuedPromptState([])
         setComposerValue((previous) =>
           mergeComposerDraftWithQueuedPrompts(previous, queuedPrompts),
         )
         return queuedPrompts.length
+      }
+
+      const editLastQueuedPrompt = () => {
+        const queuedPrompts = queuedPromptsRef.current
+        const lastQueuedPrompt = queuedPrompts.at(-1)
+
+        if (!lastQueuedPrompt) {
+          return
+        }
+
+        const remainingPrompts = queuedPrompts.slice(0, -1)
+        queuedPromptsRef.current = remainingPrompts
+        syncQueuedPromptState(remainingPrompts)
+        setComposerValue((previous) =>
+          mergeComposerDraftWithQueuedPrompts(previous, [lastQueuedPrompt]),
+        )
       }
 
       const startPromptTurn = (prompt: string) => {
@@ -3031,6 +3167,10 @@ export async function runAssistantChatWithInk(
               }),
               status,
             }),
+            createElement(QueuedFollowUpStatus, {
+              latestPrompt: lastQueuedPrompt,
+              queuedPromptCount,
+            }),
             modelSwitcherState
               ? createElement(ModelSwitcher, {
                   currentModel: activeModel,
@@ -3047,6 +3187,7 @@ export async function runAssistantChatWithInk(
               entryCount: entries.length,
               modelSwitcherActive: modelSwitcherState !== null,
               onChange: setComposerValue,
+              onEditLastQueuedPrompt: editLastQueuedPrompt,
               onSubmit: submitPrompt,
               value: composerValue,
             }),

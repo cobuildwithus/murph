@@ -92,6 +92,7 @@ import {
   applyComposerEditingInput,
   formatFooterBadgeText,
   formatAssistantTerminalHyperlink,
+  formatQueuedFollowUpPreview,
   mergeComposerDraftWithQueuedPrompts,
   normalizeComposerInsertedText,
   partitionChatTranscriptEntries,
@@ -4174,6 +4175,20 @@ test('assistant Ink composer terminal actions treat tab as a queue submit', () =
   })
 })
 
+test('assistant Ink composer terminal actions treat option+up as editing the last queued follow-up', () => {
+  const action = resolveComposerTerminalAction(
+    '',
+    createComposerKey({
+      meta: true,
+      upArrow: true,
+    }),
+  )
+
+  assert.deepEqual(action, {
+    kind: 'edit-last-queued',
+  })
+})
+
 test('assistant Ink composer terminal actions treat shift+enter as a newline edit', () => {
   const action = resolveComposerTerminalAction(
     '',
@@ -4254,6 +4269,19 @@ test('assistant Ink composer terminal actions map terminal delete keypresses to 
       killBuffer: '',
       value: 'hell',
     },
+  )
+})
+
+test('assistant Ink queued follow-up previews collapse whitespace and truncate long prompts', () => {
+  assert.equal(
+    formatQueuedFollowUpPreview('  name should be optional\nand only asked once  '),
+    'name should be optional and only asked once',
+  )
+  assert.equal(
+    formatQueuedFollowUpPreview(
+      'This is a deliberately long queued follow-up prompt that should collapse whitespace and trim down to a concise single-line preview for the Ink queue panel.',
+    ),
+    'This is a deliberately long queued follow-up prompt that should collapse whitespace…',
   )
 })
 
