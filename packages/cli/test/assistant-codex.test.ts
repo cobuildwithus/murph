@@ -324,6 +324,40 @@ test('executeCodexPrompt interrupts the spawned Codex process when aborted', asy
   assert.deepEqual(killMock?.mock?.calls, [['SIGINT']])
 })
 
+test('executeCodexPrompt does not misclassify MCP initialize failures as provider connection loss', async () => {
+  installSpawnMock((child) => {
+    child.stderr.emit(
+      'data',
+      '2026-03-24T03:30:58.077933Z ERROR codex_core::codex: Failed to create session: required MCP servers failed to initialize: healthybob_cron: handshaking with MCP server failed: connection closed: initialize response; healthybob_memory: handshaking with MCP server failed: connection closed: initialize response\n',
+    )
+    child.stderr.emit(
+      'data',
+      'Error: thread/resume: thread/resume failed: error resuming thread: Fatal error: Failed to initialize session: required MCP servers failed to initialize: healthybob_cron: handshaking with MCP server failed: connection closed: initialize response; healthybob_memory: handshaking with MCP server failed: connection closed: initialize response\n',
+    )
+    child.emit('close', 1, null)
+  })
+
+  await assert.rejects(
+    executeCodexPrompt({
+      prompt: 'Retry the resumed turn.',
+      workingDirectory: '/tmp/vault',
+      resumeSessionId: 'thread-existing',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CODEX_FAILED')
+      assert.match(
+        String(error.message),
+        /required MCP servers failed to initialize/u,
+      )
+      assert.doesNotMatch(String(error.message), /lost its connection/u)
+      assert.equal(error.context?.connectionLost, false)
+      assert.equal(error.context?.recoverableConnectionLoss, false)
+      assert.equal(error.context?.providerSessionId, null)
+      return true
+    },
+  )
+})
+
 test('executeCodexPrompt translates missing codex executables into ASSISTANT_CODEX_NOT_FOUND', async () => {
   installSpawnMock((child) => {
     const error = Object.assign(new Error('spawn codex ENOENT'), {

@@ -136,7 +136,7 @@ export async function executeCodexPrompt(
     await new Promise<void>((resolve, reject) => {
       const child = spawn(codexCommand, args, {
         cwd: workingDirectory,
-        env: input.env ?? process.env,
+        env: sanitizeChildProcessEnv(input.env),
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
@@ -279,6 +279,14 @@ export async function executeCodexPrompt(
       force: true,
     })
   }
+}
+
+function sanitizeChildProcessEnv(
+  env: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv {
+  const nextEnv = { ...(env ?? process.env) }
+  delete nextEnv.NODE_V8_COVERAGE
+  return nextEnv
 }
 
 export async function resolveCodexDisplayOptions(input: {
@@ -1534,6 +1542,10 @@ function isRetryableConnectionStatus(message: string): boolean {
 
 function isCodexConnectionLossText(message: string): boolean {
   const normalized = message.toLowerCase()
+  if (isCodexMcpBootstrapFailureText(normalized)) {
+    return false
+  }
+
   return (
     normalized.includes('stream disconnected') ||
     normalized.includes('stream closed before response.completed') ||
@@ -1556,6 +1568,14 @@ function isCodexConnectionLossText(message: string): boolean {
     normalized.includes('retrying') ||
     normalized.includes('timed out') ||
     normalized.includes('timeout')
+  )
+}
+
+function isCodexMcpBootstrapFailureText(normalizedMessage: string): boolean {
+  return (
+    normalizedMessage.includes('required mcp servers failed to initialize') ||
+    normalizedMessage.includes('handshaking with mcp server failed') ||
+    normalizedMessage.includes('initialize response')
   )
 }
 
