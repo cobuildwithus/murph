@@ -718,6 +718,24 @@ test('extractAssistantMemory strips identity tail text and ignores one-off forma
   assert.equal(extracted.daily.length, 0)
 })
 
+test('extractAssistantMemory splits compound onboarding-style memory clauses', () => {
+  const extracted = extractAssistantMemory(
+    'hmm call me will, fine with ur default tone, and i wanna do more strength training and lower my cholesterol!',
+  )
+
+  assert.deepEqual(extracted.longTerm, [
+    {
+      section: 'Identity',
+      text: 'Call the user will.',
+    },
+    {
+      section: 'Preferences',
+      text: 'User prefers the default assistant tone.',
+    },
+  ])
+  assert.equal(extracted.daily.length, 0)
+})
+
 test('extractAssistantMemory only keeps durable health context by default', () => {
   const extracted = extractAssistantMemory(
     [
@@ -812,6 +830,46 @@ test('upsertAssistantMemory binds assistant writes to the active turn context', 
       ),
     }),
     /grounded in the active user turn/u,
+  )
+})
+
+test('upsertAssistantMemory accepts canonical identity and tone writes from a compound bound user turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-compound-turn-context-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const turnContext = resolveAssistantMemoryTurnContext(
+    createAssistantMemoryTurnContextEnv({
+      allowSensitiveHealthContext: true,
+      sessionId: 'asst_789',
+      sourcePrompt:
+        'hmm call me will, fine with ur default tone, and i wanna do more strength training and lower my cholesterol!',
+      turnId: 'turn_789',
+      vault: vaultRoot,
+    }),
+  )
+  assert.ok(turnContext)
+
+  const identityResult = await upsertAssistantMemory({
+    vault: vaultRoot,
+    text: 'Call me Will.',
+    scope: 'long-term',
+    section: 'Identity',
+    turnContext,
+  })
+  const preferenceResult = await upsertAssistantMemory({
+    vault: vaultRoot,
+    text: 'User prefers the default assistant tone.',
+    scope: 'long-term',
+    section: 'Preferences',
+    turnContext,
+  })
+
+  assert.equal(identityResult.memories[0]?.text, 'Call the user Will.')
+  assert.equal(
+    preferenceResult.memories[0]?.text,
+    'User prefers the default assistant tone.',
   )
 })
 

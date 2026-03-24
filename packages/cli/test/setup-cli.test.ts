@@ -173,10 +173,41 @@ run_supervised() {
   return "$exit_code"
 }
 
-missing_packages=()
 cli_dist_ready=true
 ${cliDistCheckLines}
 
+is_discovery_invocation() {
+  for arg in "$@"; do
+    case "$arg" in
+      --help|--schema|--llms|--llms-full)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+if is_discovery_invocation "$@"; then
+  if [ "$cli_dist_ready" = true ]; then
+    run_supervised node '${cliBinPath}' "$@"
+    exit $?
+  fi
+
+  if [ -f '${cliSourceBinPath}' ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      run_supervised pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+      exit $?
+    fi
+
+    if command -v corepack >/dev/null 2>&1; then
+      run_supervised corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+      exit $?
+    fi
+  fi
+fi
+
+missing_packages=()
 if [ "$cli_dist_ready" != true ]; then
   missing_packages+=('${cliPackageRoot}')
 fi
@@ -1992,6 +2023,75 @@ exit 1
 
     assert.equal(result.stdout.trim(), 'built-ok')
     await readFile(runtimeStateDistIndexPath, 'utf8')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim serves discovery commands without rebuilding missing workspace dist artifacts', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-discovery-help-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
+  const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliBinPath = path.join(cliDistRoot, 'bin.js')
+  const shimPath = path.join(tempRoot, 'vault-cli')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+  const buildMarkerPath = path.join(tempRoot, 'build-invoked.txt')
+  const missingWorkspaceDistIndexPath = path.join(
+    repoRoot,
+    'packages',
+    'runtime-state',
+    'dist',
+    'index.js',
+  )
+
+  try {
+    await mkdir(cliDistRoot, { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeFile(cliBinPath, `console.log('cli-help')\n`, 'utf8')
+    await writeFile(path.join(cliDistRoot, 'index.js'), 'export {}\n', 'utf8')
+    await writeFile(path.join(cliDistRoot, 'vault-cli-contracts.js'), 'export {}\n', 'utf8')
+    await writeFile(path.join(cliDistRoot, 'inbox-cli-contracts.js'), 'export {}\n', 'utf8')
+
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'pnpm'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' invoked > ${JSON.stringify(buildMarkerPath)}
+exit 23
+`,
+    )
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+
+    const result = await execFileAsync(shimPath, ['assistant', 'memory', 'upsert', '--help'], {
+      env: withoutNodeV8Coverage({
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      }),
+    })
+
+    assert.equal(result.stdout.trim(), 'cli-help')
+    await assert.rejects(readFile(buildMarkerPath, 'utf8'), /ENOENT/u)
+    await assert.rejects(readFile(missingWorkspaceDistIndexPath, 'utf8'), /ENOENT/u)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

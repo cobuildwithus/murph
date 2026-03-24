@@ -348,10 +348,41 @@ run_supervised() {
   return "$exit_code"
 }
 
-missing_packages=()
 cli_dist_ready=true
 ${cliDistCheckLines}
 
+is_discovery_invocation() {
+  for arg in "$@"; do
+    case "$arg" in
+      --help|--schema|--llms|--llms-full)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+if is_discovery_invocation "$@"; then
+  if [ "$cli_dist_ready" = true ]; then
+    run_supervised node ${quoteShellArgument(cliBinPath)} "$@"
+    exit $?
+  fi
+
+  if [ -f ${quoteShellArgument(cliSourceBinPath)} ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      run_supervised pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+      exit $?
+    fi
+
+    if command -v corepack >/dev/null 2>&1; then
+      run_supervised corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+      exit $?
+    fi
+  fi
+fi
+
+missing_packages=()
 if [ "$cli_dist_ready" != true ]; then
   missing_packages+=(${quoteShellArgument(cliPackageRoot)})
 fi

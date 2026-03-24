@@ -17,6 +17,8 @@ const DURABLE_HEALTH_CONDITION_PATTERN =
   /\b(?:adhd|allerg(?:y|ies)|anemia|anxiety|arthritis|asthma|autism|cholesterol|chronic|condition|depression|diabetes|disease|disorder|gerd|history of|hypertension|hypotension|migraine|pcos|prediabetes|sleep apnea|syndrome|thyroid)\b/iu
 const EXPLICIT_HEALTH_MEMORY_LEAD_IN_PATTERN =
   /^(?:(?:please\s+)?remember(?: that)?|for future reference|keep in mind that)\b[:,]?\s*/iu
+const MEMORY_CLAUSE_SPLIT_PATTERN =
+  /(?:\s*,\s*|\s*;\s*|\s+\band\b\s+)(?=(?:actually\s+)?(?:call me|you can call me|my name is|i(?: would|'d)? prefer|user prefers|(?:i(?:'m|\s+am)\s+)?(?:fine|okay)\s+with|fine with|okay with|(?:(?:ur|your|the)\s+)?default(?:\s+assistant)?\s+tone(?:\s+is)?\s+fine|keep\s+(?:answer|answers|response|responses|reply|replies)|default to|ask before|always\b|never\b|when\b|remember(?: that)?|for future reference|keep in mind that|we(?:'re| are) working on|let'?s keep working on|i(?:'m| am) building|i(?:'m| am) working on|i want to|i wanna|we need to|the plan is|current project)\b)/iu
 
 export interface AssistantLongTermMemoryEntry {
   section: AssistantMemoryLongTermSection
@@ -106,9 +108,13 @@ export function normalizeAssistantLongTermMemoryText(input: {
   const textCandidates = extractAssistantMemory(input.text).longTerm.filter(
     (entry) => entry.section === input.section,
   )
-  const sourceCandidate = sourcePromptCandidates[0] ?? null
-  const textCandidate = textCandidates[0] ?? null
-  const resolvedCandidate = sourceCandidate ?? textCandidate
+  const matchingCandidatePair = findMatchingAssistantMemoryCandidate(
+    sourcePromptCandidates,
+    textCandidates,
+  )
+  const sourceCandidate = matchingCandidatePair?.source ?? sourcePromptCandidates[0] ?? null
+  const textCandidate = matchingCandidatePair?.text ?? textCandidates[0] ?? null
+  const resolvedCandidate = matchingCandidatePair?.text ?? sourceCandidate ?? textCandidate
 
   if (input.requireSourcePromptMatch && !sourceCandidate) {
     throw new VaultCliError(
@@ -119,9 +125,9 @@ export function normalizeAssistantLongTermMemoryText(input: {
 
   if (
     input.requireSourcePromptMatch &&
-    sourceCandidate &&
-    textCandidate &&
-    sourceCandidate.text !== textCandidate.text
+    sourcePromptCandidates.length > 0 &&
+    textCandidates.length > 0 &&
+    !matchingCandidatePair
   ) {
     throw new VaultCliError(
       'ASSISTANT_MEMORY_SOURCE_PROMPT_MISMATCH',
@@ -234,8 +240,13 @@ export function normalizeAssistantDailyMemoryText(input: {
 function splitIntoMemorySentences(prompt: string): string[] {
   return prompt
     .split(/(?:\r?\n)+|(?<=[.!?;])\s+/u)
+    .flatMap((sentence) => splitMemoryClauses(sentence))
     .map((sentence) => normalizeSentence(sentence))
     .filter((sentence): sentence is string => Boolean(sentence))
+}
+
+function splitMemoryClauses(sentence: string): string[] {
+  return sentence.split(MEMORY_CLAUSE_SPLIT_PATTERN)
 }
 
 function normalizeSentence(value: string): string | null {
@@ -280,6 +291,14 @@ function extractPreferenceMemory(sentence: string): string | null {
     return null
   }
 
+  const storedPreferenceMatch = /^user prefers\s+(.+)/iu.exec(trimmed)
+  if (storedPreferenceMatch?.[1]) {
+    const clause = cleanMemoryValue(storedPreferenceMatch[1])
+    if (looksLikeDurablePreferenceClause(clause)) {
+      return `User prefers ${clause}.`
+    }
+  }
+
   const preferMatch = /\bi(?: would|'d)? prefer\s+(.+)/iu.exec(trimmed)
   if (preferMatch?.[1]) {
     const clause = cleanMemoryValue(preferMatch[1])
@@ -288,11 +307,19 @@ function extractPreferenceMemory(sentence: string): string | null {
     }
   }
 
+  if (looksLikeDefaultAssistantTonePreference(trimmed)) {
+    return 'User prefers the default assistant tone.'
+  }
+
   if (
     /\buse\s+(?:metric|imperial|us customary)\s+units\b/iu.test(trimmed) &&
     !looksLikeOneOffFormattingRequest(trimmed)
   ) {
     return toSentence(trimmed)
+  }
+
+  if (/^keep\s+(?:answer|answers|response|responses|reply|replies)\b/iu.test(trimmed)) {
+    return null
   }
 
   if (looksLikeStableResponsePreference(trimmed)) {
@@ -319,6 +346,14 @@ function extractStandingInstructionMemory(sentence: string): string | null {
   }
 
   if (/\bask before\b/iu.test(trimmed) || /\bdefault to\b/iu.test(trimmed)) {
+    return toSentence(trimmed.replace(/^please\s+/iu, ''))
+  }
+
+  if (
+    /^keep\s+(?:answer|answers|response|responses|reply|replies)\b/iu.test(trimmed) &&
+    RESPONSE_STYLE_PATTERN.test(trimmed) &&
+    !looksLikeOneOffFormattingRequest(trimmed)
+  ) {
     return toSentence(trimmed.replace(/^please\s+/iu, ''))
   }
 
@@ -561,6 +596,13 @@ function looksLikeDurablePreferenceClause(value: string): boolean {
   return false
 }
 
+function looksLikeDefaultAssistantTonePreference(value: string): boolean {
+  const normalized = stripTrailingPunctuation(value)
+  return /^(?:(?:i(?:'m|\s+am)\s+)?(?:fine|okay)\s+with\s+(?:(?:ur|your|the)\s+)?default(?:\s+assistant)?\s+tone|(?:(?:ur|your|the)\s+)?default(?:\s+assistant)?\s+tone(?:\s+is)?\s+fine)$/iu.test(
+    normalized,
+  )
+}
+
 function looksLikeStableResponsePreference(value: string): boolean {
   const normalized = value.replace(/^please\s+/iu, '')
   return (
@@ -577,6 +619,33 @@ function looksLikeOneOffFormattingRequest(value: string): boolean {
   return /\b(?:for this|for these|right now|these two|this answer|this response)\b/iu.test(
     value,
   )
+}
+
+function findMatchingAssistantMemoryCandidate(
+  sourceCandidates: AssistantLongTermMemoryEntry[],
+  textCandidates: AssistantLongTermMemoryEntry[],
+): {
+  source: AssistantLongTermMemoryEntry
+  text: AssistantLongTermMemoryEntry
+} | null {
+  for (const sourceCandidate of sourceCandidates) {
+    for (const textCandidate of textCandidates) {
+      if (areEquivalentAssistantMemoryTexts(sourceCandidate.text, textCandidate.text)) {
+        return {
+          source: sourceCandidate,
+          text: textCandidate,
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+function areEquivalentAssistantMemoryTexts(left: string, right: string): boolean {
+  const normalizedLeft = normalizeMemoryLookup(left)
+  const normalizedRight = normalizeMemoryLookup(right)
+  return normalizedLeft !== null && normalizedLeft === normalizedRight
 }
 
 function looksLikeDurableHealthContext(value: string): boolean {

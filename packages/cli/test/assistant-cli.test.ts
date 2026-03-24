@@ -587,6 +587,85 @@ test.sequential(
   ASSISTANT_CLI_TIMEOUT_MS,
 )
 
+test.sequential(
+  'assistant memory CLI upserts canonical identity and tone memories from a compound bound turn',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-compound-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    await ensureCliRuntimeArtifacts()
+
+    const boundEnv = createAssistantMemoryTurnContextEnv({
+      allowSensitiveHealthContext: true,
+      sessionId: 'asst_cli_compound',
+      sourcePrompt:
+        'hmm call me will, fine with ur default tone, and i wanna do more strength training and lower my cholesterol!',
+      turnId: 'turn_cli_compound',
+      vault: vaultRoot,
+    })
+
+    const identityUpsert = requireData(
+      await runCli<{
+        memories: Array<{
+          section: string
+          text: string
+        }>
+      }>(
+        [
+          'assistant',
+          'memory',
+          'upsert',
+          'Call me Will.',
+          '--vault',
+          vaultRoot,
+          '--scope',
+          'long-term',
+          '--section',
+          'Identity',
+        ],
+        {
+          env: isolateAssistantMemoryEnv(boundEnv),
+        },
+      ),
+    )
+    const preferenceUpsert = requireData(
+      await runCli<{
+        memories: Array<{
+          section: string
+          text: string
+        }>
+      }>(
+        [
+          'assistant',
+          'memory',
+          'upsert',
+          'User prefers the default assistant tone.',
+          '--vault',
+          vaultRoot,
+          '--scope',
+          'long-term',
+          '--section',
+          'Preferences',
+        ],
+        {
+          env: isolateAssistantMemoryEnv(boundEnv),
+        },
+      ),
+    )
+
+    assert.equal(identityUpsert.memories[0]?.section, 'Identity')
+    assert.equal(identityUpsert.memories[0]?.text, 'Call the user Will.')
+    assert.equal(preferenceUpsert.memories[0]?.section, 'Preferences')
+    assert.equal(
+      preferenceUpsert.memories[0]?.text,
+      'User prefers the default assistant tone.',
+    )
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
 test('root chat alias participates in default-vault injection', () => {
   assert.deepEqual(applyDefaultVaultToArgs(['chat'], '/tmp/default-vault'), [
     'chat',

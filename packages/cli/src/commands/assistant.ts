@@ -734,13 +734,27 @@ export function registerAssistantCommands(
 
   memory.command('upsert', {
     args: z.object({
-      text: z.string().min(1).describe('Assistant memory text to persist.'),
+      text: z
+        .string()
+        .min(1)
+        .describe('Assistant memory text to persist. Outside live turns, use the exact sentence you want stored.'),
     }),
     description:
       'Create or update assistant memory through the typed memory commit layer.',
     hint:
-      'Use --scope both to mirror durable long-term memory into today\'s daily note. In live assistant turns, the host binds writes to the real user message and ignores any client-supplied --sourcePrompt.',
+      'Use --scope both to mirror durable long-term memory into today\'s daily note. Outside live assistant turns, phrase durable memory as the final stored sentence, such as "Call the user Alex.", "User prefers the default assistant tone.", or "Keep responses brief.". In live assistant turns, the host binds writes to the real user message and ignores any client-supplied --sourcePrompt.',
     examples: [
+      {
+        args: {
+          text: 'Call the user Alex.',
+        },
+        options: {
+          vault: './vault',
+          scope: 'long-term',
+          section: 'Identity',
+        },
+        description: 'Persist a durable naming preference when you already know the canonical stored wording.',
+      },
       {
         args: {
           text: 'Call me Alex.',
@@ -751,7 +765,7 @@ export function registerAssistantCommands(
           section: 'Identity',
           sourcePrompt: 'Call me Alex from now on.',
         },
-        description: 'Persist a durable naming preference and mirror it into the daily note.',
+        description: 'Persist a durable naming preference from natural user wording and mirror it into the daily note.',
       },
       {
         args: {
