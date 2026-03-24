@@ -3,6 +3,7 @@ import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
+import { createRuntimeUnavailableError } from '../src/runtime-errors.js'
 import { repoRoot, requireData, runCli } from './cli-test-helpers.js'
 import './cli-expansion-document-meal.test.js'
 import './cli-expansion-experiment-journal-vault.test.js'
@@ -41,6 +42,28 @@ const sampleDocumentPath = path.join(
   'fixtures/sample-imports/README.md',
 )
 const runtimeCliTestTimeoutMs = 20_000
+
+test('runtime unavailable error preserves the shared operator guidance payload', () => {
+  const result = createRuntimeUnavailableError(
+    'samples/audit query reads',
+    new Error('module missing'),
+  )
+
+  assert.equal(result.code, 'runtime_unavailable')
+  assert.equal(
+    result.message,
+    'packages/cli can describe samples/audit query reads, but local execution is blocked until the integrating workspace installs incur and links @healthybob/core, @healthybob/importers, and @healthybob/query.',
+  )
+  assert.deepEqual(result.context, {
+    cause: 'module missing',
+    packages: [
+      '@healthybob/core',
+      '@healthybob/importers',
+      '@healthybob/query',
+      'incur',
+    ],
+  })
+})
 
 async function makeFixtureVault(): Promise<FixtureVault> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-test-'))

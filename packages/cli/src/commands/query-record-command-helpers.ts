@@ -5,6 +5,7 @@ import {
   type QueryVaultReadModel as QueryReadModel,
   type QueryVaultRecord as QueryRecord,
 } from '../query-runtime.js'
+import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '../runtime-errors.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   inferEntityKind,
@@ -46,8 +47,6 @@ export interface AuditCommandListItem extends CommandListItem {
   summary: string | null
 }
 
-const RUNTIME_PACKAGES = ['@healthybob/core', '@healthybob/importers', '@healthybob/query', 'incur']
-
 let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
 
 export async function loadQueryRuntime(
@@ -68,7 +67,7 @@ export async function loadQueryRuntime(
       return runtime
     } catch (error) {
       queryRuntimePromise = null
-      throw createRuntimeUnavailableError(operation, error)
+      throw buildRuntimeUnavailableError(operation, error)
     }
   })()
 
@@ -249,26 +248,7 @@ export function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-export function createRuntimeUnavailableError(
-  operation: string,
-  cause: unknown,
-) {
-  const details =
-    cause instanceof Error
-      ? {
-          cause: cause.message,
-          packages: [...RUNTIME_PACKAGES],
-        }
-      : {
-          packages: [...RUNTIME_PACKAGES],
-        }
-
-  return new VaultCliError(
-    'runtime_unavailable',
-    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace installs incur and links @healthybob/core, @healthybob/importers, and @healthybob/query.`,
-    details,
-  )
-}
+export { createRuntimeUnavailableError } from '../runtime-errors.js'
 
 export async function readJsonObject(
   absolutePath: string,
