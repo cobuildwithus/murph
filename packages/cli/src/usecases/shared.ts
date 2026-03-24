@@ -1,7 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 
-import { healthEntityDefinitions } from "@healthybob/contracts"
+import {
+  BLOOD_TEST_CATEGORY,
+  BLOOD_TEST_SPECIMEN_TYPES,
+  healthEntityDefinitions,
+} from "@healthybob/contracts"
 
 import { VaultCliError } from "../vault-cli-errors.js"
 import {
@@ -29,6 +33,27 @@ const DEFAULT_GENERIC_LIST_EXCLUDED_FAMILIES = new Set([
   "audit",
   "core",
 ])
+const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
+
+function isBloodTestEntity(entity: QueryEntity) {
+  if (entity.family !== "history" || entity.kind !== "test") {
+    return false
+  }
+
+  const testCategory =
+    typeof entity.attributes.testCategory === "string"
+      ? entity.attributes.testCategory.trim().toLowerCase()
+      : null
+  const specimenType =
+    typeof entity.attributes.specimenType === "string"
+      ? entity.attributes.specimenType.trim().toLowerCase()
+      : null
+
+  return (
+    testCategory === BLOOD_TEST_CATEGORY ||
+    (specimenType !== null && BLOOD_TEST_SPECIMEN_TYPE_SET.has(specimenType))
+  )
+}
 
 export function normalizeIssues(
   issues: Array<{
@@ -265,6 +290,10 @@ function normalizeGenericEntityKind(entity: QueryEntity) {
     return "profile"
   }
 
+  if (isBloodTestEntity(entity)) {
+    return "blood_test"
+  }
+
   const healthDefinition = healthEntityDefinitions.find(
     (definition) => definition.kind === entity.family,
   )
@@ -315,7 +344,11 @@ export function matchesGenericKindFilter(entity: QueryEntity, kind?: string) {
     return !DEFAULT_GENERIC_LIST_EXCLUDED_FAMILIES.has(entity.family)
   }
 
-  return entity.kind === kind || entity.family === kind
+  return (
+    normalizeGenericEntityKind(entity) === kind ||
+    entity.kind === kind ||
+    entity.family === kind
+  )
 }
 
 export async function materializeExportPack(

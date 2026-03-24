@@ -228,7 +228,10 @@ function getHealthEntityDataSource(
   descriptor: HealthQueryDescriptorEntry,
   record: JsonObject,
 ) {
-  if (descriptor.kind === "history" && isPlainObject(record.data)) {
+  if (
+    (descriptor.kind === "history" || descriptor.kind === "blood_test") &&
+    isPlainObject(record.data)
+  ) {
     return record.data
   }
 

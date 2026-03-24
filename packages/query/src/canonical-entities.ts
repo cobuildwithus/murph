@@ -352,6 +352,10 @@ export function projectHistoryEntity(
 
   const relatedIds = firstStringArray(source, ["relatedIds"]);
   const tags = firstStringArray(source, ["tags"]);
+  const status =
+    kind === "test"
+      ? firstString(source, ["resultStatus", "status"])
+      : firstString(source, ["status", "severity"]);
 
   return {
     entityId: id,
@@ -359,7 +363,7 @@ export function projectHistoryEntity(
     lookupIds: uniqueStrings([id]),
     family: "history",
     kind,
-    status: firstString(source, ["status"]),
+    status,
     occurredAt,
     date: normalizeCanonicalDate(occurredAt),
     path: relativePath,

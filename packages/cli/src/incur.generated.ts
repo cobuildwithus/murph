@@ -76,6 +76,10 @@ declare module 'incur' {
       'history scaffold': { args: {}; options: { vault: string; requestId: string } }
       'history show': { args: { id: string }; options: { vault: string; requestId: string } }
       'history upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'blood-test list': { args: {}; options: { vault: string; requestId: string; status: string; from: string; to: string; limit: number } }
+      'blood-test scaffold': { args: {}; options: { vault: string; requestId: string } }
+      'blood-test show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'blood-test upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'inbox attachment list': { args: { captureId: string }; options: { vault: string; requestId: string } }
       'inbox attachment parse': { args: { attachmentId: string }; options: { vault: string; requestId: string } }
       'inbox attachment reparse': { args: { attachmentId: string }; options: { vault: string; requestId: string } }

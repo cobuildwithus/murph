@@ -32,13 +32,17 @@ import { importAssessmentResponse as importAssessmentResponseInternal } from "./
 import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.js";
 import { upsertCondition as upsertConditionInternal } from "./bank/conditions.js";
 import { upsertGoal as upsertGoalInternal } from "./bank/goals.js";
+import { upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
 import {
   stopRegimenItem as stopRegimenItemInternal,
   upsertRegimenItem as upsertRegimenItemInternal,
 } from "./bank/regimens.js";
 import { upsertFamilyMember as upsertFamilyMemberInternal } from "./family/api.js";
 import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics/api.js";
-import { appendHistoryEvent as appendHistoryEventInternal } from "./history/api.js";
+import {
+  appendBloodTest as appendBloodTestInternal,
+  appendHistoryEvent as appendHistoryEventInternal,
+} from "./history/api.js";
 import {
   appendProfileSnapshot as appendProfileSnapshotInternal,
   rebuildCurrentProfile as rebuildCurrentProfileInternal,
@@ -347,6 +351,12 @@ export async function appendHistoryEvent(
   return withCanonicalWriteLock(input.vaultRoot, () => appendHistoryEventInternal(input));
 }
 
+export async function appendBloodTest(
+  input: Parameters<typeof appendBloodTestInternal>[0],
+): ReturnType<typeof appendBloodTestInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => appendBloodTestInternal(input));
+}
+
 export async function upsertFamilyMember(
   input: Parameters<typeof upsertFamilyMemberInternal>[0],
 ): ReturnType<typeof upsertFamilyMemberInternal> {
@@ -375,6 +385,12 @@ export async function upsertGoal(
   input: Parameters<typeof upsertGoalInternal>[0],
 ): ReturnType<typeof upsertGoalInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => upsertGoalInternal(input));
+}
+
+export async function upsertRecipe(
+  input: Parameters<typeof upsertRecipeInternal>[0],
+): ReturnType<typeof upsertRecipeInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => upsertRecipeInternal(input));
 }
 
 export async function upsertRegimenItem(

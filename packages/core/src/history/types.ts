@@ -1,4 +1,19 @@
+import {
+  BLOOD_TEST_CATEGORY,
+  BLOOD_TEST_FASTING_STATUSES,
+  BLOOD_TEST_SPECIMEN_TYPES,
+} from "@healthybob/contracts";
+
+import type {
+  BloodTestReferenceRange,
+  BloodTestResultRecord,
+} from "@healthybob/contracts";
 import type { DateInput } from "../types.js";
+
+export type {
+  BloodTestReferenceRange,
+  BloodTestResultRecord,
+} from "@healthybob/contracts";
 
 export const HEALTH_HISTORY_KINDS = [
   "encounter",
@@ -26,6 +41,9 @@ export type HistoryEventOrder = (typeof HISTORY_EVENT_ORDER)[number];
 export type ProcedureStatus = (typeof PROCEDURE_STATUSES)[number];
 export type TestResultStatus = (typeof TEST_STATUSES)[number];
 export type AdverseEffectSeverity = (typeof ADVERSE_EFFECT_SEVERITIES)[number];
+export type BloodTestCategory = typeof BLOOD_TEST_CATEGORY;
+export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number];
+export type BloodTestSpecimenType = (typeof BLOOD_TEST_SPECIMEN_TYPES)[number];
 
 export interface HistoryEventBase {
   schemaVersion: "hb.event.v1";
@@ -60,7 +78,20 @@ export interface TestHistoryEventRecord extends HistoryEventBase {
   testName: string;
   resultStatus: TestResultStatus;
   summary?: string;
+  testCategory?: string;
+  specimenType?: string;
+  labName?: string;
+  labPanelId?: string;
+  collectedAt?: string;
+  reportedAt?: string;
+  fastingStatus?: BloodTestFastingStatus;
+  results?: BloodTestResultRecord[];
 }
+
+export type BloodTestHistoryEventRecord = TestHistoryEventRecord & {
+  testCategory: BloodTestCategory;
+  results: BloodTestResultRecord[];
+};
 
 export interface AdverseEffectHistoryEventRecord extends HistoryEventBase {
   kind: "adverse_effect";
@@ -118,6 +149,28 @@ export interface AppendTestHistoryEventInput extends HistoryEventDraftBase {
   resultStatus?: TestResultStatus;
   summary?: string;
   resultSummary?: string;
+  testCategory?: string;
+  specimenType?: string;
+  labName?: string;
+  labPanelId?: string;
+  collectedAt?: DateInput;
+  reportedAt?: DateInput;
+  fastingStatus?: BloodTestFastingStatus;
+  results?: BloodTestResultRecord[];
+}
+
+export interface AppendBloodTestInput extends HistoryEventDraftBase {
+  testName: string;
+  resultStatus?: TestResultStatus;
+  summary?: string;
+  resultSummary?: string;
+  specimenType?: BloodTestSpecimenType | string;
+  labName?: string;
+  labPanelId?: string;
+  collectedAt?: DateInput;
+  reportedAt?: DateInput;
+  fastingStatus?: BloodTestFastingStatus;
+  results: BloodTestResultRecord[];
 }
 
 export interface AppendAdverseEffectHistoryEventInput extends HistoryEventDraftBase {
@@ -148,6 +201,10 @@ export interface AppendHistoryEventResult {
   auditPath: string;
   relativePath: string;
   record: HistoryEventRecord;
+}
+
+export interface AppendBloodTestResult extends AppendHistoryEventResult {
+  record: BloodTestHistoryEventRecord;
 }
 
 export interface ListHistoryEventsInput {

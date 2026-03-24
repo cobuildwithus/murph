@@ -267,6 +267,7 @@ VAULT=../../fixtures/demo-web-vault pnpm dev
 | `vault-cli vault show|paths|stats|update` | Exposes explicit vault metadata, layout, record-count summaries, and stable metadata updates. |
 | `vault-cli audit show|list|tail` | Exposes first-class audit inspection and filtering over canonical audit shards. |
 | `vault-cli provider scaffold|upsert|show|list` | Gives `bank/providers/*.md` a first-class noun with stable `prov_*` ids and slug-based follow-up reads. |
+| `vault-cli recipe scaffold|upsert|show|list` | Gives `bank/recipes/*.md` a first-class noun with stable `rcp_*` ids so the vault can remember dishes, ingredients, and prep steps. |
 | `vault-cli event scaffold|upsert|show|list` | Covers the non-specialized canonical event kinds without requiring a separate noun per kind. |
 | `vault-cli document import <file>` | Copies a source document into `raw/documents/...`, writes an immutable raw manifest, and appends a document event. |
 | `vault-cli document show|list|manifest` | Lets operators follow `doc_*`/`evt_*` ids back to the event record and immutable raw manifest. |
@@ -330,10 +331,12 @@ The repo also includes a larger health-record surface:
 - `vault-cli goal scaffold|upsert|show|list`
 - `vault-cli condition scaffold|upsert|show|list`
 - `vault-cli allergy scaffold|upsert|show|list`
+- `vault-cli recipe scaffold|upsert|show|list`
 - `vault-cli regimen scaffold|upsert|show|list|stop`
 - `vault-cli family scaffold|upsert|show|list`
 - `vault-cli genetics scaffold|upsert|show|list`
 - `vault-cli history scaffold|upsert|show|list`
+- `vault-cli blood-test scaffold|upsert|show|list`
 
 The noun-oriented surface is organized around capability bundles:
 
@@ -348,7 +351,7 @@ The noun-oriented surface is organized around capability bundles:
 
 Nouns are grouped by those bundles rather than a shared grammar plus exceptions:
 
-- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `provider`, and `event` are payload-CRUD nouns
+- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, `recipe`, and `event` are payload-CRUD nouns
 - `profile` is payload CRUD plus `rebuild`
 - `regimen` is payload CRUD plus `stop`
 - `document` and `meal` are artifact-import nouns
@@ -361,7 +364,7 @@ Nouns are grouped by those bundles rather than a shared grammar plus exceptions:
 - `audit` is readable plus `tail`
 - `inbox` is runtime control
 
-Noun-specific filters still exist where the underlying records justify them: `history list` adds `--kind`, `--from`, and `--to`; `profile list` exposes `--from` and `--to`; registry-backed nouns may also expose `--status`.
+Noun-specific filters still exist where the underlying records justify them: `history list` adds `--kind`, `--from`, and `--to`; `blood-test list` exposes `--status`, `--from`, and `--to`; `profile list` exposes `--from` and `--to`; registry-backed nouns may also expose `--status`.
 
 ## One-Command macOS Setup
 
@@ -431,6 +434,7 @@ The query layer distinguishes between the primary lookup id used for follow-on r
 
 - `show` accepts query-layer ids such as `journal:2026-03-12`, `evt_*`, `smp_*`, `exp_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
 - `provider show` accepts either the canonical `prov_*` id or the provider slug from `bank/providers/<slug>.md`
+- `recipe show` accepts either the canonical `rcp_*` id or the recipe slug from `bank/recipes/<slug>.md`
 - `event show` accepts `evt_*`; specialized nouns such as `document`, `meal`, `workout`, `history`, and `experiment` remain the preferred capture surface when they exist, but workout follow-on reads still use the returned `lookupId` or `eventId` through `event show` or generic `show`
 - generic `show` still expects query-layer ids for event-backed records, but `document show` and `meal show` also accept `doc_*` and `meal_*`
 - `samples batch show` and `samples batch list` are the follow-up surface for `xfm_*`; generic `show` still does not accept import-batch ids
@@ -465,6 +469,8 @@ The main write flows map cleanly onto the vault:
   mutates only the targeted journal page through focused append/frontmatter helpers
 - `provider upsert`
   creates or updates `bank/providers/<slug>.md` with a stable `prov_*` id
+- `recipe upsert`
+  creates or updates `bank/recipes/<slug>.md` with a stable `rcp_*` id
 - `event upsert`
   appends one canonical `evt_*` event record for supported generic event kinds
 - `intake import`

@@ -399,6 +399,42 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showHistoryEvent",
     },
   },
+  blood_test: {
+    command: {
+      commandName: "blood-test",
+      description: "Structured blood-test commands for the health extension surface.",
+      descriptions: {
+        list: "List blood tests through the health read model.",
+        scaffold: "Emit a payload template for structured blood tests.",
+        show: "Show one blood test.",
+        upsert: "Append one blood test from a JSON payload file or stdin.",
+      },
+      listStatusDescription: "Optional blood-test result status to filter by.",
+      noun: "blood test",
+      payloadFile: "blood-test.json",
+      pluralNoun: "blood tests",
+      showId: {
+        description: "Blood test id to show.",
+        example: "<blood-test-id>",
+      },
+    },
+    core: {
+      resultIdField: "eventId",
+      resultCapabilities: ["ledger-file"],
+      runtimeMethod: "appendBloodTest",
+      scaffoldNoun: "blood-test",
+      scaffoldServiceMethod: "scaffoldBloodTest",
+      upsertServiceMethod: "upsertBloodTest",
+    },
+    query: {
+      genericListFilterCapabilities: ["date-range", "status"],
+      listServiceMethod: "listBloodTests",
+      notFoundLabel: "blood test",
+      runtimeListMethod: "listBloodTests",
+      runtimeShowMethod: "showBloodTest",
+      showServiceMethod: "showBloodTest",
+    },
+  },
   family: buildStatusFilteredRegistryDescriptorExtension({
     commandDescription: "Family registry commands for the health extension surface.",
     commandName: "family",

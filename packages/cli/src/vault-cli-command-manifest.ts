@@ -25,6 +25,7 @@ import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMealCommands } from './commands/meal.js'
 import { registerProfileCommands } from './commands/profile.js'
+import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerReadCommands } from './commands/read.js'
 import { registerRegimenCommands } from './commands/regimen.js'
@@ -90,6 +91,7 @@ const genericHealthRootCommandNames = [
   'condition',
   'allergy',
   'history',
+  'blood-test',
   'family',
   'genetics',
 ] as const
@@ -312,6 +314,18 @@ export const vaultCliCommandDescriptors = [
     },
     register({ cli, services }) {
       registerProviderCommands(cli, services)
+    },
+  },
+  {
+    id: 'recipe',
+    bindingMode: 'direct',
+    rootCommandNames: ['recipe'],
+    directVaultServiceBindings: {
+      core: ['scaffoldRecipe', 'upsertRecipe'],
+      query: ['showRecipe', 'listRecipes'],
+    },
+    register({ cli, services }) {
+      registerRecipeCommands(cli, services)
     },
   },
   {

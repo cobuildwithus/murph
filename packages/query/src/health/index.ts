@@ -17,6 +17,11 @@ export {
   showSupplementCompound,
 } from "./supplements.js";
 export {
+  listBloodTests,
+  readBloodTest,
+  showBloodTest,
+} from "./blood-tests.js";
+export {
   listHistoryEvents,
   readHistoryEvent,
   showHistoryEvent,
@@ -48,6 +53,10 @@ export type {
   RegimenQueryRecord,
   SupplementIngredientQueryRecord,
 } from "./registries.js";
+export type {
+  BloodTestListOptions,
+  BloodTestQueryRecord,
+} from "./blood-tests.js";
 export type {
   HealthHistoryKind,
   HistoryListOptions,

@@ -8,6 +8,7 @@ export type HealthEntityKind =
   | "allergy"
   | "regimen"
   | "history"
+  | "blood_test"
   | "family"
   | "genetics";
 
@@ -277,6 +278,31 @@ const checkedHealthEntityDefinitions = [
       title: "Primary care visit",
       encounterType: "office_visit",
       location: "Primary care clinic",
+    },
+  },
+  {
+    kind: "blood_test",
+    listKinds: ["blood_test"],
+    noun: "blood test",
+    plural: "blood tests",
+    scaffoldTemplate: {
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Functional health panel",
+      testName: "functional_health_panel",
+      labName: "Function Health",
+      specimenType: "blood",
+      fastingStatus: "fasting",
+      results: [
+        {
+          analyte: "Apolipoprotein B",
+          value: 87,
+          unit: "mg/dL",
+          referenceRange: {
+            text: "<90",
+          },
+          flag: "normal",
+        },
+      ],
     },
   },
   {

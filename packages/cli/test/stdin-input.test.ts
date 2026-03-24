@@ -97,6 +97,47 @@ test.sequential('payload-based commands accept stdin via --input -', async () =>
       'ledger/events/2026/2026-03.jsonl',
     )
 
+    const bloodTestUpsert = await runCli<{
+      eventId: string
+      lookupId: string
+      ledgerFile: string
+    }>(
+      ['blood-test', 'upsert', '--input', '-', '--vault', vaultRoot],
+      {
+        stdin: JSON.stringify({
+          occurredAt: '2026-03-12T14:00:00.000Z',
+          title: 'Functional health panel',
+          testName: 'functional_health_panel',
+          labName: 'Function Health',
+          results: [
+            {
+              analyte: 'Apolipoprotein B',
+              value: 87,
+              unit: 'mg/dL',
+              flag: 'normal',
+            },
+            {
+              analyte: 'LDL Cholesterol',
+              value: 134,
+              unit: 'mg/dL',
+              flag: 'high',
+            },
+          ],
+        }),
+      },
+    )
+
+    assert.equal(bloodTestUpsert.ok, true)
+    assert.match(requireData(bloodTestUpsert).eventId, /^evt_/u)
+    assert.equal(
+      requireData(bloodTestUpsert).lookupId,
+      requireData(bloodTestUpsert).eventId,
+    )
+    assert.equal(
+      requireData(bloodTestUpsert).ledgerFile,
+      'ledger/events/2026/2026-03.jsonl',
+    )
+
     const providerUpsert = await runCli<{
       providerId: string
       path: string

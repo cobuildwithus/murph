@@ -59,7 +59,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -195,7 +195,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -326,7 +326,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -464,7 +464,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -592,7 +592,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -714,7 +714,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -844,7 +844,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -979,7 +979,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1111,7 +1111,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1239,7 +1239,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1371,7 +1371,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1435,6 +1435,124 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 4000
+        },
+        "testCategory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "specimenType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "labName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "labPanelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "collectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reportedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "fastingStatus": {
+          "type": "string",
+          "enum": [
+            "fasting",
+            "non_fasting",
+            "unknown"
+          ]
+        },
+        "results": {
+          "minItems": 1,
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "analyte": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "slug": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              "value": {
+                "type": "number"
+              },
+              "textValue": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "comparator": {
+                "type": "string",
+                "enum": [
+                  "<",
+                  "<=",
+                  ">",
+                  ">="
+                ]
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "flag": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "normal",
+                  "high",
+                  "abnormal",
+                  "critical",
+                  "unknown"
+                ]
+              },
+              "biomarkerSlug": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              "referenceRange": {
+                "type": "object",
+                "properties": {
+                  "low": {
+                    "type": "number"
+                  },
+                  "high": {
+                    "type": "number"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  }
+                },
+                "additionalProperties": false
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              }
+            },
+            "required": [
+              "analyte"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -1509,7 +1627,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1719,7 +1837,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1850,7 +1968,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1987,7 +2105,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },

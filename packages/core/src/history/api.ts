@@ -1,3 +1,16 @@
+import {
+  BLOOD_TEST_CATEGORY,
+  BLOOD_TEST_FASTING_STATUSES,
+  BLOOD_TEST_RESULT_FLAGS,
+  BLOOD_TEST_SPECIMEN_TYPES,
+  eventRecordSchema,
+  safeParseContract,
+} from "@healthybob/contracts";
+
+import type {
+  BloodTestReferenceRange,
+  BloodTestResultRecord,
+} from "@healthybob/contracts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.js";
 import { emitAuditRecord } from "../audit.js";
 import { VaultError } from "../errors.js";
@@ -6,7 +19,6 @@ import { generateRecordId } from "../ids.js";
 import { runCanonicalWrite } from "../operations/index.js";
 import { toDateOnly } from "../time.js";
 import { walkVaultFiles } from "../fs.js";
-import { eventRecordSchema, safeParseContract } from "@healthybob/contracts";
 
 import {
   compareIsoTimestamps,
@@ -29,8 +41,11 @@ import {
 } from "./types.js";
 
 import type {
+  AppendBloodTestInput,
+  AppendBloodTestResult,
   AppendHistoryEventInput,
   AppendHistoryEventResult,
+  BloodTestHistoryEventRecord,
   HistoryEventKind,
   HistoryEventOrder,
   HistoryEventRecord,
@@ -38,11 +53,18 @@ import type {
   ListHistoryEventsInput,
   ReadHistoryEventInput,
   ReadHistoryEventResult,
+  TestHistoryEventRecord,
+  TestResultStatus,
 } from "./types.js";
 
 const HISTORY_KIND_SET = new Set<HistoryEventKind>(HEALTH_HISTORY_KINDS);
+const BLOOD_TEST_RESULT_COMPARATORS = ["<", "<=", ">", ">="] as const;
+const KNOWN_BLOOD_TEST_SPECIMEN_TYPES = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
+
 type HistoryNormalizationMode = "build" | "parse";
 type HistorySourceRecord = Record<string, unknown>;
+
+type NonTestHistoryEventKind = Exclude<HistoryEventKind, "test">;
 
 interface HistoryFieldDefinition<TValue> {
   sources?: Partial<Record<HistoryNormalizationMode, readonly string[]>>;
@@ -77,10 +99,180 @@ function stripUndefined<TRecord>(record: TRecord): TRecord {
   ) as TRecord;
 }
 
-const HISTORY_KIND_DEFINITIONS: Record<
-  HistoryEventKind,
-  Record<string, HistoryFieldDefinition<unknown>>
-> = {
+function optionalFiniteNumber(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function normalizeOptionalTimestamp(value: unknown, fieldName: string): string | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  return normalizeTimestamp(value as Parameters<typeof normalizeTimestamp>[0], fieldName);
+}
+
+function normalizeToken(value: unknown, fieldName: string, maxLength = 64): string | undefined {
+  const candidate = optionalString(value, fieldName, maxLength);
+
+  if (!candidate) {
+    return undefined;
+  }
+
+  return candidate
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+}
+
+function normalizeSlugLike(value: unknown, fieldName: string, maxLength = 160): string | undefined {
+  const candidate = optionalString(value, fieldName, maxLength);
+
+  if (!candidate) {
+    return undefined;
+  }
+
+  return candidate
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+}
+
+function normalizeBloodTestReferenceRange(
+  value: unknown,
+  fieldName: string,
+): BloodTestReferenceRange | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isPlainRecord(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an object.`);
+  }
+
+  const referenceRange = stripUndefined({
+    low: optionalFiniteNumber(value.low, `${fieldName}.low`),
+    high: optionalFiniteNumber(value.high, `${fieldName}.high`),
+    text: optionalString(value.text, `${fieldName}.text`, 160),
+  });
+
+  if (
+    referenceRange.low === undefined &&
+    referenceRange.high === undefined &&
+    referenceRange.text === undefined
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      `${fieldName} must include at least one boundary or text range.`,
+    );
+  }
+
+  return referenceRange as BloodTestReferenceRange;
+}
+
+function normalizeBloodTestResult(
+  value: unknown,
+  fieldName: string,
+): BloodTestResultRecord {
+  if (!isPlainRecord(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an object.`);
+  }
+
+  const result = stripUndefined({
+    analyte: requireString(value.analyte, `${fieldName}.analyte`, 160),
+    slug: normalizeSlugLike(value.slug, `${fieldName}.slug`, 160),
+    value: optionalFiniteNumber(value.value, `${fieldName}.value`),
+    textValue: optionalString(value.textValue, `${fieldName}.textValue`, 160),
+    comparator: optionalEnum(value.comparator, BLOOD_TEST_RESULT_COMPARATORS, `${fieldName}.comparator`),
+    unit: optionalString(value.unit, `${fieldName}.unit`, 64),
+    flag: optionalEnum(value.flag, BLOOD_TEST_RESULT_FLAGS, `${fieldName}.flag`),
+    biomarkerSlug: normalizeSlugLike(value.biomarkerSlug, `${fieldName}.biomarkerSlug`, 160),
+    referenceRange: normalizeBloodTestReferenceRange(value.referenceRange, `${fieldName}.referenceRange`),
+    note: optionalString(value.note, `${fieldName}.note`, 240),
+  });
+
+  if (result.value === undefined && result.textValue === undefined) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      `${fieldName} must include either a numeric value or textValue.`,
+    );
+  }
+
+  return result as BloodTestResultRecord;
+}
+
+function normalizeBloodTestResults(
+  value: unknown,
+  fieldName: string,
+): BloodTestResultRecord[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array.`);
+  }
+
+  if (value.length === 0) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must include at least one result.`);
+  }
+
+  if (value.length > 500) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} exceeds the maximum item count.`);
+  }
+
+  return value.map((entry, index) => normalizeBloodTestResult(entry, `${fieldName}[${index}]`));
+}
+
+function inferTestResultStatus(
+  results: BloodTestResultRecord[] | undefined,
+): TestResultStatus | undefined {
+  if (!results || results.length === 0) {
+    return undefined;
+  }
+
+  let hasNormal = false;
+  let hasAbnormal = false;
+
+  for (const result of results) {
+    switch (result.flag) {
+      case "normal":
+        hasNormal = true;
+        break;
+      case "low":
+      case "high":
+      case "abnormal":
+      case "critical":
+        hasAbnormal = true;
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (hasNormal && hasAbnormal) {
+    return "mixed";
+  }
+
+  if (hasAbnormal) {
+    return "abnormal";
+  }
+
+  if (hasNormal) {
+    return "normal";
+  }
+
+  return undefined;
+}
+
+const HISTORY_KIND_DEFINITIONS = {
   encounter: {
     encounterType: {
       normalize: (value, fieldName) => requireString(value, fieldName, 120),
@@ -102,21 +294,6 @@ const HISTORY_KIND_DEFINITIONS: Record<
         parse: "completed",
       },
       normalize: (value, fieldName) => optionalEnum(value, PROCEDURE_STATUSES, fieldName) ?? "completed",
-    },
-  },
-  test: {
-    testName: {
-      normalize: (value, fieldName) => requireString(value, fieldName, 160),
-    },
-    resultStatus: {
-      defaults: {
-        build: "unknown",
-        parse: "unknown",
-      },
-      normalize: (value, fieldName) => optionalEnum(value, TEST_STATUSES, fieldName) ?? "unknown",
-    },
-    summary: {
-      normalize: (value, fieldName) => optionalString(value, fieldName, 1000),
     },
   },
   adverse_effect: {
@@ -150,7 +327,10 @@ const HISTORY_KIND_DEFINITIONS: Record<
       normalize: (value, fieldName) => optionalString(value, fieldName, 120),
     },
   },
-};
+} as const satisfies Record<
+  NonTestHistoryEventKind,
+  Record<string, HistoryFieldDefinition<unknown>>
+>;
 
 function readHistoryFieldValue(
   source: HistorySourceRecord,
@@ -168,12 +348,74 @@ function readHistoryFieldValue(
   return fallback;
 }
 
+function normalizeTestHistoryFields(
+  source: HistorySourceRecord,
+  mode: HistoryNormalizationMode,
+): TestHistoryEventRecord {
+  const summaryAliases = mode === "build" ? ["summary", "resultSummary"] : ["summary", "resultSummary"];
+  const results = normalizeBloodTestResults(
+    readHistoryFieldValue(source, ["results"], undefined),
+    "results",
+  );
+  const testCategory = normalizeToken(
+    readHistoryFieldValue(source, ["testCategory"], undefined),
+    "testCategory",
+    64,
+  );
+  const specimenType = normalizeToken(
+    readHistoryFieldValue(source, ["specimenType"], undefined),
+    "specimenType",
+    64,
+  );
+  const inferredResultStatus = inferTestResultStatus(results);
+  const resultStatus =
+    optionalEnum(
+      readHistoryFieldValue(source, ["resultStatus"], undefined),
+      TEST_STATUSES,
+      "resultStatus",
+    ) ??
+    inferredResultStatus ??
+    "unknown";
+
+  return stripUndefined({
+    kind: "test",
+    testName: requireString(readHistoryFieldValue(source, ["testName"], undefined), "testName", 160),
+    resultStatus,
+    summary: optionalString(readHistoryFieldValue(source, summaryAliases, undefined), "summary", 1000),
+    testCategory,
+    specimenType,
+    labName: optionalString(readHistoryFieldValue(source, ["labName"], undefined), "labName", 160),
+    labPanelId: optionalString(readHistoryFieldValue(source, ["labPanelId"], undefined), "labPanelId", 120),
+    collectedAt: normalizeOptionalTimestamp(
+      readHistoryFieldValue(source, ["collectedAt"], undefined),
+      "collectedAt",
+    ),
+    reportedAt: normalizeOptionalTimestamp(
+      readHistoryFieldValue(source, ["reportedAt"], undefined),
+      "reportedAt",
+    ),
+    fastingStatus: optionalEnum(
+      readHistoryFieldValue(source, ["fastingStatus"], undefined),
+      BLOOD_TEST_FASTING_STATUSES,
+      "fastingStatus",
+    ),
+    results,
+  }) as TestHistoryEventRecord;
+}
+
 function normalizeHistoryKindFields(
   kind: HistoryEventKind,
   source: HistorySourceRecord,
   mode: HistoryNormalizationMode,
 ): Record<string, unknown> {
-  const definition = HISTORY_KIND_DEFINITIONS[kind];
+  if (kind === "test") {
+    return normalizeTestHistoryFields(source, mode) as unknown as Record<string, unknown>;
+  }
+
+  const definition = HISTORY_KIND_DEFINITIONS[kind] as Record<
+    string,
+    HistoryFieldDefinition<unknown>
+  >;
   const normalized: Record<string, unknown> = {};
 
   for (const [recordKey, fieldDefinition] of Object.entries(definition)) {
@@ -238,12 +480,20 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     relatedIds: validateSortedStringList(value.relatedIds, "relatedIds", "id", 32, 80),
     rawRefs: normalizeRelativePathList(value.rawRefs, "rawRefs"),
   };
-
-  return stripUndefined({
+  const record = stripUndefined({
     ...baseRecord,
     kind,
     ...normalizeHistoryKindFields(kind, value, "parse"),
-  }) as HistoryEventRecord;
+  });
+  const result = safeParseContract(eventRecordSchema, record);
+
+  if (!result.success) {
+    throw new VaultError("VAULT_INVALID_HISTORY_EVENT", "Stored health history event is malformed.", {
+      errors: result.errors,
+    });
+  }
+
+  return result.data as HistoryEventRecord;
 }
 
 function normalizeOrder(order: HistoryEventOrder | undefined): HistoryEventOrder {
@@ -331,6 +581,22 @@ export async function appendHistoryEvent(
       };
     },
   });
+}
+
+export async function appendBloodTest(
+  input: AppendBloodTestInput,
+): Promise<AppendBloodTestResult> {
+  const result = await appendHistoryEvent({
+    ...input,
+    kind: "test",
+    specimenType: input.specimenType ?? BLOOD_TEST_CATEGORY,
+    testCategory: BLOOD_TEST_CATEGORY,
+  });
+
+  return {
+    ...result,
+    record: result.record as BloodTestHistoryEventRecord,
+  };
 }
 
 export async function listHistoryEvents({
@@ -425,4 +691,12 @@ export async function readHistoryEvent({
   }
 
   throw new VaultError("VAULT_HISTORY_EVENT_MISSING", "Health history event was not found.");
+}
+
+export function isBloodTestHistoryRecord(record: Pick<TestHistoryEventRecord, "kind" | "testCategory" | "specimenType">) {
+  return (
+    record.kind === "test" &&
+    (record.testCategory === BLOOD_TEST_CATEGORY ||
+      (typeof record.specimenType === "string" && KNOWN_BLOOD_TEST_SPECIMEN_TYPES.has(record.specimenType)))
+  );
 }

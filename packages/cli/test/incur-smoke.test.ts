@@ -42,9 +42,11 @@ test('root help lists the simple health CRUD command groups', async () => {
     'goal',
     'condition',
     'allergy',
+    'recipe',
     'supplement',
     'regimen',
     'history',
+    'blood-test',
     'family',
     'genetics',
   ]
@@ -138,6 +140,23 @@ test('search query schema exposes retrieval-specific filters', async () => {
   assert.equal('dateFrom' in schema.options.properties, false)
   assert.equal('dateTo' in schema.options.properties, false)
   assert.equal('entryType' in schema.options.properties, false)
+  assert.deepEqual(schema.options.required, ['vault', 'limit'])
+})
+
+test('blood-test list schema stays scoped to shared date-range and status filters', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['blood-test', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('status' in schema.options.properties, true)
+  assert.equal('from' in schema.options.properties, true)
+  assert.equal('to' in schema.options.properties, true)
+  assert.equal('kind' in schema.options.properties, false)
   assert.deepEqual(schema.options.required, ['vault', 'limit'])
 })
 

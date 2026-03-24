@@ -8,6 +8,7 @@ import {
   buildExportPack,
   buildTimeline,
   getVaultEntities,
+  listBloodTests,
   listEntities,
   listRecords,
   listSupplementCompounds,
@@ -17,6 +18,7 @@ import {
   readVault,
   readVaultTolerant,
   searchVault,
+  showBloodTest,
   showSupplementCompound,
   showProfile,
 } from "../src/index.js";
@@ -573,6 +575,71 @@ snapshotId psnap_health_01
     assert.equal(current.snapshotId, "psnap_health_01");
     assert.deepEqual(current.topGoalIds, ["goal_sleep_01"]);
     assert.equal(current.markdown, null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("blood tests can be queried through dedicated helpers while remaining canonical history events", async () => {
+  const vaultRoot = await createHealthVault();
+
+  try {
+    await appendVaultFile(
+      vaultRoot,
+      "ledger/events/2026/2026-03.jsonl",
+      `${JSON.stringify({
+        schemaVersion: "hb.event.v1",
+        id: "evt_blood_01",
+        kind: "test",
+        occurredAt: "2026-03-13T08:00:00Z",
+        recordedAt: "2026-03-13T08:05:00Z",
+        dayKey: "2026-03-13",
+        source: "import",
+        title: "Functional health panel",
+        testName: "functional_health_panel",
+        resultStatus: "mixed",
+        testCategory: "blood",
+        specimenType: "serum",
+        labName: "Function Health",
+        fastingStatus: "fasting",
+        results: [
+          {
+            analyte: "Apolipoprotein B",
+            value: 87,
+            unit: "mg/dL",
+            flag: "normal",
+          },
+          {
+            analyte: "LDL Cholesterol",
+            value: 134,
+            unit: "mg/dL",
+            flag: "high",
+          },
+        ],
+        tags: ["lab", "lipids"],
+        relatedIds: ["goal_sleep_01"],
+      })}\n`,
+    );
+
+    const listResult = await listBloodTests(vaultRoot, {
+      status: "mixed",
+    });
+    const showResult = await showBloodTest(vaultRoot, "evt_blood_01");
+    const vault = await readVault(vaultRoot);
+    const bloodEntity = lookupEntityById(vault, "evt_blood_01");
+
+    assert.equal(listResult.length, 1);
+    assert.equal(listResult[0]?.kind, "blood_test");
+    assert.equal(listResult[0]?.status, "mixed");
+    assert.equal(listResult[0]?.labName, "Function Health");
+    assert.equal(listResult[0]?.specimenType, "serum");
+    assert.equal(listResult[0]?.data.testCategory, "blood");
+    assert.equal(showResult?.id, "evt_blood_01");
+    assert.equal(showResult?.testName, "functional_health_panel");
+    assert.equal(showResult?.status, "mixed");
+    assert.equal(showResult?.labName, "Function Health");
+    assert.equal(bloodEntity?.kind, "test");
+    assert.equal(bloodEntity?.status, "mixed");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

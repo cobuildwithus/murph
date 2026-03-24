@@ -126,6 +126,9 @@ export interface HealthCoreRuntimeMethods {
   appendHistoryEvent(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HistoryEventRuntimeResult>
+  appendBloodTest(
+    input: { vaultRoot: string } & JsonObject,
+  ): Promise<HistoryEventRuntimeResult>
   upsertFamilyMember(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HealthRecordRuntimeResult<'familyMemberId'>>
@@ -147,6 +150,9 @@ export interface HealthCoreScaffoldServiceMethods {
   scaffoldHistoryEvent(
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'history'>>
+  scaffoldBloodTest(
+    input: CommandContext,
+  ): Promise<HealthScaffoldResult<'blood-test'>>
   scaffoldFamilyMember(
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'family'>>
@@ -174,6 +180,9 @@ export interface HealthCoreUpsertServiceMethods {
   upsertHistoryEvent(
     input: JsonFileInput,
   ): Promise<UpsertHistoryEventResult>
+  upsertBloodTest(
+    input: JsonFileInput,
+  ): Promise<UpsertHistoryEventResult>
   upsertFamilyMember(
     input: JsonFileInput,
   ): Promise<UpsertRecordResult & { familyMemberId: string }>
@@ -194,6 +203,7 @@ export interface HealthQueryRuntimeShowMethods {
   showAllergy(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showRegimen(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showHistoryEvent(vaultRoot: string, lookup: string): Promise<JsonObject | null>
+  showBloodTest(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showFamilyMember(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showGeneticVariant(vaultRoot: string, lookup: string): Promise<JsonObject | null>
 }
@@ -230,6 +240,15 @@ export interface HealthQueryRuntimeListMethods {
       status?: string
     },
   ): Promise<JsonObject[]>
+  listBloodTests(
+    vaultRoot: string,
+    options?: {
+      from?: string
+      to?: string
+      limit?: number
+      status?: string
+    },
+  ): Promise<JsonObject[]>
   listFamilyMembers(
     vaultRoot: string,
     options?: Record<string, unknown>,
@@ -252,6 +271,7 @@ export interface HealthQueryShowServiceMethods {
   showAllergy(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showRegimen(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showHistoryEvent(input: EntityLookupInput): Promise<HealthEntityEnvelope>
+  showBloodTest(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showFamilyMember(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showGeneticVariant(input: EntityLookupInput): Promise<HealthEntityEnvelope>
 }
@@ -264,6 +284,7 @@ export interface HealthQueryListServiceMethods {
   listAllergies(input: HealthListInput): Promise<HealthListEnvelope>
   listRegimens(input: HealthListInput): Promise<HealthListEnvelope>
   listHistoryEvents(input: HealthListInput): Promise<HealthListEnvelope>
+  listBloodTests(input: HealthListInput): Promise<HealthListEnvelope>
   listFamilyMembers(input: HealthListInput): Promise<HealthListEnvelope>
   listGeneticVariants(input: HealthListInput): Promise<HealthListEnvelope>
 }

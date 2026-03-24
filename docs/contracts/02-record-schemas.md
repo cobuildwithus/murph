@@ -70,6 +70,8 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 
 Shared optional event fields are limited to `note`, `tags`, `relatedIds`, `rawRefs`, and `externalRef`. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
+`test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
+
 `activity_session` may also include optional `distanceKm` for cardio sessions and optional `strengthExercises` for explicit lifting notes. Each `strengthExercises` entry stores `exercise`, `setCount`, `repsPerSet`, and may also carry `load`, `loadUnit`, and `loadDescription`.
 
 ## Sample Streams

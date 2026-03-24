@@ -13,7 +13,12 @@ import {
   VAULT_LAYOUT,
   VaultError,
 } from "../src/index.js";
-import { appendHistoryEvent, listHistoryEvents, readHistoryEvent } from "../src/history/index.js";
+import {
+  appendBloodTest,
+  appendHistoryEvent,
+  listHistoryEvents,
+  readHistoryEvent,
+} from "../src/history/index.js";
 import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.js";
 import { listGeneticVariants, readGeneticVariant, upsertGeneticVariant } from "../src/genetics/index.js";
 import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.js";
@@ -168,6 +173,74 @@ test("history test-event normalization keeps writes canonical and ignores legacy
       { id: legacyEventId, resultStatus: "unknown" },
     ],
   );
+});
+
+test("blood-test writes infer result status and persist structured analytes canonically", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-blood-test");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-03-05T08:30:00.000Z",
+    title: "Functional health panel",
+    testName: "functional_health_panel",
+    labName: "Function Health",
+    fastingStatus: "fasting",
+    results: [
+      {
+        analyte: "Apolipoprotein B",
+        value: 87,
+        unit: "mg/dL",
+        flag: "normal",
+        referenceRange: {
+          text: "<90",
+        },
+      },
+      {
+        analyte: "LDL Cholesterol",
+        value: 134,
+        unit: "mg/dL",
+        flag: "high",
+        referenceRange: {
+          high: 99,
+        },
+      },
+    ],
+  });
+
+  assert.equal(appended.record.kind, "test");
+  assert.equal(appended.record.testCategory, "blood");
+  assert.equal(appended.record.specimenType, "blood");
+  assert.equal(appended.record.resultStatus, "mixed");
+  assert.equal(appended.record.fastingStatus, "fasting");
+  assert.equal(appended.record.labName, "Function Health");
+  assert.equal(appended.record.results.length, 2);
+  assert.equal(appended.record.results[0]?.analyte, "Apolipoprotein B");
+
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    kinds: ["test"],
+  });
+  const read = await readHistoryEvent({
+    vaultRoot,
+    eventId: appended.record.id,
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: appended.relativePath,
+  });
+
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.kind, "test");
+  assert.equal(listed[0]?.resultStatus, "mixed");
+  assert.equal(listed[0]?.testCategory, "blood");
+  assert.equal(read.record.kind, "test");
+  assert.equal(read.record.resultStatus, "mixed");
+  assert.equal(read.record.labName, "Function Health");
+  assert.equal(read.record.results?.length, 2);
+  assert.equal((stored[0] as { resultStatus?: string }).resultStatus, "mixed");
+  assert.equal((stored[0] as { testCategory?: string }).testCategory, "blood");
+  assert.equal((stored[0] as { specimenType?: string }).specimenType, "blood");
 });
 
 test("history writes reject provider ids and raw refs that violate the canonical event contract", async () => {

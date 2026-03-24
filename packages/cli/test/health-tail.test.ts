@@ -578,6 +578,209 @@ test.sequential("history list keeps canonical kind/data and echoes shared filter
   }
 });
 
+test.sequential("blood-test descriptor wiring exposes a dedicated noun while preserving the shared event id", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "blood-test.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12T13:00:00.000Z",
+        title: "Functional health panel",
+        testName: "functional_health_panel",
+        labName: "Function Health",
+        fastingStatus: "fasting",
+        results: [
+          {
+            analyte: "Apolipoprotein B",
+            value: 87,
+            unit: "mg/dL",
+            flag: "normal",
+          },
+          {
+            analyte: "LDL Cholesterol",
+            value: 134,
+            unit: "mg/dL",
+            flag: "high",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli<{
+      eventId: string;
+      lookupId: string;
+      ledgerFile: string;
+      created: boolean;
+    }>([
+      "blood-test",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const eventId = requireData(upsertResult).eventId;
+    const nounShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "blood-test",
+      "show",
+      eventId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const historyShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "history",
+      "show",
+      eventId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "show",
+      eventId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, true);
+    assert.match(eventId, /^evt_/u);
+    assert.equal(requireData(upsertResult).lookupId, eventId);
+    assert.equal(requireData(upsertResult).created, true);
+    assert.equal(
+      requireData(upsertResult).ledgerFile,
+      "ledger/events/2026/2026-03.jsonl",
+    );
+    assert.equal(nounShow.ok, true);
+    assert.equal(historyShow.ok, true);
+    assert.equal(genericShow.ok, true);
+    assert.equal(requireData(nounShow).entity.id, eventId);
+    assert.equal(requireData(nounShow).entity.kind, "blood_test");
+    assert.equal(requireData(nounShow).entity.data.testCategory, "blood");
+    assert.equal(requireData(nounShow).entity.data.labName, "Function Health");
+    assert.equal(Array.isArray(requireData(nounShow).entity.data.results), true);
+    assert.equal(requireData(historyShow).entity.kind, "test");
+    assert.equal(requireData(historyShow).entity.data.resultStatus, "mixed");
+    assert.equal(requireData(genericShow).entity.kind, "blood_test");
+    assert.equal(requireData(genericShow).entity.data.resultStatus, "mixed");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("blood-test list echoes shared filters and generic list kind routing", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "blood-test-list.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12T13:00:00.000Z",
+        title: "Functional health panel",
+        testName: "functional_health_panel",
+        labName: "Function Health",
+        results: [
+          {
+            analyte: "Apolipoprotein B",
+            value: 87,
+            unit: "mg/dL",
+            flag: "normal",
+          },
+          {
+            analyte: "LDL Cholesterol",
+            value: 134,
+            unit: "mg/dL",
+            flag: "high",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    await runCli([
+      "blood-test",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const nounList = await runCli<{
+      count: number;
+      filters: Record<string, unknown>;
+      nextCursor: string | null;
+      items: Array<{
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      }>;
+    }>([
+      "blood-test",
+      "list",
+      "--status",
+      "mixed",
+      "--limit",
+      "5",
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericList = await runCli<{
+      count: number;
+      items: Array<{
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      }>;
+    }>([
+      "list",
+      "--kind",
+      "blood_test",
+      "--limit",
+      "5",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(nounList.ok, true);
+    assert.equal(requireData(nounList).filters.status, "mixed");
+    assert.equal("kind" in requireData(nounList).filters, false);
+    assert.equal(requireData(nounList).filters.limit, 5);
+    assert.equal(requireData(nounList).count, 1);
+    assert.equal(requireData(nounList).nextCursor, null);
+    assert.equal(requireData(nounList).items[0]?.kind, "blood_test");
+    assert.equal(requireData(nounList).items[0]?.data.resultStatus, "mixed");
+    assert.equal(requireData(nounList).items[0]?.data.labName, "Function Health");
+    assert.equal(genericList.ok, true);
+    assert.equal(requireData(genericList).count, 1);
+    assert.equal(requireData(genericList).items[0]?.kind, "blood_test");
+    assert.equal(requireData(genericList).items[0]?.data.testCategory, "blood");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("profile current lookup stays wired for both noun-specific and generic show", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
   const payloadPath = path.join(vaultRoot, "profile.json");

@@ -56,6 +56,10 @@ vault-cli provider scaffold --vault <path> [--request-id <id>]
 vault-cli provider upsert --vault <path> --input @file.json [--request-id <id>]
 vault-cli provider show <id> --vault <path> [--request-id <id>]
 vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] [--request-id <id>]
+vault-cli recipe scaffold --vault <path> [--request-id <id>]
+vault-cli recipe upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli recipe show <id> --vault <path> [--request-id <id>]
+vault-cli recipe list --vault <path> [--status draft|saved|archived] [--limit <n>] [--request-id <id>]
 vault-cli event scaffold --vault <path> --kind <kind> [--request-id <id>]
 vault-cli event upsert --vault <path> --input @file.json [--request-id <id>]
 vault-cli event show <id> --vault <path> [--request-id <id>]
@@ -160,7 +164,8 @@ The command surface is organized around reusable capability bundles, not a paylo
 
 ## Noun Composition
 
-- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `provider`, and `event` are payload-CRUD nouns.
+- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, and `event` are payload-CRUD nouns.
+- `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
 - `profile` is primarily payload CRUD and also exposes `rebuild` for the derived current-profile view.
 - `regimen` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
@@ -181,7 +186,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 
 These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 
-Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, and similar registry nouns may expose `--status <status>`. `profile list` exposes `--from` and `--to`. `history list` adds `--kind`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity.
+Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, and similar registry nouns may expose `--status <status>`. `profile list` exposes `--from` and `--to`. `history list` adds `--kind`, `--from`, and `--to`. `blood-test list` exposes `--status`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity.
 
 Frozen health nouns remain:
 
@@ -194,6 +199,7 @@ Frozen health nouns remain:
 - `family`
 - `genetics`
 - `history`
+- `blood-test`
 
 ## Native Incur Contract
 
@@ -224,7 +230,9 @@ Every command now uses native `incur` command definitions directly:
 - `show` accepts query-layer ids such as `core`, `journal:<YYYY-MM-DD>`, `exp_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
 - `profile show current` and `profile current rebuild` target the derived `bank/profile/current.md` view rather than a standalone canonical record id.
 - `provider show` accepts either the canonical `prov_*` id or the stable provider slug stored in `bank/providers/<slug>.md`.
-- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `history`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add` intentionally returns the queryable event id and relies on `event show|list` plus generic `show|list` for follow-on reads.
+- `recipe show` accepts either the canonical `rcp_*` id or the stable recipe slug stored in `bank/recipes/<slug>.md`.
+- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `history`, `blood-test`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add` intentionally returns the queryable event id and relies on `event show|list` plus generic `show|list` for follow-on reads.
+- `blood-test show` accepts the canonical `evt_*` id and may also resolve the stored blood test by its title, `testName`, or `labPanelId`.
 - Generic `show` still expects query-layer ids for event-backed records, but `document show`, `document manifest`, `meal show`, and `meal manifest` accept the stable `doc_*` and `meal_*` related ids as well as `evt_*`.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
 - `intake manifest` and `intake raw` are the first-class follow-up surface for immutable assessment evidence under `raw/assessments/**`.
@@ -417,8 +425,8 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
 
 ### Follow-up Read Commands
 
-- `provider show`, `event show`, `document show`, `meal show`, `samples show`, `experiment show`, `journal show`, `intake show`, `audit show`, and `vault show` all return the same direct `entity`-style payload shape used by generic `show`, with command-local lookup behavior where documented.
-- `provider list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export pack list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
+- `provider show`, `recipe show`, `event show`, `document show`, `meal show`, `samples show`, `experiment show`, `journal show`, `intake show`, `audit show`, and `vault show` all return the same direct `entity`-style payload shape used by generic `show`, with command-local lookup behavior where documented.
+- `provider list`, `recipe list`, `event list`, `document list`, `meal list`, `samples list`, `experiment list`, `journal list`, `intake list`, `audit list`, `audit tail`, and `export pack list` all return the same direct `items` plus `filters` list payload shape used by generic `list`, but with noun-specific filter echoes.
 - `document manifest`, `meal manifest`, `samples batch show`, `intake manifest`, `intake raw`, and `export pack show` return direct artifact-inspection payloads rather than generic `entity` wrappers.
 - `inbox attachment list|show|show-status|parse|reparse` expose runtime attachment inspection and parser queue control over `.runtime` plus `derived/inbox/**`; they do not mutate canonical vault records.
 
@@ -621,7 +629,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `event upsert`, `samples add`, `workout add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `regimen stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives and canonical write locks.
+- `provider upsert`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `regimen stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives and canonical write locks.
 - `show`, `list`, `search query`, `search index status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

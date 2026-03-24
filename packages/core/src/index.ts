@@ -22,6 +22,7 @@ export { loadVault } from "./vault.js";
 export {
   addMeal,
   applyCanonicalWriteBatch,
+  appendBloodTest,
   appendJournal,
   appendHistoryEvent,
   appendJsonlRecord,
@@ -54,6 +55,7 @@ export {
   upsertFamilyMember,
   upsertGeneticVariant,
   upsertGoal,
+  upsertRecipe,
   upsertRegimenItem,
   validateVault,
 } from "./public-mutations.js";

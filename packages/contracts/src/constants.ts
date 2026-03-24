@@ -13,6 +13,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   profileCurrentFrontmatter: "hb.frontmatter.profile-current.v1",
   profileSnapshot: "hb.profile-snapshot.v1",
   providerFrontmatter: "hb.frontmatter.provider.v1",
+  recipeFrontmatter: "hb.frontmatter.recipe.v1",
   rawImportManifest: "hb.raw-import-manifest.v1",
   regimenFrontmatter: "hb.frontmatter.regimen.v1",
   sample: "hb.sample.v1",
@@ -35,6 +36,7 @@ export const ID_PREFIXES = Object.freeze({
   pack: "pack",
   profileSnapshot: "psnap",
   provider: "prov",
+  recipe: "rcp",
   regimen: "reg",
   sample: "smp",
   transform: "xfm",
@@ -112,7 +114,13 @@ export const REGIMEN_KINDS = Object.freeze(["medication", "supplement", "therapy
 
 export const REGIMEN_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
 
+export const RECIPE_STATUSES = Object.freeze(["draft", "saved", "archived"] as const);
+
 export const TEST_RESULT_STATUSES = Object.freeze(["pending", "normal", "abnormal", "mixed", "unknown"] as const);
+export const BLOOD_TEST_CATEGORY = "blood" as const;
+export const BLOOD_TEST_FASTING_STATUSES = Object.freeze(["fasting", "non_fasting", "unknown"] as const);
+export const BLOOD_TEST_RESULT_FLAGS = Object.freeze(["low", "normal", "high", "abnormal", "critical", "unknown"] as const);
+export const BLOOD_TEST_SPECIMEN_TYPES = Object.freeze(["blood", "whole_blood", "serum", "plasma", "dried_blood_spot"] as const);
 
 export const ADVERSE_EFFECT_SEVERITIES = Object.freeze(["mild", "moderate", "severe"] as const);
 
@@ -143,6 +151,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "export_pack",
   "profile_current_rebuild",
   "profile_snapshot_add",
+  "recipe_upsert",
   "regimen_stop",
   "regimen_upsert",
   "samples_import_csv",
@@ -167,6 +176,7 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   journalDay: "journal_day",
   profileCurrent: "profile_current",
   provider: "provider",
+  recipe: "recipe",
   regimen: "regimen",
 } as const);
 

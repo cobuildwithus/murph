@@ -8,6 +8,8 @@ import {
   AUDIT_ACTIONS,
   AUDIT_ACTORS,
   AUDIT_STATUSES,
+  BLOOD_TEST_FASTING_STATUSES,
+  BLOOD_TEST_RESULT_FLAGS,
   CONDITION_CLINICAL_STATUSES,
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
@@ -25,6 +27,7 @@ import {
   ID_PREFIXES,
   PROFILE_SNAPSHOT_SOURCES,
   RAW_IMPORT_KINDS,
+  RECIPE_STATUSES,
   REGIMEN_KINDS,
   REGIMEN_STATUSES,
   SAMPLE_QUALITIES,
@@ -51,6 +54,7 @@ export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
 export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type ProfileSnapshotSource = (typeof PROFILE_SNAPSHOT_SOURCES)[number];
+export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
 export type RegimenKind = (typeof REGIMEN_KINDS)[number];
 export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
 export type SampleStream = (typeof SAMPLE_STREAMS)[number];
@@ -58,6 +62,8 @@ export type SampleSource = (typeof SAMPLE_SOURCES)[number];
 export type SampleQuality = (typeof SAMPLE_QUALITIES)[number];
 export type SleepStage = (typeof SLEEP_STAGES)[number];
 export type TestResultStatus = (typeof TEST_RESULT_STATUSES)[number];
+export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number];
+export type BloodTestResultFlag = (typeof BLOOD_TEST_RESULT_FLAGS)[number];
 export type AdverseEffectSeverity = (typeof ADVERSE_EFFECT_SEVERITIES)[number];
 export type VariantZygosity = (typeof VARIANT_ZYGOSITIES)[number];
 export type VariantSignificance = (typeof VARIANT_SIGNIFICANCES)[number];
@@ -256,6 +262,46 @@ export const activityStrengthExerciseSchema = z.union([
   activityStrengthExerciseWithLoadSchema,
 ]);
 
+const bloodTestResultComparatorSchema = z.enum(["<", "<=", ">", ">="]);
+
+export const bloodTestReferenceRangeSchema = z
+  .object({
+    low: numberSchema().optional(),
+    high: numberSchema().optional(),
+    text: boundedString(1, 160).optional(),
+  })
+  .strict()
+  .refine(
+    (value) => value.low !== undefined || value.high !== undefined || value.text !== undefined,
+    {
+      message: "Blood-test reference ranges must include at least one boundary or a text range.",
+    },
+  );
+
+export const bloodTestResultSchema = z
+  .object({
+    analyte: boundedString(1, 160),
+    slug: patternedString(SLUG_PATTERN).optional(),
+    value: numberSchema().optional(),
+    textValue: boundedString(1, 160).optional(),
+    comparator: bloodTestResultComparatorSchema.optional(),
+    unit: boundedString(1, 64).optional(),
+    flag: z.enum(BLOOD_TEST_RESULT_FLAGS).optional(),
+    biomarkerSlug: patternedString(SLUG_PATTERN).optional(),
+    referenceRange: bloodTestReferenceRangeSchema.optional(),
+    note: boundedString(1, 240).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.value === undefined && value.textValue === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Blood-test results require either a numeric value or a textValue.",
+        path: ["value"],
+      });
+    }
+  });
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
@@ -341,6 +387,7 @@ export const vaultMetadataSchema = withContractMetadata(
               pack: z.literal(ID_PREFIXES.pack),
               profileSnapshot: z.literal(ID_PREFIXES.profileSnapshot),
               provider: z.literal(ID_PREFIXES.provider),
+              recipe: z.literal(ID_PREFIXES.recipe),
               regimen: z.literal(ID_PREFIXES.regimen),
               sample: z.literal(ID_PREFIXES.sample),
               transform: z.literal(ID_PREFIXES.transform),
@@ -365,6 +412,7 @@ export const vaultMetadataSchema = withContractMetadata(
           profileRoot: z.literal("bank/profile"),
           profileSnapshotsRoot: z.literal("ledger/profile-snapshots"),
           providersRoot: z.literal("bank/providers"),
+          recipesRoot: z.literal("bank/recipes"),
           rawAssessmentsRoot: z.literal("raw/assessments"),
           rawRoot: z.literal("raw"),
           eventsRoot: z.literal("ledger/events"),
@@ -448,6 +496,14 @@ export const eventRecordSchema = withContractMetadata(
       testName: boundedString(1, 160),
       resultStatus: z.enum(TEST_RESULT_STATUSES),
       summary: boundedString(1, 4000).optional(),
+      testCategory: boundedString(1, 64).optional(),
+      specimenType: boundedString(1, 64).optional(),
+      labName: boundedString(1, 160).optional(),
+      labPanelId: boundedString(1, 120).optional(),
+      collectedAt: isoDateTimeString().optional(),
+      reportedAt: isoDateTimeString().optional(),
+      fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
+      results: z.array(bloodTestResultSchema).min(1).max(500).optional(),
     }),
     eventSchema("activity_session", {
       activityType: patternedString(SLUG_PATTERN),
@@ -609,6 +665,34 @@ export const providerFrontmatterSchema = withContractMetadata(
     .strict(),
   "@healthybob/contracts/frontmatter-provider.schema.json",
   "Healthy Bob Provider Frontmatter",
+);
+
+export const recipeFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.recipeFrontmatter),
+      docType: z.literal(FRONTMATTER_DOC_TYPES.recipe),
+      recipeId: idSchema(ID_PREFIXES.recipe),
+      slug: patternedString(SLUG_PATTERN),
+      title: boundedString(1, 160),
+      status: z.enum(RECIPE_STATUSES),
+      summary: boundedString(1, 4000).optional(),
+      cuisine: boundedString(1, 160).optional(),
+      dishType: boundedString(1, 160).optional(),
+      source: boundedString(1, 240).optional(),
+      servings: numberSchema(0).optional(),
+      prepTimeMinutes: integerSchema(0).optional(),
+      cookTimeMinutes: integerSchema(0).optional(),
+      totalTimeMinutes: integerSchema(0).optional(),
+      tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+      ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
+      steps: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
+      relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
+      relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
+    })
+    .strict(),
+  "@healthybob/contracts/frontmatter-recipe.schema.json",
+  "Healthy Bob Recipe Frontmatter",
 );
 
 export const assessmentResponseSchema = withContractMetadata(
@@ -839,6 +923,8 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
 export type ActivityStrengthExercise = z.infer<typeof activityStrengthExerciseSchema>;
+export type BloodTestReferenceRange = z.infer<typeof bloodTestReferenceRangeSchema>;
+export type BloodTestResultRecord = z.infer<typeof bloodTestResultSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;
@@ -869,6 +955,7 @@ export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;
 export type ProviderFrontmatter = z.infer<typeof providerFrontmatterSchema>;
+export type RecipeFrontmatter = z.infer<typeof recipeFrontmatterSchema>;
 export type AssessmentResponseRecord = z.infer<typeof assessmentResponseSchema>;
 export type RawImportManifestArtifact = z.infer<typeof rawImportManifestArtifactSchema>;
 export type RawImportManifest = z.infer<typeof rawImportManifestSchema>;
