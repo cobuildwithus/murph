@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import { readAssistantAutomationState } from '../src/assistant-state.js'
+import { createSetupAgentmailSelectionResolver } from '../src/setup-agentmail.js'
 import { configureSetupChannels } from '../src/setup-services/channels.js'
+import { VaultCliError } from '../src/vault-cli-errors.js'
 
 test('configureSetupChannels enables Telegram auto-reply only after the doctor probe passes', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-channels-'))
@@ -323,4 +325,161 @@ test('configureSetupChannels keeps email configured but disables auto-reply when
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
+})
+
+test('configureSetupChannels reuses a discovered AgentMail inbox during onboarding before falling back to provisioning', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-discovered-'))
+
+  try {
+    const sourceAddCalls: Array<Record<string, unknown>> = []
+    const configured = await configureSetupChannels({
+      allowPrompt: true,
+      channels: ['email'],
+      dryRun: false,
+      env: {
+        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not be called in this test')
+        },
+        async doctor() {
+          return {
+            vault,
+            checks: [
+              {
+                message: 'email inbox reachable',
+                name: 'driver-import',
+                status: 'pass' as const,
+              },
+              {
+                message: 'email inbox reachable',
+                name: 'probe',
+                status: 'pass' as const,
+              },
+            ],
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+            databasePath: '.runtime/inboxd.sqlite',
+            ok: true,
+            parserToolchain: null,
+            target: 'email:agentmail',
+          }
+        },
+        async sourceAdd(input) {
+          sourceAddCalls.push(input as unknown as Record<string, unknown>)
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connector: {
+              accountId: 'existing@example.test',
+              id: 'email:agentmail',
+              source: 'email',
+              enabled: true,
+              options: {
+                emailAddress: 'existing@example.test',
+              },
+            },
+            connectorCount: 1,
+          }
+        },
+        async sourceList() {
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+          }
+        },
+      },
+      requestId: null,
+      resolveAgentmailInboxSelection: async () => ({
+        accountId: 'existing@example.test',
+        emailAddress: 'existing@example.test',
+        mode: 'discovered' as const,
+      }),
+      steps: [],
+      vault,
+    })
+
+    assert.equal(configured[0]?.channel, 'email')
+    assert.equal(configured[0]?.configured, true)
+    assert.equal(configured[0]?.autoReply, true)
+    assert.deepEqual(sourceAddCalls, [
+      {
+        account: 'existing@example.test',
+        address: 'existing@example.test',
+        emailDisplayName: 'Healthy Bob',
+        id: 'email:agentmail',
+        provision: false,
+        requestId: null,
+        source: 'email',
+        vault,
+      },
+    ])
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test('createSetupAgentmailSelectionResolver returns a manual inbox id when discovery is forbidden and the operator enters one', async () => {
+  const resolver = createSetupAgentmailSelectionResolver({
+    createClient() {
+      return {
+        apiKey: 'agentmail-key',
+        baseUrl: 'https://api.agentmail.to/v0',
+        async listInboxes() {
+          throw new VaultCliError('AGENTMAIL_REQUEST_FAILED', 'Forbidden', {
+            status: 403,
+            method: 'GET',
+            path: '/inboxes',
+          })
+        },
+      } as any
+    },
+    prompter: {
+      async chooseInbox() {
+        throw new Error('chooseInbox should not be called in this test')
+      },
+      async promptManualInboxId() {
+        return 'manual@example.test'
+      },
+    },
+  })
+
+  const selected = await resolver({
+    allowPrompt: true,
+    env: {
+      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+    },
+  })
+
+  assert.deepEqual(selected, {
+    accountId: 'manual@example.test',
+    emailAddress: null,
+    mode: 'manual',
+  })
+})
+
+test('createSetupAgentmailSelectionResolver rethrows unexpected discovery failures instead of silently provisioning', async () => {
+  const resolver = createSetupAgentmailSelectionResolver({
+    createClient() {
+      return {
+        apiKey: 'agentmail-key',
+        baseUrl: 'https://api.agentmail.to/v0',
+        async listInboxes() {
+          throw new Error('agentmail unavailable')
+        },
+      } as any
+    },
+  })
+
+  await assert.rejects(
+    resolver({
+      allowPrompt: true,
+      env: {
+        HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+      },
+    }),
+    /agentmail unavailable/u,
+  )
 })

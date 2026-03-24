@@ -152,6 +152,7 @@ export const inboxSourceAddResultSchema = z.object({
   connector: inboxConnectorConfigSchema,
   connectorCount: z.number().int().nonnegative(),
   provisionedMailbox: inboxProvisionedMailboxSchema.nullable().optional(),
+  reusedMailbox: inboxProvisionedMailboxSchema.nullable().optional(),
   autoReplyEnabled: z.boolean().optional(),
 })
 

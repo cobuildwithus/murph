@@ -5,6 +5,10 @@ import {
 import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
 import { getAssistantChannelAdapter } from '../assistant/channel-adapters.js'
 import type { InboxCliServices } from '../inbox-services.js'
+import type {
+  SetupAgentmailInboxSelection,
+  SetupAgentmailSelectionResolver,
+} from '../setup-agentmail.js'
 import { resolveTelegramBotToken } from '../telegram-runtime.js'
 import {
   resolveSetupChannelMissingEnv,
@@ -35,11 +39,13 @@ export function normalizeSetupChannels(
 }
 
 export async function configureSetupChannels(input: {
+  allowPrompt?: boolean
   channels: readonly SetupChannel[]
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
   requestId: string | null
+  resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel[]> {
@@ -73,10 +79,12 @@ export async function configureSetupChannels(input: {
   if (input.channels.includes('email')) {
     configured.push(
       await configureEmailChannel({
+        allowPrompt: input.allowPrompt ?? false,
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
         requestId: input.requestId,
+        resolveAgentmailInboxSelection: input.resolveAgentmailInboxSelection,
         steps: input.steps,
         vault: input.vault,
       }),
@@ -366,10 +374,12 @@ async function configureTelegramChannel(input: {
 }
 
 async function configureEmailChannel(input: {
+  allowPrompt: boolean
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
   requestId: string | null
+  resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel> {
@@ -398,7 +408,7 @@ async function configureEmailChannel(input: {
       configured: false,
       connectorId: EMAIL_SETUP_CONNECTOR_ID,
       detail: apiKey
-        ? 'Would provision the AgentMail inbox connector and enable assistant auto-reply for direct email threads.'
+        ? 'Would reuse an existing AgentMail inbox when possible, or provision a new inbox connector and enable assistant auto-reply for direct email threads.'
         : `Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
       missingEnv,
@@ -441,7 +451,7 @@ async function configureEmailChannel(input: {
       connectorId: existingConnector?.id ?? null,
       detail: existingConnector
         ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-        : `Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the current environment before setup can provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        : `Email needs HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the current environment before setup can reuse or provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
       enabled: true,
       missingEnv,
     }
@@ -481,9 +491,19 @@ async function configureEmailChannel(input: {
     }
   }
 
+  const selectedInbox =
+    input.resolveAgentmailInboxSelection && apiKey
+      ? await input.resolveAgentmailInboxSelection({
+          allowPrompt: input.allowPrompt,
+          env: input.env,
+        })
+      : null
+
   const added = await sourceAdd({
+    account: selectedInbox?.accountId,
+    address: selectedInbox?.emailAddress ?? undefined,
     id: EMAIL_SETUP_CONNECTOR_ID,
-    provision: true,
+    provision: selectedInbox === null,
     emailDisplayName: EMAIL_SETUP_DISPLAY_NAME,
     requestId: input.requestId,
     source: 'email',
@@ -498,12 +518,21 @@ async function configureEmailChannel(input: {
     fallbackReason: 'Email readiness probe failed',
   })
 
-  const provisionedAddress = added.provisionedMailbox?.emailAddress ?? null
+  const configuredAddress =
+    added.provisionedMailbox?.emailAddress ??
+    added.reusedMailbox?.emailAddress ??
+    selectedInbox?.emailAddress ??
+    added.connector.options.emailAddress ??
+    null
+  const actionVerb = describeConfiguredEmailAction({
+    added,
+    selectedInbox,
+  })
   input.steps.push(
     createStep({
       detail: readiness.ready
-        ? `Provisioned the AgentMail inbox connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
-        : `Provisioned the AgentMail inbox connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''}, but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        ? `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
+        : `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
       id: 'channel-email',
       kind: 'configure',
       status: 'completed',
@@ -517,8 +546,8 @@ async function configureEmailChannel(input: {
     configured: readiness.ready,
     connectorId: added.connector.id,
     detail: readiness.ready
-      ? `Configured the email connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
-      : `Configured the email connector "${added.connector.id}"${provisionedAddress ? ` at ${provisionedAddress}` : ''}, but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      ? `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
+      : `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
     enabled: true,
     missingEnv: [],
   }
@@ -560,6 +589,21 @@ async function probeSetupReadiness(input: {
         ? null
         : probeCheck?.message ?? driverImportCheck?.message ?? input.fallbackReason,
   }
+}
+
+function describeConfiguredEmailAction(input: {
+  added: Awaited<ReturnType<NonNullable<SetupChannelInboxServices['sourceAdd']>>>
+  selectedInbox: SetupAgentmailInboxSelection | null
+}): 'Provisioned' | 'Reused' {
+  if (input.added.provisionedMailbox) {
+    return 'Provisioned'
+  }
+
+  if (input.added.reusedMailbox || input.selectedInbox) {
+    return 'Reused'
+  }
+
+  return 'Provisioned'
 }
 
 async function updateAssistantAutoReplyChannels(input: {

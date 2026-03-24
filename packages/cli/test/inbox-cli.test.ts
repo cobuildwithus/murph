@@ -585,6 +585,23 @@ async function expectVaultCliError(
   })
 }
 
+function createAgentmailHttpError(input: {
+  status: number
+  method: 'GET' | 'PATCH' | 'POST'
+  path: string
+  message?: string
+}): VaultCliError {
+  return new VaultCliError(
+    'AGENTMAIL_REQUEST_FAILED',
+    input.message ?? `AgentMail request ${input.method} ${input.path} failed.`,
+    {
+      status: input.status,
+      method: input.method,
+      path: input.path,
+    },
+  )
+}
+
 async function initializeImessageSource(input: {
   services: ReturnType<typeof createIntegratedInboxCliServices>
   vaultRoot: string
@@ -1329,6 +1346,187 @@ test.sequential('source add defaults the Telegram account identity to bot when o
       requestId: null,
     })
     assert.equal(listed.connectors[0]?.accountId, 'bot')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('source add email --provision reuses the single discovered AgentMail inbox after create is forbidden', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-single')
+  const services = createIntegratedInboxCliServices({
+    createAgentmailClient() {
+      return {
+        apiKey: 'agentmail-key',
+        baseUrl: 'https://api.agentmail.to/v0',
+        async createInbox() {
+          throw createAgentmailHttpError({
+            status: 403,
+            method: 'POST',
+            path: '/inboxes',
+            message: 'Forbidden',
+          })
+        },
+        async listInboxes() {
+          return {
+            count: 1,
+            inboxes: [
+              {
+                inbox_id: 'existing@example.test',
+                email: 'existing@example.test',
+                display_name: 'Existing Inbox',
+              },
+            ],
+          }
+        },
+        async getInbox() {
+          throw new Error('getInbox should not be called in this test')
+        },
+      } as any
+    },
+    getEnvironment: () => ({
+      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+    }),
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    const added = await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'email',
+      id: 'email:agentmail',
+      provision: true,
+    })
+
+    assert.equal(added.connector.accountId, 'existing@example.test')
+    assert.equal(added.connector.options.emailAddress, 'existing@example.test')
+    assert.equal(added.provisionedMailbox ?? null, null)
+    assert.equal(added.reusedMailbox?.emailAddress, 'existing@example.test')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('source add email --provision requires --account when multiple discovered AgentMail inboxes are available', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-multiple')
+  const services = createIntegratedInboxCliServices({
+    createAgentmailClient() {
+      return {
+        apiKey: 'agentmail-key',
+        baseUrl: 'https://api.agentmail.to/v0',
+        async createInbox() {
+          throw createAgentmailHttpError({
+            status: 403,
+            method: 'POST',
+            path: '/inboxes',
+            message: 'Forbidden',
+          })
+        },
+        async listInboxes() {
+          return {
+            count: 2,
+            inboxes: [
+              {
+                inbox_id: 'one@example.test',
+                email: 'one@example.test',
+              },
+              {
+                inbox_id: 'two@example.test',
+                email: 'two@example.test',
+              },
+            ],
+          }
+        },
+        async getInbox() {
+          throw new Error('getInbox should not be called in this test')
+        },
+      } as any
+    },
+    getEnvironment: () => ({
+      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+    }),
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    await expectVaultCliError(
+      services.sourceAdd({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        source: 'email',
+        id: 'email:agentmail',
+        provision: true,
+      }),
+      'INBOX_EMAIL_ACCOUNT_SELECTION_REQUIRED',
+    )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('source add email --provision surfaces scoped-key recovery guidance when discovery is also forbidden', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-forbidden')
+  const services = createIntegratedInboxCliServices({
+    createAgentmailClient() {
+      return {
+        apiKey: 'agentmail-key',
+        baseUrl: 'https://api.agentmail.to/v0',
+        async createInbox() {
+          throw createAgentmailHttpError({
+            status: 403,
+            method: 'POST',
+            path: '/inboxes',
+            message: 'Forbidden',
+          })
+        },
+        async listInboxes() {
+          throw createAgentmailHttpError({
+            status: 403,
+            method: 'GET',
+            path: '/inboxes',
+            message: 'Forbidden',
+          })
+        },
+        async getInbox() {
+          throw new Error('getInbox should not be called in this test')
+        },
+      } as any
+    },
+    getEnvironment: () => ({
+      HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',
+    }),
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    await expectVaultCliError(
+      services.sourceAdd({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        source: 'email',
+        id: 'email:agentmail',
+        provision: true,
+      }),
+      'INBOX_EMAIL_SCOPED_KEY_ACCOUNT_REQUIRED',
+    )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

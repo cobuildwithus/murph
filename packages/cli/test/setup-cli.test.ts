@@ -867,6 +867,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
     wearables: string[]
   }> = []
   const receivedInputs: Array<{
+    allowChannelPrompts: boolean | undefined
     channels: string[] | null
     envOverrides: NodeJS.ProcessEnv | undefined
     wearables: string[] | null
@@ -902,6 +903,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
     services: {
       async setupMacos(input: any) {
         receivedInputs.push({
+          allowChannelPrompts: input.allowChannelPrompts,
           channels: input.channels == null ? null : [...input.channels],
           envOverrides: input.envOverrides,
           wearables: input.wearables == null ? null : [...input.wearables],
@@ -936,6 +938,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
     ])
     assert.deepEqual(receivedInputs, [
       {
+        allowChannelPrompts: true,
         channels: ['email'],
         envOverrides: {
           HEALTHYBOB_AGENTMAIL_API_KEY: 'agentmail-key',

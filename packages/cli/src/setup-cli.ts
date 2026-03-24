@@ -154,6 +154,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
 
     const result = await services.setupMacos({
       assistant: selectedAssistant,
+      allowChannelPrompts: interactiveWizard,
       channels: selectedChannels,
       dryRun: context.options.dryRun,
       envOverrides,
@@ -343,7 +344,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'inbox source add email --id email:agentmail --provision --emailDisplayName "Healthy Bob"',
       description:
-        'Provision an AgentMail inbox after setting HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the shell or local `.env`.',
+        'Reuse an existing AgentMail inbox or provision a new one after setting HEALTHYBOB_AGENTMAIL_API_KEY or AGENTMAIL_API_KEY in the shell or local `.env`. Use `--account <inbox_id>` when the API key is scoped to an existing inbox.',
     })
   }
 

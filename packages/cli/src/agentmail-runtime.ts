@@ -67,6 +67,13 @@ export interface AgentmailThread {
   attachments?: AgentmailMessageAttachment[] | null
 }
 
+export interface AgentmailListInboxesResponse {
+  count: number
+  inboxes: AgentmailInbox[]
+  limit?: number | null
+  next_page_token?: string | null
+}
+
 export interface AgentmailListMessagesResponse {
   count: number
   messages: AgentmailMessage[]
@@ -179,6 +186,8 @@ export interface GetAgentmailAttachmentInput {
 export interface AgentmailApiClient {
   readonly apiKey: string
   readonly baseUrl: string
+  listInboxes(signal?: AbortSignal): Promise<AgentmailListInboxesResponse>
+  getInbox(inboxId: string, signal?: AbortSignal): Promise<AgentmailInbox>
   createInbox(input?: CreateAgentmailInboxInput, signal?: AbortSignal): Promise<AgentmailInbox>
   sendMessage(
     input: SendAgentmailMessageInput,
@@ -271,7 +280,11 @@ export function createAgentmailApiClient(
       throw new VaultCliError(
         'AGENTMAIL_REQUEST_FAILED',
         `AgentMail request ${input.method} ${input.path} failed before a response was returned.`,
-        { error: errorMessage(error) },
+        createAgentmailErrorContext({
+          error: errorMessage(error),
+          method: input.method,
+          path: input.path,
+        }),
       )
     }
 
@@ -285,6 +298,22 @@ export function createAgentmailApiClient(
   return {
     apiKey: normalizedApiKey,
     baseUrl,
+
+    async listInboxes(signal) {
+      return request<AgentmailListInboxesResponse>({
+        path: '/inboxes',
+        method: 'GET',
+        signal,
+      })
+    },
+
+    async getInbox(inboxId, signal) {
+      return request<AgentmailInbox>({
+        path: `/inboxes/${encodeURIComponent(normalizeRequiredText(inboxId, 'inboxId'))}`,
+        method: 'GET',
+        signal,
+      })
+    },
 
     async createInbox(input = {}, signal) {
       return request<AgentmailInbox>({
@@ -423,7 +452,11 @@ export function createAgentmailApiClient(
         throw new VaultCliError(
           'AGENTMAIL_DOWNLOAD_FAILED',
           'AgentMail attachment download failed before a response was returned.',
-          { error: errorMessage(error) },
+          createAgentmailErrorContext({
+            error: errorMessage(error),
+            method: 'GET',
+            path: url,
+          }),
         )
       }
 
@@ -456,7 +489,27 @@ async function createAgentmailHttpError(
     'AGENTMAIL_REQUEST_FAILED',
     extractAgentmailErrorMessage(payload, rawText) ??
       `AgentMail request ${method} ${path} failed with HTTP ${response.status}.`,
-    { status: response.status },
+    createAgentmailErrorContext({
+      status: response.status,
+      method,
+      path,
+    }),
+  )
+}
+
+function createAgentmailErrorContext(input: {
+  status?: number
+  method: string
+  path: string
+  error?: string
+}): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries({
+      status: input.status,
+      method: input.method,
+      path: input.path,
+      error: input.error,
+    }).filter(([, value]) => value !== undefined),
   )
 }
 
@@ -486,6 +539,41 @@ function normalizeAgentmailBaseUrl(value: string): string {
   }
 
   return normalized.replace(/\/+$/u, '')
+}
+
+export function matchesAgentmailHttpError(
+  error: unknown,
+  input: {
+    status?: number
+    method?: 'GET' | 'PATCH' | 'POST'
+    path?: string
+  } = {},
+): error is VaultCliError {
+  if (!(error instanceof VaultCliError)) {
+    return false
+  }
+
+  if (error.code !== 'AGENTMAIL_REQUEST_FAILED') {
+    return false
+  }
+
+  const status = error.context?.status
+  const method = error.context?.method
+  const path = error.context?.path
+
+  if (input.status !== undefined && status !== input.status) {
+    return false
+  }
+
+  if (input.method !== undefined && method !== input.method) {
+    return false
+  }
+
+  if (input.path !== undefined && path !== input.path) {
+    return false
+  }
+
+  return true
 }
 
 function normalizeRequiredText(

@@ -151,7 +151,8 @@ export function describeSetupChannelStatus(
       return missingEnv.length === 0
         ? {
             badge: 'ready',
-            detail: 'AgentMail API key is available in the current environment.',
+            detail:
+              'AgentMail API key is available for inbox discovery or provisioning in the current environment.',
             missingEnv,
             ready: true,
           }

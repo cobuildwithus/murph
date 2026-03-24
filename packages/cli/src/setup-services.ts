@@ -35,6 +35,10 @@ import {
   normalizeSetupChannels,
 } from './setup-services/channels.js'
 import {
+  createSetupAgentmailSelectionResolver,
+  type SetupAgentmailSelectionResolver,
+} from './setup-agentmail.js'
+import {
   createDefaultCommandRunner,
   defaultDownloadFile,
   defaultFileExists,
@@ -69,6 +73,7 @@ import { describeSelectedSetupWearables } from './setup-runtime-env.js'
 interface SetupInput {
   vault: string
   assistant?: SetupConfiguredAssistant | null
+  allowChannelPrompts?: boolean
   channels?: readonly SetupChannel[] | null
   envOverrides?: NodeJS.ProcessEnv
   requestId?: string | null
@@ -94,6 +99,7 @@ interface SetupServicesDependencies {
   runCommand?: (input: CommandRunInput) => Promise<CommandRunResult>
   inboxServices?: Pick<InboxCliServices, 'bootstrap'> &
     Partial<Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList'>>
+  resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   vaultServices?: Pick<VaultCliServices, 'core'>
 }
 
@@ -119,6 +125,9 @@ export function createSetupServices(
     dependencies.vaultServices ?? createIntegratedVaultCliServices()
   const inboxServices =
     dependencies.inboxServices ?? createIntegratedInboxCliServices()
+  const resolveAgentmailInboxSelection =
+    dependencies.resolveAgentmailInboxSelection ??
+    createSetupAgentmailSelectionResolver()
 
   async function setupMacos(input: SetupInput): Promise<SetupResult> {
     const platform = getPlatform()
@@ -382,11 +391,13 @@ export function createSetupServices(
       input.channels == null
         ? []
         : await configureSetupChannels({
+            allowPrompt: input.allowChannelPrompts ?? false,
             channels: normalizeSetupChannels(input.channels),
             dryRun,
             env: state.env,
             inboxServices,
             requestId,
+            resolveAgentmailInboxSelection,
             steps,
             vault,
           })
