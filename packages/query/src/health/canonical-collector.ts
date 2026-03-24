@@ -43,13 +43,23 @@ import {
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.js";
 import { firstString } from "./shared.js";
+import type { MarkdownDocumentRecord } from "./shared.js";
 
 type RegistryFamily = Extract<
   CanonicalEntityFamily,
   "allergy" | "condition" | "family" | "genetics" | "goal" | "regimen"
 >;
 
+type RegistryCollectionKey =
+  | "goals"
+  | "conditions"
+  | "allergies"
+  | "regimens"
+  | "familyMembers"
+  | "geneticVariants";
+
 interface RegistryCollectorConfig<TRecord extends RegistryMarkdownRecord> {
+  key: RegistryCollectionKey;
   family: RegistryFamily;
   definition: RegistryDefinition<TRecord>;
 }
@@ -57,6 +67,25 @@ interface RegistryCollectorConfig<TRecord extends RegistryMarkdownRecord> {
 interface EntityCollection {
   entities: CanonicalEntity[];
   failures: ParseFailure[];
+}
+
+interface RegistryCollections {
+  goals: CanonicalEntity[];
+  conditions: CanonicalEntity[];
+  allergies: CanonicalEntity[];
+  regimens: CanonicalEntity[];
+  familyMembers: CanonicalEntity[];
+  geneticVariants: CanonicalEntity[];
+}
+
+interface CurrentProfileCollection {
+  entity: CanonicalEntity | null;
+  failures: ParseFailure[];
+}
+
+interface CurrentProfileDocumentResolutionInput {
+  documentOutcome: CurrentProfileDocumentOutcome<CanonicalEntity, ParseFailure>;
+  markdown: string | null;
 }
 
 export interface CanonicalHealthEntityCollection {
@@ -88,12 +117,42 @@ export interface TolerantAsyncCanonicalEntityCollectorOptions {
 }
 
 const REGISTRY_COLLECTORS = [
-  createRegistryCollectorConfig("goal", goalRegistryDefinition),
-  createRegistryCollectorConfig("condition", conditionRegistryDefinition),
-  createRegistryCollectorConfig("allergy", allergyRegistryDefinition),
-  createRegistryCollectorConfig("regimen", regimenRegistryDefinition),
-  createRegistryCollectorConfig("family", familyRegistryDefinition),
-  createRegistryCollectorConfig("genetics", geneticsRegistryDefinition),
+  {
+    key: "goals",
+    family: "goal",
+    definition:
+      goalRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
+  },
+  {
+    key: "conditions",
+    family: "condition",
+    definition:
+      conditionRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
+  },
+  {
+    key: "allergies",
+    family: "allergy",
+    definition:
+      allergyRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
+  },
+  {
+    key: "regimens",
+    family: "regimen",
+    definition:
+      regimenRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
+  },
+  {
+    key: "familyMembers",
+    family: "family",
+    definition:
+      familyRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
+  },
+  {
+    key: "geneticVariants",
+    family: "genetics",
+    definition:
+      geneticsRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
+  },
 ] as const;
 
 export function collectCanonicalEntities(
@@ -126,13 +185,6 @@ export function collectCanonicalEntities(
   return collectCanonicalEntitiesTolerantSync(vaultRoot);
 }
 
-function createRegistryCollectorConfig<TRecord extends RegistryMarkdownRecord>(
-  family: RegistryFamily,
-  definition: RegistryDefinition<TRecord>,
-): RegistryCollectorConfig<TRecord> {
-  return { family, definition };
-}
-
 async function collectCanonicalEntitiesStrict(
   vaultRoot: string,
 ): Promise<CanonicalHealthEntityCollection> {
@@ -152,32 +204,7 @@ async function collectCanonicalEntitiesStrict(
     "ledger/events",
     projectHistoryEntity,
   );
-  const goals = await readRegistryEntitiesStrict(vaultRoot, REGISTRY_COLLECTORS[0], markdownByPath);
-  const conditions = await readRegistryEntitiesStrict(
-    vaultRoot,
-    REGISTRY_COLLECTORS[1],
-    markdownByPath,
-  );
-  const allergies = await readRegistryEntitiesStrict(
-    vaultRoot,
-    REGISTRY_COLLECTORS[2],
-    markdownByPath,
-  );
-  const regimens = await readRegistryEntitiesStrict(
-    vaultRoot,
-    REGISTRY_COLLECTORS[3],
-    markdownByPath,
-  );
-  const familyMembers = await readRegistryEntitiesStrict(
-    vaultRoot,
-    REGISTRY_COLLECTORS[4],
-    markdownByPath,
-  );
-  const geneticVariants = await readRegistryEntitiesStrict(
-    vaultRoot,
-    REGISTRY_COLLECTORS[5],
-    markdownByPath,
-  );
+  const registryCollections = await readRegistryCollectionsStrict(vaultRoot, markdownByPath);
   const currentProfile = await readCurrentProfileStrict(
     vaultRoot,
     profileSnapshots,
@@ -189,12 +216,7 @@ async function collectCanonicalEntitiesStrict(
     profileSnapshots,
     currentProfile,
     history,
-    goals,
-    conditions,
-    allergies,
-    regimens,
-    familyMembers,
-    geneticVariants,
+    ...registryCollections,
     failures: [],
     markdownByPath,
   });
@@ -219,34 +241,8 @@ async function collectCanonicalEntitiesTolerantAsync(
     "ledger/events",
     projectHistoryEntity,
   );
-  const goals = await readRegistryEntitiesTolerant(
+  const registryCollections = await readRegistryCollectionsTolerant(
     vaultRoot,
-    REGISTRY_COLLECTORS[0],
-    markdownByPath,
-  );
-  const conditions = await readRegistryEntitiesTolerant(
-    vaultRoot,
-    REGISTRY_COLLECTORS[1],
-    markdownByPath,
-  );
-  const allergies = await readRegistryEntitiesTolerant(
-    vaultRoot,
-    REGISTRY_COLLECTORS[2],
-    markdownByPath,
-  );
-  const regimens = await readRegistryEntitiesTolerant(
-    vaultRoot,
-    REGISTRY_COLLECTORS[3],
-    markdownByPath,
-  );
-  const familyMembers = await readRegistryEntitiesTolerant(
-    vaultRoot,
-    REGISTRY_COLLECTORS[4],
-    markdownByPath,
-  );
-  const geneticVariants = await readRegistryEntitiesTolerant(
-    vaultRoot,
-    REGISTRY_COLLECTORS[5],
     markdownByPath,
   );
   const currentProfile = await readCurrentProfileTolerant(
@@ -260,23 +256,13 @@ async function collectCanonicalEntitiesTolerantAsync(
     profileSnapshots: profileSnapshots.entities,
     currentProfile: currentProfile.entity,
     history: history.entities,
-    goals: goals.entities,
-    conditions: conditions.entities,
-    allergies: allergies.entities,
-    regimens: regimens.entities,
-    familyMembers: familyMembers.entities,
-    geneticVariants: geneticVariants.entities,
+    ...registryCollections.collections,
     failures: [
       ...assessments.failures,
       ...profileSnapshots.failures,
       ...history.failures,
       ...currentProfile.failures,
-      ...goals.failures,
-      ...conditions.failures,
-      ...allergies.failures,
-      ...regimens.failures,
-      ...familyMembers.failures,
-      ...geneticVariants.failures,
+      ...registryCollections.failures,
     ],
     markdownByPath,
   });
@@ -302,36 +288,7 @@ function collectCanonicalEntitiesTolerantSync(
     "ledger/events",
     projectHistoryEntity,
   );
-  const goals = readRegistryEntitiesTolerantSync(
-    vaultRoot,
-    REGISTRY_COLLECTORS[0],
-    markdownByPath,
-  );
-  const conditions = readRegistryEntitiesTolerantSync(
-    vaultRoot,
-    REGISTRY_COLLECTORS[1],
-    markdownByPath,
-  );
-  const allergies = readRegistryEntitiesTolerantSync(
-    vaultRoot,
-    REGISTRY_COLLECTORS[2],
-    markdownByPath,
-  );
-  const regimens = readRegistryEntitiesTolerantSync(
-    vaultRoot,
-    REGISTRY_COLLECTORS[3],
-    markdownByPath,
-  );
-  const familyMembers = readRegistryEntitiesTolerantSync(
-    vaultRoot,
-    REGISTRY_COLLECTORS[4],
-    markdownByPath,
-  );
-  const geneticVariants = readRegistryEntitiesTolerantSync(
-    vaultRoot,
-    REGISTRY_COLLECTORS[5],
-    markdownByPath,
-  );
+  const registryCollections = readRegistryCollectionsTolerantSync(vaultRoot, markdownByPath);
 
   failures.push(
     ...assessments.failures,
@@ -347,12 +304,7 @@ function collectCanonicalEntitiesTolerantSync(
 
   failures.push(
     ...currentProfile.failures,
-    ...goals.failures,
-    ...conditions.failures,
-    ...allergies.failures,
-    ...regimens.failures,
-    ...familyMembers.failures,
-    ...geneticVariants.failures,
+    ...registryCollections.failures,
   );
 
   return buildCanonicalHealthCollection({
@@ -360,12 +312,7 @@ function collectCanonicalEntitiesTolerantSync(
     profileSnapshots: profileSnapshots.entities,
     currentProfile: currentProfile.entity,
     history: history.entities,
-    goals: goals.entities,
-    conditions: conditions.entities,
-    allergies: allergies.entities,
-    regimens: regimens.entities,
-    familyMembers: familyMembers.entities,
-    geneticVariants: geneticVariants.entities,
+    ...registryCollections.collections,
     failures,
     markdownByPath,
   });
@@ -457,6 +404,81 @@ function projectJsonlOutcomes(
   };
 }
 
+function createEmptyRegistryCollections(): RegistryCollections {
+  return {
+    goals: [],
+    conditions: [],
+    allergies: [],
+    regimens: [],
+    familyMembers: [],
+    geneticVariants: [],
+  };
+}
+
+async function readRegistryCollectionsStrict(
+  vaultRoot: string,
+  markdownByPath: Map<string, string>,
+): Promise<RegistryCollections> {
+  const collections = createEmptyRegistryCollections();
+
+  for (const collector of REGISTRY_COLLECTORS) {
+    collections[collector.key] = await readRegistryEntitiesStrict(
+      vaultRoot,
+      collector,
+      markdownByPath,
+    );
+  }
+
+  return collections;
+}
+
+async function readRegistryCollectionsTolerant(
+  vaultRoot: string,
+  markdownByPath: Map<string, string>,
+): Promise<{ collections: RegistryCollections; failures: ParseFailure[] }> {
+  const collections = createEmptyRegistryCollections();
+  const failures: ParseFailure[] = [];
+
+  for (const collector of REGISTRY_COLLECTORS) {
+    const result = await readRegistryEntitiesTolerant(vaultRoot, collector, markdownByPath);
+    collections[collector.key] = result.entities;
+    failures.push(...result.failures);
+  }
+
+  return { collections, failures };
+}
+
+function readRegistryCollectionsTolerantSync(
+  vaultRoot: string,
+  markdownByPath: Map<string, string>,
+): { collections: RegistryCollections; failures: ParseFailure[] } {
+  const collections = createEmptyRegistryCollections();
+  const failures: ParseFailure[] = [];
+
+  for (const collector of REGISTRY_COLLECTORS) {
+    const result = readRegistryEntitiesTolerantSync(vaultRoot, collector, markdownByPath);
+    collections[collector.key] = result.entities;
+    failures.push(...result.failures);
+  }
+
+  return { collections, failures };
+}
+
+function projectRegistryDocumentEntity<TRecord extends RegistryMarkdownRecord>(
+  config: RegistryCollectorConfig<TRecord>,
+  document: MarkdownDocumentRecord,
+  markdownByPath: Map<string, string>,
+): CanonicalEntity | null {
+  const record = toRegistryRecord(document, config.definition);
+  if (!record) {
+    return null;
+  }
+
+  const entity = projectRegistryEntity(config.family, record);
+  markdownByPath.set(entity.path, record.markdown);
+  return entity;
+}
+
 async function readRegistryEntitiesStrict<TRecord extends RegistryMarkdownRecord>(
   vaultRoot: string,
   config: RegistryCollectorConfig<TRecord>,
@@ -471,14 +493,10 @@ async function readRegistryEntitiesStrict<TRecord extends RegistryMarkdownRecord
 
   for (const relativePath of relativePaths) {
     const document = await readMarkdownDocument(vaultRoot, relativePath);
-    const record = toRegistryRecord(document, config.definition);
-    if (!record) {
-      continue;
+    const entity = projectRegistryDocumentEntity(config, document, markdownByPath);
+    if (entity) {
+      entities.push(entity);
     }
-
-    const entity = projectRegistryEntity(config.family, record);
-    markdownByPath.set(entity.path, record.markdown);
-    entities.push(entity);
   }
 
   return entities.sort(compareCanonicalEntities);
@@ -504,14 +522,10 @@ async function readRegistryEntitiesTolerant<TRecord extends RegistryMarkdownReco
       continue;
     }
 
-    const record = toRegistryRecord(outcome.document, config.definition);
-    if (!record) {
-      continue;
+    const entity = projectRegistryDocumentEntity(config, outcome.document, markdownByPath);
+    if (entity) {
+      entities.push(entity);
     }
-
-    const entity = projectRegistryEntity(config.family, record);
-    markdownByPath.set(entity.path, record.markdown);
-    entities.push(entity);
   }
 
   return {
@@ -540,14 +554,10 @@ function readRegistryEntitiesTolerantSync<TRecord extends RegistryMarkdownRecord
       continue;
     }
 
-    const record = toRegistryRecord(outcome.document, config.definition);
-    if (!record) {
-      continue;
+    const entity = projectRegistryDocumentEntity(config, outcome.document, markdownByPath);
+    if (entity) {
+      entities.push(entity);
     }
-
-    const entity = projectRegistryEntity(config.family, record);
-    markdownByPath.set(entity.path, record.markdown);
-    entities.push(entity);
   }
 
   return {
@@ -566,28 +576,15 @@ async function readCurrentProfileStrict(
     canonicalProfileSnapshotSortFields,
     fallbackCurrentProfileEntity,
   );
-  const document = await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md");
-
-  if (!document) {
-    return resolveCurrentProfileDocument(
-      resolution,
-      { status: "missing" },
-      currentProfileSnapshotId,
-    ).currentProfile;
-  }
+  const currentProfileDocument = buildCurrentProfileDocumentResolutionInput(
+    await readOptionalMarkdownDocument(vaultRoot, "bank/profile/current.md"),
+  );
 
   const resolvedCurrentProfile = resolveCurrentProfileDocument(
     resolution,
-    {
-      status: "ok",
-      currentProfile: projectCurrentProfileEntity(document),
-    },
+    currentProfileDocument.documentOutcome,
     currentProfileSnapshotId,
-    {
-      retainDocumentCurrentProfile: (currentProfile) => {
-        markdownByPath.set(currentProfile.path, document.markdown);
-      },
-    },
+    buildCurrentProfileRetainOptions(markdownByPath, currentProfileDocument.markdown),
   );
 
   return resolvedCurrentProfile.currentProfile;
@@ -603,21 +600,17 @@ async function readCurrentProfileTolerant(
     canonicalProfileSnapshotSortFields,
     fallbackCurrentProfileEntity,
   );
-  const outcome = await readOptionalMarkdownDocumentOutcome(
-    vaultRoot,
-    "bank/profile/current.md",
+  const currentProfileDocument = buildCurrentProfileDocumentResolutionInput(
+    await readOptionalMarkdownDocumentOutcome(
+      vaultRoot,
+      "bank/profile/current.md",
+    ),
   );
   const resolvedCurrentProfile = resolveCurrentProfileDocument(
     resolution,
-    currentProfileDocumentOutcomeFromMarkdownOutcome(outcome),
+    currentProfileDocument.documentOutcome,
     currentProfileSnapshotId,
-    outcome && outcome.ok
-      ? {
-          retainDocumentCurrentProfile: (currentProfile) => {
-            markdownByPath.set(currentProfile.path, outcome.document.markdown);
-          },
-        }
-      : undefined,
+    buildCurrentProfileRetainOptions(markdownByPath, currentProfileDocument.markdown),
   );
 
   return {
@@ -630,32 +623,80 @@ function readCurrentProfileTolerantSync(
   vaultRoot: string,
   profileSnapshots: CanonicalEntity[],
   markdownByPath: Map<string, string>,
-): { entity: CanonicalEntity | null; failures: ParseFailure[] } {
+): CurrentProfileCollection {
   const resolution = resolveCurrentProfileSnapshot(
     profileSnapshots,
     canonicalProfileSnapshotSortFields,
     fallbackCurrentProfileEntity,
   );
-  const outcome = readOptionalMarkdownDocumentOutcomeSync(
-    vaultRoot,
-    "bank/profile/current.md",
+  const currentProfileDocument = buildCurrentProfileDocumentResolutionInput(
+    readOptionalMarkdownDocumentOutcomeSync(
+      vaultRoot,
+      "bank/profile/current.md",
+    ),
   );
   const resolvedCurrentProfile = resolveCurrentProfileDocument(
     resolution,
-    currentProfileDocumentOutcomeFromMarkdownOutcome(outcome),
+    currentProfileDocument.documentOutcome,
     currentProfileSnapshotId,
-    outcome && outcome.ok
-      ? {
-          retainDocumentCurrentProfile: (currentProfile) => {
-            markdownByPath.set(currentProfile.path, outcome.document.markdown);
-          },
-        }
-      : undefined,
+    buildCurrentProfileRetainOptions(markdownByPath, currentProfileDocument.markdown),
   );
 
   return {
     entity: resolvedCurrentProfile.currentProfile,
     failures: resolvedCurrentProfile.failures,
+  };
+}
+
+function buildCurrentProfileDocumentResolutionInput(
+  input: MarkdownDocumentRecord | MarkdownDocumentOutcome | null,
+): CurrentProfileDocumentResolutionInput {
+  if (!input) {
+    return {
+      documentOutcome: { status: "missing" },
+      markdown: null,
+    };
+  }
+
+  if ("ok" in input) {
+    if (!input.ok) {
+      return {
+        documentOutcome: {
+          status: "parse-failed",
+          failure: input,
+        },
+        markdown: null,
+      };
+    }
+
+    return buildCurrentProfileDocumentResolutionInput(input.document);
+  }
+
+  return {
+    documentOutcome: {
+      status: "ok",
+      currentProfile: projectCurrentProfileEntity(input),
+    },
+    markdown: input.markdown,
+  };
+}
+
+function buildCurrentProfileRetainOptions(
+  markdownByPath: Map<string, string>,
+  markdown: string | null,
+):
+  | {
+      retainDocumentCurrentProfile: (currentProfile: CanonicalEntity) => void;
+    }
+  | undefined {
+  if (!markdown) {
+    return undefined;
+  }
+
+  return {
+    retainDocumentCurrentProfile: (currentProfile) => {
+      markdownByPath.set(currentProfile.path, markdown);
+    },
   };
 }
 
@@ -672,24 +713,4 @@ function currentProfileSnapshotId(
   entity: CanonicalEntity,
 ): string | null {
   return firstString(entity.attributes, ["snapshotId"]);
-}
-
-function currentProfileDocumentOutcomeFromMarkdownOutcome(
-  outcome: MarkdownDocumentOutcome | null,
-): CurrentProfileDocumentOutcome<CanonicalEntity, ParseFailure> {
-  if (!outcome) {
-    return { status: "missing" };
-  }
-
-  if (!outcome.ok) {
-    return {
-      status: "parse-failed",
-      failure: outcome,
-    };
-  }
-
-  return {
-    status: "ok",
-    currentProfile: projectCurrentProfileEntity(outcome.document),
-  };
 }
