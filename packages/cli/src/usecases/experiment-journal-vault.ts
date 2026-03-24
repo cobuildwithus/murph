@@ -27,6 +27,25 @@ import {
 
 type JsonObject = Record<string, unknown>
 type EntityFamily = 'experiment' | 'journal'
+type JournalLinkKind = 'eventIds' | 'sampleStreams'
+type JournalLinkOperation = 'link' | 'unlink'
+type JournalLinkRuntimeInput = {
+  vaultRoot: string
+  date: string
+  values: string[]
+}
+type JournalLinkRuntimeResult = {
+  relativePath: string
+  created: boolean
+  changed: number
+  eventIds: string[]
+  sampleStreams: string[]
+}
+type JournalLinkRuntimeAction =
+  | 'linkJournalEventIds'
+  | 'unlinkJournalEventIds'
+  | 'linkJournalStreams'
+  | 'unlinkJournalStreams'
 
 interface ExperimentJournalVaultCoreRuntime {
   createExperiment(input: {
@@ -106,50 +125,10 @@ interface ExperimentJournalVaultCoreRuntime {
     created: boolean
     updated: true
   }>
-  linkJournalEventIds(input: {
-    vaultRoot: string
-    date: string
-    values: string[]
-  }): Promise<{
-    relativePath: string
-    created: boolean
-    changed: number
-    eventIds: string[]
-    sampleStreams: string[]
-  }>
-  unlinkJournalEventIds(input: {
-    vaultRoot: string
-    date: string
-    values: string[]
-  }): Promise<{
-    relativePath: string
-    created: boolean
-    changed: number
-    eventIds: string[]
-    sampleStreams: string[]
-  }>
-  linkJournalStreams(input: {
-    vaultRoot: string
-    date: string
-    values: string[]
-  }): Promise<{
-    relativePath: string
-    created: boolean
-    changed: number
-    eventIds: string[]
-    sampleStreams: string[]
-  }>
-  unlinkJournalStreams(input: {
-    vaultRoot: string
-    date: string
-    values: string[]
-  }): Promise<{
-    relativePath: string
-    created: boolean
-    changed: number
-    eventIds: string[]
-    sampleStreams: string[]
-  }>
+  linkJournalEventIds(input: JournalLinkRuntimeInput): Promise<JournalLinkRuntimeResult>
+  unlinkJournalEventIds(input: JournalLinkRuntimeInput): Promise<JournalLinkRuntimeResult>
+  linkJournalStreams(input: JournalLinkRuntimeInput): Promise<JournalLinkRuntimeResult>
+  unlinkJournalStreams(input: JournalLinkRuntimeInput): Promise<JournalLinkRuntimeResult>
   updateVaultSummary(input: {
     vaultRoot: string
     title?: string
@@ -191,6 +170,19 @@ const experimentCheckpointPayloadSchema = experimentSelectorPayloadSchema.extend
   title: z.string().min(1).optional(),
   note: z.string().min(1).optional(),
 })
+const JOURNAL_LINK_RUNTIME_ACTIONS: Record<
+  JournalLinkKind,
+  Record<JournalLinkOperation, JournalLinkRuntimeAction>
+> = {
+  eventIds: {
+    link: 'linkJournalEventIds',
+    unlink: 'unlinkJournalEventIds',
+  },
+  sampleStreams: {
+    link: 'linkJournalStreams',
+    unlink: 'unlinkJournalStreams',
+  },
+}
 
 export async function createExperimentRecord(input: {
   vault: string
@@ -355,7 +347,7 @@ export async function listExperimentRecords(input: {
       statuses: input.status ? [input.status] : undefined,
     })
     .slice(0, input.limit)
-    .map(toListItem)
+    .map(toShowEntity)
 
   return {
     vault: input.vault,
@@ -496,7 +488,7 @@ export async function listJournalRecords(input: {
       to: input.to,
     })
     .slice(0, input.limit)
-    .map(toListItem)
+    .map(toShowEntity)
 
   return {
     vault: input.vault,
@@ -653,36 +645,18 @@ async function appendExperimentLifecycleEvent(input: {
 async function mutateJournalLinks(input: {
   vault: string
   date: string
-  kind: 'eventIds' | 'sampleStreams'
+  kind: JournalLinkKind
   values: string[]
-  operation: 'link' | 'unlink'
+  operation: JournalLinkOperation
 }) {
   const core = await loadExperimentJournalVaultCoreRuntime()
   try {
-    const result =
-      input.kind === 'eventIds'
-        ? input.operation === 'link'
-          ? await core.linkJournalEventIds({
-              vaultRoot: input.vault,
-              date: input.date,
-              values: input.values,
-            })
-          : await core.unlinkJournalEventIds({
-              vaultRoot: input.vault,
-              date: input.date,
-              values: input.values,
-            })
-        : input.operation === 'link'
-          ? await core.linkJournalStreams({
-              vaultRoot: input.vault,
-              date: input.date,
-              values: input.values,
-            })
-          : await core.unlinkJournalStreams({
-              vaultRoot: input.vault,
-              date: input.date,
-              values: input.values,
-            })
+    const action = JOURNAL_LINK_RUNTIME_ACTIONS[input.kind][input.operation]
+    const result = await core[action]({
+      vaultRoot: input.vault,
+      date: input.date,
+      values: input.values,
+    })
 
     return {
       vault: input.vault,
@@ -733,10 +707,6 @@ function toShowEntity(entity: QueryCanonicalEntity) {
     data: buildEntityData(entity),
     links: buildEntityLinks(entity),
   }
-}
-
-function toListItem(entity: QueryCanonicalEntity) {
-  return toShowEntity(entity)
 }
 
 function buildEntityData(entity: QueryCanonicalEntity) {
