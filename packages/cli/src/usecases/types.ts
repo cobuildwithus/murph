@@ -769,60 +769,111 @@ interface QueryRuntimeSupplementMethods {
   ): Promise<SupplementCompoundRecordResult | null>
 }
 
+type ImporterSource = "manual" | "import" | "device" | "derived"
+
+export interface ImportersRuntime {
+  importDocument(input: {
+    filePath: string
+    vaultRoot: string
+    title?: string
+    occurredAt?: string
+    note?: string
+    source?: ImporterSource
+  }): Promise<{
+    raw: {
+      relativePath: string
+    }
+    manifestPath: string
+    documentId: string
+    event: {
+      id: string
+    }
+  }>
+  importMeal(input: {
+    photoPath?: string
+    audioPath?: string
+    vaultRoot: string
+    occurredAt?: string
+    note?: string
+    source?: string
+  }): Promise<{
+    mealId: string
+    event: {
+      id: string
+      occurredAt?: string | null
+      note?: string | null
+    }
+    photo: {
+      relativePath: string
+    } | null
+    audio?: {
+      relativePath: string
+    } | null
+    manifestPath: string
+  }>
+  importCsvSamples(input: {
+    filePath: string
+    vaultRoot: string
+    stream?: string
+    tsColumn?: string
+    valueColumn?: string
+    unit?: string
+    delimiter?: string
+    metadataColumns?: string[]
+    presetId?: string
+    requestId?: string | null
+    source?: string
+  }): Promise<{
+    count: number
+    records: Array<{
+      id: string
+    }>
+    transformId: string
+    manifestPath: string
+    shardPaths: string[]
+  }>
+  importAssessmentResponse(input: {
+    filePath: string
+    vaultRoot: string
+    title?: string
+    occurredAt?: string
+    importedAt?: string
+    source?: string
+    requestId?: string | null
+  }): Promise<{
+    assessment: {
+      id: string
+    }
+    manifestPath: string
+    raw: {
+      relativePath: string
+    }
+    ledgerPath: string
+  }>
+}
+
 export interface ImportersRuntimeModule {
   createImporters(input?: {
     corePort?: CoreRuntimeModule
-  }): {
-    importDocument(input: {
-      filePath: string
-      vaultRoot: string
-      title?: string
-      occurredAt?: string
-      note?: string
-      source?: "manual" | "import" | "device" | "derived"
-    }): Promise<{
-      raw: {
-        relativePath: string
-      }
-      manifestPath: string
-      documentId: string
-      event: {
-        id: string
-      }
-    }>
-    importCsvSamples(input: {
-      filePath: string
-      vaultRoot: string
-      stream: string
-      tsColumn: string
-      valueColumn: string
-      unit: string
-    }): Promise<{
-      count: number
-      records: Array<{
-        id: string
-      }>
-      transformId: string
-      manifestPath: string
-      shardPaths: string[]
-    }>
-    importAssessmentResponse(input: {
-      filePath: string
-      vaultRoot: string
-    }): Promise<{
-      assessment: {
-        id: string
-      }
-      manifestPath: string
-      raw: {
-        relativePath: string
-      }
-      ledgerPath: string
-    }>
-  }
+  }): ImportersRuntime
+  prepareCsvSampleImport(input: {
+    filePath: string
+    vaultRoot: string
+    stream?: string
+    tsColumn?: string
+    valueColumn?: string
+    unit?: string
+    delimiter?: string
+    metadataColumns?: string[]
+    presetId?: string
+    requestId?: string | null
+    source?: string
+  }): Promise<{
+    stream: string
+  }>
 }
 
-export type ImportersRuntime = ReturnType<ImportersRuntimeModule["createImporters"]>
+export type ImportersFactoryRuntimeModule = Pick<ImportersRuntimeModule, "createImporters">
 
 export type QueryRecord = QueryVaultRecord
 

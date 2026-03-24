@@ -6,7 +6,6 @@ import {
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import { loadRuntimeModule } from '../runtime-import.js'
 import {
   listMealRecords,
   mealLookupSchema,
@@ -14,41 +13,11 @@ import {
   showMealManifest,
   showMealRecord,
 } from '../usecases/document-meal-read.js'
+import { loadImportersRuntimeModule } from '../usecases/runtime.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
-
-interface ImportersRuntimeModule {
-  createImporters(): {
-    importMeal(input: {
-      photoPath?: string
-      audioPath?: string
-      vaultRoot: string
-      occurredAt?: string
-      note?: string
-      source?: string
-    }): Promise<{
-      mealId: string
-      event: {
-        id: string
-        occurredAt?: string | null
-        note?: string | null
-      }
-      photo: {
-        relativePath: string
-      } | null
-      audio?: {
-        relativePath: string
-      } | null
-      manifestPath: string
-    }>
-  }
-}
-
-async function loadImportersRuntime() {
-  return loadRuntimeModule<ImportersRuntimeModule>('@healthybob/importers')
-}
 
 export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) {
   registerArtifactBackedEntityGroup(cli, {
@@ -79,7 +48,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
       },
       output: mealAddResultSchema,
       async run({ options }) {
-        const importers = (await loadImportersRuntime()).createImporters()
+        const importers = (await loadImportersRuntimeModule()).createImporters()
         const result = await importers.importMeal({
           photoPath: typeof options.photo === 'string' ? options.photo : undefined,
           audioPath: typeof options.audio === 'string' ? options.audio : undefined,

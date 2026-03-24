@@ -8,7 +8,7 @@ import {
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import { loadRuntimeModule } from '../runtime-import.js'
+import { loadImportersRuntimeModule } from '../usecases/runtime.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
   showAssessmentManifest,
@@ -53,29 +53,6 @@ const intakeRawResultSchema = z.object({
   raw: z.unknown(),
 })
 
-interface ImportersRuntimeModule {
-  createImporters(): {
-    importAssessmentResponse(input: {
-      filePath: string
-      vaultRoot: string
-      title?: string
-      occurredAt?: string
-      importedAt?: string
-      source?: string
-      requestId?: string | null
-    }): Promise<{
-      assessment: {
-        id: string
-      }
-      manifestPath: string
-      raw: {
-        relativePath: string
-      }
-      ledgerPath: string
-    }>
-  }
-}
-
 interface IntakeServices extends VaultCliServices {
   core: VaultCliServices['core'] & {
     projectAssessment(input: {
@@ -84,10 +61,6 @@ interface IntakeServices extends VaultCliServices {
       requestId: string | null
     }): Promise<z.infer<typeof intakeProjectResultSchema>>
   }
-}
-
-async function loadImportersRuntime() {
-  return loadRuntimeModule<ImportersRuntimeModule>('@healthybob/importers')
 }
 
 export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices) {
@@ -121,7 +94,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices)
       }),
       output: intakeImportResultSchema,
       async run({ args, options }) {
-        const importers = (await loadImportersRuntime()).createImporters()
+        const importers = (await loadImportersRuntimeModule()).createImporters()
         const result = await importers.importAssessmentResponse({
           filePath: args.file,
           vaultRoot: options.vault,

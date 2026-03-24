@@ -10,8 +10,8 @@ import {
 import type { JsonObject } from "../health-cli-method-types.js"
 import type {
   CoreRuntimeModule,
+  ImportersFactoryRuntimeModule,
   ImportersRuntime,
-  ImportersRuntimeModule,
   IntegratedRuntime,
   QueryRuntimeModule,
 } from "./types.js"
@@ -114,8 +114,12 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
   )
 }
 
-function isImportersRuntimeModule(value: unknown): value is ImportersRuntimeModule {
+function isImportersRuntimeModule(value: unknown): value is ImportersFactoryRuntimeModule {
   return isPlainObject(value) && typeof value.createImporters === "function"
+}
+
+export async function loadImportersRuntimeModule(): Promise<ImportersFactoryRuntimeModule> {
+  return loadRuntimeModule<ImportersFactoryRuntimeModule>("@healthybob/importers")
 }
 
 export async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
@@ -151,7 +155,7 @@ export async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
 export async function loadImporterRuntime(): Promise<ImportersRuntime> {
   const [{ core }, importersModule] = await Promise.all([
     loadIntegratedRuntime(),
-    loadRuntimeModule("@healthybob/importers"),
+    loadImportersRuntimeModule(),
   ])
 
   if (!isImportersRuntimeModule(importersModule)) {

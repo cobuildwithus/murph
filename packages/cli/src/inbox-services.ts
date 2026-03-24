@@ -28,6 +28,7 @@ import {
 } from './telegram-runtime.js'
 import { SETUP_RUNTIME_ENV_NOTICE } from './setup-runtime-env.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import type { ImportersFactoryRuntimeModule } from './usecases/types.js'
 import { toVaultCliError } from './usecases/vault-usecase-helpers.js'
 import {
   type InboxAttachmentListResult,
@@ -569,30 +570,6 @@ export interface ParsersRuntimeModule {
   }>
 }
 
-export interface ImportersRuntimeModule {
-  createImporters(input?: {
-    corePort?: CoreRuntimeModule
-  }): {
-    importDocument(input: {
-      filePath: string
-      vaultRoot: string
-      title?: string
-      occurredAt?: string
-      note?: string
-      source?: 'manual' | 'import' | 'device' | 'derived'
-    }): Promise<{
-      raw: {
-        relativePath: string
-      }
-      manifestPath: string
-      documentId: string
-      event: {
-        id: string
-      }
-    }>
-  }
-}
-
 export interface CoreRuntimeModule {
   addMeal(input: {
     vaultRoot: string
@@ -659,7 +636,7 @@ interface InboxServicesDependencies {
   sleep?: (milliseconds: number) => Promise<void>
   enableJournalPromotion?: boolean
   loadCoreModule?: () => Promise<CoreRuntimeModule>
-  loadImportersModule?: () => Promise<ImportersRuntimeModule>
+  loadImportersModule?: () => Promise<ImportersFactoryRuntimeModule>
   loadInboxModule?: () => Promise<InboxRuntimeModule>
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadQueryModule?: () => Promise<QueryRuntimeModule>
@@ -977,7 +954,7 @@ export function createIntegratedInboxCliServices(
     (() => loadRuntimeModule<CoreRuntimeModule>('@healthybob/core'))
   const loadImporters =
     dependencies.loadImportersModule ??
-    (() => loadRuntimeModule<ImportersRuntimeModule>('@healthybob/importers'))
+    (() => loadRuntimeModule<ImportersFactoryRuntimeModule>('@healthybob/importers'))
   const loadInbox =
     dependencies.loadInboxModule ??
     (() => loadRuntimeModule<InboxRuntimeModule>('@healthybob/inboxd'))

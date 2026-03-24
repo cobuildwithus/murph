@@ -1,26 +1,6 @@
 import { loadRuntimeModule } from '../runtime-import.js'
+import type { ImportersRuntimeModule } from '../usecases/types.js'
 import { createRuntimeUnavailableError } from './query-record-command-helpers.js'
-
-interface SamplesImporterRuntimeResult {
-  count: number
-  records: Array<{
-    id: string
-  }>
-  transformId: string
-  manifestPath: string
-  shardPaths: string[]
-}
-
-interface SamplesImporterPayload {
-  stream: string
-}
-
-interface ImportersRuntimeModule {
-  createImporters(): {
-    importCsvSamples(input: unknown): Promise<SamplesImporterRuntimeResult>
-  }
-  prepareCsvSampleImport(input: unknown): Promise<SamplesImporterPayload>
-}
 
 export interface ImportCsvSamplesOptions {
   delimiter?: string
