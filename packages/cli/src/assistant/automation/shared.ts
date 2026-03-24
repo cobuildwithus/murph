@@ -37,6 +37,7 @@ export interface AssistantAutoReplyScanResult {
 
 export interface AssistantAutomationStateProgress {
   cursor: AssistantAutomationCursor | null
+  backlogChannels?: readonly string[]
   primed: boolean
 }
 

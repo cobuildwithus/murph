@@ -1089,11 +1089,19 @@ export function createIntegratedInboxCliServices(
     const state = await readAssistantAutomationState(vault)
     const channels = [...new Set([...state.autoReplyChannels, channel])]
     const preferredChannels = [...new Set([...state.preferredChannels, channel])]
+    const backlogChannels = [
+      ...new Set([
+        ...state.autoReplyBacklogChannels.filter((value) => channels.includes(value)),
+        ...(channel === 'email' ? ['email'] : []),
+      ]),
+    ]
     const changed =
       channels.length !== state.autoReplyChannels.length ||
       channels.some((value, index) => state.autoReplyChannels[index] !== value) ||
       preferredChannels.length !== state.preferredChannels.length ||
-      preferredChannels.some((value, index) => state.preferredChannels[index] !== value)
+      preferredChannels.some((value, index) => state.preferredChannels[index] !== value) ||
+      backlogChannels.length !== state.autoReplyBacklogChannels.length ||
+      backlogChannels.some((value, index) => state.autoReplyBacklogChannels[index] !== value)
 
     if (!changed) {
       return false
@@ -1105,6 +1113,7 @@ export function createIntegratedInboxCliServices(
       autoReplyScanCursor: null,
       autoReplyChannels: channels,
       preferredChannels,
+      autoReplyBacklogChannels: backlogChannels,
       autoReplyPrimed: false,
       updatedAt: new Date().toISOString(),
     })

@@ -1288,6 +1288,164 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   ])
 })
 
+test('scanAssistantAutoReplyOnce processes email backlog immediately when backlog catch-up is pending', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-email-backlog-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot, { recursive: true })
+
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    backlogChannels?: readonly string[]
+    primed: boolean
+  }> = []
+  const listCalls: unknown[] = []
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-email-backlog',
+    response: 'email backlog reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
+    vault: path.resolve(input.vault),
+    message: input.message,
+    session: {
+      schema: 'healthybob.assistant-session.v2',
+      sessionId: input.sessionId,
+      provider: 'codex-cli',
+      providerSessionId: 'thread-email-backlog',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:email|identity:healthybob%40agentmail.to|thread:thread-1',
+        channel: 'email',
+        identityId: 'healthybob@agentmail.to',
+        actorId: 'person@example.test',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-1',
+        },
+      },
+      createdAt: '2026-03-18T09:00:00.000Z',
+      updatedAt: '2026-03-18T09:00:00.000Z',
+      lastTurnAt: '2026-03-18T09:00:00.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'email',
+      target: 'thread-1',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T09:00:01.000Z',
+      messageLength: input.message.length,
+    },
+    deliveryError: null,
+    provider: {
+      name: 'codex-cli',
+      model: null,
+      response: 'email backlog reply',
+      rawEvents: [],
+    },
+    sessionId: input.sessionId,
+    transcriptEntries: [],
+  }))
+
+  const inboxServices = {
+    async list(input: any) {
+      listCalls.push(input)
+      return {
+        items: [
+          {
+            captureId: 'cap-email-backlog',
+            source: 'email',
+            accountId: 'healthybob@agentmail.to',
+            externalId: 'email:1',
+            threadId: 'thread-1',
+            threadTitle: 'Re: whats good',
+            actorId: 'person@example.test',
+            actorName: 'Person',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: '2026-03-18T09:00:00Z',
+            text: 'hi bob are you there',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/email/1.json',
+            eventId: 'evt-email-1',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      assert.equal(input.captureId, 'cap-email-backlog')
+      return {
+        capture: {
+          captureId: 'cap-email-backlog',
+          source: 'email',
+          accountId: 'healthybob@agentmail.to',
+          threadTitle: 'Re: whats good',
+          threadId: 'thread-1',
+          threadIsDirect: true,
+          actorId: 'person@example.test',
+          actorName: 'Person',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:00:00Z',
+          text: 'hi bob are you there',
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: false,
+    backlogChannels: ['email'],
+    enabledChannels: ['email'],
+    inboxServices,
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length > 0, true)
+  assert.deepEqual(stateProgress[0], {
+    cursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-email-backlog',
+    },
+    primed: true,
+  })
+  assert.deepEqual(listCalls, [
+    {
+      vault: vaultRoot,
+      requestId: null,
+      limit: 50,
+      sourceId: null,
+      afterOccurredAt: null,
+      afterCaptureId: null,
+      oldestFirst: true,
+    },
+  ])
+})
+
 test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and suppress recent assistant echoes', async () => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-03-18T00:00:00.000Z'))

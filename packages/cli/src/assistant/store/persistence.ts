@@ -330,6 +330,7 @@ export async function readAutomationState(
     autoReplyScanCursor: null,
     autoReplyChannels: [],
     preferredChannels: [],
+    autoReplyBacklogChannels: [],
     autoReplyPrimed: true,
     updatedAt: new Date().toISOString(),
   })

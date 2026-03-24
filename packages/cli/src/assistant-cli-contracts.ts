@@ -405,6 +405,7 @@ export const assistantAutomationStateSchema = z
     autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
     autoReplyChannels: z.array(z.string().min(1)),
     preferredChannels: z.array(z.string().min(1)).default([]),
+    autoReplyBacklogChannels: z.array(z.string().min(1)).default([]),
     autoReplyPrimed: z.boolean(),
     updatedAt: isoTimestampSchema,
   })

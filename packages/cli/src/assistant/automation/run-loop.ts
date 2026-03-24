@@ -118,6 +118,50 @@ export async function runAssistantAutomation(
       }
 
       if (state.autoReplyChannels.length > 0) {
+        const backlogWasActive = state.autoReplyBacklogChannels.length > 0
+        if (backlogWasActive) {
+          const backlogResult = await scanAssistantAutoReplyOnce({
+            afterCursor: state.autoReplyScanCursor,
+            autoReplyPrimed: true,
+            backlogChannels: state.autoReplyBacklogChannels,
+            enabledChannels: state.autoReplyBacklogChannels,
+            inboxServices: input.inboxServices,
+            maxPerScan: input.maxPerScan,
+            onEvent: input.onEvent,
+            requestId: input.requestId,
+            signal: controller.signal,
+            allowSelfAuthored: input.allowSelfAuthored ?? false,
+            sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+            vault: input.vault,
+            async onStateProgress(next) {
+              state = await saveAssistantAutomationState(input.vault, {
+                ...state,
+                autoReplyScanCursor: next.cursor,
+                autoReplyBacklogChannels:
+                  next.backlogChannels === undefined
+                    ? state.autoReplyBacklogChannels
+                    : [...next.backlogChannels],
+                autoReplyPrimed: next.primed,
+                updatedAt: new Date().toISOString(),
+              })
+            },
+          })
+          aggregateReplies.considered += backlogResult.considered
+          aggregateReplies.failed += backlogResult.failed
+          aggregateReplies.replied += backlogResult.replied
+          aggregateReplies.skipped += backlogResult.skipped
+
+          if (input.once) {
+            break
+          }
+
+          await waitForAbortOrTimeout(
+            controller.signal,
+            normalizeScanInterval(input.scanIntervalMs),
+          )
+          continue
+        }
+
         const replyResult = await scanAssistantAutoReplyOnce({
           afterCursor: state.autoReplyScanCursor,
           autoReplyPrimed: state.autoReplyPrimed,
@@ -134,6 +178,10 @@ export async function runAssistantAutomation(
             state = await saveAssistantAutomationState(input.vault, {
               ...state,
               autoReplyScanCursor: next.cursor,
+              autoReplyBacklogChannels:
+                next.backlogChannels === undefined
+                  ? state.autoReplyBacklogChannels
+                  : [...next.backlogChannels],
               autoReplyPrimed: next.primed,
               updatedAt: new Date().toISOString(),
             })

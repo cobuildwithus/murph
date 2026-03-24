@@ -652,14 +652,26 @@ async function updateAssistantChannelState(input: {
   const state = await readAssistantAutomationState(input.vault)
   const autoReplyChannels = normalizeSetupChannels(input.autoReplyChannels)
   const preferredChannels = normalizeSetupChannels(input.preferredChannels)
+  const nextBacklogChannels = normalizeSetupChannels(
+    state.autoReplyBacklogChannels.filter(
+      (channel): channel is SetupChannel =>
+        channel === 'email' && autoReplyChannels.includes(channel),
+    ),
+  )
+  if (autoReplyChannels.includes('email') && !state.autoReplyChannels.includes('email')) {
+    nextBacklogChannels.push('email')
+  }
   const autoReplyChanged =
     autoReplyChannels.length !== state.autoReplyChannels.length ||
     autoReplyChannels.some((channel, index) => state.autoReplyChannels[index] !== channel)
   const preferredChanged =
     preferredChannels.length !== state.preferredChannels.length ||
     preferredChannels.some((channel, index) => state.preferredChannels[index] !== channel)
+  const backlogChanged =
+    nextBacklogChannels.length !== state.autoReplyBacklogChannels.length ||
+    nextBacklogChannels.some((channel, index) => state.autoReplyBacklogChannels[index] !== channel)
 
-  if (!autoReplyChanged && !preferredChanged) {
+  if (!autoReplyChanged && !preferredChanged && !backlogChanged) {
     return
   }
 
@@ -674,6 +686,7 @@ async function updateAssistantChannelState(input: {
           : state.autoReplyScanCursor,
     autoReplyChannels,
     preferredChannels,
+    autoReplyBacklogChannels: nextBacklogChannels,
     autoReplyPrimed:
       autoReplyChannels.length === 0
         ? true

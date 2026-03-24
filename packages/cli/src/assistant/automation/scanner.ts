@@ -187,6 +187,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
   allowSelfAuthored?: boolean
   autoReplyPrimed?: boolean
+  backlogChannels?: readonly string[]
   enabledChannels: readonly string[]
   inboxServices: InboxCliServices
   maxPerScan?: number
@@ -198,11 +199,13 @@ export async function scanAssistantAutoReplyOnce(input: {
   vault: string
 }): Promise<AssistantAutoReplyScanResult> {
   const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
+  const backlogChannels = normalizeEnabledChannels(input.backlogChannels ?? [])
+  const backlogActive = backlogChannels.length > 0
   if (enabledChannels.length === 0) {
     return createEmptyAutoReplyScanResult()
   }
 
-  if (!(input.autoReplyPrimed ?? true)) {
+  if (!(input.autoReplyPrimed ?? true) && !backlogActive) {
     const latest = await input.inboxServices.list({
       vault: input.vault,
       requestId: input.requestId ?? null,
@@ -239,6 +242,13 @@ export async function scanAssistantAutoReplyOnce(input: {
     return createEmptyAutoReplyScanResult()
   }
 
+  if (backlogActive) {
+    input.onEvent?.({
+      type: 'reply.scan.primed',
+      details: `processing existing ${backlogChannels.join(', ')} backlog before switching to new inbound messages`,
+    })
+  }
+
   const listed = await input.inboxServices.list({
     vault: input.vault,
     requestId: input.requestId ?? null,
@@ -257,6 +267,15 @@ export async function scanAssistantAutoReplyOnce(input: {
     type: 'reply.scan.started',
     details: `${captures.length} capture(s)`,
   })
+
+  if (backlogActive && captures.length === 0) {
+    await input.onStateProgress?.({
+      cursor: input.afterCursor ?? null,
+      backlogChannels: [],
+      primed: true,
+    })
+    return createEmptyAutoReplyScanResult()
+  }
 
   const summary = createEmptyAutoReplyScanResult()
   let cursor = input.afterCursor ?? null
