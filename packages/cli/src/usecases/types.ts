@@ -100,6 +100,31 @@ export interface ProviderListResult {
   nextCursor: string | null
 }
 
+export interface RecipeScaffoldResult {
+  vault: string
+  noun: "recipe"
+  payload: JsonObject
+}
+
+export interface RecipeUpsertResult {
+  vault: string
+  recipeId: string
+  lookupId: string
+  path: string
+  created: boolean
+}
+
+export interface RecipeListResult {
+  vault: string
+  filters: {
+    status: string | null
+    limit: number
+  }
+  items: ReadEntity[]
+  count: number
+  nextCursor: string | null
+}
+
 export interface EventScaffoldResult {
   vault: string
   noun: "event"
@@ -395,6 +420,12 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       inputFile: string
     },
   ): Promise<ProviderUpsertResult>
+  scaffoldRecipe(input: CommandContext): Promise<RecipeScaffoldResult>
+  upsertRecipe(
+    input: CommandContext & {
+      inputFile: string
+    },
+  ): Promise<RecipeUpsertResult>
   scaffoldEvent(
     input: CommandContext & {
       kind: string
@@ -515,6 +546,17 @@ export interface QueryServices extends HealthQueryServiceMethods {
       limit: number
     },
   ): Promise<ProviderListResult>
+  showRecipe(
+    input: CommandContext & {
+      lookup: string
+    },
+  ): Promise<ShowResult>
+  listRecipes(
+    input: CommandContext & {
+      status?: string
+      limit: number
+    },
+  ): Promise<RecipeListResult>
   showEvent(
     input: CommandContext & {
       eventId: string

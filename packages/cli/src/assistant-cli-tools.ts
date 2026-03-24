@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
+import { RECIPE_STATUSES } from '@healthybob/contracts'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -184,6 +185,43 @@ function createVaultQueryToolDefinitions(
           } as Parameters<VaultCliServices['query']['list']>[0],
         ),
     }),
+    defineAssistantTool({
+      name: 'vault.recipe.show',
+      description:
+        'Show one remembered recipe by canonical recipe id or slug.',
+      inputSchema: z.object({
+        id: z.string().min(1),
+      }),
+      inputExample: {
+        id: 'sheet-pan-salmon-bowls',
+      },
+      execute: ({ id }) =>
+        input.vaultServices!.query.showRecipe({
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          lookup: id,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'vault.recipe.list',
+      description:
+        'List remembered recipe records with an optional recipe status filter.',
+      inputSchema: z.object({
+        status: z.enum(RECIPE_STATUSES).optional(),
+        limit: z.number().int().positive().max(200).optional(),
+      }),
+      inputExample: {
+        status: 'saved',
+        limit: 10,
+      },
+      execute: ({ status, limit }) =>
+        input.vaultServices!.query.listRecipes({
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          status,
+          limit: limit ?? 10,
+        }),
+    }),
   ]
 }
 
@@ -327,6 +365,30 @@ function createVaultWriteToolDefinitions(
       execute: async ({ payload }) => {
         const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.provider.upsert', payload)
         return input.vaultServices!.core.upsertProvider({
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          inputFile,
+        })
+      },
+    }),
+    defineAssistantTool({
+      name: 'vault.recipe.upsert',
+      description:
+        'Upsert one recipe record from a JSON payload object so the vault can remember dishes, ingredients, and prep notes.',
+      inputSchema: z.object({
+        payload: jsonObjectSchema,
+      }),
+      inputExample: {
+        payload: {
+          title: 'Sheet Pan Salmon Bowls',
+          status: 'saved',
+          ingredients: ['2 salmon fillets', '2 cups cooked rice'],
+          steps: ['Roast the salmon.', 'Serve over rice.'],
+        },
+      },
+      execute: async ({ payload }) => {
+        const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.recipe.upsert', payload)
+        return input.vaultServices!.core.upsertRecipe({
           vault: input.vault,
           requestId: input.requestId ?? null,
           inputFile,

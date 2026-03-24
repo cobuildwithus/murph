@@ -15,6 +15,7 @@ import {
   profileCurrentFrontmatterSchema as profileCurrentFrontmatterContract,
   profileSnapshotSchema as profileSnapshotContract,
   providerFrontmatterSchema as providerFrontmatterContract,
+  recipeFrontmatterSchema as recipeFrontmatterContract,
   regimenFrontmatterSchema as regimenFrontmatterContract,
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
@@ -39,6 +40,7 @@ export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract)
 export const profileSnapshotSchema = toJsonSchema(profileSnapshotContract);
 export const profileCurrentFrontmatterSchema = toJsonSchema(profileCurrentFrontmatterContract);
 export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContract);
+export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
 export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
 export const allergyFrontmatterSchema = toJsonSchema(allergyFrontmatterContract);
@@ -60,6 +62,7 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-journal-day": journalDayFrontmatterSchema,
   "frontmatter-profile-current": profileCurrentFrontmatterSchema,
   "frontmatter-provider": providerFrontmatterSchema,
+  "frontmatter-recipe": recipeFrontmatterSchema,
   "frontmatter-regimen": regimenFrontmatterSchema,
   "profile-snapshot": profileSnapshotSchema,
   "sample-record": sampleRecordSchema,

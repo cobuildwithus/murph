@@ -13,6 +13,7 @@ import type {
   ProfileCurrentFrontmatter,
   ProfileSnapshotRecord,
   ProviderFrontmatter,
+  RecipeFrontmatter,
   RegimenFrontmatter,
   SampleRecord,
   VaultMetadata,
@@ -23,6 +24,7 @@ type FrontmatterExamples = {
   journalDay: JournalDayFrontmatter;
   experiment: ExperimentFrontmatter;
   provider: ProviderFrontmatter;
+  recipe: RecipeFrontmatter;
 };
 
 type HealthFrontmatterExamples = {
@@ -57,6 +59,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
       pack: "pack",
       profileSnapshot: "psnap",
       provider: "prov",
+      recipe: "rcp",
       regimen: "reg",
       sample: "smp",
       transform: "xfm",
@@ -78,6 +81,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
     profileRoot: "bank/profile",
     profileSnapshotsRoot: "ledger/profile-snapshots",
     providersRoot: "bank/providers",
+    recipesRoot: "bank/recipes",
     rawAssessmentsRoot: "raw/assessments",
     rawRoot: "raw",
     eventsRoot: "ledger/events",
@@ -539,6 +543,38 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     note: "Preferred clinic for annual wellness visits.",
     aliases: ["HBC Primary Care"],
   },
+  recipe: {
+    schemaVersion: "hb.frontmatter.recipe.v1",
+    docType: "recipe",
+    recipeId: "rcp_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    slug: "sheet-pan-salmon-bowls",
+    title: "Sheet Pan Salmon Bowls",
+    status: "saved",
+    summary: "A reliable high-protein salmon bowl with roasted vegetables and rice.",
+    cuisine: "mediterranean",
+    dishType: "dinner",
+    source: "Family weeknight rotation",
+    servings: 2,
+    prepTimeMinutes: 15,
+    cookTimeMinutes: 20,
+    totalTimeMinutes: 35,
+    tags: ["high-protein", "weeknight"],
+    ingredients: [
+      "2 salmon fillets",
+      "2 cups cooked rice",
+      "2 cups broccoli florets",
+      "1 tbsp olive oil",
+      "1 lemon",
+    ],
+    steps: [
+      "Heat the oven to 220C and line a sheet pan.",
+      "Toss the broccoli with olive oil and roast for 10 minutes.",
+      "Add the salmon, season, and roast until cooked through.",
+      "Serve over rice with lemon juice and any pan juices.",
+    ],
+    relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
+    relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
+  },
 });
 
 export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples> = Object.freeze({
@@ -721,5 +757,42 @@ aliases:
 ---
 
 # Primary Care Clinic
+`,
+  recipe: `---
+schemaVersion: hb.frontmatter.recipe.v1
+docType: recipe
+recipeId: rcp_01JNV422Y2M5ZBV64ZP4N1DRB1
+slug: sheet-pan-salmon-bowls
+title: Sheet Pan Salmon Bowls
+status: saved
+summary: A reliable high-protein salmon bowl with roasted vegetables and rice.
+cuisine: mediterranean
+dishType: dinner
+source: Family weeknight rotation
+servings: 2
+prepTimeMinutes: 15
+cookTimeMinutes: 20
+totalTimeMinutes: 35
+tags:
+  - high-protein
+  - weeknight
+ingredients:
+  - 2 salmon fillets
+  - 2 cups cooked rice
+  - 2 cups broccoli florets
+  - 1 tbsp olive oil
+  - 1 lemon
+steps:
+  - Heat the oven to 220C and line a sheet pan.
+  - Toss the broccoli with olive oil and roast for 10 minutes.
+  - Add the salmon, season, and roast until cooked through.
+  - Serve over rice with lemon juice and any pan juices.
+relatedGoalIds:
+  - goal_01JNV43AK9SK58T6GX3DWRZH9Q
+relatedConditionIds:
+  - cond_01JNV43NDX1N7BX08NQ19MJ4DK
+---
+
+# Sheet Pan Salmon Bowls
 `,
 });

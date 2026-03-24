@@ -31,6 +31,7 @@
         "export_pack",
         "profile_current_rebuild",
         "profile_snapshot_add",
+        "recipe_upsert",
         "regimen_stop",
         "regimen_upsert",
         "samples_import_csv",
@@ -72,7 +73,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+        "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
     },

@@ -24,6 +24,7 @@ export const FRONTMATTER_SCHEMA_VERSIONS = Object.freeze({
   goal: CONTRACT_SCHEMA_VERSION.goalFrontmatter,
   journalDay: CONTRACT_SCHEMA_VERSION.journalDayFrontmatter,
   profileCurrent: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
+  recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
   regimen: CONTRACT_SCHEMA_VERSION.regimenFrontmatter,
 });
 
@@ -50,6 +51,7 @@ export const VAULT_LAYOUT = Object.freeze({
   profileDirectory: "bank/profile",
   profileCurrentDocument: "bank/profile/current.md",
   providersDirectory: "bank/providers",
+  recipesDirectory: "bank/recipes",
   regimensDirectory: "bank/regimens",
   rawDirectory: "raw",
   rawAssessmentsDirectory: "raw/assessments",
@@ -79,6 +81,7 @@ export const VAULT_PATHS = Object.freeze({
   profileRoot: VAULT_LAYOUT.profileDirectory,
   profileSnapshotsRoot: VAULT_LAYOUT.profileSnapshotsDirectory,
   providersRoot: VAULT_LAYOUT.providersDirectory,
+  recipesRoot: VAULT_LAYOUT.recipesDirectory,
   rawAssessmentsRoot: VAULT_LAYOUT.rawAssessmentsDirectory,
   rawRoot: VAULT_LAYOUT.rawDirectory,
   eventsRoot: VAULT_LAYOUT.eventLedgerDirectory,
@@ -107,6 +110,7 @@ export const REQUIRED_DIRECTORIES = Object.freeze([
   VAULT_LAYOUT.goalsDirectory,
   VAULT_LAYOUT.profileDirectory,
   VAULT_LAYOUT.providersDirectory,
+  VAULT_LAYOUT.recipesDirectory,
   VAULT_LAYOUT.regimensDirectory,
   "ledger",
   VAULT_LAYOUT.assessmentLedgerDirectory,

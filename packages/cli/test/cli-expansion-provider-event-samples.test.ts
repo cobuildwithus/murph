@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerProviderCommands } from '../src/commands/provider.js'
+import { registerRecipeCommands } from '../src/commands/recipe.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
@@ -14,13 +15,14 @@ import { requireData } from './cli-test-helpers.js'
 
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
-    description: 'provider/event/samples slice test cli',
+    description: 'provider/recipe/event/samples slice test cli',
     version: '0.0.0-test',
   })
   const services = createIntegratedVaultCliServices()
 
   registerVaultCommands(cli, services)
   registerProviderCommands(cli, services)
+  registerRecipeCommands(cli, services)
   registerEventCommands(cli, services)
   registerSamplesCommands(cli, services)
 
@@ -57,9 +59,16 @@ async function runSliceCliRaw(args: string[]) {
   return output.join('').trim()
 }
 
-test('provider and event scaffold schemas expose the new noun entrypoints', async () => {
+test('provider, recipe, event, and samples schemas expose the new noun entrypoints', async () => {
   const providerSchema = JSON.parse(
     await runSliceCliRaw(['provider', 'upsert', '--schema']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+    }
+  }
+  const recipeSchema = JSON.parse(
+    await runSliceCliRaw(['recipe', 'upsert', '--schema']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -82,22 +91,176 @@ test('provider and event scaffold schemas expose the new noun entrypoints', asyn
   }
 
   assert.equal('input' in providerSchema.options.properties, true)
+  assert.equal('input' in recipeSchema.options.properties, true)
   assert.equal('kind' in eventSchema.options.properties, true)
   assert.deepEqual(eventSchema.options.required, ['vault', 'kind'])
   assert.equal('input' in samplesSchema.options.properties, true)
 })
 
-test('provider/event/samples help uses generic id selectors for read commands', async () => {
+test('provider/recipe/event/samples help uses generic id selectors for read commands', async () => {
   const providerHelp = await runSliceCliRaw(['provider', 'show', '--help'])
+  const recipeHelp = await runSliceCliRaw(['recipe', 'show', '--help'])
   const eventHelp = await runSliceCliRaw(['event', 'show', '--help'])
   const sampleHelp = await runSliceCliRaw(['samples', 'show', '--help'])
   const batchHelp = await runSliceCliRaw(['samples', 'batch', 'show', '--help'])
 
   assert.match(providerHelp, /Usage: vault-cli provider show <id> \[options\]/u)
+  assert.match(recipeHelp, /Usage: vault-cli recipe show <id> \[options\]/u)
   assert.match(eventHelp, /Usage: vault-cli event show <id> \[options\]/u)
   assert.match(sampleHelp, /Usage: vault-cli samples show <id> \[options\]/u)
   assert.match(batchHelp, /Usage: vault-cli samples batch show <id> \[options\]/u)
 })
+
+test.sequential(
+  'recipe scaffold/upsert/show/list work through the slice commands',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-recipe-'))
+    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const recipeScaffold = await runSliceCli<{
+        noun: string
+        payload: {
+          title?: string
+        }
+      }>(['recipe', 'scaffold', '--vault', vaultRoot])
+
+      assert.equal(recipeScaffold.ok, true)
+      assert.equal(requireData(recipeScaffold).noun, 'recipe')
+      assert.equal(
+        requireData(recipeScaffold).payload.title,
+        'Sheet Pan Salmon Bowls',
+      )
+
+      await writeFile(
+        recipePayloadPath,
+        JSON.stringify({
+          title: 'Sheet Pan Salmon Bowls',
+          slug: 'sheet-pan-salmon-bowls',
+          status: 'saved',
+          summary: 'A reliable high-protein salmon bowl with roasted vegetables and rice.',
+          cuisine: 'mediterranean',
+          dishType: 'dinner',
+          source: 'Family weeknight rotation',
+          servings: 2,
+          prepTimeMinutes: 15,
+          cookTimeMinutes: 20,
+          tags: ['high-protein', 'weeknight'],
+          ingredients: ['2 salmon fillets', '2 cups cooked rice', '2 cups broccoli florets'],
+          steps: [
+            'Heat the oven to 220C and line a sheet pan.',
+            'Roast the broccoli for 10 minutes.',
+            'Add the salmon and roast until cooked through.',
+            'Serve over rice with lemon juice.',
+          ],
+        }),
+        'utf8',
+      )
+
+      const recipeUpsert = await runSliceCli<{
+        recipeId: string
+        path: string
+        created: boolean
+      }>([
+        'recipe',
+        'upsert',
+        '--input',
+        `@${recipePayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(recipeUpsert.ok, true, JSON.stringify(recipeUpsert))
+      assert.equal(recipeUpsert.meta?.command, 'recipe upsert')
+      assert.match(requireData(recipeUpsert).recipeId, /^rcp_/u)
+      assert.equal(
+        requireData(recipeUpsert).path,
+        'bank/recipes/sheet-pan-salmon-bowls.md',
+      )
+      assert.equal(requireData(recipeUpsert).created, true)
+      await access(path.join(vaultRoot, requireData(recipeUpsert).path))
+
+      const recipeShow = await runSliceCli<{
+        entity: {
+          id: string
+          kind: string
+          title: string | null
+          data: {
+            cuisine?: string
+            totalTimeMinutes?: number
+          }
+        }
+      }>([
+        'recipe',
+        'show',
+        requireData(recipeUpsert).recipeId,
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeShowBySlug = await runSliceCli<{
+        entity: {
+          id: string
+        }
+      }>([
+        'recipe',
+        'show',
+        'sheet-pan-salmon-bowls',
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeList = await runSliceCli<{
+        filters: {
+          status: string | null
+          limit: number
+        }
+        count: number
+        items: Array<{
+          id: string
+          kind: string
+          data: Record<string, unknown>
+        }>
+      }>([
+        'recipe',
+        'list',
+        '--status',
+        'saved',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(recipeShow.ok, true)
+      assert.equal(requireData(recipeShow).entity.id, requireData(recipeUpsert).recipeId)
+      assert.equal(requireData(recipeShow).entity.kind, 'recipe')
+      assert.equal(requireData(recipeShow).entity.title, 'Sheet Pan Salmon Bowls')
+      assert.equal(requireData(recipeShow).entity.data.cuisine, 'mediterranean')
+      assert.equal(requireData(recipeShow).entity.data.totalTimeMinutes, 35)
+      assert.equal(recipeShowBySlug.ok, true)
+      assert.equal(
+        requireData(recipeShowBySlug).entity.id,
+        requireData(recipeUpsert).recipeId,
+      )
+
+      assert.equal(recipeList.ok, true)
+      assert.equal(requireData(recipeList).filters.status, 'saved')
+      assert.equal(requireData(recipeList).count, 1)
+      assert.equal(requireData(recipeList).items.length, 1)
+      assert.equal(requireData(recipeList).items[0]?.kind, 'recipe')
+      assert.equal(requireData(recipeList).items[0]?.data.dishType, 'dinner')
+
+      const recipeMarkdown = await readFile(
+        path.join(vaultRoot, requireData(recipeUpsert).path),
+        'utf8',
+      )
+      assert.match(recipeMarkdown, /recipeId:/u)
+      assert.match(recipeMarkdown, /## Ingredients/u)
+      assert.match(recipeMarkdown, /## Steps/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
 
 test.sequential(
   'provider upsert/show/list, event upsert/show/list, and samples add work through the slice commands',

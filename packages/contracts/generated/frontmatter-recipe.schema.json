@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "hb.frontmatter.recipe.v1"
+    },
+    "docType": {
+      "type": "string",
+      "const": "recipe"
+    },
+    "recipeId": {
+      "type": "string",
+      "pattern": "^rcp_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "saved",
+        "archived"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "cuisine": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "dishType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "servings": {
+      "type": "number",
+      "minimum": 0
+    },
+    "prepTimeMinutes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cookTimeMinutes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalTimeMinutes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "uniqueItems": true
+    },
+    "ingredients": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000
+      }
+    },
+    "steps": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000
+      }
+    },
+    "relatedGoalIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
+      },
+      "uniqueItems": true
+    },
+    "relatedConditionIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^cond_[0-9A-HJKMNP-TV-Z]{26}$"
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "recipeId",
+    "slug",
+    "title",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-recipe.schema.json",
+  "title": "Healthy Bob Recipe Frontmatter"
+}

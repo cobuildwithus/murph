@@ -19,6 +19,7 @@ const runRawSourceCli = runRawCli
 
 test('show help uses id selectors except for journal date keys', async () => {
   const providerShowHelp = await runRawSourceCli(['provider', 'show', '--help'])
+  const recipeShowHelp = await runRawSourceCli(['recipe', 'show', '--help'])
   const eventShowHelp = await runRawSourceCli(['event', 'show', '--help'])
   const samplesShowHelp = await runRawSourceCli(['samples', 'show', '--help'])
   const auditShowHelp = await runRawSourceCli(['audit', 'show', '--help'])
@@ -27,6 +28,7 @@ test('show help uses id selectors except for journal date keys', async () => {
   const journalShowHelp = await runRawSourceCli(['journal', 'show', '--help'])
 
   assert.match(providerShowHelp, /Usage: vault-cli provider show <id> \[options\]/u)
+  assert.match(recipeShowHelp, /Usage: vault-cli recipe show <id> \[options\]/u)
   assert.match(eventShowHelp, /Usage: vault-cli event show <id> \[options\]/u)
   assert.match(samplesShowHelp, /Usage: vault-cli samples show <id> \[options\]/u)
   assert.match(auditShowHelp, /Usage: vault-cli audit show <id> \[options\]/u)

@@ -8,3 +8,13 @@ export * from "./time.js";
 export * from "./types.js";
 export * from "./validate.js";
 export * from "./zod.js";
+
+export {
+  parseFrontmatterDocument,
+  parseFrontmatterScalar,
+} from "./frontmatter.js";
+export {
+  deriveRegimenGroupFromRelativePath,
+  hasHealthEntityRegistry,
+  healthEntityDefinitionByKind,
+} from "./health-entities.js";

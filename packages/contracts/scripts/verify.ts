@@ -28,6 +28,7 @@ import {
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   providerFrontmatterSchema,
+  recipeFrontmatterSchema,
   isStrictIsoDate,
   isStrictIsoDateTime,
   normalizeStrictIsoTimestamp,
@@ -126,6 +127,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-journal-day",
   "frontmatter-profile-current",
   "frontmatter-provider",
+  "frontmatter-recipe",
   "frontmatter-regimen",
   "profile-snapshot",
   "sample-record",
@@ -190,6 +192,7 @@ assertNoErrors("core frontmatter object", exampleFrontmatterObjects.core, coreFr
 assertNoErrors("journal day frontmatter object", exampleFrontmatterObjects.journalDay, journalDayFrontmatterSchema);
 assertNoErrors("experiment frontmatter object", exampleFrontmatterObjects.experiment, experimentFrontmatterSchema);
 assertNoErrors("provider frontmatter object", exampleFrontmatterObjects.provider, providerFrontmatterSchema);
+assertNoErrors("recipe frontmatter object", exampleFrontmatterObjects.recipe, recipeFrontmatterSchema);
 assertNoErrors("profile current frontmatter object", exampleHealthFrontmatterObjects.profileCurrent, profileCurrentFrontmatterSchema);
 assertNoErrors("goal frontmatter object", exampleHealthFrontmatterObjects.goal, goalFrontmatterSchema);
 assertNoErrors("condition frontmatter object", exampleHealthFrontmatterObjects.condition, conditionFrontmatterSchema);
@@ -220,6 +223,17 @@ assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.core), exam
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.journalDay), exampleFrontmatterObjects.journalDay);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.experiment), exampleFrontmatterObjects.experiment);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.provider), exampleFrontmatterObjects.provider);
+assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.recipe), {
+  ...exampleFrontmatterObjects.recipe,
+  servings: "2",
+  prepTimeMinutes: "15",
+  cookTimeMinutes: "20",
+  totalTimeMinutes: "35",
+});
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.recipe).attributes,
+  exampleFrontmatterObjects.recipe,
+);
 assert.deepEqual(
   parseFrontmatterMarkdown(`---
 flag: true

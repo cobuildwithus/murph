@@ -26,9 +26,14 @@ export const REGIMEN_DOC_TYPE = "regimen";
 export const REGIMEN_KINDS = ["medication", "supplement", "therapy", "habit"] as const;
 export const REGIMEN_STATUSES = ["active", "paused", "completed", "stopped"] as const;
 
+export const RECIPE_SCHEMA_VERSION = "hb.frontmatter.recipe.v1";
+export const RECIPE_DOC_TYPE = "recipe";
+export const RECIPE_STATUSES = ["draft", "saved", "archived"] as const;
+
 export const GOALS_DIRECTORY = "bank/goals";
 export const CONDITIONS_DIRECTORY = "bank/conditions";
 export const ALLERGIES_DIRECTORY = "bank/allergies";
+export const RECIPES_DIRECTORY = "bank/recipes";
 export const REGIMENS_DIRECTORY = "bank/regimens";
 
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
@@ -38,6 +43,7 @@ export type ConditionVerificationStatus = (typeof CONDITION_VERIFICATION_STATUSE
 export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
 export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
+export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
 export type RegimenKind = (typeof REGIMEN_KINDS)[number];
 export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
 
@@ -48,6 +54,63 @@ export interface SupplementIngredientRecord {
   unit?: string;
   active?: boolean;
   note?: string;
+}
+
+export interface RecipeRecord {
+  schemaVersion: typeof RECIPE_SCHEMA_VERSION;
+  docType: typeof RECIPE_DOC_TYPE;
+  recipeId: string;
+  slug: string;
+  title: string;
+  status: RecipeStatus;
+  summary?: string;
+  cuisine?: string;
+  dishType?: string;
+  source?: string;
+  servings?: number;
+  prepTimeMinutes?: number;
+  cookTimeMinutes?: number;
+  totalTimeMinutes?: number;
+  tags?: string[];
+  ingredients?: string[];
+  steps?: string[];
+  relatedGoalIds?: string[];
+  relatedConditionIds?: string[];
+  relativePath: string;
+  markdown: string;
+}
+
+export interface UpsertRecipeInput {
+  vaultRoot: string;
+  recipeId?: string;
+  slug?: string;
+  title?: string;
+  status?: RecipeStatus;
+  summary?: string;
+  cuisine?: string;
+  dishType?: string;
+  source?: string;
+  servings?: number;
+  prepTimeMinutes?: number;
+  cookTimeMinutes?: number;
+  totalTimeMinutes?: number;
+  tags?: string[];
+  ingredients?: string[];
+  steps?: string[];
+  relatedGoalIds?: string[];
+  relatedConditionIds?: string[];
+}
+
+export interface UpsertRecipeResult {
+  created: boolean;
+  auditPath: string;
+  record: RecipeRecord;
+}
+
+export interface ReadRecipeInput {
+  vaultRoot: string;
+  recipeId?: string;
+  slug?: string;
 }
 
 export interface GoalWindow {

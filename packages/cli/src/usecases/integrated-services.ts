@@ -69,6 +69,12 @@ import {
   upsertProviderRecordFromInput,
 } from "./provider-event.js"
 import {
+  listRecipeRecords,
+  scaffoldRecipePayload,
+  showRecipeRecord,
+  upsertRecipeRecordFromInput,
+} from "./recipe.js"
+import {
   appendJournalText,
   checkpointExperimentRecordFromInput,
   listExperimentRecords,
@@ -280,6 +286,18 @@ function createIntegratedCoreServices(): CoreWriteServices {
       inputFile: string
     }) {
       return upsertProviderRecordFromInput(input)
+    },
+    async scaffoldRecipe(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: 'recipe' as const,
+        payload: scaffoldRecipePayload(),
+      }
+    },
+    async upsertRecipe(input: CommandContext & {
+      inputFile: string
+    }) {
+      return upsertRecipeRecordFromInput(input)
     },
     async scaffoldEvent(input: CommandContext & {
       kind: string
@@ -586,6 +604,17 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       return listProviderRecords(input)
+    },
+    async showRecipe(input: CommandContext & {
+      lookup: string
+    }) {
+      return showRecipeRecord(input.vault, input.lookup)
+    },
+    async listRecipes(input: CommandContext & {
+      status?: string
+      limit: number
+    }) {
+      return listRecipeRecords(input)
     },
     async showEvent(input: CommandContext & {
       eventId: string

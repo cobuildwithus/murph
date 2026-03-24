@@ -16,6 +16,7 @@ import {
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   rawImportManifestSchema,
+  recipeFrontmatterSchema,
   regimenFrontmatterSchema,
   safeParseContract,
   sampleRecordSchema,
@@ -847,6 +848,14 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.regimensDirectory,
       schema: regimenFrontmatterSchema,
+      code: "HB_FRONTMATTER_INVALID",
+    })),
+  );
+  issues.push(
+    ...(await validateFrontmatterDirectory({
+      vaultRoot: absoluteRoot,
+      relativeDirectory: VAULT_LAYOUT.recipesDirectory,
+      schema: recipeFrontmatterSchema,
       code: "HB_FRONTMATTER_INVALID",
     })),
   );

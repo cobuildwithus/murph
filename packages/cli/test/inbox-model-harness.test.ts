@@ -38,6 +38,9 @@ function createStubInboxServices(showResult: Awaited<ReturnType<InboxCliServices
     sourceRemove: async () => {
       throw new Error('not implemented')
     },
+    sourceSetEnabled: async () => {
+      throw new Error('not implemented')
+    },
     sourceList: async () => {
       throw new Error('not implemented')
     },
@@ -194,6 +197,10 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
     )
     assert.equal(
       result.bundle.tools.some((tool) => tool.name === 'vault.goal.upsert'),
+      true,
+    )
+    assert.equal(
+      result.bundle.tools.some((tool) => tool.name === 'vault.recipe.upsert'),
       true,
     )
     assert.equal(
@@ -621,6 +628,92 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
     await rm(outsideRoot, { recursive: true, force: true })
+  }
+})
+
+test('createDefaultAssistantToolCatalog exposes recipe query and write tools', () => {
+  const catalog = createDefaultAssistantToolCatalog({
+    vault: '/tmp/healthybob-vault',
+    vaultServices: createStubVaultServices(),
+  })
+
+  assert.equal(catalog.hasTool('vault.recipe.show'), true)
+  assert.equal(catalog.hasTool('vault.recipe.list'), true)
+  assert.equal(catalog.hasTool('vault.recipe.upsert'), true)
+})
+
+test('createDefaultAssistantToolCatalog recipe upsert writes payload files and calls the recipe service with inputFile', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-recipe-tools-'))
+  let recordedCall:
+    | {
+        inputFile: string
+        requestId: string | null
+        vault: string
+      }
+    | undefined
+
+  const vaultServices = createStubVaultServices({
+    core: {
+      upsertRecipe: async (input) => {
+        recordedCall = input
+        return {
+          vault: input.vault,
+          lookupId: 'rcp_1',
+          recipeId: 'rcp_1',
+          created: true,
+          path: 'bank/recipes/sheet-pan-salmon-bowls.md',
+        }
+      },
+    } as VaultCliServices['core'],
+  })
+
+  try {
+    const catalog = createDefaultAssistantToolCatalog(
+      {
+        requestId: 'req_recipe',
+        vault: vaultRoot,
+        vaultServices,
+      },
+      { includeQueryTools: false },
+    )
+
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.recipe.upsert',
+          input: {
+            payload: {
+              title: 'Sheet Pan Salmon Bowls',
+              status: 'saved',
+              ingredients: ['2 salmon fillets', '2 cups cooked rice'],
+            },
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'succeeded')
+    assert.ok(recordedCall)
+    assert.equal(recordedCall?.vault, vaultRoot)
+    assert.equal(recordedCall?.requestId, 'req_recipe')
+    assert.match(recordedCall?.inputFile ?? '', /derived\/assistant\/payloads/u)
+
+    const persistedPayload = JSON.parse(
+      await readFile(recordedCall!.inputFile, 'utf8'),
+    ) as {
+      title: string
+      status: string
+      ingredients: string[]
+    }
+
+    assert.deepEqual(persistedPayload, {
+      title: 'Sheet Pan Salmon Bowls',
+      status: 'saved',
+      ingredients: ['2 salmon fillets', '2 cups cooked rice'],
+    })
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 

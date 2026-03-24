@@ -116,6 +116,7 @@ test("core constants stay aligned with canonical contracts constants", () => {
     goal: CONTRACT_SCHEMA_VERSION.goalFrontmatter,
     journalDay: CONTRACT_SCHEMA_VERSION.journalDayFrontmatter,
     profileCurrent: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
+    recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
     regimen: CONTRACT_SCHEMA_VERSION.regimenFrontmatter,
   });
   assert.equal(Object.isFrozen(CORE_FRONTMATTER_SCHEMA_VERSIONS), true);
