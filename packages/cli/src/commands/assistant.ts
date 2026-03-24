@@ -220,6 +220,7 @@ async function runAssistantChatCommand(context: {
 }) {
   const result = await runAssistantChat({
     vault: context.options.vault,
+    enableFirstTurnOnboarding: true,
     initialPrompt: context.args.prompt,
     sessionId: context.options.session,
     alias: context.options.alias,

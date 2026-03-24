@@ -242,7 +242,14 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],
     expectedUserBinDirectory,
   )
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /Never include citations, source lists, footnotes/u)
+  assert.doesNotMatch(
+    firstCall?.systemPrompt ?? '',
+    /Never include citations, source lists, footnotes/u,
+  )
+  assert.doesNotMatch(
+    firstCall?.systemPrompt ?? '',
+    /optional onboarding check-in/u,
+  )
 })
 
 test('sendAssistantMessage adds no-citations formatting guidance for outbound channel replies only', async () => {
@@ -335,6 +342,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     const first = await sendAssistantMessage({
       vault: vaultRoot,
       alias: 'chat:openai-compatible',
+      enableFirstTurnOnboarding: true,
       provider: 'openai-compatible',
       model: 'gpt-oss:20b',
       baseUrl: 'http://127.0.0.1:11434/v1',
@@ -344,6 +352,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     const second = await sendAssistantMessage({
       vault: vaultRoot,
       alias: 'chat:openai-compatible',
+      enableFirstTurnOnboarding: true,
       prompt: 'second question',
     })
 
@@ -355,6 +364,11 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.equal(secondCall?.provider, 'openai-compatible')
     assert.match(firstCall?.systemPrompt ?? '', /You are Healthy Bob/u)
     assert.match(secondCall?.systemPrompt ?? '', /You are Healthy Bob/u)
+    assert.match(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
+    assert.match(firstCall?.systemPrompt ?? '', /what tone they want/u)
+    assert.match(firstCall?.systemPrompt ?? '', /give you a name/u)
+    assert.match(firstCall?.systemPrompt ?? '', /goals they want help with/u)
+    assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
     assert.equal(firstCall?.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(secondCall?.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(firstCall?.model, 'gpt-oss:20b')

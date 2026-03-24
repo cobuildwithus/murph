@@ -407,6 +407,7 @@ export async function scanAssistantAutoReplyOnce(input: {
       const result = await sendAssistantMessage({
         vault: input.vault,
         conversation: conversationRefFromCapture(primaryCapture),
+        enableFirstTurnOnboarding: true,
         persistUserPromptOnFailure: false,
         prompt: prompt.prompt,
         deliverResponse: true,

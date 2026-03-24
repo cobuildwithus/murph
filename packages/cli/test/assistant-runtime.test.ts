@@ -1235,6 +1235,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.deepEqual(stateProgress[1], {
     cursor: {
       occurredAt: '2026-03-18T09:05:00Z',
@@ -1266,6 +1267,8 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     events.some((event) => event.type === 'capture.replied' && event.captureId === 'cap-new'),
     true,
   )
+  assert.match(providerCall?.systemPrompt ?? '', /optional onboarding check-in/u)
+  assert.match(providerCall?.systemPrompt ?? '', /what tone they want/u)
   assert.deepEqual(listCalls, [
     {
       vault: vaultRoot,

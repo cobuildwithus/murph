@@ -74,6 +74,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   codexCommand?: string
   deliverResponse?: boolean
   deliveryTarget?: string | null
+  enableFirstTurnOnboarding?: boolean
   maxSessionAgeMs?: number | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -206,6 +207,9 @@ export async function sendAssistantMessage(
     provider === 'openai-compatible' ||
     provider !== resolved.session.provider ||
     resolved.session.providerSessionId === null
+  const shouldInjectFirstTurnOnboarding =
+    input.enableFirstTurnOnboarding === true &&
+    (resolved.created || resolved.session.turnCount === 0)
   const conversationMessages = shouldUseLocalTranscriptContext(provider)
     ? await loadAssistantConversationMessages({
         limit: 20,
@@ -273,11 +277,12 @@ export async function sendAssistantMessage(
       },
       userPrompt: input.prompt,
       systemPrompt: shouldInjectBootstrapContext
-        ? buildAssistantSystemPrompt(
+        ? buildAssistantSystemPrompt({
             cliAccess,
             assistantMemoryPrompt,
-            resolved.session.binding.channel,
-          )
+            channel: resolved.session.binding.channel,
+            includeFirstTurnOnboarding: shouldInjectFirstTurnOnboarding,
+          })
         : null,
       sessionContext: shouldInjectBootstrapContext
         ? {
@@ -546,14 +551,15 @@ async function restoreMissingAssistantSessionSnapshot(input: {
   return true
 }
 
-function buildAssistantSystemPrompt(
+function buildAssistantSystemPrompt(input: {
   cliAccess: {
     rawCommand: 'vault-cli'
     setupCommand: 'healthybob'
-  },
-  assistantMemoryPrompt: string | null,
-  channel: string | null,
-): string {
+  }
+  assistantMemoryPrompt: string | null
+  channel: string | null
+  includeFirstTurnOnboarding: boolean
+}): string {
   return [
     'You are Healthy Bob, a local-first health assistant operating over the current working directory as a file-native health vault.',
     'Use the workspace files as the source of truth when relevant.',
@@ -562,14 +568,27 @@ function buildAssistantSystemPrompt(
     'Do not modify vault files unless the user explicitly asks you to propose changes. Typed assistant-memory commits through the Healthy Bob memory tools are the only exception for conversational continuity.',
     'When you operate purely through Healthy Bob CLI tools to read or write vault content, treat that as a vault operation rather than a coding task. Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
     'When you reference evidence from the vault, mention relative file paths when practical.',
-    buildOutboundReplyFormattingGuidance(channel),
-    assistantMemoryPrompt,
-    buildAssistantMemoryGuidanceText(cliAccess),
-    buildAssistantCronGuidanceText(cliAccess),
-    buildAssistantCliGuidanceText(cliAccess),
+    buildOutboundReplyFormattingGuidance(input.channel),
+    input.includeFirstTurnOnboarding
+      ? buildAssistantFirstTurnOnboardingGuidanceText()
+      : null,
+    input.assistantMemoryPrompt,
+    buildAssistantMemoryGuidanceText(input.cliAccess),
+    buildAssistantCronGuidanceText(input.cliAccess),
+    buildAssistantCliGuidanceText(input.cliAccess),
   ]
     .filter((value): value is string => Boolean(value))
     .join('\n\n')
+}
+
+function buildAssistantFirstTurnOnboardingGuidanceText(): string {
+  return [
+    'In the first reply of a brand-new interactive chat session, include one short optional onboarding check-in so you can personalize future replies.',
+    'If the first user message already asks for something concrete, answer that request first and then add the optional check-in as a brief closing note.',
+    'Ask at most three brief questions in one compact bundle, make it clear they are optional, and skip anything the user already told you.',
+    'Good defaults are: what tone they want, whether they want to give you a name, and what goals they want help with.',
+    'Do this only once for the new session. Do not repeat the onboarding questions or turn them into a longer interview on later turns.',
+  ].join('\n\n')
 }
 
 function buildOutboundReplyFormattingGuidance(channel: string | null): string | null {
