@@ -58,6 +58,7 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
 
 test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves the provider session id', async () => {
   const onEvent = vi.fn()
+  const abortController = new AbortController()
   providerMocks.executeCodexPrompt.mockResolvedValue({
     finalMessage: 'assistant reply',
     jsonEvents: [{ type: 'thread.started', thread_id: 'thread-123' }],
@@ -67,6 +68,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   })
 
   const result = await executeAssistantProviderTurn({
+    abortSignal: abortController.signal,
     provider: 'codex-cli',
     configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
     env: {
@@ -100,6 +102,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   })
 
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
+  assert.equal(call?.abortSignal, abortController.signal)
   assert.equal(call?.codexCommand, '/opt/homebrew/bin/codex')
   assert.deepEqual(call?.configOverrides, ['mcp_servers.healthybob_memory.command="node"'])
   assert.deepEqual(call?.env, {

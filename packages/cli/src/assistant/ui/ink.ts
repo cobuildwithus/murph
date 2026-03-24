@@ -36,6 +36,7 @@ import {
 import {
   extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError,
+  isAssistantProviderInterruptedError,
 } from '../provider-turn-recovery.js'
 import {
   appendAssistantTranscriptEntries,
@@ -51,6 +52,7 @@ import {
   CHAT_SLASH_COMMANDS,
   CHAT_STARTER_SUGGESTIONS,
   applyProviderProgressEventToEntries,
+  finalizePendingInkChatTraces,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatSessionBinding,
@@ -77,7 +79,7 @@ const AssistantInkThemeContext =
 interface ComposerInputProps {
   disabled: boolean
   onChange: (value: string) => void
-  onSubmit: (value: string) => ComposerSubmitDisposition
+  onSubmit: (value: string, mode: ComposerSubmitMode) => ComposerSubmitDisposition
   placeholder: string
   value: string
 }
@@ -98,6 +100,8 @@ interface ModelSwitcherState {
   modelIndex: number
   reasoningIndex: number
 }
+
+type ComposerSubmitMode = 'enter' | 'tab'
 
 type ComposerSubmitDisposition = 'clear' | 'keep'
 
@@ -141,7 +145,9 @@ interface ChatStatusProps {
 interface ChatComposerProps {
   entryCount: number
   modelSwitcherActive: boolean
-  onSubmit: (value: string) => ComposerSubmitDisposition
+  onChange: (value: string) => void
+  onSubmit: (value: string, mode: ComposerSubmitMode) => ComposerSubmitDisposition
+  value: string
 }
 
 interface ChatFooterProps {
@@ -174,6 +180,7 @@ type ComposerTerminalAction =
       key: Key
     }
   | {
+      mode: ComposerSubmitMode
       kind: 'submit'
     }
 
@@ -726,6 +733,7 @@ function resolveComposerModifiedReturnAction(
   if (!shift) {
     return {
       kind: 'submit',
+      mode: 'enter',
     }
   }
 
@@ -738,6 +746,15 @@ function resolveComposerModifiedReturnAction(
       shift: true,
     },
   }
+}
+
+export function mergeComposerDraftWithQueuedPrompts(
+  draft: string,
+  queuedPrompts: readonly string[],
+): string {
+  return [draft, ...queuedPrompts]
+    .filter((value) => value.trim().length > 0)
+    .join('\n\n')
 }
 
 export function resolveComposerTerminalAction(
@@ -768,10 +785,18 @@ export function resolveComposerTerminalAction(
     }
   }
 
+  if (key.tab && !key.shift) {
+    return {
+      kind: 'submit',
+      mode: 'tab',
+    }
+  }
+
   if (key.return) {
     if (!key.shift) {
       return {
         kind: 'submit',
+        mode: 'enter',
       }
     }
 
@@ -842,7 +867,7 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
       return
     }
 
-    if (key.tab || (key.shift && key.tab) || (key.ctrl && input === 'c')) {
+    if ((key.shift && key.tab) || (key.ctrl && input === 'c')) {
       return
     }
 
@@ -869,7 +894,7 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
     const action = resolveComposerTerminalAction(input, key)
 
     if (action.kind === 'submit') {
-      if (onSubmitRef.current(currentValue) === 'clear') {
+      if (onSubmitRef.current(currentValue, action.mode) === 'clear') {
         valueRef.current = ''
         cursorOffsetRef.current = 0
         killBufferRef.current = ''
@@ -1423,15 +1448,14 @@ const ChatComposer = React.memo(function ChatComposer(
 ): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
-  const [value, setValue] = React.useState('')
   const slashSuggestions = props.modelSwitcherActive
     ? []
-    : getMatchingSlashCommands(value)
+    : getMatchingSlashCommands(props.value)
   const showComposerGuidance = shouldShowChatComposerGuidance(props.entryCount)
   const showStarterSuggestions =
     showComposerGuidance &&
     !props.modelSwitcherActive &&
-    value.trim().length === 0
+    props.value.trim().length === 0
 
   return createElement(
     React.Fragment,
@@ -1456,9 +1480,9 @@ const ChatComposer = React.memo(function ChatComposer(
         ),
         createElement(ComposerInput, {
           disabled: props.modelSwitcherActive,
-          value,
+          value: props.value,
           placeholder: 'Type a message',
-          onChange: setValue,
+          onChange: props.onChange,
           onSubmit: props.onSubmit,
         }),
       ),
@@ -2475,6 +2499,7 @@ export async function runAssistantChatWithInk(
         kind: 'error' | 'info' | 'success'
         text: string
       } | null>(null)
+      const [composerValue, setComposerValue] = React.useState('')
       const [activeModel, setActiveModel] = React.useState<string | null>(
         normalizeNullableString(input.model) ??
           normalizeNullableString(defaults?.model) ??
@@ -2493,6 +2518,9 @@ export async function runAssistantChatWithInk(
       const latestTurnsRef = React.useRef(0)
       const initialPromptRef = React.useRef(normalizeNullableString(input.initialPrompt))
       const bootstrappedRef = React.useRef(false)
+      const queuedPromptsRef = React.useRef<string[]>([])
+      const activeTurnAbortControllerRef = React.useRef<AbortController | null>(null)
+      const pauseRequestedRef = React.useRef(false)
 
       React.useEffect(() => {
         latestSessionRef.current = session
@@ -2628,46 +2656,62 @@ export async function runAssistantChatWithInk(
         })()
       }
 
-      const submitPrompt = (rawValue: string): ComposerSubmitDisposition => {
-        const action = resolveChatSubmitAction(rawValue, busy)
+      const queuePrompt = (prompt: string) => {
+        queuedPromptsRef.current = [...queuedPromptsRef.current, prompt]
+        const queuedPromptCount = queuedPromptsRef.current.length
+        setStatus({
+          kind: 'info',
+          text:
+            queuedPromptCount === 1
+              ? 'Queued 1 follow-up for after the current turn.'
+              : `Queued ${queuedPromptCount} follow-up messages for after the current turn.`,
+        })
+      }
 
-        if (action.kind === 'ignore') {
-          return 'keep'
+      const dequeueQueuedPrompt = (): string | null => {
+        const [nextPrompt, ...remainingPrompts] = queuedPromptsRef.current
+        if (!nextPrompt) {
+          return null
         }
 
-        if (action.kind === 'exit') {
-          exit()
-          return 'keep'
+        queuedPromptsRef.current = remainingPrompts
+        return nextPrompt
+      }
+
+      const restoreQueuedPromptsIntoComposer = (): number => {
+        const queuedPrompts = queuedPromptsRef.current
+        if (queuedPrompts.length === 0) {
+          return 0
         }
 
-        if (action.kind === 'session') {
-          setStatus({
-            kind: 'info',
-            text: `session ${latestSessionRef.current.sessionId}`,
-          })
-          return 'keep'
-        }
+        queuedPromptsRef.current = []
+        setComposerValue((previous) =>
+          mergeComposerDraftWithQueuedPrompts(previous, queuedPrompts),
+        )
+        return queuedPrompts.length
+      }
 
-        if (action.kind === 'model') {
-          setStatus(null)
-          openModelSwitcher()
-          return 'clear'
-        }
-
+      const startPromptTurn = (prompt: string) => {
         setEntries((previous: InkChatEntry[]) => [
           ...previous,
           {
             kind: 'user',
-            text: action.prompt,
+            text: prompt,
           },
         ])
         setBusy(true)
         setStatus(null)
+        pauseRequestedRef.current = false
+
+        const abortController = new AbortController()
+        activeTurnAbortControllerRef.current = abortController
 
         const turnTracePrefix = `turn:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
 
         void (async () => {
           let streamedAssistantEntryKey: string | null = null
+          let completedTurn = false
+          let interruptedTurn = false
 
           const handleTraceEvent = (event: AssistantProviderTraceEvent) => {
             const namespacedUpdates = namespaceTurnTraceUpdates(
@@ -2703,6 +2747,7 @@ export async function runAssistantChatWithInk(
           try {
             const result = await sendAssistantMessage({
               ...input,
+              abortSignal: abortController.signal,
               conversation: {
                 ...(input.conversation ?? {}),
                 sessionId: latestSessionRef.current.sessionId,
@@ -2717,12 +2762,13 @@ export async function runAssistantChatWithInk(
                 )
               },
               onTraceEvent: handleTraceEvent,
-              prompt: action.prompt,
+              prompt,
               reasoningEffort: activeReasoningEffort,
               sessionSnapshot: latestSessionRef.current,
               showThinkingTraces: true,
             })
 
+            completedTurn = true
             latestSessionRef.current = result.session
             setSession(result.session)
             setTurns((previous: number) => previous + 1)
@@ -2764,9 +2810,19 @@ export async function runAssistantChatWithInk(
               setSession(recoveredSession)
             }
 
+            if (isAssistantProviderInterruptedError(error)) {
+              interruptedTurn = true
+              return
+            }
+
+            const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
             const errorText = error instanceof Error ? error.message : String(error)
             const connectionLost = isAssistantProviderConnectionLostError(error)
             const missingSession = isAssistantSessionNotFoundError(error)
+            const queuedFollowUpSuffix =
+              restoredQueuedPromptCount > 0
+                ? ' Queued follow-ups are back in the composer.'
+                : ''
             setEntries((previous: InkChatEntry[]) => [
               ...previous,
               {
@@ -2778,17 +2834,17 @@ export async function runAssistantChatWithInk(
               connectionLost
                 ? {
                     kind: 'error',
-                    text: 'The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.',
+                    text: `The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.${queuedFollowUpSuffix}`,
                   }
                 : missingSession
                   ? {
                       kind: 'error',
-                      text: 'The local assistant session record is missing. Check the current vault/default vault or start a new chat.',
+                      text: `The local assistant session record is missing. Check the current vault/default vault or start a new chat.${queuedFollowUpSuffix}`,
                     }
-                : {
-                    kind: 'error',
-                    text: 'The assistant hit an error. Fix it or keep chatting.',
-                  },
+                  : {
+                      kind: 'error',
+                      text: `The assistant hit an error. Fix it or keep chatting.${queuedFollowUpSuffix}`,
+                    },
             )
             if (!missingSession) {
               void appendAssistantTranscriptEntries(
@@ -2803,10 +2859,122 @@ export async function runAssistantChatWithInk(
               ).catch(() => {})
             }
           } finally {
+            activeTurnAbortControllerRef.current = null
+            setEntries((previous: InkChatEntry[]) =>
+              finalizePendingInkChatTraces(previous, turnTracePrefix),
+            )
+            const pauseRequested = pauseRequestedRef.current
+            pauseRequestedRef.current = false
             setBusy(false)
+
+            if (interruptedTurn) {
+              const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
+              setStatus({
+                kind: 'info',
+                text:
+                  restoredQueuedPromptCount > 0
+                    ? 'Paused current turn. Queued follow-ups are back in the composer.'
+                    : 'Paused current turn.',
+              })
+              return
+            }
+
+            if (completedTurn && pauseRequested) {
+              const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
+              setStatus({
+                kind: 'info',
+                text:
+                  restoredQueuedPromptCount > 0
+                    ? 'Stopped after the current turn. Queued follow-ups are back in the composer.'
+                    : 'Stopped after the current turn.',
+              })
+              return
+            }
+
+            if (completedTurn) {
+              const nextQueuedPrompt = dequeueQueuedPrompt()
+              if (nextQueuedPrompt) {
+                queueMicrotask(() => {
+                  startPromptTurn(nextQueuedPrompt)
+                })
+              }
+            }
           }
         })()
+      }
 
+      const requestPause = () => {
+        if (
+          !busy ||
+          modelSwitcherState ||
+          pauseRequestedRef.current ||
+          !activeTurnAbortControllerRef.current
+        ) {
+          return
+        }
+
+        pauseRequestedRef.current = true
+        setStatus({
+          kind: 'info',
+          text:
+            queuedPromptsRef.current.length > 0
+              ? 'Pausing current turn. Queued follow-ups will return to the composer.'
+              : 'Pausing current turn...',
+        })
+        activeTurnAbortControllerRef.current.abort()
+      }
+
+      useInput(
+        (_input: string, key: Key) => {
+          if (!key.escape) {
+            return
+          }
+
+          requestPause()
+        },
+        {
+          isActive: busy && modelSwitcherState === null,
+        },
+      )
+
+      const submitPrompt = (
+        rawValue: string,
+        mode: ComposerSubmitMode,
+      ): ComposerSubmitDisposition => {
+        const action = resolveChatSubmitAction(rawValue, {
+          busy,
+          trigger: mode,
+        })
+
+        if (action.kind === 'ignore') {
+          return 'keep'
+        }
+
+        if (action.kind === 'exit') {
+          exit()
+          return 'keep'
+        }
+
+        if (action.kind === 'session') {
+          setStatus({
+            kind: 'info',
+            text: `session ${latestSessionRef.current.sessionId}`,
+          })
+          return 'keep'
+        }
+
+        if (action.kind === 'model') {
+          setStatus(null)
+          openModelSwitcher()
+          return 'clear'
+        }
+
+        if (action.kind === 'queue') {
+          queuePrompt(action.prompt)
+          return 'clear'
+        }
+
+        startPromptTurn(action.prompt)
         return shouldClearComposerForSubmitAction(action) ? 'clear' : 'keep'
       }
 
@@ -2817,7 +2985,7 @@ export async function runAssistantChatWithInk(
 
         bootstrappedRef.current = true
         if (initialPromptRef.current) {
-          submitPrompt(initialPromptRef.current)
+          submitPrompt(initialPromptRef.current, 'enter')
         }
       }, [])
 
@@ -2878,7 +3046,9 @@ export async function runAssistantChatWithInk(
             createElement(ChatComposer, {
               entryCount: entries.length,
               modelSwitcherActive: modelSwitcherState !== null,
+              onChange: setComposerValue,
               onSubmit: submitPrompt,
+              value: composerValue,
             }),
             createElement(ChatFooter, {
               badges: metadataBadges,

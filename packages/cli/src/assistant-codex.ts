@@ -13,6 +13,7 @@ import type {
 import { VaultCliError } from './vault-cli-errors.js'
 
 export interface CodexExecInput {
+  abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy
   configOverrides?: readonly string[]
   codexCommand?: string
@@ -139,9 +140,40 @@ export async function executeCodexPrompt(
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
+      let settled = false
+      let abortRequested = false
+
+      const cleanupAbortListener = attachCodexAbortListener({
+        abortSignal: input.abortSignal,
+        onAbort: () => {
+          abortRequested = true
+          child.kill('SIGINT')
+        },
+      })
+
+      const resolveOnce = () => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        cleanupAbortListener()
+        resolve()
+      }
+
+      const rejectOnce = (error: unknown) => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        cleanupAbortListener()
+        reject(error)
+      }
+
       child.on('error', (error) => {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          reject(
+          rejectOnce(
             new VaultCliError(
               'ASSISTANT_CODEX_NOT_FOUND',
               `Codex CLI executable "${codexCommand}" was not found. Install @openai/codex or pass --codexCommand.`,
@@ -150,7 +182,7 @@ export async function executeCodexPrompt(
           return
         }
 
-        reject(error)
+        rejectOnce(error)
       })
 
       let stdoutBuffer = ''
@@ -203,20 +235,25 @@ export async function executeCodexPrompt(
           }
         }
 
-        if (code !== 0) {
-          reject(
-            buildCodexFailure({
-              code,
-              signal,
-              stderr,
-              fallback: lastEventError,
-              providerSessionId: discoveredSessionId,
-            }),
+        if (signal || code !== 0) {
+          rejectOnce(
+            abortRequested || signal === 'SIGINT'
+              ? buildCodexInterruptedError({
+                  providerSessionId: discoveredSessionId,
+                  signal,
+                })
+              : buildCodexFailure({
+                  code,
+                  signal,
+                  stderr,
+                  fallback: lastEventError,
+                  providerSessionId: discoveredSessionId,
+                }),
           )
           return
         }
 
-        resolve()
+        resolveOnce()
       })
     })
 
@@ -260,6 +297,32 @@ export async function resolveCodexDisplayOptions(input: {
     model: explicitModel ?? activeProfile?.model ?? config.model,
     reasoningEffort:
       activeProfile?.reasoningEffort ?? config.reasoningEffort,
+  }
+}
+
+function attachCodexAbortListener(input: {
+  abortSignal?: AbortSignal
+  onAbort: () => void
+}): () => void {
+  const signal = input.abortSignal
+  if (!signal) {
+    return () => {}
+  }
+
+  const handleAbort = () => {
+    input.onAbort()
+  }
+
+  signal.addEventListener('abort', handleAbort, {
+    once: true,
+  })
+
+  if (signal.aborted) {
+    handleAbort()
+  }
+
+  return () => {
+    signal.removeEventListener('abort', handleAbort)
   }
 }
 
@@ -1342,6 +1405,33 @@ function buildCodexFailure(input: {
       providerSessionId: connectionLost ? input.providerSessionId : null,
       recoverableConnectionLoss: connectionLost,
       retryable: connectionLost,
+    },
+  )
+}
+
+function buildCodexInterruptedError(input: {
+  providerSessionId: string | null
+  signal: NodeJS.Signals | null
+}): VaultCliError {
+  const parts = ['Codex CLI was interrupted.']
+
+  if (input.signal) {
+    parts.push(`signal ${input.signal}.`)
+  }
+
+  if (input.providerSessionId) {
+    parts.push(
+      `Healthy Bob preserved provider session ${input.providerSessionId}, so the next turn can resume it.`,
+    )
+  }
+
+  return new VaultCliError(
+    'ASSISTANT_CODEX_INTERRUPTED',
+    parts.join(' '),
+    {
+      interrupted: true,
+      providerSessionId: input.providerSessionId,
+      retryable: false,
     },
   )
 }

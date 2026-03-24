@@ -12,7 +12,7 @@ export async function recoverAssistantSessionAfterProviderFailure(input: {
   session: AssistantSession
   vault: string
 }): Promise<AssistantSession | null> {
-  if (!isAssistantProviderConnectionLostError(input.error)) {
+  if (!shouldRecoverAssistantSessionAfterProviderFailure(input.error)) {
     return null
   }
 
@@ -82,6 +82,20 @@ export function isAssistantProviderConnectionLostError(
     context &&
       (context.connectionLost === true ||
         context.recoverableConnectionLoss === true),
+  )
+}
+
+export function isAssistantProviderInterruptedError(error: unknown): boolean {
+  const context = readAssistantProviderErrorContext(error)
+  return Boolean(context && context.interrupted === true)
+}
+
+function shouldRecoverAssistantSessionAfterProviderFailure(
+  error: unknown,
+): boolean {
+  return (
+    isAssistantProviderConnectionLostError(error) ||
+    isAssistantProviderInterruptedError(error)
   )
 }
 

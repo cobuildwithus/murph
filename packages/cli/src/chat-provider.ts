@@ -18,6 +18,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
 
 export interface AssistantProviderTurnInput {
+  abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
   baseUrl?: string | null
@@ -95,6 +96,7 @@ export async function executeAssistantProviderTurn(
           configOverrides: input.configOverrides,
           showThinkingTraces: input.showThinkingTraces ?? false,
         }),
+        abortSignal: input.abortSignal,
         env: input.env,
         workingDirectory: input.workingDirectory,
         prompt,

@@ -70,6 +70,7 @@ interface AssistantSessionResolutionFields {
 }
 
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
+  abortSignal?: AbortSignal
   codexCommand?: string
   deliverResponse?: boolean
   deliveryTarget?: string | null
@@ -262,6 +263,7 @@ export async function sendAssistantMessage(
   let providerResult: AssistantProviderTurnResult
   try {
     providerResult = await executeAssistantProviderTurn({
+      abortSignal: input.abortSignal,
       provider,
       workingDirectory: input.workingDirectory ?? input.vault,
       configOverrides: configOverrides.length > 0 ? configOverrides : undefined,

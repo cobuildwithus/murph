@@ -64,6 +64,8 @@ export interface ChatMetadataBadge {
   value: string
 }
 
+export type ChatSubmitTrigger = 'enter' | 'tab'
+
 export type ChatSubmitAction =
   | {
       kind: 'exit'
@@ -79,6 +81,10 @@ export type ChatSubmitAction =
       prompt: string
     }
   | {
+      kind: 'queue'
+      prompt: string
+    }
+  | {
       kind: 'session'
     }
 
@@ -86,7 +92,7 @@ export const CHAT_BANNER =
   'Local-first chat backed by transcript history and resumable provider sessions when available.'
 
 export const CHAT_COMPOSER_HINT =
-  'Enter send · Shift+Enter newline · /model switch model · /session show session · /exit quit'
+  'Enter send · Tab queue when busy · Shift+Enter newline · Esc pause · /model switch model · /session show session · /exit quit'
 
 export const CHAT_STARTER_SUGGESTIONS = [
   'Summarize recent sleep and recovery',
@@ -225,6 +231,25 @@ export function applyProviderProgressEventToEntries(input: {
   return [...input.entries, nextEntry]
 }
 
+export function finalizePendingInkChatTraces(
+  entries: readonly InkChatEntry[],
+  turnTracePrefix?: string | null,
+): InkChatEntry[] {
+  const normalizedPrefix = normalizeNullableString(turnTracePrefix)
+
+  return entries.map((entry) =>
+    entry.kind === 'trace' &&
+    entry.pending &&
+    (!normalizedPrefix ||
+      (entry.traceId !== null && entry.traceId.startsWith(`${normalizedPrefix}:`)))
+      ? {
+          ...entry,
+          pending: false,
+        }
+      : entry,
+  )
+}
+
 export function applyInkChatTraceUpdates(
   entries: readonly InkChatEntry[],
   updates: readonly InkChatTraceUpdate[],
@@ -342,32 +367,62 @@ export function formatBusyStatus(elapsedSeconds: number): string {
 
 export function resolveChatSubmitAction(
   input: string,
-  busy: boolean,
+  options:
+    | boolean
+    | {
+        busy: boolean
+        trigger?: ChatSubmitTrigger
+      },
 ): ChatSubmitAction {
   const prompt = input.trim()
+  const busy = typeof options === 'boolean' ? options : options.busy
+  const trigger = typeof options === 'boolean' ? 'enter' : options.trigger ?? 'enter'
 
-  if (prompt.length === 0 || busy) {
+  if (prompt.length === 0) {
     return {
       kind: 'ignore',
     }
   }
 
   if (prompt === '/exit' || prompt === '/quit') {
-    return {
-      kind: 'exit',
-    }
+    return busy
+      ? {
+          kind: 'ignore',
+        }
+      : {
+          kind: 'exit',
+        }
   }
 
   if (prompt === '/session') {
-    return {
-      kind: 'session',
-    }
+    return busy
+      ? {
+          kind: 'ignore',
+        }
+      : {
+          kind: 'session',
+        }
   }
 
   if (prompt === '/model') {
-    return {
-      kind: 'model',
-    }
+    return busy
+      ? {
+          kind: 'ignore',
+        }
+      : {
+          kind: 'model',
+        }
+  }
+
+  if (busy) {
+    return trigger === 'tab'
+      ? {
+          kind: 'queue',
+          prompt,
+        }
+      : {
+          kind: 'ignore',
+        }
   }
 
   return {
@@ -379,7 +434,11 @@ export function resolveChatSubmitAction(
 export function shouldClearComposerForSubmitAction(
   action: ChatSubmitAction,
 ): boolean {
-  return action.kind === 'model' || action.kind === 'prompt'
+  return (
+    action.kind === 'model' ||
+    action.kind === 'prompt' ||
+    action.kind === 'queue'
+  )
 }
 
 export function formatChatMetadata(

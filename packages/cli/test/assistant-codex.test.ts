@@ -293,6 +293,37 @@ test('executeCodexPrompt emits reconnect status events and classifies connection
   ])
 })
 
+test('executeCodexPrompt interrupts the spawned Codex process when aborted', async () => {
+  const abortController = new AbortController()
+  let spawnedChild: MockChildProcess | null = null
+
+  installSpawnMock((child) => {
+    spawnedChild = child
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-pause-1' })}\n`,
+    )
+    abortController.abort()
+  })
+
+  await assert.rejects(
+    executeCodexPrompt({
+      prompt: 'Pause the current turn.',
+      workingDirectory: '/tmp/vault',
+      abortSignal: abortController.signal,
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CODEX_INTERRUPTED')
+      assert.equal(error.context?.interrupted, true)
+      assert.equal(error.context?.providerSessionId, 'thread-pause-1')
+      return true
+    },
+  )
+
+  const killMock = (spawnedChild as MockChildProcess | null)?.kill as any
+  assert.deepEqual(killMock?.mock?.calls, [['SIGINT']])
+})
+
 test('executeCodexPrompt translates missing codex executables into ASSISTANT_CODEX_NOT_FOUND', async () => {
   installSpawnMock((child) => {
     const error = Object.assign(new Error('spawn codex ENOENT'), {
@@ -421,6 +452,12 @@ function createMockChildProcess(): MockChildProcess {
   const child = new EventEmitter() as MockChildProcess
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
+  child.kill = vi.fn((signal?: NodeJS.Signals) => {
+    queueMicrotask(() => {
+      child.emit('close', null, signal ?? 'SIGTERM')
+    })
+    return true
+  })
   return child
 }
 
@@ -433,6 +470,7 @@ function readOutputFilePath(args: string[]): string {
 }
 
 interface MockChildProcess extends EventEmitter {
+  kill: any
   stderr: EventEmitter
   stdout: EventEmitter
 }
