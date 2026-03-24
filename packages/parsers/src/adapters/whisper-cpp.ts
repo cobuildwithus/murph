@@ -27,7 +27,7 @@ export function createWhisperCppProvider(
   async function resolveCommand(): Promise<string | null> {
     return resolveConfiguredExecutable({
       explicitCandidates: options.commandCandidates,
-      envValue: () => readConfiguredEnvValue(process.env, ["WHISPER_COMMAND", "HEALTHYBOB_WHISPER_COMMAND"]),
+      envValue: () => readConfiguredEnvValue(process.env, ["WHISPER_COMMAND"]),
       fallbackCommands: ["whisper-cli", "whisper-cpp"],
     });
   }
@@ -35,7 +35,7 @@ export function createWhisperCppProvider(
   function resolveModelPath(): string | null {
     const candidate =
       options.modelPath ??
-      readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH", "HEALTHYBOB_WHISPER_MODEL_PATH"]);
+      readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH"]);
     return candidate && candidate.trim().length > 0 ? candidate.trim() : null;
   }
 

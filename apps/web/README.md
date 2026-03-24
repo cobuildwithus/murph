@@ -50,8 +50,6 @@ Development fallback only:
 - `DEVICE_SYNC_DEV_USER_EMAIL`
 - `DEVICE_SYNC_DEV_USER_NAME`
 
-Legacy `HEALTHYBOB_*` env names remain accepted as compatibility aliases for now.
-
 ## Prisma
 
 Generate the client and apply migrations with Prisma:

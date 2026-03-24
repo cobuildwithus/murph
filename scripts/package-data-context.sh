@@ -26,7 +26,7 @@ Create a ZIP bundle containing the selected Healthy Bob vault plus the matching
 vault-scoped assistant-state directory.
 
 Options:
-  --vault <path>             Vault root to package. Defaults to HEALTHYBOB_VAULT
+  --vault <path>             Vault root to package. Defaults to VAULT
                              or the saved Healthy Bob default vault.
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: output-packages)
@@ -282,15 +282,15 @@ if ! command -v zip >/dev/null 2>&1; then
 fi
 
 if [[ -z "$vault_path" ]]; then
-  if [[ -n "${HEALTHYBOB_VAULT:-}" ]]; then
-    vault_path="$HEALTHYBOB_VAULT"
+  if [[ -n "${VAULT:-}" ]]; then
+    vault_path="$VAULT"
   else
     vault_path="$(resolve_saved_default_vault || true)"
   fi
 fi
 
 if [[ -z "$vault_path" ]]; then
-  echo "Error: missing vault path. Pass --vault, set HEALTHYBOB_VAULT, or save a default Healthy Bob vault first." >&2
+  echo "Error: missing vault path. Pass --vault, set VAULT, or save a default Healthy Bob vault first." >&2
   exit 1
 fi
 

@@ -94,8 +94,6 @@ Oura settings:
 - `OURA_RECONCILE_INTERVAL_MS`
 - `OURA_REQUEST_TIMEOUT_MS`
 
-Legacy `HEALTHYBOB_*` env names remain accepted as compatibility aliases for now.
-
 ## Run
 
 ```bash

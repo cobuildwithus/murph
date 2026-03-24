@@ -38,7 +38,7 @@ import {
   resolveAssistantLanguageModel,
 } from '../src/model-harness.js'
 
-const TEST_API_KEY_ENV = 'HEALTHYBOB_ASSISTANT_TEST_KEY'
+const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'
 
 beforeEach(() => {
   harnessMocks.gateway.mockClear()

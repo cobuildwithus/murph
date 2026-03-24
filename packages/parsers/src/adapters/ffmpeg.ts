@@ -16,7 +16,7 @@ export async function resolveFfmpegCommand(
     envValue: () =>
       options.allowSystemLookup === false
         ? null
-        : readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND", "HEALTHYBOB_FFMPEG_COMMAND"]),
+        : readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND"]),
     fallbackCommands: options.allowSystemLookup === false ? [] : ["ffmpeg"],
   });
 }

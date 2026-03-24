@@ -3,13 +3,10 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 
 export const VAULT_ENV = "VAULT";
-export const HEALTHYBOB_VAULT_ENV = "HEALTHYBOB_VAULT";
-export const VAULT_ENV_KEYS = [VAULT_ENV, HEALTHYBOB_VAULT_ENV] as const;
+export const VAULT_ENV_KEYS = [VAULT_ENV] as const;
 export const WEB_LAUNCH_CWD_ENV = "WEB_LAUNCH_CWD";
-export const HEALTHYBOB_WEB_LAUNCH_CWD_ENV = "HEALTHYBOB_WEB_LAUNCH_CWD";
 export const WEB_LAUNCH_CWD_ENV_KEYS = [
   WEB_LAUNCH_CWD_ENV,
-  HEALTHYBOB_WEB_LAUNCH_CWD_ENV,
 ] as const;
 export const FIXTURE_VAULT_EXAMPLE = "../../fixtures/demo-web-vault";
 const INIT_CWD_ENV = "INIT_CWD";
@@ -71,7 +68,6 @@ export function rememberLaunchCwd(
   const initCwd = env[INIT_CWD_ENV]?.trim();
   const resolvedLaunchCwd = initCwd ? path.resolve(cwd, initCwd) : cwd;
   env[WEB_LAUNCH_CWD_ENV] = resolvedLaunchCwd;
-  env[HEALTHYBOB_WEB_LAUNCH_CWD_ENV] = resolvedLaunchCwd;
 }
 
 async function resolveSavedDefaultVaultRoot(

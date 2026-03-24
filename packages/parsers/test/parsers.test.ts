@@ -93,13 +93,13 @@ test("audio preparation accepts WAV directly and requires ffmpeg for other audio
 test("shared executable helpers preserve lazy resolution, availability, and missing-tool errors", async () => {
   const directory = await makeTempDirectory("healthybob-parser-executable");
   const executablePath = await writeExternalFile(directory, "fake-tool", "tool-placeholder");
-  const previousCommand = process.env.HEALTHYBOB_TEST_COMMAND;
+  const previousCommand = process.env.TEST_COMMAND;
 
   try {
-    process.env.HEALTHYBOB_TEST_COMMAND = executablePath;
+    process.env.TEST_COMMAND = executablePath;
     assert.equal(
       await resolveConfiguredExecutable({
-        envValue: () => process.env.HEALTHYBOB_TEST_COMMAND,
+        envValue: () => process.env.TEST_COMMAND,
       }),
       executablePath,
     );
@@ -115,10 +115,10 @@ test("shared executable helpers preserve lazy resolution, availability, and miss
       executablePath,
     });
 
-    process.env.HEALTHYBOB_TEST_COMMAND = "";
+    process.env.TEST_COMMAND = "";
     assert.equal(
       await resolveConfiguredExecutable({
-        envValue: () => process.env.HEALTHYBOB_TEST_COMMAND,
+        envValue: () => process.env.TEST_COMMAND,
       }),
       null,
     );
@@ -138,9 +138,9 @@ test("shared executable helpers preserve lazy resolution, availability, and miss
     assert.throws(() => requireExecutable(null, "tool missing"), /tool missing/u);
   } finally {
     if (previousCommand === undefined) {
-      delete process.env.HEALTHYBOB_TEST_COMMAND;
+      delete process.env.TEST_COMMAND;
     } else {
-      process.env.HEALTHYBOB_TEST_COMMAND = previousCommand;
+      process.env.TEST_COMMAND = previousCommand;
     }
   }
 });

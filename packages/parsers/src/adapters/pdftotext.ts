@@ -21,7 +21,7 @@ export function createPdfToTextProvider(
   async function resolveCommand(): Promise<string | null> {
     return resolveConfiguredExecutable({
       explicitCandidates: options.commandCandidates,
-      envValue: () => readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND", "HEALTHYBOB_PDFTOTEXT_COMMAND"]),
+      envValue: () => readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND"]),
       fallbackCommands: ["pdftotext"],
     });
   }

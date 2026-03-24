@@ -9,7 +9,6 @@ import { writeTextFileAtomic } from '@healthybob/runtime-state'
 
 import {
   DEVICE_SYNC_BASE_URL_ENV,
-  HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV,
   resolveDeviceSyncBaseUrl,
   resolveDeviceSyncControlToken,
 } from './device-sync-client.js'
@@ -398,8 +397,7 @@ function hasExplicitControlPlaneTarget(
 ): boolean {
   return (
     (typeof baseUrl === 'string' && baseUrl.trim().length > 0) ||
-    typeof env[DEVICE_SYNC_BASE_URL_ENV] === 'string' ||
-    typeof env[HEALTHYBOB_DEVICE_SYNC_BASE_URL_ENV] === 'string'
+    typeof env[DEVICE_SYNC_BASE_URL_ENV] === 'string'
   )
 }
 

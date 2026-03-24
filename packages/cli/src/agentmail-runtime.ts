@@ -215,17 +215,11 @@ export interface AgentmailApiClient {
 }
 
 export function resolveAgentmailApiKey(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.AGENTMAIL_API_KEY) ??
-    normalizeNullableString(env.HEALTHYBOB_AGENTMAIL_API_KEY)
-  )
+  return normalizeNullableString(env.AGENTMAIL_API_KEY)
 }
 
 export function resolveAgentmailBaseUrl(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.AGENTMAIL_BASE_URL) ??
-    normalizeNullableString(env.HEALTHYBOB_AGENTMAIL_BASE_URL)
-  )
+  return normalizeNullableString(env.AGENTMAIL_BASE_URL)
 }
 
 export function createAgentmailApiClient(

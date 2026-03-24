@@ -18,65 +18,43 @@ test("shared Crockford helpers preserve the duplicated low-level encoding behavi
   assert.equal(generateUlid(0, deterministicRandomBytes), "00000000000123456789ABCDEF");
 });
 
-test("resolveDeviceSyncBaseUrl accepts the legacy HEALTHYBOB_* alias", () => {
-  assert.equal(
-    resolveDeviceSyncBaseUrl({
-      env: {
-        HEALTHYBOB_DEVICE_SYNC_BASE_URL: "http://127.0.0.1:9911/",
-      },
-    }),
-    "http://127.0.0.1:9911",
-  );
-});
-
-test("resolveDeviceSyncBaseUrl prefers the unprefixed env var over the legacy alias", () => {
+test("resolveDeviceSyncBaseUrl reads the unprefixed env var", () => {
   assert.equal(
     resolveDeviceSyncBaseUrl({
       env: {
         DEVICE_SYNC_BASE_URL: "http://127.0.0.1:9911/",
-        HEALTHYBOB_DEVICE_SYNC_BASE_URL: "http://127.0.0.1:9922/",
       },
     }),
     "http://127.0.0.1:9911",
   );
 });
 
-test("resolveDeviceSyncControlToken falls back to legacy control-token and secret aliases", () => {
+test("resolveDeviceSyncBaseUrl falls back to the default base URL when env is unset", () => {
+  assert.equal(resolveDeviceSyncBaseUrl(), "http://127.0.0.1:8788");
+});
+
+test("resolveDeviceSyncControlToken reads the unprefixed control token", () => {
   assert.equal(
     resolveDeviceSyncControlToken({
       env: {
-        HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: "legacy-control-token",
+        DEVICE_SYNC_CONTROL_TOKEN: "control-token",
       },
     }),
-    "legacy-control-token",
-  );
-  assert.equal(
-    resolveDeviceSyncControlToken({
-      env: {
-        HEALTHYBOB_DEVICE_SYNC_SECRET: "legacy-secret-token",
-      },
-    }),
-    "legacy-secret-token",
+    "control-token",
   );
 });
 
-test("resolveDeviceSyncControlToken prefers unprefixed env vars over legacy aliases", () => {
+test("resolveDeviceSyncControlToken falls back to DEVICE_SYNC_SECRET", () => {
   assert.equal(
     resolveDeviceSyncControlToken({
       env: {
-        DEVICE_SYNC_CONTROL_TOKEN: "primary-control-token",
-        HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN: "legacy-control-token",
+        DEVICE_SYNC_SECRET: "secret-token",
       },
     }),
-    "primary-control-token",
+    "secret-token",
   );
-  assert.equal(
-    resolveDeviceSyncControlToken({
-      env: {
-        DEVICE_SYNC_SECRET: "primary-secret-token",
-        HEALTHYBOB_DEVICE_SYNC_SECRET: "legacy-secret-token",
-      },
-    }),
-    "primary-secret-token",
-  );
+});
+
+test("resolveDeviceSyncControlToken returns null when no env is set", () => {
+  assert.equal(resolveDeviceSyncControlToken(), null);
 });

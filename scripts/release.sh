@@ -61,7 +61,7 @@ cd "$ROOT_DIR"
 unset npm_config_store_dir NPM_CONFIG_STORE_DIR || true
 
 COMMIT_CMD='scripts/committer'
-CHECK_CMD="${HEALTHYBOB_RELEASE_CHECK_CMD:-pnpm release:check}"
+CHECK_CMD="${RELEASE_CHECK_CMD:-pnpm release:check}"
 COMMIT_TEMPLATE='chore(release): v%s'
 TAG_MESSAGE_TEMPLATE='chore(release): v%s'
 

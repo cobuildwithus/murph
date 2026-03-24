@@ -20,8 +20,7 @@ const OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
 const OPERATOR_CONFIG_DIRECTORY = '.healthybob'
 const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
 export const VAULT_ENV = 'VAULT'
-export const HEALTHYBOB_VAULT_ENV = 'HEALTHYBOB_VAULT'
-export const VAULT_ENV_KEYS = [VAULT_ENV, HEALTHYBOB_VAULT_ENV] as const
+export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
 const assistantOperatorDefaultsSchema = z.object({
   provider: z.enum(assistantChatProviderValues).nullable(),

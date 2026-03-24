@@ -26,7 +26,7 @@ export function createPaddleOcrProvider(
   async function resolveCommand(): Promise<string | null> {
     return resolveConfiguredExecutable({
       explicitCandidates: options.commandCandidates,
-      envValue: () => readConfiguredEnvValue(process.env, ["PADDLEOCR_COMMAND", "HEALTHYBOB_PADDLEOCR_COMMAND"]),
+      envValue: () => readConfiguredEnvValue(process.env, ["PADDLEOCR_COMMAND"]),
       fallbackCommands: ["paddleocr", "paddlex"],
     });
   }

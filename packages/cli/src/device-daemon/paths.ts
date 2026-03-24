@@ -2,10 +2,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { URL } from 'node:url'
 import { resolveDeviceSyncRuntimePaths } from '@healthybob/runtime-state'
-import {
-  DEVICE_SYNC_CONTROL_TOKEN_ENV,
-  HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV,
-} from '../device-sync-client.js'
+import { DEVICE_SYNC_CONTROL_TOKEN_ENV } from '../device-sync-client.js'
 import {
   DEVICE_SYNC_HOST_ENV,
   DEVICE_SYNC_HOST_ENV_KEYS,
@@ -17,11 +14,6 @@ import {
   DEVICE_SYNC_SECRET_ENV_KEYS,
   DEVICE_SYNC_STATE_DB_PATH_ENV,
   DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS,
-  HEALTHYBOB_DEVICE_SYNC_HOST_ENV,
-  HEALTHYBOB_DEVICE_SYNC_PORT_ENV,
-  HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL_ENV,
-  HEALTHYBOB_DEVICE_SYNC_SECRET_ENV,
-  HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH_ENV,
   type DeviceDaemonDependencies,
   type DeviceDaemonPaths,
 } from './types.js'
@@ -77,38 +69,19 @@ export function buildManagedDeviceSyncEnvironment(input: {
     ...input.env,
     VAULT_ROOT: input.vault,
     DEVICE_SYNC_VAULT_ROOT: input.vault,
-    HEALTHYBOB_VAULT_ROOT: input.vault,
-    HEALTHYBOB_DEVICE_SYNC_VAULT_ROOT: input.vault,
     [DEVICE_SYNC_PUBLIC_BASE_URL_ENV]:
-      readEnvValue(input.env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ||
-      input.baseUrl,
-    [HEALTHYBOB_DEVICE_SYNC_PUBLIC_BASE_URL_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ||
       input.baseUrl,
     [DEVICE_SYNC_SECRET_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_SECRET_ENV_KEYS) ||
       input.controlToken,
-    [HEALTHYBOB_DEVICE_SYNC_SECRET_ENV]:
-      readEnvValue(input.env, DEVICE_SYNC_SECRET_ENV_KEYS) ||
-      input.controlToken,
     [DEVICE_SYNC_CONTROL_TOKEN_ENV]:
       input.env[DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
-      input.env[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
-      input.controlToken,
-    [HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]:
-      input.env[DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
-      input.env[HEALTHYBOB_DEVICE_SYNC_CONTROL_TOKEN_ENV]?.trim() ||
       input.controlToken,
     [DEVICE_SYNC_HOST_ENV]: normalizedHost,
-    [HEALTHYBOB_DEVICE_SYNC_HOST_ENV]: normalizedHost,
     [DEVICE_SYNC_PORT_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_PORT_ENV_KEYS) || effectivePort,
-    [HEALTHYBOB_DEVICE_SYNC_PORT_ENV]:
-      readEnvValue(input.env, DEVICE_SYNC_PORT_ENV_KEYS) || effectivePort,
     [DEVICE_SYNC_STATE_DB_PATH_ENV]:
-      readEnvValue(input.env, DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS) ||
-      input.paths.stateDbPath,
-    [HEALTHYBOB_DEVICE_SYNC_STATE_DB_PATH_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS) ||
       input.paths.stateDbPath,
   }

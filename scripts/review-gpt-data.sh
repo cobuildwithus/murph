@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "$vault_override" ]]; then
-  export HEALTHYBOB_VAULT="$vault_override"
+  export VAULT="$vault_override"
 fi
 
 if [[ "$has_send_override" == "0" ]]; then

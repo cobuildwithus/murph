@@ -53,18 +53,6 @@ test("getConfiguredVaultRoot resolves relative paths from the launch cwd when pr
   );
 });
 
-test("getConfiguredVaultRoot accepts legacy HEALTHYBOB_* vault and launch-cwd aliases", () => {
-  const resolved = getConfiguredVaultRoot(
-    {
-      HEALTHYBOB_VAULT: "fixtures/demo-web-vault",
-      HEALTHYBOB_WEB_LAUNCH_CWD: "/repo",
-    },
-    "/repo/packages/web",
-  );
-
-  assert.equal(resolved, "/repo/fixtures/demo-web-vault");
-});
-
 test("buildSuggestedCommand keeps the package-local example for direct package runs", () => {
   assert.equal(buildSuggestedCommand(), `${VAULT_ENV}=${FIXTURE_VAULT_EXAMPLE} pnpm dev`);
 });
