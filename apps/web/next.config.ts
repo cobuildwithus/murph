@@ -2,6 +2,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
+import {
+  createWorkspaceSourcePackageNames,
+  installSourceExtensionAliases,
+  resolveWorkspaceSourceEntries as resolveWorkspaceSourceEntriesFromMap,
+} from "../../config/workspace-source-resolution";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
@@ -11,44 +16,19 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@healthybob/importers": "../../packages/importers/src/index.ts",
   "@healthybob/device-syncd": "../../packages/device-syncd/src/index.ts",
 } as const;
-const SOURCE_EXTENSION_ALIAS: Record<string, string[]> = {
-  ".js": [".ts", ".tsx", ".js"],
-  ".mjs": [".mts", ".mjs"],
-  ".cjs": [".cts", ".cjs"],
-};
 
-export const WORKSPACE_SOURCE_PACKAGE_NAMES = Object.freeze(
-  Object.keys(WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
+export const WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
+  WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
 );
 
 export function resolveWorkspaceSourceEntries(appDir: string): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS).map(([packageName, relativePath]) => [
-      packageName,
-      path.resolve(appDir, relativePath),
-    ]),
+  return resolveWorkspaceSourceEntriesFromMap(
+    appDir,
+    WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
   );
 }
 
-interface ResolveConfigLike {
-  extensionAlias?: Record<string, string[]>;
-}
-
-interface WebpackConfigLike {
-  resolve?: ResolveConfigLike;
-}
-
-function installSourceExtensionAliases<T extends WebpackConfigLike>(config: T): T {
-  config.resolve = {
-    ...config.resolve,
-    extensionAlias: {
-      ...(config.resolve?.extensionAlias ?? {}),
-      ...SOURCE_EXTENSION_ALIAS,
-    },
-  };
-
-  return config;
-}
+export { installSourceExtensionAliases };
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(appDir, "../.."),

@@ -3,33 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
+import { createVitestWorkspaceRuntimeAliases } from "../../config/workspace-source-resolution";
 import { resolveWorkspaceSourceEntries } from "./next.config";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function createVitestWorkspaceRuntimeAliases(packageDir: string) {
-  const sourceEntries = resolveWorkspaceSourceEntries(packageDir);
-
-  return Object.entries(sourceEntries).flatMap(([packageName, entryPath]) => {
-    const sourceDir = path.dirname(entryPath);
-    const escapedPackageName = escapeRegex(packageName);
-
-    return [
-      {
-        find: new RegExp(`^${escapedPackageName}$`),
-        replacement: entryPath,
-      },
-      {
-        find: new RegExp(`^${escapedPackageName}/(.+)$`),
-        replacement: `${sourceDir}/$1.ts`,
-      },
-    ];
-  });
-}
 
 export default defineConfig({
   oxc: {
@@ -39,7 +16,9 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: createVitestWorkspaceRuntimeAliases(packageDir),
+    alias: createVitestWorkspaceRuntimeAliases(
+      resolveWorkspaceSourceEntries(packageDir),
+    ),
   },
   test: {
     environment: "node",
