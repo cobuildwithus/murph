@@ -225,7 +225,7 @@ function createVaultWriteToolDefinitions(
     defineAssistantTool({
       name: 'vault.meal.add',
       description:
-        'Create one canonical meal record from a photo plus an optional audio note and optional text note.',
+        'Create one canonical meal record from a photo plus an optional audio note and optional text note. Use this for meals, snacks, and drink logs, preserving snack/drink context in the note when helpful.',
       inputSchema: z.object({
         photo: vaultFilePathSchema,
         audio: vaultFilePathSchema.optional(),
