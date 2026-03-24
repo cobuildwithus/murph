@@ -49,16 +49,20 @@ export async function runInboxDaemon(input: {
   pipeline: InboxPipeline;
   connectors: PollConnector[];
   signal: AbortSignal;
+  continueOnConnectorFailure?: boolean;
 }): Promise<void> {
   const controller = new AbortController();
   const releaseAbortRelay = relayAbort(input.signal, controller);
+  const continueOnConnectorFailure = input.continueOnConnectorFailure ?? false;
   const runners = input.connectors.map((connector) =>
     runPollConnector({
       connector,
       pipeline: input.pipeline,
       signal: controller.signal,
     }).catch((error: unknown) => {
-      controller.abort();
+      if (!continueOnConnectorFailure) {
+        controller.abort();
+      }
       throw createConnectorFailure(connector, error);
     }),
   );
@@ -69,11 +73,15 @@ export async function runInboxDaemon(input: {
       result.status === "rejected" ? [result.reason] : [],
     );
 
-    if (failures.length === 1) {
-      throw failures[0];
+    if (failures.length === 0) {
+      return;
     }
 
-    if (failures.length > 1) {
+    if (!continueOnConnectorFailure || failures.length === settled.length) {
+      if (failures.length === 1) {
+        throw failures[0];
+      }
+
       throw new AggregateError(failures, "Inbox daemon stopped after connector failures.");
     }
   } finally {

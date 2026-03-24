@@ -1880,6 +1880,94 @@ test("daemon with parsers still rejects connector failures after cleanup", async
   );
 });
 
+test("daemon with parsers can keep healthy connectors running after one connector fails", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parsed-daemon-isolated-failure-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const controller = new AbortController();
+  let healthyConnectorAborted = false;
+  let healthyConnectorClosed = 0;
+  let sawFailingConnectorClose = false;
+  let resolveFailingConnectorClose: (() => void) | null = null;
+  const failingConnectorClosed = new Promise<void>((resolve) => {
+    resolveFailingConnectorClose = resolve;
+  });
+
+  const running = runInboxDaemonWithParsers({
+    vaultRoot,
+    runtime,
+    registry: createParserRegistry([]),
+    connectors: [
+      {
+        id: "healthy-email",
+        source: "email",
+        accountId: "agentmail",
+        kind: "poll" as const,
+        capabilities: {
+          attachments: true,
+          backfill: false,
+          ownMessages: false,
+          watch: true,
+          webhooks: false,
+        },
+        async watch(_cursor, _emit, signal) {
+          if (signal.aborted) {
+            healthyConnectorAborted = true;
+            return;
+          }
+
+          await new Promise<void>((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                healthyConnectorAborted = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+        },
+        async close() {
+          healthyConnectorClosed += 1;
+        },
+      },
+      {
+        id: "failing-imessage",
+        source: "imessage",
+        accountId: "self",
+        kind: "poll" as const,
+        capabilities: {
+          attachments: true,
+          backfill: false,
+          ownMessages: false,
+          watch: true,
+          webhooks: false,
+        },
+        async watch() {
+          throw new Error("daemon blew up");
+        },
+        async close() {
+          sawFailingConnectorClose = true;
+          resolveFailingConnectorClose?.();
+        },
+      },
+    ],
+    signal: controller.signal,
+    continueOnConnectorFailure: true,
+  });
+
+  await failingConnectorClosed;
+  assert.equal(sawFailingConnectorClose, true);
+  assert.equal(healthyConnectorAborted, false);
+
+  controller.abort();
+  await running;
+
+  assert.equal(healthyConnectorAborted, true);
+  assert.equal(healthyConnectorClosed, 1);
+});
+
 test("parsed inbox pipeline stores captures even when auto-drain parsing fails", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-parsed-pipeline-failure-vault");
   const sourceRoot = await makeTempDirectory("healthybob-parsed-pipeline-failure-source");

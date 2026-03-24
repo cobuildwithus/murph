@@ -472,6 +472,7 @@ export interface InboxRuntimeModule {
     pipeline: InboxPipeline
     connectors: PollConnector[]
     signal: AbortSignal
+    continueOnConnectorFailure?: boolean
   }): Promise<void>
 }
 
@@ -539,6 +540,7 @@ export interface ParsersRuntimeModule {
     }
     connectors: PollConnector[]
     signal: AbortSignal
+    continueOnConnectorFailure?: boolean
   }): Promise<void>
   createInboxParserService(input: {
     vaultRoot: string
@@ -2390,6 +2392,7 @@ export function createIntegratedInboxCliServices(
           ffmpeg: configured.ffmpeg,
           connectors: instrumentedConnectors,
           signal: runSignal,
+          continueOnConnectorFailure: true,
         })
       } catch (error) {
         reason = runSignal.aborted ? 'signal' : 'error'

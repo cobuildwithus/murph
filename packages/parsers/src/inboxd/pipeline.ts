@@ -20,6 +20,7 @@ export interface ParsedInboxPipeline extends InboxPipeline {
 export interface RunInboxDaemonWithParsersInput extends CreateParsedInboxPipelineInput {
   connectors: PollConnector[];
   signal: AbortSignal;
+  continueOnConnectorFailure?: boolean;
 }
 
 export async function createParsedInboxPipeline(
@@ -47,7 +48,7 @@ export async function createParsedInboxPipeline(
 export async function runInboxDaemonWithParsers(
   input: RunInboxDaemonWithParsersInput,
 ): Promise<void> {
-  const { connectors, signal, ...pipelineInput } = input;
+  const { connectors, signal, continueOnConnectorFailure, ...pipelineInput } = input;
   let pipeline: ParsedInboxPipeline | null = null;
 
   try {
@@ -74,6 +75,7 @@ export async function runInboxDaemonWithParsers(
       pipeline,
       connectors,
       signal,
+      continueOnConnectorFailure,
     });
   } catch (error) {
     await closeConnectors(connectors);

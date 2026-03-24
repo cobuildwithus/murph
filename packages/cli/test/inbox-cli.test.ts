@@ -308,6 +308,7 @@ function createFakeParsersRuntimeModule(input?: {
     }
     signal: AbortSignal
     vaultRoot: string
+    continueOnConnectorFailure?: boolean
   }): Promise<void> | void
 }) {
   const discoveredAt = input?.discoveredAt ?? '2026-03-13T12:34:56.000Z'
@@ -476,10 +477,12 @@ function createFakeParsersRuntimeModule(input?: {
       }
       signal: AbortSignal
       vaultRoot: string
+      continueOnConnectorFailure?: boolean
     }) {
       try {
         await input?.onRunInboxDaemonWithParsers?.({
           connectors: payload.connectors,
+          continueOnConnectorFailure: payload.continueOnConnectorFailure,
           runtime: payload.runtime,
           signal: payload.signal,
           vaultRoot: payload.vaultRoot,
@@ -1991,6 +1994,52 @@ test.sequential('run writes daemon state and status updates after abort', async 
     })
     assert.equal(stoppedStatus.running, false)
     assert.equal(stoppedStatus.status, 'stopped')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('run enables connector isolation for parser-backed daemon runs', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-run-isolated-connectors')
+  const observedFlags: boolean[] = []
+  const fakeParsers = createFakeParsersRuntimeModule({
+    async onRunInboxDaemonWithParsers(payload) {
+      observedFlags.push(payload.continueOnConnectorFailure === true)
+    },
+  })
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+      }),
+    loadParsersModule: async () => fakeParsers,
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'imessage',
+      id: 'imessage:self',
+      account: 'self',
+      includeOwn: true,
+    })
+
+    const result = await services.run({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    assert.equal(result.reason, 'completed')
+    assert.deepEqual(observedFlags, [true])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })
