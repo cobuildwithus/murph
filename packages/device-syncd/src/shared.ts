@@ -1,10 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import path from "node:path";
-import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@healthybob/runtime-state";
-
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+import { DEVICE_SYNC_DB_RELATIVE_PATH, encodeRandomCrockford, generateUlid } from "@healthybob/runtime-state";
 
 export const DEFAULT_DEVICE_SYNC_HOST = "127.0.0.1";
+export { generateUlid } from "@healthybob/runtime-state";
 
 export function toIsoTimestamp(value: string | number | Date): string {
   const date = value instanceof Date ? value : new Date(value);
@@ -24,43 +23,12 @@ export function subtractDays(timestamp: string, days: number): string {
   return new Date(Date.parse(timestamp) - days * 86_400_000).toISOString();
 }
 
-function encodeCrockford(value: number, length: number): string {
-  let remainder = value;
-  let encoded = "";
-
-  do {
-    encoded = CROCKFORD[remainder % 32] + encoded;
-    remainder = Math.floor(remainder / 32);
-  } while (remainder > 0);
-
-  return encoded.padStart(length, "0").slice(-length);
-}
-
-function encodeRandomPart(length: number): string {
-  const bytes = randomBytes(length);
-  let encoded = "";
-
-  for (const byte of bytes) {
-    encoded += CROCKFORD[byte % 32];
-
-    if (encoded.length >= length) {
-      break;
-    }
-  }
-
-  return encoded.slice(0, length);
-}
-
-export function generateUlid(now = Date.now()): string {
-  return `${encodeCrockford(now, 10)}${encodeRandomPart(16)}`;
-}
-
 export function generatePrefixedId(prefix: string, now = Date.now()): string {
   return `${sanitizeKey(prefix, "rec")}_${generateUlid(now)}`;
 }
 
 export function generateStateCode(length = 24): string {
-  return encodeRandomPart(length);
+  return encodeRandomCrockford(length);
 }
 
 export function sanitizeKey(value: unknown, fallback = "item"): string {

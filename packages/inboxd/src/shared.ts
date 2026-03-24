@@ -1,6 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { generateUlid } from "@healthybob/runtime-state";
 
 import {
   assertPathWithinVaultOnDisk,
@@ -11,8 +12,6 @@ import {
 
 import type { StoredAttachment } from "./contracts/capture.js";
 
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
 export function toIsoTimestamp(value: Date | string | number): string {
   const date = value instanceof Date ? value : new Date(value);
 
@@ -21,36 +20,6 @@ export function toIsoTimestamp(value: Date | string | number): string {
   }
 
   return date.toISOString();
-}
-
-function encodeCrockford(value: number, length: number): string {
-  let remainder = value;
-  let encoded = "";
-
-  do {
-    encoded = CROCKFORD[remainder % 32] + encoded;
-    remainder = Math.floor(remainder / 32);
-  } while (remainder > 0);
-
-  return encoded.padStart(length, "0").slice(-length);
-}
-
-function encodeRandomPart(length: number): string {
-  const bytes = randomBytes(length);
-  let encoded = "";
-
-  for (const byte of bytes) {
-    encoded += CROCKFORD[byte % 32];
-    if (encoded.length === length) {
-      break;
-    }
-  }
-
-  return encoded.slice(0, length);
-}
-
-function generateUlid(now = Date.now()): string {
-  return `${encodeCrockford(now, 10)}${encodeRandomPart(16)}`;
 }
 
 export function generatePrefixedId(prefix: string, now = Date.now()): string {
