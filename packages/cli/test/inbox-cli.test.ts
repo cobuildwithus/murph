@@ -1355,6 +1355,41 @@ test.sequential('source add defaults the Telegram account identity to bot when o
   }
 })
 
+test.sequential('source add defaults the Linq account identity to default when omitted', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-linq-default-account-'))
+  const services = createIntegratedInboxCliServices({
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: vaultRoot,
+      requestId: null,
+    })
+
+    const added = await services.sourceAdd({
+      vault: vaultRoot,
+      requestId: null,
+      source: 'linq',
+      id: 'linq:default',
+      linqWebhookPath: 'custom-linq',
+      linqWebhookPort: 9911,
+    })
+    assert.equal(added.connector.accountId, 'default')
+    assert.equal(added.connector.options.linqWebhookPath, '/custom-linq')
+    assert.equal(added.connector.options.linqWebhookPort, 9911)
+
+    const listed = await services.sourceList({
+      vault: vaultRoot,
+      requestId: null,
+    })
+    assert.equal(listed.connectors[0]?.accountId, 'default')
+    assert.equal(listed.connectors[0]?.options.linqWebhookPath, '/custom-linq')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('sourceSetEnabled updates the persisted enabled flag for an existing connector', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-toggle-source')
   const services = createIntegratedInboxCliServices({
@@ -1685,6 +1720,47 @@ test.sequential('source add rejects connector ids that alias the same source/acc
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('source add rejects Linq connectors that reuse the same webhook listener endpoint', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-linq-endpoint-conflict-'))
+  const services = createIntegratedInboxCliServices({
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: vaultRoot,
+      requestId: null,
+    })
+
+    await services.sourceAdd({
+      vault: vaultRoot,
+      requestId: null,
+      source: 'linq',
+      id: 'linq:default',
+      account: 'default',
+      linqWebhookHost: '127.0.0.1',
+      linqWebhookPath: '/linq-webhook',
+      linqWebhookPort: 8789,
+    })
+
+    await expectVaultCliError(
+      services.sourceAdd({
+        vault: vaultRoot,
+        requestId: null,
+        source: 'linq',
+        id: 'linq:secondary',
+        account: 'secondary',
+        linqWebhookHost: '127.0.0.1',
+        linqWebhookPath: 'linq-webhook',
+        linqWebhookPort: 8789,
+      }),
+      'INBOX_LINQ_WEBHOOK_CONFLICT',
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 

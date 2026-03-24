@@ -8,6 +8,7 @@ import {
   resolveImessageDeliveryCandidates,
   sendEmailMessage,
   sendImessageMessage,
+  sendLinqMessage,
   sendTelegramMessage,
 } from '../src/outbound-channel.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
@@ -213,6 +214,47 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
   )
 })
 
+test('deliverAssistantMessage uses stored Linq thread bindings so one assistant session can reply back into the same chat', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-linq-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sent: Array<{ message: string; target: string }> = []
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'linq',
+      identityId: 'default',
+      participantId: '+15551234567',
+      sourceThreadId: 'chat_123',
+      threadIsDirect: true,
+      message: 'Linq thread reply.',
+    },
+    {
+      sendLinq: async (input: { message: string; target: string }) => {
+        sent.push(input)
+      },
+    },
+  )
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0], {
+    target: 'chat_123',
+    message: 'Linq thread reply.',
+  })
+  assert.equal(result.delivery.channel, 'linq')
+  assert.equal(result.delivery.target, 'chat_123')
+  assert.equal(result.delivery.targetKind, 'thread')
+  assert.equal(result.session.binding.channel, 'linq')
+  assert.equal(result.session.binding.identityId, 'default')
+  assert.equal(result.session.binding.threadId, 'chat_123')
+  assert.equal(result.session.binding.delivery?.kind, 'thread')
+  assert.equal(result.session.binding.delivery?.target, 'chat_123')
+  assert.equal('lastAssistantMessage' in result.session, false)
+  assert.equal(result.session.turnCount, 0)
+})
+
 test('deliverAssistantMessage uses stored email thread bindings so one assistant session can reply back into the same email thread', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-email-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -380,6 +422,67 @@ test('sendEmailMessage resolves a thread and replies to the latest AgentMail mes
   })
 })
 
+test('sendLinqMessage posts Linq chat message payloads to the configured API base url', async () => {
+  const requests: Array<{
+    body: Record<string, unknown>
+    headers: Record<string, string> | undefined
+    method: string
+    url: string
+  }> = []
+
+  await sendLinqMessage(
+    {
+      message: 'Queued the Linq reply.',
+      target: 'chat_123',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (url, init) => {
+        requests.push({
+          body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+          headers: init.headers,
+          method: init.method,
+          url,
+        })
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            chat_id: 'chat_123',
+            message: {
+              id: 'msg_1',
+            },
+          }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 1)
+  assert.equal(
+    requests[0]?.url,
+    'https://linq.example.test/api/partner/v3/chats/chat_123/messages',
+  )
+  assert.equal(requests[0]?.method, 'POST')
+  assert.equal(requests[0]?.headers?.authorization, 'Bearer linq-token')
+  assert.equal(requests[0]?.headers?.['content-type'], 'application/json')
+  assert.deepEqual(requests[0]?.body, {
+    message: {
+      parts: [
+        {
+          type: 'text',
+          value: 'Queued the Linq reply.',
+        },
+      ],
+    },
+  })
+})
+
 test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including topic targets', async () => {
   const requests: Array<{
     body: Record<string, unknown>
@@ -511,6 +614,30 @@ test('sendTelegramMessage splits long replies and retries transient Telegram fai
   assert.equal(
     `${requests[1]?.text as string}${requests[2]?.text as string}`,
     longMessage,
+  )
+})
+
+test('sendLinqMessage requires an API token before attempting delivery', async () => {
+  await assert.rejects(
+    () =>
+      sendLinqMessage(
+        {
+          message: 'Smoke test',
+          target: 'chat_123',
+        },
+        {
+          env: {},
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultCliError, true)
+      assert.equal((error as VaultCliError).code, 'ASSISTANT_LINQ_API_TOKEN_REQUIRED')
+      assert.match(
+        (error as VaultCliError).message,
+        /LINQ_API_TOKEN|HEALTHYBOB_LINQ_API_TOKEN/iu,
+      )
+      return true
+    },
   )
 })
 

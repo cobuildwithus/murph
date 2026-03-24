@@ -17,6 +17,7 @@ export async function instantiateConnector(input: {
   loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
+  linqWebhookSecret?: string | null
   ensureImessageReady?: () => Promise<void>
 }): Promise<PollConnector> {
   const inboxd = await input.loadInbox()
@@ -65,6 +66,17 @@ export async function instantiateConnector(input: {
           normalizeBackfillLimit(input.inputLimit) ??
           input.connector.options.backfillLimit ??
           500,
+      })
+    }
+    case 'linq': {
+      return inboxd.createLinqWebhookConnector({
+        id: input.connector.id,
+        accountId: input.connector.accountId,
+        host: input.connector.options.linqWebhookHost ?? undefined,
+        path: input.connector.options.linqWebhookPath ?? undefined,
+        port: input.connector.options.linqWebhookPort ?? undefined,
+        webhookSecret: input.linqWebhookSecret ?? null,
+        downloadAttachments: true,
       })
     }
   }

@@ -75,6 +75,85 @@ test('instantiateConnector delegates iMessage defaults through the connector fac
   assert.equal(captured.backfillLimit, 7)
 })
 
+test('instantiateConnector delegates Linq webhook options through the connector factory', async () => {
+  let received: {
+    accountId?: string | null
+    downloadAttachments?: boolean
+    host?: string
+    id?: string
+    path?: string
+    port?: number
+    webhookSecret?: string | null
+  } | null = null
+
+  const connector = await instantiateConnector({
+    connector: {
+      id: 'linq:default',
+      source: 'linq',
+      enabled: true,
+      accountId: 'default',
+      options: {
+        linqWebhookHost: '127.0.0.1',
+        linqWebhookPath: '/hooks/linq',
+        linqWebhookPort: 9911,
+      },
+    },
+    linqWebhookSecret: 'secret-123',
+    async loadInbox() {
+      return {
+        createLinqWebhookConnector(options: {
+          accountId?: string | null
+          downloadAttachments?: boolean
+          host?: string
+          id?: string
+          path?: string
+          port?: number
+          webhookSecret?: string | null
+        }) {
+          received = options
+          return {
+            id: options.id ?? 'linq:default',
+            source: 'linq',
+            accountId: options.accountId ?? null,
+            kind: 'poll',
+            capabilities: {
+              attachments: true,
+              backfill: false,
+              ownMessages: true,
+              watch: true,
+              webhooks: true,
+            },
+            async backfill() {
+              return null
+            },
+            async watch() {},
+          }
+        },
+      } as any
+    },
+    async loadImessageDriver() {
+      throw new Error('unreachable')
+    },
+    async loadTelegramDriver() {
+      throw new Error('unreachable')
+    },
+  })
+
+  assert.equal(connector.id, 'linq:default')
+  if (!received) {
+    throw new Error('expected Linq connector options to be captured')
+  }
+  assert.deepEqual(received, {
+    accountId: 'default',
+    downloadAttachments: true,
+    host: '127.0.0.1',
+    id: 'linq:default',
+    path: '/hooks/linq',
+    port: 9911,
+    webhookSecret: 'secret-123',
+  })
+})
+
 test.sequential('normalizeDaemonState rewrites stale daemon state records', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-daemon-'))
 

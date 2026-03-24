@@ -8,6 +8,7 @@ import {
   resolveImessageDeliveryCandidates,
   sendEmailMessage,
   sendImessageMessage,
+  sendLinqMessage,
   sendTelegramMessage,
   type AssistantChannelDependencies,
 } from './assistant/channel-adapters.js'
@@ -32,6 +33,7 @@ export {
   sendEmailMessage,
   resolveImessageDeliveryCandidates,
   sendImessageMessage,
+  sendLinqMessage,
   sendTelegramMessage,
 }
 

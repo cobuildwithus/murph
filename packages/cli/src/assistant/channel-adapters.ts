@@ -22,6 +22,11 @@ import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
 } from '../telegram-runtime.js'
+import {
+  resolveLinqApiToken,
+  sendLinqChatMessage,
+  type LinqFetch,
+} from '../linq-runtime.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
@@ -66,6 +71,11 @@ interface EmailRuntimeDependencies {
   fetchImplementation?: AgentmailFetch
 }
 
+interface LinqRuntimeDependencies {
+  env?: NodeJS.ProcessEnv
+  fetchImplementation?: LinqFetch
+}
+
 export interface AssistantChannelDependencies {
   sendImessage?: (input: { message: string; target: string }) => Promise<void>
   sendTelegram?: (input: {
@@ -77,6 +87,7 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
+  sendLinq?: (input: { message: string; target: string }) => Promise<void>
   sendEmail?: (input: {
     identityId: string
     message: string
@@ -91,7 +102,7 @@ export interface AssistantDeliveryCandidate {
 }
 
 export interface AssistantChannelAdapter {
-  channel: 'imessage' | 'telegram' | 'email'
+  channel: 'imessage' | 'telegram' | 'linq' | 'email'
   canAutoReply: (capture: InboxShowResult['capture']) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef
@@ -117,6 +128,8 @@ export function getAssistantChannelAdapter(
       return IMESSAGE_CHANNEL_ADAPTER
     case 'telegram':
       return TELEGRAM_CHANNEL_ADAPTER
+    case 'linq':
+      return LINQ_CHANNEL_ADAPTER
     case 'email':
       return EMAIL_CHANNEL_ADAPTER
     default:
@@ -221,6 +234,34 @@ export async function sendTelegramMessage(
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<void> {
   await sendTelegramMessageDetailed(input, dependencies)
+}
+
+export async function sendLinqMessage(
+  input: {
+    message: string
+    target: string
+  },
+  dependencies: LinqRuntimeDependencies = {},
+): Promise<void> {
+  const env = dependencies.env ?? process.env
+  const token = resolveLinqApiToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
+      'Outbound Linq delivery requires LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN.',
+    )
+  }
+
+  await sendLinqChatMessage(
+    {
+      chatId: input.target,
+      message: input.message,
+    },
+    {
+      env,
+      fetchImplementation: dependencies.fetchImplementation,
+    },
+  )
 }
 
 async function sendTelegramMessageDetailed(
@@ -441,6 +482,62 @@ const TELEGRAM_CHANNEL_ADAPTER: AssistantChannelAdapter = {
     return assistantChannelDeliverySchema.parse({
       channel: 'telegram',
       target: deliveredTarget,
+      targetKind: candidate.kind,
+      sentAt: new Date().toISOString(),
+      messageLength: input.message.length,
+    })
+  },
+}
+
+const LINQ_CHANNEL_ADAPTER: AssistantChannelAdapter = {
+  channel: 'linq',
+  canAutoReply(capture) {
+    return capture.threadIsDirect === true
+      ? null
+      : 'Linq auto-reply only runs for direct chats'
+  },
+  inferBindingDelivery(input) {
+    const explicitKind = input.deliveryKind ?? null
+    const explicitTarget = input.deliveryTarget?.trim() ? input.deliveryTarget.trim() : null
+    if (explicitKind && explicitTarget) {
+      return assistantBindingDeliverySchema.parse({
+        kind: explicitKind,
+        target: explicitTarget,
+      })
+    }
+
+    if (input.conversation.threadId) {
+      return assistantBindingDeliverySchema.parse({
+        kind: 'thread',
+        target: input.conversation.threadId,
+      })
+    }
+
+    return null
+  },
+  isReadyForSetup(env) {
+    return resolveLinqApiToken(env) !== null
+  },
+  async send(input, dependencies) {
+    const send = dependencies.sendLinq ?? sendLinqMessage
+    const candidates = resolveDeliveryCandidates(input)
+
+    if (candidates.length === 0) {
+      throw new VaultCliError(
+        'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+        'Linq delivery requires an explicit chat id or a stored thread binding.',
+      )
+    }
+
+    const candidate = candidates[0]!
+    await send({
+      target: candidate.target,
+      message: input.message,
+    })
+
+    return assistantChannelDeliverySchema.parse({
+      channel: 'linq',
+      target: candidate.target,
       targetKind: candidate.kind,
       sentAt: new Date().toISOString(),
       messageLength: input.message.length,

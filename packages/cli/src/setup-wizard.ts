@@ -97,6 +97,11 @@ const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
     title: 'Telegram',
   },
   {
+    channel: 'linq',
+    description: 'Linq iMessage/SMS/RCS auto-reply via webhook.',
+    title: 'Linq',
+  },
+  {
     channel: 'email',
     description: 'AgentMail inbox plus email auto-reply.',
     title: 'Email',
@@ -753,6 +758,8 @@ function formatSetupChannel(channel: SetupChannel): string {
       return 'iMessage'
     case 'telegram':
       return 'Telegram'
+    case 'linq':
+      return 'Linq'
     case 'email':
       return 'Email'
   }

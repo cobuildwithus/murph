@@ -82,6 +82,8 @@ export function normalizeConnectorAccountId(
       return normalized ?? 'bot'
     case 'email':
       return normalized
+    case 'linq':
+      return normalized ?? 'default'
   }
 }
 

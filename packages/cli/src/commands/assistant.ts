@@ -97,7 +97,7 @@ const assistantSessionOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe('Optional channel label such as imessage, telegram, or email.'),
+    .describe('Optional channel label such as imessage, telegram, linq, or email.'),
   identity: z
     .string()
     .min(1)
@@ -190,7 +190,7 @@ const assistantDeliveryOptionFields = {
     .min(1)
     .optional()
     .describe(
-      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
+      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
     ),
 }
 
@@ -587,9 +587,9 @@ export function registerAssistantCommands(
         .describe('Outbound message body to deliver over the mapped assistant channel.'),
     }),
     description:
-      'Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, and email all use the same stored assistant channel binding surface.',
+      'Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, Linq, and email all use the same stored assistant channel binding surface.',
     hint:
-      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
+      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
     examples: [
       {
         args: {
@@ -601,6 +601,18 @@ export function registerAssistantCommands(
           participant: '+15551234567',
         },
         description: 'Send a direct iMessage to one participant.',
+      },
+      {
+        args: {
+          message: 'I saw the message and queued your follow-up.',
+        },
+        options: {
+          vault: './vault',
+          channel: 'linq',
+          sourceThread: 'chat_123',
+          deliveryTarget: 'chat_123',
+        },
+        description: 'Send a Linq reply back into the same direct chat.',
       },
       {
         args: {
@@ -645,7 +657,7 @@ export function registerAssistantCommands(
         .min(1)
         .optional()
         .describe(
-          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
+          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
         ),
     }),
     output: assistantDeliverResultSchema,

@@ -313,7 +313,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'assistant run',
       description:
-        'Start the assistant automation loop so configured channels like iMessage, Telegram, or email can receive automatic replies.',
+        'Start the assistant automation loop so configured channels like iMessage, Telegram, Linq, or email can receive automatic replies.',
     })
   }
 
@@ -341,6 +341,15 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       command: 'inbox source add telegram --id telegram:bot --account bot',
       description:
         'Add the Telegram poll connector after setting TELEGRAM_BOT_TOKEN in the shell or local `.env`.',
+    })
+  }
+
+  if (!result.channels.some((channel) => channel.channel === 'linq' && channel.configured)) {
+    commands.push({
+      command:
+        'inbox source add linq --id linq:default --account default --linqWebhookPort 8789 --linqWebhookPath /linq-webhook',
+      description:
+        'Add the Linq webhook connector after setting LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the shell or local `.env`, then point Linq at the local listener address.',
     })
   }
 

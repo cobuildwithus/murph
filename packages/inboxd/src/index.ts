@@ -77,6 +77,32 @@ export type {
   AgentmailThreadLike,
 } from "./connectors/email/types.js";
 export {
+  createLinqWebhookConnector,
+} from "./connectors/linq/connector.js";
+export type {
+  LinqWebhookConnectorOptions,
+} from "./connectors/linq/connector.js";
+export {
+  normalizeLinqWebhookEvent,
+  requireLinqMessageReceivedEvent,
+  toLinqChatMessage,
+} from "./connectors/linq/normalize.js";
+export type {
+  LinqAttachmentDownloadDriver,
+  NormalizeLinqWebhookEventInput,
+} from "./connectors/linq/normalize.js";
+export type {
+  LinqIncomingMessage,
+  LinqListPhoneNumbersResponse,
+  LinqMediaPart,
+  LinqMessagePart,
+  LinqMessageReceivedData,
+  LinqMessageReceivedEvent,
+  LinqSendMessageResponse,
+  LinqTextPart,
+  LinqWebhookEvent,
+} from "./connectors/linq/types.js";
+export {
   createImessageConnector,
   loadImessageKitDriver,
 } from "./connectors/imessage/connector.js";

@@ -26,6 +26,8 @@ const IMESSAGE_SETUP_CONNECTOR_ID = 'imessage:self'
 const IMESSAGE_SETUP_ACCOUNT_ID = 'self'
 const TELEGRAM_SETUP_CONNECTOR_ID = 'telegram:bot'
 const TELEGRAM_SETUP_ACCOUNT_ID = 'bot'
+const LINQ_SETUP_CONNECTOR_ID = 'linq:default'
+const LINQ_SETUP_ACCOUNT_ID = 'default'
 const EMAIL_SETUP_CONNECTOR_ID = 'email:agentmail'
 const EMAIL_SETUP_DISPLAY_NAME = 'Healthy Bob'
 
@@ -68,6 +70,19 @@ export async function configureSetupChannels(input: {
   if (input.channels.includes('telegram')) {
     configured.push(
       await configureTelegramChannel({
+        dryRun: input.dryRun,
+        env: input.env,
+        inboxServices: input.inboxServices,
+        requestId: input.requestId,
+        steps: input.steps,
+        vault: input.vault,
+      }),
+    )
+  }
+
+  if (input.channels.includes('linq')) {
+    configured.push(
+      await configureLinqChannel({
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
@@ -393,6 +408,190 @@ async function configureTelegramChannel(input: {
     detail: readiness.ready
       ? `Configured the Telegram connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
       : `Configured the Telegram connector "${added.connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+    enabled: true,
+    missingEnv: [],
+  }
+}
+
+function describeLinqConnectorEndpoint(input: {
+  options: {
+    linqWebhookHost?: string | null
+    linqWebhookPath?: string | null
+    linqWebhookPort?: number | null
+  }
+}): string {
+  const host = input.options.linqWebhookHost ?? '0.0.0.0'
+  const path = input.options.linqWebhookPath ?? '/linq-webhook'
+  const port = input.options.linqWebhookPort ?? 8789
+  return `${host}:${port}${path}`
+}
+
+async function configureLinqChannel(input: {
+  dryRun: boolean
+  env: NodeJS.ProcessEnv
+  inboxServices: SetupChannelInboxServices
+  requestId: string | null
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<SetupConfiguredChannel> {
+  const linqAdapter = getAssistantChannelAdapter('linq')
+  const readyForSetup = linqAdapter?.isReadyForSetup(input.env) ?? false
+  const doctor = input.inboxServices.doctor
+  const sourceList = input.inboxServices.sourceList
+  const sourceAdd = input.inboxServices.sourceAdd
+  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
+  const missingEnv = resolveSetupChannelMissingEnv('linq', input.env)
+
+  if (input.dryRun) {
+    input.steps.push(
+      createStep({
+        detail: readyForSetup
+          ? 'Would verify the Linq API token, add or reuse the linq:default inbox connector, and enable assistant auto-reply for Linq direct chats.'
+          : 'Would configure Linq once LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN is available in the shell or local `.env`.',
+        id: 'channel-linq',
+        kind: 'configure',
+        status: 'planned',
+        title: 'Linq channel',
+      }),
+    )
+
+    return {
+      autoReply: readyForSetup,
+      channel: 'linq',
+      configured: false,
+      connectorId: LINQ_SETUP_CONNECTOR_ID,
+      detail: readyForSetup
+        ? 'Would configure the Linq webhook connector and enable assistant auto-reply for Linq direct chats.'
+        : `Linq needs LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      enabled: true,
+      missingEnv,
+    }
+  }
+
+  if (!sourceList || !sourceAdd) {
+    throw new VaultCliError(
+      'runtime_unavailable',
+      'Healthy Bob setup cannot configure Linq because the inbox source management services are unavailable in this build.',
+    )
+  }
+
+  const listed = await sourceList({
+    vault: input.vault,
+    requestId: input.requestId,
+  })
+  const existingConnector =
+    listed.connectors.find((connector) => connector.id === LINQ_SETUP_CONNECTOR_ID) ??
+    listed.connectors.find(
+      (connector) => connector.source === 'linq' && connector.accountId === LINQ_SETUP_ACCOUNT_ID,
+    ) ??
+    listed.connectors.find((connector) => connector.source === 'linq') ??
+    null
+
+  if (!readyForSetup) {
+    input.steps.push(
+      createStep({
+        detail: existingConnector
+          ? `Reused the Linq inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN was not available in the shell or local \`.env\`.`
+          : 'Linq was selected, but setup did not add the connector because LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN was not available in the shell or local `.env`.',
+        id: 'channel-linq',
+        kind: 'configure',
+        status: existingConnector ? 'reused' : 'skipped',
+        title: 'Linq channel',
+      }),
+    )
+
+    return {
+      autoReply: false,
+      channel: 'linq',
+      configured: existingConnector !== null,
+      connectorId: existingConnector?.id ?? null,
+      detail: existingConnector
+        ? `Reused the Linq connector "${existingConnector.id}", but skipped assistant auto-reply until a Linq API token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+        : `Linq needs LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      enabled: true,
+      missingEnv,
+    }
+  }
+
+  if (existingConnector) {
+    await ensureSetupConnectorEnabled({
+      connectorId: existingConnector.id,
+      enabled: existingConnector.enabled,
+      requestId: input.requestId,
+      sourceSetEnabled,
+      vault: input.vault,
+    })
+    const readiness = await probeSetupReadiness({
+      connectorId: existingConnector.id,
+      doctor,
+      requestId: input.requestId,
+      vault: input.vault,
+      fallbackReason: 'Linq readiness probe failed',
+    })
+    const endpoint = describeLinqConnectorEndpoint(existingConnector)
+
+    input.steps.push(
+      createStep({
+        detail: readiness.ready
+          ? `Reusing the Linq inbox connector "${existingConnector.id}" at ${endpoint} and enabling assistant auto-reply for Linq direct chats.`
+          : `Reused the Linq inbox connector "${existingConnector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        id: 'channel-linq',
+        kind: 'configure',
+        status: 'reused',
+        title: 'Linq channel',
+      }),
+    )
+
+    return {
+      autoReply: readiness.ready,
+      channel: 'linq',
+      configured: readiness.ready,
+      connectorId: existingConnector.id,
+      detail: readiness.ready
+        ? `Reused the Linq connector "${existingConnector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
+        : `Reused the Linq connector "${existingConnector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      enabled: true,
+      missingEnv: [],
+    }
+  }
+
+  const added = await sourceAdd({
+    account: LINQ_SETUP_ACCOUNT_ID,
+    id: LINQ_SETUP_CONNECTOR_ID,
+    requestId: input.requestId,
+    source: 'linq',
+    vault: input.vault,
+  })
+
+  const readiness = await probeSetupReadiness({
+    connectorId: added.connector.id,
+    doctor,
+    requestId: input.requestId,
+    vault: input.vault,
+    fallbackReason: 'Linq readiness probe failed',
+  })
+  const endpoint = describeLinqConnectorEndpoint(added.connector)
+
+  input.steps.push(
+    createStep({
+      detail: readiness.ready
+        ? `Added the Linq inbox connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
+        : `Added the Linq inbox connector "${added.connector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      id: 'channel-linq',
+      kind: 'configure',
+      status: 'completed',
+      title: 'Linq channel',
+    }),
+  )
+
+  return {
+    autoReply: readiness.ready,
+    channel: 'linq',
+    configured: readiness.ready,
+    connectorId: added.connector.id,
+    detail: readiness.ready
+      ? `Configured the Linq connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
+      : `Configured the Linq connector "${added.connector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
     enabled: true,
     missingEnv: [],
   }
@@ -768,6 +967,13 @@ function resolveSetupChannelForConnector(
     (connector.source === 'telegram' && connector.accountId === TELEGRAM_SETUP_ACCOUNT_ID)
   ) {
     return 'telegram'
+  }
+
+  if (
+    connector.id === LINQ_SETUP_CONNECTOR_ID ||
+    (connector.source === 'linq' && connector.accountId === LINQ_SETUP_ACCOUNT_ID)
+  ) {
+    return 'linq'
   }
 
   if (connector.id === EMAIL_SETUP_CONNECTOR_ID || connector.source === 'email') {

@@ -79,7 +79,8 @@ export function conversationRefFromCapture(input: {
 }): ConversationRef {
   return normalizeConversationRef({
     channel: input.source,
-    identityId: input.source === 'email' ? input.accountId : null,
+    identityId:
+      input.source === 'email' || input.source === 'linq' ? input.accountId : null,
     participantId: input.actorId,
     threadId: input.threadId,
     directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),

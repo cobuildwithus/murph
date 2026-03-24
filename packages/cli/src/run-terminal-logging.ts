@@ -189,6 +189,8 @@ function humanizeSource(source: string): string {
       return 'iMessage'
     case 'telegram':
       return 'Telegram'
+    case 'linq':
+      return 'Linq'
     case 'email':
       return 'email'
     default:

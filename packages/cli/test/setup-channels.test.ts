@@ -153,6 +153,98 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
   }
 })
 
+test('configureSetupChannels adds a Linq connector and persists auto-reply when the doctor probe passes', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linq-'))
+
+  try {
+    const doctorCalls: string[] = []
+    const sourceAddCalls: Array<Record<string, unknown>> = []
+    const configured = await configureSetupChannels({
+      channels: ['linq'],
+      dryRun: false,
+      env: {
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not be called in this test')
+        },
+        async doctor(input) {
+          doctorCalls.push(input.sourceId ?? '')
+          return {
+            vault,
+            checks: [
+              {
+                message: 'linq api reachable',
+                name: 'probe',
+                status: 'pass' as const,
+              },
+            ],
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+            databasePath: '.runtime/inboxd.sqlite',
+            ok: true,
+            parserToolchain: null,
+            target: input.sourceId ?? null,
+          }
+        },
+        async sourceAdd(input) {
+          sourceAddCalls.push(input as unknown as Record<string, unknown>)
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connector: {
+              accountId: 'default',
+              id: 'linq:default',
+              source: 'linq',
+              enabled: true,
+              options: {
+                linqWebhookHost: '0.0.0.0',
+                linqWebhookPath: '/linq-webhook',
+                linqWebhookPort: 8789,
+              },
+            },
+            connectorCount: 1,
+          }
+        },
+        async sourceList() {
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+          }
+        },
+      },
+      requestId: null,
+      steps: [],
+      vault,
+    })
+
+    assert.equal(configured[0]?.channel, 'linq')
+    assert.equal(configured[0]?.configured, true)
+    assert.equal(configured[0]?.autoReply, true)
+    assert.equal(configured[0]?.connectorId, 'linq:default')
+    assert.deepEqual(configured[0]?.missingEnv, [])
+    assert.match(configured[0]?.detail ?? '', /0\.0\.0\.0:8789\/linq-webhook/u)
+    assert.deepEqual(doctorCalls, ['linq:default'])
+    assert.deepEqual(sourceAddCalls, [
+      {
+        account: 'default',
+        id: 'linq:default',
+        requestId: null,
+        source: 'linq',
+        vault,
+      },
+    ])
+
+    const automationState = await readAssistantAutomationState(vault)
+    assert.deepEqual(automationState.autoReplyChannels, ['linq'])
+    assert.deepEqual(automationState.preferredChannels, ['linq'])
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
 test('configureSetupChannels provisions email and persists auto-reply when AgentMail readiness passes', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-'))
 

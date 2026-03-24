@@ -642,7 +642,12 @@ function buildOutboundReplyFormattingGuidance(channel: string | null): string | 
 }
 
 function isAssistantOutboundReplyChannel(channel: string | null): boolean {
-  return channel === 'email' || channel === 'imessage' || channel === 'telegram'
+  return (
+    channel === 'email' ||
+    channel === 'imessage' ||
+    channel === 'linq' ||
+    channel === 'telegram'
+  )
 }
 
 function buildAssistantMemoryGuidanceText(

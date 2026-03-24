@@ -897,8 +897,17 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
     }),
     [],
   )
+  assert.deepEqual(
+    resolveSetupChannelMissingEnv('linq', {
+      LINQ_API_TOKEN: 'linq-token',
+    }),
+    [],
+  )
   assert.deepEqual(resolveSetupChannelMissingEnv('telegram', {}), [
     'TELEGRAM_BOT_TOKEN',
+  ])
+  assert.deepEqual(resolveSetupChannelMissingEnv('linq', {}), [
+    'LINQ_API_TOKEN',
   ])
   assert.deepEqual(
     resolveSetupWearableMissingEnv('oura', {

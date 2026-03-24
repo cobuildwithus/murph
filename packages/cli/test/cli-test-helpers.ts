@@ -49,6 +49,7 @@ export const repoRoot = path.resolve(packageDir, '../..')
 export const binPath = path.join(packageDir, 'dist/bin.js')
 const cliIndexPath = path.join(packageDir, 'dist/index.js')
 const execFileAsync = promisify(execFile)
+const CLI_MAX_OUTPUT_BUFFER_BYTES = 8 * 1024 * 1024
 const requiredRuntimeModulePaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
   path.join(repoRoot, 'packages/runtime-state/dist/index.js'),
@@ -89,17 +90,46 @@ const requiredRuntimeArtifactPaths = [
 ]
 
 const runtimeBuildSteps: Array<{ cwd: string; args: string[] }> = [
-  { cwd: repoRoot, args: ['build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/contracts', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/runtime-state', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/core', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/importers', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/device-syncd', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/query', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/inboxd', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/parsers', 'build'] },
+  { cwd: repoRoot, args: ['--dir', 'packages/cli', 'build'] },
 ]
 
 let cliRuntimeArtifactsPromise: Promise<void> | null = null
 let cliRuntimeArtifactsVerified = false
+const strippedTestRunnerEnvKeys = ['NODE_OPTIONS', 'VITEST'] as const
+const strippedTestRunnerEnvPrefixes = ['VITEST_', 'C8_', 'NYC_'] as const
+
+function withoutVitestRuntimeEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const nextEnv = { ...env }
+
+  for (const key of strippedTestRunnerEnvKeys) {
+    delete nextEnv[key]
+  }
+
+  for (const key of Object.keys(nextEnv)) {
+    if (strippedTestRunnerEnvPrefixes.some((prefix) => key.startsWith(prefix))) {
+      delete nextEnv[key]
+    }
+  }
+
+  return nextEnv
+}
 
 export function withoutNodeV8Coverage(
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const nextEnv = { ...env }
+  const nextEnv = withoutVitestRuntimeEnv(env)
   delete nextEnv.NODE_V8_COVERAGE
+
   return nextEnv
 }
 
@@ -309,10 +339,11 @@ async function execCliProcess(
       {
         cwd: repoRoot,
         encoding: 'utf8',
-        env: withoutNodeV8Coverage({
+        env: withoutVitestRuntimeEnv({
           ...process.env,
           ...options?.env,
         }),
+        maxBuffer: CLI_MAX_OUTPUT_BUFFER_BYTES,
       },
       (error, stdout, stderr) => {
         if (error) {

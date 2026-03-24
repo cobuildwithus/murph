@@ -26,6 +26,11 @@ import {
   resolveTelegramBotToken,
   resolveTelegramFileBaseUrl,
 } from './telegram-runtime.js'
+import {
+  probeLinqApi,
+  resolveLinqApiToken,
+  resolveLinqWebhookSecret,
+} from './linq-runtime.js'
 import { SETUP_RUNTIME_ENV_NOTICE } from './setup-runtime-env.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import type { ImportersFactoryRuntimeModule } from './usecases/types.js'
@@ -452,6 +457,15 @@ export interface InboxRuntimeModule {
     backfillLimit?: number
     pollIntervalMs?: number
   }): PollConnector
+  createLinqWebhookConnector(input: {
+    id?: string
+    accountId?: string | null
+    host?: string
+    path?: string
+    port?: number
+    webhookSecret?: string | null
+    downloadAttachments?: boolean
+  }): PollConnector
   createTelegramBotApiPollDriver(input: {
     token: string
     allowedUpdates?: string[] | null
@@ -664,6 +678,9 @@ interface SourceAddInput extends CommandContext {
   emailUsername?: string | null
   emailDomain?: string | null
   emailClientId?: string | null
+  linqWebhookHost?: string | null
+  linqWebhookPath?: string | null
+  linqWebhookPort?: number
   enableAutoReply?: boolean
 }
 
@@ -830,6 +847,48 @@ function createParserRuntimeUnavailableError(
     `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @healthybob/inboxd and @healthybob/parsers.`,
     details,
   )
+}
+
+function normalizeOptionalLinqWebhookPath(
+  value: string | null | undefined,
+): string | undefined {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return undefined
+  }
+
+  return normalized.startsWith('/') ? normalized : `/${normalized}`
+}
+
+function normalizeOptionalLinqWebhookPort(
+  value: number | undefined,
+): number | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new VaultCliError(
+      'INBOX_LINQ_WEBHOOK_PORT_INVALID',
+      'Linq webhook port must be an integer between 1 and 65535.',
+    )
+  }
+
+  return value
+}
+
+function describeLinqConnectorEndpoint(
+  connector: Pick<InboxConnectorConfig, 'options'>,
+): {
+  host: string
+  path: string
+  port: number
+} {
+  return {
+    host: connector.options.linqWebhookHost ?? '0.0.0.0',
+    path: connector.options.linqWebhookPath ?? '/linq-webhook',
+    port: connector.options.linqWebhookPort ?? 8789,
+  }
 }
 
 function instrumentConnectorForRunEvents(
@@ -1896,6 +1955,74 @@ export function createIntegratedInboxCliServices(
     })
   }
 
+  const runLinqDoctorChecks = async (
+    context: DoctorContext,
+    connector: InboxConnectorConfig,
+  ): Promise<void> => {
+    context.checks.push(
+      passCheck('platform', 'Linq webhook delivery is platform-agnostic.'),
+    )
+
+    const env = getEnvironment()
+    const token = resolveLinqApiToken(env)
+    if (!token) {
+      context.checks.push(
+        failCheck(
+          'token',
+          `Linq API token is missing from LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        ),
+      )
+    } else {
+      context.checks.push(
+        passCheck('token', 'Linq API token was found in the local environment.'),
+      )
+    }
+
+    const webhookSecret = resolveLinqWebhookSecret(env)
+    context.checks.push(
+      webhookSecret
+        ? passCheck(
+            'webhook-secret',
+            'A Linq webhook signing secret was found in the local environment.',
+          )
+        : warnCheck(
+            'webhook-secret',
+            'No Linq webhook signing secret is configured; unsigned webhooks will be accepted until LINQ_WEBHOOK_SECRET or HEALTHYBOB_LINQ_WEBHOOK_SECRET is set.',
+          ),
+    )
+
+    context.checks.push(
+      passCheck(
+        'webhook-listener',
+        'The Linq webhook listener is configured for local watch mode.',
+        describeLinqConnectorEndpoint(connector),
+      ),
+    )
+
+    if (!token) {
+      return
+    }
+
+    await runDoctorCheck(context, {
+      run: () => probeLinqApi({ env }),
+      onSuccess: (probe) =>
+        probe.phoneNumbers.length > 0
+          ? passCheck('probe', 'The Linq API token authenticated successfully.', {
+              phoneNumbers: probe.phoneNumbers,
+            })
+          : warnCheck(
+              'probe',
+              'The Linq API token authenticated, but no phone numbers were returned.',
+            ),
+      onError: (error) =>
+        failCheck(
+          'probe',
+          'The Linq API token could not authenticate with /phonenumbers.',
+          { error: errorMessage(error) },
+        ),
+    })
+  }
+
   const buildDoctorResult = async (
     input: DoctorInput,
   ): Promise<InboxDoctorResult> => {
@@ -1930,6 +2057,10 @@ export function createIntegratedInboxCliServices(
 
     if (target.connector.source === 'email') {
       await runEmailDoctorChecks(context, target.connector)
+    }
+
+    if (target.connector.source === 'linq') {
+      await runLinqDoctorChecks(context, target.connector)
     }
 
     return finalizeDoctorResult(context, target.connector)
@@ -2041,6 +2172,9 @@ export function createIntegratedInboxCliServices(
       let reusedMailbox: InboxProvisionedMailbox | null = null
       let accountId = normalizeConnectorAccountId(input.source, input.account)
       let emailAddress = normalizeNullableString(input.address)
+      const linqWebhookHost = normalizeNullableString(input.linqWebhookHost)
+      const linqWebhookPath = normalizeOptionalLinqWebhookPath(input.linqWebhookPath)
+      const linqWebhookPort = normalizeOptionalLinqWebhookPort(input.linqWebhookPort)
 
       if (input.source === 'email') {
         if (input.provision) {
@@ -2089,6 +2223,33 @@ export function createIntegratedInboxCliServices(
         })
       }
 
+      if (input.source === 'linq') {
+        const nextEndpoint = {
+          host: linqWebhookHost ?? '0.0.0.0',
+          path: linqWebhookPath ?? '/linq-webhook',
+          port: linqWebhookPort ?? 8789,
+        }
+        const conflictingConnector = config.connectors.find((connector) => {
+          if (connector.source !== 'linq') {
+            return false
+          }
+
+          const endpoint = describeLinqConnectorEndpoint(connector)
+          return (
+            endpoint.host === nextEndpoint.host &&
+            endpoint.path === nextEndpoint.path &&
+            endpoint.port === nextEndpoint.port
+          )
+        })
+
+        if (conflictingConnector) {
+          throw new VaultCliError(
+            'INBOX_LINQ_WEBHOOK_CONFLICT',
+            `Linq webhook endpoint ${nextEndpoint.host}:${nextEndpoint.port}${nextEndpoint.path} is already assigned to connector "${conflictingConnector.id}".`,
+          )
+        }
+      }
+
       const connector: InboxConnectorConfig = {
         id: input.id,
         source: input.source,
@@ -2099,6 +2260,9 @@ export function createIntegratedInboxCliServices(
             input.source === 'imessage' ? input.includeOwn ?? undefined : undefined,
           backfillLimit: normalizeBackfillLimit(input.backfillLimit),
           emailAddress: input.source === 'email' ? emailAddress : undefined,
+          linqWebhookHost: input.source === 'linq' ? linqWebhookHost ?? undefined : undefined,
+          linqWebhookPath: input.source === 'linq' ? linqWebhookPath ?? undefined : undefined,
+          linqWebhookPort: input.source === 'linq' ? linqWebhookPort ?? undefined : undefined,
         },
       }
       ensureConnectorNamespaceAvailable(config, connector)
@@ -2276,6 +2440,7 @@ export function createIntegratedInboxCliServices(
           loadImessageDriver: loadConfiguredImessageDriver,
           loadTelegramDriver: loadConfiguredTelegramDriver,
           loadEmailDriver: loadConfiguredEmailDriver,
+          linqWebhookSecret: resolveLinqWebhookSecret(getEnvironment()),
           ensureImessageReady: ensureConfiguredImessageReady,
           loadInbox,
         })
@@ -2376,6 +2541,7 @@ export function createIntegratedInboxCliServices(
             loadImessageDriver: loadConfiguredImessageDriver,
             loadTelegramDriver: loadConfiguredTelegramDriver,
             loadEmailDriver: loadConfiguredEmailDriver,
+            linqWebhookSecret: resolveLinqWebhookSecret(getEnvironment()),
             ensureImessageReady: ensureConfiguredImessageReady,
             loadInbox,
           }),

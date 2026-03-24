@@ -10,6 +10,7 @@ import {
 
 const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
 const EMAIL_API_KEY_KEYS = ['AGENTMAIL_API_KEY'] as const
+const LINQ_TOKEN_KEYS = ['LINQ_API_TOKEN', 'HEALTHYBOB_LINQ_API_TOKEN'] as const
 const WHOOP_CLIENT_ID_KEYS = ['WHOOP_CLIENT_ID'] as const
 const WHOOP_CLIENT_SECRET_KEYS = ['WHOOP_CLIENT_SECRET'] as const
 const WHOOP_CLIENT_KEY_GROUPS = [WHOOP_CLIENT_ID_KEYS, WHOOP_CLIENT_SECRET_KEYS] as const
@@ -92,6 +93,8 @@ export function resolveSetupChannelMissingEnv(
       return hasAnyEnv(env, TELEGRAM_TOKEN_KEYS)
         ? []
         : [TELEGRAM_TOKEN_KEYS[0]]
+    case 'linq':
+      return hasAnyEnv(env, LINQ_TOKEN_KEYS) ? [] : [LINQ_TOKEN_KEYS[0]]
     case 'email':
       return hasAnyEnv(env, EMAIL_API_KEY_KEYS)
         ? []
@@ -137,6 +140,22 @@ export function describeSetupChannelStatus(
             badge: 'needs token',
             detail:
               'Add TELEGRAM_BOT_TOKEN to the current environment to enable Telegram auto-reply.',
+            missingEnv,
+            ready: false,
+          }
+    case 'linq':
+      return missingEnv.length === 0
+        ? {
+            badge: 'ready',
+            detail:
+              'Linq API token is available for inbound webhook verification and outbound chat delivery in the current environment.',
+            missingEnv,
+            ready: true,
+          }
+        : {
+            badge: 'needs token',
+            detail:
+              'Add LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN to the current environment to enable the Linq channel.',
             missingEnv,
             ready: false,
           }

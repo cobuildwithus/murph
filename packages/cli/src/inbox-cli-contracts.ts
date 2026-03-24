@@ -4,7 +4,7 @@ import {
   pathSchema,
 } from './vault-cli-contracts.js'
 
-export const inboxSourceValues = ['imessage', 'telegram', 'email'] as const
+export const inboxSourceValues = ['imessage', 'telegram', 'email', 'linq'] as const
 export const inboxPromotionTargetValues = ['meal', 'document', 'journal', 'experiment-note'] as const
 export const inboxCheckStatusValues = ['pass', 'warn', 'fail'] as const
 
@@ -12,6 +12,9 @@ export const inboxConnectorOptionsSchema = z.object({
   includeOwnMessages: z.boolean().optional(),
   backfillLimit: z.number().int().positive().max(5000).optional(),
   emailAddress: z.string().min(1).nullable().optional(),
+  linqWebhookHost: z.string().min(1).nullable().optional(),
+  linqWebhookPath: z.string().min(1).nullable().optional(),
+  linqWebhookPort: z.number().int().positive().max(65535).nullable().optional(),
 })
 
 export const inboxConnectorConfigSchema = z.object({
