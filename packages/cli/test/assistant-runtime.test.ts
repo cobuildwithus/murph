@@ -1288,7 +1288,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   ])
 })
 
-test('scanAssistantAutoReplyOnce processes email backlog immediately when backlog catch-up is pending', async () => {
+test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one reply', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-email-backlog-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot, { recursive: true })
@@ -1366,7 +1366,7 @@ test('scanAssistantAutoReplyOnce processes email backlog immediately when backlo
       return {
         items: [
           {
-            captureId: 'cap-email-backlog',
+            captureId: 'cap-email-1',
             source: 'email',
             accountId: 'healthybob@agentmail.to',
             externalId: 'email:1',
@@ -1375,22 +1375,63 @@ test('scanAssistantAutoReplyOnce processes email backlog immediately when backlo
             actorId: 'person@example.test',
             actorName: 'Person',
             actorIsSelf: false,
-            occurredAt: '2026-03-18T09:00:00Z',
-            receivedAt: '2026-03-18T09:00:00Z',
-            text: 'hi bob are you there',
+            occurredAt: '2026-03-18T08:58:00Z',
+            receivedAt: '2026-03-18T08:58:00Z',
+            text: 'first email in thread',
             attachmentCount: 0,
             envelopePath: 'raw/inbox/email/1.json',
             eventId: 'evt-email-1',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-email-2',
+            source: 'email',
+            accountId: 'healthybob@agentmail.to',
+            externalId: 'email:2',
+            threadId: 'thread-1',
+            threadTitle: 'Re: whats good',
+            actorId: 'person@example.test',
+            actorName: 'Person',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T08:59:00Z',
+            receivedAt: '2026-03-18T08:59:00Z',
+            text: 'second email in thread',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/email/2.json',
+            eventId: 'evt-email-2',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-email-3',
+            source: 'email',
+            accountId: 'healthybob@agentmail.to',
+            externalId: 'email:3',
+            threadId: 'thread-1',
+            threadTitle: 'Re: whats good',
+            actorId: 'person@example.test',
+            actorName: 'Person',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: '2026-03-18T09:00:00Z',
+            text: 'latest email in thread',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/email/3.json',
+            eventId: 'evt-email-3',
             promotions: [],
           },
         ],
       }
     },
     async show(input: any) {
-      assert.equal(input.captureId, 'cap-email-backlog')
+      const textByCaptureId: Record<string, string> = {
+        'cap-email-1': 'first email in thread',
+        'cap-email-2': 'second email in thread',
+        'cap-email-3': 'latest email in thread',
+      }
+      assert.equal(typeof textByCaptureId[input.captureId], 'string')
       return {
         capture: {
-          captureId: 'cap-email-backlog',
+          captureId: input.captureId,
           source: 'email',
           accountId: 'healthybob@agentmail.to',
           threadTitle: 'Re: whats good',
@@ -1399,8 +1440,13 @@ test('scanAssistantAutoReplyOnce processes email backlog immediately when backlo
           actorId: 'person@example.test',
           actorName: 'Person',
           actorIsSelf: false,
-          occurredAt: '2026-03-18T09:00:00Z',
-          text: 'hi bob are you there',
+          occurredAt:
+            input.captureId === 'cap-email-1'
+              ? '2026-03-18T08:58:00Z'
+              : input.captureId === 'cap-email-2'
+                ? '2026-03-18T08:59:00Z'
+                : '2026-03-18T09:00:00Z',
+          text: textByCaptureId[input.captureId],
           attachments: [],
         },
       }
@@ -1420,16 +1466,24 @@ test('scanAssistantAutoReplyOnce processes email backlog immediately when backlo
   })
 
   assert.deepEqual(result, {
-    considered: 1,
+    considered: 3,
     failed: 0,
     replied: 1,
     skipped: 0,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length > 0, true)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(typeof providerCall?.userPrompt, 'string')
+  assert.match(providerCall.userPrompt, /Grouped captures: 3/)
+  assert.match(providerCall.userPrompt, /Capture 1:/)
+  assert.match(providerCall.userPrompt, /first email in thread/)
+  assert.match(providerCall.userPrompt, /second email in thread/)
+  assert.match(providerCall.userPrompt, /latest email in thread/)
   assert.deepEqual(stateProgress[0], {
     cursor: {
       occurredAt: '2026-03-18T09:00:00Z',
-      captureId: 'cap-email-backlog',
+      captureId: 'cap-email-3',
     },
     primed: true,
   })
