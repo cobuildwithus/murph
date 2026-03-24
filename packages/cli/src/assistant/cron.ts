@@ -2,6 +2,7 @@ import {
   assistantCronJobSchema,
   assistantCronRunRecordSchema,
   type AssistantCronJob,
+  type AssistantCronPreset,
   type AssistantCronRunRecord,
   type AssistantCronSchedule,
   type AssistantCronTrigger,
@@ -12,6 +13,12 @@ import {
   buildAssistantCronSchedule,
   computeAssistantCronNextRunAt,
 } from './cron/schedule.js'
+import {
+  getAssistantCronPresetDefinition,
+  listAssistantCronPresets as listBuiltinAssistantCronPresets,
+  renderAssistantCronPreset,
+  type AssistantCronPresetDefinition,
+} from './cron/presets.js'
 import {
   appendAssistantCronRun,
   assertAssistantCronJobNameIsAvailable,
@@ -81,6 +88,67 @@ export interface ProcessDueAssistantCronJobsInput {
   limit?: number
   signal?: AbortSignal
   vault: string
+}
+
+export interface InstallAssistantCronPresetInput extends AssistantCronTargetInput {
+  additionalInstructions?: string | null
+  enabled?: boolean
+  name?: string | null
+  presetId: string
+  schedule?: AssistantCronSchedule | null
+  variables?: Record<string, string | null | undefined> | null
+  vault: string
+}
+
+export interface InstallAssistantCronPresetResult {
+  job: AssistantCronJob
+  preset: AssistantCronPreset
+  resolvedPrompt: string
+  resolvedVariables: Record<string, string>
+}
+
+export function listAssistantCronPresets(): AssistantCronPreset[] {
+  return listBuiltinAssistantCronPresets()
+}
+
+export function getAssistantCronPreset(
+  presetId: string,
+): AssistantCronPresetDefinition {
+  return getAssistantCronPresetDefinition(presetId)
+}
+
+export async function installAssistantCronPreset(
+  input: InstallAssistantCronPresetInput,
+): Promise<InstallAssistantCronPresetResult> {
+  const rendered = renderAssistantCronPreset({
+    presetId: input.presetId,
+    variables: input.variables,
+    additionalInstructions: input.additionalInstructions,
+  })
+  const resolvedName = normalizeNullableString(input.name) ?? rendered.preset.suggestedName
+  const schedule = input.schedule ?? rendered.preset.suggestedSchedule
+  const job = await addAssistantCronJob({
+    vault: input.vault,
+    name: resolvedName,
+    prompt: rendered.resolvedPrompt,
+    schedule,
+    enabled: input.enabled,
+    sessionId: input.sessionId,
+    alias: input.alias,
+    channel: input.channel,
+    identityId: input.identityId,
+    participantId: input.participantId,
+    sourceThreadId: input.sourceThreadId,
+    deliverResponse: input.deliverResponse,
+    deliveryTarget: input.deliveryTarget,
+  })
+
+  return {
+    preset: rendered.preset,
+    job,
+    resolvedPrompt: rendered.resolvedPrompt,
+    resolvedVariables: rendered.resolvedVariables,
+  }
 }
 
 export async function addAssistantCronJob(

@@ -251,6 +251,30 @@ export const assistantCronRunRecordSchema = z
   })
   .strict()
 
+export const assistantCronPresetVariableSchema = z
+  .object({
+    key: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().min(1),
+    required: z.boolean(),
+    defaultValue: z.string().min(1).nullable(),
+    example: z.string().min(1).nullable(),
+  })
+  .strict()
+
+export const assistantCronPresetSchema = z
+  .object({
+    id: z.string().min(1),
+    category: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().min(1),
+    suggestedName: z.string().min(1),
+    suggestedSchedule: assistantCronScheduleSchema,
+    suggestedScheduleLabel: z.string().min(1),
+    variables: z.array(assistantCronPresetVariableSchema),
+  })
+  .strict()
+
 export const assistantAskResultSchema = z.object({
   vault: pathSchema,
   prompt: z.string().min(1),
@@ -374,6 +398,28 @@ export const assistantCronRunsResultSchema = z.object({
   runs: z.array(assistantCronRunRecordSchema),
 })
 
+export const assistantCronPresetListResultSchema = z.object({
+  vault: pathSchema,
+  presets: z.array(assistantCronPresetSchema),
+})
+
+export const assistantCronPresetShowResultSchema = z.object({
+  vault: pathSchema,
+  preset: assistantCronPresetSchema,
+  promptTemplate: z.string().min(1),
+})
+
+export const assistantCronPresetInstallResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  preset: assistantCronPresetSchema,
+  job: assistantCronJobSchema,
+  resolvedPrompt: z.string().min(1),
+  resolvedVariables: z.record(z.string(), z.string()),
+})
+
 export const assistantRunResultSchema = z.object({
   vault: pathSchema,
   startedAt: isoTimestampSchema,
@@ -467,6 +513,10 @@ export type AssistantCronJob = z.infer<typeof assistantCronJobSchema>
 export type AssistantCronRunRecord = z.infer<
   typeof assistantCronRunRecordSchema
 >
+export type AssistantCronPresetVariable = z.infer<
+  typeof assistantCronPresetVariableSchema
+>
+export type AssistantCronPreset = z.infer<typeof assistantCronPresetSchema>
 export type AssistantCronStatusResult = z.infer<
   typeof assistantCronStatusResultSchema
 >
@@ -483,6 +533,15 @@ export type AssistantCronRemoveResult = z.infer<
 export type AssistantCronRunResult = z.infer<typeof assistantCronRunResultSchema>
 export type AssistantCronRunsResult = z.infer<
   typeof assistantCronRunsResultSchema
+>
+export type AssistantCronPresetListResult = z.infer<
+  typeof assistantCronPresetListResultSchema
+>
+export type AssistantCronPresetShowResult = z.infer<
+  typeof assistantCronPresetShowResultSchema
+>
+export type AssistantCronPresetInstallResult = z.infer<
+  typeof assistantCronPresetInstallResultSchema
 >
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantAutomationCursor = z.infer<

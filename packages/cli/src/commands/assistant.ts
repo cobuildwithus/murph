@@ -6,6 +6,9 @@ import {
   assistantChatResultSchema,
   assistantCronAddResultSchema,
   assistantCronListResultSchema,
+  assistantCronPresetInstallResultSchema,
+  assistantCronPresetListResultSchema,
+  assistantCronPresetShowResultSchema,
   assistantCronRemoveResultSchema,
   assistantCronRunResultSchema,
   assistantCronRunsResultSchema,
@@ -30,8 +33,11 @@ import type { ConversationRef } from '../assistant/conversation-ref.js'
 import {
   addAssistantCronJob,
   buildAssistantCronSchedule,
+  getAssistantCronPreset,
   getAssistantCronJob,
   getAssistantCronStatus,
+  installAssistantCronPreset,
+  listAssistantCronPresets,
   listAssistantCronJobs,
   listAssistantCronRuns,
   removeAssistantCronJob,
@@ -65,11 +71,13 @@ import {
   withBaseOptions,
 } from '../command-helpers.js'
 import type { InboxCliServices } from '../inbox-services.js'
+import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
   formatAssistantRunEventForTerminal,
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
 } from '../run-terminal-logging.js'
+import { VaultCliError } from '../vault-cli-errors.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
 const assistantSessionOptionFields = {
@@ -194,6 +202,44 @@ function buildAssistantCronResultPaths(vault: string) {
     jobsPath: redactAssistantDisplayPath(statePaths.cronJobsPath),
     runsRoot: redactAssistantDisplayPath(statePaths.cronRunsDirectory),
   }
+}
+
+function parseAssistantCronPresetVariables(
+  value: readonly string[] | undefined,
+): Record<string, string> {
+  const entries = normalizeRepeatableFlagOption(value, 'var') ?? []
+  const variables: Record<string, string> = {}
+
+  for (const entry of entries) {
+    const separatorIndex = entry.indexOf('=')
+    if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Preset variables must use key=value form. Repeat --var for multiple values.',
+      )
+    }
+
+    const key = entry.slice(0, separatorIndex).trim()
+    const variableValue = entry.slice(separatorIndex + 1).trim()
+
+    if (key.length === 0 || variableValue.length === 0) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Preset variables must use key=value form with non-empty keys and values.',
+      )
+    }
+
+    if (Object.hasOwn(variables, key)) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Preset variable "${key}" was provided more than once. Repeat --var only for different keys.`,
+      )
+    }
+
+    variables[key] = variableValue
+  }
+
+  return variables
 }
 
 const assistantChatArgsSchema = z.object({
@@ -856,6 +902,165 @@ export function registerAssistantCommands(
     description:
       'Manage scheduled assistant prompts stored outside the canonical vault under assistant-state/cron.',
   })
+
+  const preset = Cli.create('preset', {
+    description:
+      'Browse and materialize built-in assistant cron templates without editing scheduler state files directly.',
+  })
+
+  preset.command('list', {
+    args: emptyArgsSchema,
+    description: 'List the built-in assistant cron presets that can be installed later.',
+    hint:
+      'Presets are templates, not active jobs. Use `assistant cron preset install` to turn one into a real cron job.',
+    options: withBaseOptions(),
+    output: assistantCronPresetListResultSchema,
+    async run(context) {
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        presets: listAssistantCronPresets(),
+      }
+    },
+  })
+
+  preset.command('show', {
+    args: z.object({
+      preset: z.string().min(1).describe('Assistant cron preset id to inspect.'),
+    }),
+    description: 'Show one built-in assistant cron preset, including its prompt template.',
+    options: withBaseOptions(),
+    output: assistantCronPresetShowResultSchema,
+    async run(context) {
+      const presetDefinition = getAssistantCronPreset(context.args.preset)
+      return {
+        vault: redactAssistantDisplayPath(context.options.vault),
+        preset: {
+          id: presetDefinition.id,
+          category: presetDefinition.category,
+          title: presetDefinition.title,
+          description: presetDefinition.description,
+          suggestedName: presetDefinition.suggestedName,
+          suggestedSchedule: presetDefinition.suggestedSchedule,
+          suggestedScheduleLabel: presetDefinition.suggestedScheduleLabel,
+          variables: presetDefinition.variables,
+        },
+        promptTemplate: presetDefinition.promptTemplate,
+      }
+    },
+  })
+
+  preset.command('install', {
+    args: z.object({
+      preset: z.string().min(1).describe('Assistant cron preset id to install.'),
+    }),
+    description: 'Create one assistant cron job from a built-in preset template.',
+    hint:
+      'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule.',
+    examples: [
+      {
+        args: {
+          preset: 'condition-research-roundup',
+        },
+        options: {
+          vault: './vault',
+          name: 'cholesterol-research-roundup',
+          var: ['condition_or_goal=lowering cholesterol'],
+        },
+        description: 'Install the condition research preset with a cholesterol-focused variable override.',
+      },
+      {
+        args: {
+          preset: 'environment-health-watch',
+        },
+        options: {
+          vault: './vault',
+          var: ['location_context=Brisbane, Queensland, Australia'],
+          channel: 'telegram',
+          participant: '123456789',
+          sourceThread: '123456789',
+          deliverResponse: true,
+        },
+        description: 'Install the environment-health preset and deliver the weekly report back into a Telegram chat.',
+      },
+    ],
+    options: withBaseOptions({
+      name: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional cron job name override. Defaults to the preset’s suggested name.'),
+      var: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          'Optional preset variable assignment in key=value form. Repeat --var for multiple values.',
+        ),
+      instructions: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional extra instructions appended to the preset prompt before the job is created.'),
+      at: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional one-shot ISO 8601 timestamp with an explicit offset.'),
+      every: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional recurring interval such as 30m, 2h, or 1d.'),
+      cron: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional five-field cron expression override.'),
+      disabled: z
+        .boolean()
+        .optional()
+        .describe('Create the preset-backed cron job in a disabled state without scheduling it yet.'),
+      ...assistantSessionOptionFields,
+      ...assistantDeliveryOptionFields,
+    }),
+    output: assistantCronPresetInstallResultSchema,
+    async run(context) {
+      const schedule =
+        context.options.at || context.options.every || context.options.cron
+          ? buildAssistantCronSchedule({
+              at: context.options.at,
+              every: context.options.every,
+              cron: context.options.cron,
+            })
+          : undefined
+      const result = await installAssistantCronPreset({
+        vault: context.options.vault,
+        presetId: context.args.preset,
+        name: context.options.name,
+        variables: parseAssistantCronPresetVariables(context.options.var),
+        additionalInstructions: context.options.instructions,
+        schedule,
+        enabled: context.options.disabled ? false : true,
+        sessionId: context.options.session,
+        alias: context.options.alias,
+        channel: context.options.channel,
+        identityId: context.options.identity,
+        participantId: context.options.participant,
+        sourceThreadId: context.options.sourceThread,
+        deliverResponse: context.options.deliverResponse,
+        deliveryTarget: context.options.deliveryTarget,
+      })
+
+      return {
+        ...buildAssistantCronResultPaths(context.options.vault),
+        preset: result.preset,
+        job: result.job,
+        resolvedPrompt: result.resolvedPrompt,
+        resolvedVariables: result.resolvedVariables,
+      }
+    },
+  })
+
+  cron.command(preset)
 
   cron.command('status', {
     args: emptyArgsSchema,

@@ -557,6 +557,12 @@ export async function runSetupWizard(
                 'Set your default assistant, choose message channels, and optionally connect wearables in the same onboarding flow.',
               ),
               createElement(Text, null, ''),
+              createElement(
+                Text,
+                null,
+                'After setup, you can browse built-in cron templates for environment checks, condition research, ingestible watchlists, longevity roundups, and weekly health snapshots with `assistant cron preset list`.',
+              ),
+              createElement(Text, null, ''),
               createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),
               createElement(Text, null, ''),
               createElement(

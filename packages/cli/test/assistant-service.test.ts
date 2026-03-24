@@ -220,6 +220,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     /phrase `text` as the exact stored sentence you want committed/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant cron preset install/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
   assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))

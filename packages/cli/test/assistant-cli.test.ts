@@ -376,6 +376,95 @@ test.sequential(
 )
 
 test.sequential(
+  'assistant cron preset list/show/install expose built-in templates and materialize jobs through the CLI',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const presetList = requireData(
+      await runCli<{
+        presets: Array<{
+          id: string
+          suggestedSchedule: {
+            kind: string
+          }
+        }>
+      }>(['assistant', 'cron', 'preset', 'list', '--vault', vaultRoot]),
+    )
+    assert.ok(
+      presetList.presets.some((preset) => preset.id === 'environment-health-watch'),
+    )
+    assert.ok(
+      presetList.presets.some((preset) => preset.id === 'weekly-health-snapshot'),
+    )
+
+    const presetShown = requireData(
+      await runCli<{
+        preset: {
+          id: string
+          suggestedScheduleLabel: string
+        }
+        promptTemplate: string
+      }>([
+        'assistant',
+        'cron',
+        'preset',
+        'show',
+        'condition-research-roundup',
+        '--vault',
+        vaultRoot,
+      ]),
+    )
+    assert.equal(presetShown.preset.id, 'condition-research-roundup')
+    assert.match(presetShown.promptTemplate, /condition or goal/u)
+
+    const installed = requireData(
+      await runCli<{
+        preset: {
+          id: string
+        }
+        job: {
+          name: string
+          enabled: boolean
+          schedule: {
+            kind: string
+          }
+        }
+        resolvedPrompt: string
+        resolvedVariables: Record<string, string>
+      }>([
+        'assistant',
+        'cron',
+        'preset',
+        'install',
+        'condition-research-roundup',
+        '--vault',
+        vaultRoot,
+        '--name',
+        'cholesterol-research-roundup',
+        '--var',
+        'condition_or_goal=lowering LDL cholesterol',
+        '--instructions',
+        'Flag anything that looks directly actionable.',
+      ]),
+    )
+
+    assert.equal(installed.preset.id, 'condition-research-roundup')
+    assert.equal(installed.job.name, 'cholesterol-research-roundup')
+    assert.equal(installed.job.enabled, true)
+    assert.equal(installed.job.schedule.kind, 'cron')
+    assert.equal(
+      installed.resolvedVariables.condition_or_goal,
+      'lowering LDL cholesterol',
+    )
+    assert.match(installed.resolvedPrompt, /Flag anything that looks directly actionable/u)
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
   'assistant memory search/get/upsert/forget expose typed memory records through the CLI',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-cli-'))

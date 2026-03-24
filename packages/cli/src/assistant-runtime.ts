@@ -1,6 +1,8 @@
 export type {
   AddAssistantCronJobInput,
   AssistantCronProcessDueResult,
+  InstallAssistantCronPresetInput,
+  InstallAssistantCronPresetResult,
   AssistantCronRunExecutionResult,
   AssistantCronStatusSnapshot,
   ProcessDueAssistantCronJobsInput,
@@ -9,8 +11,11 @@ export type {
 export {
   addAssistantCronJob,
   buildAssistantCronSchedule,
+  getAssistantCronPreset,
   getAssistantCronJob,
   getAssistantCronStatus,
+  installAssistantCronPreset,
+  listAssistantCronPresets,
   listAssistantCronJobs,
   listAssistantCronRuns,
   processDueAssistantCronJobs,

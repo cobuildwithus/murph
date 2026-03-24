@@ -22,8 +22,11 @@ vi.mock('../src/assistant/service.js', async () => {
 import {
   addAssistantCronJob,
   buildAssistantCronSchedule,
+  getAssistantCronPreset,
   getAssistantCronJob,
   getAssistantCronStatus,
+  installAssistantCronPreset,
+  listAssistantCronPresets,
   listAssistantCronJobs,
   listAssistantCronRuns,
   processDueAssistantCronJobs,
@@ -48,6 +51,79 @@ afterEach(async () => {
 
 beforeEach(() => {
   cronServiceMocks.sendAssistantMessage.mockReset()
+})
+
+test('assistant cron presets stay separate from scheduler state until installed', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-list-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const presets = listAssistantCronPresets()
+  const conditionPreset = getAssistantCronPreset('condition-research-roundup')
+  const listedJobs = await listAssistantCronJobs(vaultRoot)
+
+  assert.ok(presets.some((preset) => preset.id === 'environment-health-watch'))
+  assert.equal(conditionPreset.id, 'condition-research-roundup')
+  assert.match(conditionPreset.promptTemplate, /condition or goal/u)
+  assert.equal(conditionPreset.suggestedSchedule.kind, 'cron')
+  assert.deepEqual(listedJobs, [])
+})
+
+test('assistant cron preset install rejects unknown preset variables', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-invalid-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  await assert.rejects(
+    () =>
+      installAssistantCronPreset({
+        vault: vaultRoot,
+        presetId: 'condition-research-roundup',
+        variables: {
+          unsupported_key: 'value',
+        },
+      }),
+    /does not define variable "unsupported_key"/u,
+  )
+})
+
+test('assistant cron preset installs materialize regular cron jobs with resolved variables', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const installed = await installAssistantCronPreset({
+    vault: vaultRoot,
+    presetId: 'condition-research-roundup',
+    name: 'cholesterol-research-roundup',
+    variables: {
+      condition_or_goal: 'lowering LDL cholesterol',
+    },
+    additionalInstructions: 'Call out anything that seems immediately actionable.',
+    alias: 'research:cholesterol',
+  })
+
+  assert.equal(installed.preset.id, 'condition-research-roundup')
+  assert.equal(installed.job.name, 'cholesterol-research-roundup')
+  assert.equal(installed.job.schedule.kind, 'cron')
+  assert.equal(installed.job.enabled, true)
+  assert.equal(installed.job.target.alias, 'research:cholesterol')
+  assert.equal(
+    installed.resolvedVariables.condition_or_goal,
+    'lowering LDL cholesterol',
+  )
+  assert.match(installed.resolvedPrompt, /lowering LDL cholesterol/u)
+  assert.match(installed.resolvedPrompt, /Additional user instructions/u)
+
+  const listed = await listAssistantCronJobs(vaultRoot)
+  assert.equal(listed.length, 1)
+  assert.equal(listed[0]?.jobId, installed.job.jobId)
 })
 
 test('assistant cron jobs persist cleanly and can be enabled, disabled, and removed', async () => {

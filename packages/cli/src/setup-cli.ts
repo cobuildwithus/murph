@@ -366,6 +366,12 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     })
   }
 
+  commands.push({
+    command: 'assistant cron preset list',
+    description:
+      'Browse built-in cron templates for environment checks, condition research, ingestible watchlists, longevity roundups, and weekly health snapshots.',
+  })
+
   return commands
 }
 

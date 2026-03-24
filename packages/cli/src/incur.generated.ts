@@ -12,6 +12,9 @@ declare module 'incur' {
       'assistant cron disable': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron enable': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron list': { args: {}; options: { vault: string; requestId: string } }
+      'assistant cron preset install': { args: { preset: string }; options: { vault: string; requestId: string; name: string; var: string[]; instructions: string; at: string; every: string; cron: string; disabled: boolean; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; deliverResponse: boolean; deliveryTarget: string } }
+      'assistant cron preset list': { args: {}; options: { vault: string; requestId: string } }
+      'assistant cron preset show': { args: { preset: string }; options: { vault: string; requestId: string } }
       'assistant cron remove': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron run': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron runs': { args: { job: string }; options: { vault: string; requestId: string; limit: number } }
