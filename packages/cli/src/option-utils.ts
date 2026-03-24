@@ -1,7 +1,7 @@
 import { VaultCliError } from './vault-cli-errors.js'
 
 export function normalizeRepeatedOption(
-  value: string[] | undefined,
+  value: readonly string[] | undefined,
 ): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined
@@ -37,9 +37,35 @@ function rejectCommaDelimitedEntries(
 }
 
 export function normalizeRepeatableFlagOption(
-  value: string[] | undefined,
+  value: readonly string[] | undefined,
   optionName: string,
 ): string[] | undefined {
   rejectCommaDelimitedEntries(value, optionName)
   return normalizeRepeatedOption(value)
+}
+
+export function normalizeRepeatableEnumFlagOption<TValue extends string>(
+  value: readonly string[] | undefined,
+  optionName: string,
+  supportedValues: readonly TValue[],
+): TValue[] | undefined {
+  const entries = normalizeRepeatableFlagOption(value, optionName)
+
+  if (!entries) {
+    return undefined
+  }
+
+  const supportedValueSet = new Set<string>(supportedValues)
+  const invalidValues = entries.filter((entry) => !supportedValueSet.has(entry))
+
+  if (invalidValues.length > 0) {
+    const invalidLabel = invalidValues.length === 1 ? 'value' : 'values'
+    const invalidSummary = invalidValues.map((entry) => `"${entry}"`).join(', ')
+    throw new VaultCliError(
+      'invalid_option',
+      `Unsupported ${invalidLabel} for --${optionName}: ${invalidSummary}. Supported values: ${supportedValues.join(', ')}.`,
+    )
+  }
+
+  return entries as TValue[]
 }

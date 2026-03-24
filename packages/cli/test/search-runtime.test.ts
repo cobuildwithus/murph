@@ -877,6 +877,31 @@ test.sequential('timeline exposes projected health entry types', async () => {
   }
 })
 
+test.sequential('search rejects unsupported record-type values', async () => {
+  const vaultRoot = await makeCanonicalHealthFixture()
+
+  try {
+    const result = await runCli([
+      'search',
+      'query',
+      '--text',
+      'sleep',
+      '--record-type',
+      'not_a_real_record_type',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.ok, false)
+    assert.match(
+      result.error.message ?? '',
+      /unsupported value(?:s)? for --record-type/iu,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('search rejects comma-delimited record-type tokens', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
@@ -896,6 +921,32 @@ test.sequential('search rejects comma-delimited record-type tokens', async () =>
     assert.match(
       result.error.message ?? '',
       /repeat the flag instead|comma-delimited values are not supported/iu,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('timeline rejects unsupported entry-type values', async () => {
+  const vaultRoot = await makeCanonicalHealthFixture()
+
+  try {
+    const result = await runCli([
+      'timeline',
+      '--entry-type',
+      'not_a_real_entry_type',
+      '--from',
+      '2026-03-12',
+      '--to',
+      '2026-03-12',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.ok, false)
+    assert.match(
+      result.error.message ?? '',
+      /unsupported value(?:s)? for --entry-type/iu,
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

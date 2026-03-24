@@ -53,8 +53,10 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'allergy',
   'assistant',
   'audit',
+  'blood-test',
   'chat',
   'condition',
+  'device',
   'document',
   'event',
   'experiment',
@@ -80,6 +82,7 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'timeline',
   'validate',
   'vault',
+  'workout',
 ])
 
 const NON_EXECUTING_BUILTIN_FLAGS = new Set([
@@ -99,6 +102,7 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'assistant memory',
   'assistant session',
   'audit',
+  'blood-test',
   'condition',
   'device',
   'device account',

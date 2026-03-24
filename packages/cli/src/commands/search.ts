@@ -1,3 +1,4 @@
+import { ALL_VAULT_RECORD_TYPES } from '@healthybob/query'
 import { Cli, z } from 'incur'
 import { emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
 import {
@@ -7,28 +8,14 @@ import {
   slugSchema,
 } from '../vault-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-import { normalizeRepeatableFlagOption } from '../option-utils.js'
+import {
+  normalizeRepeatableEnumFlagOption,
+  normalizeRepeatableFlagOption,
+} from '../option-utils.js'
 import { loadQueryRuntime } from '../query-runtime.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
-const recordTypeValues = [
-  'allergy',
-  'assessment',
-  'audit',
-  'condition',
-  'core',
-  'current_profile',
-  'event',
-  'experiment',
-  'family',
-  'genetics',
-  'goal',
-  'history',
-  'journal',
-  'profile_snapshot',
-  'regimen',
-  'sample',
-] as const
+const recordTypeValues = ALL_VAULT_RECORD_TYPES
 
 const timelineEntryTypeValues = [
   'assessment',
@@ -192,7 +179,12 @@ export function registerSearchCommands(
         )
       }
 
-      const recordTypes = parseRecordTypes(options.recordType)
+      const recordTypes =
+        normalizeRepeatableEnumFlagOption(
+          options.recordType,
+          'record-type',
+          recordTypeValues,
+        ) ?? []
       const kinds = normalizeRepeatableFlagOption(options.kind, 'kind') ?? []
       const streams = normalizeRepeatableFlagOption(options.stream, 'stream') ?? []
       const tags = normalizeRepeatableFlagOption(options.tag, 'tag') ?? []
@@ -312,7 +304,12 @@ export function registerSearchCommands(
       async run({ options }) {
         const kinds = normalizeRepeatableFlagOption(options.kind, 'kind') ?? []
         const streams = normalizeRepeatableFlagOption(options.stream, 'stream') ?? []
-        const entryTypes = parseTimelineEntryTypes(options.entryType)
+        const entryTypes =
+          normalizeRepeatableEnumFlagOption(
+            options.entryType,
+            'entry-type',
+            timelineEntryTypeValues,
+          ) ?? []
         const entryTypeSet = entryTypes.length > 0 ? new Set(entryTypes) : null
         const query = await loadQueryRuntime()
         const vault = await query.readVault(options.vault)
@@ -350,29 +347,5 @@ export function registerSearchCommands(
         }
       },
     },
-  )
-}
-
-function parseRecordTypes(
-  value: string[] | undefined,
-): Array<(typeof recordTypeValues)[number]> {
-  const requestedValues = normalizeRepeatableFlagOption(value, 'record-type') ?? []
-  const recordTypeSet = new Set(recordTypeValues)
-
-  return requestedValues.filter(
-    (entry): entry is (typeof recordTypeValues)[number] =>
-      recordTypeSet.has(entry as (typeof recordTypeValues)[number]),
-  )
-}
-
-function parseTimelineEntryTypes(
-  value: string[] | undefined,
-): Array<(typeof timelineEntryTypeValues)[number]> {
-  const requestedValues = normalizeRepeatableFlagOption(value, 'entry-type') ?? []
-  const entryTypeSet = new Set(timelineEntryTypeValues)
-
-  return requestedValues.filter(
-    (entry): entry is (typeof timelineEntryTypeValues)[number] =>
-      entryTypeSet.has(entry as (typeof timelineEntryTypeValues)[number]),
   )
 }

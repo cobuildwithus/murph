@@ -111,7 +111,7 @@ async function actionMain(): Promise<void> {
   }
 
   const defaultVault = await resolveDefaultVault(homeDirectory)
-  cli.serve(applyDefaultVaultToArgs(argv, defaultVault))
+  await cli.serve(applyDefaultVaultToArgs(argv, defaultVault))
 }
 
 function formatErrorMessage(error: unknown): string {

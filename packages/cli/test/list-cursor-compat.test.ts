@@ -445,3 +445,19 @@ test.sequential('generic list rejects comma-delimited repeatable filter tokens',
     /comma-delimited values are not supported.*repeat the flag instead/ui,
   )
 }, CLI_LIST_TIMEOUT_MS)
+
+test.sequential('generic list rejects unsupported record-type values', async () => {
+  const result = await runSourceCli([
+    'list',
+    '--record-type',
+    'not_a_real_record_type',
+    '--vault',
+    path.join(repoRoot, 'fixtures/minimal-vault'),
+  ])
+
+  assert.equal(result.ok, false)
+  assert.match(
+    result.error.message ?? '',
+    /unsupported value(?:s)? for --record-type/ui,
+  )
+}, CLI_LIST_TIMEOUT_MS)

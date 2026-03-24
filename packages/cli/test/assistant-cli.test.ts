@@ -7,6 +7,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
+  TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
   VAULT_ENV,
   applyDefaultVaultToArgs,
   readOperatorConfig,
@@ -23,6 +24,7 @@ import {
   resolveAssistantStatePaths,
 } from '../src/assistant-state.js'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
 import {
@@ -597,6 +599,14 @@ test('root chat alias participates in default-vault injection', () => {
     '/tmp/default-vault',
   ])
   assert.deepEqual(
+    applyDefaultVaultToArgs(['device', 'connect', 'oura'], '/tmp/default-vault'),
+    ['device', 'connect', 'oura', '--vault', '/tmp/default-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['workout', 'add', 'Ran 5k'], '/tmp/default-vault'),
+    ['workout', 'add', 'Ran 5k', '--vault', '/tmp/default-vault'],
+  )
+  assert.deepEqual(
     applyDefaultVaultToArgs(['chat', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
     ['chat', '--vault', '/tmp/explicit-vault'],
   )
@@ -625,10 +635,19 @@ test('default-vault injection skips incomplete command groups', () => {
     applyDefaultVaultToArgs(['assistant', 'session'], '/tmp/default-vault'),
     ['assistant', 'session'],
   )
+  assert.deepEqual(applyDefaultVaultToArgs(['device'], '/tmp/default-vault'), ['device'])
+  assert.deepEqual(applyDefaultVaultToArgs(['workout'], '/tmp/default-vault'), ['workout'])
   assert.deepEqual(applyDefaultVaultToArgs(['goal'], '/tmp/default-vault'), ['goal'])
   assert.deepEqual(
     applyDefaultVaultToArgs(['assistant', 'session', 'list'], '/tmp/default-vault'),
     ['assistant', 'session', 'list', '--vault', '/tmp/default-vault'],
+  )
+})
+
+test('default-vault root coverage stays aligned with manifest-backed root commands', () => {
+  assert.deepEqual(
+    [...TOP_LEVEL_COMMANDS_REQUIRING_VAULT].sort(),
+    [...collectVaultCliDescriptorRootCommandNames()].sort(),
   )
 })
 
@@ -673,6 +692,7 @@ test('root chat prints only a resume hint after a human TTY session exits', asyn
     [
       {
         vault: '/tmp/mock-vault',
+        enableFirstTurnOnboarding: true,
         initialPrompt: undefined,
         sessionId: undefined,
         alias: undefined,
