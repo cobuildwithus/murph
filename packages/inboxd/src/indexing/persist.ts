@@ -86,13 +86,13 @@ export async function persistRawCapture({
     const sanitizedAttachment = stripEphemeralAttachmentFields(attachment);
 
     if (!attachment.originalPath && !attachment.data) {
-      storedAttachments.push({
-        ...sanitizedAttachment,
-        attachmentId,
-        ordinal,
-        storedPath: null,
-        sha256: null,
-      });
+      storedAttachments.push(
+        buildUnstoredAttachment({
+          attachment: sanitizedAttachment,
+          attachmentId,
+          ordinal,
+        }),
+      );
       continue;
     }
 
@@ -121,6 +121,17 @@ export async function persistRawCapture({
       try {
         await copyFile(path.resolve(attachment.originalPath), absolutePath, fsConstants.COPYFILE_EXCL);
       } catch (error) {
+        if (isMissingFileError(error)) {
+          storedAttachments.push(
+            buildUnstoredAttachment({
+              attachment: sanitizedAttachment,
+              attachmentId,
+              ordinal,
+            }),
+          );
+          continue;
+        }
+
         if (!isAlreadyExistsError(error)) {
           throw error;
         }
@@ -619,6 +630,21 @@ function stripEphemeralAttachmentFields(
 ): PersistableInboundAttachment {
   const { data, ...sanitized } = attachment;
   return sanitized;
+}
+
+function buildUnstoredAttachment(input: {
+  attachment: PersistableInboundAttachment;
+  attachmentId: string;
+  ordinal: number;
+}): StoredAttachment {
+  return {
+    ...input.attachment,
+    attachmentId: input.attachmentId,
+    ordinal: input.ordinal,
+    originalPath: null,
+    storedPath: null,
+    sha256: null,
+  };
 }
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {

@@ -232,6 +232,76 @@ test("processCapture repairs a stored envelope when only the audit append was lo
   pipeline.close();
 });
 
+test("processCapture keeps importing a capture when one local attachment file disappears before persistence", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-missing-attachment-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-inbox-missing-attachment-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const keptAttachmentPath = await writeExternalFile(sourceRoot, "kept.jpg", "kept");
+  const missingAttachmentPath = path.join(sourceRoot, "missing.jpg");
+  const inbound = createCapture({
+    externalId: "msg-missing-attachment",
+    occurredAt: "2026-03-13T10:47:00.000Z",
+    attachments: [
+      {
+        externalId: "att-kept",
+        kind: "image",
+        mime: "image/jpeg",
+        originalPath: keptAttachmentPath,
+        fileName: "kept.jpg",
+      },
+      {
+        externalId: "att-missing",
+        kind: "image",
+        mime: "image/jpeg",
+        originalPath: missingAttachmentPath,
+        fileName: "missing.jpg",
+      },
+    ],
+  });
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const persisted = await pipeline.processCapture(inbound);
+  const capture = runtime.getCapture(persisted.captureId);
+
+  assert.ok(capture);
+  assert.equal(capture.attachments.length, 2);
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+
+  const keptAttachment = capture.attachments.find(
+    (attachment) => attachment.externalId === "att-kept",
+  );
+  assert.ok(keptAttachment);
+  assert.match(keptAttachment.storedPath ?? "", /kept\.jpg$/u);
+  assert.notEqual(keptAttachment.sha256, null);
+
+  const missingAttachment = capture.attachments.find(
+    (attachment) => attachment.externalId === "att-missing",
+  );
+  assert.ok(missingAttachment);
+  assert.equal(missingAttachment.storedPath, null);
+  assert.equal(missingAttachment.sha256, null);
+  assert.equal(missingAttachment.originalPath, null);
+
+  const envelope = await findStoredCaptureEnvelope({
+    vaultRoot,
+    inbound,
+    captureId: persisted.captureId,
+  });
+  assert.ok(envelope);
+  const storedMissingAttachment = envelope.stored.attachments.find(
+    (attachment) => attachment.externalId === "att-missing",
+  );
+  assert.ok(storedMissingAttachment);
+  assert.equal(storedMissingAttachment.storedPath, null);
+  assert.equal(storedMissingAttachment.sha256, null);
+  assert.equal(storedMissingAttachment.originalPath, null);
+
+  pipeline.close();
+});
+
 test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent across repeated runs", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-vault");
   const sourceRoot = await makeTempDirectory("healthybob-inbox-rebuild-source");
