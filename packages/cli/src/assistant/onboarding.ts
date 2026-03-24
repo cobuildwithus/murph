@@ -14,6 +14,7 @@ const assistantOnboardingProfileSchema = z
   .object({
     schema: z.literal('healthybob.assistant-onboarding.v1'),
     name: z.string().min(1).nullable(),
+    nameAsked: z.boolean().optional().default(false),
     tone: z.string().min(1).nullable(),
     goals: z.array(z.string().min(1)),
     updatedAt: z.string().min(1).nullable(),
@@ -53,20 +54,23 @@ export async function updateAssistantOnboardingSummary(input: {
   const paths = resolveAssistantStatePaths(input.vault)
   const extracted = extractAssistantOnboardingAnswers(input.prompt)
 
-  if (extracted.name || extracted.tone || extracted.goals.length > 0) {
-    await assistantOnboardingWriteLock.withWriteLock(paths, async () => {
-      const current = await readAssistantOnboardingProfile(paths)
-      const next = mergeAssistantOnboardingProfile(current, extracted)
-      if (JSON.stringify(next) === JSON.stringify(current)) {
-        return
-      }
-
+  return assistantOnboardingWriteLock.withWriteLock(paths, async () => {
+    const current = await readAssistantOnboardingProfile(paths)
+    const summary = await buildAssistantOnboardingSummary({
+      paths,
+      current,
+      extracted,
+    })
+    const next = mergeAssistantOnboardingProfile(current, extracted, {
+      markNameAsked: summary.missingSlots.includes('name'),
+    })
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
       await mkdir(paths.assistantStateRoot, { recursive: true })
       await writeJsonFileAtomic(resolveAssistantOnboardingPath(paths), next)
-    })
-  }
+    }
 
-  return buildAssistantOnboardingSummary(paths)
+    return summary
+  })
 }
 
 function resolveAssistantOnboardingPath(
@@ -94,6 +98,7 @@ function createEmptyAssistantOnboardingProfile() {
   return assistantOnboardingProfileSchema.parse({
     schema: 'healthybob.assistant-onboarding.v1',
     name: null,
+    nameAsked: false,
     tone: null,
     goals: [],
     updatedAt: null,
@@ -107,12 +112,17 @@ function mergeAssistantOnboardingProfile(
     name: string | null
     tone: string | null
   },
+  options?: {
+    markNameAsked?: boolean
+  },
 ) {
   const goals = [...new Set([...current.goals, ...extracted.goals])]
   const name = extracted.name ?? current.name
+  const nameAsked = current.nameAsked || Boolean(options?.markNameAsked) || name !== null
   const tone = extracted.tone ?? current.tone
   const changed =
     name !== current.name ||
+    nameAsked !== current.nameAsked ||
     tone !== current.tone ||
     goals.length !== current.goals.length ||
     goals.some((goal, index) => goal !== current.goals[index])
@@ -120,6 +130,7 @@ function mergeAssistantOnboardingProfile(
   return assistantOnboardingProfileSchema.parse({
     schema: current.schema,
     name,
+    nameAsked,
     tone,
     goals,
     updatedAt: changed ? new Date().toISOString() : current.updatedAt,
@@ -127,25 +138,34 @@ function mergeAssistantOnboardingProfile(
 }
 
 async function buildAssistantOnboardingSummary(
-  paths: AssistantStatePaths,
+  input: {
+    current: z.infer<typeof assistantOnboardingProfileSchema>
+    extracted: {
+      goals: string[]
+      name: string | null
+      tone: string | null
+    }
+    paths: AssistantStatePaths
+  },
 ): Promise<AssistantOnboardingSummary> {
   const [profile, memoryBackfill] = await Promise.all([
-    readAssistantOnboardingProfile(paths),
-    loadAssistantOnboardingMemoryBackfill(paths.absoluteVaultRoot),
+    Promise.resolve(input.current),
+    loadAssistantOnboardingMemoryBackfill(input.paths.absoluteVaultRoot),
   ])
 
   const answered = {
-    name: profile.name ?? memoryBackfill.name,
-    tone: profile.tone ?? memoryBackfill.tone,
-    goals: profile.goals,
+    name: input.extracted.name ?? profile.name ?? memoryBackfill.name,
+    tone: input.extracted.tone ?? profile.tone ?? memoryBackfill.tone,
+    goals: [...new Set([...profile.goals, ...input.extracted.goals])],
   }
+  const shouldAskName = answered.name === null && profile.nameAsked !== true
 
   return {
     answered,
     missingSlots: assistantOnboardingSlotValues.filter((slot) => {
       switch (slot) {
         case 'name':
-          return answered.name === null
+          return shouldAskName
         case 'tone':
           return answered.tone === null
         case 'goals':

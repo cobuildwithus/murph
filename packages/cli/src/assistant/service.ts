@@ -655,6 +655,7 @@ function buildAssistantMemoryGuidanceText(
     'When a Healthy Bob memory tool asks for `vault`, pass the current working directory unless the user explicitly targets a different vault.',
     `Use \`${cliAccess.rawCommand} assistant memory ...\` only as a fallback when the MCP tools are unavailable in this session.`,
     'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
+    'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep answers concise.`',
     'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
     'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
   ].join('\n\n')

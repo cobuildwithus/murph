@@ -531,6 +531,59 @@ test('sendAssistantMessage suppresses onboarding once name, tone, and goals are 
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
 })
 
+test('sendAssistantMessage asks for an optional name only once even when later new sessions still need onboarding', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-name-once-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-name-1',
+      response: 'First reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-onboarding-name-2',
+      response: 'Second reply.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:onboarding-name-once-one',
+    enableFirstTurnOnboarding: true,
+    prompt: 'first question',
+  })
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:onboarding-name-once-two',
+    enableFirstTurnOnboarding: true,
+    prompt: 'second question',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+
+  assert.match(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
+  assert.doesNotMatch(
+    secondCall?.systemPrompt ?? '',
+    /whether they want to give you a name/u,
+  )
+  assert.match(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.match(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
+})
+
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-provider-switch-'))
   const vaultRoot = path.join(parent, 'vault')
