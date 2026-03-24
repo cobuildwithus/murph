@@ -329,6 +329,7 @@ export async function readAutomationState(
     inboxScanCursor: null,
     autoReplyScanCursor: null,
     autoReplyChannels: [],
+    preferredChannels: [],
     autoReplyPrimed: true,
     updatedAt: new Date().toISOString(),
   })

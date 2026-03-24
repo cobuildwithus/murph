@@ -30,7 +30,9 @@ const EMAIL_SETUP_CONNECTOR_ID = 'email:agentmail'
 const EMAIL_SETUP_DISPLAY_NAME = 'Healthy Bob'
 
 type SetupChannelInboxServices = Pick<InboxCliServices, 'bootstrap'> &
-  Partial<Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList'>>
+  Partial<
+    Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
+  >
 
 export function normalizeSetupChannels(
   value: readonly SetupChannel[] | null | undefined,
@@ -92,10 +94,17 @@ export async function configureSetupChannels(input: {
   }
 
   if (!input.dryRun) {
-    await updateAssistantAutoReplyChannels({
-      channels: configured
+    await reconcileDeselectedSetupChannels({
+      channels: input.channels,
+      inboxServices: input.inboxServices,
+      requestId: input.requestId,
+      vault: input.vault,
+    })
+    await updateAssistantChannelState({
+      autoReplyChannels: configured
         .filter((channel) => channel.autoReply)
         .map((channel) => channel.channel),
+      preferredChannels: input.channels,
       vault: input.vault,
     })
   }
@@ -136,6 +145,7 @@ async function configureIMessageChannel(input: {
 
   const sourceList = input.inboxServices.sourceList
   const sourceAdd = input.inboxServices.sourceAdd
+  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
   if (!sourceList || !sourceAdd) {
     throw new VaultCliError(
       'runtime_unavailable',
@@ -156,6 +166,13 @@ async function configureIMessageChannel(input: {
     null
 
   if (existingConnector) {
+    await ensureSetupConnectorEnabled({
+      connectorId: existingConnector.id,
+      enabled: existingConnector.enabled,
+      requestId: input.requestId,
+      sourceSetEnabled,
+      vault: input.vault,
+    })
     input.steps.push(
       createStep({
         detail:
@@ -225,6 +242,7 @@ async function configureTelegramChannel(input: {
   const doctor = input.inboxServices.doctor
   const sourceList = input.inboxServices.sourceList
   const sourceAdd = input.inboxServices.sourceAdd
+  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
   const missingEnv = resolveSetupChannelMissingEnv('telegram', input.env)
 
   if (input.dryRun) {
@@ -299,6 +317,13 @@ async function configureTelegramChannel(input: {
   }
 
   if (existingConnector) {
+    await ensureSetupConnectorEnabled({
+      connectorId: existingConnector.id,
+      enabled: existingConnector.enabled,
+      requestId: input.requestId,
+      sourceSetEnabled,
+      vault: input.vault,
+    })
     const readiness = await probeSetupReadiness({
       connectorId: existingConnector.id,
       doctor,
@@ -387,6 +412,7 @@ async function configureEmailChannel(input: {
   const doctor = input.inboxServices.doctor
   const sourceList = input.inboxServices.sourceList
   const sourceAdd = input.inboxServices.sourceAdd
+  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
   const missingEnv = resolveSetupChannelMissingEnv('email', input.env)
 
   if (input.dryRun) {
@@ -458,10 +484,18 @@ async function configureEmailChannel(input: {
   }
 
   if (existingConnector) {
+    await ensureSetupConnectorEnabled({
+      connectorId: existingConnector.id,
+      enabled: existingConnector.enabled,
+      requestId: input.requestId,
+      sourceSetEnabled,
+      vault: input.vault,
+    })
     const readiness = await probeSetupReadiness({
       connectorId: existingConnector.id,
       doctor,
       requestId: input.requestId,
+      treatProbeWarnAsReady: true,
       vault: input.vault,
       fallbackReason: 'Email readiness probe failed',
     })
@@ -514,6 +548,7 @@ async function configureEmailChannel(input: {
     connectorId: added.connector.id,
     doctor,
     requestId: input.requestId,
+    treatProbeWarnAsReady: true,
     vault: input.vault,
     fallbackReason: 'Email readiness probe failed',
   })
@@ -557,6 +592,7 @@ async function probeSetupReadiness(input: {
   connectorId: string
   doctor?: InboxCliServices['doctor']
   requestId: string | null
+  treatProbeWarnAsReady?: boolean
   vault: string
   fallbackReason: string
 }): Promise<{
@@ -578,9 +614,11 @@ async function probeSetupReadiness(input: {
   const probeCheck = result.checks.find((check) => check.name === 'probe') ?? null
   const driverImportCheck =
     result.checks.find((check) => check.name === 'driver-import') ?? null
-  const ready =
-    probeCheck?.status === 'pass' &&
-    (driverImportCheck === null || driverImportCheck.status === 'pass')
+  const ready = Boolean(
+    (probeCheck?.status === 'pass' ||
+      (input.treatProbeWarnAsReady === true && probeCheck?.status === 'warn')) &&
+      (driverImportCheck === null || driverImportCheck.status === 'pass'),
+  )
 
   return {
     ready,
@@ -606,23 +644,122 @@ function describeConfiguredEmailAction(input: {
   return 'Provisioned'
 }
 
-async function updateAssistantAutoReplyChannels(input: {
-  channels: readonly SetupChannel[]
+async function updateAssistantChannelState(input: {
+  autoReplyChannels: readonly SetupChannel[]
+  preferredChannels: readonly SetupChannel[]
   vault: string
 }): Promise<void> {
   const state = await readAssistantAutomationState(input.vault)
-  const channels = normalizeSetupChannels(input.channels)
-  const changed =
-    channels.length !== state.autoReplyChannels.length ||
-    channels.some((channel, index) => state.autoReplyChannels[index] !== channel)
+  const autoReplyChannels = normalizeSetupChannels(input.autoReplyChannels)
+  const preferredChannels = normalizeSetupChannels(input.preferredChannels)
+  const autoReplyChanged =
+    autoReplyChannels.length !== state.autoReplyChannels.length ||
+    autoReplyChannels.some((channel, index) => state.autoReplyChannels[index] !== channel)
+  const preferredChanged =
+    preferredChannels.length !== state.preferredChannels.length ||
+    preferredChannels.some((channel, index) => state.preferredChannels[index] !== channel)
+
+  if (!autoReplyChanged && !preferredChanged) {
+    return
+  }
 
   await saveAssistantAutomationState(input.vault, {
     version: 2,
     inboxScanCursor: state.inboxScanCursor,
     autoReplyScanCursor:
-      channels.length === 0 ? null : changed ? null : state.autoReplyScanCursor,
-    autoReplyChannels: channels,
-    autoReplyPrimed: channels.length === 0 ? true : changed ? false : state.autoReplyPrimed,
+      autoReplyChannels.length === 0
+        ? null
+        : autoReplyChanged
+          ? null
+          : state.autoReplyScanCursor,
+    autoReplyChannels,
+    preferredChannels,
+    autoReplyPrimed:
+      autoReplyChannels.length === 0
+        ? true
+        : autoReplyChanged
+          ? false
+          : state.autoReplyPrimed,
     updatedAt: new Date().toISOString(),
   })
+}
+
+async function reconcileDeselectedSetupChannels(input: {
+  channels: readonly SetupChannel[]
+  inboxServices: SetupChannelInboxServices
+  requestId: string | null
+  vault: string
+}): Promise<void> {
+  const sourceList = input.inboxServices.sourceList
+  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
+  if (!sourceList || !sourceSetEnabled) {
+    return
+  }
+
+  const selectedChannels = new Set(normalizeSetupChannels(input.channels))
+  const listed = await sourceList({
+    vault: input.vault,
+    requestId: input.requestId,
+  })
+
+  for (const connector of listed.connectors) {
+    if (!connector.enabled) {
+      continue
+    }
+
+    const setupChannel = resolveSetupChannelForConnector(connector)
+    if (!setupChannel || selectedChannels.has(setupChannel)) {
+      continue
+    }
+
+    await sourceSetEnabled({
+      connectorId: connector.id,
+      enabled: false,
+      requestId: input.requestId,
+      vault: input.vault,
+    })
+  }
+}
+
+async function ensureSetupConnectorEnabled(input: {
+  connectorId: string
+  enabled: boolean
+  requestId: string | null
+  sourceSetEnabled?: InboxCliServices['sourceSetEnabled']
+  vault: string
+}): Promise<void> {
+  if (input.enabled || !input.sourceSetEnabled) {
+    return
+  }
+
+  await input.sourceSetEnabled({
+    connectorId: input.connectorId,
+    enabled: true,
+    requestId: input.requestId,
+    vault: input.vault,
+  })
+}
+
+function resolveSetupChannelForConnector(
+  connector: Awaited<ReturnType<NonNullable<SetupChannelInboxServices['sourceList']>>>['connectors'][number],
+): SetupChannel | null {
+  if (
+    connector.id === IMESSAGE_SETUP_CONNECTOR_ID ||
+    (connector.source === 'imessage' && connector.accountId === IMESSAGE_SETUP_ACCOUNT_ID)
+  ) {
+    return 'imessage'
+  }
+
+  if (
+    connector.id === TELEGRAM_SETUP_CONNECTOR_ID ||
+    (connector.source === 'telegram' && connector.accountId === TELEGRAM_SETUP_ACCOUNT_ID)
+  ) {
+    return 'telegram'
+  }
+
+  if (connector.id === EMAIL_SETUP_CONNECTOR_ID || connector.source === 'email') {
+    return 'email'
+  }
+
+  return null
 }

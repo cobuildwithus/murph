@@ -1352,6 +1352,46 @@ test.sequential('source add defaults the Telegram account identity to bot when o
   }
 })
 
+test.sequential('sourceSetEnabled updates the persisted enabled flag for an existing connector', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-toggle-source')
+  const services = createIntegratedInboxCliServices({
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'imessage',
+      id: 'imessage:self',
+      account: 'self',
+      includeOwn: true,
+    })
+
+    const disabled = await services.sourceSetEnabled({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      connectorId: 'imessage:self',
+      enabled: false,
+    })
+    assert.equal(disabled.connector.enabled, false)
+
+    const listed = await services.sourceList({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    assert.equal(listed.connectors[0]?.enabled, false)
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('source add email --provision reuses the single discovered AgentMail inbox after create is forbidden', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-single')
   const services = createIntegratedInboxCliServices({

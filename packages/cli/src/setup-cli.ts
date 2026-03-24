@@ -276,9 +276,13 @@ export async function resolveInitialSetupWizardChannels(
   try {
     const raw = await readFile(automationPath, 'utf8')
     const state = assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
-    const savedChannels = setupChannelValues.filter((channel) =>
-      state.autoReplyChannels.includes(channel),
+    const preferredChannels = setupChannelValues.filter((channel) =>
+      state.preferredChannels.includes(channel),
     )
+    const savedChannels =
+      preferredChannels.length > 0
+        ? preferredChannels
+        : setupChannelValues.filter((channel) => state.autoReplyChannels.includes(channel))
     return savedChannels.length > 0
       ? savedChannels
       : getDefaultSetupWizardChannels()

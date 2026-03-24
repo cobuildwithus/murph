@@ -240,7 +240,7 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
   }
 })
 
-test('configureSetupChannels keeps email configured but disables auto-reply when AgentMail readiness fails', async () => {
+test('configureSetupChannels keeps email selected in onboarding preferences even when AgentMail readiness fails', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-fail-'))
 
   try {
@@ -322,6 +322,211 @@ test('configureSetupChannels keeps email configured but disables auto-reply when
 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, [])
+    assert.deepEqual(automationState.preferredChannels, ['email'])
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test('configureSetupChannels treats an empty but reachable AgentMail inbox as configured and auto-reply ready', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-warn-'))
+
+  try {
+    const configured = await configureSetupChannels({
+      channels: ['email'],
+      dryRun: false,
+      env: {
+        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not be called in this test')
+        },
+        async doctor() {
+          return {
+            vault,
+            checks: [
+              {
+                message: 'driver initialized',
+                name: 'driver-import',
+                status: 'pass' as const,
+              },
+              {
+                message: 'The AgentMail inbox responded but returned no unread messages.',
+                name: 'probe',
+                status: 'warn' as const,
+              },
+            ],
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+            databasePath: '.runtime/inboxd.sqlite',
+            ok: true,
+            parserToolchain: null,
+            target: 'email:agentmail',
+          }
+        },
+        async sourceAdd() {
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connector: {
+              accountId: 'inbox_123',
+              id: 'email:agentmail',
+              source: 'email',
+              enabled: true,
+              options: {
+                emailAddress: 'healthybob@example.test',
+              },
+            },
+            connectorCount: 1,
+            provisionedMailbox: {
+              inboxId: 'inbox_123',
+              emailAddress: 'healthybob@example.test',
+              displayName: 'Healthy Bob',
+              clientId: null,
+              provider: 'agentmail' as const,
+            },
+          }
+        },
+        async sourceList() {
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+          }
+        },
+      },
+      requestId: null,
+      steps: [],
+      vault,
+    })
+
+    assert.equal(configured[0]?.channel, 'email')
+    assert.equal(configured[0]?.configured, true)
+    assert.equal(configured[0]?.autoReply, true)
+
+    const automationState = await readAssistantAutomationState(vault)
+    assert.deepEqual(automationState.autoReplyChannels, ['email'])
+    assert.deepEqual(automationState.preferredChannels, ['email'])
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test('configureSetupChannels disables stale setup connectors that were not selected in onboarding', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-channel-reconcile-'))
+
+  try {
+    const sourceSetEnabledCalls: Array<{
+      connectorId: string
+      enabled: boolean
+    }> = []
+
+    const configured = await configureSetupChannels({
+      channels: ['email'],
+      dryRun: false,
+      env: {
+        HEALTHYBOB_AGENTMAIL_API_KEY: 'am_test_123',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not be called in this test')
+        },
+        async doctor() {
+          return {
+            vault,
+            checks: [
+              {
+                message: 'driver initialized',
+                name: 'driver-import',
+                status: 'pass' as const,
+              },
+              {
+                message: 'The AgentMail inbox responded but returned no unread messages.',
+                name: 'probe',
+                status: 'warn' as const,
+              },
+            ],
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+            databasePath: '.runtime/inboxd.sqlite',
+            ok: true,
+            parserToolchain: null,
+            target: 'email:agentmail',
+          }
+        },
+        async sourceList() {
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [
+              {
+                accountId: 'healthybob@agentmail.to',
+                enabled: true,
+                id: 'email:agentmail',
+                options: {
+                  emailAddress: 'healthybob@agentmail.to',
+                },
+                source: 'email' as const,
+              },
+              {
+                accountId: 'self',
+                enabled: true,
+                id: 'imessage:self',
+                options: {
+                  includeOwnMessages: true,
+                },
+                source: 'imessage' as const,
+              },
+            ],
+          }
+        },
+        async sourceAdd() {
+          throw new Error('sourceAdd should not be called when an email connector already exists')
+        },
+        async sourceSetEnabled(input) {
+          sourceSetEnabledCalls.push({
+            connectorId: input.connectorId,
+            enabled: input.enabled,
+          })
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connector: {
+              accountId: input.connectorId === 'email:agentmail' ? 'healthybob@agentmail.to' : 'self',
+              enabled: input.enabled,
+              id: input.connectorId,
+              options:
+                input.connectorId === 'email:agentmail'
+                  ? {
+                      emailAddress: 'healthybob@agentmail.to',
+                    }
+                  : {
+                      includeOwnMessages: true,
+                    },
+              source: input.connectorId === 'email:agentmail' ? 'email' : 'imessage',
+            },
+            connectorCount: 2,
+          }
+        },
+      },
+      requestId: null,
+      steps: [],
+      vault,
+    })
+
+    assert.equal(configured[0]?.channel, 'email')
+    assert.equal(configured[0]?.configured, true)
+    assert.deepEqual(sourceSetEnabledCalls, [
+      {
+        connectorId: 'imessage:self',
+        enabled: false,
+      },
+    ])
+
+    const automationState = await readAssistantAutomationState(vault)
+    assert.deepEqual(automationState.autoReplyChannels, ['email'])
+    assert.deepEqual(automationState.preferredChannels, ['email'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }

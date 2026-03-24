@@ -404,6 +404,7 @@ export const assistantAutomationStateSchema = z
     inboxScanCursor: assistantAutomationCursorSchema.nullable(),
     autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
     autoReplyChannels: z.array(z.string().min(1)),
+    preferredChannels: z.array(z.string().min(1)).default([]),
     autoReplyPrimed: z.boolean(),
     updatedAt: isoTimestampSchema,
   })

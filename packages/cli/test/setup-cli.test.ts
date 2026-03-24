@@ -831,14 +831,15 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   }
 })
 
-test('resolveInitialSetupWizardChannels reuses saved email auto-reply channels', async () => {
+test('resolveInitialSetupWizardChannels reuses saved preferred email channels even when auto-reply is disabled', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
   const initialState = await readAssistantAutomationState(vaultRoot)
 
   await saveAssistantAutomationState(vaultRoot, {
     ...initialState,
-    autoReplyChannels: ['email'],
-    autoReplyPrimed: false,
+    autoReplyChannels: [],
+    preferredChannels: ['email'],
+    autoReplyPrimed: true,
     updatedAt: '2026-03-24T00:00:00.000Z',
   })
 

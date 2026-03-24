@@ -691,6 +691,18 @@ interface SourceRemoveInput extends CommandContext {
   connectorId: string
 }
 
+interface SourceSetEnabledInput extends CommandContext {
+  connectorId: string
+  enabled: boolean
+}
+
+interface InboxSourceSetEnabledResult {
+  vault: string
+  configPath: string
+  connector: InboxConnectorConfig
+  connectorCount: number
+}
+
 interface DoctorInput extends CommandContext {
   sourceId?: string | null
 }
@@ -773,6 +785,7 @@ export interface InboxCliServices {
   sourceAdd(input: SourceAddInput): Promise<InboxSourceAddResult>
   sourceList(input: CommandContext): Promise<InboxSourceListResult>
   sourceRemove(input: SourceRemoveInput): Promise<InboxSourceRemoveResult>
+  sourceSetEnabled(input: SourceSetEnabledInput): Promise<InboxSourceSetEnabledResult>
   doctor(input: DoctorInput): Promise<InboxDoctorResult>
   setup(input: SetupInput): Promise<InboxSetupResult>
   parse(input: ParseInput): Promise<InboxParseResult>
@@ -1075,9 +1088,12 @@ export function createIntegratedInboxCliServices(
   ): Promise<boolean> => {
     const state = await readAssistantAutomationState(vault)
     const channels = [...new Set([...state.autoReplyChannels, channel])]
+    const preferredChannels = [...new Set([...state.preferredChannels, channel])]
     const changed =
       channels.length !== state.autoReplyChannels.length ||
-      channels.some((value, index) => state.autoReplyChannels[index] !== value)
+      channels.some((value, index) => state.autoReplyChannels[index] !== value) ||
+      preferredChannels.length !== state.preferredChannels.length ||
+      preferredChannels.some((value, index) => state.preferredChannels[index] !== value)
 
     if (!changed) {
       return false
@@ -1088,6 +1104,7 @@ export function createIntegratedInboxCliServices(
       inboxScanCursor: state.inboxScanCursor,
       autoReplyScanCursor: null,
       autoReplyChannels: channels,
+      preferredChannels,
       autoReplyPrimed: false,
       updatedAt: new Date().toISOString(),
     })
@@ -2102,6 +2119,31 @@ export function createIntegratedInboxCliServices(
         configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
         removed: true,
         connectorId: input.connectorId,
+        connectorCount: config.connectors.length,
+      }
+    },
+
+    async sourceSetEnabled(input) {
+      const paths = await ensureInitialized(loadInbox, input.vault)
+      const config = await readConfig(paths)
+      const connector = config.connectors.find(
+        (candidate) => candidate.id === input.connectorId,
+      )
+
+      if (!connector) {
+        throw new VaultCliError(
+          'INBOX_SOURCE_NOT_FOUND',
+          `Inbox source "${input.connectorId}" is not configured.`,
+        )
+      }
+
+      connector.enabled = input.enabled
+      await writeConfig(paths, config)
+
+      return {
+        vault: paths.absoluteVaultRoot,
+        configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
+        connector,
         connectorCount: config.connectors.length,
       }
     },
