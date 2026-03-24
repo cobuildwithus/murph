@@ -5,7 +5,6 @@ import path from 'node:path'
 import { test } from 'vitest'
 import {
   compactObject,
-  generateContractId,
   inferVaultLinkKind,
   isVaultQueryableRecordId,
   normalizeIsoTimestamp,
@@ -80,9 +79,4 @@ test('path resolution preserves current invalid_path errors and rejects symlink 
     await rm(vaultRoot, { recursive: true, force: true })
     await rm(outsideRoot, { recursive: true, force: true })
   }
-})
-
-test('contract ids keep the local ULID-style format', () => {
-  assert.match(generateContractId('evt'), /^evt_[0-9A-HJKMNP-TV-Z]{26}$/u)
-  assert.match(generateContractId('exp'), /^exp_[0-9A-HJKMNP-TV-Z]{26}$/u)
 })

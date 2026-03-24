@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import {
   isVaultError,
   resolveVaultPathOnDisk,
@@ -11,8 +10,6 @@ import {
 
 const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
-const CROCKFORD_BASE32_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-
 export function inferVaultLinkKind(
   id: string,
   options: {
@@ -90,10 +87,6 @@ export async function resolveVaultRelativePath(
   }
 }
 
-export function generateContractId(prefix: string) {
-  return `${prefix}_${generateUlid()}`
-}
-
 interface VaultErrorMapping {
   code: string
   message?: string
@@ -123,28 +116,6 @@ export function toVaultCliError(
       ...mappedDetails,
     },
   )
-}
-
-function generateUlid() {
-  return `${encodeTime(Date.now(), 10)}${encodeRandom(16)}`
-}
-
-function encodeTime(value: number, length: number) {
-  let remaining = value
-  let output = ''
-
-  for (let index = 0; index < length; index += 1) {
-    output = CROCKFORD_BASE32_ALPHABET[remaining % 32] + output
-    remaining = Math.floor(remaining / 32)
-  }
-
-  return output
-}
-
-function encodeRandom(length: number) {
-  return Array.from(randomBytes(length), (byte) =>
-    CROCKFORD_BASE32_ALPHABET[byte % 32],
-  ).join('')
 }
 
 function toVaultRelativePathError(relativePath: string, error: unknown) {

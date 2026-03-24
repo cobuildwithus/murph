@@ -76,7 +76,6 @@ import {
 } from './memory/storage-format.js'
 import {
   buildDailyMemoryMapKey,
-  buildLongTermMemoryMapKey,
   deriveLongTermReplaceKey,
   formatLocalDate,
   formatLocalTime,
@@ -613,18 +612,6 @@ async function resolveUpsertedAssistantMemoryRecords(input: {
   }
 
   return records
-}
-
-function setLongTermMemoryEntry(
-  target: Map<string, AssistantLongTermMemoryEntry>,
-  entry: AssistantLongTermMemoryEntry,
-): void {
-  const key = buildLongTermMemoryMapKey(entry.section, entry.text)
-  if (!key) {
-    return
-  }
-
-  target.set(key, entry)
 }
 
 async function mergeLongTermAssistantMemory(
