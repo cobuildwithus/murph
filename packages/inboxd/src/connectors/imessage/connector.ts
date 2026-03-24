@@ -1,3 +1,5 @@
+import path from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   IMessageSDK,
   type ChatSummary as PhotonImessageChatSummary,
@@ -13,6 +15,8 @@ import {
   type ImessageKitMessageLike,
   normalizeImessageMessage,
 } from "./normalize.js";
+
+const MAX_EAGER_IMESSAGE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export interface ImessageGetMessagesInput {
   cursor?: Record<string, unknown> | null;
@@ -87,7 +91,7 @@ export function createImessageConnector({
     },
     normalize: async ({ message, source, accountId, context }) =>
       normalizeImessageMessage({
-        message,
+        message: await hydrateEphemeralImessageAttachments(message),
         source,
         accountId,
         chat: resolveChat(context ?? new Map(), message),
@@ -256,6 +260,65 @@ function filterImessageMessages(input: {
   return filtered.slice(0, normalizedLimit);
 }
 
+async function hydrateEphemeralImessageAttachments(
+  message: ImessageKitMessageLike,
+): Promise<ImessageKitMessageLike> {
+  const attachments = message.attachments;
+
+  if (!attachments || attachments.length === 0) {
+    return message;
+  }
+
+  let changed = false;
+  const hydrated = await Promise.all(
+    attachments.map(async (attachment) => {
+      const nextAttachment = await snapshotEphemeralImessageAttachment(attachment);
+      if (nextAttachment !== attachment) {
+        changed = true;
+      }
+      return nextAttachment;
+    }),
+  );
+
+  return changed
+    ? {
+        ...message,
+        attachments: hydrated,
+      }
+    : message;
+}
+
+async function snapshotEphemeralImessageAttachment(
+  attachment: NonNullable<ImessageKitMessageLike["attachments"]>[number],
+): Promise<NonNullable<ImessageKitMessageLike["attachments"]>[number]> {
+  const attachmentPath = resolveEphemeralAttachmentPath(attachment.path);
+  if (!attachmentPath || hasAttachmentData(attachment)) {
+    return attachment;
+  }
+
+  const byteSize = normalizeAttachmentByteSize(attachment);
+  if (byteSize !== null && byteSize > MAX_EAGER_IMESSAGE_ATTACHMENT_BYTES) {
+    return attachment;
+  }
+
+  try {
+    const data = await readFile(attachmentPath);
+    return {
+      ...attachment,
+      data: new Uint8Array(data),
+    };
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {
+        ...attachment,
+        path: null,
+      };
+    }
+
+    throw error;
+  }
+}
+
 function compareImessageMessages(
   left: ImessageKitMessageLike,
   right: ImessageKitMessageLike,
@@ -356,6 +419,37 @@ async function loadChats(driver: ImessagePollDriver): Promise<Map<string, Imessa
   }
 
   return indexChats(await driver.listChats());
+}
+
+function resolveEphemeralAttachmentPath(candidate: string | null | undefined): string | null {
+  if (typeof candidate !== "string" || candidate.trim().length === 0) {
+    return null;
+  }
+
+  const resolved = path.resolve(candidate);
+  const normalized = resolved.replaceAll("\\", "/");
+  return normalized.includes("/TemporaryItems/") || normalized.includes("/com.apple.imagent/")
+    ? resolved
+    : null;
+}
+
+function hasAttachmentData(
+  attachment: NonNullable<ImessageKitMessageLike["attachments"]>[number],
+): boolean {
+  return attachment.data instanceof Uint8Array;
+}
+
+function normalizeAttachmentByteSize(
+  attachment: NonNullable<ImessageKitMessageLike["attachments"]>[number],
+): number | null {
+  const byteSize = attachment.byteSize ?? attachment.size ?? null;
+  return typeof byteSize === "number" && Number.isFinite(byteSize) && byteSize >= 0
+    ? Math.trunc(byteSize)
+    : null;
+}
+
+function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 function indexChats(chats: ImessageKitChatLike[]): Map<string, ImessageKitChatLike> {

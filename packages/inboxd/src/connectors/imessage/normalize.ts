@@ -7,6 +7,7 @@ export interface ImessageKitAttachmentLike {
   filename?: string | null;
   fileName?: string | null;
   path?: string | null;
+  data?: Uint8Array | null;
   transferName?: string | null;
   mimeType?: string | null;
   mime?: string | null;
@@ -72,6 +73,7 @@ export function normalizeImessageAttachment(
     originalPath,
     fileName,
     byteSize: attachment.byteSize ?? attachment.size ?? null,
+    data: attachment.data ?? null,
   };
 }
 

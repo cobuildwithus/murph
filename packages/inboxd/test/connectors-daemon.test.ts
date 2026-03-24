@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
 import type { InboundCapture, PersistedCapture } from "../src/contracts/capture.js";
@@ -236,6 +239,103 @@ test("createImessageConnector preserves an explicit null account scope while def
   assert.equal(captures[0]?.accountId, null);
   assert.equal(defaulted.id, "imessage:self");
   assert.equal(defaulted.accountId, "self");
+});
+
+test("createImessageConnector snapshots ephemeral temp-file attachments during backfill when they are small enough", async () => {
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "healthybob-imessage-ephemeral-"));
+  const attachmentPath = path.join(
+    sourceRoot,
+    "TemporaryItems",
+    "com.apple.imagent",
+    "photo.jpg",
+  );
+  await fs.mkdir(path.dirname(attachmentPath), { recursive: true });
+  await fs.writeFile(attachmentPath, "ephemeral-image", "utf8");
+
+  const captures: InboundCapture[] = [];
+  const connector = createImessageConnector({
+    driver: {
+      async getMessages() {
+        return {
+          messages: [
+            {
+              guid: "im-ephemeral-data",
+              chatGuid: "chat-ephemeral-data",
+              date: "2026-03-13T08:00:00.000Z",
+              attachments: [
+                {
+                  id: "att-ephemeral-data",
+                  path: attachmentPath,
+                  filename: "photo.jpg",
+                  mimeType: "image/jpeg",
+                  size: 15,
+                },
+              ],
+            },
+          ],
+        };
+      },
+      async startWatching() {},
+    },
+    accountId: "self",
+  });
+
+  await connector.backfill(null, async (capture) => {
+    captures.push(capture);
+    return createPersistedCapture(capture);
+  });
+
+  const attachment = captures[0]?.attachments[0];
+  assert.ok(attachment);
+  assert.equal(Buffer.from(attachment.data ?? []).toString("utf8"), "ephemeral-image");
+  assert.equal(attachment.originalPath, attachmentPath);
+});
+
+test("createImessageConnector downgrades missing ephemeral temp-file attachments instead of failing backfill", async () => {
+  const missingPath = path.join(
+    os.tmpdir(),
+    "healthybob-imessage-missing",
+    "TemporaryItems",
+    "com.apple.imagent",
+    "missing.jpg",
+  );
+  const captures: InboundCapture[] = [];
+  const connector = createImessageConnector({
+    driver: {
+      async getMessages() {
+        return {
+          messages: [
+            {
+              guid: "im-ephemeral-missing",
+              chatGuid: "chat-ephemeral-missing",
+              date: "2026-03-13T08:00:00.000Z",
+              attachments: [
+                {
+                  id: "att-ephemeral-missing",
+                  path: missingPath,
+                  filename: "missing.jpg",
+                  mimeType: "image/jpeg",
+                  size: 15,
+                },
+              ],
+            },
+          ],
+        };
+      },
+      async startWatching() {},
+    },
+    accountId: "self",
+  });
+
+  await connector.backfill(null, async (capture) => {
+    captures.push(capture);
+    return createPersistedCapture(capture);
+  });
+
+  const attachment = captures[0]?.attachments[0];
+  assert.ok(attachment);
+  assert.equal(attachment.originalPath, null);
+  assert.equal(attachment.data ?? null, null);
 });
 
 test("runPollConnector keeps cursor writes scoped to the connector account id", async () => {
