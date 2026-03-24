@@ -1,45 +1,31 @@
-import { loadReleaseContext, validateReleaseContext } from './release-helpers.mjs';
+import {
+  loadReleaseContext,
+  parseReleaseArgs,
+  validateReleaseContext,
+} from './release-helpers.mjs';
 
-function usage() {
-  console.log(`Usage: node scripts/verify-release-target.mjs [--expect-version <version>] [--json]`);
-}
-
-function parseArgs(argv) {
-  const options = {
+const options = parseReleaseArgs(process.argv.slice(2), {
+  defaults: {
     expectVersion: '',
     json: false,
-  };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-
-    if (argument === '--expect-version') {
-      options.expectVersion = argv[index + 1] ?? '';
-      index += 1;
-      continue;
-    }
-
-    if (argument === '--json') {
-      options.json = true;
-      continue;
-    }
-
-    if (argument === '--help' || argument === '-h') {
-      usage();
-      process.exit(0);
-    }
-
-    throw new Error(`Unknown argument: ${argument}`);
-  }
-
-  if (argv.includes('--expect-version') && options.expectVersion.length === 0) {
-    throw new Error('Missing value for --expect-version.');
-  }
-
-  return options;
-}
-
-const options = parseArgs(process.argv.slice(2));
+  },
+  options: [
+    {
+      flag: '--expect-version',
+      key: 'expectVersion',
+      missingValueMessage: 'Missing value for --expect-version.',
+      type: 'value',
+    },
+    {
+      flag: '--json',
+      key: 'json',
+      type: 'flag',
+      value: true,
+    },
+  ],
+  usageText:
+    'Usage: node scripts/verify-release-target.mjs [--expect-version <version>] [--json]',
+});
 const context = await loadReleaseContext();
 const summary = validateReleaseContext(context, {
   expectVersion: options.expectVersion || undefined,

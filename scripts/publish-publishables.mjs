@@ -4,66 +4,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   loadReleaseContext,
+  parseReleaseArgs,
   validateReleaseContext,
 } from './release-helpers.mjs';
 
 const execFileAsync = promisify(execFile);
-
-function usage() {
-  console.log(
-    'Usage: node scripts/publish-publishables.mjs [--pack-output <file>] [--npm-tag <tag>] [--provenance|--no-provenance]',
-  );
-}
-
-function parseArgs(argv) {
-  const options = {
-    npmTag: '',
-    packOutput: 'dist/npm/pack-output.json',
-    provenance: false,
-  };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-
-    if (argument === '--pack-output') {
-      options.packOutput = argv[index + 1] ?? '';
-      index += 1;
-      continue;
-    }
-
-    if (argument === '--npm-tag') {
-      options.npmTag = argv[index + 1] ?? '';
-      index += 1;
-      continue;
-    }
-
-    if (argument === '--provenance') {
-      options.provenance = true;
-      continue;
-    }
-
-    if (argument === '--no-provenance') {
-      options.provenance = false;
-      continue;
-    }
-
-    if (argument === '--help' || argument === '-h') {
-      usage();
-      process.exit(0);
-    }
-
-    throw new Error(`Unknown argument: ${argument}`);
-  }
-
-  if (argv.includes('--pack-output') && options.packOutput.length === 0) {
-    throw new Error('Missing value for --pack-output.');
-  }
-  if (argv.includes('--npm-tag') && options.npmTag.length === 0) {
-    throw new Error('Missing value for --npm-tag.');
-  }
-
-  return options;
-}
 
 function isAlreadyPublished(output) {
   return /previously published|cannot publish over|version already exists/ui.test(
@@ -71,7 +16,41 @@ function isAlreadyPublished(output) {
   );
 }
 
-const options = parseArgs(process.argv.slice(2));
+const options = parseReleaseArgs(process.argv.slice(2), {
+  defaults: {
+    npmTag: '',
+    packOutput: 'dist/npm/pack-output.json',
+    provenance: false,
+  },
+  options: [
+    {
+      flag: '--pack-output',
+      key: 'packOutput',
+      missingValueMessage: 'Missing value for --pack-output.',
+      type: 'value',
+    },
+    {
+      flag: '--npm-tag',
+      key: 'npmTag',
+      missingValueMessage: 'Missing value for --npm-tag.',
+      type: 'value',
+    },
+    {
+      flag: '--provenance',
+      key: 'provenance',
+      type: 'flag',
+      value: true,
+    },
+    {
+      flag: '--no-provenance',
+      key: 'provenance',
+      type: 'flag',
+      value: false,
+    },
+  ],
+  usageText:
+    'Usage: node scripts/publish-publishables.mjs [--pack-output <file>] [--npm-tag <tag>] [--provenance|--no-provenance]',
+});
 const context = await loadReleaseContext();
 const packOutputPath = path.resolve(context.repoRoot, options.packOutput);
 const packOutput = JSON.parse(await readFile(packOutputPath, 'utf8'));

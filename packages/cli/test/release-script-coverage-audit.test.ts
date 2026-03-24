@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -22,6 +22,13 @@ const cliPackageJson = JSON.parse(
   files?: string[]
   name?: string
   scripts?: Record<string, string>
+}
+
+function runNodeScript(...args: string[]) {
+  return spawnSync('node', args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  })
 }
 
 describe('monorepo release flow coverage audit', () => {
@@ -84,6 +91,101 @@ describe('monorepo release flow coverage audit', () => {
       '@healthybob/parsers',
       'healthybob',
     ])
+  })
+
+  it('keeps release script help usage stable for both --help and -h', () => {
+    const cases = [
+      {
+        args: ['scripts/verify-release-target.mjs'],
+        expected:
+          'Usage: node scripts/verify-release-target.mjs [--expect-version <version>] [--json]',
+      },
+      {
+        args: ['scripts/pack-publishables.mjs'],
+        expected:
+          'Usage: node scripts/pack-publishables.mjs [--expect-version <version>] [--out-dir <dir>] [--pack-output <file>] [--clean]',
+      },
+      {
+        args: ['scripts/publish-publishables.mjs'],
+        expected:
+          'Usage: node scripts/publish-publishables.mjs [--pack-output <file>] [--npm-tag <tag>] [--provenance|--no-provenance]',
+      },
+    ] as const
+
+    for (const helpFlag of ['--help', '-h']) {
+      for (const testCase of cases) {
+        const result = runNodeScript(...testCase.args, helpFlag)
+
+        expect(result.status).toBe(0)
+        expect(result.stderr).toBe('')
+        expect(result.stdout.trim()).toBe(testCase.expected)
+      }
+    }
+  })
+
+  it('rejects unknown release-script arguments with the stable error text', () => {
+    for (const scriptPath of [
+      'scripts/verify-release-target.mjs',
+      'scripts/pack-publishables.mjs',
+      'scripts/publish-publishables.mjs',
+    ]) {
+      const result = runNodeScript(scriptPath, '--wat')
+
+      expect(result.status).not.toBe(0)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain('Unknown argument: --wat')
+    }
+  })
+
+  it('preserves current value-token consumption and missing-value validation branches', () => {
+    const verifyResult = runNodeScript(
+      'scripts/verify-release-target.mjs',
+      '--expect-version',
+      '--json',
+    )
+    expect(verifyResult.status).not.toBe(0)
+    expect(verifyResult.stdout).toBe('')
+    expect(verifyResult.stderr).toContain(
+      'Expected release version --json, but manifest packages are on 0.0.0.',
+    )
+
+    const packMissingValue = runNodeScript(
+      'scripts/pack-publishables.mjs',
+      '--pack-output',
+      '--expect-version',
+    )
+    expect(packMissingValue.status).not.toBe(0)
+    expect(packMissingValue.stdout).toBe('')
+    expect(packMissingValue.stderr).toContain(
+      'Missing value for --expect-version.',
+    )
+
+    const packEmptyString = runNodeScript(
+      'scripts/pack-publishables.mjs',
+      '--out-dir',
+      '',
+    )
+    expect(packEmptyString.status).not.toBe(0)
+    expect(packEmptyString.stdout).toBe('')
+    expect(packEmptyString.stderr).toContain('Missing value for --out-dir.')
+
+    const publishMissingValue = runNodeScript(
+      'scripts/publish-publishables.mjs',
+      '--pack-output',
+      '--npm-tag',
+    )
+    expect(publishMissingValue.status).not.toBe(0)
+    expect(publishMissingValue.stdout).toBe('')
+    expect(publishMissingValue.stderr).toContain('Missing value for --npm-tag.')
+
+    const publishEmptyString = runNodeScript(
+      'scripts/publish-publishables.mjs',
+      '--npm-tag',
+      '',
+    )
+    expect(publishEmptyString.status).not.toBe(0)
+    expect(publishEmptyString.stdout).toBe('')
+    expect(publishEmptyString.stderr).toContain('Missing value for --npm-tag.')
   })
 
   it('keeps packages/cli publish-ready as healthybob without package-local release scripts', () => {

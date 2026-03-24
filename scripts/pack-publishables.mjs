@@ -4,71 +4,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   loadReleaseContext,
+  parseReleaseArgs,
   validateReleaseContext,
 } from './release-helpers.mjs';
 
 const execFileAsync = promisify(execFile);
-
-function usage() {
-  console.log(
-    'Usage: node scripts/pack-publishables.mjs [--expect-version <version>] [--out-dir <dir>] [--pack-output <file>] [--clean]',
-  );
-}
-
-function parseArgs(argv) {
-  const options = {
-    clean: false,
-    expectVersion: '',
-    outDir: 'dist/npm',
-    packOutput: '',
-  };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-
-    if (argument === '--clean') {
-      options.clean = true;
-      continue;
-    }
-
-    if (argument === '--expect-version') {
-      options.expectVersion = argv[index + 1] ?? '';
-      index += 1;
-      continue;
-    }
-
-    if (argument === '--out-dir') {
-      options.outDir = argv[index + 1] ?? '';
-      index += 1;
-      continue;
-    }
-
-    if (argument === '--pack-output') {
-      options.packOutput = argv[index + 1] ?? '';
-      index += 1;
-      continue;
-    }
-
-    if (argument === '--help' || argument === '-h') {
-      usage();
-      process.exit(0);
-    }
-
-    throw new Error(`Unknown argument: ${argument}`);
-  }
-
-  if (argv.includes('--expect-version') && options.expectVersion.length === 0) {
-    throw new Error('Missing value for --expect-version.');
-  }
-  if (options.outDir.length === 0) {
-    throw new Error('Missing value for --out-dir.');
-  }
-  if (argv.includes('--pack-output') && options.packOutput.length === 0) {
-    throw new Error('Missing value for --pack-output.');
-  }
-
-  return options;
-}
 
 function normalizePackResult(rawValue) {
   if (!rawValue || rawValue.length === 0) {
@@ -94,7 +34,43 @@ async function tgzFiles(directoryPath) {
   }
 }
 
-const options = parseArgs(process.argv.slice(2));
+const options = parseReleaseArgs(process.argv.slice(2), {
+  defaults: {
+    clean: false,
+    expectVersion: '',
+    outDir: 'dist/npm',
+    packOutput: '',
+  },
+  options: [
+    {
+      flag: '--clean',
+      key: 'clean',
+      type: 'flag',
+      value: true,
+    },
+    {
+      flag: '--expect-version',
+      key: 'expectVersion',
+      missingValueMessage: 'Missing value for --expect-version.',
+      type: 'value',
+    },
+    {
+      flag: '--out-dir',
+      key: 'outDir',
+      missingValueCheck: 'always',
+      missingValueMessage: 'Missing value for --out-dir.',
+      type: 'value',
+    },
+    {
+      flag: '--pack-output',
+      key: 'packOutput',
+      missingValueMessage: 'Missing value for --pack-output.',
+      type: 'value',
+    },
+  ],
+  usageText:
+    'Usage: node scripts/pack-publishables.mjs [--expect-version <version>] [--out-dir <dir>] [--pack-output <file>] [--clean]',
+});
 const context = await loadReleaseContext();
 const summary = validateReleaseContext(context, {
   expectVersion: options.expectVersion || undefined,

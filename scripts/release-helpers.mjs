@@ -9,6 +9,51 @@ export function resolveRepoRoot() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 }
 
+export function parseReleaseArgs(argv, definition) {
+  const options = { ...definition.defaults };
+  const optionsByFlag = new Map(
+    definition.options.map((option) => [option.flag, option]),
+  );
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    const option = optionsByFlag.get(argument);
+
+    if (option) {
+      if (option.type === 'value') {
+        options[option.key] = argv[index + 1] ?? '';
+        index += 1;
+        continue;
+      }
+
+      options[option.key] = option.value;
+      continue;
+    }
+
+    if (argument === '--help' || argument === '-h') {
+      console.log(definition.usageText);
+      process.exit(0);
+    }
+
+    throw new Error(`Unknown argument: ${argument}`);
+  }
+
+  for (const option of definition.options) {
+    if (option.type !== 'value' || !option.missingValueMessage) {
+      continue;
+    }
+
+    const shouldValidate =
+      option.missingValueCheck === 'always' || argv.includes(option.flag);
+
+    if (shouldValidate && String(options[option.key]).length === 0) {
+      throw new Error(option.missingValueMessage);
+    }
+  }
+
+  return options;
+}
+
 export function isSupportedReleaseVersion(value) {
   return SUPPORTED_RELEASE_VERSION_PATTERN.test(value);
 }
