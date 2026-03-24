@@ -7,6 +7,7 @@ import {
   type AgentmailApiClient,
   type AgentmailInbox,
 } from './agentmail-runtime.js'
+import { prepareSetupPromptInput } from './setup-prompt-io.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export interface SetupAgentmailInboxSelection {
@@ -188,6 +189,7 @@ async function promptForLine(input: {
   prompt: string
 }): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
+    prepareSetupPromptInput(input.input)
     const readline = createInterface({
       input: input.input,
       output: input.output,

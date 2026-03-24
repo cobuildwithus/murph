@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline'
+import { prepareSetupPromptInput } from './setup-prompt-io.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
   type SetupChannel,
@@ -284,6 +285,7 @@ function normalizeEnvValue(value: string | undefined): string | null {
 
 async function promptForRuntimeEnvValue(question: string): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
+    prepareSetupPromptInput(process.stdin)
     const readline = createInterface({
       input: process.stdin,
       output: process.stderr,

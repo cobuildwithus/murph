@@ -1,6 +1,7 @@
 import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
 import { normalizeNullableString } from './assistant/shared.js'
+import { prepareSetupPromptInput } from './setup-prompt-io.js'
 import {
   type SetupAssistantPreset,
   type SetupCommandOptions,
@@ -379,6 +380,7 @@ async function promptWithDefault(input: {
   output: NodeJS.WritableStream
   prompt: string
 }): Promise<string | null> {
+  prepareSetupPromptInput(input.input)
   const rl = readline.createInterface({
     input: input.input,
     output: input.output,

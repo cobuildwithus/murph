@@ -37,6 +37,10 @@ import {
 } from '../src/setup-runtime-env.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
 import {
+  createSetupWizardCompletionController,
+  type SetupWizardResult,
+} from '../src/setup-wizard.js'
+import {
   ensureCliRuntimeArtifacts,
   repoRoot,
   requireData,
@@ -45,6 +49,37 @@ import {
 } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
+
+test('setup wizard completion waits for Ink exit before resolving the selected flow', async () => {
+  const completion = createSetupWizardCompletionController()
+  const selected = {
+    assistantPreset: 'codex-cli' as const,
+    channels: ['email'] as const,
+    wearables: [] as const,
+  }
+
+  let settled = false
+  const pendingResult = completion.waitForResult().then((result: SetupWizardResult) => {
+    settled = true
+    return result
+  })
+
+  completion.submit({
+    assistantPreset: selected.assistantPreset,
+    channels: [...selected.channels],
+    wearables: [...selected.wearables],
+  })
+  await Promise.resolve()
+  assert.equal(settled, false)
+
+  completion.completeExit()
+
+  assert.deepEqual(await pendingResult, {
+    assistantPreset: 'codex-cli',
+    channels: ['email'],
+    wearables: [],
+  })
+})
 
 async function writeExecutable(
   absolutePath: string,

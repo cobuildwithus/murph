@@ -30,6 +30,13 @@ export interface SetupWizardInput {
   wearableStatuses?: Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
 }
 
+export interface SetupWizardCompletionController {
+  completeExit(): void
+  fail(error: unknown): void
+  submit(result: SetupWizardResult): void
+  waitForResult(): Promise<SetupWizardResult>
+}
+
 interface SetupWizardAssistantOption {
   description: string
   preset: SetupAssistantPreset
@@ -161,6 +168,66 @@ export function toggleSetupWizardWearable(
   return sortSetupWizardWearables([...next])
 }
 
+export function createSetupWizardCompletionController(): SetupWizardCompletionController {
+  let settled = false
+  let exited = false
+  let submittedResult: SetupWizardResult | null = null
+  let resolvePromise!: (value: SetupWizardResult) => void
+  let rejectPromise!: (reason: unknown) => void
+  const promise = new Promise<SetupWizardResult>((resolve, reject) => {
+    resolvePromise = resolve
+    rejectPromise = reject
+  })
+
+  const maybeResolve = () => {
+    if (settled || !exited || submittedResult === null) {
+      return
+    }
+
+    settled = true
+    resolvePromise(submittedResult)
+  }
+
+  return {
+    completeExit() {
+      if (settled) {
+        return
+      }
+
+      exited = true
+      if (submittedResult === null) {
+        settled = true
+        rejectPromise(new Error('Healthy Bob setup wizard exited unexpectedly.'))
+        return
+      }
+
+      maybeResolve()
+    },
+
+    fail(error) {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      rejectPromise(error)
+    },
+
+    submit(result) {
+      if (settled || submittedResult !== null) {
+        return
+      }
+
+      submittedResult = result
+      maybeResolve()
+    },
+
+    async waitForResult() {
+      return await promise
+    },
+  }
+}
+
 export async function runSetupWizard(
   input: SetupWizardInput,
 ): Promise<SetupWizardResult> {
@@ -177,219 +244,201 @@ export async function runSetupWizard(
       : getDefaultSetupWizardWearables(),
   )
   const commandName = input.commandName ?? 'healthybob'
+  const completion = createSetupWizardCompletionController()
 
-  return await new Promise<SetupWizardResult>((resolve, reject) => {
-    let settled = false
-    let instance:
-      | {
-          unmount: () => void
-          waitUntilExit: () => Promise<unknown>
+  let instance:
+    | {
+        unmount: () => void
+        waitUntilExit: () => Promise<unknown>
+      }
+    | null = null
+
+  const App = (): React.ReactElement => {
+    const createElement = React.createElement
+    const { exit } = useApp()
+    const [step, setStep] = React.useState<SetupWizardStep>('intro')
+    const [assistantIndex, setAssistantIndex] = React.useState(
+      findSetupWizardAssistantOptionIndex(initialAssistantPreset),
+    )
+    const [channelIndex, setChannelIndex] = React.useState(0)
+    const [wearableIndex, setWearableIndex] = React.useState(0)
+    const [selectedAssistantPreset, setSelectedAssistantPreset] =
+      React.useState<SetupAssistantPreset>(initialAssistantPreset)
+    const [selectedChannels, setSelectedChannels] = React.useState<SetupChannel[]>(
+      initialChannels,
+    )
+    const [selectedWearables, setSelectedWearables] = React.useState<SetupWearable[]>(
+      initialWearables,
+    )
+    const latestAssistantRef = React.useRef<SetupAssistantPreset>(
+      initialAssistantPreset,
+    )
+    const latestChannelsRef = React.useRef<SetupChannel[]>(initialChannels)
+    const latestWearablesRef = React.useRef<SetupWearable[]>(initialWearables)
+
+    React.useEffect(() => {
+      latestAssistantRef.current = selectedAssistantPreset
+    }, [selectedAssistantPreset])
+
+    React.useEffect(() => {
+      latestChannelsRef.current = selectedChannels
+    }, [selectedChannels])
+
+    React.useEffect(() => {
+      latestWearablesRef.current = selectedWearables
+    }, [selectedWearables])
+
+    useInput((value, key) => {
+      if ((key.ctrl && value === 'c') || value.toLowerCase() === 'q') {
+        completion.fail(
+          new VaultCliError('setup_cancelled', 'Healthy Bob setup was cancelled.'),
+        )
+        exit()
+        return
+      }
+
+      if (step === 'intro') {
+        if (key.return || value === ' ') {
+          setStep('assistant')
+          return
         }
-      | null = null
 
-    const resolveOnce = (result: SetupWizardResult) => {
-      if (settled) {
-        return
-      }
-
-      settled = true
-      resolve(result)
-    }
-
-    const rejectOnce = (error: unknown) => {
-      if (settled) {
-        return
-      }
-
-      settled = true
-      reject(error)
-    }
-
-    const App = (): React.ReactElement => {
-      const createElement = React.createElement
-      const { exit } = useApp()
-      const [step, setStep] = React.useState<SetupWizardStep>('intro')
-      const [assistantIndex, setAssistantIndex] = React.useState(
-        findSetupWizardAssistantOptionIndex(initialAssistantPreset),
-      )
-      const [channelIndex, setChannelIndex] = React.useState(0)
-      const [wearableIndex, setWearableIndex] = React.useState(0)
-      const [selectedAssistantPreset, setSelectedAssistantPreset] =
-        React.useState<SetupAssistantPreset>(initialAssistantPreset)
-      const [selectedChannels, setSelectedChannels] = React.useState<SetupChannel[]>(
-        initialChannels,
-      )
-      const [selectedWearables, setSelectedWearables] = React.useState<
-        SetupWearable[]
-      >(initialWearables)
-      const latestAssistantRef = React.useRef<SetupAssistantPreset>(
-        initialAssistantPreset,
-      )
-      const latestChannelsRef = React.useRef<SetupChannel[]>(initialChannels)
-      const latestWearablesRef = React.useRef<SetupWearable[]>(initialWearables)
-
-      React.useEffect(() => {
-        latestAssistantRef.current = selectedAssistantPreset
-      }, [selectedAssistantPreset])
-
-      React.useEffect(() => {
-        latestChannelsRef.current = selectedChannels
-      }, [selectedChannels])
-
-      React.useEffect(() => {
-        latestWearablesRef.current = selectedWearables
-      }, [selectedWearables])
-
-      useInput((value, key) => {
-        if ((key.ctrl && value === 'c') || value.toLowerCase() === 'q') {
-          rejectOnce(
+        if (key.escape) {
+          completion.fail(
             new VaultCliError('setup_cancelled', 'Healthy Bob setup was cancelled.'),
           )
           exit()
+        }
+        return
+      }
+
+      if (step === 'assistant') {
+        if (key.upArrow) {
+          setAssistantIndex((current) =>
+            wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, -1),
+          )
           return
         }
 
-        if (step === 'intro') {
-          if (key.return || value === ' ') {
-            setStep('assistant')
-            return
-          }
-
-          if (key.escape) {
-            rejectOnce(
-              new VaultCliError('setup_cancelled', 'Healthy Bob setup was cancelled.'),
-            )
-            exit()
-          }
+        if (key.downArrow) {
+          setAssistantIndex((current) =>
+            wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, 1),
+          )
           return
         }
 
-        if (step === 'assistant') {
-          if (key.upArrow) {
-            setAssistantIndex((current) =>
-              wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, -1),
-            )
-            return
-          }
-
-          if (key.downArrow) {
-            setAssistantIndex((current) =>
-              wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, 1),
-            )
-            return
-          }
-
-          if (value === ' ') {
-            const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
-            if (activePreset) {
-              setSelectedAssistantPreset(activePreset)
-            }
-            return
-          }
-
-          if (key.escape) {
-            setStep('intro')
-            return
-          }
-
-          if (key.return) {
-            const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
-            if (activePreset) {
-              setSelectedAssistantPreset(activePreset)
-            }
-            setStep('channels')
+        if (value === ' ') {
+          const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
+          if (activePreset) {
+            setSelectedAssistantPreset(activePreset)
           }
           return
         }
 
-        if (step === 'channels') {
-          if (key.upArrow) {
-            setChannelIndex((current) =>
-              wrapSetupWizardIndex(current, setupWizardChannelOptions.length, -1),
+        if (key.escape) {
+          setStep('intro')
+          return
+        }
+
+        if (key.return) {
+          const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
+          if (activePreset) {
+            setSelectedAssistantPreset(activePreset)
+          }
+          setStep('channels')
+          return
+        }
+        return
+      }
+
+      if (step === 'channels') {
+        if (key.upArrow) {
+          setChannelIndex((current) =>
+            wrapSetupWizardIndex(current, setupWizardChannelOptions.length, -1),
+          )
+          return
+        }
+
+        if (key.downArrow) {
+          setChannelIndex((current) =>
+            wrapSetupWizardIndex(current, setupWizardChannelOptions.length, 1),
+          )
+          return
+        }
+
+        if (value === ' ') {
+          const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
+          if (activeChannel) {
+            setSelectedChannels((current) =>
+              toggleSetupWizardChannel(current, activeChannel),
             )
-            return
-          }
-
-          if (key.downArrow) {
-            setChannelIndex((current) =>
-              wrapSetupWizardIndex(current, setupWizardChannelOptions.length, 1),
-            )
-            return
-          }
-
-          if (value === ' ') {
-            const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
-            if (activeChannel) {
-              setSelectedChannels((current) =>
-                toggleSetupWizardChannel(current, activeChannel),
-              )
-            }
-            return
-          }
-
-          if (key.escape) {
-            setStep('assistant')
-            return
-          }
-
-          if (key.return) {
-            setStep('wearables')
           }
           return
         }
 
-        if (step === 'wearables') {
-          if (key.upArrow) {
-            setWearableIndex((current) =>
-              wrapSetupWizardIndex(current, setupWizardWearableOptions.length, -1),
+        if (key.escape) {
+          setStep('assistant')
+          return
+        }
+
+        if (key.return) {
+          setStep('wearables')
+        }
+        return
+      }
+
+      if (step === 'wearables') {
+        if (key.upArrow) {
+          setWearableIndex((current) =>
+            wrapSetupWizardIndex(current, setupWizardWearableOptions.length, -1),
+          )
+          return
+        }
+
+        if (key.downArrow) {
+          setWearableIndex((current) =>
+            wrapSetupWizardIndex(current, setupWizardWearableOptions.length, 1),
+          )
+          return
+        }
+
+        if (value === ' ') {
+          const activeWearable = setupWizardWearableOptions[wearableIndex]?.wearable
+          if (activeWearable) {
+            setSelectedWearables((current) =>
+              toggleSetupWizardWearable(current, activeWearable),
             )
-            return
-          }
-
-          if (key.downArrow) {
-            setWearableIndex((current) =>
-              wrapSetupWizardIndex(current, setupWizardWearableOptions.length, 1),
-            )
-            return
-          }
-
-          if (value === ' ') {
-            const activeWearable = setupWizardWearableOptions[wearableIndex]?.wearable
-            if (activeWearable) {
-              setSelectedWearables((current) =>
-                toggleSetupWizardWearable(current, activeWearable),
-              )
-            }
-            return
-          }
-
-          if (key.escape) {
-            setStep('channels')
-            return
-          }
-
-          if (key.return) {
-            setStep('confirm')
           }
           return
         }
 
-        if (step === 'confirm') {
-          if (key.escape || key.leftArrow) {
-            setStep('wearables')
-            return
-          }
-
-          if (key.return || value === ' ') {
-            resolveOnce({
-              assistantPreset: latestAssistantRef.current,
-              channels: sortSetupWizardChannels(latestChannelsRef.current),
-              wearables: sortSetupWizardWearables(latestWearablesRef.current),
-            })
-            exit()
-          }
+        if (key.escape) {
+          setStep('channels')
+          return
         }
-      })
+
+        if (key.return) {
+          setStep('confirm')
+        }
+        return
+      }
+
+      if (step === 'confirm') {
+        if (key.escape || key.leftArrow) {
+          setStep('wearables')
+          return
+        }
+
+        if (key.return || value === ' ') {
+          completion.submit({
+            assistantPreset: latestAssistantRef.current,
+            channels: sortSetupWizardChannels(latestChannelsRef.current),
+            wearables: sortSetupWizardWearables(latestWearablesRef.current),
+          })
+          exit()
+        }
+      }
+    })
 
       const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
       const selectedChannelSummary = formatSelectionSummary(
@@ -595,33 +644,38 @@ export async function runSetupWizard(
           : null,
       )
 
-      function getChannelStatus(channel: SetupChannel): SetupWizardRuntimeStatus {
-        return normalizeSetupWizardRuntimeStatus(input.channelStatuses?.[channel])
-      }
-
-      function getWearableStatus(
-        wearable: SetupWearable,
-      ): SetupWizardRuntimeStatus {
-        return normalizeSetupWizardRuntimeStatus(input.wearableStatuses?.[wearable])
-      }
+    function getChannelStatus(channel: SetupChannel): SetupWizardRuntimeStatus {
+      return normalizeSetupWizardRuntimeStatus(input.channelStatuses?.[channel])
     }
 
-    try {
-      instance = render(React.createElement(App), {
-        stderr: process.stderr,
-        stdout: process.stderr,
-        patchConsole: false,
-      })
-      void instance.waitUntilExit().catch(rejectOnce)
-    } catch (error) {
-      rejectOnce(error)
-      return
+    function getWearableStatus(wearable: SetupWearable): SetupWizardRuntimeStatus {
+      return normalizeSetupWizardRuntimeStatus(input.wearableStatuses?.[wearable])
     }
+  }
 
-    if (!instance) {
-      rejectOnce(new Error('Healthy Bob setup wizard failed to initialize.'))
-    }
-  })
+  try {
+    instance = render(React.createElement(App), {
+      stderr: process.stderr,
+      stdout: process.stderr,
+      patchConsole: false,
+    })
+    void instance.waitUntilExit().then(
+      () => {
+        completion.completeExit()
+      },
+      (error) => {
+        completion.fail(error)
+      },
+    )
+  } catch (error) {
+    completion.fail(error)
+  }
+
+  if (!instance) {
+    completion.fail(new Error('Healthy Bob setup wizard failed to initialize.'))
+  }
+
+  return await completion.waitForResult()
 }
 
 function normalizeSetupWizardRuntimeStatus(
