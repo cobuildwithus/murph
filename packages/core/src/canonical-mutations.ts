@@ -344,6 +344,52 @@ function safeParseDocument<T>(
   };
 }
 
+async function readExperimentFrontmatterDocument(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<{
+  rawDocument: string;
+  document: {
+    attributes: ExperimentFrontmatter;
+    body: string;
+  };
+}> {
+  const rawDocument = await readUtf8File(vaultRoot, relativePath);
+  return {
+    rawDocument,
+    document: safeParseDocument(
+      experimentFrontmatterSchema,
+      rawDocument,
+      relativePath,
+      "HB_EXPERIMENT_FRONTMATTER_INVALID",
+      `Experiment frontmatter for "${relativePath}" is invalid.`,
+    ),
+  };
+}
+
+async function readJournalDayFrontmatterDocument(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<{
+  rawDocument: string;
+  document: {
+    attributes: JournalDayFrontmatter;
+    body: string;
+  };
+}> {
+  const rawDocument = await readUtf8File(vaultRoot, relativePath);
+  return {
+    rawDocument,
+    document: safeParseDocument(
+      journalDayFrontmatterSchema,
+      rawDocument,
+      relativePath,
+      "HB_JOURNAL_FRONTMATTER_INVALID",
+      `Journal frontmatter for "${relativePath}" is invalid.`,
+    ),
+  };
+}
+
 function validateVaultMetadata(value: unknown): VaultMetadata {
   const result = safeParseContract(vaultMetadataSchema, value);
   if (!result.success) {
@@ -815,13 +861,9 @@ export async function updateExperiment(
   input: UpdateExperimentInput,
 ): Promise<UpdateExperimentResult> {
   await loadVault({ vaultRoot: input.vaultRoot });
-  const rawDocument = await readUtf8File(input.vaultRoot, input.relativePath);
-  const document = safeParseDocument(
-    experimentFrontmatterSchema,
-    rawDocument,
+  const { document } = await readExperimentFrontmatterDocument(
+    input.vaultRoot,
     input.relativePath,
-    "HB_EXPERIMENT_FRONTMATTER_INVALID",
-    `Experiment frontmatter for "${input.relativePath}" is invalid.`,
   );
   const nextAttributes = validateExperimentFrontmatter(
     compactObject({
@@ -873,13 +915,9 @@ async function appendExperimentLifecycleEvent(
   input: AppendExperimentLifecycleEventInput,
 ): Promise<AppendExperimentLifecycleEventResult> {
   await loadVault({ vaultRoot: input.vaultRoot });
-  const rawDocument = await readUtf8File(input.vaultRoot, input.relativePath);
-  const document = safeParseDocument(
-    experimentFrontmatterSchema,
-    rawDocument,
+  const { document } = await readExperimentFrontmatterDocument(
+    input.vaultRoot,
     input.relativePath,
-    "HB_EXPERIMENT_FRONTMATTER_INVALID",
-    `Experiment frontmatter for "${input.relativePath}" is invalid.`,
   );
   const occurredAt = normalizeTimestampInput(input.occurredAt ?? new Date());
   if (!occurredAt) {
@@ -977,13 +1015,9 @@ export async function appendJournal(input: AppendJournalInput): Promise<AppendJo
     vaultRoot: input.vaultRoot,
     date: input.date,
   });
-  const rawDocument = await readUtf8File(input.vaultRoot, ensured.relativePath);
-  const document = safeParseDocument(
-    journalDayFrontmatterSchema,
-    rawDocument,
+  const { document } = await readJournalDayFrontmatterDocument(
+    input.vaultRoot,
     ensured.relativePath,
-    "HB_JOURNAL_FRONTMATTER_INVALID",
-    `Journal frontmatter for "${ensured.relativePath}" is invalid.`,
   );
   const nextMarkdown = stringifyFrontmatterDocument({
     attributes: document.attributes,
@@ -1022,9 +1056,12 @@ async function mutateJournalLinks(
   const relativePath =
     ensured?.relativePath ?? `${VAULT_LAYOUT.journalDirectory}/${input.date.slice(0, 4)}/${input.date}.md`;
 
-  let rawDocument: string;
+  let document: {
+    attributes: JournalDayFrontmatter;
+    body: string;
+  };
   try {
-    rawDocument = await readUtf8File(input.vaultRoot, relativePath);
+    ({ document } = await readJournalDayFrontmatterDocument(input.vaultRoot, relativePath));
   } catch (error) {
     if (error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
       throw new VaultError("HB_JOURNAL_DAY_MISSING", `No journal day found for "${input.date}".`);
@@ -1032,15 +1069,7 @@ async function mutateJournalLinks(
 
     throw error;
   }
-
-  const document = safeParseDocument(
-    journalDayFrontmatterSchema,
-    rawDocument,
-    relativePath,
-    "HB_JOURNAL_FRONTMATTER_INVALID",
-    `Journal frontmatter for "${relativePath}" is invalid.`,
-  );
-  const currentValues = new Set(document.attributes[input.key]);
+  const currentValues = new Set<string>(document.attributes[input.key]);
   let changed = 0;
 
   for (const value of uniqueTrimmedStringList(input.values) ?? []) {
@@ -1319,13 +1348,9 @@ export async function promoteInboxJournal(
     vaultRoot: input.vaultRoot,
     date: input.date,
   });
-  const rawDocument = await readUtf8File(input.vaultRoot, ensured.relativePath);
-  const document = safeParseDocument(
-    journalDayFrontmatterSchema,
-    rawDocument,
+  const { rawDocument, document } = await readJournalDayFrontmatterDocument(
+    input.vaultRoot,
     ensured.relativePath,
-    "HB_JOURNAL_FRONTMATTER_INVALID",
-    `Journal frontmatter for "${ensured.relativePath}" is invalid.`,
   );
   const currentEventIds = [...document.attributes.eventIds];
   const bodyUpdate = upsertPromotionBody({
@@ -1373,13 +1398,9 @@ export async function promoteInboxJournal(
 export async function promoteInboxExperimentNote(
   input: PromoteInboxExperimentNoteInput,
 ): Promise<PromoteInboxExperimentNoteResult> {
-  const rawDocument = await readUtf8File(input.vaultRoot, input.relativePath);
-  const document = safeParseDocument(
-    experimentFrontmatterSchema,
-    rawDocument,
+  const { rawDocument, document } = await readExperimentFrontmatterDocument(
+    input.vaultRoot,
     input.relativePath,
-    "HB_EXPERIMENT_FRONTMATTER_INVALID",
-    `Experiment frontmatter for "${input.relativePath}" is invalid.`,
   );
   const bodyUpdate = upsertPromotionBody({
     body: document.body,

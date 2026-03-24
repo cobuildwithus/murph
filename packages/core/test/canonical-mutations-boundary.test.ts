@@ -276,6 +276,67 @@ test("high-level core experiment mutation ports keep legacy create coercion dist
   );
 });
 
+test("helper-backed experiment mutation readers preserve exact invalid-frontmatter errors across callers", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  await initializeVault({ vaultRoot });
+
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "reader-boundary",
+    title: "Reader Boundary",
+    startedOn: "2026-03-10",
+  });
+  const relativePath = created.experiment.relativePath;
+  const capture = {
+    captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRC1",
+    eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRC2",
+    source: "imessage",
+    occurredAt: "2026-03-13T08:00:00.000Z",
+    text: "Reader boundary inbox note",
+    thread: {
+      id: "thread-boundary",
+      title: "Reader Boundary Thread",
+    },
+    actor: {
+      id: "contact-boundary",
+      displayName: "Reader Boundary",
+    },
+    attachments: [],
+  };
+
+  await fs.writeFile(path.join(vaultRoot, relativePath), "---\nnot: valid\n---\n", "utf8");
+
+  for (const action of [
+    () =>
+      updateExperiment({
+        vaultRoot,
+        relativePath,
+        title: "Should fail",
+      }),
+    () =>
+      checkpointExperiment({
+        vaultRoot,
+        relativePath,
+        occurredAt: "2026-03-12T14:30:00.000Z",
+        title: "Checkpoint",
+      }),
+    () =>
+      promoteInboxExperimentNote({
+        vaultRoot,
+        relativePath,
+        capture,
+      }),
+  ]) {
+    await assert.rejects(
+      action,
+      (error: unknown) =>
+        error instanceof VaultError &&
+        error.code === "HB_EXPERIMENT_FRONTMATTER_INVALID" &&
+        error.message === `Experiment frontmatter for "${relativePath}" is invalid.`,
+    );
+  }
+});
+
 test("high-level canonical mutation ports dedupe trimmed duplicate experiment and event lists", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
   await initializeVault({ vaultRoot });
@@ -326,6 +387,64 @@ test("high-level canonical mutation ports dedupe trimmed duplicate experiment an
     "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
   ]);
   assert.deepEqual(eventRecord.rawRefs, ["raw/documents/a.pdf", "raw/documents/b.pdf"]);
+});
+
+test("helper-backed journal mutation readers preserve exact invalid-frontmatter errors across callers", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendJournal({
+    vaultRoot,
+    date: "2026-03-13",
+    text: "Seed journal entry.",
+  });
+  const capture = {
+    captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRD1",
+    eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRD2",
+    source: "imessage",
+    occurredAt: "2026-03-13T09:00:00.000Z",
+    text: "Reader boundary journal note",
+    thread: {
+      id: "thread-journal-boundary",
+      title: "Journal Boundary Thread",
+    },
+    actor: {
+      id: "contact-journal-boundary",
+      displayName: "Journal Boundary",
+    },
+    attachments: [],
+  };
+
+  await fs.writeFile(path.join(vaultRoot, appended.relativePath), "---\nnot: valid\n---\n", "utf8");
+
+  for (const action of [
+    () =>
+      appendJournal({
+        vaultRoot,
+        date: "2026-03-13",
+        text: "Should fail",
+      }),
+    () =>
+      linkJournalEventIds({
+        vaultRoot,
+        date: "2026-03-13",
+        values: ["evt_01JNV422Y2M5ZBV64ZP4N1DRD3"],
+      }),
+    () =>
+      promoteInboxJournal({
+        vaultRoot,
+        date: "2026-03-13",
+        capture,
+      }),
+  ]) {
+    await assert.rejects(
+      action,
+      (error: unknown) =>
+        error instanceof VaultError &&
+        error.code === "HB_JOURNAL_FRONTMATTER_INVALID" &&
+        error.message === `Journal frontmatter for "${appended.relativePath}" is invalid.`,
+    );
+  }
 });
 
 test("high-level core inbox promotion ports preserve journal and experiment-note idempotency", async () => {
