@@ -14,6 +14,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@healthybob/runtime-state": "../../packages/runtime-state/src/index.ts",
   "@healthybob/core": "../../packages/core/src/index.ts",
   "@healthybob/importers": "../../packages/importers/src/index.ts",
+  "@healthybob/inboxd": "../../packages/inboxd/src/index.ts",
   "@healthybob/device-syncd": "../../packages/device-syncd/src/index.ts",
 } as const;
 

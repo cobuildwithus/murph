@@ -49,6 +49,12 @@
       "@healthybob/importers/*": [
         "packages/importers/src/*"
       ],
+      "@healthybob/inboxd": [
+        "packages/inboxd/src/index.ts"
+      ],
+      "@healthybob/inboxd/*": [
+        "packages/inboxd/src/*"
+      ],
       "@healthybob/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],

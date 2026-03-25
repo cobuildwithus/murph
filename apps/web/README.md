@@ -1,25 +1,28 @@
 # @healthybob/hosted-web
 
-Hosted device-sync control plane for Vercel deployments.
+Hosted integration control plane for Vercel deployments.
 
 This app is intentionally separate from `packages/web`:
 
 - `packages/web` stays local-only and reads a local Healthy Bob vault.
-- `apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, token escrow, and sparse local-agent APIs.
+- `apps/web` is the hosted integration control plane for OAuth callbacks, webhooks, token escrow, sparse Linq routing state, and sparse local-agent APIs.
 
 ## Core responsibilities
 
 - WHOOP and Oura OAuth start/callback flows
 - WHOOP and Oura webhook intake
+- hosted Linq webhook ingress plus sparse chat routing state
 - per-user connection ownership mapping
 - encrypted provider-token escrow
-- local-agent pairing plus sparse signal/token routes
+- local-agent pairing plus sparse signal/token routes for hosted integrations
 
 ## Non-goals
 
 - canonical health-data storage
+- canonical inbox-capture storage
 - vault imports
 - proxying provider health payloads through the hosted app
+- storing canonical Linq chat captures in Postgres
 
 ## Key environment variables
 
@@ -30,10 +33,17 @@ Required:
 - `DATABASE_URL`
 - `DEVICE_SYNC_ENCRYPTION_KEY`
 - `DEVICE_SYNC_ENCRYPTION_KEY_VERSION`
+
+Required for the hosted device-sync lane:
+
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
 - `OURA_CLIENT_ID`
 - `OURA_CLIENT_SECRET`
+
+Required for hosted Linq ingress:
+
+- `LINQ_WEBHOOK_SECRET`
 
 Optional but recommended:
 
@@ -44,6 +54,8 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
+
+When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
 Development fallback only:
 
@@ -94,12 +106,16 @@ Browser-authenticated routes:
 - `POST /api/device-sync/providers/:provider/connect`
 - `POST /api/device-sync/oauth/:provider/start`
 - `POST /api/device-sync/agents/pair`
+- `GET /api/linq/bindings`
+- `POST /api/linq/bindings`
 
 Public provider-facing routes:
 
 - `GET /api/device-sync/oauth/:provider/callback`
 - `POST /api/device-sync/webhooks/:provider`
 - `GET /api/device-sync/webhooks/oura` for Oura webhook verification challenges
+- `GET /api/linq/webhook`
+- `POST /api/linq/webhook`
 
 Local-agent routes:
 
@@ -107,3 +123,5 @@ Local-agent routes:
 - `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
+- `POST /api/linq/agents/pair`
+- `GET /api/linq/agent/events`

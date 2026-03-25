@@ -1,8 +1,11 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { EmitCapture, PollConnector } from '../types.js'
 import { normalizeLinqWebhookEvent, type LinqAttachmentDownloadDriver } from './normalize.js'
-import type { LinqWebhookEvent } from './types.js'
+import {
+  isLinqWebhookPayloadError,
+  isLinqWebhookVerificationError,
+  verifyAndParseLinqWebhookRequest,
+} from './webhook.js'
 
 const DEFAULT_LINQ_WEBHOOK_HOST = '0.0.0.0'
 const DEFAULT_LINQ_WEBHOOK_PATH = '/linq-webhook'
@@ -181,27 +184,27 @@ async function handleLinqWebhookRequest(input: {
   }
 
   const rawBody = await readRequestBody(input.request)
-  if (input.webhookSecret) {
-    const timestamp = normalizeHeaderValue(input.request.headers['x-webhook-timestamp'])
-    const signature = normalizeHeaderValue(input.request.headers['x-webhook-signature'])
-    if (!timestamp || !signature) {
-      respondJson(input.response, 401, {
-        ok: false,
-        error: 'Missing Linq webhook signature headers.',
-      })
-      return
-    }
+  let payload
 
-    if (!verifyLinqWebhookSignature(input.webhookSecret, rawBody, timestamp, signature)) {
-      respondJson(input.response, 401, {
-        ok: false,
-        error: 'Invalid Linq webhook signature.',
-      })
-      return
-    }
+  try {
+    payload = verifyAndParseLinqWebhookRequest({
+      headers: input.request.headers,
+      rawBody,
+      webhookSecret: input.webhookSecret,
+    })
+  } catch (error) {
+    const normalizedMessage = error instanceof Error ? error.message : String(error)
+    const statusCode = isLinqWebhookVerificationError(error)
+      ? 401
+      : isLinqWebhookPayloadError(error)
+        ? 400
+        : 500
+    respondJson(input.response, statusCode, {
+      ok: false,
+      error: normalizedMessage,
+    })
+    return
   }
-
-  const payload = parseLinqWebhookEvent(rawBody)
   if (payload.event_type !== 'message.received') {
     respondJson(input.response, 202, {
       ok: true,
@@ -225,55 +228,6 @@ async function handleLinqWebhookRequest(input: {
   })
 }
 
-function parseLinqWebhookEvent(rawBody: string): LinqWebhookEvent {
-  let payload: unknown
-  try {
-    payload = JSON.parse(rawBody)
-  } catch (error) {
-    throw new Error(
-      `Linq webhook payload must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('Linq webhook payload must be an object.')
-  }
-
-  const record = payload as Record<string, unknown>
-  const apiVersion = normalizeRequiredString(record.api_version, 'Linq webhook api_version')
-  const eventId = normalizeRequiredString(record.event_id, 'Linq webhook event_id')
-  const createdAt = normalizeRequiredString(record.created_at, 'Linq webhook created_at')
-  const eventType = normalizeRequiredString(record.event_type, 'Linq webhook event_type')
-
-  return {
-    api_version: apiVersion as LinqWebhookEvent['api_version'],
-    event_id: eventId,
-    created_at: createdAt,
-    event_type: eventType,
-    trace_id: normalizeNullableString(record.trace_id),
-    partner_id: normalizeNullableString(record.partner_id),
-    data: record.data,
-  }
-}
-
-function verifyLinqWebhookSignature(
-  secret: string,
-  payload: string,
-  timestamp: string,
-  signature: string,
-): boolean {
-  const expected = createHmac('sha256', secret)
-    .update(`${timestamp}.${payload}`)
-    .digest('hex')
-  const normalizedSignature = signature.replace(/^sha256=/iu, '').trim().toLowerCase()
-
-  try {
-    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(normalizedSignature, 'hex'))
-  } catch {
-    return false
-  }
-}
-
 async function readRequestBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = []
   for await (const chunk of request) {
@@ -291,14 +245,6 @@ function respondJson(
   response.statusCode = statusCode
   response.setHeader('content-type', 'application/json; charset=utf-8')
   response.end(`${JSON.stringify(body)}\n`)
-}
-
-function normalizeHeaderValue(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) {
-    return normalizeNullableString(value[0])
-  }
-
-  return normalizeNullableString(value)
 }
 
 function normalizeNullableString(value: unknown): string | null {

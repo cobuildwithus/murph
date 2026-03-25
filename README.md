@@ -231,12 +231,12 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | `packages/parsers` | Local-first attachment parsing, provider selection, and derived artifact publication under `derived/inbox/**`. |
 | `packages/query` | Read model assembly, lookups, list filters, summaries, and export-pack generation. |
 | `packages/web` | Local-only Next.js app that reads the vault on the server through `packages/query` and exposes a read-only observability surface. |
-| `apps/web` | Hosted Next.js device-sync control plane for Vercel deployments, including OAuth callbacks, webhooks, encrypted token escrow, and sparse local-agent APIs. |
+| `apps/web` | Hosted Next.js integration control plane for Vercel deployments, including device OAuth callbacks, webhooks, encrypted token escrow, hosted Linq ingress, and sparse local-agent APIs. |
 | `packages/cli` | The `vault-cli` operator surface, input validation, assistant session orchestration, middleware, and output envelopes. |
 
 ## Local Web Observatory
 
-The repo now includes two web surfaces: a local-only app under `packages/web` and a hosted device-sync control plane under `apps/web`.
+The repo now includes two web surfaces: a local-only app under `packages/web` and a hosted integration control plane under `apps/web`.
 
 - It is read-only and uses the query layer on the server.
 - It requires an explicit `VAULT` environment variable.

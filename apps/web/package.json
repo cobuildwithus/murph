@@ -23,6 +23,7 @@
     "@prisma/adapter-pg": "^7.5.0",
     "@healthybob/device-syncd": "workspace:*",
     "@healthybob/importers": "workspace:*",
+    "@healthybob/inboxd": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
     "@prisma/client": "^7.5.0",
     "next": "^16.1.6",

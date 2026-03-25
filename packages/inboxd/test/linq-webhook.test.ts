@@ -1,0 +1,89 @@
+import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+
+import { test } from "vitest";
+
+import { verifyAndParseLinqWebhookRequest } from "../src/index.js";
+
+test("verifyAndParseLinqWebhookRequest validates the Linq signature envelope", () => {
+  const payload = JSON.stringify({
+    api_version: "v3",
+    event_id: "evt_123",
+    created_at: "2026-03-25T10:00:00.000Z",
+    event_type: "message.received",
+    trace_id: "trace_123",
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      recipient_phone: "+15557654321",
+      received_at: "2026-03-25T09:59:59.000Z",
+      is_from_me: false,
+      service: "SMS",
+      message: {
+        id: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "Hello from Linq",
+          },
+        ],
+      },
+    },
+  });
+  const timestamp = "1711360800";
+  const signature = signLinqWebhook("secret-123", payload, timestamp);
+
+  const event = verifyAndParseLinqWebhookRequest({
+    headers: new Headers({
+      "x-webhook-timestamp": timestamp,
+      "x-webhook-signature": signature,
+    }),
+    rawBody: payload,
+    webhookSecret: "secret-123",
+  });
+
+  assert.equal(event.event_id, "evt_123");
+  assert.equal(event.event_type, "message.received");
+  assert.equal(event.trace_id, "trace_123");
+});
+
+test("verifyAndParseLinqWebhookRequest rejects invalid signatures", () => {
+  const payload = JSON.stringify({
+    api_version: "v3",
+    event_id: "evt_invalid",
+    created_at: "2026-03-25T10:00:00.000Z",
+    event_type: "message.received",
+    data: {
+      chat_id: "chat_invalid",
+      from: "+15550000000",
+      recipient_phone: "+15559999999",
+      received_at: "2026-03-25T09:59:59.000Z",
+      is_from_me: false,
+      service: "SMS",
+      message: {
+        id: "msg_invalid",
+        parts: [],
+      },
+    },
+  });
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-timestamp": "1711360800",
+          "x-webhook-signature": "sha256=deadbeef",
+        },
+        rawBody: payload,
+        webhookSecret: "secret-123",
+      }),
+    /Invalid Linq webhook signature/u,
+  );
+});
+
+function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
+  const signature = createHmac("sha256", secret)
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+  return `sha256=${signature}`;
+}

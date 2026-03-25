@@ -79,6 +79,16 @@ export type {
 export {
   createLinqWebhookConnector,
 } from "./connectors/linq/connector.js";
+export {
+  isLinqWebhookPayloadError,
+  isLinqWebhookVerificationError,
+  parseLinqWebhookEvent,
+  readLinqWebhookHeader,
+  verifyAndParseLinqWebhookRequest,
+  verifyLinqWebhookSignature,
+  LinqWebhookPayloadError,
+  LinqWebhookVerificationError,
+} from "./connectors/linq/webhook.js";
 export type {
   LinqWebhookConnectorOptions,
 } from "./connectors/linq/connector.js";

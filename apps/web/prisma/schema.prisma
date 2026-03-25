@@ -129,3 +129,41 @@ model DeviceBrowserAssertionNonce {
   @@index([expiresAt])
   @@map("device_browser_assertion_nonce")
 }
+
+
+model LinqRecipientBinding {
+  id             String             @id
+  userId         String             @map("user_id")
+  recipientPhone String             @map("recipient_phone")
+  label          String?
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  events         LinqWebhookEvent[]
+
+  @@unique([recipientPhone])
+  @@index([userId, recipientPhone])
+  @@map("linq_recipient_binding")
+}
+
+model LinqWebhookEvent {
+  id             Int                  @id @default(autoincrement())
+  userId         String               @map("user_id")
+  bindingId      String               @map("binding_id")
+  recipientPhone String               @map("recipient_phone")
+  eventId        String               @unique @map("event_id")
+  traceId        String?              @map("trace_id")
+  eventType      String               @map("event_type")
+  chatId         String?              @map("chat_id")
+  messageId      String?              @map("message_id")
+  occurredAt     DateTime?            @map("occurred_at")
+  receivedAt     DateTime             @map("received_at")
+  payloadJson    Json                 @map("payload_json")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  binding        LinqRecipientBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+
+  @@index([userId, id])
+  @@index([bindingId, id])
+  @@index([recipientPhone, id])
+  @@index([receivedAt])
+  @@map("linq_webhook_event")
+}

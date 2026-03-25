@@ -33,7 +33,7 @@ export default function HomePage() {
             overflowWrap: "anywhere",
           }}
         >
-          This app hosts OAuth callbacks, webhooks, and sparse local-agent APIs for WHOOP and Oura.
+          This app hosts OAuth callbacks, webhooks, sparse local-agent APIs for WHOOP and Oura, and a hosted Linq webhook ingress for "text your agent" routing.
         </p>
       </div>
     </main>
