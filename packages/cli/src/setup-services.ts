@@ -648,6 +648,7 @@ function assistantSelectionToOperatorDefaults(
     baseUrl: assistant.baseUrl,
     apiKeyEnv: assistant.apiKeyEnv,
     providerName: assistant.providerName,
+    account: assistant.account ?? null,
   }
 }
 
@@ -676,6 +677,8 @@ function assistantOperatorDefaultsMatch(
       normalizeNullableConfigField(next.apiKeyEnv) &&
     normalizeNullableConfigField(existing?.providerName) ===
       normalizeNullableConfigField(next.providerName) &&
+    JSON.stringify(existing?.account ?? null) ===
+      JSON.stringify(next.account ?? null) &&
     (existing?.oss ?? null) === (next.oss ?? null)
   )
 }
@@ -690,14 +693,36 @@ function formatAssistantDefaultsSummary(
   }
 
   if (assistant.oss) {
-    return `${assistant.model ?? 'the configured local model'} in Codex OSS`
+    return appendAssistantAccountSummary(
+      `${assistant.model ?? 'the configured local model'} in Codex OSS`,
+      assistant,
+    )
   }
 
-  return `${assistant.model ?? 'the configured model'} in Codex CLI`
+  return appendAssistantAccountSummary(
+    `${assistant.model ?? 'the configured model'} in Codex CLI`,
+    assistant,
+  )
 }
 
 function normalizeNullableConfigField(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function appendAssistantAccountSummary(
+  summary: string,
+  assistant: SetupConfiguredAssistant,
+): string {
+  const planName = normalizeNullableConfigField(assistant.account?.planName)
+  if (planName) {
+    return `${summary} (${planName} account)`
+  }
+
+  if (assistant.account?.kind === 'api-key') {
+    return `${summary} (API key account)`
+  }
+
+  return summary
 }
 
 function defaultResolveCliBinPath(): string {

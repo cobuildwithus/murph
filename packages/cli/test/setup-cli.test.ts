@@ -29,6 +29,10 @@ import {
   saveAssistantAutomationState,
 } from '../src/assistant-state.js'
 import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
+import {
+  createSetupAssistantAccountResolver,
+  detectCodexAccountFromAuthJson,
+} from '../src/setup-assistant-account.js'
 import { createSetupServices } from '../src/setup-services.js'
 import {
   describeSelectedSetupWearables,
@@ -49,6 +53,19 @@ import {
 } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
+
+function buildFakeJwt(payload: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'none' }), 'utf8')
+  const body = Buffer.from(JSON.stringify(payload), 'utf8')
+  const encode = (value: Buffer) =>
+    value
+      .toString('base64')
+      .replace(/=/gu, '')
+      .replace(/\+/gu, '-')
+      .replace(/\//gu, '_')
+
+  return `${encode(header)}.${encode(body)}.`
+}
 
 test('setup wizard completion waits for Ink exit before resolving the selected flow', async () => {
   const completion = createSetupWizardCompletionController()
@@ -78,6 +95,107 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
     assistantPreset: 'codex-cli',
     channels: ['email'],
     wearables: [],
+  })
+})
+
+test('codex auth account parser captures the local ChatGPT plan without persisting identifiers', () => {
+  const account = detectCodexAccountFromAuthJson(
+    JSON.stringify({
+      tokens: {
+        idToken: buildFakeJwt({
+          chatgpt_plan_type: 'plus',
+        }),
+      },
+    }),
+  )
+
+  assert.deepEqual(account, {
+    source: 'codex-auth-json',
+    kind: 'account',
+    planCode: 'plus',
+    planName: 'Plus',
+    quota: null,
+  })
+})
+
+test('setup assistant account resolver merges codex auth plan with rpc quota metadata', async () => {
+  const resolver = createSetupAssistantAccountResolver({
+    env: () => ({
+      CODEX_HOME: '/tmp/fake-codex-home',
+    }),
+    readTextFile: async () =>
+      JSON.stringify({
+        tokens: {
+          idToken: buildFakeJwt({
+            chatgpt_plan_type: 'pro',
+          }),
+        },
+      }),
+    probeCodexRpc: async () => ({
+      source: 'codex-rpc',
+      kind: 'account',
+      planCode: null,
+      planName: null,
+      quota: {
+        creditsRemaining: 42,
+        creditsUnlimited: false,
+        primaryWindow: {
+          usedPercent: 35,
+          remainingPercent: 65,
+          windowMinutes: 300,
+          resetsAt: '2026-03-25T10:00:00.000Z',
+        },
+        secondaryWindow: {
+          usedPercent: 60,
+          remainingPercent: 40,
+          windowMinutes: 10080,
+          resetsAt: '2026-03-29T10:00:00.000Z',
+        },
+      },
+    }),
+  })
+
+  const account = await resolver.resolve({
+    assistant: {
+      preset: 'codex-cli',
+      enabled: true,
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      profile: null,
+      reasoningEffort: null,
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      oss: false,
+      account: null,
+      detail: 'Use Codex CLI with gpt-5.4.',
+    },
+  })
+
+  assert.deepEqual(account, {
+    source: 'codex-rpc+codex-auth-json',
+    kind: 'account',
+    planCode: 'pro',
+    planName: 'Pro',
+    quota: {
+      creditsRemaining: 42,
+      creditsUnlimited: false,
+      primaryWindow: {
+        usedPercent: 35,
+        remainingPercent: 65,
+        windowMinutes: 300,
+        resetsAt: '2026-03-25T10:00:00.000Z',
+      },
+      secondaryWindow: {
+        usedPercent: 60,
+        remainingPercent: 40,
+        windowMinutes: 10080,
+        resetsAt: '2026-03-29T10:00:00.000Z',
+      },
+    },
   })
 })
 
@@ -1750,6 +1868,39 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
 
   try {
     const result = await services.setupMacos({
+      assistant: {
+        preset: 'codex-cli',
+        enabled: true,
+        provider: 'codex-cli',
+        model: 'gpt-5.4',
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        codexCommand: null,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: 'workspace-write',
+        approvalPolicy: 'on-request',
+        oss: false,
+        account: {
+          source: 'codex-rpc+codex-auth-json',
+          kind: 'account',
+          planCode: 'plus',
+          planName: 'Plus',
+          quota: {
+            creditsRemaining: 18,
+            creditsUnlimited: false,
+            primaryWindow: {
+              usedPercent: 45,
+              remainingPercent: 55,
+              windowMinutes: 300,
+              resetsAt: '2026-03-25T10:00:00.000Z',
+            },
+            secondaryWindow: null,
+          },
+        },
+        detail: 'Use Codex CLI with gpt-5.4. Detected Plus account from local Codex credentials.',
+      },
       requestId: 'req-123',
       vault: vaultRoot,
       whisperModel: 'base.en',
@@ -1797,12 +1948,31 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       true,
     )
     assert.equal(
+      result.steps.some((step) => step.id === 'assistant-defaults' && step.status === 'completed'),
+      true,
+    )
+    assert.equal(
       result.notes.includes('Open a new shell or run source ~/.zshrc to use healthybob immediately.'),
       true,
     )
 
     const modelText = await readFile(expectedWhisperModelPath, 'utf8')
     const operatorConfig = JSON.parse(await readFile(operatorConfigPath, 'utf8')) as {
+      assistant?: {
+        account?: {
+          kind?: string | null
+          planCode?: string | null
+          planName?: string | null
+          quota?: {
+            creditsRemaining?: number | null
+            primaryWindow?: {
+              remainingPercent?: number | null
+            } | null
+          } | null
+        } | null
+        model?: string | null
+        provider?: string | null
+      } | null
       defaultVault: string | null
     }
     const healthybobShim = await readFile(healthybobShimPath, 'utf8')
@@ -1810,6 +1980,13 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     const shellProfile = await readFile(shellProfilePath, 'utf8')
     assert.equal(modelText, 'model')
     assert.equal(operatorConfig.defaultVault, '~/vault')
+    assert.equal(operatorConfig.assistant?.provider, 'codex-cli')
+    assert.equal(operatorConfig.assistant?.model, 'gpt-5.4')
+    assert.equal(operatorConfig.assistant?.account?.kind, 'account')
+    assert.equal(operatorConfig.assistant?.account?.planCode, 'plus')
+    assert.equal(operatorConfig.assistant?.account?.planName, 'Plus')
+    assert.equal(operatorConfig.assistant?.account?.quota?.creditsRemaining, 18)
+    assert.equal(operatorConfig.assistant?.account?.quota?.primaryWindow?.remainingPercent, 55)
     assert.equal(healthybobShim, buildExpectedCliShimScript(cliBinPath))
     assert.equal(vaultCliShim, buildExpectedCliShimScript(cliBinPath))
     assert.match(shellProfile, /export PATH="\$HOME\/\.local\/bin:\$PATH"/u)

@@ -640,6 +640,23 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
             codexCommand: '/opt/bin/codex',
             model: 'gpt-oss:20b',
             identityId: 'assistant:primary',
+            account: {
+              source: 'codex-rpc+codex-auth-json',
+              kind: 'account',
+              planCode: 'pro',
+              planName: 'Pro',
+              quota: {
+                creditsRemaining: 12,
+                creditsUnlimited: false,
+                primaryWindow: {
+                  usedPercent: 40,
+                  remainingPercent: 60,
+                  windowMinutes: 300,
+                  resetsAt: '2026-03-25T10:00:00.000Z',
+                },
+                secondaryWindow: null,
+              },
+            },
             sandbox: 'workspace-write',
             approvalPolicy: 'on-request',
             profile: 'ops',

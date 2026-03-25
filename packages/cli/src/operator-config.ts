@@ -35,6 +35,41 @@ const assistantOperatorDefaultsSchema = z.object({
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
+  account: z
+    .object({
+      source: z.string().min(1),
+      kind: z.enum(['account', 'api-key', 'unknown']),
+      planCode: z.string().min(1).nullable(),
+      planName: z.string().min(1).nullable(),
+      quota: z
+        .object({
+          creditsRemaining: z.number().finite().nullable(),
+          creditsUnlimited: z.boolean().nullable(),
+          primaryWindow: z
+            .object({
+              usedPercent: z.number().min(0).max(100),
+              remainingPercent: z.number().min(0).max(100),
+              windowMinutes: z.number().int().positive().nullable(),
+              resetsAt: z.string().datetime({ offset: true }).nullable(),
+            })
+            .strict()
+            .nullable(),
+          secondaryWindow: z
+            .object({
+              usedPercent: z.number().min(0).max(100),
+              remainingPercent: z.number().min(0).max(100),
+              windowMinutes: z.number().int().positive().nullable(),
+              resetsAt: z.string().datetime({ offset: true }).nullable(),
+            })
+            .strict()
+            .nullable(),
+        })
+        .strict()
+        .nullable(),
+    })
+    .strict()
+    .nullable()
+    .optional(),
 })
 
 const operatorConfigSchema = z.object({
@@ -336,6 +371,7 @@ function mergeAssistantOperatorDefaults(
       'apiKeyEnv' in patch ? patch.apiKeyEnv : existing?.apiKeyEnv ?? null,
     providerName:
       'providerName' in patch ? patch.providerName : existing?.providerName ?? null,
+    account: 'account' in patch ? patch.account : existing?.account ?? null,
   })
 }
 

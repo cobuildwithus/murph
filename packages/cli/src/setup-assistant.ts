@@ -1,6 +1,11 @@
 import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
 import { normalizeNullableString } from './assistant/shared.js'
+import {
+  createSetupAssistantAccountResolver,
+  formatSetupAssistantAccountLabel,
+  type SetupAssistantAccountResolver,
+} from './setup-assistant-account.js'
 import { prepareSetupPromptInput } from './setup-prompt-io.js'
 import {
   type SetupAssistantPreset,
@@ -31,6 +36,7 @@ export interface SetupAssistantResolver {
 }
 
 interface SetupAssistantResolverDependencies {
+  assistantAccount?: SetupAssistantAccountResolver
   discoverModels?: (baseUrl: string) => Promise<string[]>
   input?: NodeJS.ReadableStream
   output?: NodeJS.WritableStream
@@ -107,14 +113,17 @@ export function createSetupAssistantResolver(
 ): SetupAssistantResolver {
   const discoverModels =
     dependencies.discoverModels ?? defaultDiscoverOpenAICompatibleModels
+  const assistantAccount =
+    dependencies.assistantAccount ?? createSetupAssistantAccountResolver()
   const input = dependencies.input ?? defaultInput
   const output = dependencies.output ?? defaultOutput
 
   return {
     async resolve(resolutionInput) {
+      let resolvedAssistant: SetupConfiguredAssistant
       switch (resolutionInput.preset) {
         case 'skip':
-          return {
+          resolvedAssistant = {
             preset: 'skip',
             enabled: false,
             provider: null,
@@ -128,9 +137,11 @@ export function createSetupAssistantResolver(
             sandbox: null,
             approvalPolicy: null,
             oss: null,
+            account: null,
             detail:
               'Skipped saving assistant defaults during setup. Healthy Bob will keep any existing assistant config unchanged.',
           }
+          break
 
         case 'codex-cli': {
           const model = await resolvePromptedValue({
@@ -144,7 +155,7 @@ export function createSetupAssistantResolver(
               'Default assistant model for Codex CLI',
           })
 
-          return {
+          resolvedAssistant = {
             preset: 'codex-cli',
             enabled: true,
             provider: 'codex-cli',
@@ -166,8 +177,13 @@ export function createSetupAssistantResolver(
             sandbox: DEFAULT_SETUP_SANDBOX,
             approvalPolicy: DEFAULT_SETUP_APPROVAL_POLICY,
             oss: false,
-            detail: `Use Codex CLI with ${model}.`,
+            account: null,
+            detail: buildCodexAssistantDetail({
+              model,
+              oss: false,
+            }),
           }
+          break
         }
 
         case 'codex-oss': {
@@ -182,7 +198,7 @@ export function createSetupAssistantResolver(
               'Default local model for Codex OSS',
           })
 
-          return {
+          resolvedAssistant = {
             preset: 'codex-oss',
             enabled: true,
             provider: 'codex-cli',
@@ -204,8 +220,13 @@ export function createSetupAssistantResolver(
             sandbox: DEFAULT_SETUP_SANDBOX,
             approvalPolicy: DEFAULT_SETUP_APPROVAL_POLICY,
             oss: true,
-            detail: `Use Codex CLI in OSS mode with ${model}.`,
+            account: null,
+            detail: buildCodexAssistantDetail({
+              model,
+              oss: true,
+            }),
           }
+          break
         }
 
         case 'openai-compatible': {
@@ -248,7 +269,7 @@ export function createSetupAssistantResolver(
               'API key environment variable (leave blank for local/no auth)',
           })
 
-          return {
+          resolvedAssistant = {
             preset: 'openai-compatible',
             enabled: true,
             provider: 'openai-compatible',
@@ -268,14 +289,31 @@ export function createSetupAssistantResolver(
             sandbox: null,
             approvalPolicy: null,
             oss: false,
+            account: null,
             detail: buildOpenAICompatibleAssistantDetail({
               apiKeyEnv,
               baseUrl,
               model,
             }),
           }
+          break
         }
       }
+
+      const detectedAccount = await assistantAccount.resolve({
+        assistant: resolvedAssistant,
+      })
+
+      return detectedAccount === null
+        ? resolvedAssistant
+        : {
+            ...resolvedAssistant,
+            account: detectedAccount,
+            detail: appendDetectedAssistantAccountDetail(
+              resolvedAssistant.detail,
+              detectedAccount,
+            ),
+          }
     },
   }
 }
@@ -444,4 +482,25 @@ function buildOpenAICompatibleAssistantDetail(input: {
   }
 
   return `Use ${input.model} through the OpenAI-compatible endpoint at ${input.baseUrl}.`
+}
+
+function buildCodexAssistantDetail(input: {
+  model: string
+  oss: boolean
+}): string {
+  return input.oss
+    ? `Use Codex CLI in OSS mode with ${input.model}.`
+    : `Use Codex CLI with ${input.model}.`
+}
+
+function appendDetectedAssistantAccountDetail(
+  detail: string,
+  account: NonNullable<SetupConfiguredAssistant['account']>,
+): string {
+  const label = formatSetupAssistantAccountLabel(account)
+  if (!label) {
+    return detail
+  }
+
+  return `${detail} Detected ${label} from local Codex credentials.`
 }

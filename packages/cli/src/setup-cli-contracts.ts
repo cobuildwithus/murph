@@ -5,7 +5,11 @@ import {
   assistantSandboxValues,
 } from './assistant-cli-contracts.js'
 import { inboxBootstrapResultSchema } from './inbox-cli-contracts.js'
-import { pathSchema, requestIdSchema } from './vault-cli-contracts.js'
+import {
+  isoTimestampSchema,
+  pathSchema,
+  requestIdSchema,
+} from './vault-cli-contracts.js'
 
 export const whisperModelValues = [
   'tiny',
@@ -34,6 +38,14 @@ export const setupAssistantPresetValues = [
   'skip',
 ] as const
 export const setupAssistantPresetSchema = z.enum(setupAssistantPresetValues)
+export const setupAssistantAccountKindValues = [
+  'account',
+  'api-key',
+  'unknown',
+] as const
+export const setupAssistantAccountKindSchema = z.enum(
+  setupAssistantAccountKindValues,
+)
 
 export const setupStepKindSchema = z.enum(['install', 'download', 'configure'])
 
@@ -78,6 +90,34 @@ export const setupConfiguredWearableSchema = z.object({
   missingEnv: z.array(z.string().min(1)),
 })
 
+export const setupAssistantQuotaWindowSchema = z
+  .object({
+    usedPercent: z.number().min(0).max(100),
+    remainingPercent: z.number().min(0).max(100),
+    windowMinutes: z.number().int().positive().nullable(),
+    resetsAt: isoTimestampSchema.nullable(),
+  })
+  .strict()
+
+export const setupAssistantQuotaSchema = z
+  .object({
+    creditsRemaining: z.number().finite().nullable(),
+    creditsUnlimited: z.boolean().nullable(),
+    primaryWindow: setupAssistantQuotaWindowSchema.nullable(),
+    secondaryWindow: setupAssistantQuotaWindowSchema.nullable(),
+  })
+  .strict()
+
+export const setupAssistantAccountSchema = z
+  .object({
+    source: z.string().min(1),
+    kind: setupAssistantAccountKindSchema,
+    planCode: z.string().min(1).nullable(),
+    planName: z.string().min(1).nullable(),
+    quota: setupAssistantQuotaSchema.nullable(),
+  })
+  .strict()
+
 export const setupConfiguredAssistantSchema = z.object({
   preset: setupAssistantPresetSchema,
   enabled: z.boolean(),
@@ -92,6 +132,7 @@ export const setupConfiguredAssistantSchema = z.object({
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   oss: z.boolean().nullable(),
+  account: setupAssistantAccountSchema.nullable().optional(),
   detail: z.string().min(1),
 })
 
@@ -182,6 +223,14 @@ export type WhisperModel = z.infer<typeof whisperModelSchema>
 export type SetupChannel = z.infer<typeof setupChannelSchema>
 export type SetupWearable = z.infer<typeof setupWearableSchema>
 export type SetupAssistantPreset = z.infer<typeof setupAssistantPresetSchema>
+export type SetupAssistantAccountKind = z.infer<
+  typeof setupAssistantAccountKindSchema
+>
+export type SetupAssistantQuotaWindow = z.infer<
+  typeof setupAssistantQuotaWindowSchema
+>
+export type SetupAssistantQuota = z.infer<typeof setupAssistantQuotaSchema>
+export type SetupAssistantAccount = z.infer<typeof setupAssistantAccountSchema>
 export type SetupConfiguredAssistant = z.infer<
   typeof setupConfiguredAssistantSchema
 >
