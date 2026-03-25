@@ -82,7 +82,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       description:
         'Run ChatGPT Deep Research through review:gpt, wait for the result, and save the captured markdown note under research/ in the selected vault.',
       hint:
-        'Use this when you need a deeper current-evidence scan that should leave a durable markdown note in the vault.',
+        'Use this when you need a deeper current-evidence scan that should leave a durable markdown note in the vault. Free-tier access may be more limited.',
       examples: [
         {
           args: {
@@ -119,7 +119,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       description:
         'Run GPT Pro through review:gpt, wait for the result, and save the captured markdown note under research/ in the selected vault.',
       hint:
-        'Use this when you want a durable GPT Pro synthesis saved into the vault without switching into Deep Research mode.',
+        'Use this when you want a durable GPT Pro synthesis saved into the vault without switching into Deep Research mode. Healthy Bob will warn when the saved assistant account is not Pro.',
       examples: [
         {
           args: {

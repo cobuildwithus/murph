@@ -15,6 +15,7 @@ export const researchRunResultSchema = z.object({
   chat: z.string().min(1).nullable(),
   model: z.string().min(1).nullable(),
   thinking: z.string().min(1).nullable(),
+  warnings: z.array(z.string().min(1)),
 })
 
 export type ResearchExecutionMode =

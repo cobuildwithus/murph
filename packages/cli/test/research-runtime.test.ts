@@ -71,6 +71,7 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
     },
     {
       now: () => fixedNow,
+      resolveAssistantDefaults: async () => null,
       resolveWorkspaceRoot: () => '/repo',
       createTempDirectory: async () => '/tmp/healthybob-research-case',
       readTextFile: async (filePath) => {
@@ -143,10 +144,11 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
     chat: '69abc',
     model: null,
     thinking: null,
+    warnings: [],
   })
 })
 
-test('runDeepthinkPrompt targets GPT Pro defaults and derives a title from the prompt', async () => {
+test('runDeepthinkPrompt targets GPT Pro defaults, derives a title from the prompt, and warns on non-Pro plans', async () => {
   const fixedNow = new Date('2026-03-24T01:02:03.004Z')
   let recordedArgs: string[] | null = null
   let recordedSave: { relativePath: string; summary: string } | null = null
@@ -158,6 +160,27 @@ test('runDeepthinkPrompt targets GPT Pro defaults and derives a title from the p
     },
     {
       now: () => fixedNow,
+      resolveAssistantDefaults: async () => ({
+        provider: 'codex-cli',
+        codexCommand: 'codex',
+        model: 'gpt-5.4',
+        reasoningEffort: null,
+        identityId: null,
+        sandbox: 'workspace-write',
+        approvalPolicy: 'on-request',
+        profile: null,
+        oss: false,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        account: {
+          source: 'codex-auth-json',
+          kind: 'account',
+          planCode: 'plus',
+          planName: 'Plus',
+          quota: null,
+        },
+      }),
       resolveWorkspaceRoot: () => '/repo',
       createTempDirectory: async () => '/tmp/healthybob-deepthink-case',
       readTextFile: async () => 'Answer text',
@@ -204,6 +227,99 @@ test('runDeepthinkPrompt targets GPT Pro defaults and derives a title from the p
     result.title,
     'Think through whether adding more zone-2 cardio is worth the tradeoff for rec...',
   )
+  assert.deepEqual(result.warnings, [
+    'Deepthink targets GPT Pro and may fail because the saved assistant account is Plus, not Pro.',
+  ])
+})
+
+test('runDeepthinkPrompt skips warnings when the saved assistant account is Pro', async () => {
+  const result = await runDeepthinkPrompt(
+    {
+      vault: '/vaults/primary',
+      prompt: 'Think through a recovery tradeoff.',
+    },
+    {
+      now: () => new Date('2026-03-24T01:02:03.004Z'),
+      resolveAssistantDefaults: async () => ({
+        provider: 'codex-cli',
+        codexCommand: 'codex',
+        model: 'gpt-5.4',
+        reasoningEffort: null,
+        identityId: null,
+        sandbox: 'workspace-write',
+        approvalPolicy: 'on-request',
+        profile: null,
+        oss: false,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        account: {
+          source: 'codex-auth-json',
+          kind: 'account',
+          planCode: 'pro',
+          planName: 'Pro',
+          quota: null,
+        },
+      }),
+      resolveWorkspaceRoot: () => '/repo',
+      createTempDirectory: async () => '/tmp/healthybob-deepthink-pro-case',
+      readTextFile: async () => 'Answer text',
+      runProcess: async () => ({
+        stdout: '',
+        stderr: '',
+      }),
+      saveNote: async () => {},
+      removePath: async () => {},
+    },
+  )
+
+  assert.deepEqual(result.warnings, [])
+})
+
+test('runResearchPrompt warns on saved Free-tier accounts', async () => {
+  const result = await runResearchPrompt(
+    {
+      vault: '/vaults/primary',
+      prompt: 'Research current LDL guidance.',
+    },
+    {
+      now: () => new Date('2026-03-24T05:06:07.008Z'),
+      resolveAssistantDefaults: async () => ({
+        provider: 'codex-cli',
+        codexCommand: 'codex',
+        model: 'gpt-5.4',
+        reasoningEffort: null,
+        identityId: null,
+        sandbox: 'workspace-write',
+        approvalPolicy: 'on-request',
+        profile: null,
+        oss: false,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        account: {
+          source: 'codex-auth-json',
+          kind: 'account',
+          planCode: 'free',
+          planName: 'Free',
+          quota: null,
+        },
+      }),
+      resolveWorkspaceRoot: () => '/repo',
+      createTempDirectory: async () => '/tmp/healthybob-research-free-case',
+      readTextFile: async () => 'Research response',
+      runProcess: async () => ({
+        stdout: '',
+        stderr: '',
+      }),
+      saveNote: async () => {},
+      removePath: async () => {},
+    },
+  )
+
+  assert.deepEqual(result.warnings, [
+    'Research uses Deep Research and may be unavailable or more limited on the saved Free account.',
+  ])
 })
 
 test('runResearchPrompt preserves multiline prompts when sending and saving research requests', async () => {
@@ -218,6 +334,7 @@ test('runResearchPrompt preserves multiline prompts when sending and saving rese
     },
     {
       now: () => new Date('2026-03-24T05:06:07.008Z'),
+      resolveAssistantDefaults: async () => null,
       resolveWorkspaceRoot: () => '/repo',
       createTempDirectory: async () => '/tmp/healthybob-multiline-case',
       readTextFile: async () => 'Response body',

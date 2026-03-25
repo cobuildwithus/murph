@@ -4,6 +4,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  resolveAssistantOperatorDefaults,
+  type AssistantOperatorDefaults,
+} from './operator-config.js'
 import { loadIntegratedRuntime } from './usecases/runtime.js'
 import {
   type ResearchExecutionMode,
@@ -49,6 +53,7 @@ export interface ReviewGptProcessResult {
 export interface ResearchRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   now?: () => Date
+  resolveAssistantDefaults?: () => Promise<AssistantOperatorDefaults | null>
   resolveWorkspaceRoot?: (input: {
     prompt: string
     vault: string
@@ -282,6 +287,13 @@ async function runResearchLikePrompt(
   })
   const runProcess = dependencies.runProcess ?? runReviewGptProcess
   const persistNote = dependencies.saveNote ?? saveResearchNote
+  const resolveAssistantDefaults =
+    dependencies.resolveAssistantDefaults ?? resolveAssistantOperatorDefaults
+  const assistantDefaults = await resolveAssistantDefaults()
+  const warnings = buildResearchWarnings({
+    mode,
+    defaults: assistantDefaults,
+  })
 
   const temporaryDirectory = await createTempDirectory('healthybob-research-')
   const responseFile = path.join(temporaryDirectory, 'response.md')
@@ -341,10 +353,48 @@ async function runResearchLikePrompt(
       chat: normalizeOptionalText(input.chat) ?? null,
       model,
       thinking,
+      warnings,
     }
   } finally {
     await removePath(temporaryDirectory)
   }
+}
+
+function buildResearchWarnings(input: {
+  mode: ResearchExecutionMode
+  defaults: AssistantOperatorDefaults | null
+}): string[] {
+  const account = input.defaults?.account ?? null
+  const planCode =
+    typeof account?.planCode === 'string' ? account.planCode.trim().toLowerCase() : null
+  const planName =
+    typeof account?.planName === 'string' && account.planName.trim().length > 0
+      ? account.planName.trim()
+      : null
+
+  if (input.mode === 'gpt-pro') {
+    if (planCode === 'pro') {
+      return []
+    }
+
+    if (planName) {
+      return [
+        `Deepthink targets GPT Pro and may fail because the saved assistant account is ${planName}, not Pro.`,
+      ]
+    }
+
+    return [
+      'Deepthink targets GPT Pro and may fail because Healthy Bob could not verify a saved Pro assistant account on this machine.',
+    ]
+  }
+
+  if (planCode === 'free' || planCode === 'guest') {
+    return [
+      `Research uses Deep Research and may be unavailable or more limited on the saved ${planName ?? 'Free'} account.`,
+    ]
+  }
+
+  return []
 }
 
 async function runReviewGptProcess(
