@@ -68,7 +68,8 @@ import {
 } from './view-model.js'
 import {
   LIGHT_ASSISTANT_INK_THEME,
-  resolveAssistantInkTheme,
+  captureAssistantInkThemeBaseline,
+  resolveAssistantInkThemeForOpenChat,
   type AssistantInkTheme,
 } from './theme.js'
 
@@ -198,6 +199,7 @@ const COMPOSER_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\\\|;:'\\\",.<>/?"
 const MODIFIED_RETURN_SEQUENCE = /^\u001b?\[27;(\d+);13~$/u
 const QUEUED_FOLLOW_UP_SHORTCUT_HINT = '⌥ + ↑ edit last queued message'
 const MAX_QUEUED_FOLLOW_UP_PREVIEW_LENGTH = 88
+const ASSISTANT_INK_THEME_REFRESH_INTERVAL_MS = 2_000
 
 function useAssistantInkTheme(): AssistantInkTheme {
   return React.useContext(AssistantInkThemeContext)
@@ -2549,7 +2551,7 @@ export async function runAssistantChatWithInk(
 ): Promise<AssistantChatResult> {
   const startedAt = new Date().toISOString()
   const defaults = await resolveAssistantOperatorDefaults()
-  const theme = resolveAssistantInkTheme()
+  const themeBaseline = captureAssistantInkThemeBaseline()
   const resolved = await openAssistantConversation(input)
   const transcriptEntries = await listAssistantTranscriptEntries(
     input.vault,
@@ -2606,6 +2608,7 @@ export async function runAssistantChatWithInk(
     const App = (): React.ReactElement => {
       const createElement = React.createElement
       const { exit } = useApp()
+      const [theme, setTheme] = React.useState(() => themeBaseline.theme)
       const [session, setSession] = React.useState(resolved.session)
       const [turns, setTurns] = React.useState(0)
       const [entries, setEntries] = React.useState(seedChatEntries(transcriptEntries))
@@ -2653,6 +2656,30 @@ export async function runAssistantChatWithInk(
       React.useEffect(() => {
         latestTurnsRef.current = turns
       }, [turns])
+
+      React.useEffect(() => {
+        if (process.platform !== 'darwin') {
+          return undefined
+        }
+
+        const refreshTimer = setInterval(() => {
+          setTheme((currentTheme) => {
+            const nextTheme = resolveAssistantInkThemeForOpenChat({
+              currentMode: currentTheme.mode,
+              initialAppleInterfaceStyle: themeBaseline.initialAppleInterfaceStyle,
+              initialColorFgbg: themeBaseline.initialColorFgbg,
+            })
+
+            return nextTheme.mode === currentTheme.mode
+              ? currentTheme
+              : nextTheme
+          })
+        }, ASSISTANT_INK_THEME_REFRESH_INTERVAL_MS)
+
+        return () => {
+          clearInterval(refreshTimer)
+        }
+      }, [])
 
       React.useEffect(
         () => () => {

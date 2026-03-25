@@ -34,6 +34,20 @@ export interface ResolveAssistantInkThemeInput {
   readAppleInterfaceStyle?: () => string | null
 }
 
+export interface AssistantInkThemeBaseline {
+  initialAppleInterfaceStyle: string | null
+  initialColorFgbg: string | null | undefined
+  theme: AssistantInkTheme
+}
+
+export interface ResolveAssistantInkThemeModeForOpenChatInput {
+  currentMode: AssistantInkThemeMode
+  currentAppleInterfaceStyle: string | null
+  initialAppleInterfaceStyle: string | null
+  initialColorFgbg: string | null | undefined
+  platform: NodeJS.Platform
+}
+
 export const LIGHT_ASSISTANT_INK_THEME: AssistantInkTheme = {
   mode: 'light',
   accentColor: '#2563eb',
@@ -84,6 +98,14 @@ export const DARK_ASSISTANT_INK_THEME: AssistantInkTheme = {
   switcherSelectionTextColor: '#e2e8f0',
   switcherTextColor: '#e5e7eb',
   userLabelColor: '#93c5fd',
+}
+
+export function resolveAssistantInkThemeForMode(
+  mode: AssistantInkThemeMode,
+): AssistantInkTheme {
+  return mode === 'dark'
+    ? DARK_ASSISTANT_INK_THEME
+    : LIGHT_ASSISTANT_INK_THEME
 }
 
 export function inferAssistantInkThemeModeFromColorFgbg(
@@ -165,9 +187,83 @@ export function resolveAssistantInkTheme(
     platform,
   })
 
-  return mode === 'dark'
-    ? DARK_ASSISTANT_INK_THEME
-    : LIGHT_ASSISTANT_INK_THEME
+  return resolveAssistantInkThemeForMode(mode)
+}
+
+export function captureAssistantInkThemeBaseline(
+  input: ResolveAssistantInkThemeInput = {},
+): AssistantInkThemeBaseline {
+  const platform = input.platform ?? process.platform
+  const env = input.env ?? process.env
+  const readAppleStyle = input.readAppleInterfaceStyle ?? readAppleInterfaceStyle
+  const initialAppleInterfaceStyle =
+    platform === 'darwin'
+      ? readAppleStyle()
+      : null
+
+  return {
+    initialAppleInterfaceStyle,
+    initialColorFgbg: env.COLORFGBG,
+    theme: resolveAssistantInkTheme({
+      env,
+      platform,
+      readAppleInterfaceStyle: () => initialAppleInterfaceStyle,
+    }),
+  }
+}
+
+export function resolveAssistantInkThemeModeForOpenChat(
+  input: ResolveAssistantInkThemeModeForOpenChatInput,
+): AssistantInkThemeMode {
+  if (input.platform !== 'darwin') {
+    return input.currentMode
+  }
+
+  const launchColorFgbgMode = inferAssistantInkThemeModeFromColorFgbg(
+    input.initialColorFgbg,
+  )
+  const initialAppleMode = inferAssistantInkThemeModeFromAppleInterfaceStyle(
+    input.initialAppleInterfaceStyle,
+  )
+  const currentAppleMode = inferAssistantInkThemeModeFromAppleInterfaceStyle(
+    input.currentAppleInterfaceStyle,
+  )
+
+  if (!launchColorFgbgMode) {
+    return currentAppleMode ?? input.currentMode
+  }
+
+  if (!initialAppleMode || !currentAppleMode) {
+    return input.currentMode
+  }
+
+  return currentAppleMode === initialAppleMode
+    ? launchColorFgbgMode
+    : currentAppleMode
+}
+
+export function resolveAssistantInkThemeForOpenChat(input: {
+  currentMode: AssistantInkThemeMode
+  initialAppleInterfaceStyle: string | null
+  initialColorFgbg: string | null | undefined
+  platform?: NodeJS.Platform
+  readAppleInterfaceStyle?: () => string | null
+}): AssistantInkTheme {
+  const platform = input.platform ?? process.platform
+  const currentAppleInterfaceStyle =
+    platform === 'darwin'
+      ? (input.readAppleInterfaceStyle ?? readAppleInterfaceStyle)()
+      : null
+
+  return resolveAssistantInkThemeForMode(
+    resolveAssistantInkThemeModeForOpenChat({
+      currentMode: input.currentMode,
+      currentAppleInterfaceStyle,
+      initialAppleInterfaceStyle: input.initialAppleInterfaceStyle,
+      initialColorFgbg: input.initialColorFgbg,
+      platform,
+    }),
+  )
 }
 
 function readAppleInterfaceStyle(): string | null {

@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
 import {
+  captureAssistantInkThemeBaseline,
   DARK_ASSISTANT_INK_THEME,
   LIGHT_ASSISTANT_INK_THEME,
   inferAssistantInkThemeModeFromAppleInterfaceStyle,
   inferAssistantInkThemeModeFromColorFgbg,
+  resolveAssistantInkThemeForOpenChat,
   resolveAssistantInkTheme,
   resolveAssistantInkThemeMode,
+  resolveAssistantInkThemeModeForOpenChat,
 } from '../src/assistant/ui/theme.js'
 
 test('assistant Ink theme infers dark and light terminal backgrounds from COLORFGBG', () => {
@@ -68,5 +71,71 @@ test('assistant Ink theme returns the matching palette object', () => {
       platform: 'linux',
     }),
     LIGHT_ASSISTANT_INK_THEME,
+  )
+})
+
+test('assistant Ink open-chat theme follows macOS appearance after launch when the system mode flips', () => {
+  assert.equal(
+    resolveAssistantInkThemeModeForOpenChat({
+      currentMode: 'light',
+      currentAppleInterfaceStyle: 'Dark',
+      initialAppleInterfaceStyle: '',
+      initialColorFgbg: '0;15',
+      platform: 'darwin',
+    }),
+    'dark',
+  )
+  assert.deepEqual(
+    resolveAssistantInkThemeForOpenChat({
+      currentMode: 'light',
+      initialAppleInterfaceStyle: '',
+      initialColorFgbg: '0;15',
+      platform: 'darwin',
+      readAppleInterfaceStyle: () => 'Dark',
+    }),
+    DARK_ASSISTANT_INK_THEME,
+  )
+})
+
+test('assistant Ink open-chat theme returns to the launch terminal hint when macOS appearance returns to its launch mode', () => {
+  assert.equal(
+    resolveAssistantInkThemeModeForOpenChat({
+      currentMode: 'dark',
+      currentAppleInterfaceStyle: '',
+      initialAppleInterfaceStyle: '',
+      initialColorFgbg: '0;15',
+      platform: 'darwin',
+    }),
+    'light',
+  )
+})
+
+test('assistant Ink open-chat theme preserves a manual terminal hint when macOS appearance has not changed', () => {
+  assert.equal(
+    resolveAssistantInkThemeModeForOpenChat({
+      currentMode: 'dark',
+      currentAppleInterfaceStyle: '',
+      initialAppleInterfaceStyle: '',
+      initialColorFgbg: '15;0',
+      platform: 'darwin',
+    }),
+    'dark',
+  )
+})
+
+test('assistant Ink theme baseline captures the launch appearance snapshot once', () => {
+  assert.deepEqual(
+    captureAssistantInkThemeBaseline({
+      env: {
+        COLORFGBG: '0;15',
+      },
+      platform: 'darwin',
+      readAppleInterfaceStyle: () => '',
+    }),
+    {
+      initialAppleInterfaceStyle: '',
+      initialColorFgbg: '0;15',
+      theme: LIGHT_ASSISTANT_INK_THEME,
+    },
   )
 })
