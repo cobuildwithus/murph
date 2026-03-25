@@ -144,7 +144,7 @@ export const setupCommandOptionsSchema = z.object({
   dryRun: z
     .boolean()
     .optional()
-    .describe('Describe the macOS setup plan without mutating the machine or vault.'),
+    .describe('Describe the host setup plan without mutating the machine or vault.'),
   rebuild: z
     .boolean()
     .optional()

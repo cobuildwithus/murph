@@ -412,7 +412,7 @@ async function withFormulaBinPath(
   return withPrependedPath(env, [path.join(formulaPrefix, 'bin')])
 }
 
-async function resolveExecutablePath(
+export async function resolveExecutablePath(
   candidates: string[],
   env: NodeJS.ProcessEnv,
   absoluteFallbacks: string[] = [],
@@ -441,7 +441,7 @@ async function resolveExecutablePath(
   return null
 }
 
-function withPrependedPath(
+export function withPrependedPath(
   env: NodeJS.ProcessEnv,
   entries: string[],
 ): NodeJS.ProcessEnv {

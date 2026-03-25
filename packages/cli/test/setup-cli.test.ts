@@ -39,6 +39,8 @@ import {
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
 } from '../src/setup-runtime-env.js'
+import type { InboxSourceSetEnabledResult } from '../src/inbox-app/types.js'
+import type { InboxConnectorConfig } from '../src/inbox-cli-contracts.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
 import {
   createSetupWizardCompletionController,
@@ -465,7 +467,10 @@ function makeBootstrapResult(vault: string, options?: {
   }
 }
 
-function makeSetupResult(vault: string): SetupResult {
+function makeSetupResult(
+  vault: string,
+  overrides: Partial<SetupResult> = {},
+): SetupResult {
   return {
     arch: 'arm64',
     assistant: null,
@@ -501,12 +506,15 @@ function makeSetupResult(vault: string): SetupResult {
     vault,
     wearables: [],
     whisperModel: 'base.en',
+    ...overrides,
   }
 }
 
 async function runSetupCli<TData>(
   args: string[],
-  services: ReturnType<typeof createSetupServices> | { setupMacos(input: any): Promise<any> },
+  services:
+    | ReturnType<typeof createSetupServices>
+    | { setupHost?(input: any): Promise<any>; setupMacos(input: any): Promise<any> },
   commandName = 'healthybob',
 ): Promise<CliEnvelope<TData>> {
   const cli = createSetupCli({
@@ -579,6 +587,20 @@ async function runSetupWrapper(
   envOverrides: NodeJS.ProcessEnv,
 ): Promise<{ stdout: string; stderr: string }> {
   return await execFileAsync('bash', [path.join(repoRoot, 'scripts/setup-macos.sh'), ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: withoutNodeV8Coverage({
+      ...process.env,
+      ...envOverrides,
+    }),
+  })
+}
+
+async function runSetupHostWrapper(
+  args: string[],
+  envOverrides: NodeJS.ProcessEnv,
+): Promise<{ stdout: string; stderr: string }> {
+  return await execFileAsync('bash', [path.join(repoRoot, 'scripts/setup-host.sh'), ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
     env: withoutNodeV8Coverage({
@@ -927,6 +949,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   const receivedWearables: Array<string[] | null> = []
   const cli = createSetupCli({
     commandName: 'healthybob',
+    platform: () => 'darwin',
     terminal: {
       stdinIsTTY: true,
       stderrIsTTY: true,
@@ -975,6 +998,58 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
     assert.deepEqual(wizardInitialChannels, [['imessage']])
     assert.deepEqual(receivedChannels[1], ['imessage'])
     assert.deepEqual(receivedWearables[1], [])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('interactive onboarding on Linux starts without the macOS-only iMessage default', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-linux-'))
+  const wizardInitialChannels: Array<string[]> = []
+  const wizardPlatforms: Array<string | undefined> = []
+
+  const cli = createSetupCli({
+    commandName: 'healthybob',
+    platform: () => 'linux',
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+    services: {
+      async setupHost(input: any) {
+        return makeSetupResult(input.vault, {
+          channels: [],
+          platform: 'linux',
+        })
+      },
+      async setupMacos(input: any) {
+        return makeSetupResult(input.vault, {
+          channels: [],
+          platform: 'linux',
+        })
+      },
+    } as ReturnType<typeof createSetupServices>,
+    wizard: {
+      async run(input: any) {
+        wizardInitialChannels.push([...input.initialChannels])
+        wizardPlatforms.push(input.platform)
+        return {
+          channels: [],
+          wearables: [],
+        }
+      },
+    },
+  })
+
+  try {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+      env: process.env,
+      exit: () => {},
+      stdout() {},
+    })
+
+    assert.deepEqual(wizardInitialChannels, [[]])
+    assert.deepEqual(wizardPlatforms, ['linux'])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -2781,7 +2856,7 @@ test.sequential('healthybob alias routes empty and help invocations to setup hel
   const inboxHelp = await runSetupAliasRaw('healthybob', ['inbox', 'doctor', '--help'])
 
   assert.match(help, /Healthy Bob local machine setup helpers\./u)
-  assert.match(help, /setup\s+Provision the macOS parser\/runtime toolchain/u)
+  assert.match(help, /setup\s+Provision the local parser\/runtime toolchain for macOS or Linux/u)
   assert.match(onboardHelp, /onboard\s+[—-]\s+Alias for setup/u)
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
   assert.match(emptyInvocation, /Healthy Bob local machine setup helpers\./u)
@@ -2899,15 +2974,15 @@ test.sequential('setup-macos wrapper rejects non-macOS hosts before bootstrappin
   await writeExecutable(path.join(stubBin, 'uname'), '#!/usr/bin/env bash\necho Linux\n')
   await writeExecutable(
     path.join(stubBin, 'brew'),
-    '#!/usr/bin/env bash\nprintf "brew\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "brew\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
   await writeExecutable(
     path.join(stubBin, 'node'),
-    '#!/usr/bin/env bash\nprintf "node\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "node\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
   await writeExecutable(
     path.join(stubBin, 'corepack'),
-    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
 
   try {
@@ -2938,15 +3013,15 @@ test.sequential('setup-macos wrapper stays macOS-only even for dry-run invocatio
   await writeExecutable(path.join(stubBin, 'uname'), '#!/usr/bin/env bash\necho Linux\n')
   await writeExecutable(
     path.join(stubBin, 'brew'),
-    '#!/usr/bin/env bash\nprintf "brew\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "brew\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
   await writeExecutable(
     path.join(stubBin, 'node'),
-    '#!/usr/bin/env bash\nprintf "node\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "node\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
   await writeExecutable(
     path.join(stubBin, 'corepack'),
-    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
 
   try {
@@ -2977,15 +3052,15 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
   await writeExecutable(path.join(stubBin, 'uname'), '#!/usr/bin/env bash\necho Darwin\n')
   await writeExecutable(
     path.join(stubBin, 'brew'),
-    '#!/usr/bin/env bash\nprintf "brew\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "brew\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
   await writeExecutable(
     path.join(stubBin, 'node'),
-    '#!/usr/bin/env bash\nprintf "node\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "node\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
   await writeExecutable(
     path.join(stubBin, 'corepack'),
-    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "${CALL_LOG}"\nexit 99\n',
+    '#!/usr/bin/env bash\nprintf "corepack\\n" >> "\${CALL_LOG}"\nexit 99\n',
   )
 
   try {
@@ -3015,6 +3090,298 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
       result.stdout,
       /node packages\/cli\/dist\/bin\.js onboard --dry-run --vault \.\/vault/u,
     )
+    assert.equal(result.stderr, '')
+    assert.equal(await readOptionalText(callLog), '')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup service dry-run on Linux keeps cross-platform channels and skips iMessage cleanly', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-home-'))
+  const services = createSetupServices({
+    arch: () => 'x64',
+    env: () => ({ AGENTMAIL_API_KEY: 'agentmail-key', PATH: '' }),
+    getHomeDirectory: () => homeRoot,
+    log() {},
+    platform: () => 'linux',
+  })
+
+  try {
+    const result = await services.setupHost({
+      vault: './vault',
+      channels: ['imessage', 'email'],
+      dryRun: true,
+      skipOcr: true,
+    })
+
+    assert.equal(result.platform, 'linux')
+    assert.equal(result.dryRun, true)
+    assert.equal(result.channels[0]?.channel, 'imessage')
+    assert.equal(result.channels[0]?.configured, false)
+    assert.match(result.channels[0]?.detail ?? '', /requires macOS/u)
+    assert.equal(result.channels[1]?.channel, 'email')
+    assert.equal(result.channels[1]?.autoReply, true)
+    assert.ok(result.steps.some((step) => step.id === 'channel-imessage' && step.status === 'skipped'))
+  } finally {
+    await rm(homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('Linux setup preserves existing iMessage state while adding Telegram on the same vault', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-preserve-imessage-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const binRoot = path.join(tempRoot, 'bin')
+  const ffmpegCommand = path.join(binRoot, 'ffmpeg')
+  const pdftotextCommand = path.join(binRoot, 'pdftotext')
+  const whisperCommand = path.join(binRoot, 'whisper-cli')
+  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const connectors: InboxConnectorConfig[] = [
+    {
+      accountId: 'self',
+      enabled: true,
+      id: 'imessage:self',
+      options: {
+        includeOwnMessages: true,
+      },
+      source: 'imessage' as const,
+    },
+  ]
+  const sourceAddCalls: Array<{
+    account: string | null | undefined
+    id: string
+    requestId: string | null | undefined
+    source: string
+    vault: string
+  }> = []
+  const sourceSetEnabledCalls: Array<{
+    connectorId: string
+    enabled: boolean
+    requestId: string | null | undefined
+    vault: string
+  }> = []
+
+  await mkdir(vaultRoot, { recursive: true })
+  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperCommand)
+  await saveAssistantAutomationState(vaultRoot, {
+    version: 2,
+    inboxScanCursor: null,
+    autoReplyScanCursor: null,
+    autoReplyChannels: ['imessage'],
+    preferredChannels: ['imessage'],
+    autoReplyBacklogChannels: [],
+    autoReplyPrimed: false,
+    updatedAt: '2026-03-24T23:00:00.000Z',
+  })
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    downloadFile: async (_url, destinationPath) => {
+      await mkdir(path.dirname(destinationPath), { recursive: true })
+      await writeFile(destinationPath, 'model', 'utf8')
+    },
+    env: () => ({
+      PATH: binRoot,
+      TELEGRAM_BOT_TOKEN: 'token-123',
+    }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap() {
+        return makeBootstrapResult(vaultRoot, {
+          whisperCommand,
+        })
+      },
+      async doctor(input) {
+        return {
+          vault: input.vault,
+          configPath: '.runtime/inboxd/config.json',
+          databasePath: '.runtime/inboxd.sqlite',
+          target: input.sourceId ?? null,
+          ok: true,
+          checks: [
+            {
+              name: 'driver-import',
+              status: 'pass' as const,
+              message: 'The Telegram poll driver initialized successfully.',
+            },
+            {
+              name: 'probe',
+              status: 'pass' as const,
+              message: 'The Telegram bot token authenticated successfully with getMe.',
+            },
+          ],
+          connectors: [],
+          parserToolchain: null,
+        }
+      },
+      async sourceAdd(input) {
+        sourceAddCalls.push({
+          account: input.account,
+          id: input.id,
+          requestId: input.requestId,
+          source: input.source,
+          vault: input.vault,
+        })
+        const connector: InboxConnectorConfig = {
+          accountId: input.account ?? null,
+          enabled: true,
+          id: input.id,
+          options: {},
+          source: input.source,
+        }
+        connectors.push(connector)
+        return {
+          configPath: '.runtime/inboxd/config.json',
+          connector,
+          connectorCount: connectors.length,
+          vault: input.vault,
+        }
+      },
+      async sourceList(input) {
+        return {
+          configPath: '.runtime/inboxd/config.json',
+          connectors: connectors.map((connector) => ({
+            ...connector,
+            options: { ...connector.options },
+          })),
+          vault: input.vault,
+        }
+      },
+      async sourceSetEnabled(input): Promise<InboxSourceSetEnabledResult> {
+        const connector = connectors.find((entry) => entry.id === input.connectorId)
+        if (connector) {
+          connector.enabled = input.enabled
+        }
+        sourceSetEnabledCalls.push({
+          connectorId: input.connectorId,
+          enabled: input.enabled,
+          requestId: input.requestId,
+          vault: input.vault,
+        })
+        return {
+          configPath: '.runtime/inboxd/config.json',
+          connector:
+            connector ??
+            ({
+              accountId: null,
+              enabled: input.enabled,
+              id: input.connectorId,
+              options: {},
+              source: 'telegram',
+            } satisfies InboxConnectorConfig),
+          connectorCount: connectors.length,
+          vault: input.vault,
+        }
+      },
+    },
+    log() {},
+    platform: () => 'linux',
+    resolveCliBinPath: () => cliBinPath,
+    vaultServices: {
+      core: {
+        async init() {
+          throw new Error('init should not be called for an existing vault')
+        },
+      },
+    } as any,
+  })
+
+  try {
+    const result = await services.setupHost({
+      channels: ['telegram'],
+      skipOcr: true,
+      vault: vaultRoot,
+      whisperModel: 'base.en',
+    })
+
+    assert.equal(result.platform, 'linux')
+    assert.equal(result.channels.length, 1)
+    assert.equal(result.channels[0]?.channel, 'telegram')
+    assert.equal(result.channels[0]?.configured, true)
+    assert.equal(result.channels[0]?.autoReply, true)
+    assert.deepEqual(sourceAddCalls, [
+      {
+        account: 'bot',
+        id: 'telegram:bot',
+        requestId: null,
+        source: 'telegram',
+        vault: vaultRoot,
+      },
+    ])
+    assert.deepEqual(sourceSetEnabledCalls, [])
+    assert.equal(connectors.find((connector) => connector.id === 'imessage:self')?.enabled, true)
+
+    const automationState = await readAssistantAutomationState(vaultRoot)
+    assert.deepEqual(automationState.autoReplyChannels, ['telegram', 'imessage'])
+    assert.deepEqual(automationState.preferredChannels, ['telegram', 'imessage'])
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup-host wrapper dry-run prints the Linux bootstrap plan without mutating the machine', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-host-linux-dryrun-'))
+  const stubBin = path.join(tempRoot, 'bin')
+  const callLog = path.join(tempRoot, 'calls.log')
+  const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
+
+  await mkdir(stubBin, { recursive: true })
+  await writeExecutable(
+    path.join(stubBin, 'uname'),
+    `#!/usr/bin/env bash
+if [ "\${1:-}" = "-m" ]; then
+  echo x86_64
+else
+  echo Linux
+fi
+`,
+  )
+  await writeExecutable(
+    path.join(stubBin, 'node'),
+    `#!/usr/bin/env bash
+printf "node\n" >> "\${CALL_LOG}"
+exit 99
+`,
+  )
+  await writeExecutable(
+    path.join(stubBin, 'corepack'),
+    `#!/usr/bin/env bash
+printf "corepack\n" >> "\${CALL_LOG}"
+exit 99
+`,
+  )
+  await writeExecutable(
+    path.join(stubBin, 'curl'),
+    `#!/usr/bin/env bash
+printf "curl\n" >> "\${CALL_LOG}"
+exit 99
+`,
+  )
+  await writeExecutable(
+    path.join(stubBin, 'wget'),
+    `#!/usr/bin/env bash
+printf "wget\n" >> "\${CALL_LOG}"
+exit 99
+`,
+  )
+
+  try {
+    const result = await runSetupHostWrapper(['--dry-run', '--vault', './vault'], {
+      CALL_LOG: callLog,
+      HOME: tempRoot,
+      PATH: pathValue,
+    })
+
+    assert.match(result.stdout, /Dry run requested/u)
+    assert.match(result.stdout, /Healthy Bob Linux setup will install or reuse:/u)
+    assert.match(result.stdout, /download Node 22\.16\.0 under ~\/\.healthybob\/bootstrap/u)
+    assert.match(result.stdout, /corepack pnpm install/u)
+    assert.match(result.stdout, /node packages\/cli\/dist\/bin\.js onboard --dry-run --vault \.\/vault/u)
+    assert.match(result.stdout, /iMessage remains macOS-only/u)
     assert.equal(result.stderr, '')
     assert.equal(await readOptionalText(callLog), '')
   } finally {

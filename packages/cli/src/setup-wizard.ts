@@ -26,6 +26,7 @@ export interface SetupWizardInput {
   initialAssistantPreset?: SetupAssistantPreset
   initialChannels?: readonly SetupChannel[]
   initialWearables?: readonly SetupWearable[]
+  platform?: NodeJS.Platform
   vault: string
   wearableStatuses?: Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
 }
@@ -88,7 +89,7 @@ const setupWizardAssistantOptions: readonly SetupWizardAssistantOption[] = [
 const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
   {
     channel: 'imessage',
-    description: 'Messages.app auto-reply on this Mac.',
+    description: 'Messages.app auto-reply on macOS.',
     title: 'iMessage',
   },
   {
@@ -125,8 +126,10 @@ export function getDefaultSetupWizardAssistantPreset(): SetupAssistantPreset {
   return getDefaultAssistantPreset()
 }
 
-export function getDefaultSetupWizardChannels(): SetupChannel[] {
-  return ['imessage']
+export function getDefaultSetupWizardChannels(
+  platform: NodeJS.Platform = process.platform,
+): SetupChannel[] {
+  return platform === 'darwin' ? ['imessage'] : []
 }
 
 export function getDefaultSetupWizardWearables(): SetupWearable[] {
@@ -241,7 +244,7 @@ export async function runSetupWizard(
   const initialChannels = sortSetupWizardChannels(
     input.initialChannels && input.initialChannels.length > 0
       ? [...input.initialChannels]
-      : getDefaultSetupWizardChannels(),
+      : getDefaultSetupWizardChannels(input.platform),
   )
   const initialWearables = sortSetupWizardWearables(
     input.initialWearables && input.initialWearables.length > 0

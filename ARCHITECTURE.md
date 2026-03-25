@@ -1,6 +1,6 @@
 # Healthy Bob Architecture
 
-Last verified: 2026-03-24
+Last verified: 2026-03-25
 
 ## Module Map
 
@@ -14,7 +14,7 @@ Last verified: 2026-03-24
 - `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
 - `packages/web`: local-only Next.js observability app that reads the selected vault on the server through the query package, preferring explicit `VAULT` selection and otherwise falling back to the saved CLI default vault, and may initiate device-auth control-plane actions against `packages/device-syncd`
 - `apps/web`: hosted Next.js device-sync control plane for Vercel-style deployments, backed by Postgres/Prisma for OAuth sessions, encrypted token escrow, ownership mapping, webhook traces, sparse sync signals, and local-agent pairing while keeping canonical health data out of the hosted tier
-- `packages/cli`: the published `healthybob` package plus `vault-cli`, an incur-backed typed operator surface over core/importers/query/inboxd plus parser-toolchain queue controls, quick workout capture atop canonical `activity_session` events, inbox model-routing helpers, provider-backed assistant session orchestration, CLI-owned `device-syncd` launcher/status/stop control for the selected vault, out-of-vault assistant memory docs plus turn-bound Codex MCP memory tools, outbound iMessage/Telegram/Linq/AgentMail email channel adapters, an onboarding/setup wizard that can reuse or discover existing AgentMail inboxes before provisioning, and local setup commands
+- `packages/cli`: the published `healthybob` package plus `vault-cli`, an incur-backed typed operator surface over core/importers/query/inboxd plus parser-toolchain queue controls, quick workout capture atop canonical `activity_session` events, inbox model-routing helpers, provider-backed assistant session orchestration, CLI-owned `device-syncd` launcher/status/stop control for the selected vault, out-of-vault assistant memory docs plus turn-bound Codex MCP memory tools, outbound iMessage/Telegram/Linq/AgentMail email channel adapters, an onboarding/setup wizard that can reuse or discover existing AgentMail inboxes before provisioning, and local host setup commands for macOS and Linux while keeping iMessage itself macOS-only
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
 ## Trust Boundaries
@@ -65,4 +65,4 @@ Last verified: 2026-03-24
 
 ## Current Verification Posture
 
-The repository still uses the bootstrap verification commands, but it now also has a repo-owned parser bootstrap path (`pnpm setup:inbox`), a fixed-version monorepo release manifest that packs and publishes the direct CLI runtime package chain under one tag, a local web package that builds under Next.js webpack mode, a local device-sync runtime with service/http tests, and inbox/parser package tests that exercise runtime rebuild, parser workers, parser-toolchain discovery, and parsed-pipeline flows inside the local TypeScript workspace.
+The repository still uses the bootstrap verification commands, but it now also has a repo-owned parser bootstrap path (`pnpm setup:inbox`), a cross-platform repo-local host bootstrap path (`pnpm onboard` / `scripts/setup-host.sh`) for macOS and Linux, a fixed-version monorepo release manifest that packs and publishes the direct CLI runtime package chain under one tag, a local web package that builds under Next.js webpack mode, a local device-sync runtime with service/http tests, and inbox/parser package tests that exercise runtime rebuild, parser workers, parser-toolchain discovery, and parsed-pipeline flows inside the local TypeScript workspace.

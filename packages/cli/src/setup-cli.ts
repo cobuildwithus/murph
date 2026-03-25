@@ -56,6 +56,7 @@ export interface SetupWizardRunner {
     initialAssistantPreset?: SetupAssistantPreset
     initialChannels: readonly SetupChannel[]
     initialWearables: readonly SetupWearable[]
+    platform?: NodeJS.Platform
     vault: string
     wearableStatuses?: Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
   }): Promise<SetupWizardResult>
@@ -66,6 +67,7 @@ export interface SetupCliOptions {
   commandName?: string
   onSetupSuccess?: ((context: SuccessfulSetupContext) => void | Promise<void>) | undefined
   runtimeEnv?: SetupRuntimeEnvResolver
+  platform?: () => NodeJS.Platform
   services?: ReturnType<typeof createSetupServices>
   terminal?: {
     stderrIsTTY: boolean
@@ -91,6 +93,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   const wizard = options.wizard ?? {
     run: runSetupWizard,
   }
+  const getPlatform = options.platform ?? (() => process.platform)
   const cli = Cli.create(commandName, {
     description: 'Healthy Bob local machine setup helpers.',
   })
@@ -113,14 +116,16 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     if (interactiveWizard) {
       const currentEnv = runtimeEnv.getCurrentEnv()
       const wizardResult = await wizard.run({
-        channelStatuses: buildSetupWizardChannelStatuses(currentEnv),
+        channelStatuses: buildSetupWizardChannelStatuses(currentEnv, getPlatform()),
         commandName,
         initialAssistantPreset:
           context.options.assistantPreset ?? getDefaultSetupAssistantPreset(),
         initialChannels: await resolveInitialSetupWizardChannels(
           context.options.vault,
+          getPlatform(),
         ),
         initialWearables: getDefaultSetupWizardWearables(),
+        platform: getPlatform(),
         vault: context.options.vault,
         wearableStatuses: buildSetupWizardWearableStatuses(currentEnv),
       })
@@ -152,7 +157,12 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
             preset: selectedAssistantPreset,
           })
 
-    const result = await services.setupMacos({
+    const setupHost =
+      'setupHost' in services && typeof services.setupHost === 'function'
+        ? services.setupHost.bind(services)
+        : services.setupMacos.bind(services)
+
+    const result = await setupHost({
       assistant: selectedAssistant,
       allowChannelPrompts: interactiveWizard,
       channels: selectedChannels,
@@ -188,12 +198,12 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
 
   registerSetupCommand(cli, 'setup', {
     description:
-      'Provision the macOS parser/runtime toolchain, initialize the vault, and run inbox bootstrap in one command.',
+      'Provision the local parser/runtime toolchain for macOS or Linux, initialize the vault, and run inbox bootstrap in one command.',
     run: runSetupCommand,
   })
   registerSetupCommand(cli, 'onboard', {
     description:
-      'Alias for setup that opens the interactive onboarding flow before provisioning the local toolchain and vault runtime.',
+      'Alias for setup that opens the interactive onboarding flow before provisioning the local host toolchain and vault runtime.',
     run: runSetupCommand,
   })
 
@@ -270,6 +280,7 @@ export function formatSetupWearableLabel(wearable: SetupWearable): string {
 
 export async function resolveInitialSetupWizardChannels(
   vault: string,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<SetupChannel[]> {
   const automationPath = resolveAssistantStatePaths(vault).automationPath
 
@@ -285,7 +296,7 @@ export async function resolveInitialSetupWizardChannels(
         : setupChannelValues.filter((channel) => state.autoReplyChannels.includes(channel))
     return savedChannels.length > 0
       ? savedChannels
-      : getDefaultSetupWizardChannels()
+      : getDefaultSetupWizardChannels(platform)
   } catch (error) {
     if (
       typeof error === 'object' &&
@@ -293,7 +304,7 @@ export async function resolveInitialSetupWizardChannels(
       'code' in error &&
       error.code === 'ENOENT'
     ) {
-      return getDefaultSetupWizardChannels()
+      return getDefaultSetupWizardChannels(platform)
     }
 
     throw error
@@ -328,7 +339,10 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     },
   )
 
-  if (!result.channels.some((channel) => channel.channel === 'imessage' && channel.configured)) {
+  if (
+    result.platform === 'darwin' &&
+    !result.channels.some((channel) => channel.channel === 'imessage' && channel.configured)
+  ) {
     commands.push({
       command: 'inbox source add imessage --id imessage:self --account self --includeOwn',
       description:
@@ -404,9 +418,13 @@ function collectSetupMissingEnvKeys(result: SetupResult): string[] {
 
 function buildSetupWizardChannelStatuses(
   env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
 ): Partial<Record<SetupChannel, SetupWizardRuntimeStatus>> {
   return Object.fromEntries(
-    setupChannelValues.map((channel) => [channel, describeSetupChannelStatus(channel, env)]),
+    setupChannelValues.map((channel) => [
+      channel,
+      describeSetupChannelStatus(channel, env, platform),
+    ]),
   ) as Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
 }
 
@@ -463,7 +481,7 @@ function registerSetupCommand(
       },
     ],
     hint:
-      'Use the repo-local scripts/setup-macos.sh wrapper when the workspace itself still needs Node, pnpm, and a build before this command can run.',
+      'Use the repo-local scripts/setup-host.sh wrapper when the workspace itself still needs Node, pnpm, and a build before this command can run.',
     options: setupCommandOptionsSchema,
     output: setupResultSchema,
     async run(context) {

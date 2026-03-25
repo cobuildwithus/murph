@@ -67,8 +67,10 @@ import {
   ensureHomebrew,
   ensurePaddleXOcr,
   ensureWhisperModel,
+  resolveExecutablePath,
 } from './setup-services/toolchain.js'
 import { describeSelectedSetupWearables } from './setup-runtime-env.js'
+import { errorMessage } from './inbox-services/shared.js'
 
 interface SetupInput {
   vault: string
@@ -106,7 +108,42 @@ interface SetupServicesDependencies {
 }
 
 interface SetupServices {
+  setupHost(input: SetupInput): Promise<SetupResult>
   setupMacos(input: SetupInput): Promise<SetupResult>
+}
+
+interface SetupProvisioningInput {
+  arch: string
+  dryRun: boolean
+  env: NodeJS.ProcessEnv
+  fileExists: (absolutePath: string) => Promise<boolean>
+  log: (message: string) => void
+  notes: string[]
+  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
+  skipOcr?: boolean
+  steps: SetupStepResult[]
+  toolchainRoot: string
+  whisperModel: WhisperModel
+  downloadFile: (url: string, destinationPath: string) => Promise<void>
+}
+
+interface SetupProvisioningResult {
+  env: NodeJS.ProcessEnv
+  tools: SetupTools
+}
+
+interface AptRunnerState {
+  command: string | null
+  baseArgs: string[]
+  env: NodeJS.ProcessEnv
+  updateAttempted: boolean
+  updateSucceeded: boolean
+}
+
+interface AptInstallResult {
+  apt: AptRunnerState
+  installed: boolean
+  reason: string | null
 }
 
 export function createSetupServices(
@@ -131,16 +168,10 @@ export function createSetupServices(
     dependencies.resolveAgentmailInboxSelection ??
     createSetupAgentmailSelectionResolver()
 
-  async function setupMacos(input: SetupInput): Promise<SetupResult> {
+  async function setupHost(input: SetupInput): Promise<SetupResult> {
     const platform = getPlatform()
-    if (platform !== 'darwin') {
-      throw new VaultCliError(
-        'unsupported_platform',
-        'Healthy Bob setup currently supports macOS only.',
-        {
-          platform,
-        },
-      )
+    if (platform !== 'darwin' && platform !== 'linux') {
+      throw unsupportedSetupPlatform(platform)
     }
 
     const arch = getArch()
@@ -163,17 +194,8 @@ export function createSetupServices(
     }
 
     log(
-      `Healthy Bob setup targeting ${redactHomePathInText(vault, homeDirectory)} on macOS (${arch}).`,
+      `Healthy Bob setup targeting ${redactHomePathInText(vault, homeDirectory)} on ${describeSetupHost(platform)} (${arch}).`,
     )
-
-    let state = await ensureHomebrew({
-      arch,
-      dryRun,
-      env: effectiveEnv,
-      log,
-      runCommand,
-      steps,
-    })
 
     await ensureDirectoryStep({
       absolutePath: toolchainRoot,
@@ -187,113 +209,38 @@ export function createSetupServices(
       title: 'Local toolchain root',
     })
 
-    const formulaCommands: Record<FormulaCommandKey, string | null> = {
-      ffmpegCommand: null,
-      pdftotextCommand: null,
-      whisperCommand: null,
-    }
-    for (const formulaSpec of buildBaseFormulaSpecs()) {
-      const formulaResult = await ensureBrewFormula({
-        brewState: state,
-        commandCandidates: formulaSpec.commandCandidates,
-        dryRun,
-        formula: formulaSpec.formula,
-        id: formulaSpec.id,
-        installDetail: formulaSpec.installDetail,
-        kind: 'install',
-        missingPlanDetail: formulaSpec.missingPlanDetail,
-        runCommand,
-        steps,
-        title: formulaSpec.title,
-      })
-      state = {
-        ...state,
-        env: formulaResult.env,
-      }
-      formulaCommands[formulaSpec.key] = formulaResult.command
-    }
-
-    const whisperModelPath = path.join(
-      toolchainRoot,
-      'models',
-      'whisper',
-      modelFileNames[whisperModel],
-    )
-    await ensureWhisperModel({
-      destinationPath: whisperModelPath,
-      dryRun,
-      downloadFile,
-      downloadUrl: whisperModelDownloadUrl(whisperModel),
-      fileExists,
-      id: 'whisper-model',
-      model: whisperModel,
-      steps,
-      title: 'Whisper model',
-    })
-
-    let paddleocrCommand: string | null = null
-    if (input.skipOcr) {
-      steps.push(
-        createStep({
-          detail: 'Skipped PaddleX OCR because --skipOcr was set.',
-          id: 'paddlex-ocr',
-          kind: 'install',
-          status: 'skipped',
-          title: 'PaddleX OCR',
-        }),
-      )
-      notes.push('OCR installation was skipped by request.')
-    } else if (arch !== 'arm64') {
-      steps.push(
-        createStep({
-          detail:
-            'Skipped PaddleX OCR because current macOS Paddle wheels only support Apple Silicon.',
-          id: 'paddlex-ocr',
-          kind: 'install',
-          status: 'skipped',
-          title: 'PaddleX OCR',
-        }),
-      )
-      notes.push(
-        'OCR was skipped because PaddlePaddle does not currently publish macOS x86_64 support.',
-      )
-    } else {
-      const pythonFormulaSpec = buildPythonFormulaSpec()
-      const pythonResult = await ensureBrewFormula({
-        brewState: state,
-        commandCandidates: pythonFormulaSpec.commandCandidates,
-        dryRun,
-        formula: pythonFormulaSpec.formula,
-        id: pythonFormulaSpec.id,
-        installDetail: pythonFormulaSpec.installDetail,
-        kind: 'install',
-        missingPlanDetail: pythonFormulaSpec.missingPlanDetail,
-        runCommand,
-        steps,
-        title: pythonFormulaSpec.title,
-      })
-      state = {
-        ...state,
-        env: pythonResult.env,
-      }
-      paddleocrCommand = await ensurePaddleXOcr({
-        dryRun,
-        env: state.env,
-        fileExists,
-        pythonCommand: pythonResult.command,
-        runCommand,
-        steps,
-        toolchainRoot,
-      })
-    }
-
-    const tools: SetupTools = {
-      ffmpegCommand: formulaCommands.ffmpegCommand,
-      pdftotextCommand: formulaCommands.pdftotextCommand,
-      whisperCommand: formulaCommands.whisperCommand,
-      whisperModelPath,
-      paddleocrCommand,
-    }
+    const provisioning =
+      platform === 'darwin'
+        ? await provisionMacosToolchain({
+            arch,
+            downloadFile,
+            dryRun,
+            env: effectiveEnv,
+            fileExists,
+            log,
+            notes,
+            runCommand,
+            skipOcr: input.skipOcr,
+            steps,
+            toolchainRoot,
+            whisperModel,
+          })
+        : await provisionLinuxToolchain({
+            arch,
+            downloadFile,
+            dryRun,
+            env: effectiveEnv,
+            fileExists,
+            log,
+            notes,
+            runCommand,
+            skipOcr: input.skipOcr,
+            steps,
+            toolchainRoot,
+            whisperModel,
+          })
+    const toolchainEnv = provisioning.env
+    const tools = provisioning.tools
 
     let bootstrap: InboxBootstrapResult | null = null
     const vaultMetadataPath = path.join(vault, 'vault.json')
@@ -366,7 +313,7 @@ export function createSetupServices(
     await ensureCliShims({
       cliBinPath,
       dryRun,
-      env: state.env,
+      env: toolchainEnv,
       fileExists,
       homeDirectory,
       notes,
@@ -396,8 +343,9 @@ export function createSetupServices(
             allowPrompt: input.allowChannelPrompts ?? false,
             channels: normalizeSetupChannels(input.channels),
             dryRun,
-            env: state.env,
+            env: toolchainEnv,
             inboxServices,
+            platform,
             requestId,
             resolveAgentmailInboxSelection,
             steps,
@@ -407,7 +355,7 @@ export function createSetupServices(
       input.wearables == null
         ? []
         : describeSelectedSetupWearables({
-            env: state.env,
+            env: toolchainEnv,
             wearables: input.wearables,
           })
 
@@ -453,9 +401,680 @@ export function createSetupServices(
     }
   }
 
+  async function setupMacos(input: SetupInput): Promise<SetupResult> {
+    const platform = getPlatform()
+    if (platform !== 'darwin') {
+      throw unsupportedSetupPlatform(platform, 'Healthy Bob setup currently supports macOS only through setupMacos(). Use setupHost() for Linux support.')
+    }
+
+    return await setupHost(input)
+  }
+
   return {
+    setupHost,
     setupMacos,
   }
+}
+
+async function provisionMacosToolchain(
+  input: SetupProvisioningInput,
+): Promise<SetupProvisioningResult> {
+  let state = await ensureHomebrew({
+    arch: input.arch,
+    dryRun: input.dryRun,
+    env: input.env,
+    log: input.log,
+    runCommand: input.runCommand,
+    steps: input.steps,
+  })
+
+  const formulaCommands: Record<FormulaCommandKey, string | null> = {
+    ffmpegCommand: null,
+    pdftotextCommand: null,
+    whisperCommand: null,
+  }
+  for (const formulaSpec of buildBaseFormulaSpecs()) {
+    const formulaResult = await ensureBrewFormula({
+      brewState: state,
+      commandCandidates: formulaSpec.commandCandidates,
+      dryRun: input.dryRun,
+      formula: formulaSpec.formula,
+      id: formulaSpec.id,
+      installDetail: formulaSpec.installDetail,
+      kind: 'install',
+      missingPlanDetail: formulaSpec.missingPlanDetail,
+      runCommand: input.runCommand,
+      steps: input.steps,
+      title: formulaSpec.title,
+    })
+    state = {
+      ...state,
+      env: formulaResult.env,
+    }
+    formulaCommands[formulaSpec.key] = formulaResult.command
+  }
+
+  const whisperModelPath = path.join(
+    input.toolchainRoot,
+    'models',
+    'whisper',
+    modelFileNames[input.whisperModel],
+  )
+  await ensureWhisperModel({
+    destinationPath: whisperModelPath,
+    dryRun: input.dryRun,
+    downloadFile: input.downloadFile,
+    downloadUrl: whisperModelDownloadUrl(input.whisperModel),
+    fileExists: input.fileExists,
+    id: 'whisper-model',
+    model: input.whisperModel,
+    steps: input.steps,
+    title: 'Whisper model',
+  })
+
+  let paddleocrCommand: string | null = null
+  if (input.skipOcr) {
+    input.steps.push(
+      createStep({
+        detail: 'Skipped PaddleX OCR because --skipOcr was set.',
+        id: 'paddlex-ocr',
+        kind: 'install',
+        status: 'skipped',
+        title: 'PaddleX OCR',
+      }),
+    )
+    input.notes.push('OCR installation was skipped by request.')
+  } else if (input.arch !== 'arm64') {
+    input.steps.push(
+      createStep({
+        detail:
+          'Skipped PaddleX OCR because current macOS Paddle wheels only support Apple Silicon.',
+        id: 'paddlex-ocr',
+        kind: 'install',
+        status: 'skipped',
+        title: 'PaddleX OCR',
+      }),
+    )
+    input.notes.push(
+      'OCR was skipped because PaddlePaddle does not currently publish macOS x86_64 support.',
+    )
+  } else {
+    const pythonFormulaSpec = buildPythonFormulaSpec()
+    const pythonResult = await ensureBrewFormula({
+      brewState: state,
+      commandCandidates: pythonFormulaSpec.commandCandidates,
+      dryRun: input.dryRun,
+      formula: pythonFormulaSpec.formula,
+      id: pythonFormulaSpec.id,
+      installDetail: pythonFormulaSpec.installDetail,
+      kind: 'install',
+      missingPlanDetail: pythonFormulaSpec.missingPlanDetail,
+      runCommand: input.runCommand,
+      steps: input.steps,
+      title: pythonFormulaSpec.title,
+    })
+    state = {
+      ...state,
+      env: pythonResult.env,
+    }
+    paddleocrCommand = await ensurePaddleXOcr({
+      dryRun: input.dryRun,
+      env: state.env,
+      fileExists: input.fileExists,
+      pythonCommand: pythonResult.command,
+      runCommand: input.runCommand,
+      steps: input.steps,
+      toolchainRoot: input.toolchainRoot,
+    })
+  }
+
+  return {
+    env: state.env,
+    tools: {
+      ffmpegCommand: formulaCommands.ffmpegCommand,
+      pdftotextCommand: formulaCommands.pdftotextCommand,
+      whisperCommand: formulaCommands.whisperCommand,
+      whisperModelPath,
+      paddleocrCommand,
+    },
+  }
+}
+
+async function provisionLinuxToolchain(
+  input: SetupProvisioningInput,
+): Promise<SetupProvisioningResult> {
+  let apt = await resolveAptRunner(input.env)
+
+  const ffmpeg = await ensureLinuxCommand({
+    apt,
+    commandCandidates: ['ffmpeg'],
+    dryRun: input.dryRun,
+    env: input.env,
+    id: 'ffmpeg',
+    installPackages: ['ffmpeg'],
+    missingDetail:
+      'ffmpeg was not found on PATH and Healthy Bob could not install it automatically. Install ffmpeg manually or rerun setup with apt/sudo access.',
+    missingPlanDetail:
+      'Would reuse ffmpeg from PATH when available, or install the ffmpeg package via apt-get for audio/video normalization.',
+    notes: input.notes,
+    runCommand: input.runCommand,
+    steps: input.steps,
+    title: 'ffmpeg',
+  })
+  apt = ffmpeg.apt
+
+  const pdftotext = await ensureLinuxCommand({
+    apt,
+    commandCandidates: ['pdftotext'],
+    dryRun: input.dryRun,
+    env: ffmpeg.env,
+    id: 'pdftotext',
+    installPackages: ['poppler-utils'],
+    missingDetail:
+      'pdftotext was not found on PATH and Healthy Bob could not install it automatically. Install poppler-utils manually or rerun setup with apt/sudo access.',
+    missingPlanDetail:
+      'Would reuse pdftotext from PATH when available, or install poppler-utils via apt-get for PDF parsing.',
+    notes: input.notes,
+    runCommand: input.runCommand,
+    steps: input.steps,
+    title: 'pdftotext',
+  })
+  apt = pdftotext.apt
+
+  const whisper = await ensureLinuxCommand({
+    apt,
+    commandCandidates: ['whisper-cli', 'whisper-cpp'],
+    dryRun: input.dryRun,
+    env: pdftotext.env,
+    id: 'whisper-cpp',
+    installPackages: ['whisper-cpp'],
+    missingDetail:
+      'whisper.cpp was not found on PATH and Healthy Bob could not install it automatically. Install whisper.cpp manually or rerun setup with apt/sudo access.',
+    missingPlanDetail:
+      'Would reuse whisper.cpp from PATH when available, or install the whisper-cpp package via apt-get for local transcription.',
+    notes: input.notes,
+    runCommand: input.runCommand,
+    steps: input.steps,
+    title: 'whisper.cpp',
+  })
+  apt = whisper.apt
+
+  const whisperModelPath = path.join(
+    input.toolchainRoot,
+    'models',
+    'whisper',
+    modelFileNames[input.whisperModel],
+  )
+  await ensureWhisperModel({
+    destinationPath: whisperModelPath,
+    dryRun: input.dryRun,
+    downloadFile: input.downloadFile,
+    downloadUrl: whisperModelDownloadUrl(input.whisperModel),
+    fileExists: input.fileExists,
+    id: 'whisper-model',
+    model: input.whisperModel,
+    steps: input.steps,
+    title: 'Whisper model',
+  })
+
+  let paddleocrCommand: string | null = null
+  if (input.skipOcr) {
+    input.steps.push(
+      createStep({
+        detail: 'Skipped PaddleX OCR because --skipOcr was set.',
+        id: 'paddlex-ocr',
+        kind: 'install',
+        status: 'skipped',
+        title: 'PaddleX OCR',
+      }),
+    )
+    input.notes.push('OCR installation was skipped by request.')
+  } else if (input.arch !== 'x64') {
+    input.steps.push(
+      createStep({
+        detail:
+          'Skipped PaddleX OCR because automatic Linux OCR setup currently targets x86_64 hosts.',
+        id: 'paddlex-ocr',
+        kind: 'install',
+        status: 'skipped',
+        title: 'PaddleX OCR',
+      }),
+    )
+    input.notes.push(
+      'OCR was skipped because automatic Linux PaddleX setup currently targets x86_64 hosts.',
+    )
+  } else {
+    const existingPaddlex = await resolveExecutablePath(['paddlex'], whisper.env)
+    if (existingPaddlex) {
+      input.steps.push(
+        createStep({
+          detail: `Reusing PaddleX OCR from ${existingPaddlex}.`,
+          id: 'paddlex-ocr',
+          kind: 'install',
+          status: 'reused',
+          title: 'PaddleX OCR',
+        }),
+      )
+      paddleocrCommand = existingPaddlex
+    } else {
+      const python = await ensureLinuxPythonCommand({
+        apt,
+        dryRun: input.dryRun,
+        env: whisper.env,
+        notes: input.notes,
+        runCommand: input.runCommand,
+        steps: input.steps,
+      })
+      apt = python.apt
+      if (python.command) {
+        try {
+          paddleocrCommand = await ensurePaddleXOcr({
+            dryRun: input.dryRun,
+            env: python.env,
+            fileExists: input.fileExists,
+            pythonCommand: python.command,
+            runCommand: input.runCommand,
+            steps: input.steps,
+            toolchainRoot: input.toolchainRoot,
+          })
+        } catch (error) {
+          input.steps.push(
+            createStep({
+              detail:
+                'Skipped PaddleX OCR because the Python environment could not install paddlex[ocr] automatically on this host.',
+              id: 'paddlex-ocr',
+              kind: 'install',
+              status: 'skipped',
+              title: 'PaddleX OCR',
+            }),
+          )
+          input.notes.push(
+            `OCR was skipped because automatic Linux PaddleX setup failed: ${errorMessage(error)}.`,
+          )
+        }
+      } else if (!input.dryRun) {
+        input.steps.push(
+          createStep({
+            detail:
+              'Skipped PaddleX OCR because Python 3 with venv support could not be resolved on this host.',
+            id: 'paddlex-ocr',
+            kind: 'install',
+            status: 'skipped',
+            title: 'PaddleX OCR',
+          }),
+        )
+      }
+    }
+  }
+
+  return {
+    env: whisper.env,
+    tools: {
+      ffmpegCommand: ffmpeg.command,
+      pdftotextCommand: pdftotext.command,
+      whisperCommand: whisper.command,
+      whisperModelPath,
+      paddleocrCommand,
+    },
+  }
+}
+
+async function ensureLinuxCommand(input: {
+  apt: AptRunnerState
+  commandCandidates: string[]
+  dryRun: boolean
+  env: NodeJS.ProcessEnv
+  id: string
+  installPackages: string[]
+  missingDetail: string
+  missingPlanDetail: string
+  notes: string[]
+  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
+  steps: SetupStepResult[]
+  title: string
+}): Promise<{
+  apt: AptRunnerState
+  command: string | null
+  env: NodeJS.ProcessEnv
+}> {
+  const existing = await resolveExecutablePath(input.commandCandidates, input.env)
+  if (existing) {
+    input.steps.push(
+      createStep({
+        detail: `Reusing ${input.title} from ${existing}.`,
+        id: input.id,
+        kind: 'install',
+        status: 'reused',
+        title: input.title,
+      }),
+    )
+    return {
+      apt: input.apt,
+      command: existing,
+      env: input.env,
+    }
+  }
+
+  if (input.dryRun) {
+    input.steps.push(
+      createStep({
+        detail: input.missingPlanDetail,
+        id: input.id,
+        kind: 'install',
+        status: 'planned',
+        title: input.title,
+      }),
+    )
+    return {
+      apt: input.apt,
+      command: null,
+      env: input.env,
+    }
+  }
+
+  const install = await ensureAptPackages({
+    apt: input.apt,
+    env: input.env,
+    packages: input.installPackages,
+    runCommand: input.runCommand,
+  })
+  const resolved = await resolveExecutablePath(input.commandCandidates, input.env)
+  if (resolved) {
+    input.steps.push(
+      createStep({
+        detail: `Installed ${input.title} through apt-get.`,
+        id: input.id,
+        kind: 'install',
+        status: 'completed',
+        title: input.title,
+      }),
+    )
+    return {
+      apt: install.apt,
+      command: resolved,
+      env: input.env,
+    }
+  }
+
+  input.steps.push(
+    createStep({
+      detail: install.reason ?? input.missingDetail,
+      id: input.id,
+      kind: 'install',
+      status: 'skipped',
+      title: input.title,
+    }),
+  )
+  input.notes.push(input.missingDetail)
+  if (install.reason && install.reason !== input.missingDetail) {
+    input.notes.push(`${input.title} auto-install detail: ${install.reason}`)
+  }
+
+  return {
+    apt: install.apt,
+    command: null,
+    env: input.env,
+  }
+}
+
+async function ensureLinuxPythonCommand(input: {
+  apt: AptRunnerState
+  dryRun: boolean
+  env: NodeJS.ProcessEnv
+  notes: string[]
+  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
+  steps: SetupStepResult[]
+}): Promise<{
+  apt: AptRunnerState
+  command: string | null
+  env: NodeJS.ProcessEnv
+}> {
+  const title = 'Python 3'
+  const id = 'python'
+  const candidates = ['python3.12', 'python3', 'python']
+  const existing = await resolveExecutablePath(candidates, input.env)
+  if (existing && (await pythonSupportsVenv(existing, input.env, input.runCommand))) {
+    input.steps.push(
+      createStep({
+        detail: `Reusing ${title} from ${existing} for OCR tooling.`,
+        id,
+        kind: 'install',
+        status: 'reused',
+        title,
+      }),
+    )
+    return {
+      apt: input.apt,
+      command: existing,
+      env: input.env,
+    }
+  }
+
+  if (input.dryRun) {
+    input.steps.push(
+      createStep({
+        detail:
+          'Would reuse Python 3 with venv support from PATH when available, or install python3 plus python3-venv via apt-get for OCR tooling.',
+        id,
+        kind: 'install',
+        status: 'planned',
+        title,
+      }),
+    )
+    return {
+      apt: input.apt,
+      command: existing,
+      env: input.env,
+    }
+  }
+
+  const install = await ensureAptPackages({
+    apt: input.apt,
+    env: input.env,
+    packages: ['python3', 'python3-venv'],
+    runCommand: input.runCommand,
+  })
+  const resolved = await resolveExecutablePath(candidates, input.env)
+  if (resolved && (await pythonSupportsVenv(resolved, input.env, input.runCommand))) {
+    input.steps.push(
+      createStep({
+        detail: 'Installed Python 3 with venv support through apt-get for OCR tooling.',
+        id,
+        kind: 'install',
+        status: 'completed',
+        title,
+      }),
+    )
+    return {
+      apt: install.apt,
+      command: resolved,
+      env: input.env,
+    }
+  }
+
+  input.steps.push(
+    createStep({
+      detail:
+        install.reason ??
+        'Python 3 with venv support was not found on PATH and Healthy Bob could not install it automatically.',
+      id,
+      kind: 'install',
+      status: 'skipped',
+      title,
+    }),
+  )
+  input.notes.push(
+    'OCR setup could not resolve Python 3 with venv support automatically. Install python3 and python3-venv manually or rerun setup with apt/sudo access.',
+  )
+  if (install.reason) {
+    input.notes.push(`Python auto-install detail: ${install.reason}`)
+  }
+
+  return {
+    apt: install.apt,
+    command: null,
+    env: input.env,
+  }
+}
+
+async function pythonSupportsVenv(
+  pythonCommand: string,
+  env: NodeJS.ProcessEnv,
+  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>,
+): Promise<boolean> {
+  const result = await runCommand({
+    args: ['-m', 'venv', '--help'],
+    env,
+    file: pythonCommand,
+  })
+  return result.exitCode === 0
+}
+
+async function resolveAptRunner(env: NodeJS.ProcessEnv): Promise<AptRunnerState> {
+  const aptGet = await resolveExecutablePath(
+    ['apt-get'],
+    env,
+    ['/usr/bin/apt-get', '/bin/apt-get'],
+  )
+  if (!aptGet) {
+    return {
+      command: null,
+      baseArgs: [],
+      env,
+      updateAttempted: false,
+      updateSucceeded: false,
+    }
+  }
+
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    return {
+      command: aptGet,
+      baseArgs: [],
+      env,
+      updateAttempted: false,
+      updateSucceeded: false,
+    }
+  }
+
+  const sudo = await resolveExecutablePath(
+    ['sudo'],
+    env,
+    ['/usr/bin/sudo', '/bin/sudo'],
+  )
+  if (!sudo) {
+    return {
+      command: null,
+      baseArgs: [],
+      env,
+      updateAttempted: false,
+      updateSucceeded: false,
+    }
+  }
+
+  return {
+    command: sudo,
+    baseArgs: ['-n', aptGet],
+    env,
+    updateAttempted: false,
+    updateSucceeded: false,
+  }
+}
+
+async function ensureAptPackages(input: {
+  apt: AptRunnerState
+  env: NodeJS.ProcessEnv
+  packages: string[]
+  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
+}): Promise<AptInstallResult> {
+  if (!input.apt.command) {
+    return {
+      apt: input.apt,
+      installed: false,
+      reason: 'apt-get or passwordless sudo is unavailable on this host.',
+    }
+  }
+
+  let apt = input.apt
+  const aptCommand = input.apt.command
+  const aptEnv = {
+    ...input.env,
+    DEBIAN_FRONTEND: 'noninteractive',
+  }
+
+  if (!apt.updateAttempted) {
+    const updateResult = await input.runCommand({
+      args: [...apt.baseArgs, 'update'],
+      env: aptEnv,
+      file: aptCommand,
+    })
+    apt = {
+      ...apt,
+      updateAttempted: true,
+      updateSucceeded: updateResult.exitCode === 0,
+    }
+    if (updateResult.exitCode !== 0) {
+      return {
+        apt,
+        installed: false,
+        reason: summarizeCommandFailure(
+          updateResult,
+          'apt-get update failed during automatic Linux tool provisioning.',
+        ),
+      }
+    }
+  }
+
+  const installResult = await input.runCommand({
+    args: [...apt.baseArgs, 'install', '-y', ...input.packages],
+    env: aptEnv,
+    file: aptCommand,
+  })
+  if (installResult.exitCode !== 0) {
+    return {
+      apt,
+      installed: false,
+      reason: summarizeCommandFailure(
+        installResult,
+        `apt-get install failed for ${input.packages.join(', ')}.`,
+      ),
+    }
+  }
+
+  return {
+    apt,
+    installed: true,
+    reason: null,
+  }
+}
+
+function summarizeCommandFailure(
+  result: CommandRunResult,
+  fallback: string,
+): string {
+  const stderr = result.stderr.trim()
+  if (stderr.length > 0) {
+    return stderr
+  }
+
+  const stdout = result.stdout.trim()
+  if (stdout.length > 0) {
+    return stdout
+  }
+
+  return fallback
+}
+
+function unsupportedSetupPlatform(
+  platform: NodeJS.Platform,
+  message = 'Healthy Bob setup currently supports macOS and Linux only.',
+): VaultCliError {
+  return new VaultCliError('unsupported_platform', message, {
+    platform,
+  })
+}
+
+function describeSetupHost(platform: NodeJS.Platform): string {
+  return platform === 'darwin' ? 'macOS' : platform
 }
 
 export function detectSetupProgramName(argv0: string | undefined): string {

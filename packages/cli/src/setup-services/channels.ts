@@ -19,6 +19,7 @@ import {
   type SetupChannel,
   type SetupConfiguredChannel,
   type SetupStepResult,
+  setupChannelValues,
 } from '../setup-cli-contracts.js'
 import { createStep } from './steps.js'
 
@@ -31,10 +32,21 @@ const LINQ_SETUP_ACCOUNT_ID = 'default'
 const EMAIL_SETUP_CONNECTOR_ID = 'email:agentmail'
 const EMAIL_SETUP_DISPLAY_NAME = 'Healthy Bob'
 
+function isSetupChannelSupportedOnPlatform(
+  channel: SetupChannel,
+  platform: NodeJS.Platform,
+): boolean {
+  return channel !== 'imessage' || platform === 'darwin'
+}
+
 type SetupChannelInboxServices = Pick<InboxCliServices, 'bootstrap'> &
   Partial<
     Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
   >
+
+function isSetupChannel(value: string): value is SetupChannel {
+  return setupChannelValues.includes(value as SetupChannel)
+}
 
 export function normalizeSetupChannels(
   value: readonly SetupChannel[] | null | undefined,
@@ -48,18 +60,21 @@ export async function configureSetupChannels(input: {
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
+  platform?: NodeJS.Platform
   requestId: string | null
   resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel[]> {
   const configured: SetupConfiguredChannel[] = []
+  const platform = input.platform ?? process.platform
 
   if (input.channels.includes('imessage')) {
     configured.push(
       await configureIMessageChannel({
         dryRun: input.dryRun,
         inboxServices: input.inboxServices,
+        platform,
         requestId: input.requestId,
         steps: input.steps,
         vault: input.vault,
@@ -73,6 +88,7 @@ export async function configureSetupChannels(input: {
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
+        platform,
         requestId: input.requestId,
         steps: input.steps,
         vault: input.vault,
@@ -86,6 +102,7 @@ export async function configureSetupChannels(input: {
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
+        platform,
         requestId: input.requestId,
         steps: input.steps,
         vault: input.vault,
@@ -100,6 +117,7 @@ export async function configureSetupChannels(input: {
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
+        platform,
         requestId: input.requestId,
         resolveAgentmailInboxSelection: input.resolveAgentmailInboxSelection,
         steps: input.steps,
@@ -112,6 +130,7 @@ export async function configureSetupChannels(input: {
     await reconcileDeselectedSetupChannels({
       channels: input.channels,
       inboxServices: input.inboxServices,
+      platform,
       requestId: input.requestId,
       vault: input.vault,
     })
@@ -119,7 +138,8 @@ export async function configureSetupChannels(input: {
       autoReplyChannels: configured
         .filter((channel) => channel.autoReply)
         .map((channel) => channel.channel),
-      preferredChannels: input.channels,
+      platform,
+      preferredChannels: filterPersistedSetupChannels(input.channels, platform),
       vault: input.vault,
     })
   }
@@ -127,13 +147,47 @@ export async function configureSetupChannels(input: {
   return configured
 }
 
+function filterPersistedSetupChannels(
+  channels: readonly SetupChannel[],
+  platform: NodeJS.Platform,
+): SetupChannel[] {
+  return normalizeSetupChannels(channels).filter((channel) =>
+    isSetupChannelSupportedOnPlatform(channel, platform),
+  )
+}
+
 async function configureIMessageChannel(input: {
   dryRun: boolean
   inboxServices: SetupChannelInboxServices
+  platform: NodeJS.Platform
   requestId: string | null
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel> {
+  if (input.platform !== 'darwin') {
+    input.steps.push(
+      createStep({
+        detail:
+          'Skipped iMessage because it requires Messages.app and the local Messages database on macOS.',
+        id: 'channel-imessage',
+        kind: 'configure',
+        status: 'skipped',
+        title: 'iMessage channel',
+      }),
+    )
+
+    return {
+      autoReply: false,
+      channel: 'imessage',
+      configured: false,
+      connectorId: null,
+      detail:
+        'Skipped iMessage because it requires macOS. Use Telegram, Linq, or email on Linux, or run iMessage from a Mac host.',
+      enabled: true,
+      missingEnv: [],
+    }
+  }
+
   if (input.dryRun) {
     input.steps.push(
       createStep({
@@ -247,6 +301,7 @@ async function configureTelegramChannel(input: {
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
+  platform: NodeJS.Platform
   requestId: string | null
   steps: SetupStepResult[]
   vault: string
@@ -430,6 +485,7 @@ async function configureLinqChannel(input: {
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
+  platform: NodeJS.Platform
   requestId: string | null
   steps: SetupStepResult[]
   vault: string
@@ -602,6 +658,7 @@ async function configureEmailChannel(input: {
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
+  platform: NodeJS.Platform
   requestId: string | null
   resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   steps: SetupStepResult[]
@@ -845,12 +902,29 @@ function describeConfiguredEmailAction(input: {
 
 async function updateAssistantChannelState(input: {
   autoReplyChannels: readonly SetupChannel[]
+  platform: NodeJS.Platform
   preferredChannels: readonly SetupChannel[]
   vault: string
 }): Promise<void> {
   const state = await readAssistantAutomationState(input.vault)
-  const autoReplyChannels = normalizeSetupChannels(input.autoReplyChannels)
-  const preferredChannels = normalizeSetupChannels(input.preferredChannels)
+  const preservedAutoReplyChannels = state.autoReplyChannels.filter(
+    (channel): channel is SetupChannel =>
+      isSetupChannel(channel) &&
+      !isSetupChannelSupportedOnPlatform(channel, input.platform),
+  )
+  const preservedPreferredChannels = state.preferredChannels.filter(
+    (channel): channel is SetupChannel =>
+      isSetupChannel(channel) &&
+      !isSetupChannelSupportedOnPlatform(channel, input.platform),
+  )
+  const autoReplyChannels = normalizeSetupChannels([
+    ...input.autoReplyChannels,
+    ...preservedAutoReplyChannels,
+  ])
+  const preferredChannels = normalizeSetupChannels([
+    ...input.preferredChannels,
+    ...preservedPreferredChannels,
+  ])
   const nextBacklogChannels = normalizeSetupChannels(
     state.autoReplyBacklogChannels.filter(
       (channel): channel is SetupChannel =>
@@ -899,6 +973,7 @@ async function updateAssistantChannelState(input: {
 async function reconcileDeselectedSetupChannels(input: {
   channels: readonly SetupChannel[]
   inboxServices: SetupChannelInboxServices
+  platform: NodeJS.Platform
   requestId: string | null
   vault: string
 }): Promise<void> {
@@ -920,7 +995,11 @@ async function reconcileDeselectedSetupChannels(input: {
     }
 
     const setupChannel = resolveSetupChannelForConnector(connector)
-    if (!setupChannel || selectedChannels.has(setupChannel)) {
+    if (
+      !setupChannel ||
+      !isSetupChannelSupportedOnPlatform(setupChannel, input.platform) ||
+      selectedChannels.has(setupChannel)
+    ) {
       continue
     }
 

@@ -117,17 +117,26 @@ export function resolveSetupWearableMissingEnv(
 export function describeSetupChannelStatus(
   channel: SetupChannel,
   env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
 ): SetupWizardRuntimeStatus {
   const missingEnv = resolveSetupChannelMissingEnv(channel, env)
 
   switch (channel) {
     case 'imessage':
-      return {
-        badge: 'ready',
-        detail: 'Works through Messages.app on this Mac.',
-        missingEnv,
-        ready: true,
-      }
+      return platform === 'darwin'
+        ? {
+            badge: 'ready',
+            detail: 'Works through Messages.app on this Mac.',
+            missingEnv,
+            ready: true,
+          }
+        : {
+            badge: 'macOS only',
+            detail:
+              'Requires Messages.app plus ~/Library/Messages/chat.db on a macOS host.',
+            missingEnv,
+            ready: false,
+          }
     case 'telegram':
       return missingEnv.length === 0
         ? {

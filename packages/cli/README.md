@@ -20,7 +20,7 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - iMessage-backed inbox and assistant delivery flows now depend directly on `@photon-ai/imessage-kit` instead of late-loading that package at call time, while Telegram delivery and ingestion share the same assistant channel binding abstraction.
 - The built CLI package shape exposes both `vault-cli` and a setup-focused `healthybob` alias from the same entrypoint; `healthybob`, `healthybob --help`, and `healthybob setup ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
 
-## macOS setup
+## Host setup (macOS and Linux)
 
 Once `healthybob` is published, the installed-package onboarding path will be:
 
@@ -28,13 +28,13 @@ Once `healthybob` is published, the installed-package onboarding path will be:
 healthybob setup
 ```
 
-That command installs or reuses the Homebrew-based local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.healthybob/toolchain/models/whisper/`, optionally installs PaddleX OCR on Apple Silicon, initializes the default `./vault` target unless you override it, saves that vault as the default Healthy Bob CLI vault for later commands, runs inbox bootstrap, and then launches `assistant run` automatically when at least one selected channel is fully configured for auto-reply, falling back to `assistant chat` otherwise.
+That command installs or reuses the local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.healthybob/toolchain/models/whisper/`, optionally installs PaddleX OCR on supported hosts, initializes the default `./vault` target unless you override it, saves that vault as the default Healthy Bob CLI vault for later commands, runs inbox bootstrap, and then launches `assistant run` automatically when at least one selected channel is fully configured for auto-reply, falling back to `assistant chat` otherwise.
 
 Setup also installs user-level `healthybob` and `vault-cli` shims into `~/.local/bin`. If that directory is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells the operator to reload the shell. Once setup has run, the main CLI can omit `--vault` when the saved default is the intended target.
 
 Useful flags include `--dry-run`, `--whisperModel small.en`, and `--skipOcr`.
 
-From a checkout, the supported onboarding path is still the repo-local `scripts/setup-macos.sh` wrapper. The wrapper is macOS-only, and `./scripts/setup-macos.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `healthybob` and `vault-cli` commands for future shells via those user-level shims.
+From a checkout, the supported onboarding path is the repo-local `scripts/setup-host.sh` wrapper. On macOS it delegates to the existing Homebrew-based bootstrap path; on Linux it can reuse or download Node locally, activate pnpm through corepack, install dependencies, build the workspace, and then run the same CLI setup flow. `./scripts/setup-host.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `healthybob` and `vault-cli` commands for future shells via those user-level shims. iMessage remains macOS-only even though the rest of the host setup now supports Linux.
 
 ## Release Flow
 

@@ -132,6 +132,39 @@ function instrumentConnectorForRunEvents(
   }
 }
 
+function isVaultCliErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === code
+  )
+}
+
+function shouldSkipConnectorStartup(
+  connector: { source: string },
+  error: unknown,
+): boolean {
+  return (
+    connector.source === 'imessage' &&
+    isVaultCliErrorCode(error, 'INBOX_IMESSAGE_UNAVAILABLE')
+  )
+}
+
+function emitConnectorSkipped(
+  connector: { id: string; source: string },
+  error: unknown,
+  onEvent?: ((event: InboxRunEvent) => void) | null,
+): void {
+  onEvent?.({
+    connectorId: connector.id,
+    details: errorMessage(error),
+    phase: 'startup',
+    source: connector.source,
+    type: 'connector.skipped',
+  })
+}
+
 function tryKillProcess(
   killProcess: (pid: number, signal?: NodeJS.Signals | number) => void,
   pid: number,
@@ -365,24 +398,46 @@ export function createInboxRuntimeOps(
       const configured = await parsers.createConfiguredParserRegistry({
         vaultRoot: paths.absoluteVaultRoot,
       })
-      const connectors = await Promise.all(
-        enabledConnectors.map((connector) =>
-          instantiateConnector({
+      const activeConnectorConfigs = [] as typeof enabledConnectors
+      const instrumentedConnectors = [] as PollConnector[]
+      const linqWebhookSecret = resolveLinqWebhookSecret(env.getEnvironment())
+
+      for (const connector of enabledConnectors) {
+        try {
+          const instantiated = await instantiateConnector({
             connector,
             loadImessageDriver: env.loadConfiguredImessageDriver,
             loadTelegramDriver: env.loadConfiguredTelegramDriver,
             loadEmailDriver: env.loadConfiguredEmailDriver,
-            linqWebhookSecret: resolveLinqWebhookSecret(env.getEnvironment()),
+            linqWebhookSecret,
             ensureImessageReady: env.ensureConfiguredImessageReady,
             loadInbox: env.loadInbox,
-          }),
-        ),
-      )
-      const instrumentedConnectors = connectors.map((connector) =>
-        instrumentConnectorForRunEvents(connector, options?.onEvent),
-      )
+          })
+          activeConnectorConfigs.push(connector)
+          instrumentedConnectors.push(
+            instrumentConnectorForRunEvents(instantiated, options?.onEvent),
+          )
+        } catch (error) {
+          if (shouldSkipConnectorStartup(connector, error)) {
+            emitConnectorSkipped(connector, error, options?.onEvent)
+            continue
+          }
+          throw error
+        }
+      }
 
-      const connectorIds = enabledConnectors.map((connector) => connector.id)
+      if (instrumentedConnectors.length === 0) {
+        throw new VaultCliError(
+          'INBOX_NO_SUPPORTED_SOURCES',
+          'All enabled inbox sources are unsupported on this host. Disable or remove iMessage here, add Telegram, Linq, or email connectors, or run iMessage from a macOS host.',
+          {
+            connectorIds: enabledConnectors.map((connector) => connector.id),
+            platform: env.getPlatform(),
+          },
+        )
+      }
+
+      const connectorIds = activeConnectorConfigs.map((connector) => connector.id)
       const startedAt = env.clock().toISOString()
       const signalBridge = options?.signal
         ? { cleanup: () => {}, signal: options.signal }
@@ -456,7 +511,7 @@ export function createInboxRuntimeOps(
 
       return {
         vault: paths.absoluteVaultRoot,
-        sourceIds: enabledConnectors.map((connector) => connector.id),
+        sourceIds: connectorIds,
         startedAt,
         stoppedAt,
         reason,

@@ -6,6 +6,21 @@ import type {
 
 export type ForegroundLogScope = 'assistant' | 'inbox'
 
+export const UNSAFE_FOREGROUND_LOG_DETAILS_ENV =
+  'HEALTHYBOB_UNSAFE_FOREGROUND_LOG_DETAILS'
+
+export interface ForegroundTerminalLogOptions {
+  unsafeDetails?: boolean
+}
+
+export function resolveForegroundTerminalLogOptions(
+  env: NodeJS.ProcessEnv = process.env,
+): ForegroundTerminalLogOptions {
+  return {
+    unsafeDetails: parseBooleanEnvFlag(env[UNSAFE_FOREGROUND_LOG_DETAILS_ENV]),
+  }
+}
+
 export function formatForegroundLogLine(
   scope: ForegroundLogScope,
   message: string,
@@ -20,6 +35,7 @@ export function formatForegroundLogLine(
 
 export function formatAssistantRunEventForTerminal(
   event: AssistantRunEvent,
+  options: ForegroundTerminalLogOptions = {},
 ): string | null {
   if (event.type === 'scan.started') {
     return captureCountFromDetails(event.details) === 0
@@ -34,7 +50,11 @@ export function formatAssistantRunEventForTerminal(
   }
 
   if (event.type === 'reply.scan.primed') {
-    return `primed channel auto-reply: ${event.details ?? ''}`.trim()
+    const details = formatAssistantReplyScanPrimedDetails(
+      event.details,
+      options,
+    )
+    return details ? `primed channel auto-reply: ${details}` : 'primed channel auto-reply'
   }
 
   if (event.type === 'capture.routed') {
@@ -43,35 +63,54 @@ export function formatAssistantRunEventForTerminal(
   }
 
   if (event.type === 'capture.replied') {
-    return `replied ${event.captureId ?? 'capture'}${event.details ? `: ${event.details}` : ''}`
+    return formatAssistantEventLine('replied', event.captureId, options.unsafeDetails ? event.details : null)
   }
 
   if (event.type === 'daemon.failed') {
-    return `inbox daemon failed${event.details ? `: ${event.details}` : ''}`
+    return formatAssistantEventLine(
+      'inbox daemon failed',
+      undefined,
+      options.unsafeDetails ? event.details : null,
+    )
   }
 
   const label = event.type.replace(/^(capture|reply\.scan)\./u, '')
-  const suffix = [event.captureId, event.details].filter(Boolean).join(': ')
-  return `${label}${suffix ? ` ${suffix}` : ''}`.trim()
+  const details = formatAssistantEventDetails(event, options)
+  return formatAssistantEventLine(label, event.captureId, details)
 }
 
 export function formatInboxRunEventForTerminal(
   event: InboxRunEvent,
+  options: ForegroundTerminalLogOptions = {},
 ): string | null {
   switch (event.type) {
     case 'connector.backfill.started':
-      return `${formatConnectorLabel(event)} backfill starting`
+      return `${formatConnectorLabel(event, options)} backfill starting`
     case 'connector.backfill.finished': {
       const imported = event.counts?.imported ?? 0
       const deduped = event.counts?.deduped ?? 0
-      return `${formatConnectorLabel(event)} backfill finished: ${imported} imported, ${deduped} deduped`
+      return `${formatConnectorLabel(event, options)} backfill finished: ${imported} imported, ${deduped} deduped`
     }
     case 'connector.watch.started':
-      return `${formatConnectorLabel(event)} watching for new messages`
+      return `${formatConnectorLabel(event, options)} watching for new messages`
     case 'connector.failed':
-      return `${formatConnectorLabel(event)} ${event.phase === 'backfill' ? 'backfill' : 'watch'} failed${event.details ? `: ${event.details}` : ''}`
+      return formatConnectorEventLine(
+        `${formatConnectorLabel(event, options)} ${
+          event.phase === 'backfill'
+            ? 'backfill'
+            : event.phase === 'startup'
+              ? 'startup'
+              : 'watch'
+        } failed`,
+        options.unsafeDetails ? event.details : null,
+      )
+    case 'connector.skipped':
+      return formatConnectorEventLine(
+        `${formatConnectorLabel(event, options)} skipped on this host`,
+        options.unsafeDetails ? event.details : null,
+      )
     case 'capture.imported':
-      return formatImportedCaptureEvent(event)
+      return formatImportedCaptureEvent(event, options)
     default:
       return null
   }
@@ -79,11 +118,27 @@ export function formatInboxRunEventForTerminal(
 
 function formatConnectorLabel(
   event: Pick<InboxRunEvent, 'connectorId' | 'source'>,
+  options: ForegroundTerminalLogOptions,
 ): string {
-  return `${humanizeSource(event.source)} connector ${event.connectorId}`
+  return options.unsafeDetails
+    ? `${humanizeSource(event.source)} connector ${event.connectorId}`
+    : `${humanizeSource(event.source)} connector`
 }
 
-function formatImportedCaptureEvent(event: InboxRunEvent): string {
+function formatImportedCaptureEvent(
+  event: InboxRunEvent,
+  options: ForegroundTerminalLogOptions,
+): string {
+  if (options.unsafeDetails) {
+    return formatUnsafeImportedCaptureEvent(event)
+  }
+
+  const phase = event.phase === 'backfill' ? 'backfill' : 'new'
+  const source = humanizeSource(event.source)
+  return `${phase} ${source} capture imported: ${summarizeCapturePayload(event.capture)}`
+}
+
+function formatUnsafeImportedCaptureEvent(event: InboxRunEvent): string {
   const phase = event.phase === 'backfill' ? 'backfill' : 'new'
   const source = humanizeSource(event.source)
   const capture = event.capture
@@ -100,6 +155,25 @@ function formatImportedCaptureEvent(event: InboxRunEvent): string {
   }
 
   return `${parts.join(' ')}: ${preview}`
+}
+
+function summarizeCapturePayload(
+  capture?: RuntimeCaptureRecordInput,
+): string {
+  const parts: string[] = []
+
+  if (normalizePreviewText(capture?.text)) {
+    parts.push('text')
+  }
+
+  const attachmentCount = capture?.attachments?.length ?? 0
+  if (attachmentCount > 0) {
+    parts.push(
+      `${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`,
+    )
+  }
+
+  return parts.length > 0 ? parts.join(' + ') : 'no text or attachments'
 }
 
 function resolveActorLabel(capture?: RuntimeCaptureRecordInput): string | null {
@@ -168,6 +242,126 @@ function clipTerminalText(value: string | null, maxLength: number): string | nul
   }
 
   return `${value.slice(0, Math.max(1, maxLength - 3)).trimEnd()}...`
+}
+
+function formatAssistantEventLine(
+  label: string,
+  captureId?: string,
+  details?: string | null,
+): string {
+  const suffix = [captureId, normalizeLabel(details)].filter(Boolean).join(': ')
+  return `${label}${suffix ? ` ${suffix}` : ''}`.trim()
+}
+
+function formatAssistantEventDetails(
+  event: AssistantRunEvent,
+  options: ForegroundTerminalLogOptions,
+): string | null {
+  const details = normalizeLabel(event.details)
+  if (!details) {
+    return null
+  }
+
+  if (options.unsafeDetails) {
+    return details
+  }
+
+  switch (event.type) {
+    case 'capture.noop':
+    case 'capture.skipped':
+      return isSafeAssistantDetail(details) ? details : null
+    case 'capture.reply-skipped':
+      if (isSafeAssistantDetail(details)) {
+        return details
+      }
+
+      return details.endsWith(
+        'Will retry this capture after the provider reconnects.',
+      )
+        ? 'waiting for provider reconnect'
+        : null
+    default:
+      return null
+  }
+}
+
+function formatAssistantReplyScanPrimedDetails(
+  details: string | undefined,
+  options: ForegroundTerminalLogOptions,
+): string | null {
+  const normalized = normalizeLabel(details)
+  if (!normalized) {
+    return null
+  }
+
+  if (options.unsafeDetails) {
+    return normalized
+  }
+
+  if (
+    normalized ===
+    'no existing captures yet; auto-reply will start with the next inbound message'
+  ) {
+    return normalized
+  }
+
+  if (
+    normalized.startsWith('processing existing ') &&
+    normalized.endsWith(
+      ' backlog before switching to new inbound messages',
+    )
+  ) {
+    return normalized
+  }
+
+  if (normalized.startsWith('starting after ')) {
+    return 'starting after latest existing capture'
+  }
+
+  return null
+}
+
+function formatConnectorEventLine(
+  message: string,
+  details?: string | null,
+): string {
+  const suffix = normalizeLabel(details)
+  return suffix ? `${message}: ${suffix}` : message
+}
+
+function isSafeAssistantDetail(details: string): boolean {
+  return SAFE_ASSISTANT_DETAILS.has(details)
+}
+
+const SAFE_ASSISTANT_DETAILS = new Set([
+  'assistant result already exists',
+  'assistant reply already exists',
+  'capture already promoted',
+  'capture has no text or parsed attachment content',
+  'capture is self-authored',
+  'capture matches a recent assistant delivery',
+  'channel not enabled for assistant auto-reply',
+  'Email auto-reply only runs for direct threads',
+  'Linq auto-reply only runs for direct chats',
+  'model chose no canonical writes',
+  'Telegram auto-reply only runs for direct chats',
+  'waiting for parser completion',
+])
+
+function parseBooleanEnvFlag(value: string | undefined): boolean {
+  if (typeof value !== 'string') {
+    return false
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case '1':
+    case 'on':
+    case 'true':
+    case 'yes':
+      return true
+    default:
+      return false
+  }
 }
 
 function captureCountFromDetails(details?: string): number | null {

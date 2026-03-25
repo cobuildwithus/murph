@@ -6,17 +6,17 @@ The workspace includes buildable packages for contracts, shared runtime-state he
 
 ## Install (recommended)
 
-Runtime: Node >= 22.16.0. One-command setup is currently macOS-only.
+Runtime: Node >= 22.16.0. One-command setup supports macOS and Linux. iMessage remains macOS-only.
 
 Healthy Bob now has a fixed-version monorepo release flow that packs `healthybob` plus the supporting runtime packages, including `@healthybob/device-syncd`, for npm publication. Until a public version is actually cut, the recommended install path is still from this repo root:
 
 ```bash
 pnpm onboard --vault ./vault
 # or, if pnpm is not available yet:
-./scripts/setup-macos.sh --vault ./vault
+./scripts/setup-host.sh --vault ./vault
 ```
 
-`pnpm onboard` is the repo-local installer entrypoint. It runs the macOS setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. That wizard now uses a compact assistant/channel/wearable stepper: it saves a default assistant backend such as Codex CLI, Codex OSS/local model, or an OpenAI-compatible endpoint, shows inline readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP, can prompt for missing runtime credentials for the current onboarding run only, can discover and reuse existing AgentMail inboxes before attempting to provision a new one, and can open ready wearable connect flows before the assistant handoff continues. iMessage remains enabled by default there, Telegram and email can be enabled from the same surface, optional Oura/WHOOP connect handoff can be selected at the same time, and if at least one selected auto-reply channel is fully configured the command will drop into `assistant run` after any ready wearable connect flows open in the browser.
+`pnpm onboard` is the repo-local installer entrypoint. It runs the cross-platform setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. That wizard now uses a compact assistant/channel/wearable stepper: it saves a default assistant backend such as Codex CLI, Codex OSS/local model, or an OpenAI-compatible endpoint, shows inline readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP, can prompt for missing runtime credentials for the current onboarding run only, can discover and reuse existing AgentMail inboxes before attempting to provision a new one, and can open ready wearable connect flows before the assistant handoff continues. On macOS, iMessage remains enabled by default there; on Linux, setup defaults to the cross-platform channels instead. Telegram and email can be enabled from the same surface, optional Oura/WHOOP connect handoff can be selected at the same time, and if at least one selected auto-reply channel is fully configured the command will drop into `assistant run` after any ready wearable connect flows open in the browser.
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
@@ -366,9 +366,9 @@ Nouns are grouped by those bundles rather than a shared grammar plus exceptions:
 
 Noun-specific filters still exist where the underlying records justify them: `history list` adds `--kind`, `--from`, and `--to`; `blood-test list` exposes `--status`, `--from`, and `--to`; `profile list` exposes `--from` and `--to`; registry-backed nouns may also expose `--status`.
 
-## One-Command macOS Setup
+## One-Command Host Setup
 
-Healthy Bob now has a dedicated macOS setup surface for the local parser/runtime stack:
+Healthy Bob now has a dedicated host setup surface for the local parser/runtime stack on macOS and Linux:
 
 ```bash
 healthybob onboard
@@ -376,20 +376,20 @@ healthybob onboard
 healthybob setup
 ```
 
-That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. The built CLI shape already includes a setup-first `healthybob` alias: `healthybob`, `healthybob --help`, `healthybob onboard ...`, and `healthybob setup ...` route to that setup surface, while other commands continue through the main operator surface. On macOS it will:
+That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. The built CLI shape already includes a setup-first `healthybob` alias: `healthybob`, `healthybob --help`, `healthybob onboard ...`, and `healthybob setup ...` route to that setup surface, while other commands continue through the main operator surface. Across supported hosts it will:
 
-- install or reuse Homebrew
+- on macOS, install or reuse Homebrew; on Linux, reuse system tools from PATH when available and otherwise attempt apt-based installs for the parser stack
 - install or reuse `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`
 - download a local whisper.cpp model into `~/.healthybob/toolchain/models/whisper/`
-- install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon unless you pass `--skipOcr`
+- install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon, and attempt the same Linux OCR setup on x86_64 unless you pass `--skipOcr`
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
 - open an interactive onboarding wizard that steps through assistant defaults, message channels, optional wearable connect targets, and a final review with compact inline summaries instead of one long text wall
 - offer Codex CLI, Codex OSS/local-model, OpenAI-compatible endpoint, or skip-for-now assistant presets during that wizard, with provider-specific follow-up prompts such as model ids, base URLs, and API-key environment variable names
 - show readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP directly inside that wizard, including current-run-only prompts for missing runtime credentials when you want to continue without restarting setup
-- enable iMessage by default in that wizard, let Telegram and AgentMail email opt into the same onboarding flow, and let Oura/WHOOP be selected for immediate post-setup connect handoff when their client credentials are available
+- enable iMessage by default in that wizard on macOS, keep Linux defaults focused on Telegram, Linq, and email, and let Oura/WHOOP be selected for immediate post-setup connect handoff when their client credentials are available
 - save that vault as the default Healthy Bob CLI vault for future commands on the same machine
 - install user-level `healthybob` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
-- configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled, and do the same for Telegram or AgentMail email when their runtime credentials are available in the current environment
+- configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled on macOS, and do the same for Telegram, Linq, or AgentMail email when their runtime credentials are available in the current environment
 - open selected Oura or WHOOP browser connect flows automatically after setup when their client credentials are ready, while clearly reporting any selected wearable that still needs env vars before connect can begin
 - automatically launch `assistant run` after a successful interactive onboarding when at least one selected channel is fully configured for auto-reply, or `assistant chat` when no auto-reply channel is ready yet
 
@@ -402,7 +402,7 @@ Common options:
 
 The existing operator/data-plane surface remains under `vault-cli`. Published installs are expected to use the unscoped `healthybob` package plus the internal scoped runtime packages released from the same git tag, but the supported checkout bootstrap path today is still the repo-local wrapper below.
 
-### Repo-local macOS bootstrap
+### Repo-local host bootstrap
 
 If you are starting from a fresh checkout and the workspace itself still needs Node, pnpm, dependencies, and a build, use the repo-local wrapper entrypoint instead:
 
@@ -410,9 +410,9 @@ If you are starting from a fresh checkout and the workspace itself still needs N
 pnpm onboard --vault ./vault
 ```
 
-`pnpm onboard` is a thin alias for the existing macOS wrapper. `pnpm run setup --vault ./vault` works too. Plain `pnpm setup` cannot be claimed by this repo because `pnpm` reserves `setup` as its own built-in command.
+`pnpm onboard` is a thin alias for the host wrapper. `pnpm run setup --vault ./vault` works too. Plain `pnpm setup` cannot be claimed by this repo because `pnpm` reserves `setup` as its own built-in command.
 
-That wrapper is macOS-only. On a normal run it ensures Homebrew, Node 22+, and pnpm are present, installs workspace dependencies, builds the packages, and then delegates to `node packages/cli/dist/bin.js onboard ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
+On macOS, that wrapper delegates to the existing Homebrew-based bootstrap path. On Linux, it can reuse an existing Node 22+ runtime or download an isolated Node build under `~/.healthybob/bootstrap`, activate pnpm through corepack, install workspace dependencies, build the packages, and then delegate to `node packages/cli/dist/bin.js onboard ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
 Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, stores the selected assistant backend defaults for later `healthybob chat` and channel auto-reply, and a normal interactive `healthybob onboard` or `healthybob setup` run now walks through assistant defaults, message channels, optional Oura/WHOOP connect targets, inline readiness badges, and any current-run runtime-env prompts before it drops into the right assistant surface. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
 
@@ -424,7 +424,7 @@ For a local-first parser setup, the repo exposes one bootstrap command:
 pnpm setup:inbox --vault ./vault
 ```
 
-That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. Use this lower-level wrapper when you already manage the external parser tools yourself; use `healthybob setup`, `pnpm onboard`, or `./scripts/setup-macos.sh` when you also want the macOS dependency/toolchain provisioning step.
+That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. Use this lower-level wrapper when you already manage the external parser tools yourself; use `healthybob setup`, `pnpm onboard`, or `./scripts/setup-host.sh` when you also want the host dependency/toolchain provisioning step.
 
 For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so pending parser jobs drain once on startup and new captures continue auto-draining without a separate manual worker step.
 

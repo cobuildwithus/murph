@@ -251,13 +251,14 @@ export interface InboxRunEvent {
   }
   details?: string
   persisted?: PersistedCapture
-  phase?: 'backfill' | 'watch'
+  phase?: 'backfill' | 'startup' | 'watch'
   source: string
   type:
     | 'capture.imported'
     | 'connector.backfill.finished'
     | 'connector.backfill.started'
     | 'connector.failed'
+    | 'connector.skipped'
     | 'connector.watch.started'
 }
 

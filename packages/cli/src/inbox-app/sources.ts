@@ -60,6 +60,26 @@ function describeLinqConnectorEndpoint(
   }
 }
 
+function assertImessageSupportedOnHost(
+  env: Pick<InboxAppEnvironment, 'getPlatform'>,
+  action: 'add' | 'enable',
+): void {
+  const platform = env.getPlatform()
+  if (platform === 'darwin') {
+    return
+  }
+
+  throw new VaultCliError(
+    'INBOX_IMESSAGE_UNAVAILABLE',
+    action === 'add'
+      ? 'The iMessage inbox connector requires macOS. Use Telegram, Linq, or email on Linux, or keep iMessage on a Mac host.'
+      : 'The iMessage inbox connector requires macOS and cannot be enabled on this host. Disable it here or run it from a Mac host.',
+    {
+      platform,
+    },
+  )
+}
+
 export function createInboxSourceOps(
   env: InboxAppEnvironment,
 ): Pick<
@@ -70,6 +90,10 @@ export function createInboxSourceOps(
     async sourceAdd(input) {
       const paths = await ensureInitialized(env.loadInbox, input.vault)
       const config = await readConfig(paths)
+
+      if (input.source === 'imessage') {
+        assertImessageSupportedOnHost(env, 'add')
+      }
 
       if (config.connectors.some((connector) => connector.id === input.id)) {
         throw new VaultCliError(
@@ -227,6 +251,10 @@ export function createInboxSourceOps(
           'INBOX_SOURCE_NOT_FOUND',
           `Inbox source "${input.connectorId}" is not configured.`,
         )
+      }
+
+      if (connector.source === 'imessage' && input.enabled) {
+        assertImessageSupportedOnHost(env, 'enable')
       }
 
       connector.enabled = input.enabled

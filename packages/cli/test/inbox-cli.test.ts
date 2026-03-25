@@ -7,7 +7,15 @@ import {
   openSqliteRuntimeDatabase,
   resolveRuntimePaths,
 } from '@healthybob/runtime-state'
-import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import {
+  createIntegratedInboxCliServices,
+  type InboxRunEvent,
+} from '../src/inbox-services.js'
+import {
+  UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
+  formatInboxRunEventForTerminal,
+  resolveForegroundTerminalLogOptions,
+} from '../src/run-terminal-logging.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
@@ -17,6 +25,101 @@ const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url)
 const builtInboxRuntimeUrl = new URL('../../inboxd/dist/index.js', import.meta.url).href
 const builtImportersRuntimeUrl = new URL('../../importers/dist/index.js', import.meta.url).href
 const builtParsersRuntimeUrl = new URL('../../parsers/dist/index.js', import.meta.url).href
+
+test('formatInboxRunEventForTerminal omits connector identifiers by default', () => {
+  const event: InboxRunEvent = {
+    connectorId: 'email:person@example.test',
+    source: 'email',
+    type: 'connector.watch.started',
+  }
+
+  const message = formatInboxRunEventForTerminal(event)
+
+  assert.equal(message, 'email connector watching for new messages')
+  assert.doesNotMatch(message ?? '', /person@example\.test/u)
+})
+
+test('formatInboxRunEventForTerminal redacts actor, thread, and text previews by default', () => {
+  const event: InboxRunEvent = {
+    capture: {
+      actor: {
+        displayName: 'Person Example',
+        id: 'person@example.test',
+        isSelf: false,
+      },
+      externalId: 'message-1',
+      attachments: [
+        {
+          fileName: 'lab-results.pdf',
+          kind: 'document',
+        },
+      ],
+      occurredAt: '2026-03-25T08:00:00.000Z',
+      source: 'email',
+      text: 'Follow up about the lab results tomorrow morning.',
+      thread: {
+        id: 'thread-person@example.test',
+        title: 'Care plan',
+      },
+    },
+    connectorId: 'email:person@example.test',
+    phase: 'watch',
+    source: 'email',
+    type: 'capture.imported',
+  }
+
+  const message = formatInboxRunEventForTerminal(event)
+
+  assert.equal(message, 'new email capture imported: text + 1 attachment')
+  assert.doesNotMatch(message ?? '', /Person Example/u)
+  assert.doesNotMatch(message ?? '', /person@example\.test/u)
+  assert.doesNotMatch(message ?? '', /Care plan/u)
+  assert.doesNotMatch(message ?? '', /Follow up about the lab results/u)
+})
+
+test('formatInboxRunEventForTerminal only includes verbose capture details when unsafe logging is enabled', () => {
+  const event: InboxRunEvent = {
+    capture: {
+      actor: {
+        displayName: 'Person Example',
+        id: 'person@example.test',
+        isSelf: false,
+      },
+      externalId: 'message-1',
+      attachments: [
+        {
+          kind: 'document',
+        },
+      ],
+      occurredAt: '2026-03-25T08:00:00.000Z',
+      source: 'email',
+      text: 'Follow up about the lab results tomorrow morning.',
+      thread: {
+        id: 'thread-person@example.test',
+        title: 'Care plan',
+      },
+    },
+    connectorId: 'email:person@example.test',
+    phase: 'watch',
+    source: 'email',
+    type: 'capture.imported',
+  }
+
+  assert.deepEqual(resolveForegroundTerminalLogOptions({}), {
+    unsafeDetails: false,
+  })
+
+  const message = formatInboxRunEventForTerminal(
+    event,
+    resolveForegroundTerminalLogOptions({
+      [UNSAFE_FOREGROUND_LOG_DETAILS_ENV]: 'true',
+    }),
+  )
+
+  assert.match(message ?? '', /Person Example/u)
+  assert.match(message ?? '', /Care plan/u)
+  assert.match(message ?? '', /Follow up about the lab results tomorrow morning\./u)
+})
 
 async function makeVaultFixture(prefix: string): Promise<{
   homeRoot: string
@@ -224,6 +327,78 @@ function createFakeInboxRuntimeModule(input?: {
         },
         async backfill() {
           return null
+        },
+        async watch() {},
+        async close() {},
+      }
+    },
+    createTelegramPollConnector(options: {
+      id?: string
+      accountId?: string | null
+      backfillLimit?: number
+    }) {
+      return {
+        id: options.id ?? 'telegram:bot',
+        source: 'telegram',
+        accountId: options.accountId ?? 'bot',
+        kind: 'poll' as const,
+        capabilities: {
+          attachments: true,
+          backfill: true,
+          watch: true,
+          webhooks: false,
+        },
+        async backfill() {
+          return null
+        },
+        async watch() {},
+        async close() {},
+      }
+    },
+    createEmailPollConnector(options: {
+      id?: string
+      accountId?: string | null
+      accountAddress?: string | null
+      backfillLimit?: number
+      pollIntervalMs?: number
+    }) {
+      return {
+        id: options.id ?? 'email:agentmail',
+        source: 'email',
+        accountId: options.accountId ?? null,
+        kind: 'poll' as const,
+        capabilities: {
+          attachments: true,
+          backfill: true,
+          watch: true,
+          webhooks: false,
+        },
+        async backfill() {
+          return null
+        },
+        async watch() {},
+        async close() {},
+      }
+    },
+    createLinqWebhookConnector(options: {
+      id?: string
+      accountId?: string | null
+      host?: string
+      path?: string
+      port?: number
+      webhookSecret?: string | null
+      downloadAttachments?: boolean
+    }) {
+      return {
+        id: options.id ?? 'linq:default',
+        source: 'linq',
+        accountId: options.accountId ?? 'default',
+        kind: 'poll' as const,
+        capabilities: {
+          attachments: true,
+          backfill: false,
+          watch: true,
+          webhooks: true,
         },
         async watch() {},
         async close() {},
@@ -1324,6 +1499,38 @@ test.sequential('source add defaults the iMessage account identity to self when 
   }
 })
 
+test.sequential('source add rejects the iMessage connector on Linux hosts', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-imessage-linux-add')
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'linux',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+
+    await expectVaultCliError(
+      services.sourceAdd({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        source: 'imessage',
+        id: 'imessage:self',
+        account: 'self',
+        includeOwn: true,
+      }),
+      'INBOX_IMESSAGE_UNAVAILABLE',
+    )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('source add defaults the Telegram account identity to bot when omitted', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-telegram-default-account')
   const services = createIntegratedInboxCliServices({
@@ -1424,6 +1631,58 @@ test.sequential('sourceSetEnabled updates the persisted enabled flag for an exis
       requestId: null,
     })
     assert.equal(listed.connectors[0]?.enabled, false)
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('sourceSetEnabled refuses to enable an existing iMessage connector on Linux hosts', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-toggle-imessage-linux')
+  const darwinServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+  const linuxServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'linux',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await darwinServices.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    await darwinServices.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'imessage',
+      id: 'imessage:self',
+      account: 'self',
+      includeOwn: true,
+    })
+
+    const disabled = await linuxServices.sourceSetEnabled({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      connectorId: 'imessage:self',
+      enabled: false,
+    })
+    assert.equal(disabled.connector.enabled, false)
+
+    await expectVaultCliError(
+      linuxServices.sourceSetEnabled({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        connectorId: 'imessage:self',
+        enabled: true,
+      }),
+      'INBOX_IMESSAGE_UNAVAILABLE',
+    )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })
@@ -2067,6 +2326,268 @@ test.sequential('run surfaces iMessage permission failures before starting the d
       }),
       'INBOX_IMESSAGE_PERMISSION_REQUIRED',
     )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('run on Linux skips unsupported iMessage connectors and continues with Telegram', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-run-linux-mixed')
+  const events: Array<{
+    type: string
+    connectorId?: string
+    source?: string
+    phase?: string
+  }> = []
+  const baseInboxModule = createFakeInboxRuntimeModule()
+  const darwinServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => baseInboxModule,
+  })
+  const linuxServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPid: () => 4242,
+    getPlatform: () => 'linux',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => ({
+      ...baseInboxModule,
+      createTelegramPollConnector(options: {
+        id?: string
+        accountId?: string | null
+        backfillLimit?: number
+      }) {
+        return {
+          id: options.id ?? 'telegram:bot',
+          source: 'telegram',
+          accountId: options.accountId ?? 'bot',
+          kind: 'poll' as const,
+          capabilities: {
+            attachments: true,
+            backfill: true,
+            watch: true,
+            webhooks: false,
+          },
+          async backfill(
+            _cursor: Record<string, unknown> | null,
+            emit: (
+              capture: any,
+              checkpoint?: Record<string, unknown> | null,
+            ) => Promise<{ captureId?: string; deduped: boolean }>,
+          ) {
+            await emit(
+              {
+                source: 'telegram',
+                externalId: 'telegram-backfill-1',
+                accountId: 'bot',
+                occurredAt: '2026-03-13T08:00:00.000Z',
+                receivedAt: '2026-03-13T08:00:01.000Z',
+                thread: {
+                  id: 'chat-1',
+                  title: 'Telegram',
+                  isDirect: true,
+                },
+                actor: {
+                  id: 'telegram:user',
+                  displayName: 'User',
+                  isSelf: false,
+                },
+                text: 'Telegram backlog note',
+                attachments: [],
+                raw: {},
+              },
+              {
+                updateId: 1,
+              },
+            )
+            return {
+              updateId: 1,
+            }
+          },
+          async watch(
+            _cursor: Record<string, unknown> | null,
+            emit: (
+              capture: any,
+              checkpoint?: Record<string, unknown> | null,
+            ) => Promise<{ captureId?: string; deduped: boolean }>,
+            _signal: AbortSignal,
+          ) {
+            await emit(
+              {
+                source: 'telegram',
+                externalId: 'telegram-watch-1',
+                accountId: 'bot',
+                occurredAt: '2026-03-13T09:00:00.000Z',
+                receivedAt: '2026-03-13T09:00:01.000Z',
+                thread: {
+                  id: 'chat-1',
+                  title: 'Telegram',
+                  isDirect: true,
+                },
+                actor: {
+                  id: 'telegram:user',
+                  displayName: 'User',
+                  isSelf: false,
+                },
+                text: 'Linux host is still running',
+                attachments: [],
+                raw: {},
+              },
+              {
+                updateId: 2,
+              },
+            )
+          },
+          async close() {},
+        }
+      },
+    }),
+    loadTelegramDriver: async () => ({
+      async getMe() {
+        return {}
+      },
+      async getMessages() {
+        return []
+      },
+      async startWatching() {},
+      async getFile() {
+        return {}
+      },
+      async downloadFile() {
+        return new Uint8Array()
+      },
+    }),
+    loadParsersModule: async () =>
+      createFakeParsersRuntimeModule({
+        async onRunInboxDaemonWithParsers({ connectors, signal }) {
+          assert.equal(connectors.length, 1)
+          assert.equal(connectors[0]?.id, 'telegram:bot')
+          const connector = connectors[0]
+          assert.ok(connector)
+          await connector.backfill?.(
+            null,
+            async () => ({
+              captureId: 'cap-telegram-backfill',
+              deduped: false,
+            }),
+          )
+          await connector.watch?.(
+            null,
+            async () => ({
+              captureId: 'cap-telegram-watch',
+              deduped: false,
+            }),
+            signal,
+          )
+        },
+      }),
+  })
+
+  try {
+    await darwinServices.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    await darwinServices.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'imessage',
+      id: 'imessage:self',
+      account: 'self',
+      includeOwn: true,
+    })
+    await darwinServices.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'telegram',
+      id: 'telegram:bot',
+      account: 'bot',
+    })
+
+    const result = await linuxServices.run(
+      {
+        vault: fixture.vaultRoot,
+        requestId: null,
+      },
+      {
+        onEvent(event) {
+          events.push(event)
+        },
+      },
+    )
+
+    assert.equal(result.reason, 'completed')
+    assert.deepEqual(result.sourceIds, ['telegram:bot'])
+    assert.deepEqual(events.map((event) => event.type), [
+      'connector.skipped',
+      'connector.backfill.started',
+      'connector.backfill.finished',
+      'connector.watch.started',
+      'capture.imported',
+    ])
+    assert.equal(events[0]?.connectorId, 'imessage:self')
+    assert.equal(events[0]?.source, 'imessage')
+    assert.equal(events[0]?.phase, 'startup')
+    assert.equal(events[4]?.connectorId, 'telegram:bot')
+    assert.equal(events[4]?.source, 'telegram')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('run on Linux fails cleanly when only unsupported iMessage connectors are enabled', async () => {
+  const fixture = await makeVaultFixture('healthybob-inbox-run-linux-imessage-only')
+  const events: Array<{ type: string; connectorId?: string; phase?: string }> = []
+  const baseInboxModule = createFakeInboxRuntimeModule()
+  const darwinServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => baseInboxModule,
+  })
+  const linuxServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'linux',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: async () => baseInboxModule,
+    loadParsersModule: async () => createFakeParsersRuntimeModule(),
+  })
+
+  try {
+    await darwinServices.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    await darwinServices.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'imessage',
+      id: 'imessage:self',
+      account: 'self',
+      includeOwn: true,
+    })
+
+    await expectVaultCliError(
+      linuxServices.run(
+        {
+          vault: fixture.vaultRoot,
+          requestId: null,
+        },
+        {
+          onEvent(event) {
+            events.push(event)
+          },
+        },
+      ),
+      'INBOX_NO_SUPPORTED_SOURCES',
+    )
+
+    assert.deepEqual(events.map((event) => event.type), ['connector.skipped'])
+    assert.equal(events[0]?.connectorId, 'imessage:self')
+    assert.equal(events[0]?.phase, 'startup')
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })
