@@ -131,7 +131,7 @@ Keep secrets in a separate table from user-visible connection metadata.
 ### Secret hygiene and rotation
 
 - Keep real hosted control-plane credentials in an untracked local `.env` for development or the deployment platform's secret manager. The repo-owned `apps/web/.env.example` file should remain placeholder-only.
-- A raw filesystem zip/tar of a repo clone is still an exposure when ignored local `apps/web/.env` or `.next` artifacts exist, even if git itself is clean. Use the guarded source-bundle path (`scripts/package-audit-context.sh` / `pnpm zip:src`) for review handoff instead of archiving the clone directly.
+- A raw filesystem zip/tar of a repo clone is still an exposure when ignored local `apps/web/.env` or `.next` artifacts exist, even if git itself is clean. Use the guarded source-bundle path (`scripts/package-audit-context.sh` / `pnpm zip:src`) for review handoff instead of archiving the clone directly; it stages git-visible files and filters blocked local residue from the bundle.
 - If any real hosted `.env` or deploy secret was exposed, rotate at least:
   - the Postgres credential behind `DATABASE_URL`
   - `DEVICE_SYNC_ENCRYPTION_KEY` and `DEVICE_SYNC_ENCRYPTION_KEY_VERSION`

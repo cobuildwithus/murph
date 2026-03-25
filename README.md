@@ -57,7 +57,7 @@ VAULT=fixtures/demo-web-vault pnpm web:dev
 The repo now has two separate ChatGPT upload paths:
 
 - `pnpm review:gpt`
-  packages source/docs for code review using the existing audit ZIP flow
+  packages source/docs for code review using the existing audit ZIP flow, pruning untracked generated source sidecars first and then staging git-visible files while filtering local `.env` and build residue from the upload bundle
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
   packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
 

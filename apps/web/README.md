@@ -69,7 +69,7 @@ The hosted control plane consumes each assertion nonce once, so replayed asserti
 ## Secret hygiene and rotation
 
 - Keep real hosted values in an untracked local `.env` for development or in the platform secret manager for deployed environments. The committed `.env.example` file must stay placeholder-only.
-- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env` or `.next` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly.
+- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env` or `.next` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files and filters blocked local residue from the bundle.
 - Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env` or deploy secret was ever exposed.
 - Treat a leaked raw clone/archive that included the local hosted `.env` the same way as a direct secret exposure.
 - Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate `DEVICE_SYNC_ENCRYPTION_KEY`, but do not assume the version field alone gives backwards-compatible reads. The current hosted control plane loads one active key at runtime.

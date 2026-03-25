@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
-node --import=tsx scripts/check-no-js.ts --for-source-bundle
+node --import=tsx scripts/clean-generated-source-artifacts.ts
+node --import=tsx scripts/check-no-js.ts
 source scripts/repo-tools.config.sh
-exec "$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@"
+node --import=tsx scripts/package-audit-context.ts "$@"
