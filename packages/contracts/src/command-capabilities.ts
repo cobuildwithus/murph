@@ -24,6 +24,7 @@ export type CommandCapability =
   | "materialize"
   | "prune"
   | "validate"
+  | "repair"
   | "tail"
   | "project"
   | "bootstrap"
@@ -195,7 +196,7 @@ const checkedCommandNounCapabilities = [
   {
     bundles: ["readable", "derivedAdmin"],
     noun: "vault",
-    additionalCapabilities: ["update"],
+    additionalCapabilities: ["update", "repair"],
   },
   {
     bundles: ["readable", "derivedAdmin"],

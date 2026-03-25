@@ -5,8 +5,8 @@ import {
 } from "@healthybob/contracts";
 
 import { VAULT_LAYOUT } from "../constants.js";
-import { readJsonFile } from "../fs.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
+import { loadVault } from "../vault.js";
 
 import {
   compactObject,
@@ -59,9 +59,7 @@ function validateCoreFrontmatter(
 export async function updateVaultSummary(
   input: UpdateVaultSummaryInput,
 ): Promise<UpdateVaultSummaryResult> {
-  const metadata = validateVaultMetadata(
-    await readJsonFile(input.vaultRoot, VAULT_LAYOUT.metadata),
-  );
+  const { metadata } = await loadVault({ vaultRoot: input.vaultRoot });
   const { document: coreDocument } = await readValidatedFrontmatterDocument(
     input.vaultRoot,
     VAULT_LAYOUT.coreDocument,

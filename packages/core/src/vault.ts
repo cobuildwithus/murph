@@ -6,6 +6,7 @@ import {
   conditionFrontmatterSchema,
   auditRecordSchema,
   type ContractSchema,
+  type VaultMetadata,
   coreFrontmatterSchema,
   eventRecordSchema,
   experimentFrontmatterSchema,
@@ -26,12 +27,8 @@ import {
 import {
   DEFAULT_TIMEZONE,
   FRONTMATTER_SCHEMA_VERSIONS,
-  ID_PREFIXES,
   REQUIRED_DIRECTORIES,
   VAULT_LAYOUT,
-  VAULT_PATHS,
-  VAULT_SCHEMA_VERSION,
-  VAULT_SHARDS,
 } from "./constants.js";
 import { emitAuditRecord } from "./audit.js";
 import {
@@ -55,6 +52,7 @@ import {
 } from "./operations/write-batch.js";
 import { buildCurrentProfileMarkdown, listProfileSnapshots } from "./profile/storage.js";
 import { toIsoTimestamp } from "./time.js";
+import { buildVaultMetadata, loadVaultMetadata } from "./vault-metadata.js";
 
 import type { DateInput, UnknownRecord, ValidationIssue } from "./types.js";
 import { isPlainRecord } from "./types.js";
@@ -66,13 +64,6 @@ interface BuildCoreDocumentInput {
   updatedAt: string;
 }
 
-interface BuildVaultMetadataInput {
-  vaultId: string;
-  createdAt: string;
-  title: string;
-  timezone: string;
-}
-
 interface InitializeVaultInput {
   vaultRoot?: string;
   title?: string;
@@ -82,6 +73,16 @@ interface InitializeVaultInput {
 
 interface LoadVaultInput {
   vaultRoot?: string;
+}
+
+interface RepairVaultResult {
+  metadataFile: string;
+  title: string;
+  timezone: string;
+  repairedFields: string[];
+  createdDirectories: string[];
+  updated: boolean;
+  auditPath: string | null;
 }
 
 interface ValidateFrontmatterFileInput {
@@ -112,24 +113,11 @@ interface ValidateJsonlFamilyInput {
   ) => Promise<ValidationIssue[]>;
 }
 
-interface VaultMetadata extends UnknownRecord {
-  schemaVersion: string;
-  vaultId: string;
-  createdAt: string;
-  title: string;
-  timezone: string;
-  idPolicy: {
-    format: string;
-    prefixes: Record<string, string>;
-  };
-  paths: Record<string, string>;
-  shards: Record<string, string>;
-}
-
 interface LoadedVault {
   vaultRoot: string;
   metadata: VaultMetadata;
   layout: typeof VAULT_LAYOUT;
+  compatibilityRepairs: string[];
 }
 
 interface InitializedVault extends LoadedVault {
@@ -173,27 +161,6 @@ function buildCoreDocument({
     },
     body: `# ${title}\n\n## Notes\n\n`,
   });
-}
-
-function buildVaultMetadata({
-  vaultId,
-  createdAt,
-  title,
-  timezone,
-}: BuildVaultMetadataInput): VaultMetadata {
-  return {
-    schemaVersion: VAULT_SCHEMA_VERSION,
-    vaultId,
-    createdAt,
-    title,
-    timezone,
-    idPolicy: {
-      format: "prefix_ulid",
-      prefixes: { ...ID_PREFIXES },
-    },
-    paths: { ...VAULT_PATHS },
-    shards: { ...VAULT_SHARDS },
-  };
 }
 
 function validationIssue(
@@ -281,10 +248,8 @@ export async function initializeVault({
 
 export async function loadVault({ vaultRoot }: LoadVaultInput = {}): Promise<LoadedVault> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
-  const metadata = await readJsonFile(absoluteRoot, VAULT_LAYOUT.metadata);
-  assertContractShape<VaultMetadata>(
-    vaultMetadataSchema,
-    metadata,
+  const { metadata, repairedFields } = await loadVaultMetadata(
+    absoluteRoot,
     "VAULT_INVALID_METADATA",
     "Vault metadata failed contract validation.",
   );
@@ -295,7 +260,93 @@ export async function loadVault({ vaultRoot }: LoadVaultInput = {}): Promise<Loa
     layout: {
       ...VAULT_LAYOUT,
     },
+    compatibilityRepairs: repairedFields,
   };
+}
+
+export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<RepairVaultResult> {
+  const absoluteRoot = normalizeVaultRoot(vaultRoot);
+  const { metadata, repairedFields } = await loadVaultMetadata(
+    absoluteRoot,
+    "VAULT_INVALID_METADATA",
+    "Vault metadata failed contract validation.",
+  );
+  const createdDirectories = await ensureMissingRequiredDirectories(absoluteRoot);
+
+  if (repairedFields.length === 0 && createdDirectories.length === 0) {
+    return {
+      metadataFile: VAULT_LAYOUT.metadata,
+      title: metadata.title,
+      timezone: metadata.timezone,
+      repairedFields,
+      createdDirectories,
+      updated: false,
+      auditPath: null,
+    };
+  }
+
+  let auditPath: string | null = null;
+  const occurredAt = new Date().toISOString();
+
+  if (repairedFields.length > 0 || createdDirectories.length > 0) {
+    auditPath = await runCanonicalWrite({
+      vaultRoot: absoluteRoot,
+      operationType: "vault_repair",
+      summary: `Repair vault ${metadata.vaultId}`,
+      occurredAt,
+      mutate: async ({ batch }) => {
+        if (repairedFields.length > 0) {
+          await batch.stageTextWrite(
+            VAULT_LAYOUT.metadata,
+            `${JSON.stringify(metadata, null, 2)}\n`,
+            {
+              overwrite: true,
+            },
+          );
+        }
+
+        const audit = await emitAuditRecord({
+          vaultRoot: absoluteRoot,
+          batch,
+          action: "vault_repair",
+          commandName: "core.repairVault",
+          summary: "Repaired vault metadata and additive scaffold directories.",
+          occurredAt,
+          files: repairedFields.length > 0 ? [VAULT_LAYOUT.metadata, ...createdDirectories] : createdDirectories,
+          targetIds: [metadata.vaultId],
+        });
+
+        return audit.relativePath;
+      },
+    });
+  }
+
+  return {
+    metadataFile: VAULT_LAYOUT.metadata,
+    title: metadata.title,
+    timezone: metadata.timezone,
+    repairedFields,
+    createdDirectories,
+    updated: true,
+    auditPath,
+  };
+}
+
+async function ensureMissingRequiredDirectories(vaultRoot: string): Promise<string[]> {
+  const createdDirectories: string[] = [];
+
+  for (const relativeDirectory of REQUIRED_DIRECTORIES) {
+    const directoryPath = resolveVaultPath(vaultRoot, relativeDirectory);
+
+    if (await pathExists(directoryPath.absolutePath)) {
+      continue;
+    }
+
+    await ensureVaultDirectory(vaultRoot, relativeDirectory);
+    createdDirectories.push(relativeDirectory);
+  }
+
+  return createdDirectories;
 }
 
 async function validateFrontmatterFile({
@@ -751,7 +802,18 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
   let metadata: VaultMetadata | null = null;
 
   try {
-    metadata = (await loadVault({ vaultRoot: absoluteRoot })).metadata;
+    const loadedVault = await loadVault({ vaultRoot: absoluteRoot });
+    metadata = loadedVault.metadata;
+    issues.push(
+      ...loadedVault.compatibilityRepairs.map((fieldPath) =>
+        validationIssue(
+          "VAULT_METADATA_REPAIR_RECOMMENDED",
+          `Vault metadata is missing additive field "${fieldPath}". Run \`vault repair\` to persist the current scaffold.`,
+          VAULT_LAYOUT.metadata,
+          "warning",
+        ),
+      ),
+    );
   } catch (error) {
     issues.push(
       validationIssue(
@@ -939,7 +1001,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
   issues.push(...(await validateWriteOperations(absoluteRoot)));
 
   return {
-    valid: issues.length === 0,
+    valid: issues.every((issue) => issue.severity !== "error"),
     issues,
     metadata,
   };

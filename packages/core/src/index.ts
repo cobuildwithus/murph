@@ -41,6 +41,7 @@ export {
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  repairVault,
   rebuildCurrentProfile,
   stopExperiment,
   stopRegimenItem,

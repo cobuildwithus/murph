@@ -41,11 +41,13 @@ import {
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,
+  loadVault,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   parseFrontmatterDocument,
   projectAssessmentResponse,
   readJsonlRecords,
+  repairVault,
   stopExperiment,
   stringifyFrontmatterDocument,
   toMonthlyShardRelativePath,
@@ -187,6 +189,74 @@ test("initializeVault rejects roots that already contain a vault", async () => {
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_ALREADY_EXISTS",
   );
+});
+
+test("loadVault backfills additive metadata defaults in memory and repairVault persists them", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const metadataPath = path.join(vaultRoot, "vault.json");
+  const staleMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+    idPolicy: {
+      prefixes: Record<string, string>;
+    };
+    paths: Record<string, string>;
+  };
+  delete staleMetadata.idPolicy.prefixes.recipe;
+  delete staleMetadata.paths.recipesRoot;
+  await fs.writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, "utf8");
+  await fs.rm(path.join(vaultRoot, "bank/recipes"), { recursive: true, force: true });
+
+  const loaded = await loadVault({ vaultRoot });
+
+  assert.equal(loaded.metadata.idPolicy.prefixes.recipe, "rcp");
+  assert.equal(loaded.metadata.paths.recipesRoot, "bank/recipes");
+  assert.deepEqual(loaded.compatibilityRepairs.sort(), [
+    "idPolicy.prefixes.recipe",
+    "paths.recipesRoot",
+  ]);
+
+  const validationBeforeRepair = await validateVault({ vaultRoot });
+  assert.equal(validationBeforeRepair.valid, false);
+  assert.deepEqual(
+    validationBeforeRepair.issues
+      .filter((issue) => issue.severity === "warning")
+      .map((issue) => issue.code)
+      .sort(),
+    [
+      "VAULT_METADATA_REPAIR_RECOMMENDED",
+      "VAULT_METADATA_REPAIR_RECOMMENDED",
+    ],
+  );
+  assert.equal(
+    validationBeforeRepair.issues.some((issue) => issue.path === "bank/recipes"),
+    true,
+  );
+
+  const repaired = await repairVault({ vaultRoot });
+  const persistedMetadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+    idPolicy: {
+      prefixes: Record<string, string>;
+    };
+    paths: Record<string, string>;
+  };
+  const repairedRecipesDirectory = await fs.stat(path.join(vaultRoot, "bank/recipes"));
+
+  assert.equal(repaired.updated, true);
+  assert.equal(repaired.metadataFile, "vault.json");
+  assert.deepEqual(repaired.repairedFields.sort(), [
+    "idPolicy.prefixes.recipe",
+    "paths.recipesRoot",
+  ]);
+  assert.deepEqual(repaired.createdDirectories, ["bank/recipes"]);
+  assert.equal(typeof repaired.auditPath, "string");
+  assert.equal(persistedMetadata.idPolicy.prefixes.recipe, "rcp");
+  assert.equal(persistedMetadata.paths.recipesRoot, "bank/recipes");
+  assert.equal(repairedRecipesDirectory.isDirectory(), true);
+
+  const validationAfterRepair = await validateVault({ vaultRoot });
+  assert.equal(validationAfterRepair.valid, true);
+  assert.deepEqual(validationAfterRepair.issues, []);
 });
 
 test("copyRawArtifact enforces raw immutability and importDocument appends contract-shaped events", async () => {

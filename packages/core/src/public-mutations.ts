@@ -55,6 +55,7 @@ import { VaultError } from "./errors.js";
 import {
   initializeVault as initializeVaultInternal,
   loadVault as loadVaultInternal,
+  repairVault as repairVaultInternal,
   validateVault as validateVaultInternal,
 } from "./vault.js";
 
@@ -311,6 +312,12 @@ export async function updateVaultSummary(
   input: Parameters<typeof updateVaultSummaryInternal>[0],
 ): ReturnType<typeof updateVaultSummaryInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => updateVaultSummaryInternal(input));
+}
+
+export async function repairVault(
+  input: Parameters<typeof repairVaultInternal>[0] = {},
+): ReturnType<typeof repairVaultInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => repairVaultInternal(input));
 }
 
 export async function promoteInboxJournal(

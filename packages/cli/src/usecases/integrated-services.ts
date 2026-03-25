@@ -182,6 +182,21 @@ function createIntegratedCoreServices(): CoreWriteServices {
         issues: normalizeIssues(result.issues),
       }
     },
+    async repairVault(input: CommandContext) {
+      const { vault } = input
+      const { core } = await loadIntegratedRuntime()
+      const result = await core.repairVault({ vaultRoot: vault })
+      return {
+        vault,
+        metadataFile: result.metadataFile,
+        title: result.title,
+        timezone: result.timezone,
+        repairedFields: result.repairedFields,
+        createdDirectories: result.createdDirectories,
+        updated: result.updated,
+        auditPath: result.auditPath,
+      }
+    },
     async addMeal(input: CommandContext & {
       photo?: string
       audio?: string

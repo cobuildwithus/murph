@@ -403,12 +403,24 @@ test.sequential(
 )
 
 test.sequential(
-  'vault update mutates vault.json and CORE.md title and timezone fields',
+  'vault update repairs additive metadata drift while mutating vault.json and CORE.md title and timezone fields',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-vault-phase2-'))
 
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
+      const metadataPath = path.join(vaultRoot, 'vault.json')
+      const staleMetadata = JSON.parse(
+        await readFile(metadataPath, 'utf8'),
+      ) as {
+        idPolicy: {
+          prefixes: Record<string, string>
+        }
+        paths: Record<string, string>
+      }
+      delete staleMetadata.idPolicy.prefixes.recipe
+      delete staleMetadata.paths.recipesRoot
+      await writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, 'utf8')
 
       const updated = await runSliceCli<{
         title: string
@@ -455,12 +467,92 @@ test.sequential(
       ) as {
         title: string
         timezone: string
+        idPolicy: {
+          prefixes: Record<string, string>
+        }
+        paths: Record<string, string>
       }
       const coreMarkdown = await readFile(path.join(vaultRoot, 'CORE.md'), 'utf8')
 
       assert.equal(metadata.title, 'Precision Health Vault')
       assert.equal(metadata.timezone, 'UTC')
+      assert.equal(metadata.idPolicy.prefixes.recipe, 'rcp')
+      assert.equal(metadata.paths.recipesRoot, 'bank/recipes')
       assert.match(coreMarkdown, /^# Precision Health Vault/mu)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair restores additive metadata fields and missing scaffold directories',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-vault-repair-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      const metadataPath = path.join(vaultRoot, 'vault.json')
+      const staleMetadata = JSON.parse(
+        await readFile(metadataPath, 'utf8'),
+      ) as {
+        idPolicy: {
+          prefixes: Record<string, string>
+        }
+        paths: Record<string, string>
+      }
+      delete staleMetadata.idPolicy.prefixes.recipe
+      delete staleMetadata.paths.recipesRoot
+      await writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, 'utf8')
+      await rm(path.join(vaultRoot, 'bank/recipes'), { recursive: true, force: true })
+
+      const repaired = await runSliceCli<{
+        metadataFile: string
+        repairedFields: string[]
+        createdDirectories: string[]
+        updated: boolean
+        auditPath: string | null
+      }>([
+        'vault',
+        'repair',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(repaired.ok, true)
+      assert.equal(repaired.meta?.command, 'vault repair')
+      assert.equal(requireData(repaired).metadataFile, 'vault.json')
+      assert.equal(requireData(repaired).updated, true)
+      assert.deepEqual(requireData(repaired).repairedFields.sort(), [
+        'idPolicy.prefixes.recipe',
+        'paths.recipesRoot',
+      ])
+      assert.deepEqual(requireData(repaired).createdDirectories, ['bank/recipes'])
+      assert.equal(typeof requireData(repaired).auditPath, 'string')
+
+      const repairedMetadata = JSON.parse(
+        await readFile(metadataPath, 'utf8'),
+      ) as {
+        idPolicy: {
+          prefixes: Record<string, string>
+        }
+        paths: Record<string, string>
+      }
+
+      assert.equal(repairedMetadata.idPolicy.prefixes.recipe, 'rcp')
+      assert.equal(repairedMetadata.paths.recipesRoot, 'bank/recipes')
+      const validated = await runSliceCli<{
+        valid: boolean
+        issues: Array<{ code: string }>
+      }>([
+        'validate',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(validated.ok, true)
+      assert.equal(requireData(validated).valid, true)
+      assert.deepEqual(requireData(validated).issues, [])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

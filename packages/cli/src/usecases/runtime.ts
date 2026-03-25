@@ -55,6 +55,7 @@ function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
     hasCallableMembers(value, [
       "initializeVault",
       "validateVault",
+      "repairVault",
       "addMeal",
       "createExperiment",
       "ensureJournalDay",

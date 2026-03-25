@@ -70,6 +70,17 @@ const vaultUpdateResultSchema = z.object({
   updated: z.boolean(),
 })
 
+const vaultRepairResultSchema = z.object({
+  vault: pathSchema,
+  metadataFile: pathSchema,
+  title: z.string().min(1),
+  timezone: z.string().min(1),
+  repairedFields: z.array(z.string().min(1)),
+  createdDirectories: z.array(pathSchema),
+  updated: z.boolean(),
+  auditPath: pathSchema.nullable(),
+})
+
 export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) {
   cli.command(
     'init',
@@ -160,6 +171,20 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) 
         requestId: requestIdFromOptions(options),
         title: options.title,
         timezone: options.timezone,
+      })
+    },
+  })
+
+  vaultGroup.command('repair', {
+    description:
+      'Repair additive vault metadata and scaffold drift so older vaults can adopt newer contract fields without manual edits.',
+    args: emptyArgsSchema,
+    options: withBaseOptions(),
+    output: vaultRepairResultSchema,
+    async run({ options }) {
+      return services.core.repairVault({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
       })
     },
   })

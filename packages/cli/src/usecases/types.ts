@@ -286,6 +286,17 @@ export interface VaultUpdateResult {
   updated: boolean
 }
 
+export interface VaultRepairResult {
+  vault: string
+  metadataFile: string
+  title: string
+  timezone: string
+  repairedFields: string[]
+  createdDirectories: string[]
+  updated: boolean
+  auditPath: string | null
+}
+
 export interface StopRegimenResult {
   vault: string
   regimenId: string
@@ -447,6 +458,7 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       timezone?: string
     },
   ): Promise<VaultUpdateResult>
+  repairVault(input: CommandContext): Promise<VaultRepairResult>
   projectAssessment(
     input: ProjectAssessmentInput,
   ): Promise<AssessmentProjectionResult>
@@ -679,6 +691,17 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }): Promise<{
     valid: boolean
     issues?: Array<Record<string, unknown>>
+  }>
+  repairVault(input: {
+    vaultRoot: string
+  }): Promise<{
+    metadataFile: string
+    title: string
+    timezone: string
+    repairedFields: string[]
+    createdDirectories: string[]
+    updated: boolean
+    auditPath: string | null
   }>
   addMeal(input: {
     vaultRoot: string
