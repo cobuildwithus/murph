@@ -2581,6 +2581,179 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
   assert.equal(resolved.session.providerSessionId, 'thread-stall-1')
 })
 
+test('scanAssistantAutoReplyOnce keeps long-running deepthink commands past the default stall window before retrying', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'healthybob-assistant-auto-reply-deepthink-watchdog-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockImplementation(
+    (input: {
+      abortSignal?: AbortSignal
+      onEvent?: (event: {
+        id: string | null
+        kind:
+          | 'command'
+          | 'file'
+          | 'message'
+          | 'plan'
+          | 'reasoning'
+          | 'search'
+          | 'status'
+          | 'tool'
+        rawEvent: unknown
+        state: 'completed' | 'running'
+        text: string
+      }) => void
+    }) =>
+      new Promise((_, reject) => {
+        input.onEvent?.({
+          id: 'cmd-deepthink-1',
+          kind: 'command',
+          rawEvent: {
+            type: 'item.started',
+          },
+          state: 'running',
+          text: '$ vault-cli deepthink "Think through the rollout tradeoffs"',
+        })
+
+        const interrupt = () => {
+          reject(
+            new VaultCliError(
+              'ASSISTANT_CODEX_INTERRUPTED',
+              'Codex CLI was interrupted.',
+              {
+                interrupted: true,
+                providerSessionId: 'thread-deepthink-1',
+                retryable: false,
+              },
+            ),
+          )
+        }
+
+        if (input.abortSignal?.aborted) {
+          interrupt()
+          return
+        }
+
+        input.abortSignal?.addEventListener('abort', interrupt, {
+          once: true,
+        })
+      }),
+  )
+
+  const events: Array<{
+    captureId?: string
+    details?: string
+    providerKind?: string
+    providerState?: string
+    type: string
+  }> = []
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-deepthink',
+            source: 'telegram',
+            accountId: 'self',
+            externalId: 'ext-deepthink',
+            threadId: 'thread-deepthink',
+            threadTitle: 'Deepthink chat',
+            actorId: 'telegram:789',
+            actorName: 'Deepthink User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:15:00Z',
+            receivedAt: null,
+            text: 'Please think deeply about this.',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/deepthink.json',
+            eventId: 'evt-deepthink',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show() {
+      return {
+        capture: {
+          captureId: 'cap-deepthink',
+          source: 'telegram',
+          accountId: 'self',
+          externalId: 'ext-deepthink',
+          threadId: 'thread-deepthink',
+          threadTitle: 'Deepthink chat',
+          threadIsDirect: true,
+          actorId: 'telegram:789',
+          actorName: 'Deepthink User',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:15:00Z',
+          receivedAt: null,
+          text: 'Please think deeply about this.',
+          attachmentCount: 0,
+          envelopePath: 'raw/inbox/deepthink.json',
+          eventId: 'evt-deepthink',
+          createdAt: '2026-03-18T09:15:00Z',
+          promotions: [],
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  let settled = false
+  const runPromise = scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    providerHeartbeatMs: 10,
+    providerLongRunningCommandStallTimeoutMs: 100,
+    providerStallTimeoutMs: 25,
+    vault: vaultRoot,
+  }).finally(() => {
+    settled = true
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(settled, false)
+
+  const result = await runPromise
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    replied: 0,
+    skipped: 1,
+  })
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-progress' &&
+        event.captureId === 'cap-deepthink' &&
+        event.providerKind === 'status' &&
+        event.details?.includes('deepthink command active for '),
+    ),
+    true,
+  )
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-progress' &&
+        event.captureId === 'cap-deepthink' &&
+        event.providerKind === 'status' &&
+        event.details?.includes('during deepthink command;'),
+    ),
+    true,
+  )
+})
+
 test('scanAssistantAutoReplyOnce defers reconnectable provider failures and preserves the resumable session without duplicating transcript turns', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-reconnect-'))
   const vaultRoot = path.join(parent, 'vault')

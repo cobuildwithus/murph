@@ -148,6 +148,24 @@ test('formatAssistantRunEventForTerminal keeps safe auto-reply heartbeat details
   )
 })
 
+test('formatAssistantRunEventForTerminal keeps long-running auto-reply heartbeat details visible by default', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details:
+      'assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
+    providerKind: 'status',
+    providerState: 'running',
+    type: 'capture.reply-progress',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(
+    message,
+    'reply-progress cap_safe_123: assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
+  )
+})
+
 test('assistant memory path resolver exposes only the memory path subset', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-paths-'))
   const vaultRoot = path.join(parent, 'vault')

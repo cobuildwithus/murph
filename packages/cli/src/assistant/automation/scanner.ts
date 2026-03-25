@@ -48,6 +48,8 @@ import {
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 export const AUTO_REPLY_PROVIDER_HEARTBEAT_MS = 2 * 60 * 1000
 export const AUTO_REPLY_PROVIDER_STALL_TIMEOUT_MS = 10 * 60 * 1000
+export const AUTO_REPLY_PROVIDER_LONG_RUNNING_COMMAND_STALL_TIMEOUT_MS =
+  150 * 60 * 1000
 const AUTO_REPLY_PROVIDER_STALLED_DETAIL =
   'assistant provider stalled without progress; will retry this capture.'
 
@@ -88,6 +90,12 @@ type AssistantAutoReplyFailureDecision =
 
 interface AssistantAutoReplyScanState {
   cursor: AssistantAutomationCursor | null
+}
+
+interface AssistantAutoReplyLongRunningOperation {
+  key: string
+  label: string
+  startedAtMs: number
 }
 
 export async function scanAssistantInboxOnce(input: {
@@ -245,6 +253,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   onEvent?: (event: AssistantRunEvent) => void
   onStateProgress?: (state: AssistantAutomationStateProgress) => Promise<void> | void
   providerHeartbeatMs?: number | null
+  providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
   requestId?: string | null
   signal?: AbortSignal
@@ -387,6 +396,8 @@ export async function scanAssistantAutoReplyOnce(input: {
       })
       const result = await executeAssistantAutoReply({
         providerHeartbeatMs: input.providerHeartbeatMs,
+        providerLongRunningCommandStallTimeoutMs:
+          input.providerLongRunningCommandStallTimeoutMs,
         providerStallTimeoutMs: input.providerStallTimeoutMs,
         signal: input.signal,
         maxSessionAgeMs: input.sessionMaxAgeMs ?? null,
@@ -555,6 +566,7 @@ async function loadAssistantAutoReplyCaptures(input: {
 
 async function executeAssistantAutoReply(input: {
   providerHeartbeatMs?: number | null
+  providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
   signal?: AbortSignal
   maxSessionAgeMs: number | null
@@ -578,8 +590,17 @@ async function executeAssistantAutoReply(input: {
     input.providerStallTimeoutMs,
     AUTO_REPLY_PROVIDER_STALL_TIMEOUT_MS,
   )
+  const longRunningCommandStallTimeoutMs = Math.max(
+    stallTimeoutMs,
+    normalizeAutoReplyWatchdogMs(
+      input.providerLongRunningCommandStallTimeoutMs,
+      AUTO_REPLY_PROVIDER_LONG_RUNNING_COMMAND_STALL_TIMEOUT_MS,
+    ),
+  )
   let lastProgressAtMs = startedAtMs
   let stalled = false
+  let activeLongRunningOperation: AssistantAutoReplyLongRunningOperation | null =
+    null
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let stallTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -598,25 +619,33 @@ async function executeAssistantAutoReply(input: {
     if (stallTimer !== null) {
       clearTimeout(stallTimer)
     }
+    const currentStallTimeoutMs = resolveAutoReplyProviderStallTimeoutMs({
+      defaultTimeoutMs: stallTimeoutMs,
+      longRunningCommandTimeoutMs: longRunningCommandStallTimeoutMs,
+      operation: activeLongRunningOperation,
+    })
     stallTimer = setTimeout(() => {
       if (abortController.signal.aborted) {
         return
       }
 
       stalled = true
+      const stalledDetailSuffix = activeLongRunningOperation
+        ? ` during ${activeLongRunningOperation.label}`
+        : ''
       input.onEvent?.({
         type: 'capture.reply-progress',
         captureId: input.replyCaptureId,
         details: `assistant provider stalled after ${formatAutoReplyDuration(
           Date.now() - startedAtMs,
-        )}; last provider activity ${formatAutoReplyDuration(
+        )}${stalledDetailSuffix}; last provider activity ${formatAutoReplyDuration(
           Date.now() - lastProgressAtMs,
         )} ago; aborting and scheduling retry`,
         providerKind: 'status',
         providerState: 'running',
       })
       abortController.abort()
-    }, stallTimeoutMs)
+    }, currentStallTimeoutMs)
   }
 
   heartbeatTimer = setInterval(() => {
@@ -628,12 +657,16 @@ async function executeAssistantAutoReply(input: {
     if (now - lastProgressAtMs < heartbeatMs) {
       return
     }
+    const longRunningDetail = formatAutoReplyLongRunningHeartbeatDetail(
+      activeLongRunningOperation,
+      now,
+    )
     input.onEvent?.({
       type: 'capture.reply-progress',
       captureId: input.replyCaptureId,
       details: `assistant still running after ${formatAutoReplyDuration(
         now - startedAtMs,
-      )}; last provider activity ${formatAutoReplyDuration(
+      )}${longRunningDetail}; last provider activity ${formatAutoReplyDuration(
         now - lastProgressAtMs,
       )} ago`,
       providerKind: 'status',
@@ -653,7 +686,13 @@ async function executeAssistantAutoReply(input: {
       deliverResponse: true,
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: (event) => {
-        lastProgressAtMs = Date.now()
+        const eventReceivedAtMs = Date.now()
+        lastProgressAtMs = eventReceivedAtMs
+        activeLongRunningOperation = applyAssistantAutoReplyLongRunningOperationEvent(
+          activeLongRunningOperation,
+          event,
+          eventReceivedAtMs,
+        )
         resetStallTimer()
 
         const runEvent = createAssistantAutoReplyProgressEvent(
@@ -758,6 +797,29 @@ function formatAutoReplyDuration(durationMs: number): string {
   return `${minutes}m ${seconds}s`
 }
 
+function resolveAutoReplyProviderStallTimeoutMs(input: {
+  defaultTimeoutMs: number
+  longRunningCommandTimeoutMs: number
+  operation: AssistantAutoReplyLongRunningOperation | null
+}): number {
+  return input.operation
+    ? input.longRunningCommandTimeoutMs
+    : input.defaultTimeoutMs
+}
+
+function formatAutoReplyLongRunningHeartbeatDetail(
+  operation: AssistantAutoReplyLongRunningOperation | null,
+  nowMs: number,
+): string {
+  if (!operation) {
+    return ''
+  }
+
+  return `; ${operation.label} active for ${formatAutoReplyDuration(
+    nowMs - operation.startedAtMs,
+  )}`
+}
+
 function normalizeAutoReplyWatchdogMs(
   value: number | null | undefined,
   fallback: number,
@@ -767,6 +829,105 @@ function normalizeAutoReplyWatchdogMs(
   }
 
   return Math.max(1, Math.trunc(value))
+}
+
+function applyAssistantAutoReplyLongRunningOperationEvent(
+  current: AssistantAutoReplyLongRunningOperation | null,
+  event: AssistantProviderProgressEvent,
+  eventReceivedAtMs: number,
+): AssistantAutoReplyLongRunningOperation | null {
+  const matchedOperation = matchAssistantAutoReplyLongRunningOperation(event)
+  if (!matchedOperation) {
+    return current
+  }
+
+  if (event.state === 'completed') {
+    if (!current) {
+      return null
+    }
+
+    return current.key === matchedOperation.key || current.label === matchedOperation.label
+      ? null
+      : current
+  }
+
+  return {
+    ...matchedOperation,
+    startedAtMs: eventReceivedAtMs,
+  }
+}
+
+function matchAssistantAutoReplyLongRunningOperation(
+  event: AssistantProviderProgressEvent,
+): Omit<AssistantAutoReplyLongRunningOperation, 'startedAtMs'> | null {
+  if (event.kind === 'command') {
+    return matchAssistantAutoReplyLongRunningCommand(event)
+  }
+
+  if (event.kind === 'tool') {
+    return matchAssistantAutoReplyLongRunningTool(event)
+  }
+
+  return null
+}
+
+function matchAssistantAutoReplyLongRunningCommand(
+  event: Pick<AssistantProviderProgressEvent, 'id' | 'text'>,
+): Omit<AssistantAutoReplyLongRunningOperation, 'startedAtMs'> | null {
+  const commandText = normalizeNullableString(
+    event.text.replace(/^\$\s*/u, ''),
+  )
+  if (!commandText) {
+    return null
+  }
+
+  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|healthybob)\s+(research|deepthink)(?:\s|$)/iu.exec(
+    commandText,
+  )
+  if (cliCommandMatch) {
+    const commandName = cliCommandMatch[1]!.toLowerCase()
+    return {
+      key: event.id ?? `command:${commandName}`,
+      label: `${commandName} command`,
+    }
+  }
+
+  if (/(?:^|\s)(?:[^\s]+\/)?(?:pnpm|npm|yarn)\s+review:gpt(?:\s|$)/iu.test(commandText)) {
+    return {
+      key: event.id ?? 'command:review:gpt',
+      label: 'review:gpt run',
+    }
+  }
+
+  return /\breview:gpt\b/iu.test(commandText)
+    ? {
+        key: event.id ?? 'command:review:gpt',
+        label: 'review:gpt run',
+      }
+    : null
+}
+
+function matchAssistantAutoReplyLongRunningTool(
+  event: Pick<AssistantProviderProgressEvent, 'id' | 'text'>,
+): Omit<AssistantAutoReplyLongRunningOperation, 'startedAtMs'> | null {
+  const toolText = normalizeNullableString(event.text)
+  if (!toolText || !/^tool\b/iu.test(toolText)) {
+    return null
+  }
+
+  if (/\bdeepthink\b/iu.test(toolText)) {
+    return {
+      key: event.id ?? 'tool:deepthink',
+      label: 'deepthink tool',
+    }
+  }
+
+  return /\bresearch\b/iu.test(toolText)
+    ? {
+        key: event.id ?? 'tool:research',
+        label: 'research tool',
+      }
+    : null
 }
 
 function classifyAssistantAutoReplyFailure(
