@@ -16,7 +16,10 @@ import {
   resolveAssistantSession,
 } from '../store.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
-import { isAssistantProviderConnectionLostError } from '../provider-turn-recovery.js'
+import {
+  isAssistantProviderConnectionLostError,
+  isAssistantProviderStalledError,
+} from '../provider-turn-recovery.js'
 import {
   assistantChatReplyArtifactExists,
   assistantResultArtifactExists,
@@ -43,6 +46,10 @@ import {
 } from './shared.js'
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+export const AUTO_REPLY_PROVIDER_HEARTBEAT_MS = 2 * 60 * 1000
+export const AUTO_REPLY_PROVIDER_STALL_TIMEOUT_MS = 10 * 60 * 1000
+const AUTO_REPLY_PROVIDER_STALLED_DETAIL =
+  'assistant provider stalled without progress; will retry this capture.'
 
 interface AssistantAutoReplyGroupContext {
   captureCount: number
@@ -237,6 +244,8 @@ export async function scanAssistantAutoReplyOnce(input: {
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
   onStateProgress?: (state: AssistantAutomationStateProgress) => Promise<void> | void
+  providerHeartbeatMs?: number | null
+  providerStallTimeoutMs?: number | null
   requestId?: string | null
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
@@ -377,6 +386,9 @@ export async function scanAssistantAutoReplyOnce(input: {
         details: 'assistant provider turn started',
       })
       const result = await executeAssistantAutoReply({
+        providerHeartbeatMs: input.providerHeartbeatMs,
+        providerStallTimeoutMs: input.providerStallTimeoutMs,
+        signal: input.signal,
         maxSessionAgeMs: input.sessionMaxAgeMs ?? null,
         onEvent: input.onEvent,
         primaryCapture: decision.primaryCapture,
@@ -542,6 +554,9 @@ async function loadAssistantAutoReplyCaptures(input: {
 }
 
 async function executeAssistantAutoReply(input: {
+  providerHeartbeatMs?: number | null
+  providerStallTimeoutMs?: number | null
+  signal?: AbortSignal
   maxSessionAgeMs: number | null
   onEvent?: (event: AssistantRunEvent) => void
   primaryCapture: InboxShowResult['capture']
@@ -549,33 +564,125 @@ async function executeAssistantAutoReply(input: {
   replyCaptureId: string
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
-  const result = await sendAssistantMessage({
-    vault: input.vault,
-    conversation: conversationRefFromCapture(input.primaryCapture),
-    enableFirstTurnOnboarding: true,
-    persistUserPromptOnFailure: false,
-    prompt: input.prompt,
-    deliverResponse: true,
-    maxSessionAgeMs: input.maxSessionAgeMs,
-    onProviderEvent: (event) => {
-      const runEvent = createAssistantAutoReplyProgressEvent(
-        input.replyCaptureId,
-        event,
-      )
-      if (runEvent) {
-        input.onEvent?.(runEvent)
-      }
-    },
-  })
+  const abortController = new AbortController()
+  const cleanupAbortBridge = bridgeUpstreamAbortSignal(
+    abortController,
+    input.signal,
+  )
+  const startedAtMs = Date.now()
+  const heartbeatMs = normalizeAutoReplyWatchdogMs(
+    input.providerHeartbeatMs,
+    AUTO_REPLY_PROVIDER_HEARTBEAT_MS,
+  )
+  const stallTimeoutMs = normalizeAutoReplyWatchdogMs(
+    input.providerStallTimeoutMs,
+    AUTO_REPLY_PROVIDER_STALL_TIMEOUT_MS,
+  )
+  let lastProgressAtMs = startedAtMs
+  let stalled = false
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let stallTimer: ReturnType<typeof setTimeout> | null = null
 
-  if (result.deliveryError || result.delivery === null) {
-    throw new Error(
-      result.deliveryError?.message ??
-        'assistant generated a response, but the outbound delivery channel did not confirm the send',
-    )
+  const clearTimers = () => {
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+    }
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer)
+      stallTimer = null
+    }
   }
 
-  return result
+  const resetStallTimer = () => {
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer)
+    }
+    stallTimer = setTimeout(() => {
+      if (abortController.signal.aborted) {
+        return
+      }
+
+      stalled = true
+      input.onEvent?.({
+        type: 'capture.reply-progress',
+        captureId: input.replyCaptureId,
+        details: `assistant provider stalled after ${formatAutoReplyDuration(
+          Date.now() - startedAtMs,
+        )}; last provider activity ${formatAutoReplyDuration(
+          Date.now() - lastProgressAtMs,
+        )} ago; aborting and scheduling retry`,
+        providerKind: 'status',
+        providerState: 'running',
+      })
+      abortController.abort()
+    }, stallTimeoutMs)
+  }
+
+  heartbeatTimer = setInterval(() => {
+    if (abortController.signal.aborted) {
+      return
+    }
+
+    const now = Date.now()
+    if (now - lastProgressAtMs < heartbeatMs) {
+      return
+    }
+    input.onEvent?.({
+      type: 'capture.reply-progress',
+      captureId: input.replyCaptureId,
+      details: `assistant still running after ${formatAutoReplyDuration(
+        now - startedAtMs,
+      )}; last provider activity ${formatAutoReplyDuration(
+        now - lastProgressAtMs,
+      )} ago`,
+      providerKind: 'status',
+      providerState: 'running',
+    })
+  }, heartbeatMs)
+  resetStallTimer()
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: input.vault,
+      conversation: conversationRefFromCapture(input.primaryCapture),
+      abortSignal: abortController.signal,
+      enableFirstTurnOnboarding: true,
+      persistUserPromptOnFailure: false,
+      prompt: input.prompt,
+      deliverResponse: true,
+      maxSessionAgeMs: input.maxSessionAgeMs,
+      onProviderEvent: (event) => {
+        lastProgressAtMs = Date.now()
+        resetStallTimer()
+
+        const runEvent = createAssistantAutoReplyProgressEvent(
+          input.replyCaptureId,
+          event,
+        )
+        if (runEvent) {
+          input.onEvent?.(runEvent)
+        }
+      },
+    })
+
+    if (result.deliveryError || result.delivery === null) {
+      throw new Error(
+        result.deliveryError?.message ??
+          'assistant generated a response, but the outbound delivery channel did not confirm the send',
+      )
+    }
+
+    return result
+  } catch (error) {
+    if (stalled) {
+      markAssistantProviderStalled(error)
+    }
+    throw error
+  } finally {
+    clearTimers()
+    cleanupAbortBridge()
+  }
 }
 
 function createAssistantAutoReplyProgressEvent(
@@ -595,9 +702,80 @@ function createAssistantAutoReplyProgressEvent(
   }
 }
 
+function bridgeUpstreamAbortSignal(
+  controller: AbortController,
+  signal?: AbortSignal,
+): () => void {
+  if (!signal) {
+    return () => {}
+  }
+
+  const abort = () => controller.abort()
+  if (signal.aborted) {
+    controller.abort()
+    return () => {}
+  }
+
+  signal.addEventListener('abort', abort, { once: true })
+  return () => {
+    signal.removeEventListener('abort', abort)
+  }
+}
+
+function markAssistantProviderStalled(error: unknown): void {
+  if (!error || typeof error !== 'object') {
+    return
+  }
+
+  const currentContext =
+    'context' in error &&
+    (error as { context?: unknown }).context &&
+    typeof (error as { context?: unknown }).context === 'object' &&
+    !Array.isArray((error as { context?: unknown }).context)
+      ? ((error as { context?: Record<string, unknown> }).context ?? {})
+      : {}
+
+  ;(error as { context?: Record<string, unknown> }).context = {
+    ...currentContext,
+    providerStalled: true,
+    retryable: true,
+  }
+}
+
+function formatAutoReplyDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  if (minutes <= 0) {
+    return `${seconds}s`
+  }
+
+  if (seconds === 0) {
+    return `${minutes}m`
+  }
+
+  return `${minutes}m ${seconds}s`
+}
+
+function normalizeAutoReplyWatchdogMs(
+  value: number | null | undefined,
+  fallback: number,
+): number {
+  if (!Number.isFinite(value) || typeof value !== 'number') {
+    return fallback
+  }
+
+  return Math.max(1, Math.trunc(value))
+}
+
 function classifyAssistantAutoReplyFailure(
   error: unknown,
 ): AssistantAutoReplyFailureDecision {
+  if (isAssistantProviderStalledError(error)) {
+    return createDeferredSkipDecision(AUTO_REPLY_PROVIDER_STALLED_DETAIL)
+  }
+
   const detail = errorMessage(error)
   if (isAssistantProviderConnectionLostError(error)) {
     return createDeferredSkipDecision(

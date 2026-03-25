@@ -85,6 +85,11 @@ export function isAssistantProviderConnectionLostError(
   )
 }
 
+export function isAssistantProviderStalledError(error: unknown): boolean {
+  const context = readAssistantProviderErrorContext(error)
+  return Boolean(context && context.providerStalled === true)
+}
+
 export function isAssistantProviderInterruptedError(error: unknown): boolean {
   const context = readAssistantProviderErrorContext(error)
   return Boolean(context && context.interrupted === true)

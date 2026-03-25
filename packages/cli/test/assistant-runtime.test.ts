@@ -144,6 +144,7 @@ function createComposerKey(overrides: Partial<Key> = {}): Key {
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(
     cleanupPaths.splice(0).map(async (target) => {
       await rm(target, {
@@ -2304,6 +2305,280 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
     runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]?.userPrompt.includes('hello direct'),
     true,
   )
+})
+
+test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the same capture with the preserved session', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-stall-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn
+    .mockImplementationOnce(
+      (input: {
+        abortSignal?: AbortSignal
+        onEvent?: (event: {
+          id: string | null
+          kind:
+            | 'command'
+            | 'file'
+            | 'message'
+            | 'plan'
+            | 'reasoning'
+            | 'search'
+            | 'status'
+            | 'tool'
+          rawEvent: unknown
+          state: 'completed' | 'running'
+          text: string
+        }) => void
+      }) =>
+        new Promise((_, reject) => {
+          input.onEvent?.({
+            id: 'search-1',
+            kind: 'search',
+            rawEvent: {
+              type: 'item.started',
+            },
+            state: 'running',
+            text: 'Web: treehouse menu',
+          })
+
+          const interrupt = () => {
+            reject(
+              new VaultCliError(
+                'ASSISTANT_CODEX_INTERRUPTED',
+                'Codex CLI was interrupted.',
+                {
+                  interrupted: true,
+                  providerSessionId: 'thread-stall-1',
+                  retryable: false,
+                },
+              ),
+            )
+          }
+
+          if (input.abortSignal?.aborted) {
+            interrupt()
+            return
+          }
+
+          input.abortSignal?.addEventListener('abort', interrupt, {
+            once: true,
+          })
+        }),
+    )
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-stall-1',
+      response: 'retried reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
+    vault: path.resolve(input.vault),
+    message: input.message,
+    session: {
+      schema: 'healthybob.assistant-session.v2',
+      sessionId: input.sessionId,
+      provider: 'codex-cli',
+      providerSessionId: 'thread-stall-1',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:telegram|thread:thread-stall',
+        channel: 'telegram',
+        identityId: null,
+        actorId: 'telegram:123',
+        threadId: 'thread-stall',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-stall',
+        },
+      },
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:01.000Z',
+      lastTurnAt: '2026-03-18T00:00:01.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'telegram',
+      target: 'thread-stall',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T00:00:01.000Z',
+      messageLength: input.message.length,
+    },
+  }))
+
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    primed: boolean
+  }> = []
+  const events: Array<{
+    captureId?: string
+    details?: string
+    providerKind?: string
+    providerState?: string
+    type: string
+  }> = []
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-stall',
+            source: 'telegram',
+            accountId: 'self',
+            externalId: 'ext-stall',
+            threadId: 'thread-stall',
+            threadTitle: 'Stall chat',
+            actorId: 'telegram:123',
+            actorName: 'Retry User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:10:00Z',
+            receivedAt: null,
+            text: 'Can you follow up?',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/stall.json',
+            eventId: 'evt-stall',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show() {
+      return {
+        capture: {
+          captureId: 'cap-stall',
+          source: 'telegram',
+          accountId: 'self',
+          externalId: 'ext-stall',
+          threadId: 'thread-stall',
+          threadTitle: 'Stall chat',
+          threadIsDirect: true,
+          actorId: 'telegram:123',
+          actorName: 'Retry User',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:10:00Z',
+          receivedAt: null,
+          text: 'Can you follow up?',
+          attachmentCount: 0,
+          envelopePath: 'raw/inbox/stall.json',
+          eventId: 'evt-stall',
+          createdAt: '2026-03-18T09:10:00Z',
+          promotions: [],
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const firstPromise = scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    providerHeartbeatMs: 10,
+    providerStallTimeoutMs: 25,
+    vault: vaultRoot,
+  })
+
+  const first = await firstPromise
+
+  const second = await scanAssistantAutoReplyOnce({
+    afterCursor: stateProgress[0]?.cursor ?? null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(first, {
+    considered: 1,
+    failed: 0,
+    replied: 0,
+    skipped: 1,
+  })
+  assert.deepEqual(second, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.deepEqual(stateProgress[0], {
+    cursor: null,
+    primed: true,
+  })
+  assert.deepEqual(stateProgress[1], {
+    cursor: {
+      occurredAt: '2026-03-18T09:10:00Z',
+      captureId: 'cap-stall',
+    },
+    primed: true,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+  assert.equal(
+    runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
+    'thread-stall-1',
+  )
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-progress' &&
+        event.captureId === 'cap-stall' &&
+        event.providerKind === 'status' &&
+        event.details?.startsWith('assistant provider stalled after '),
+    ),
+    true,
+  )
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-skipped' &&
+        event.captureId === 'cap-stall' &&
+        event.details ===
+          'assistant provider stalled without progress; will retry this capture.',
+    ),
+    true,
+  )
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    actorId: 'telegram:123',
+    threadId: 'thread-stall',
+    threadIsDirect: true,
+    provider: 'codex-cli',
+    model: null,
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    maxSessionAgeMs: null,
+  })
+
+  assert.equal(resolved.session.providerSessionId, 'thread-stall-1')
 })
 
 test('scanAssistantAutoReplyOnce defers reconnectable provider failures and preserves the resumable session without duplicating transcript turns', async () => {

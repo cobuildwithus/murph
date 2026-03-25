@@ -321,6 +321,9 @@ function formatAssistantReplyProgressDetails(
         ? 'web search finished'
         : 'searching the web'
     case 'status':
+      if (details && isSafeAssistantReplyStatusDetail(details)) {
+        return details
+      }
       return event.providerState === 'completed'
         ? 'assistant status updated'
         : 'waiting on assistant provider'
@@ -381,9 +384,17 @@ function isSafeAssistantDetail(details: string): boolean {
   return SAFE_ASSISTANT_DETAILS.has(details)
 }
 
+function isSafeAssistantReplyStatusDetail(details: string): boolean {
+  return (
+    details.startsWith('assistant still running after ') ||
+    details.startsWith('assistant provider stalled after ')
+  )
+}
+
 const SAFE_ASSISTANT_DETAILS = new Set([
   'assistant result already exists',
   'assistant reply already exists',
+  'assistant provider stalled without progress; will retry this capture.',
   'capture already promoted',
   'capture has no text or parsed attachment content',
   'capture is self-authored',

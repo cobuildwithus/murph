@@ -131,6 +131,23 @@ test('formatAssistantRunEventForTerminal shows raw auto-reply provider progress 
   assert.equal(message, 'reply-progress cap_safe_123: Web: treehouse menu')
 })
 
+test('formatAssistantRunEventForTerminal keeps safe auto-reply heartbeat details visible by default', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details: 'assistant still running after 10m; last provider activity 8m ago',
+    providerKind: 'status',
+    providerState: 'running',
+    type: 'capture.reply-progress',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(
+    message,
+    'reply-progress cap_safe_123: assistant still running after 10m; last provider activity 8m ago',
+  )
+})
+
 test('assistant memory path resolver exposes only the memory path subset', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-paths-'))
   const vaultRoot = path.join(parent, 'vault')
