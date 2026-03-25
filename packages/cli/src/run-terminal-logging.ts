@@ -63,6 +63,19 @@ export function formatAssistantRunEventForTerminal(
     return `routed ${event.captureId ?? 'capture'}${tools ? `: ${tools}` : ''}`
   }
 
+  if (event.type === 'capture.reply-started') {
+    return formatAssistantEventLine(
+      'reply-started',
+      event.captureId,
+      options.unsafeDetails ? event.details : 'assistant provider turn started',
+    )
+  }
+
+  if (event.type === 'capture.reply-progress') {
+    const details = formatAssistantReplyProgressDetails(event, options)
+    return formatAssistantEventLine('reply-progress', event.captureId, details)
+  }
+
   if (event.type === 'capture.replied') {
     return formatAssistantEventLine('replied', event.captureId, options.unsafeDetails ? event.details : null)
   }
@@ -274,6 +287,49 @@ function formatAssistantEventDetails(
         : null
     default:
       return null
+  }
+}
+
+function formatAssistantReplyProgressDetails(
+  event: AssistantRunEvent,
+  options: ForegroundTerminalLogOptions,
+): string | null {
+  const details = normalizeLabel(event.details)
+  if (options.unsafeDetails && details) {
+    return details
+  }
+
+  switch (event.providerKind) {
+    case 'command':
+      return event.providerState === 'completed'
+        ? 'assistant command finished'
+        : 'running assistant command'
+    case 'file':
+      return event.providerState === 'completed'
+        ? 'file update finished'
+        : 'updating files'
+    case 'plan':
+      return event.providerState === 'completed'
+        ? 'plan updated'
+        : 'updating plan'
+    case 'reasoning':
+      return event.providerState === 'completed'
+        ? 'thinking step completed'
+        : 'thinking'
+    case 'search':
+      return event.providerState === 'completed'
+        ? 'web search finished'
+        : 'searching the web'
+    case 'status':
+      return event.providerState === 'completed'
+        ? 'assistant status updated'
+        : 'waiting on assistant provider'
+    case 'tool':
+      return event.providerState === 'completed'
+        ? 'assistant tool finished'
+        : 'using assistant tool'
+    default:
+      return details
   }
 }
 

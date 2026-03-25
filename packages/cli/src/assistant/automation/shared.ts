@@ -5,10 +5,22 @@ type ShutdownTimer = ReturnType<typeof setTimeout> | number
 export interface AssistantRunEvent {
   captureId?: string
   details?: string
+  providerKind?:
+    | 'command'
+    | 'file'
+    | 'message'
+    | 'plan'
+    | 'reasoning'
+    | 'search'
+    | 'status'
+    | 'tool'
+  providerState?: 'completed' | 'running'
   tools?: string[]
   type:
     | 'capture.failed'
     | 'capture.noop'
+    | 'capture.reply-progress'
+    | 'capture.reply-started'
     | 'capture.replied'
     | 'capture.reply-failed'
     | 'capture.reply-skipped'

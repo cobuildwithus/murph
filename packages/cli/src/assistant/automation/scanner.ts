@@ -5,6 +5,7 @@ import { routeInboxCaptureWithModel } from '../../inbox-model-harness.js'
 import { shouldBypassParserWaitForRouting } from '../../inbox-routing-vision.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultCliServices } from '../../vault-cli-services.js'
+import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
   conversationRefFromCapture,
@@ -370,10 +371,17 @@ export async function scanAssistantAutoReplyOnce(input: {
         continue
       }
 
+      input.onEvent?.({
+        type: 'capture.reply-started',
+        captureId: context.firstCaptureId,
+        details: 'assistant provider turn started',
+      })
       const result = await executeAssistantAutoReply({
         maxSessionAgeMs: input.sessionMaxAgeMs ?? null,
+        onEvent: input.onEvent,
         primaryCapture: decision.primaryCapture,
         prompt: decision.prompt,
+        replyCaptureId: context.firstCaptureId,
         vault: input.vault,
       })
       await applySuccessfulReply({
@@ -535,8 +543,10 @@ async function loadAssistantAutoReplyCaptures(input: {
 
 async function executeAssistantAutoReply(input: {
   maxSessionAgeMs: number | null
+  onEvent?: (event: AssistantRunEvent) => void
   primaryCapture: InboxShowResult['capture']
   prompt: string
+  replyCaptureId: string
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
   const result = await sendAssistantMessage({
@@ -547,6 +557,15 @@ async function executeAssistantAutoReply(input: {
     prompt: input.prompt,
     deliverResponse: true,
     maxSessionAgeMs: input.maxSessionAgeMs,
+    onProviderEvent: (event) => {
+      const runEvent = createAssistantAutoReplyProgressEvent(
+        input.replyCaptureId,
+        event,
+      )
+      if (runEvent) {
+        input.onEvent?.(runEvent)
+      }
+    },
   })
 
   if (result.deliveryError || result.delivery === null) {
@@ -557,6 +576,23 @@ async function executeAssistantAutoReply(input: {
   }
 
   return result
+}
+
+function createAssistantAutoReplyProgressEvent(
+  captureId: string,
+  event: AssistantProviderProgressEvent,
+): AssistantRunEvent | null {
+  if (event.kind === 'message') {
+    return null
+  }
+
+  return {
+    type: 'capture.reply-progress',
+    captureId,
+    details: event.text,
+    providerKind: event.kind,
+    providerState: event.state,
+  }
 }
 
 function classifyAssistantAutoReplyFailure(

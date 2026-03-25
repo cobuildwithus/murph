@@ -100,6 +100,37 @@ test('formatAssistantRunEventForTerminal redacts delivery targets by default', (
   assert.doesNotMatch(message ?? '', /\+15550001111/u)
 })
 
+test('formatAssistantRunEventForTerminal summarizes auto-reply provider progress by default', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details: 'Web: treehouse menu',
+    providerKind: 'search',
+    providerState: 'running',
+    type: 'capture.reply-progress',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(message, 'reply-progress cap_safe_123: searching the web')
+  assert.doesNotMatch(message ?? '', /treehouse menu/u)
+})
+
+test('formatAssistantRunEventForTerminal shows raw auto-reply provider progress when unsafe details are enabled', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details: 'Web: treehouse menu',
+    providerKind: 'search',
+    providerState: 'running',
+    type: 'capture.reply-progress',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event, {
+    unsafeDetails: true,
+  })
+
+  assert.equal(message, 'reply-progress cap_safe_123: Web: treehouse menu')
+})
+
 test('assistant memory path resolver exposes only the memory path subset', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-paths-'))
   const vaultRoot = path.join(parent, 'vault')

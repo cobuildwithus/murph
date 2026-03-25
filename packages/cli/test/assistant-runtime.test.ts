@@ -1074,13 +1074,34 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
-    provider: 'codex-cli',
-    providerSessionId: 'thread-auto',
-    response: 'auto reply',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
+  runtimeMocks.executeAssistantProviderTurn.mockImplementation(async (input: any) => {
+    input.onEvent?.({
+      id: 'search-1',
+      kind: 'search',
+      rawEvent: {
+        type: 'item.started',
+      },
+      state: 'running',
+      text: 'Web: macros today',
+    })
+    input.onEvent?.({
+      id: 'tool-1',
+      kind: 'tool',
+      rawEvent: {
+        type: 'item.completed',
+      },
+      state: 'completed',
+      text: 'Tool healthybob.inbox_list',
+    })
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-auto',
+      response: 'auto reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     vault: path.resolve(input.vault),
@@ -1129,7 +1150,13 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     cursor: { occurredAt: string; captureId: string } | null
     primed: boolean
   }> = []
-  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+  const events: Array<{
+    captureId?: string
+    details?: string
+    providerKind?: string
+    providerState?: string
+    type: string
+  }> = []
   const listCalls: unknown[] = []
 
   const inboxServices = {
@@ -1283,6 +1310,37 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   )
   assert.equal(
     events.some((event) => event.type === 'capture.replied' && event.captureId === 'cap-new'),
+    true,
+  )
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-started' &&
+        event.captureId === 'cap-new' &&
+        event.details === 'assistant provider turn started',
+    ),
+    true,
+  )
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-progress' &&
+        event.captureId === 'cap-new' &&
+        event.providerKind === 'search' &&
+        event.providerState === 'running' &&
+        event.details === 'Web: macros today',
+    ),
+    true,
+  )
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-progress' &&
+        event.captureId === 'cap-new' &&
+        event.providerKind === 'tool' &&
+        event.providerState === 'completed' &&
+        event.details === 'Tool healthybob.inbox_list',
+    ),
     true,
   )
   assert.match(providerCall?.systemPrompt ?? '', /optional onboarding check-in/u)
