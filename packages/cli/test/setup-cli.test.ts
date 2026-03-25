@@ -43,7 +43,9 @@ import type { InboxSourceSetEnabledResult } from '../src/inbox-app/types.js'
 import type { InboxConnectorConfig } from '../src/inbox-cli-contracts.js'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
 import {
+  buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController,
+  describeSetupWizardPublicUrlStrategyChoice,
   type SetupWizardResult,
 } from '../src/setup-wizard.js'
 import {
@@ -98,6 +100,70 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
     channels: ['email'],
     wearables: [],
   })
+})
+
+test('public URL review recommends hosted apps/web for wearable ingress when no public base is configured', () => {
+  const review = buildSetupWizardPublicUrlReview({
+    channels: [],
+    wearables: ['oura', 'whoop'],
+  })
+
+  assert.equal(review.enabled, true)
+  assert.equal(review.recommendedStrategy, 'hosted')
+  assert.match(review.summary, /hosted `apps\/web`/u)
+  assert.deepEqual(
+    review.targets.map((target) => target.url),
+    [
+      'http://127.0.0.1:8788/oauth/whoop/callback',
+      'http://127.0.0.1:8788/webhooks/whoop',
+      'http://127.0.0.1:8788/oauth/oura/callback',
+      'http://127.0.0.1:8788/webhooks/oura',
+    ],
+  )
+  assert.match(
+    describeSetupWizardPublicUrlStrategyChoice({
+      review,
+      strategy: 'hosted',
+    }),
+    /hosted `apps\/web`/u,
+  )
+})
+
+test('public URL review recommends tunnel mode for Linq-only ingress and keeps the local webhook target explicit', () => {
+  const review = buildSetupWizardPublicUrlReview({
+    channels: ['linq'],
+    wearables: [],
+  })
+
+  assert.equal(review.enabled, true)
+  assert.equal(review.recommendedStrategy, 'tunnel')
+  assert.match(review.summary, /local inbox webhook/u)
+  assert.deepEqual(review.targets, [
+    {
+      detail:
+        'Point Linq here through a tunnel. Hosted `apps/web` does not replace this inbox webhook path yet.',
+      label: 'Linq webhook',
+      url: 'http://127.0.0.1:8789/linq-webhook',
+    },
+  ])
+  assert.match(
+    describeSetupWizardPublicUrlStrategyChoice({
+      review,
+      strategy: 'tunnel',
+    }),
+    /does not provide a hosted Linq ingress yet/u,
+  )
+})
+
+test('public URL review stays hidden when a public device-sync base is already configured', () => {
+  const review = buildSetupWizardPublicUrlReview({
+    channels: ['linq'],
+    wearables: ['whoop'],
+    publicBaseUrl: 'https://health.example.test/api/device-sync',
+  })
+
+  assert.equal(review.enabled, false)
+  assert.equal(review.targets.length, 0)
 })
 
 test('codex auth account parser captures the local ChatGPT plan without persisting identifiers', () => {

@@ -53,10 +53,13 @@ export interface SetupWizardRunner {
   run(input: {
     channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
     commandName: string
+    deviceSyncLocalBaseUrl?: string | null
     initialAssistantPreset?: SetupAssistantPreset
     initialChannels: readonly SetupChannel[]
     initialWearables: readonly SetupWearable[]
+    linqLocalWebhookUrl?: string | null
     platform?: NodeJS.Platform
+    publicBaseUrl?: string | null
     vault: string
     wearableStatuses?: Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
   }): Promise<SetupWizardResult>
@@ -118,6 +121,8 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       const wizardResult = await wizard.run({
         channelStatuses: buildSetupWizardChannelStatuses(currentEnv, getPlatform()),
         commandName,
+        deviceSyncLocalBaseUrl:
+          resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
         initialAssistantPreset:
           context.options.assistantPreset ?? getDefaultSetupAssistantPreset(),
         initialChannels: await resolveInitialSetupWizardChannels(
@@ -125,7 +130,9 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
           getPlatform(),
         ),
         initialWearables: getDefaultSetupWizardWearables(),
+        linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
         platform: getPlatform(),
+        publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
         vault: context.options.vault,
         wearableStatuses: buildSetupWizardWearableStatuses(currentEnv),
       })
@@ -363,7 +370,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       command:
         'inbox source add linq --id linq:default --account default --linqWebhookPort 8789 --linqWebhookPath /linq-webhook',
       description:
-        'Add the Linq webhook connector after setting LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the shell or local `.env`, then point Linq at the local listener address.',
+        'Add the Linq webhook connector after setting LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the shell or local `.env`, then point Linq at the local listener or a tunnel that forwards to it.',
     })
   }
 
@@ -434,6 +441,39 @@ function buildSetupWizardWearableStatuses(
   return Object.fromEntries(
     setupWearableValues.map((wearable) => [wearable, describeSetupWearableStatus(wearable, env)]),
   ) as Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
+}
+
+function resolveSetupWizardPublicBaseUrl(
+  env: NodeJS.ProcessEnv,
+): string | null {
+  return readSetupEnvValue(env, ['DEVICE_SYNC_PUBLIC_BASE_URL'])
+}
+
+function resolveSetupWizardDeviceSyncLocalBaseUrl(
+  env: NodeJS.ProcessEnv,
+): string {
+  return (
+    readSetupEnvValue(env, ['DEVICE_SYNC_BASE_URL']) ??
+    'http://127.0.0.1:8788'
+  )
+}
+
+function resolveSetupWizardLinqLocalWebhookUrl(): string {
+  return 'http://127.0.0.1:8789/linq-webhook'
+}
+
+function readSetupEnvValue(
+  env: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = env[key]?.trim()
+    if (value) {
+      return value
+    }
+  }
+
+  return null
 }
 
 function registerSetupCommand(
