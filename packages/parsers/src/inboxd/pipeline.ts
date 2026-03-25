@@ -21,6 +21,9 @@ export interface RunInboxDaemonWithParsersInput extends CreateParsedInboxPipelin
   connectors: PollConnector[];
   signal: AbortSignal;
   continueOnConnectorFailure?: boolean;
+  restartConnectorOnFailure?: boolean;
+  connectorRestartDelayMs?: number;
+  maxConnectorRestartDelayMs?: number;
 }
 
 export async function createParsedInboxPipeline(
@@ -48,7 +51,15 @@ export async function createParsedInboxPipeline(
 export async function runInboxDaemonWithParsers(
   input: RunInboxDaemonWithParsersInput,
 ): Promise<void> {
-  const { connectors, signal, continueOnConnectorFailure, ...pipelineInput } = input;
+  const {
+    connectors,
+    signal,
+    continueOnConnectorFailure,
+    restartConnectorOnFailure,
+    connectorRestartDelayMs,
+    maxConnectorRestartDelayMs,
+    ...pipelineInput
+  } = input;
   let pipeline: ParsedInboxPipeline | null = null;
 
   try {
@@ -76,6 +87,9 @@ export async function runInboxDaemonWithParsers(
       connectors,
       signal,
       continueOnConnectorFailure,
+      restartConnectorOnFailure,
+      connectorRestartDelayMs,
+      maxConnectorRestartDelayMs,
     });
   } catch (error) {
     await closeConnectors(connectors);

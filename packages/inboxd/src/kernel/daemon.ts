@@ -2,11 +2,17 @@ import type { PollConnector } from "../connectors/types.js";
 import type { InboxPipeline } from "./pipeline.js";
 import { createCaptureCheckpoint } from "../shared.js";
 
+const DEFAULT_CONNECTOR_RESTART_DELAY_MS = 1_000;
+const DEFAULT_MAX_CONNECTOR_RESTART_DELAY_MS = 30_000;
+
 export interface RunPollConnectorInput {
   connector: PollConnector;
   pipeline: InboxPipeline;
   accountId?: string | null;
   signal: AbortSignal;
+  restartConnectorOnFailure?: boolean;
+  connectorRestartDelayMs?: number;
+  maxConnectorRestartDelayMs?: number;
 }
 
 export async function runPollConnector({
@@ -14,8 +20,22 @@ export async function runPollConnector({
   pipeline,
   accountId = null,
   signal,
+  restartConnectorOnFailure = false,
+  connectorRestartDelayMs = DEFAULT_CONNECTOR_RESTART_DELAY_MS,
+  maxConnectorRestartDelayMs = DEFAULT_MAX_CONNECTOR_RESTART_DELAY_MS,
 }: RunPollConnectorInput): Promise<void> {
   const cursorAccountId = accountId ?? connector.accountId ?? null;
+  const normalizedRestartDelayMs = normalizeRestartDelay(
+    connectorRestartDelayMs,
+    "Connector restart delay",
+  );
+  const normalizedMaxRestartDelayMs = normalizeRestartDelay(
+    maxConnectorRestartDelayMs,
+    "Connector max restart delay",
+  );
+  if (normalizedMaxRestartDelayMs < normalizedRestartDelayMs) {
+    throw new TypeError("Connector max restart delay must be at least the restart delay.");
+  }
   let cursor = pipeline.runtime.getCursor(connector.source, cursorAccountId);
 
   const emit = async (
@@ -23,10 +43,13 @@ export async function runPollConnector({
     checkpoint?: Record<string, unknown> | null,
   ) => {
     const result = await pipeline.processCapture(capture);
+    const nextCursor =
+      checkpoint === undefined ? createCaptureCheckpoint(capture) : checkpoint;
+    cursor = nextCursor;
     pipeline.runtime.setCursor(
       connector.source,
       cursorAccountId ?? capture.accountId ?? null,
-      checkpoint === undefined ? createCaptureCheckpoint(capture) : checkpoint,
+      nextCursor,
     );
     return result;
   };
@@ -38,7 +61,30 @@ export async function runPollConnector({
     }
 
     if (!signal.aborted && connector.capabilities.watch) {
-      await connector.watch(cursor, emit, signal);
+      let nextRestartDelayMs = normalizedRestartDelayMs;
+
+      while (!signal.aborted) {
+        try {
+          await connector.watch(cursor, emit, signal);
+          break;
+        } catch (error) {
+          if (!restartConnectorOnFailure || signal.aborted) {
+            throw error;
+          }
+
+          try {
+            await connector.close?.();
+          } catch (closeError) {
+            throw createConnectorRestartCleanupError(error, closeError);
+          }
+
+          await waitForAbortOrTimeout(signal, nextRestartDelayMs);
+          nextRestartDelayMs = Math.min(
+            nextRestartDelayMs * 2,
+            normalizedMaxRestartDelayMs,
+          );
+        }
+      }
     }
   } finally {
     await connector.close?.();
@@ -50,6 +96,9 @@ export async function runInboxDaemon(input: {
   connectors: PollConnector[];
   signal: AbortSignal;
   continueOnConnectorFailure?: boolean;
+  restartConnectorOnFailure?: boolean;
+  connectorRestartDelayMs?: number;
+  maxConnectorRestartDelayMs?: number;
 }): Promise<void> {
   const controller = new AbortController();
   const releaseAbortRelay = relayAbort(input.signal, controller);
@@ -59,6 +108,9 @@ export async function runInboxDaemon(input: {
       connector,
       pipeline: input.pipeline,
       signal: controller.signal,
+      restartConnectorOnFailure: input.restartConnectorOnFailure ?? false,
+      connectorRestartDelayMs: input.connectorRestartDelayMs,
+      maxConnectorRestartDelayMs: input.maxConnectorRestartDelayMs,
     }).catch((error: unknown) => {
       if (!continueOnConnectorFailure) {
         controller.abort();
@@ -111,4 +163,51 @@ function createConnectorFailure(connector: PollConnector, error: unknown): Error
   }
 
   return failure;
+}
+
+function createConnectorRestartCleanupError(
+  originalError: unknown,
+  cleanupError: unknown,
+): AggregateError {
+  const originalDetail =
+    originalError instanceof Error ? originalError.message : String(originalError);
+  const cleanupDetail =
+    cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+
+  return new AggregateError(
+    [originalError, cleanupError],
+    `Connector watch failed (${originalDetail}) and cleanup before restart also failed (${cleanupDetail}).`,
+  );
+}
+
+function normalizeRestartDelay(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 1) {
+    throw new TypeError(`${label} must be at least 1ms.`);
+  }
+
+  return Math.floor(value);
+}
+
+async function waitForAbortOrTimeout(
+  signal: AbortSignal,
+  milliseconds: number,
+): Promise<void> {
+  if (signal.aborted) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+
+    const onAbort = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

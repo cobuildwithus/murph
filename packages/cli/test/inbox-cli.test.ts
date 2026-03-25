@@ -484,6 +484,9 @@ function createFakeParsersRuntimeModule(input?: {
     signal: AbortSignal
     vaultRoot: string
     continueOnConnectorFailure?: boolean
+    restartConnectorOnFailure?: boolean
+    connectorRestartDelayMs?: number
+    maxConnectorRestartDelayMs?: number
   }): Promise<void> | void
 }) {
   const discoveredAt = input?.discoveredAt ?? '2026-03-13T12:34:56.000Z'
@@ -653,11 +656,17 @@ function createFakeParsersRuntimeModule(input?: {
       signal: AbortSignal
       vaultRoot: string
       continueOnConnectorFailure?: boolean
+      restartConnectorOnFailure?: boolean
+      connectorRestartDelayMs?: number
+      maxConnectorRestartDelayMs?: number
     }) {
       try {
         await input?.onRunInboxDaemonWithParsers?.({
           connectors: payload.connectors,
           continueOnConnectorFailure: payload.continueOnConnectorFailure,
+          restartConnectorOnFailure: payload.restartConnectorOnFailure,
+          connectorRestartDelayMs: payload.connectorRestartDelayMs,
+          maxConnectorRestartDelayMs: payload.maxConnectorRestartDelayMs,
           runtime: payload.runtime,
           signal: payload.signal,
           vaultRoot: payload.vaultRoot,
@@ -2674,9 +2683,11 @@ test.sequential('run writes daemon state and status updates after abort', async 
 test.sequential('run enables connector isolation for parser-backed daemon runs', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-run-isolated-connectors')
   const observedFlags: boolean[] = []
+  const observedRestartFlags: boolean[] = []
   const fakeParsers = createFakeParsersRuntimeModule({
     async onRunInboxDaemonWithParsers(payload) {
       observedFlags.push(payload.continueOnConnectorFailure === true)
+      observedRestartFlags.push(payload.restartConnectorOnFailure === true)
     },
   })
   const services = createIntegratedInboxCliServices({
@@ -2711,6 +2722,7 @@ test.sequential('run enables connector isolation for parser-backed daemon runs',
 
     assert.equal(result.reason, 'completed')
     assert.deepEqual(observedFlags, [true])
+    assert.deepEqual(observedRestartFlags, [true])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

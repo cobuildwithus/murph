@@ -388,6 +388,9 @@ export interface InboxRuntimeModule {
     connectors: PollConnector[]
     signal: AbortSignal
     continueOnConnectorFailure?: boolean
+    restartConnectorOnFailure?: boolean
+    connectorRestartDelayMs?: number
+    maxConnectorRestartDelayMs?: number
   }): Promise<void>
 }
 
@@ -456,6 +459,9 @@ export interface ParsersRuntimeModule {
     connectors: PollConnector[]
     signal: AbortSignal
     continueOnConnectorFailure?: boolean
+    restartConnectorOnFailure?: boolean
+    connectorRestartDelayMs?: number
+    maxConnectorRestartDelayMs?: number
   }): Promise<void>
   createInboxParserService(input: {
     vaultRoot: string

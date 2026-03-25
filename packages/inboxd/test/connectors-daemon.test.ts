@@ -509,6 +509,150 @@ test("runPollConnector uses connector-supplied checkpoints when emitting capture
   assert.deepEqual(cursorWrites, [{ updateId: 42 }, { updateId: 42 }]);
 });
 
+test("runPollConnector retries watch failures from the latest emitted cursor when restart is enabled", async () => {
+  const cursorWrites: Array<Record<string, unknown> | null> = [];
+  const seenWatchCursors: Array<Record<string, unknown> | null> = [];
+  let watchCalls = 0;
+
+  await runPollConnector({
+    connector: createStubPollConnector({
+      id: "email:agentmail",
+      source: "email",
+      accountId: "agentmail",
+      async backfill(cursor, emit) {
+        assert.equal(cursor, null);
+
+        await emit(
+          {
+            source: "email",
+            externalId: "email:msg-1",
+            accountId: "agentmail",
+            thread: {
+              id: "thread-1",
+            },
+            actor: {
+              isSelf: false,
+            },
+            occurredAt: "2026-03-13T09:00:00.000Z",
+            text: "backfill",
+            attachments: [],
+            raw: {},
+          },
+          { messageId: "msg-1" },
+        );
+
+        return { messageId: "msg-1" };
+      },
+      async watch(cursor, emit) {
+        seenWatchCursors.push(cursor);
+        watchCalls += 1;
+
+        if (watchCalls === 1) {
+          await emit(
+            {
+              source: "email",
+              externalId: "email:msg-2",
+              accountId: "agentmail",
+              thread: {
+                id: "thread-1",
+              },
+              actor: {
+                isSelf: false,
+              },
+              occurredAt: "2026-03-13T09:01:00.000Z",
+              text: "first watch attempt",
+              attachments: [],
+              raw: {},
+            },
+            { messageId: "msg-2" },
+          );
+
+          throw new Error("watch exploded");
+        }
+
+        assert.deepEqual(cursor, { messageId: "msg-2" });
+
+        await emit(
+          {
+            source: "email",
+            externalId: "email:msg-3",
+            accountId: "agentmail",
+            thread: {
+              id: "thread-1",
+            },
+            actor: {
+              isSelf: false,
+            },
+            occurredAt: "2026-03-13T09:02:00.000Z",
+            text: "second watch attempt",
+            attachments: [],
+            raw: {},
+          },
+          { messageId: "msg-3" },
+        );
+      },
+    }),
+    pipeline: {
+      runtime: {
+        databasePath: ":memory:",
+        close() {},
+        getCursor() {
+          return null;
+        },
+        setCursor(_source, _accountId, cursor) {
+          cursorWrites.push(cursor);
+        },
+        findByExternalId() {
+          return null;
+        },
+        upsertCaptureIndex() {},
+        enqueueDerivedJobs() {},
+        listAttachmentParseJobs() {
+          return [];
+        },
+        claimNextAttachmentParseJob() {
+          return null;
+        },
+        requeueAttachmentParseJobs() {
+          return 0;
+        },
+        completeAttachmentParseJob() {
+          throw new Error("completeAttachmentParseJob should not be called");
+        },
+        failAttachmentParseJob() {
+          throw new Error("failAttachmentParseJob should not be called");
+        },
+        listCaptures() {
+          return [];
+        },
+        searchCaptures() {
+          return [];
+        },
+        getCapture() {
+          return null;
+        },
+      },
+      async processCapture(input) {
+        return createPersistedCapture(input);
+      },
+      close() {},
+    },
+    signal: new AbortController().signal,
+    restartConnectorOnFailure: true,
+    connectorRestartDelayMs: 1,
+    maxConnectorRestartDelayMs: 4,
+  });
+
+  assert.equal(watchCalls, 2);
+  assert.deepEqual(seenWatchCursors, [{ messageId: "msg-1" }, { messageId: "msg-2" }]);
+  assert.deepEqual(cursorWrites, [
+    { messageId: "msg-1" },
+    { messageId: "msg-1" },
+    { messageId: "msg-2" },
+    { messageId: "msg-3" },
+  ]);
+});
+
 test("runInboxDaemon aborts sibling connectors and waits for their cleanup when one fails", async () => {
   let runningConnectorAborted = false;
   let runningConnectorClosed = 0;
@@ -791,6 +935,96 @@ test("runInboxDaemon can keep sibling connectors alive after a connector failure
 
   assert.equal(runningConnectorAborted, true);
   assert.equal(runningConnectorClosed, 1);
+});
+
+test("runInboxDaemon restarts failed connectors when restart-on-failure is enabled", async () => {
+  const controller = new AbortController();
+  let watchCalls = 0;
+  let resolveRestarted!: () => void;
+  const restarted = new Promise<void>((resolve) => {
+    resolveRestarted = resolve;
+  });
+
+  const connector = createStubPollConnector({
+    id: "email:agentmail",
+    source: "email",
+    accountId: "agentmail",
+    async watch(_cursor, _emit, signal) {
+      watchCalls += 1;
+
+      if (watchCalls === 1) {
+        throw new Error("watch exploded");
+      }
+
+      resolveRestarted();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          resolve();
+          return;
+        }
+
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    },
+  });
+
+  const running = runInboxDaemon({
+    pipeline: {
+      runtime: {
+        databasePath: ":memory:",
+        close() {},
+        getCursor() {
+          return null;
+        },
+        setCursor() {},
+        findByExternalId() {
+          return null;
+        },
+        upsertCaptureIndex() {},
+        enqueueDerivedJobs() {},
+        listAttachmentParseJobs() {
+          return [];
+        },
+        claimNextAttachmentParseJob() {
+          return null;
+        },
+        requeueAttachmentParseJobs() {
+          return 0;
+        },
+        completeAttachmentParseJob() {
+          throw new Error("completeAttachmentParseJob should not be called");
+        },
+        failAttachmentParseJob() {
+          throw new Error("failAttachmentParseJob should not be called");
+        },
+        listCaptures() {
+          return [];
+        },
+        searchCaptures() {
+          return [];
+        },
+        getCapture() {
+          return null;
+        },
+      },
+      async processCapture(_input) {
+        throw new Error("processCapture should not be called");
+      },
+      close() {},
+    },
+    connectors: [connector],
+    signal: controller.signal,
+    continueOnConnectorFailure: true,
+    restartConnectorOnFailure: true,
+    connectorRestartDelayMs: 1,
+    maxConnectorRestartDelayMs: 4,
+  });
+
+  await restarted;
+  controller.abort();
+  await running;
+
+  assert.equal(watchCalls, 2);
 });
 
 test("runInboxDaemon still rejects when every connector fails in isolation mode", async () => {

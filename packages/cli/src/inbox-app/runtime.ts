@@ -470,6 +470,7 @@ export function createInboxRuntimeOps(
           connectors: instrumentedConnectors,
           signal: runSignal,
           continueOnConnectorFailure: true,
+          restartConnectorOnFailure: true,
         })
       } catch (error) {
         reason = runSignal.aborted ? 'signal' : 'error'
