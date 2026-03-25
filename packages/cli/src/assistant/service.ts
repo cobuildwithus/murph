@@ -33,6 +33,7 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
   type ResolveAssistantSessionInput,
+  type ResolvedAssistantSession,
 } from './store.js'
 import {
   createAssistantMemoryTurnContextEnv,
@@ -93,6 +94,43 @@ export interface AssistantChatInput
   extends Omit<AssistantMessageInput, 'deliverResponse' | 'deliveryTarget' | 'prompt'> {
   initialPrompt?: string | null
 }
+
+interface AssistantTurnPlan {
+  allowSensitiveHealthContext: boolean
+  cliEnv: NodeJS.ProcessEnv
+  configOverrides?: readonly string[]
+  conversationMessages?: ReadonlyArray<{
+    content: string
+    role: 'assistant' | 'user'
+  }>
+  persistUserPromptOnFailure: boolean
+  provider: AssistantChatProvider
+  providerOptions: ReturnType<typeof resolveAssistantProviderOptions>
+  resumeProviderSessionId: string | null
+  sessionContext?: {
+    binding: AssistantSession['binding']
+  }
+  systemPrompt: string | null
+  workingDirectory: string
+}
+
+interface PersistedUserTurn {
+  turnCreatedAt: string
+}
+
+type AssistantDeliveryOutcome =
+  | {
+      kind: 'failed'
+      error: AssistantDeliveryError
+    }
+  | {
+      kind: 'not-requested'
+    }
+  | {
+      kind: 'sent'
+      delivery: NonNullable<AssistantAskResult['delivery']>
+      session: AssistantSession
+    }
 
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
@@ -165,9 +203,68 @@ export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
   const defaults = await resolveAssistantOperatorDefaults()
-  const cliAccess = resolveAssistantCliAccessContext()
   const resolved = await resolveAssistantSessionForMessage(input, defaults)
+  const plan = await resolveAssistantTurnPlan(input, defaults, resolved)
+  const userTurn = await persistUserTurn(input, resolved, plan)
+  const providerResult = await executeProviderTurnWithRecovery({
+    defaults,
+    input,
+    plan,
+    resolved,
+    turnCreatedAt: userTurn.turnCreatedAt,
+  })
+  const session = await persistAssistantTurnAndSession({
+    input,
+    plan,
+    providerResult,
+    resolved,
+    turnCreatedAt: userTurn.turnCreatedAt,
+  })
+  const deliveryOutcome = await deliverAssistantReply({
+    input,
+    response: providerResult.response,
+    session,
+  })
 
+  return assistantAskResultSchema.parse({
+    vault: redactAssistantDisplayPath(input.vault),
+    prompt: input.prompt,
+    response: providerResult.response,
+    session: deliveryOutcome.kind === 'sent' ? deliveryOutcome.session : session,
+    delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
+    deliveryError:
+      deliveryOutcome.kind === 'failed' ? deliveryOutcome.error : null,
+  })
+}
+
+export async function updateAssistantSessionOptions(input: {
+  providerOptions: Partial<AssistantSession['providerOptions']>
+  sessionId: string
+  vault: string
+}): Promise<AssistantSession> {
+  const session = await resolveAssistantSession({
+    vault: input.vault,
+    conversation: {
+      sessionId: input.sessionId,
+    },
+    createIfMissing: false,
+  })
+
+  return saveAssistantSession(input.vault, {
+    ...session.session,
+    providerOptions: {
+      ...session.session.providerOptions,
+      ...input.providerOptions,
+    },
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+async function resolveAssistantTurnPlan(
+  input: AssistantMessageInput,
+  defaults: AssistantOperatorDefaults | null,
+  resolved: ResolvedAssistantSession,
+): Promise<AssistantTurnPlan> {
   const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
   const providerOptions = resolveAssistantProviderOptions({
     model: input.model ?? resolved.session.providerOptions.model ?? defaults?.model,
@@ -204,7 +301,6 @@ export async function sendAssistantMessage(
       resolved.session.providerOptions.providerName ??
       defaults?.providerName,
   })
-
   const shouldInjectBootstrapContext =
     resolved.created ||
     resolved.session.turnCount === 0 ||
@@ -237,14 +333,54 @@ export async function sendAssistantMessage(
         vault: input.vault,
       })
     : null
-  const resumeProviderSessionId =
-    provider === resolved.session.provider
-      ? resolved.session.providerSessionId
-      : null
+  const cliAccess = resolveAssistantCliAccessContext()
+  const workingDirectory = input.workingDirectory ?? input.vault
+  const memoryMcpConfig = buildAssistantMemoryMcpConfig(workingDirectory)
+  const cronMcpConfig = buildAssistantCronMcpConfig(workingDirectory)
+  const configOverrides = [
+    ...(memoryMcpConfig?.configOverrides ?? []),
+    ...(cronMcpConfig?.configOverrides ?? []),
+  ]
 
-  const persistUserPromptOnFailure = input.persistUserPromptOnFailure ?? true
+  return {
+    allowSensitiveHealthContext,
+    cliEnv: cliAccess.env,
+    configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
+    conversationMessages,
+    persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
+    provider,
+    providerOptions,
+    resumeProviderSessionId:
+      provider === resolved.session.provider
+        ? resolved.session.providerSessionId
+        : null,
+    sessionContext: shouldInjectBootstrapContext
+      ? {
+          binding: resolved.session.binding,
+        }
+      : undefined,
+    systemPrompt: shouldInjectBootstrapContext
+      ? buildAssistantSystemPrompt({
+          cliAccess,
+          assistantMemoryPrompt,
+          channel: input.channel ?? resolved.session.binding.channel,
+          onboardingSummary:
+            shouldInjectFirstTurnOnboarding && onboardingSummary
+              ? onboardingSummary
+              : null,
+        })
+      : null,
+    workingDirectory,
+  }
+}
+
+async function persistUserTurn(
+  input: AssistantMessageInput,
+  resolved: ResolvedAssistantSession,
+  plan: AssistantTurnPlan,
+): Promise<PersistedUserTurn> {
   let turnCreatedAt = new Date().toISOString()
-  if (persistUserPromptOnFailure) {
+  if (plan.persistUserPromptOnFailure) {
     const userEntries = await appendAssistantTranscriptEntries(
       input.vault,
       resolved.session.sessionId,
@@ -257,207 +393,199 @@ export async function sendAssistantMessage(
     )
     turnCreatedAt = userEntries[0]?.createdAt ?? turnCreatedAt
   }
-  const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
-    allowSensitiveHealthContext,
-    sessionId: resolved.session.sessionId,
-    sourcePrompt: input.prompt,
-    turnId: `${resolved.session.sessionId}:${turnCreatedAt}`,
-    vault: input.vault,
-  })
-  const memoryMcpConfig = buildAssistantMemoryMcpConfig(
-    input.workingDirectory ?? input.vault,
-  )
-  const cronMcpConfig = buildAssistantCronMcpConfig(
-    input.workingDirectory ?? input.vault,
-  )
-  const configOverrides = [
-    ...(memoryMcpConfig?.configOverrides ?? []),
-    ...(cronMcpConfig?.configOverrides ?? []),
-  ]
 
-  let providerResult: AssistantProviderTurnResult
+  return {
+    turnCreatedAt,
+  }
+}
+
+async function executeProviderTurnWithRecovery(input: {
+  defaults: AssistantOperatorDefaults | null
+  input: AssistantMessageInput
+  plan: AssistantTurnPlan
+  resolved: ResolvedAssistantSession
+  turnCreatedAt: string
+}): Promise<AssistantProviderTurnResult> {
+  const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
+    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+    sessionId: input.resolved.session.sessionId,
+    sourcePrompt: input.input.prompt,
+    turnId: `${input.resolved.session.sessionId}:${input.turnCreatedAt}`,
+    vault: input.input.vault,
+  })
+
   try {
-    providerResult = await executeAssistantProviderTurn({
-      abortSignal: input.abortSignal,
-      provider,
-      workingDirectory: input.workingDirectory ?? input.vault,
-      configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
+    return await executeAssistantProviderTurn({
+      abortSignal: input.input.abortSignal,
+      provider: input.plan.provider,
+      workingDirectory: input.plan.workingDirectory,
+      configOverrides: input.plan.configOverrides,
       env: {
-        ...cliAccess.env,
+        ...input.plan.cliEnv,
         ...memoryTurnEnv,
       },
-      userPrompt: input.prompt,
-      systemPrompt: shouldInjectBootstrapContext
-        ? buildAssistantSystemPrompt({
-            cliAccess,
-            assistantMemoryPrompt,
-            channel: resolved.session.binding.channel,
-            onboardingSummary:
-              shouldInjectFirstTurnOnboarding && onboardingSummary
-                ? onboardingSummary
-                : null,
-          })
-        : null,
-      sessionContext: shouldInjectBootstrapContext
-        ? {
-            binding: resolved.session.binding,
-          }
-        : undefined,
-      resumeProviderSessionId,
-      codexCommand: input.codexCommand ?? defaults?.codexCommand ?? undefined,
-      model: providerOptions.model,
-      reasoningEffort: providerOptions.reasoningEffort,
-      sandbox: providerOptions.sandbox,
-      approvalPolicy: providerOptions.approvalPolicy,
-      baseUrl: providerOptions.baseUrl,
-      apiKeyEnv: providerOptions.apiKeyEnv,
-      providerName: providerOptions.providerName,
-      conversationMessages,
-      onEvent: input.onProviderEvent ?? undefined,
-      profile: providerOptions.profile,
-      oss: providerOptions.oss,
-      onTraceEvent: input.onTraceEvent,
-      showThinkingTraces: input.showThinkingTraces ?? false,
+      userPrompt: input.input.prompt,
+      systemPrompt: input.plan.systemPrompt,
+      sessionContext: input.plan.sessionContext,
+      resumeProviderSessionId: input.plan.resumeProviderSessionId,
+      codexCommand:
+        input.input.codexCommand ?? input.defaults?.codexCommand ?? undefined,
+      model: input.plan.providerOptions.model,
+      reasoningEffort: input.plan.providerOptions.reasoningEffort,
+      sandbox: input.plan.providerOptions.sandbox,
+      approvalPolicy: input.plan.providerOptions.approvalPolicy,
+      baseUrl: input.plan.providerOptions.baseUrl,
+      apiKeyEnv: input.plan.providerOptions.apiKeyEnv,
+      providerName: input.plan.providerOptions.providerName,
+      conversationMessages: input.plan.conversationMessages,
+      onEvent: input.input.onProviderEvent ?? undefined,
+      profile: input.plan.providerOptions.profile,
+      oss: input.plan.providerOptions.oss,
+      onTraceEvent: input.input.onTraceEvent,
+      showThinkingTraces: input.input.showThinkingTraces ?? false,
     })
   } catch (error) {
     const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
       error,
-      provider,
-      providerOptions,
-      session: resolved.session,
-      vault: input.vault,
+      provider: input.plan.provider,
+      providerOptions: input.plan.providerOptions,
+      session: input.resolved.session,
+      vault: input.input.vault,
     })
     attachRecoveredAssistantSession(error, recoveredSession)
     throw error
   }
+}
 
-  if (!persistUserPromptOnFailure) {
-    await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
-      {
-        kind: 'user',
-        text: input.prompt,
-        createdAt: turnCreatedAt,
-      },
-    ])
+async function persistAssistantTurnAndSession(input: {
+  input: AssistantMessageInput
+  plan: AssistantTurnPlan
+  providerResult: AssistantProviderTurnResult
+  resolved: ResolvedAssistantSession
+  turnCreatedAt: string
+}): Promise<AssistantSession> {
+  if (!input.plan.persistUserPromptOnFailure) {
+    await appendAssistantTranscriptEntries(
+      input.input.vault,
+      input.resolved.session.sessionId,
+      [
+        {
+          kind: 'user',
+          text: input.input.prompt,
+          createdAt: input.turnCreatedAt,
+        },
+      ],
+    )
   }
 
-  await appendAssistantTranscriptEntries(input.vault, resolved.session.sessionId, [
-    {
-      kind: 'assistant',
-      text: providerResult.response,
-    },
-  ])
+  await appendAssistantTranscriptEntries(
+    input.input.vault,
+    input.resolved.session.sessionId,
+    [
+      {
+        kind: 'assistant',
+        text: input.providerResult.response,
+      },
+    ],
+  )
 
   const updatedAt = new Date().toISOString()
-  let session = await saveAssistantSession(input.vault, {
-    ...resolved.session,
-    provider: providerResult.provider,
+  return saveAssistantSession(input.input.vault, {
+    ...input.resolved.session,
+    provider: input.providerResult.provider,
     providerSessionId: resolveNextProviderSessionId({
-      provider: providerResult.provider,
-      providerSessionId: providerResult.providerSessionId,
-      previousProvider: resolved.session.provider,
-      previousProviderSessionId: resolved.session.providerSessionId,
+      provider: input.providerResult.provider,
+      providerSessionId: input.providerResult.providerSessionId,
+      previousProvider: input.resolved.session.provider,
+      previousProviderSessionId: input.resolved.session.providerSessionId,
     }),
-    providerOptions,
+    providerOptions: input.plan.providerOptions,
     updatedAt,
     lastTurnAt: updatedAt,
-    turnCount: resolved.session.turnCount + 1,
+    turnCount: input.resolved.session.turnCount + 1,
   })
+}
 
-  let delivery: AssistantAskResult['delivery'] = null
-  let deliveryError: AssistantDeliveryError | null = null
-
-  if (input.deliverResponse) {
-    try {
-      const delivered = await deliverAssistantMessageOverBinding({
-        message: providerResult.response,
-        channel: session.binding.channel,
-        identityId: session.binding.identityId,
-        actorId: session.binding.actorId,
-        threadId: session.binding.threadId,
-        threadIsDirect: session.binding.threadIsDirect,
-        sessionId: session.sessionId,
-        target: input.deliveryTarget ?? null,
-        vault: input.vault,
-      })
-      const normalizedDelivery =
-        delivered &&
-        typeof delivered === 'object' &&
-        'delivery' in delivered &&
-        (delivered as { delivery?: AssistantAskResult['delivery'] }).delivery
-          ? (delivered as { delivery: NonNullable<AssistantAskResult['delivery']> }).delivery
-          : (delivered as NonNullable<AssistantAskResult['delivery']>)
-
-      if (
-        delivered &&
-        typeof delivered === 'object' &&
-        'session' in delivered &&
-        (delivered as { session?: AssistantSession }).session
-      ) {
-        session = (delivered as { session: AssistantSession }).session
-      } else {
-        const deliveredAt = normalizedDelivery.sentAt
-        session = await saveAssistantSession(input.vault, {
-          ...session,
-          binding: {
-            ...session.binding,
-            channel: normalizedDelivery.channel,
-          },
-          updatedAt: deliveredAt,
-          lastTurnAt: deliveredAt,
-        })
-      }
-      delivery = normalizedDelivery
-    } catch (error) {
-      deliveryError = {
-        code:
-          typeof error === 'object' &&
-          error !== null &&
-          'code' in error &&
-          typeof (error as { code?: unknown }).code === 'string'
-            ? (error as { code: string }).code
-            : null,
-        message:
-          error instanceof Error && error.message.trim().length > 0
-            ? error.message
-            : String(error),
-      }
+async function deliverAssistantReply(input: {
+  input: AssistantMessageInput
+  response: string
+  session: AssistantSession
+}): Promise<AssistantDeliveryOutcome> {
+  if (!input.input.deliverResponse) {
+    return {
+      kind: 'not-requested',
     }
   }
 
-  return assistantAskResultSchema.parse({
-    vault: redactAssistantDisplayPath(input.vault),
-    prompt: input.prompt,
-    response: providerResult.response,
-    session,
-    delivery,
-    deliveryError,
-  })
+  try {
+    const delivered = await deliverAssistantMessageOverBinding({
+      message: sanitizeAssistantOutboundReply(
+        input.response,
+        input.session.binding.channel,
+      ),
+      channel: input.session.binding.channel,
+      identityId: input.session.binding.identityId,
+      actorId: input.session.binding.actorId,
+      threadId: input.session.binding.threadId,
+      threadIsDirect: input.session.binding.threadIsDirect,
+      sessionId: input.session.sessionId,
+      target: input.input.deliveryTarget ?? null,
+      vault: input.input.vault,
+    })
+
+    return {
+      kind: 'sent',
+      delivery: delivered.delivery,
+      session:
+        delivered.session ??
+        await persistAssistantDeliverySession({
+          delivery: delivered.delivery,
+          session: input.session,
+          vault: input.input.vault,
+        }),
+    }
+  } catch (error) {
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(error),
+    }
+  }
 }
 
-export async function updateAssistantSessionOptions(input: {
-  providerOptions: Partial<AssistantSession['providerOptions']>
-  sessionId: string
+async function persistAssistantDeliverySession(input: {
+  delivery: NonNullable<AssistantAskResult['delivery']>
+  session: AssistantSession
   vault: string
 }): Promise<AssistantSession> {
-  const session = await resolveAssistantSession({
-    vault: input.vault,
-    conversation: {
-      sessionId: input.sessionId,
-    },
-    createIfMissing: false,
-  })
-
+  const deliveredAt = input.delivery.sentAt
   return saveAssistantSession(input.vault, {
-    ...session.session,
-    providerOptions: {
-      ...session.session.providerOptions,
-      ...input.providerOptions,
+    ...input.session,
+    binding: {
+      ...input.session.binding,
+      channel: input.delivery.channel,
     },
-    updatedAt: new Date().toISOString(),
+    updatedAt: deliveredAt,
+    lastTurnAt: deliveredAt,
   })
 }
 
+function normalizeAssistantDeliveryError(
+  error: unknown,
+): AssistantDeliveryError {
+  return {
+    code:
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : null,
+    message:
+      error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : String(error),
+  }
+}
 
 function shouldUseLocalTranscriptContext(
   provider: AssistantChatProvider,
@@ -581,7 +709,7 @@ function buildAssistantSystemPrompt(input: {
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
     'Do not modify vault files unless the user explicitly asks you to propose changes. Typed assistant-memory commits through the Healthy Bob memory tools are the only exception for conversational continuity.',
     'When you operate purely through Healthy Bob CLI tools to read or write vault content, treat that as a vault operation rather than a coding task. Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
-    'When you reference evidence from the vault, mention relative file paths when practical.',
+    buildAssistantVaultEvidenceFormattingGuidance(input.channel),
     buildOutboundReplyFormattingGuidance(input.channel),
     buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
     input.assistantMemoryPrompt,
@@ -591,6 +719,16 @@ function buildAssistantSystemPrompt(input: {
   ]
     .filter((value): value is string => Boolean(value))
     .join('\n\n')
+}
+
+function buildAssistantVaultEvidenceFormattingGuidance(
+  channel: string | null,
+): string | null {
+  if (isAssistantOutboundReplyChannel(channel)) {
+    return null
+  }
+
+  return 'When you reference evidence from the vault, mention relative file paths when practical.'
 }
 
 function buildAssistantFirstTurnOnboardingGuidanceText(
@@ -693,4 +831,73 @@ function shouldExposeSensitiveHealthContext(binding: {
   }
 
   return binding.threadIsDirect === true
+}
+
+const ASSISTANT_LOCAL_MARKDOWN_LINK_PATTERN =
+  /\[([^\]\n]+)\]\(((?:\/|file:\/\/)[^)]+)\)/gu
+
+function sanitizeAssistantOutboundReply(
+  message: string,
+  channel: string | null,
+): string {
+  if (!isAssistantOutboundReplyChannel(channel)) {
+    return message
+  }
+
+  const withoutLocalMarkdownLinks = message.replace(
+    ASSISTANT_LOCAL_MARKDOWN_LINK_PATTERN,
+    '$1',
+  )
+  const normalizedLines = withoutLocalMarkdownLinks
+    .split('\n')
+    .map((line) => stripAssistantSourceCalloutPrefix(line))
+
+  return normalizedLines.join('\n').replace(/\n{3,}/gu, '\n\n').trim()
+}
+
+function stripAssistantSourceCalloutPrefix(line: string): string {
+  const match = /^(\s*(?:[-*]\s+)?)(?:In|From)\s+(.+?):\s+/u.exec(line)
+  if (!match) {
+    return line
+  }
+
+  const prefix = match[1] ?? ''
+  const referenceClause = match[2] ?? ''
+  if (!looksLikeAssistantSourceReferenceClause(referenceClause)) {
+    return line
+  }
+
+  return `${prefix}${line.slice(match[0].length)}`
+}
+
+function looksLikeAssistantSourceReferenceClause(value: string): boolean {
+  const parts = value
+    .split(/\s+(?:and|or)\s+|,\s*/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+
+  return parts.length > 0 && parts.every((part) => isAssistantSourceReference(part))
+}
+
+function isAssistantSourceReference(value: string): boolean {
+  const normalized = value.trim().replace(/^`|`$/gu, '')
+  if (normalized.length === 0) {
+    return false
+  }
+
+  if (normalized.startsWith('/') || normalized.startsWith('file://')) {
+    return true
+  }
+
+  if (
+    /^(?:journal|ledger|raw|derived|research|experiments|assistant-state)(?:\/|$)/u.test(
+      normalized,
+    )
+  ) {
+    return true
+  }
+
+  return /(?:^|\/)[A-Za-z0-9._-]+\.(?:md|jsonl|json|txt|csv|ya?ml)$/u.test(
+    normalized,
+  )
 }

@@ -1877,6 +1877,203 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
   }
 })
 
+test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances it on prompt skips', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-cursor-policy-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  let phase: 'defer' | 'skip' = 'defer'
+  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    primed: boolean
+  }> = []
+
+  const inboxServices = {
+    async list() {
+      if (phase === 'defer') {
+        return {
+          items: [
+            {
+              captureId: 'cap-defer',
+              source: 'imessage',
+              accountId: 'self',
+              externalId: 'ext-defer',
+              threadId: 'chat-defer',
+              threadTitle: null,
+              actorId: '+15550001111',
+              actorName: 'Defer User',
+              actorIsSelf: false,
+              occurredAt: '2026-03-18T09:00:00Z',
+              receivedAt: null,
+              text: 'Need parsing first',
+              attachmentCount: 1,
+              envelopePath: 'raw/inbox/defer.json',
+              eventId: 'evt-defer',
+              promotions: [],
+            },
+          ],
+        }
+      }
+
+      return {
+        items: [
+          {
+            captureId: 'cap-skip',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-skip',
+            threadId: 'chat-skip',
+            threadTitle: null,
+            actorId: '+15550002222',
+            actorName: 'Skip User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:01:00Z',
+            receivedAt: null,
+            text: null,
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/skip.json',
+            eventId: 'evt-skip',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      if (phase === 'defer') {
+        assert.equal(input.captureId, 'cap-defer')
+        return {
+          capture: {
+            captureId: 'cap-defer',
+            source: 'imessage',
+            threadTitle: null,
+            threadId: 'chat-defer',
+            threadIsDirect: true,
+            actorId: '+15550001111',
+            actorName: 'Defer User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            text: 'Need parsing first',
+            attachments: [
+              {
+                ordinal: 1,
+                kind: 'image',
+                fileName: 'meal.jpg',
+                transcriptText: null,
+                extractedText: null,
+                parseState: 'pending',
+              },
+            ],
+          },
+        }
+      }
+
+      assert.equal(input.captureId, 'cap-skip')
+      return {
+        capture: {
+          captureId: 'cap-skip',
+          source: 'imessage',
+          threadTitle: null,
+          threadId: 'chat-skip',
+          threadIsDirect: true,
+          actorId: '+15550002222',
+          actorName: 'Skip User',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:01:00Z',
+          text: null,
+          attachments: [
+            {
+              ordinal: 1,
+              kind: 'image',
+              fileName: 'blank.jpg',
+              transcriptText: null,
+              extractedText: null,
+              parseState: 'succeeded',
+            },
+          ],
+        },
+      }
+    },
+  } as any
+
+  const first = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['imessage'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  phase = 'skip'
+
+  const second = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['imessage'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(first, {
+    considered: 1,
+    failed: 0,
+    replied: 0,
+    skipped: 1,
+  })
+  assert.deepEqual(second, {
+    considered: 1,
+    failed: 0,
+    replied: 0,
+    skipped: 1,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
+  assert.deepEqual(stateProgress, [
+    {
+      cursor: null,
+      primed: true,
+    },
+    {
+      cursor: {
+        occurredAt: '2026-03-18T09:01:00Z',
+        captureId: 'cap-skip',
+      },
+      primed: true,
+    },
+  ])
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-skipped' &&
+        event.captureId === 'cap-defer' &&
+        event.details === 'waiting for parser completion',
+    ),
+    true,
+  )
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-skipped' &&
+        event.captureId === 'cap-skip' &&
+        event.details === 'capture has no text or parsed attachment content',
+    ),
+    true,
+  )
+})
+
 test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-scope-'))
   const vaultRoot = path.join(parent, 'vault')

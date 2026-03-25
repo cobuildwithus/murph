@@ -310,6 +310,14 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
     localChatCall?.systemPrompt ?? '',
     /Never include citations, source lists, footnotes, bracketed references/u,
   )
+  assert.doesNotMatch(
+    outboundCall?.systemPrompt ?? '',
+    /mention relative file paths when practical/u,
+  )
+  assert.match(
+    localChatCall?.systemPrompt ?? '',
+    /mention relative file paths when practical/u,
+  )
 })
 
 test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
