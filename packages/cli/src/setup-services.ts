@@ -23,6 +23,7 @@ import {
   type SetupChannel,
   type SetupConfiguredAssistant,
   type SetupResult,
+  type SetupScheduledUpdate,
   type SetupStepKind,
   type SetupStepResult,
   type SetupTools,
@@ -34,6 +35,7 @@ import {
   configureSetupChannels,
   normalizeSetupChannels,
 } from './setup-services/channels.js'
+import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
 import {
   createSetupAgentmailSelectionResolver,
   type SetupAgentmailSelectionResolver,
@@ -81,6 +83,7 @@ interface SetupInput {
   requestId?: string | null
   dryRun?: boolean
   rebuild?: boolean
+  scheduledUpdatePresetIds?: readonly string[] | null
   strict?: boolean
   toolchainRoot?: string
   wearables?: readonly SetupWearable[] | null
@@ -364,6 +367,15 @@ export function createSetupServices(
             env: toolchainEnv,
             wearables: input.wearables,
           })
+    const scheduledUpdates =
+      input.scheduledUpdatePresetIds == null
+        ? []
+        : await configureSetupScheduledUpdates({
+            dryRun,
+            presetIds: input.scheduledUpdatePresetIds,
+            steps,
+            vault,
+          })
 
     return {
       arch,
@@ -378,6 +390,9 @@ export function createSetupServices(
               ...assistant,
               detail: redactHomePathInText(assistant.detail, homeDirectory),
             },
+      scheduledUpdates: scheduledUpdates.map((scheduledUpdate) =>
+        redactHomePathsInValue(scheduledUpdate, homeDirectory),
+      ) as SetupScheduledUpdate[],
       channels: channels.map((channel) => ({
         ...channel,
         connectorId: channel.connectorId,

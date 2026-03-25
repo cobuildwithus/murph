@@ -28,12 +28,14 @@ import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from '../src/assistant-state.js'
+import { listAssistantCronJobs } from '../src/assistant/cron.js'
 import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
 import {
   createSetupAssistantAccountResolver,
   detectCodexAccountFromAuthJson,
 } from '../src/setup-assistant-account.js'
 import { createSetupServices } from '../src/setup-services.js'
+import { configureSetupScheduledUpdates } from '../src/setup-services/scheduled-updates.js'
 import {
   describeSelectedSetupWearables,
   resolveSetupChannelMissingEnv,
@@ -46,6 +48,7 @@ import {
   buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController,
   describeSetupWizardPublicUrlStrategyChoice,
+  getDefaultSetupWizardScheduledUpdates,
   type SetupWizardResult,
 } from '../src/setup-wizard.js'
 import {
@@ -76,6 +79,7 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
   const selected = {
     assistantPreset: 'codex-cli' as const,
     channels: ['email'] as const,
+    scheduledUpdates: ['weekly-health-snapshot'] as const,
     wearables: [] as const,
   }
 
@@ -88,6 +92,7 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
   completion.submit({
     assistantPreset: selected.assistantPreset,
     channels: [...selected.channels],
+    scheduledUpdates: [...selected.scheduledUpdates],
     wearables: [...selected.wearables],
   })
   await Promise.resolve()
@@ -98,8 +103,98 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
   assert.deepEqual(await pendingResult, {
     assistantPreset: 'codex-cli',
     channels: ['email'],
+    scheduledUpdates: ['weekly-health-snapshot'],
     wearables: [],
   })
+})
+
+test('setup wizard scheduled updates default to the starter bundle', () => {
+  assert.deepEqual(getDefaultSetupWizardScheduledUpdates(), [
+    'environment-health-watch',
+    'weekly-health-snapshot',
+  ])
+})
+
+test('setup scheduled updates install the selected preset-backed jobs', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
+  const steps: SetupResult['steps'] = []
+
+  try {
+    const scheduledUpdates = await configureSetupScheduledUpdates({
+      dryRun: false,
+      presetIds: ['weekly-health-snapshot', 'environment-health-watch'],
+      steps,
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
+      [
+        ['environment-health-watch', 'completed'],
+        ['weekly-health-snapshot', 'completed'],
+      ],
+    )
+    assert.equal(steps.length, 1)
+    assert.equal(steps[0]?.id, 'assistant-scheduled-updates')
+    assert.equal(steps[0]?.status, 'completed')
+
+    const jobs = await listAssistantCronJobs(vaultRoot)
+    assert.deepEqual(
+      jobs.map((job) => job.name).sort(),
+      ['environment-health-watch', 'weekly-health-snapshot'],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('setup scheduled updates reuse existing cron jobs with matching preset names', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
+
+  try {
+    await configureSetupScheduledUpdates({
+      dryRun: false,
+      presetIds: ['environment-health-watch'],
+      steps: [],
+      vault: vaultRoot,
+    })
+
+    const steps: SetupResult['steps'] = []
+    const scheduledUpdates = await configureSetupScheduledUpdates({
+      dryRun: false,
+      presetIds: ['environment-health-watch'],
+      steps,
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
+      [['environment-health-watch', 'reused']],
+    )
+    assert.equal(steps[0]?.status, 'reused')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('setup scheduled updates can be fully opted out during onboarding', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
+  const steps: SetupResult['steps'] = []
+
+  try {
+    const scheduledUpdates = await configureSetupScheduledUpdates({
+      dryRun: false,
+      presetIds: [],
+      steps,
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(scheduledUpdates, [])
+    assert.equal(steps[0]?.status, 'skipped')
+    assert.match(steps[0]?.detail ?? '', /No assistant scheduled updates selected/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('public URL review recommends hosted apps/web for wearable ingress when no public base is configured', () => {
@@ -545,6 +640,7 @@ function makeSetupResult(
     dryRun: false,
     notes: [],
     platform: 'darwin',
+    scheduledUpdates: [],
     steps: [
       {
         detail: `Initialized a new vault scaffold at ${vault}.`,
@@ -1011,7 +1107,9 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
   let wizardCalls = 0
   const wizardInitialChannels: Array<string[]> = []
+  const wizardInitialScheduledUpdates: Array<string[]> = []
   const receivedChannels: Array<string[] | null> = []
+  const receivedScheduledUpdates: Array<string[] | null> = []
   const receivedWearables: Array<string[] | null> = []
   const cli = createSetupCli({
     commandName: 'healthybob',
@@ -1025,6 +1123,11 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
         receivedChannels.push(
           input.channels == null ? null : [...input.channels],
         )
+        receivedScheduledUpdates.push(
+          input.scheduledUpdatePresetIds == null
+            ? null
+            : [...input.scheduledUpdatePresetIds],
+        )
         receivedWearables.push(
           input.wearables == null ? null : [...input.wearables],
         )
@@ -1035,8 +1138,10 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
       async run(input: any) {
         wizardCalls += 1
         wizardInitialChannels.push([...input.initialChannels])
+        wizardInitialScheduledUpdates.push([...input.initialScheduledUpdates])
         return {
           channels: ['imessage'],
+          scheduledUpdates: ['environment-health-watch'],
           wearables: [],
         }
       },
@@ -1052,6 +1157,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 
     assert.equal(wizardCalls, 0)
     assert.deepEqual(receivedChannels[0], null)
+    assert.deepEqual(receivedScheduledUpdates[0], null)
     assert.deepEqual(receivedWearables[0], null)
 
     await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
@@ -1062,7 +1168,12 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 
     assert.equal(wizardCalls, 1)
     assert.deepEqual(wizardInitialChannels, [['imessage']])
+    assert.deepEqual(wizardInitialScheduledUpdates, [[
+      'environment-health-watch',
+      'weekly-health-snapshot',
+    ]])
     assert.deepEqual(receivedChannels[1], ['imessage'])
+    assert.deepEqual(receivedScheduledUpdates[1], ['environment-health-watch'])
     assert.deepEqual(receivedWearables[1], [])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -1072,6 +1183,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 test('interactive onboarding on Linux starts without the macOS-only iMessage default', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-linux-'))
   const wizardInitialChannels: Array<string[]> = []
+  const wizardInitialScheduledUpdates: Array<string[]> = []
   const wizardPlatforms: Array<string | undefined> = []
 
   const cli = createSetupCli({
@@ -1098,9 +1210,11 @@ test('interactive onboarding on Linux starts without the macOS-only iMessage def
     wizard: {
       async run(input: any) {
         wizardInitialChannels.push([...input.initialChannels])
+        wizardInitialScheduledUpdates.push([...input.initialScheduledUpdates])
         wizardPlatforms.push(input.platform)
         return {
           channels: [],
+          scheduledUpdates: [],
           wearables: [],
         }
       },
@@ -1115,6 +1229,10 @@ test('interactive onboarding on Linux starts without the macOS-only iMessage def
     })
 
     assert.deepEqual(wizardInitialChannels, [[]])
+    assert.deepEqual(wizardInitialScheduledUpdates, [[
+      'environment-health-watch',
+      'weekly-health-snapshot',
+    ]])
     assert.deepEqual(wizardPlatforms, ['linux'])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -1205,6 +1323,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
     allowChannelPrompts: boolean | undefined
     channels: string[] | null
     envOverrides: NodeJS.ProcessEnv | undefined
+    scheduledUpdatePresetIds: string[] | null
     wearables: string[] | null
   }> = []
   const previousEnv = {
@@ -1241,6 +1360,10 @@ test('interactive onboarding prompts for missing channel and wearable credential
           allowChannelPrompts: input.allowChannelPrompts,
           channels: input.channels == null ? null : [...input.channels],
           envOverrides: input.envOverrides,
+          scheduledUpdatePresetIds:
+            input.scheduledUpdatePresetIds == null
+              ? null
+              : [...input.scheduledUpdatePresetIds],
           wearables: input.wearables == null ? null : [...input.wearables],
         })
         return makeSetupResult(input.vault)
@@ -1251,6 +1374,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
         return {
           assistantPreset: 'skip',
           channels: ['email'],
+          scheduledUpdates: ['weekly-health-snapshot'],
           wearables: ['oura'],
         }
       },
@@ -1280,6 +1404,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
           OURA_CLIENT_ID: 'oura-client',
           OURA_CLIENT_SECRET: 'oura-secret',
         },
+        scheduledUpdatePresetIds: ['weekly-health-snapshot'],
         wearables: ['oura'],
       },
     ])

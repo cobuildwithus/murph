@@ -2,6 +2,7 @@ import { z } from 'incur'
 import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
+  assistantCronPresetSchema,
   assistantSandboxValues,
 } from './assistant-cli-contracts.js'
 import { inboxBootstrapResultSchema } from './inbox-cli-contracts.js'
@@ -136,6 +137,12 @@ export const setupConfiguredAssistantSchema = z.object({
   detail: z.string().min(1),
 })
 
+export const setupScheduledUpdateSchema = z.object({
+  preset: assistantCronPresetSchema,
+  jobName: z.string().min(1),
+  status: setupStepStatusSchema,
+})
+
 export const setupCommandOptionsSchema = z.object({
   vault: pathSchema
     .default('./vault')
@@ -215,6 +222,7 @@ export const setupResultSchema = z.object({
   steps: z.array(setupStepResultSchema).min(1),
   bootstrap: inboxBootstrapResultSchema.nullable(),
   assistant: setupConfiguredAssistantSchema.nullable(),
+  scheduledUpdates: z.array(setupScheduledUpdateSchema),
   channels: z.array(setupConfiguredChannelSchema),
   wearables: z.array(setupConfiguredWearableSchema),
 })
@@ -234,6 +242,7 @@ export type SetupAssistantAccount = z.infer<typeof setupAssistantAccountSchema>
 export type SetupConfiguredAssistant = z.infer<
   typeof setupConfiguredAssistantSchema
 >
+export type SetupScheduledUpdate = z.infer<typeof setupScheduledUpdateSchema>
 export type SetupCommandOptions = z.infer<typeof setupCommandOptionsSchema>
 export type SetupStepKind = z.infer<typeof setupStepKindSchema>
 export type SetupStepStatus = z.infer<typeof setupStepStatusSchema>

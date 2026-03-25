@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
+import { listAssistantCronPresets } from './assistant/cron/presets.js'
 import { getDefaultSetupAssistantPreset as getDefaultAssistantPreset } from './setup-assistant.js'
 import {
   type SetupAssistantPreset,
@@ -17,6 +18,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 export interface SetupWizardResult {
   assistantPreset?: SetupAssistantPreset
   channels: SetupChannel[]
+  scheduledUpdates: string[]
   wearables: SetupWearable[]
 }
 
@@ -26,6 +28,7 @@ export interface SetupWizardInput {
   deviceSyncLocalBaseUrl?: string | null
   initialAssistantPreset?: SetupAssistantPreset
   initialChannels?: readonly SetupChannel[]
+  initialScheduledUpdates?: readonly string[]
   initialWearables?: readonly SetupWearable[]
   linqLocalWebhookUrl?: string | null
   platform?: NodeJS.Platform
@@ -50,6 +53,13 @@ interface SetupWizardAssistantOption {
 interface SetupWizardChannelOption {
   channel: SetupChannel
   description: string
+  title: string
+}
+
+interface SetupWizardScheduledUpdateOption {
+  description: string
+  id: string
+  scheduleLabel: string
   title: string
 }
 
@@ -84,6 +94,7 @@ export interface SetupWizardPublicUrlReview {
 type SetupWizardStep =
   | 'intro'
   | 'assistant'
+  | 'scheduled-updates'
   | 'channels'
   | 'wearables'
   | 'public-url'
@@ -138,6 +149,19 @@ const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
   },
 ]
 
+const setupWizardScheduledUpdateOptions: readonly SetupWizardScheduledUpdateOption[] =
+  listAssistantCronPresets().map((preset) => ({
+    id: preset.id,
+    title: preset.title,
+    description: preset.description,
+    scheduleLabel: preset.suggestedScheduleLabel,
+  }))
+
+const DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS = [
+  'weekly-health-snapshot',
+  'environment-health-watch',
+] as const
+
 const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [
   {
     description: 'OAuth connect plus scheduled sync.',
@@ -180,6 +204,18 @@ export function getDefaultSetupWizardWearables(): SetupWearable[] {
   return []
 }
 
+export function getDefaultSetupWizardScheduledUpdates(): string[] {
+  const available = new Set(
+    setupWizardScheduledUpdateOptions.map((option) => option.id),
+  )
+
+  return sortSetupWizardScheduledUpdates(
+    DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS.filter((id) =>
+      available.has(id),
+    ),
+  )
+}
+
 export function wrapSetupWizardIndex(
   currentIndex: number,
   length: number,
@@ -218,6 +254,20 @@ export function toggleSetupWizardWearable(
   }
 
   return sortSetupWizardWearables([...next])
+}
+
+export function toggleSetupWizardScheduledUpdate(
+  selectedPresetIds: readonly string[],
+  presetId: string,
+): string[] {
+  const next = new Set(selectedPresetIds)
+  if (next.has(presetId)) {
+    next.delete(presetId)
+  } else {
+    next.add(presetId)
+  }
+
+  return sortSetupWizardScheduledUpdates([...next])
 }
 
 export function createSetupWizardCompletionController(): SetupWizardCompletionController {
@@ -290,6 +340,11 @@ export async function runSetupWizard(
       ? [...input.initialChannels]
       : getDefaultSetupWizardChannels(input.platform),
   )
+  const initialScheduledUpdates = sortSetupWizardScheduledUpdates(
+    input.initialScheduledUpdates && input.initialScheduledUpdates.length > 0
+      ? [...input.initialScheduledUpdates]
+      : getDefaultSetupWizardScheduledUpdates(),
+  )
   const initialWearables = sortSetupWizardWearables(
     input.initialWearables && input.initialWearables.length > 0
       ? [...input.initialWearables]
@@ -312,6 +367,7 @@ export async function runSetupWizard(
     const [assistantIndex, setAssistantIndex] = React.useState(
       findSetupWizardAssistantOptionIndex(initialAssistantPreset),
     )
+    const [scheduledUpdateIndex, setScheduledUpdateIndex] = React.useState(0)
     const [channelIndex, setChannelIndex] = React.useState(0)
     const [wearableIndex, setWearableIndex] = React.useState(0)
     const [publicUrlIndex, setPublicUrlIndex] = React.useState(0)
@@ -319,6 +375,9 @@ export async function runSetupWizard(
       React.useState<SetupAssistantPreset>(initialAssistantPreset)
     const [selectedChannels, setSelectedChannels] = React.useState<SetupChannel[]>(
       initialChannels,
+    )
+    const [selectedScheduledUpdates, setSelectedScheduledUpdates] = React.useState<string[]>(
+      initialScheduledUpdates,
     )
     const [selectedWearables, setSelectedWearables] = React.useState<SetupWearable[]>(
       initialWearables,
@@ -339,6 +398,7 @@ export async function runSetupWizard(
       initialAssistantPreset,
     )
     const latestChannelsRef = React.useRef<SetupChannel[]>(initialChannels)
+    const latestScheduledUpdatesRef = React.useRef<string[]>(initialScheduledUpdates)
     const latestWearablesRef = React.useRef<SetupWearable[]>(initialWearables)
     const publicUrlReview = buildSetupWizardPublicUrlReview({
       channels: selectedChannels,
@@ -356,6 +416,10 @@ export async function runSetupWizard(
     React.useEffect(() => {
       latestChannelsRef.current = selectedChannels
     }, [selectedChannels])
+
+    React.useEffect(() => {
+      latestScheduledUpdatesRef.current = selectedScheduledUpdates
+    }, [selectedScheduledUpdates])
 
     React.useEffect(() => {
       latestWearablesRef.current = selectedWearables
@@ -434,6 +498,52 @@ export async function runSetupWizard(
           if (activePreset) {
             setSelectedAssistantPreset(activePreset)
           }
+          setStep('scheduled-updates')
+          return
+        }
+        return
+      }
+
+      if (step === 'scheduled-updates') {
+        if (key.upArrow) {
+          setScheduledUpdateIndex((current) =>
+            wrapSetupWizardIndex(
+              current,
+              setupWizardScheduledUpdateOptions.length,
+              -1,
+            ),
+          )
+          return
+        }
+
+        if (key.downArrow) {
+          setScheduledUpdateIndex((current) =>
+            wrapSetupWizardIndex(
+              current,
+              setupWizardScheduledUpdateOptions.length,
+              1,
+            ),
+          )
+          return
+        }
+
+        if (value === ' ') {
+          const activePresetId =
+            setupWizardScheduledUpdateOptions[scheduledUpdateIndex]?.id
+          if (activePresetId) {
+            setSelectedScheduledUpdates((current) =>
+              toggleSetupWizardScheduledUpdate(current, activePresetId),
+            )
+          }
+          return
+        }
+
+        if (key.escape) {
+          setStep('assistant')
+          return
+        }
+
+        if (key.return) {
           setStep('channels')
           return
         }
@@ -466,7 +576,7 @@ export async function runSetupWizard(
         }
 
         if (key.escape) {
-          setStep('assistant')
+          setStep('scheduled-updates')
           return
         }
 
@@ -564,6 +674,9 @@ export async function runSetupWizard(
           completion.submit({
             assistantPreset: latestAssistantRef.current,
             channels: sortSetupWizardChannels(latestChannelsRef.current),
+            scheduledUpdates: sortSetupWizardScheduledUpdates(
+              latestScheduledUpdatesRef.current,
+            ),
             wearables: sortSetupWizardWearables(latestWearablesRef.current),
           })
           exit()
@@ -574,6 +687,11 @@ export async function runSetupWizard(
       const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
       const selectedChannelSummary = formatSelectionSummary(
         selectedChannels.map((channel) => formatSetupChannel(channel)),
+      )
+      const selectedScheduledUpdateSummary = formatSelectionSummary(
+        selectedScheduledUpdates.map((presetId) =>
+          formatSetupScheduledUpdate(presetId),
+        ),
       )
       const selectedWearableSummary = formatSelectionSummary(
         selectedWearables.map((wearable) => formatSetupWearable(wearable)),
@@ -626,6 +744,28 @@ export async function runSetupWizard(
           createElement(Text, null, `    ${option.description}`),
         )
       })
+
+      const scheduledUpdateLines = setupWizardScheduledUpdateOptions.map(
+        (option, index) => {
+          const active = index === scheduledUpdateIndex
+          const selected = selectedScheduledUpdates.includes(option.id)
+
+          return createElement(
+            Box,
+            {
+              flexDirection: 'column',
+              key: option.id,
+              marginBottom: 1,
+            },
+            createElement(
+              Text,
+              null,
+              `${active ? '>' : ' '} ${selected ? '[x]' : '[ ]'} ${option.title} · ${option.scheduleLabel}`,
+            ),
+            createElement(Text, null, `    ${option.description}`),
+          )
+        },
+      )
 
       const channelLines = setupWizardChannelOptions.map((option, index) => {
         const active = index === channelIndex
@@ -706,6 +846,7 @@ export async function runSetupWizard(
         createElement(Text, null, ''),
         createElement(Text, null, `Vault: ${input.vault}`),
         createElement(Text, null, `Assistant: ${assistantSummary}`),
+        createElement(Text, null, `Schedules: ${selectedScheduledUpdateSummary}`),
         createElement(Text, null, `Channels: ${selectedChannelSummary}`),
         createElement(Text, null, `Wearables: ${selectedWearableSummary}`),
         publicUrlStrategySummary
@@ -723,13 +864,13 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'Set your default assistant, choose message channels, and optionally connect wearables in the same onboarding flow.',
+                'Set your default assistant, pick a small starter bundle of scheduled updates, choose message channels, and optionally connect wearables in the same onboarding flow.',
               ),
               createElement(Text, null, ''),
               createElement(
                 Text,
                 null,
-                'After setup, you can browse built-in cron templates for environment checks, condition research, ingestible watchlists, longevity roundups, and weekly health snapshots with `assistant cron preset list`.',
+                'The next screens can install preset-backed scheduled updates like weekly health snapshots, environment checks, ingestible watchlists, and research roundups. You can change or remove them later.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),
@@ -762,6 +903,30 @@ export async function runSetupWizard(
                 Text,
                 null,
                 'Use ↑/↓ to move, Space to select, Enter to continue, or Esc to go back.',
+              ),
+            )
+          : null,
+        step === 'scheduled-updates'
+          ? createElement(
+              Box,
+              { flexDirection: 'column' },
+              createElement(
+                Text,
+                null,
+                formatSetupWizardStepTitle('scheduled-updates', includePublicUrlStep),
+              ),
+              createElement(Text, null, ''),
+              createElement(
+                Text,
+                null,
+                'Healthy Bob will install these as assistant cron jobs. Two broad starter updates are selected by default, and they run while `assistant run` is active for this vault.',
+              ),
+              createElement(Text, null, ''),
+              ...scheduledUpdateLines,
+              createElement(
+                Text,
+                null,
+                'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
               ),
             )
           : null,
@@ -841,6 +1006,11 @@ export async function runSetupWizard(
                 null,
                 `Still needs env: ${formatSelectionSummary(selectedNeedsEnv)}`,
               ),
+              createElement(
+                Text,
+                null,
+                `Scheduled updates: ${selectedScheduledUpdateSummary}`,
+              ),
               publicUrlStrategySummary
                 ? createElement(Text, null, `Public URL strategy: ${publicUrlStrategySummary}`)
                 : null,
@@ -849,8 +1019,12 @@ export async function runSetupWizard(
                 Text,
                 null,
                 selectedNeedsEnv.length > 0
-                  ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
-                  : 'Healthy Bob will finish setup, then open any selected wearable connect flows that are ready.',
+                  ? selectedScheduledUpdates.length > 0
+                    ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup, install the selected scheduled updates, and open any ready wearable connect flows.'
+                    : 'Healthy Bob will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
+                  : selectedScheduledUpdates.length > 0
+                    ? 'Healthy Bob will finish setup, install the selected scheduled updates, and open any selected wearable connect flows that are ready.'
+                    : 'Healthy Bob will finish setup and open any selected wearable connect flows that are ready.',
               ),
               createElement(Text, null, ''),
               createElement(
@@ -937,6 +1111,21 @@ function sortSetupWizardWearables(
   )
 }
 
+function sortSetupWizardScheduledUpdates(
+  presetIds: readonly string[],
+): string[] {
+  const order = new Map<string, number>(
+    setupWizardScheduledUpdateOptions.map((option, index) => [option.id, index] as const),
+  )
+  const unique = [...new Set(presetIds)]
+
+  return unique.sort(
+    (left, right) =>
+      (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right) ?? Number.MAX_SAFE_INTEGER),
+  )
+}
+
 function findSetupWizardAssistantOptionIndex(
   preset: SetupAssistantPreset,
 ): number {
@@ -976,6 +1165,13 @@ function formatSetupWearable(wearable: SetupWearable): string {
   return wearable === 'oura' ? 'Oura' : 'WHOOP'
 }
 
+function formatSetupScheduledUpdate(presetId: string): string {
+  return (
+    setupWizardScheduledUpdateOptions.find((option) => option.id === presetId)?.title ??
+    presetId
+  )
+}
+
 function formatSelectionSummary(values: readonly string[]): string {
   return values.length > 0 ? values.join(', ') : 'none'
 }
@@ -1011,6 +1207,8 @@ function formatSetupWizardStepLabel(step: SetupWizardStep): string {
       return 'Intro'
     case 'assistant':
       return 'Assistant'
+    case 'scheduled-updates':
+      return 'Schedules'
     case 'channels':
       return 'Channels'
     case 'wearables':
@@ -1024,16 +1222,24 @@ function formatSetupWizardStepLabel(step: SetupWizardStep): string {
 
 function listSetupWizardSteps(includePublicUrlStep: boolean): SetupWizardStep[] {
   return includePublicUrlStep
-    ? ['intro', 'assistant', 'channels', 'wearables', 'public-url', 'confirm']
-    : ['intro', 'assistant', 'channels', 'wearables', 'confirm']
+    ? [
+        'intro',
+        'assistant',
+        'scheduled-updates',
+        'channels',
+        'wearables',
+        'public-url',
+        'confirm',
+      ]
+    : ['intro', 'assistant', 'scheduled-updates', 'channels', 'wearables', 'confirm']
 }
 
 function listSetupWizardFlowSteps(
   includePublicUrlStep: boolean,
 ): Array<Exclude<SetupWizardStep, 'intro'>> {
   return includePublicUrlStep
-    ? ['assistant', 'channels', 'wearables', 'public-url', 'confirm']
-    : ['assistant', 'channels', 'wearables', 'confirm']
+    ? ['assistant', 'scheduled-updates', 'channels', 'wearables', 'public-url', 'confirm']
+    : ['assistant', 'scheduled-updates', 'channels', 'wearables', 'confirm']
 }
 
 function formatSetupWizardStepTitle(

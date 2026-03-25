@@ -37,6 +37,7 @@ import {
 } from './setup-services.js'
 import {
   getDefaultSetupWizardChannels,
+  getDefaultSetupWizardScheduledUpdates,
   getDefaultSetupWizardWearables,
   runSetupWizard,
   type SetupWizardResult,
@@ -56,6 +57,7 @@ export interface SetupWizardRunner {
     deviceSyncLocalBaseUrl?: string | null
     initialAssistantPreset?: SetupAssistantPreset
     initialChannels: readonly SetupChannel[]
+    initialScheduledUpdates: readonly string[]
     initialWearables: readonly SetupWearable[]
     linqLocalWebhookUrl?: string | null
     platform?: NodeJS.Platform
@@ -112,6 +114,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     )
 
     let selectedChannels: SetupChannel[] | null = null
+    let selectedScheduledUpdates: string[] | null = null
     let selectedWearables: SetupWearable[] | null = null
     let selectedAssistantPreset: SetupAssistantPreset | null = null
     let envOverrides: NodeJS.ProcessEnv | undefined
@@ -129,6 +132,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
           context.options.vault,
           getPlatform(),
         ),
+        initialScheduledUpdates: getDefaultSetupWizardScheduledUpdates(),
         initialWearables: getDefaultSetupWizardWearables(),
         linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
         platform: getPlatform(),
@@ -138,6 +142,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       })
 
       selectedChannels = wizardResult.channels
+      selectedScheduledUpdates = wizardResult.scheduledUpdates
       selectedWearables = wizardResult.wearables
       selectedAssistantPreset =
         wizardResult.assistantPreset ??
@@ -179,6 +184,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       requestId: context.options.requestId ?? null,
       skipOcr: context.options.skipOcr,
       strict: context.options.strict,
+      scheduledUpdatePresetIds: selectedScheduledUpdates,
       toolchainRoot: context.options.toolchainRoot,
       vault: context.options.vault,
       wearables: selectedWearables,
@@ -332,6 +338,14 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       command: 'assistant run',
       description:
         'Start the assistant automation loop so configured channels like iMessage, Telegram, Linq, or email can receive automatic replies.',
+    })
+  }
+
+  if (result.scheduledUpdates.length > 0) {
+    commands.push({
+      command: 'assistant cron list',
+      description:
+        'Inspect the scheduled assistant jobs installed during onboarding and confirm their next run times.',
     })
   }
 
