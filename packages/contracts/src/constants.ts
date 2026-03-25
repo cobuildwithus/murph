@@ -60,6 +60,7 @@ export const EVENT_KINDS = Object.freeze([
   "test",
   "activity_session",
   "sleep_session",
+  "intervention_session",
 ] as const);
 
 export const EVENT_SOURCES = Object.freeze(["manual", "import", "device", "derived"] as const);

@@ -330,6 +330,21 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     endAt: "2026-03-12T05:55:00Z",
     durationMinutes: 435,
   },
+  {
+    schemaVersion: "hb.event.v1",
+    id: "evt_01JNV45XJ4M22V2PE9Q4KQ7H1X",
+    kind: "intervention_session",
+    occurredAt: "2026-03-12T19:30:00Z",
+    recordedAt: "2026-03-12T19:30:15Z",
+    dayKey: "2026-03-12",
+    source: "manual",
+    title: "20-minute sauna",
+    note: "20 min sauna after lifting.",
+    relatedIds: ["reg_01JNV422Y2M5ZBV64ZP4N1DRB1"],
+    interventionType: "sauna",
+    durationMinutes: 20,
+    regimenId: "reg_01JNV422Y2M5ZBV64ZP4N1DRB1",
+  },
 ]);
 
 export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.freeze([

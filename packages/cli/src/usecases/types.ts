@@ -136,6 +136,7 @@ export interface EventScaffoldResult {
     | "supplement_intake"
     | "activity_session"
     | "sleep_session"
+    | "intervention_session"
   payload: JsonObject
 }
 
@@ -683,6 +684,29 @@ export interface VaultCliServices {
 
 export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   REQUIRED_DIRECTORIES: readonly string[]
+  applyCanonicalWriteBatch(input: {
+    vaultRoot: string
+    operationType: string
+    summary: string
+    occurredAt?: string
+    textWrites?: Array<{
+      relativePath: string
+      content: string
+      overwrite?: boolean
+      allowExistingMatch?: boolean
+    }>
+    jsonlAppends?: Array<{
+      relativePath: string
+      record: Record<string, unknown>
+    }>
+    deletes?: Array<{
+      relativePath: string
+    }>
+  }): Promise<{
+    textWrites: string[]
+    jsonlAppends: string[]
+    deletes: string[]
+  }>
   initializeVault(input: {
     vaultRoot: string
   }): Promise<unknown>

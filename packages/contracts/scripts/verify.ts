@@ -133,7 +133,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "sample-record",
   "vault-metadata",
 ]);
-assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 15);
+assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 16);
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 7);
 assert.equal(
   (schemaCatalog["frontmatter-core"] as { additionalProperties?: unknown }).additionalProperties,

@@ -119,6 +119,7 @@ const EVENT_WRITE_KINDS = [
   'supplement_intake',
   'activity_session',
   'sleep_session',
+  'intervention_session',
 ] as const
 
 export const eventScaffoldKindSchema = z.enum(EVENT_WRITE_KINDS)
@@ -242,6 +243,16 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     startAt: '2026-03-11T22:45:00.000Z',
     endAt: '2026-03-12T06:45:00.000Z',
     durationMinutes: 480,
+  },
+  intervention_session: {
+    kind: 'intervention_session',
+    occurredAt: '2026-03-12T19:30:00.000Z',
+    title: '20-minute sauna',
+    interventionType: 'sauna',
+    durationMinutes: 20,
+    regimenId: 'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    relatedIds: ['reg_01JNV422Y2M5ZBV64ZP4N1DRB1'],
+    note: '20 min sauna after lifting.',
   },
 }
 

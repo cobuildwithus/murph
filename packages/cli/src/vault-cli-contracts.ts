@@ -102,6 +102,21 @@ export const workoutAddResultSchema = z.object({
   note: z.string().min(1),
 })
 
+export const interventionAddResultSchema = z.object({
+  vault: pathSchema,
+  eventId: z.string().min(1),
+  lookupId: z.string().min(1),
+  ledgerFile: pathSchema,
+  created: z.boolean(),
+  occurredAt: isoTimestampSchema,
+  kind: z.literal('intervention_session'),
+  title: z.string().min(1),
+  interventionType: z.string().min(1),
+  durationMinutes: z.number().int().positive().nullable(),
+  regimenId: z.string().min(1).nullable(),
+  note: z.string().min(1),
+})
+
 export const samplesImportCsvResultSchema = z.object({
   vault: pathSchema,
   sourceFile: pathSchema,
@@ -190,6 +205,7 @@ export type VaultValidateResult = z.infer<typeof vaultValidateResultSchema>
 export type DocumentImportResult = z.infer<typeof documentImportResultSchema>
 export type MealAddResult = z.infer<typeof mealAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
+export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
 export type SamplesImportCsvResult = z.infer<
   typeof samplesImportCsvResultSchema
 >

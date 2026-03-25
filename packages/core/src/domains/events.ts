@@ -25,7 +25,8 @@ type EventWriteKind =
   | "medication_intake"
   | "supplement_intake"
   | "activity_session"
-  | "sleep_session";
+  | "sleep_session"
+  | "intervention_session";
 
 export interface UpsertEventInput {
   vaultRoot: string;
@@ -46,6 +47,7 @@ const EVENT_WRITE_KIND_SET = new Set<EventWriteKind>([
   "supplement_intake",
   "activity_session",
   "sleep_session",
+  "intervention_session",
 ]);
 const RESERVED_EVENT_KEYS = new Set([
   "schemaVersion",

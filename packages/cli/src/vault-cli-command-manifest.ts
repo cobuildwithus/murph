@@ -15,6 +15,7 @@ import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import { registerEventCommands } from './commands/event.js'
 import { registerExperimentCommands } from './commands/experiment.js'
+import { registerInterventionCommands } from './commands/intervention.js'
 import { registerExportCommands } from './commands/export.js'
 import {
   createHealthUpsertResultSchema,
@@ -27,6 +28,8 @@ import { registerMealCommands } from './commands/meal.js'
 import { registerProfileCommands } from './commands/profile.js'
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
+import { registerResearchCommands } from './commands/research.js'
+import { researchRunResultSchema } from './research-cli-contracts.js'
 import { registerReadCommands } from './commands/read.js'
 import { registerRegimenCommands } from './commands/regimen.js'
 import { registerSamplesCommands } from './commands/samples.js'
@@ -305,6 +308,14 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'intervention',
+    bindingMode: 'none',
+    rootCommandNames: ['intervention'],
+    register({ cli, services }) {
+      registerInterventionCommands(cli, services)
+    },
+  },
+  {
     id: 'provider',
     bindingMode: 'direct',
     rootCommandNames: ['provider'],
@@ -404,6 +415,28 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['search', 'timeline'],
     register({ cli, services }) {
       registerSearchCommands(cli, services)
+    },
+  },
+  {
+    id: 'research',
+    bindingMode: 'none',
+    rootCommandNames: ['research', 'deepthink'],
+    leafCommands: [
+      {
+        path: ['research'],
+        description:
+          'Run ChatGPT Deep Research through review:gpt, wait for the response, and save the markdown note into research/ inside the vault.',
+        output: researchRunResultSchema,
+      },
+      {
+        path: ['deepthink'],
+        description:
+          'Run GPT Pro through review:gpt, wait for the response, and save the markdown note into research/ inside the vault.',
+        output: researchRunResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerResearchCommands(cli)
     },
   },
   {

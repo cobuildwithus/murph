@@ -1,12 +1,15 @@
 import { type ActivityStrengthExercise } from '@healthybob/contracts'
 import { VaultCliError } from '../vault-cli-errors.js'
+import {
+  inferDurationMinutes,
+  validateDurationMinutes,
+} from './text-duration.js'
 import { upsertEventRecord } from './provider-event.js'
 import {
   compactObject,
   normalizeOptionalText,
 } from './vault-usecase-helpers.js'
 
-const MAX_DURATION_MINUTES = 24 * 60
 const MILES_TO_KM = 1.609344
 
 const knownWorkoutTypes = [
@@ -78,18 +81,6 @@ const knownWorkoutTypes = [
   },
 ] as const
 
-const ambiguousDurationPattern =
-  /\b\d+(?:\.\d+)?\s*(?:or|to|\/|-)\s*\d+(?:\.\d+)?\s*(?:minutes?|mins?|min|hours?|hrs?|hr|h)\b/iu
-const combinedDurationPatterns = [
-  /\b(\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h)\s*(?:and\s+)?(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min|m)\b/iu,
-  /\b(\d+(?:\.\d+)?)h\s*(\d+(?:\.\d+)?)m\b/iu,
-] as const
-const hourOnlyPattern =
-  /\b(\d+(?:\.\d+)?)\s*-?\s*(?:hours?|hrs?|hr|h)\b/iu
-const minuteOnlyPatterns = [
-  /\b(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min)\b/iu,
-  /\b(\d+(?:\.\d+)?)m\b/iu,
-] as const
 const ambiguousDistancePattern =
   /\b\d+(?:\.\d+)?\s*(?:or|to|\/|-)\s*\d+(?:\.\d+)?\s*(?:km|kilometers?|kilometres?|mi|miles?|k)\b/iu
 const kilometerDistancePattern =
@@ -216,7 +207,7 @@ function resolveDurationMinutes(
   requestedDurationMinutes: number | undefined,
 ) {
   if (typeof requestedDurationMinutes === 'number') {
-    return validateDurationMinutes(requestedDurationMinutes)
+    return validateDurationMinutes(requestedDurationMinutes, 'Workout duration')
   }
 
   const inferred = inferDurationMinutes(text)
@@ -235,57 +226,6 @@ function resolveDurationMinutes(
     'invalid_option',
     'Could not infer a workout duration from the note. Pass --duration <minutes> to record it explicitly.',
   )
-}
-
-function inferDurationMinutes(text: string): number | 'ambiguous' | null {
-  if (ambiguousDurationPattern.test(text)) {
-    return 'ambiguous'
-  }
-
-  if (/\bhalf(?: an)? hour\b/iu.test(text) || /\bhalf-hour\b/iu.test(text)) {
-    return 30
-  }
-
-  for (const pattern of combinedDurationPatterns) {
-    const match = text.match(pattern)
-    if (!match) {
-      continue
-    }
-
-    const hours = Number.parseFloat(match[1] ?? '')
-    const minutes = Number.parseFloat(match[2] ?? '')
-    if (Number.isFinite(hours) && Number.isFinite(minutes)) {
-      return validateDurationMinutes((hours * 60) + minutes)
-    }
-  }
-
-  const hourMatch = text.match(hourOnlyPattern)
-  const minuteMatch = findMinuteDurationMatch(text)
-
-  if (hourMatch && minuteMatch) {
-    return 'ambiguous'
-  }
-
-  if (hourMatch) {
-    return validateDurationMinutes(Number.parseFloat(hourMatch[1] ?? '') * 60)
-  }
-
-  if (minuteMatch) {
-    return validateDurationMinutes(Number.parseFloat(minuteMatch[1] ?? ''))
-  }
-
-  return null
-}
-
-function findMinuteDurationMatch(text: string) {
-  for (const pattern of minuteOnlyPatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      return match
-    }
-  }
-
-  return null
 }
 
 function resolveDistanceKm(
@@ -545,25 +485,6 @@ function normalizeStrengthLoadUnit(value: string) {
 
 function normalizeStrengthLoadValue(value: number) {
   return Number(value.toFixed(3))
-}
-
-function validateDurationMinutes(value: number) {
-  if (!Number.isFinite(value)) {
-    throw new VaultCliError(
-      'invalid_option',
-      'Workout duration must be a positive number of minutes.',
-    )
-  }
-
-  const rounded = Math.round(value)
-  if (rounded < 1 || rounded > MAX_DURATION_MINUTES) {
-    throw new VaultCliError(
-      'invalid_option',
-      `Workout duration must be between 1 and ${MAX_DURATION_MINUTES} minutes.`,
-    )
-  }
-
-  return rounded
 }
 
 function validateDistanceKm(value: number) {

@@ -516,6 +516,11 @@ export const eventRecordSchema = withContractMetadata(
       endAt: isoDateTimeString(),
       durationMinutes: integerSchema(1),
     }),
+    eventSchema("intervention_session", {
+      interventionType: patternedString(SLUG_PATTERN),
+      durationMinutes: integerSchema(1).optional(),
+      regimenId: idSchema(ID_PREFIXES.regimen).optional(),
+    }),
     eventSchema("adverse_effect", {
       substance: boundedString(1, 160),
       effect: boundedString(1, 160),
@@ -936,6 +941,7 @@ export type MedicationIntakeEventRecord = Extract<z.infer<typeof eventRecordSche
 export type SupplementIntakeEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "supplement_intake" }>;
 export type ActivitySessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "activity_session" }>;
 export type SleepSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "sleep_session" }>;
+export type InterventionSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "intervention_session" }>;
 export type EncounterEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "encounter" }>;
 export type ProcedureEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "procedure" }>;
 export type TestEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "test" }>;

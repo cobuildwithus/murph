@@ -92,6 +92,7 @@ repo/
 - `vault-cli document import`
 - `vault-cli meal add`
 - `vault-cli workout add`
+- `vault-cli intervention add`
 - `vault-cli samples import-csv`
 - `vault-cli experiment create`
 - `vault-cli journal ensure`

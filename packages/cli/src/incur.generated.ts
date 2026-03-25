@@ -7,7 +7,6 @@ declare module 'incur' {
       'allergy upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'assistant ask': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli" | "openai-compatible"; codexCommand: string; model: string; baseUrl: string; apiKeyEnv: string; providerName: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean; deliverResponse: boolean; deliveryTarget: string } }
       'assistant chat': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli" | "openai-compatible"; codexCommand: string; model: string; baseUrl: string; apiKeyEnv: string; providerName: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean } }
-      'assistant deliver': { args: { message: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; deliveryTarget: string } }
       'assistant cron add': { args: { prompt: string }; options: { vault: string; requestId: string; name: string; at: string; every: string; cron: string; keepAfterRun: boolean; disabled: boolean; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; deliverResponse: boolean; deliveryTarget: string } }
       'assistant cron disable': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron enable': { args: { job: string }; options: { vault: string; requestId: string } }
@@ -20,6 +19,7 @@ declare module 'incur' {
       'assistant cron runs': { args: { job: string }; options: { vault: string; requestId: string; limit: number } }
       'assistant cron show': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron status': { args: {}; options: { vault: string; requestId: string } }
+      'assistant deliver': { args: { message: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; deliveryTarget: string } }
       'assistant memory forget': { args: { memoryId: string }; options: { vault: string; requestId: string } }
       'assistant memory get': { args: { memoryId: string }; options: { vault: string; requestId: string } }
       'assistant memory search': { args: {}; options: { vault: string; requestId: string; text: string; scope: "long-term" | "daily" | "all"; section: "Identity" | "Preferences" | "Standing instructions" | "Health context" | "Notes"; limit: number } }
@@ -30,11 +30,16 @@ declare module 'incur' {
       'audit list': { args: {}; options: { vault: string; requestId: string; action: string; actor: string; status: string; from: string; to: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { vault: string; requestId: string } }
       'audit tail': { args: {}; options: { vault: string; requestId: string; limit: number } }
+      'blood-test list': { args: {}; options: { vault: string; requestId: string; status: string; from: string; to: string; limit: number } }
+      'blood-test scaffold': { args: {}; options: { vault: string; requestId: string } }
+      'blood-test show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'blood-test upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'chat': { args: { prompt: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; provider: "codex-cli" | "openai-compatible"; codexCommand: string; model: string; baseUrl: string; apiKeyEnv: string; providerName: string; sandbox: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy: "untrusted" | "on-request" | "never"; profile: string; oss: boolean } }
       'condition list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'condition scaffold': { args: {}; options: { vault: string; requestId: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId: string } }
       'condition upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'deepthink': { args: { prompt: string }; options: { vault: string; requestId: string; title: string; chat: string; browserPath: string; timeout: string; waitTimeout: string } }
       'device account disconnect': { args: { accountId: string }; options: { vault: string; requestId: string; baseUrl: string } }
       'device account list': { args: {}; options: { vault: string; requestId: string; baseUrl: string; provider: string } }
       'device account reconcile': { args: { accountId: string }; options: { vault: string; requestId: string; baseUrl: string } }
@@ -49,7 +54,7 @@ declare module 'incur' {
       'document manifest': { args: { id: string }; options: { vault: string; requestId: string } }
       'document show': { args: { id: string }; options: { vault: string; requestId: string } }
       'event list': { args: {}; options: { vault: string; requestId: string; kind: string; from: string; to: string; tag: string[]; experiment: string; limit: number } }
-      'event scaffold': { args: {}; options: { vault: string; requestId: string; kind: "symptom" | "note" | "observation" | "medication_intake" | "supplement_intake" | "activity_session" | "sleep_session" } }
+      'event scaffold': { args: {}; options: { vault: string; requestId: string; kind: "symptom" | "note" | "observation" | "medication_intake" | "supplement_intake" | "activity_session" | "sleep_session" | "intervention_session" } }
       'event show': { args: { id: string }; options: { vault: string; requestId: string } }
       'event upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'experiment checkpoint': { args: {}; options: { vault: string; requestId: string; input: string } }
@@ -79,10 +84,6 @@ declare module 'incur' {
       'history scaffold': { args: {}; options: { vault: string; requestId: string } }
       'history show': { args: { id: string }; options: { vault: string; requestId: string } }
       'history upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'blood-test list': { args: {}; options: { vault: string; requestId: string; status: string; from: string; to: string; limit: number } }
-      'blood-test scaffold': { args: {}; options: { vault: string; requestId: string } }
-      'blood-test show': { args: { id: string }; options: { vault: string; requestId: string } }
-      'blood-test upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'inbox attachment list': { args: { captureId: string }; options: { vault: string; requestId: string } }
       'inbox attachment parse': { args: { attachmentId: string }; options: { vault: string; requestId: string } }
       'inbox attachment reparse': { args: { attachmentId: string }; options: { vault: string; requestId: string } }
@@ -117,6 +118,7 @@ declare module 'incur' {
       'intake project': { args: { id: string }; options: { vault: string; requestId: string } }
       'intake raw': { args: { id: string }; options: { vault: string; requestId: string } }
       'intake show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'intervention add': { args: { text: string }; options: { vault: string; requestId: string; duration: number; type: string; regimenId: string; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
       'journal append': { args: { date: string }; options: { vault: string; requestId: string; text: string } }
       'journal ensure': { args: { date: string }; options: { vault: string; requestId: string } }
       'journal link': { args: { date: string }; options: { vault: string; requestId: string; eventId: string[]; stream: string[] } }
@@ -124,7 +126,7 @@ declare module 'incur' {
       'journal show': { args: { date: string }; options: { vault: string; requestId: string } }
       'journal unlink': { args: { date: string }; options: { vault: string; requestId: string; eventId: string[]; stream: string[] } }
       'list': { args: {}; options: { vault: string; requestId: string; recordType: string[]; kind: string; status: string; stream: string[]; experiment: string; from: string; to: string; tag: string[]; limit: number } }
-      'meal add': { args: {}; options: { vault: string; requestId: string; photo: string | undefined; audio: string; note: string; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'meal add': { args: {}; options: { vault: string; requestId: string; photo: string; audio: string; note: string; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
       'meal list': { args: {}; options: { vault: string; requestId: string; from: string; to: string } }
       'meal manifest': { args: { id: string }; options: { vault: string; requestId: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId: string } }
@@ -137,11 +139,16 @@ declare module 'incur' {
       'provider scaffold': { args: {}; options: { vault: string; requestId: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId: string } }
       'provider upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'recipe list': { args: {}; options: { vault: string; requestId: string; status: "draft" | "saved" | "archived"; limit: number } }
+      'recipe scaffold': { args: {}; options: { vault: string; requestId: string } }
+      'recipe show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'recipe upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'regimen list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'regimen scaffold': { args: {}; options: { vault: string; requestId: string } }
       'regimen show': { args: { id: string }; options: { vault: string; requestId: string } }
       'regimen stop': { args: { regimenId: string }; options: { vault: string; requestId: string; stoppedOn: string } }
       'regimen upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'research': { args: { prompt: string }; options: { vault: string; requestId: string; title: string; chat: string; browserPath: string; timeout: string; waitTimeout: string } }
       'run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; allowSelfAuthored: boolean; sessionRolloverHours: number; once: boolean; skipDaemon: boolean } }
       'samples add': { args: {}; options: { vault: string; requestId: string; input: string } }
       'samples batch list': { args: {}; options: { vault: string; requestId: string; stream: string; from: string; to: string; limit: number } }
@@ -163,6 +170,7 @@ declare module 'incur' {
       'timeline': { args: {}; options: { vault: string; requestId: string; from: string; to: string; experiment: string; kind: string[]; stream: string[]; entryType: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId: string } }
       'vault paths': { args: {}; options: { vault: string; requestId: string } }
+      'vault repair': { args: {}; options: { vault: string; requestId: string } }
       'vault show': { args: {}; options: { vault: string; requestId: string } }
       'vault stats': { args: {}; options: { vault: string; requestId: string } }
       'vault update': { args: {}; options: { vault: string; requestId: string; title: string; timezone: string } }

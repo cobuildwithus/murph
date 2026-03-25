@@ -1,0 +1,8 @@
+{
+  "id": "intervention-add",
+  "command": "vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--regimen-id <regimenId>] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/intervention-add",
+  "purpose": "Covers freeform intervention capture where the CLI infers or accepts the minimum canonical intervention_session fields and follow-on reads use the returned evt_* lookup id."
+}

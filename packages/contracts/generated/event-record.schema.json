@@ -1949,6 +1949,135 @@
         },
         "kind": {
           "type": "string",
+          "const": "intervention_session"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "uniqueItems": true
+        },
+        "relatedIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "uniqueItems": true
+        },
+        "rawRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "interventionType": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "durationMinutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "regimenId": {
+          "type": "string",
+          "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "id",
+        "occurredAt",
+        "recordedAt",
+        "dayKey",
+        "source",
+        "title",
+        "kind",
+        "interventionType"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "hb.event.v1"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "dayKey": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "import",
+            "device",
+            "derived"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "kind": {
+          "type": "string",
           "const": "adverse_effect"
         },
         "note": {
