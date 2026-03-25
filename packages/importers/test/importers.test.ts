@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
-import * as coreRuntime from "../../core/src/index.js";
+import * as coreRuntime from "@healthybob/core";
 import type {
   DocumentImportPayload,
   MealImportPayload,

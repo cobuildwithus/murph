@@ -1,27 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "disableSourceOfProjectReferenceRedirect": true,
-    "paths": {
-      "@healthybob/contracts": [
-        "packages/contracts/dist/index.d.ts"
-      ],
-      "@healthybob/contracts/*": [
-        "packages/contracts/dist/*"
-      ],
-      "@healthybob/runtime-state": [
-        "packages/runtime-state/dist/index.d.ts"
-      ],
-      "@healthybob/runtime-state/*": [
-        "packages/runtime-state/dist/*"
-      ],
-      "@healthybob/query": [
-        "packages/query/dist/index.d.ts"
-      ],
-      "@healthybob/query/*": [
-        "packages/query/dist/*"
-      ]
-    },
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
@@ -46,6 +25,10 @@
       "path": "../query"
     }
   ],
-  "include": ["src/**/*.ts"],
-  "exclude": ["dist"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
 }

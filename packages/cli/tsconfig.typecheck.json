@@ -1,52 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "disableSourceOfProjectReferenceRedirect": true,
     "noEmit": true,
-    "paths": {
-      "@healthybob/contracts": [
-        "packages/contracts/dist/index.d.ts"
-      ],
-      "@healthybob/contracts/*": [
-        "packages/contracts/dist/*"
-      ],
-      "@healthybob/core": [
-        "packages/core/dist/index.d.ts"
-      ],
-      "@healthybob/core/*": [
-        "packages/core/dist/*"
-      ],
-      "@healthybob/importers": [
-        "packages/importers/dist/index.d.ts"
-      ],
-      "@healthybob/importers/*": [
-        "packages/importers/dist/*"
-      ],
-      "@healthybob/inboxd": [
-        "packages/inboxd/dist/index.d.ts"
-      ],
-      "@healthybob/inboxd/*": [
-        "packages/inboxd/dist/*"
-      ],
-      "@healthybob/parsers": [
-        "packages/parsers/dist/index.d.ts"
-      ],
-      "@healthybob/parsers/*": [
-        "packages/parsers/dist/*"
-      ],
-      "@healthybob/query": [
-        "packages/query/dist/index.d.ts"
-      ],
-      "@healthybob/query/*": [
-        "packages/query/dist/*"
-      ],
-      "@healthybob/runtime-state": [
-        "packages/runtime-state/dist/index.d.ts"
-      ],
-      "@healthybob/runtime-state/*": [
-        "packages/runtime-state/dist/*"
-      ]
-    },
     "rootDir": ".",
     "composite": false,
     "incremental": false
@@ -71,6 +26,12 @@
       "path": "../query"
     }
   ],
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
-  "exclude": ["dist"]
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
 }

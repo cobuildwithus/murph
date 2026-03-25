@@ -1,22 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "disableSourceOfProjectReferenceRedirect": true,
     "noEmit": true,
-    "paths": {
-      "@healthybob/importers": [
-        "packages/importers/dist/index.d.ts"
-      ],
-      "@healthybob/importers/*": [
-        "packages/importers/dist/*"
-      ],
-      "@healthybob/runtime-state": [
-        "packages/runtime-state/dist/index.d.ts"
-      ],
-      "@healthybob/runtime-state/*": [
-        "packages/runtime-state/dist/*"
-      ]
-    },
     "rootDir": ".",
     "composite": false,
     "incremental": false
