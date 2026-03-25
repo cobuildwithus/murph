@@ -3,12 +3,12 @@ import {
   asArray,
   asPlainObject,
   createRawArtifact,
+  emitObservationMetrics,
+  emitSampleMetrics,
   finiteNumber,
   minutesBetween,
   pushDeletionObservation as pushSharedDeletionObservation,
-  pushObservationEvent,
   pushRawArtifact,
-  pushSample,
   slugify,
   stringId,
   toIso,
@@ -21,7 +21,11 @@ import type {
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
 } from "../core-port.js";
-import type { PlainObject } from "./shared-normalization.js";
+import type {
+  ObservationMetricDescriptor,
+  PlainObject,
+  SampleMetricDescriptor,
+} from "./shared-normalization.js";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.js";
 
 export interface WhoopSnapshotInput {
@@ -55,6 +59,212 @@ function makeExternalRef(
 function cycleOrFallbackTimestamp(...candidates: Array<string | undefined>): string | undefined {
   return candidates.find((candidate) => typeof candidate === "string" && candidate.length > 0);
 }
+
+function millisecondsToMinutes(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined) {
+    return undefined;
+  }
+
+  return numeric / 60000;
+}
+
+interface WhoopWorkoutMetricSource {
+  workout: PlainObject;
+  score?: PlainObject;
+  sportName: string;
+}
+
+const WHOOP_SLEEP_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject | undefined>[] = [
+  {
+    stream: "respiratory_rate",
+    value: (score) => score?.respiratory_rate,
+    unit: "breaths_per_minute",
+    facet: "respiratory-rate",
+  },
+];
+
+const WHOOP_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject | undefined>[] = [
+  {
+    metric: "sleep-performance",
+    value: (score) => score?.sleep_performance_percentage,
+    unit: "%",
+    title: "WHOOP sleep performance",
+    facet: "sleep-performance",
+  },
+  {
+    metric: "sleep-consistency",
+    value: (score) => score?.sleep_consistency_percentage,
+    unit: "%",
+    title: "WHOOP sleep consistency",
+    facet: "sleep-consistency",
+  },
+  {
+    metric: "sleep-efficiency",
+    value: (score) => score?.sleep_efficiency_percentage,
+    unit: "%",
+    title: "WHOOP sleep efficiency",
+    facet: "sleep-efficiency",
+  },
+];
+
+const WHOOP_SLEEP_STAGE_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
+  {
+    metric: "sleep-awake-minutes",
+    value: (stageSummary) => stageSummary.total_awake_time_milli,
+    transform: millisecondsToMinutes,
+    unit: "minutes",
+    title: "WHOOP awake time",
+    facet: "sleep-awake-minutes",
+  },
+  {
+    metric: "sleep-light-minutes",
+    value: (stageSummary) => stageSummary.total_light_sleep_time_milli,
+    transform: millisecondsToMinutes,
+    unit: "minutes",
+    title: "WHOOP light sleep",
+    facet: "sleep-light-minutes",
+  },
+  {
+    metric: "sleep-deep-minutes",
+    value: (stageSummary) => stageSummary.total_slow_wave_sleep_time_milli,
+    transform: millisecondsToMinutes,
+    unit: "minutes",
+    title: "WHOOP deep sleep",
+    facet: "sleep-deep-minutes",
+  },
+  {
+    metric: "sleep-rem-minutes",
+    value: (stageSummary) => stageSummary.total_rem_sleep_time_milli,
+    transform: millisecondsToMinutes,
+    unit: "minutes",
+    title: "WHOOP REM sleep",
+    facet: "sleep-rem-minutes",
+  },
+];
+
+const WHOOP_RECOVERY_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject | undefined>[] = [
+  {
+    stream: "hrv",
+    value: (score) => score?.hrv_rmssd_milli,
+    unit: "ms",
+    facet: "hrv",
+  },
+  {
+    stream: "temperature",
+    value: (score) => score?.skin_temp_celsius,
+    unit: "celsius",
+    facet: "skin-temperature",
+  },
+];
+
+const WHOOP_RECOVERY_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject | undefined>[] = [
+  {
+    metric: "recovery-score",
+    value: (score) => score?.recovery_score,
+    unit: "%",
+    title: "WHOOP recovery score",
+    facet: "recovery-score",
+  },
+  {
+    metric: "resting-heart-rate",
+    value: (score) => score?.resting_heart_rate,
+    unit: "bpm",
+    title: "WHOOP resting heart rate",
+    facet: "resting-heart-rate",
+  },
+  {
+    metric: "spo2",
+    value: (score) => score?.spo2_percentage,
+    unit: "%",
+    title: "WHOOP SpO2",
+    facet: "spo2",
+  },
+];
+
+const WHOOP_CYCLE_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject | undefined>[] = [
+  {
+    metric: "day-strain",
+    value: (score) => score?.strain,
+    unit: "whoop_strain",
+    title: "WHOOP day strain",
+    facet: "day-strain",
+  },
+  {
+    metric: "energy-burned",
+    value: (score) => score?.kilojoule,
+    unit: "kJ",
+    title: "WHOOP energy burned",
+    facet: "energy-burned",
+  },
+  {
+    metric: "average-heart-rate",
+    value: (score) => score?.average_heart_rate,
+    unit: "bpm",
+    title: "WHOOP average heart rate",
+    facet: "average-heart-rate",
+  },
+  {
+    metric: "max-heart-rate",
+    value: (score) => score?.max_heart_rate,
+    unit: "bpm",
+    title: "WHOOP max heart rate",
+    facet: "max-heart-rate",
+  },
+];
+
+const WHOOP_WORKOUT_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<WhoopWorkoutMetricSource>[] = [
+  {
+    metric: "workout-strain",
+    value: ({ score }) => score?.strain,
+    unit: "whoop_strain",
+    title: ({ sportName }) => `WHOOP ${sportName} strain`,
+    facet: "workout-strain",
+  },
+  {
+    metric: "average-heart-rate",
+    value: ({ score }) => score?.average_heart_rate,
+    unit: "bpm",
+    title: ({ sportName }) => `WHOOP ${sportName} average heart rate`,
+    facet: "average-heart-rate",
+  },
+  {
+    metric: "max-heart-rate",
+    value: ({ score }) => score?.max_heart_rate,
+    unit: "bpm",
+    title: ({ sportName }) => `WHOOP ${sportName} max heart rate`,
+    facet: "max-heart-rate",
+  },
+  {
+    metric: "energy-burned",
+    value: ({ score }) => score?.kilojoule,
+    unit: "kJ",
+    title: ({ sportName }) => `WHOOP ${sportName} energy burned`,
+    facet: "energy-burned",
+  },
+  {
+    metric: "percent-recorded",
+    value: ({ score }) => score?.percent_recorded,
+    unit: "%",
+    title: ({ sportName }) => `WHOOP ${sportName} percent recorded`,
+    facet: "percent-recorded",
+  },
+  {
+    metric: "altitude-gain",
+    value: ({ workout }) => finiteNumber(workout.altitude_gain_meter),
+    unit: "meter",
+    title: ({ sportName }) => `WHOOP ${sportName} altitude gain`,
+    facet: "altitude-gain",
+  },
+  {
+    metric: "altitude-change",
+    value: ({ workout }) => finiteNumber(workout.altitude_change_meter),
+    unit: "meter",
+    title: ({ sportName }) => `WHOOP ${sportName} altitude change`,
+    facet: "altitude-change",
+  },
+];
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
@@ -108,11 +318,12 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const sleepId = stringId(sleep.id) ?? `sleep-${events.length + 1}`;
     const startAt = toIso(sleep.start);
     const endAt = toIso(sleep.end);
+    const version = toIso(sleep.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(sleep.updated_at), endAt, startAt, importedAt);
     const occurredAt = startAt ?? recordedAt;
     const durationMinutes = minutesBetween(startAt, endAt);
     const sleepRole = `sleep:${sleepId}`;
-    const sleepRef = makeExternalRef("sleep", sleepId, toIso(sleep.updated_at));
+    const sleepRef = makeExternalRef("sleep", sleepId, version);
     const score = asPlainObject(sleep.score);
     const stageSummary = asPlainObject(score?.stage_summary);
     const nap = Boolean(sleep.nap);
@@ -141,100 +352,47 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
       );
     }
 
-    pushSample(samples, {
-      stream: "respiratory_rate",
-      value: score?.respiratory_rate,
-      unit: "breaths_per_minute",
-      recordedAt,
-      externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "respiratory-rate"),
-    });
+    emitSampleMetrics(
+      samples,
+      {
+        source: score,
+        recordedAt,
+        externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
+      },
+      WHOOP_SLEEP_SAMPLE_METRICS,
+    );
 
-    pushObservationEvent(events, {
-      metric: "sleep-performance",
-      value: score?.sleep_performance_percentage,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP sleep performance",
-      rawArtifactRoles: [sleepRole],
-      externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "sleep-performance"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-consistency",
-      value: score?.sleep_consistency_percentage,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP sleep consistency",
-      rawArtifactRoles: [sleepRole],
-      externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "sleep-consistency"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-efficiency",
-      value: score?.sleep_efficiency_percentage,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP sleep efficiency",
-      rawArtifactRoles: [sleepRole],
-      externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "sleep-efficiency"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: score,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [sleepRole],
+        externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
+      },
+      WHOOP_SLEEP_OBSERVATION_METRICS,
+    );
 
     if (stageSummary) {
-      pushObservationEvent(events, {
-        metric: "sleep-awake-minutes",
-        value: finiteNumber(stageSummary.total_awake_time_milli) !== undefined
-          ? Number(stageSummary.total_awake_time_milli) / 60000
-          : undefined,
-        unit: "minutes",
-        occurredAt,
-        recordedAt,
-        title: "WHOOP awake time",
-        rawArtifactRoles: [sleepRole],
-        externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "sleep-awake-minutes"),
-      });
-      pushObservationEvent(events, {
-        metric: "sleep-light-minutes",
-        value: finiteNumber(stageSummary.total_light_sleep_time_milli) !== undefined
-          ? Number(stageSummary.total_light_sleep_time_milli) / 60000
-          : undefined,
-        unit: "minutes",
-        occurredAt,
-        recordedAt,
-        title: "WHOOP light sleep",
-        rawArtifactRoles: [sleepRole],
-        externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "sleep-light-minutes"),
-      });
-      pushObservationEvent(events, {
-        metric: "sleep-deep-minutes",
-        value: finiteNumber(stageSummary.total_slow_wave_sleep_time_milli) !== undefined
-          ? Number(stageSummary.total_slow_wave_sleep_time_milli) / 60000
-          : undefined,
-        unit: "minutes",
-        occurredAt,
-        recordedAt,
-        title: "WHOOP deep sleep",
-        rawArtifactRoles: [sleepRole],
-        externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "sleep-deep-minutes"),
-      });
-      pushObservationEvent(events, {
-        metric: "sleep-rem-minutes",
-        value: finiteNumber(stageSummary.total_rem_sleep_time_milli) !== undefined
-          ? Number(stageSummary.total_rem_sleep_time_milli) / 60000
-          : undefined,
-        unit: "minutes",
-        occurredAt,
-        recordedAt,
-        title: "WHOOP REM sleep",
-        rawArtifactRoles: [sleepRole],
-        externalRef: makeExternalRef("sleep", sleepId, toIso(sleep.updated_at), "sleep-rem-minutes"),
-      });
+      emitObservationMetrics(
+        events,
+        {
+          source: stageSummary,
+          occurredAt,
+          recordedAt,
+          rawArtifactRoles: [sleepRole],
+          externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
+        },
+        WHOOP_SLEEP_STAGE_METRICS,
+      );
     }
   }
 
   for (const recovery of recoveries) {
     const sleepId = stringId(recovery.sleep_id) ?? stringId(recovery.cycle_id) ?? `recovery-${events.length + 1}`;
     const recoveryRole = `recovery:${sleepId}`;
+    const version = toIso(recovery.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(recovery.updated_at), importedAt);
     const occurredAt = recordedAt;
     const score = asPlainObject(recovery.score);
@@ -244,51 +402,27 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
       createRawArtifact(recoveryRole, `recovery-${sleepId}.json`, recovery),
     );
 
-    pushSample(samples, {
-      stream: "hrv",
-      value: score?.hrv_rmssd_milli,
-      unit: "ms",
-      recordedAt,
-      externalRef: makeExternalRef("recovery", sleepId, toIso(recovery.updated_at), "hrv"),
-    });
-    pushSample(samples, {
-      stream: "temperature",
-      value: score?.skin_temp_celsius,
-      unit: "celsius",
-      recordedAt,
-      externalRef: makeExternalRef("recovery", sleepId, toIso(recovery.updated_at), "skin-temperature"),
-    });
+    emitSampleMetrics(
+      samples,
+      {
+        source: score,
+        recordedAt,
+        externalRef: (facet) => makeExternalRef("recovery", sleepId, version, facet),
+      },
+      WHOOP_RECOVERY_SAMPLE_METRICS,
+    );
 
-    pushObservationEvent(events, {
-      metric: "recovery-score",
-      value: score?.recovery_score,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP recovery score",
-      rawArtifactRoles: [recoveryRole],
-      externalRef: makeExternalRef("recovery", sleepId, toIso(recovery.updated_at), "recovery-score"),
-    });
-    pushObservationEvent(events, {
-      metric: "resting-heart-rate",
-      value: score?.resting_heart_rate,
-      unit: "bpm",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP resting heart rate",
-      rawArtifactRoles: [recoveryRole],
-      externalRef: makeExternalRef("recovery", sleepId, toIso(recovery.updated_at), "resting-heart-rate"),
-    });
-    pushObservationEvent(events, {
-      metric: "spo2",
-      value: score?.spo2_percentage,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP SpO2",
-      rawArtifactRoles: [recoveryRole],
-      externalRef: makeExternalRef("recovery", sleepId, toIso(recovery.updated_at), "spo2"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: score,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [recoveryRole],
+        externalRef: (facet) => makeExternalRef("recovery", sleepId, version, facet),
+      },
+      WHOOP_RECOVERY_OBSERVATION_METRICS,
+    );
   }
 
   for (const cycle of cycles) {
@@ -296,6 +430,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const cycleRole = `cycle:${cycleId}`;
     const startAt = toIso(cycle.start);
     const endAt = toIso(cycle.end);
+    const version = toIso(cycle.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(cycle.updated_at), endAt, startAt, importedAt);
     const occurredAt = endAt ?? startAt ?? recordedAt;
     const score = asPlainObject(cycle.score);
@@ -305,46 +440,17 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
       createRawArtifact(cycleRole, `cycle-${cycleId}.json`, cycle),
     );
 
-    pushObservationEvent(events, {
-      metric: "day-strain",
-      value: score?.strain,
-      unit: "whoop_strain",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP day strain",
-      rawArtifactRoles: [cycleRole],
-      externalRef: makeExternalRef("cycle", cycleId, toIso(cycle.updated_at), "day-strain"),
-    });
-    pushObservationEvent(events, {
-      metric: "energy-burned",
-      value: score?.kilojoule,
-      unit: "kJ",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP energy burned",
-      rawArtifactRoles: [cycleRole],
-      externalRef: makeExternalRef("cycle", cycleId, toIso(cycle.updated_at), "energy-burned"),
-    });
-    pushObservationEvent(events, {
-      metric: "average-heart-rate",
-      value: score?.average_heart_rate,
-      unit: "bpm",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP average heart rate",
-      rawArtifactRoles: [cycleRole],
-      externalRef: makeExternalRef("cycle", cycleId, toIso(cycle.updated_at), "average-heart-rate"),
-    });
-    pushObservationEvent(events, {
-      metric: "max-heart-rate",
-      value: score?.max_heart_rate,
-      unit: "bpm",
-      occurredAt,
-      recordedAt,
-      title: "WHOOP max heart rate",
-      rawArtifactRoles: [cycleRole],
-      externalRef: makeExternalRef("cycle", cycleId, toIso(cycle.updated_at), "max-heart-rate"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: score,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [cycleRole],
+        externalRef: (facet) => makeExternalRef("cycle", cycleId, version, facet),
+      },
+      WHOOP_CYCLE_OBSERVATION_METRICS,
+    );
   }
 
   for (const workout of workouts) {
@@ -352,6 +458,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     const workoutRole = `workout:${workoutId}`;
     const startAt = toIso(workout.start);
     const endAt = toIso(workout.end);
+    const version = toIso(workout.updated_at);
     const recordedAt = cycleOrFallbackTimestamp(toIso(workout.updated_at), endAt, startAt, importedAt);
     const occurredAt = startAt ?? recordedAt;
     const durationMinutes = minutesBetween(startAt, endAt);
@@ -375,7 +482,7 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
           source: "device",
           title: trimToLength(`WHOOP ${sportName}`, 160),
           rawArtifactRoles: [workoutRole],
-          externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at)),
+          externalRef: makeExternalRef("workout", workoutId, version),
           fields: stripUndefined({
             activityType,
             durationMinutes,
@@ -388,78 +495,22 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
       );
     }
 
-    pushObservationEvent(events, {
-      metric: "workout-strain",
-      value: score?.strain,
-      unit: "whoop_strain",
-      occurredAt,
-      recordedAt,
-      title: `WHOOP ${sportName} strain`,
-      rawArtifactRoles: [workoutRole],
-      externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at), "workout-strain"),
-    });
-    pushObservationEvent(events, {
-      metric: "average-heart-rate",
-      value: score?.average_heart_rate,
-      unit: "bpm",
-      occurredAt,
-      recordedAt,
-      title: `WHOOP ${sportName} average heart rate`,
-      rawArtifactRoles: [workoutRole],
-      externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at), "average-heart-rate"),
-    });
-    pushObservationEvent(events, {
-      metric: "max-heart-rate",
-      value: score?.max_heart_rate,
-      unit: "bpm",
-      occurredAt,
-      recordedAt,
-      title: `WHOOP ${sportName} max heart rate`,
-      rawArtifactRoles: [workoutRole],
-      externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at), "max-heart-rate"),
-    });
-    pushObservationEvent(events, {
-      metric: "energy-burned",
-      value: score?.kilojoule,
-      unit: "kJ",
-      occurredAt,
-      recordedAt,
-      title: `WHOOP ${sportName} energy burned`,
-      rawArtifactRoles: [workoutRole],
-      externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at), "energy-burned"),
-    });
-    pushObservationEvent(events, {
-      metric: "percent-recorded",
-      value: score?.percent_recorded,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: `WHOOP ${sportName} percent recorded`,
-      rawArtifactRoles: [workoutRole],
-      externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at), "percent-recorded"),
-    });
-    pushObservationEvent(events, {
-      metric: "altitude-gain",
-      value: finiteNumber(workout.altitude_gain_meter),
-      unit: "meter",
-      occurredAt,
-      recordedAt,
-      title: `WHOOP ${sportName} altitude gain`,
-      rawArtifactRoles: [workoutRole],
-      externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at), "altitude-gain"),
-    });
-    pushObservationEvent(events, {
-      metric: "altitude-change",
-      value: finiteNumber(workout.altitude_change_meter),
-      unit: "meter",
-      occurredAt,
-      recordedAt,
-      title: `WHOOP ${sportName} altitude change`,
-      rawArtifactRoles: [workoutRole],
-      externalRef: makeExternalRef("workout", workoutId, toIso(workout.updated_at), "altitude-change"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: {
+          workout,
+          score,
+          sportName,
+        },
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [workoutRole],
+        externalRef: (facet) => makeExternalRef("workout", workoutId, version, facet),
+      },
+      WHOOP_WORKOUT_OBSERVATION_METRICS,
+    );
   }
-
 
   for (const deletion of deletions) {
     pushDeletionObservation(events, rawArtifacts, importedAt, deletion);

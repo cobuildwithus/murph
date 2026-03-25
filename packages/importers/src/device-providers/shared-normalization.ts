@@ -28,6 +28,32 @@ export interface SampleOptions {
   externalRef: DeviceExternalRefPayload;
 }
 
+export interface MetricEmissionContext<T> {
+  source: T;
+  occurredAt?: string;
+  recordedAt?: string;
+  rawArtifactRoles?: string[];
+  externalRef: (facet?: string) => DeviceExternalRefPayload;
+}
+
+export interface ObservationMetricDescriptor<T> {
+  metric: string;
+  value: (source: T) => unknown;
+  transform?: (value: unknown, source: T) => unknown;
+  unit: string;
+  title: string | ((source: T) => string);
+  note?: string | ((source: T) => string | undefined);
+  facet?: string | ((source: T) => string | undefined);
+}
+
+export interface SampleMetricDescriptor<T> {
+  stream: string;
+  value: (source: T) => unknown;
+  transform?: (value: unknown, source: T) => unknown;
+  unit: string;
+  facet?: string | ((source: T) => string | undefined);
+}
+
 export interface PlainObject {
   [key: string]: unknown;
 }
@@ -213,6 +239,65 @@ export function pushSample(
       sample,
     }),
   );
+}
+
+function resolveMetricDescriptorValue<T, TValue>(
+  value: TValue | ((source: T) => TValue),
+  source: T,
+): TValue {
+  return typeof value === "function" ? (value as (source: T) => TValue)(source) : value;
+}
+
+export function emitObservationMetrics<T>(
+  events: DeviceEventPayload[],
+  context: MetricEmissionContext<T>,
+  descriptors: readonly ObservationMetricDescriptor<T>[],
+): void {
+  for (const descriptor of descriptors) {
+    const rawValue = descriptor.value(context.source);
+    const value = descriptor.transform ? descriptor.transform(rawValue, context.source) : rawValue;
+
+    pushObservationEvent(events, {
+      metric: descriptor.metric,
+      value,
+      unit: descriptor.unit,
+      occurredAt: context.occurredAt,
+      recordedAt: context.recordedAt,
+      title: resolveMetricDescriptorValue(descriptor.title, context.source),
+      note: descriptor.note
+        ? resolveMetricDescriptorValue(descriptor.note, context.source)
+        : undefined,
+      rawArtifactRoles: context.rawArtifactRoles,
+      externalRef: context.externalRef(
+        descriptor.facet
+          ? resolveMetricDescriptorValue(descriptor.facet, context.source)
+          : undefined,
+      ),
+    });
+  }
+}
+
+export function emitSampleMetrics<T>(
+  samples: DeviceSamplePayload[],
+  context: MetricEmissionContext<T>,
+  descriptors: readonly SampleMetricDescriptor<T>[],
+): void {
+  for (const descriptor of descriptors) {
+    const rawValue = descriptor.value(context.source);
+    const value = descriptor.transform ? descriptor.transform(rawValue, context.source) : rawValue;
+
+    pushSample(samples, {
+      stream: descriptor.stream,
+      value,
+      unit: descriptor.unit,
+      recordedAt: context.recordedAt,
+      externalRef: context.externalRef(
+        descriptor.facet
+          ? resolveMetricDescriptorValue(descriptor.facet, context.source)
+          : undefined,
+      ),
+    });
+  }
 }
 
 export function pushDeletionObservation(

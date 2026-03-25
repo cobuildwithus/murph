@@ -96,6 +96,15 @@ test("device sync http server protects control routes and keeps webhooks on the 
       accounts: [accountRecord],
     });
 
+    const publicControlRoute = await fetch(`${publicBaseUrl}/accounts`);
+    assert.equal(publicControlRoute.status, 404);
+    assert.deepEqual(await publicControlRoute.json(), {
+      error: {
+        code: "NOT_FOUND",
+        message: "No route for GET /accounts",
+      },
+    });
+
     const wrongListener = await fetch(`${controlBaseUrl}/webhooks/demo`, {
       method: "POST",
       headers: {
@@ -106,6 +115,12 @@ test("device sync http server protects control routes and keeps webhooks on the 
       }),
     });
     assert.equal(wrongListener.status, 404);
+    assert.deepEqual(await wrongListener.json(), {
+      error: {
+        code: "NOT_FOUND",
+        message: "No route for POST /webhooks/demo",
+      },
+    });
 
     const webhookResponse = await fetch(`${publicBaseUrl}/webhooks/demo`, {
       method: "POST",
@@ -277,7 +292,7 @@ test("device sync http server redirects OAuth callback errors back to the origin
     assert.equal(destination.searchParams.get("deviceSyncStatus"), "error");
     assert.equal(destination.searchParams.get("deviceSyncProvider"), "demo");
     assert.equal(destination.searchParams.get("deviceSyncError"), "OAUTH_CALLBACK_REJECTED");
-    assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), null);
+    assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), "The user canceled the OAuth flow.");
   } finally {
     await server.close();
   }

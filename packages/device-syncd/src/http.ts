@@ -16,6 +16,36 @@ const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane
 
 type DeviceSyncHttpRouteKind = "control" | "public";
 type DeviceSyncHttpListenerSurface = "combined" | "control" | "public";
+type DeviceSyncHttpMethod = "GET" | "POST";
+
+interface DeviceSyncHttpRouteParams {
+  provider?: string;
+  accountId?: string;
+}
+
+interface DeviceSyncHttpRouteHandlerInput {
+  request: IncomingMessage;
+  response: ServerResponse;
+  service: DeviceSyncService;
+  bodyLimitBytes: number;
+  config?: DeviceSyncHttpConfig;
+  url: URL;
+  pathname: string;
+  params: DeviceSyncHttpRouteParams;
+}
+
+interface DeviceSyncHttpRouteDescriptor {
+  method: DeviceSyncHttpMethod;
+  pattern: string | RegExp;
+  surface: DeviceSyncHttpRouteKind;
+  parseParams(pathname: string): DeviceSyncHttpRouteParams | null;
+  handle(input: DeviceSyncHttpRouteHandlerInput): Promise<void>;
+}
+
+interface DeviceSyncHttpRouteMatch {
+  route: DeviceSyncHttpRouteDescriptor;
+  params: DeviceSyncHttpRouteParams;
+}
 
 export interface CreateDeviceSyncHttpServerInput {
   service: DeviceSyncService;
@@ -98,6 +128,196 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
   };
 }
 
+const DEVICE_SYNC_HTTP_ROUTES = [
+  createStaticRoute({
+    method: "GET",
+    pattern: "/",
+    surface: "control",
+    handle({ response, service }) {
+      sendJson(response, 200, {
+        ok: true,
+        providers: service.describeProviders(),
+        summary: service.summarize(),
+      });
+    },
+  }),
+  createStaticRoute({
+    method: "GET",
+    pattern: "/healthz",
+    surface: "control",
+    handle({ response, service }) {
+      sendJson(response, 200, {
+        ok: true,
+        summary: service.summarize(),
+      });
+    },
+  }),
+  createStaticRoute({
+    method: "GET",
+    pattern: "/providers",
+    surface: "control",
+    handle({ response, service }) {
+      sendJson(response, 200, {
+        providers: service.describeProviders(),
+      });
+    },
+  }),
+  createParameterizedRoute({
+    method: "GET",
+    pattern: /^\/connect\/([^/]+)$/u,
+    paramNames: ["provider"],
+    surface: "control",
+    async handle({ response, service, url, params }) {
+      const result = await service.startConnection({
+        provider: params.provider ?? "",
+        returnTo: url.searchParams.get("returnTo"),
+      });
+      redirect(response, result.authorizationUrl);
+    },
+  }),
+  createParameterizedRoute({
+    method: "POST",
+    pattern: /^\/providers\/([^/]+)\/connect$/u,
+    paramNames: ["provider"],
+    surface: "control",
+    async handle({ request, response, service, bodyLimitBytes, params }) {
+      const body = await maybeReadJsonBody(request, bodyLimitBytes);
+      const result = await service.startConnection({
+        provider: params.provider ?? "",
+        returnTo: readStringField(body, "returnTo"),
+      });
+      sendJson(response, 200, result);
+    },
+  }),
+  createParameterizedRoute({
+    method: "GET",
+    pattern: /^\/oauth\/([^/]+)\/callback$/u,
+    paramNames: ["provider"],
+    surface: "public",
+    async handle({ response, service, url, params }) {
+      const provider = params.provider ?? "";
+
+      try {
+        const result = await service.handleOAuthCallback({
+          provider,
+          code: url.searchParams.get("code"),
+          state: url.searchParams.get("state"),
+          scope: url.searchParams.get("scope"),
+          error: url.searchParams.get("error"),
+          errorDescription: url.searchParams.get("error_description"),
+        });
+
+        if (result.returnTo) {
+          const destination = new URL(result.returnTo);
+          destination.searchParams.set("deviceSyncStatus", "connected");
+          destination.searchParams.set("deviceSyncProvider", result.account.provider);
+          destination.searchParams.set("deviceSyncAccountId", result.account.id);
+          redirect(response, destination.toString());
+          return;
+        }
+
+        sendHtml(
+          response,
+          200,
+          renderCallbackHtml({
+            title: `${formatProviderLabel(result.account.provider)} connected`,
+            body: `Connected ${escapeHtml(formatProviderLabel(result.account.provider))} account ${escapeHtml(result.account.id)} successfully.`,
+          }),
+        );
+      } catch (error) {
+        if (isDeviceSyncError(error)) {
+          sendCallbackErrorResponse(response, provider, error);
+          return;
+        }
+
+        throw error;
+      }
+    },
+  }),
+  createParameterizedRoute({
+    method: "GET",
+    pattern: /^\/webhooks\/([^/]+)$/u,
+    paramNames: ["provider"],
+    surface: "public",
+    handle({ response, url, config, params }) {
+      const provider = params.provider ?? "";
+      const challenge = resolveWebhookVerificationChallenge(provider, url, config);
+
+      if (challenge !== null) {
+        sendText(response, 200, challenge);
+        return;
+      }
+
+      sendJson(response, 200, {
+        ok: true,
+        provider,
+      });
+    },
+  }),
+  createParameterizedRoute({
+    method: "POST",
+    pattern: /^\/webhooks\/([^/]+)$/u,
+    paramNames: ["provider"],
+    surface: "public",
+    async handle({ request, response, service, bodyLimitBytes, params }) {
+      const rawBody = await readRequestBody(request, bodyLimitBytes);
+      const result = await service.handleWebhook(params.provider ?? "", toFetchHeaders(request), rawBody);
+      sendJson(response, 202, result);
+    },
+  }),
+  createStaticRoute({
+    method: "GET",
+    pattern: "/accounts",
+    surface: "control",
+    handle({ response, service, url }) {
+      sendJson(response, 200, {
+        accounts: service.listAccounts(url.searchParams.get("provider") ?? undefined),
+      });
+    },
+  }),
+  createParameterizedRoute({
+    method: "GET",
+    pattern: /^\/accounts\/([^/]+)$/u,
+    paramNames: ["accountId"],
+    surface: "control",
+    handle({ response, service, params }) {
+      const account = service.getAccount(params.accountId ?? "");
+
+      if (!account) {
+        sendJson(response, 404, {
+          error: {
+            code: "ACCOUNT_NOT_FOUND",
+            message: "Device sync account was not found.",
+          },
+        });
+        return;
+      }
+
+      sendJson(response, 200, { account });
+    },
+  }),
+  createParameterizedRoute({
+    method: "POST",
+    pattern: /^\/accounts\/([^/]+)\/reconcile$/u,
+    paramNames: ["accountId"],
+    surface: "control",
+    handle({ response, service, params }) {
+      const result = service.queueManualReconcile(params.accountId ?? "");
+      sendJson(response, 202, result);
+    },
+  }),
+  createParameterizedRoute({
+    method: "POST",
+    pattern: /^\/accounts\/([^/]+)\/disconnect$/u,
+    paramNames: ["accountId"],
+    surface: "control",
+    async handle({ response, service, params }) {
+      const result = await service.disconnectAccount(params.accountId ?? "");
+      sendJson(response, 200, result);
+    },
+  }),
+] satisfies readonly DeviceSyncHttpRouteDescriptor[];
+
 async function routeRequest(input: {
   request: IncomingMessage;
   response: ServerResponse;
@@ -111,9 +331,9 @@ async function routeRequest(input: {
   const url = new URL(input.request.url ?? "/", `${input.service.publicBaseUrl}/`);
   const basePath = new URL(`${input.service.publicBaseUrl}/`).pathname.replace(/\/+$/u, "");
   const pathname = stripBasePath(url.pathname, basePath);
-  const routeKind = classifyDeviceSyncHttpRoute(method, pathname);
+  const routeMatch = matchDeviceSyncHttpRoute(method, pathname);
 
-  if (!routeKind || !surfaceAllowsRoute(input.surface, routeKind)) {
+  if (!routeMatch || !surfaceAllowsRoute(input.surface, routeMatch.route)) {
     sendJson(input.response, 404, {
       error: {
         code: "NOT_FOUND",
@@ -123,7 +343,7 @@ async function routeRequest(input: {
     return;
   }
 
-  if (routeKind === "control") {
+  if (routeMatch.route.surface === "control") {
     assertDeviceSyncControlRequest({
       headers: input.request.headers,
       remoteAddress: input.request.socket.remoteAddress,
@@ -131,165 +351,16 @@ async function routeRequest(input: {
     });
   }
 
-  if (method === "GET" && pathname === "/") {
-    sendJson(input.response, 200, {
-      ok: true,
-      providers: input.service.describeProviders(),
-      summary: input.service.summarize(),
-    });
-    return;
-  }
-
-  if (method === "GET" && pathname === "/healthz") {
-    sendJson(input.response, 200, {
-      ok: true,
-      summary: input.service.summarize(),
-    });
-    return;
-  }
-
-  if (method === "GET" && pathname === "/providers") {
-    sendJson(input.response, 200, {
-      providers: input.service.describeProviders(),
-    });
-    return;
-  }
-
-  const connectMatch = pathname.match(/^\/connect\/([^/]+)$/u);
-
-  if (method === "GET" && connectMatch) {
-    const result = await input.service.startConnection({
-      provider: decodeURIComponent(connectMatch[1] ?? ""),
-      returnTo: url.searchParams.get("returnTo"),
-    });
-    redirect(input.response, result.authorizationUrl);
-    return;
-  }
-
-  const connectApiMatch = pathname.match(/^\/providers\/([^/]+)\/connect$/u);
-
-  if (method === "POST" && connectApiMatch) {
-    const body = await maybeReadJsonBody(input.request, input.bodyLimitBytes);
-    const result = await input.service.startConnection({
-      provider: decodeURIComponent(connectApiMatch[1] ?? ""),
-      returnTo: readStringField(body, "returnTo"),
-    });
-    sendJson(input.response, 200, result);
-    return;
-  }
-
-  const callbackMatch = pathname.match(/^\/oauth\/([^/]+)\/callback$/u);
-
-  if (method === "GET" && callbackMatch) {
-    const provider = decodeURIComponent(callbackMatch[1] ?? "");
-
-    try {
-      const result = await input.service.handleOAuthCallback({
-        provider,
-        code: url.searchParams.get("code"),
-        state: url.searchParams.get("state"),
-        scope: url.searchParams.get("scope"),
-        error: url.searchParams.get("error"),
-        errorDescription: url.searchParams.get("error_description"),
-      });
-
-      if (result.returnTo) {
-        const destination = new URL(result.returnTo);
-        destination.searchParams.set("deviceSyncStatus", "connected");
-        destination.searchParams.set("deviceSyncProvider", result.account.provider);
-        destination.searchParams.set("deviceSyncAccountId", result.account.id);
-        redirect(input.response, destination.toString());
-        return;
-      }
-
-      sendHtml(
-        input.response,
-        200,
-        renderCallbackHtml({
-          title: `${formatProviderLabel(result.account.provider)} connected`,
-          body: `Connected ${escapeHtml(formatProviderLabel(result.account.provider))} account ${escapeHtml(result.account.id)} successfully.`,
-        }),
-      );
-      return;
-    } catch (error) {
-      if (isDeviceSyncError(error)) {
-        sendCallbackErrorResponse(input.response, provider, error);
-        return;
-      }
-
-      throw error;
-    }
-  }
-
-  const webhookMatch = pathname.match(/^\/webhooks\/([^/]+)$/u);
-
-  if (webhookMatch) {
-    const provider = decodeURIComponent(webhookMatch[1] ?? "");
-
-    if (method === "GET") {
-      const challenge = resolveWebhookVerificationChallenge(provider, url, input.config);
-
-      if (challenge !== null) {
-        sendText(input.response, 200, challenge);
-        return;
-      }
-
-      sendJson(input.response, 200, {
-        ok: true,
-        provider,
-      });
-      return;
-    }
-
-    if (method === "POST") {
-      const rawBody = await readRequestBody(input.request, input.bodyLimitBytes);
-      const result = await input.service.handleWebhook(provider, toFetchHeaders(input.request), rawBody);
-      sendJson(input.response, 202, result);
-      return;
-    }
-  }
-
-  if (method === "GET" && pathname === "/accounts") {
-    sendJson(input.response, 200, {
-      accounts: input.service.listAccounts(url.searchParams.get("provider") ?? undefined),
-    });
-    return;
-  }
-
-  const accountMatch = pathname.match(/^\/accounts\/([^/]+)$/u);
-
-  if (method === "GET" && accountMatch) {
-    const account = input.service.getAccount(decodeURIComponent(accountMatch[1] ?? ""));
-
-    if (!account) {
-      sendJson(input.response, 404, {
-        error: {
-          code: "ACCOUNT_NOT_FOUND",
-          message: "Device sync account was not found.",
-        },
-      });
-      return;
-    }
-
-    sendJson(input.response, 200, { account });
-    return;
-  }
-
-  const reconcileMatch = pathname.match(/^\/accounts\/([^/]+)\/reconcile$/u);
-
-  if (method === "POST" && reconcileMatch) {
-    const result = input.service.queueManualReconcile(decodeURIComponent(reconcileMatch[1] ?? ""));
-    sendJson(input.response, 202, result);
-    return;
-  }
-
-  const disconnectMatch = pathname.match(/^\/accounts\/([^/]+)\/disconnect$/u);
-
-  if (method === "POST" && disconnectMatch) {
-    const result = await input.service.disconnectAccount(decodeURIComponent(disconnectMatch[1] ?? ""));
-    sendJson(input.response, 200, result);
-    return;
-  }
+  await routeMatch.route.handle({
+    request: input.request,
+    response: input.response,
+    service: input.service,
+    bodyLimitBytes: input.bodyLimitBytes,
+    config: input.config,
+    url,
+    pathname,
+    params: routeMatch.params,
+  });
 }
 
 async function startListener(input: {
@@ -392,38 +463,89 @@ function resolvePublicListener(
   };
 }
 
-function classifyDeviceSyncHttpRoute(method: string, pathname: string): DeviceSyncHttpRouteKind | null {
-  if (
-    (method === "GET" &&
-      (pathname === "/" ||
-        pathname === "/healthz" ||
-        pathname === "/providers" ||
-        pathname === "/accounts" ||
-        /^\/connect\/[^/]+$/u.test(pathname) ||
-        /^\/accounts\/[^/]+$/u.test(pathname))) ||
-    (method === "POST" &&
-      (/^\/providers\/[^/]+\/connect$/u.test(pathname) ||
-        /^\/accounts\/[^/]+\/reconcile$/u.test(pathname) ||
-        /^\/accounts\/[^/]+\/disconnect$/u.test(pathname)))
-  ) {
-    return "control";
-  }
+function createStaticRoute(input: {
+  method: DeviceSyncHttpMethod;
+  pattern: string;
+  surface: DeviceSyncHttpRouteKind;
+  handle(input: DeviceSyncHttpRouteHandlerInput): Promise<void> | void;
+}): DeviceSyncHttpRouteDescriptor {
+  return {
+    method: input.method,
+    pattern: input.pattern,
+    surface: input.surface,
+    parseParams(pathname) {
+      return pathname === input.pattern ? {} : null;
+    },
+    async handle(routeInput) {
+      await input.handle(routeInput);
+    },
+  };
+}
 
-  if (
-    (method === "GET" && (/^\/oauth\/[^/]+\/callback$/u.test(pathname) || /^\/webhooks\/[^/]+$/u.test(pathname))) ||
-    (method === "POST" && /^\/webhooks\/[^/]+$/u.test(pathname))
-  ) {
-    return "public";
+function surfaceAllowsRoute(
+  surface: DeviceSyncHttpListenerSurface,
+  route: DeviceSyncHttpRouteDescriptor,
+): boolean {
+  return surface === "combined" || surface === route.surface;
+}
+
+function createParameterizedRoute(input: {
+  method: DeviceSyncHttpMethod;
+  pattern: RegExp;
+  paramNames: ReadonlyArray<keyof DeviceSyncHttpRouteParams>;
+  surface: DeviceSyncHttpRouteKind;
+  handle(input: DeviceSyncHttpRouteHandlerInput): Promise<void> | void;
+}): DeviceSyncHttpRouteDescriptor {
+  return {
+    method: input.method,
+    pattern: input.pattern,
+    surface: input.surface,
+    parseParams(pathname) {
+      return parseRouteParams(pathname, input.pattern, input.paramNames);
+    },
+    async handle(routeInput) {
+      await input.handle(routeInput);
+    },
+  };
+}
+
+function matchDeviceSyncHttpRoute(method: string, pathname: string): DeviceSyncHttpRouteMatch | null {
+  for (const route of DEVICE_SYNC_HTTP_ROUTES) {
+    if (route.method !== method) {
+      continue;
+    }
+
+    const params = route.parseParams(pathname);
+
+    if (params) {
+      return {
+        route,
+        params,
+      };
+    }
   }
 
   return null;
 }
 
-function surfaceAllowsRoute(
-  surface: DeviceSyncHttpListenerSurface,
-  routeKind: DeviceSyncHttpRouteKind,
-): boolean {
-  return surface === "combined" || surface === routeKind;
+function parseRouteParams(
+  pathname: string,
+  pattern: RegExp,
+  paramNames: ReadonlyArray<keyof DeviceSyncHttpRouteParams>,
+): DeviceSyncHttpRouteParams | null {
+  const match = pathname.match(pattern);
+
+  if (!match) {
+    return null;
+  }
+
+  const params: DeviceSyncHttpRouteParams = {};
+
+  for (const [index, paramName] of paramNames.entries()) {
+    params[paramName] = decodeURIComponent(match[index + 1] ?? "");
+  }
+
+  return params;
 }
 
 async function maybeReadJsonBody(request: IncomingMessage, limitBytes: number): Promise<Record<string, unknown>> {
@@ -544,33 +666,17 @@ function resolveWebhookVerificationChallenge(
   });
 }
 
-export function buildCallbackErrorRedirectLocation(input: {
-  returnTo: string | null;
-  provider: string;
-  errorCode: string;
-}): string | null {
-  if (!input.returnTo) {
-    return null;
-  }
-
-  const destination = new URL(input.returnTo);
-  destination.searchParams.set("deviceSyncStatus", "error");
-  destination.searchParams.set("deviceSyncProvider", input.provider);
-  destination.searchParams.set("deviceSyncError", input.errorCode);
-  return destination.toString();
-}
-
 function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {
   const provider = error.details ? readStringField(error.details, "provider") ?? fallbackProvider : fallbackProvider;
   const returnTo = error.details ? readStringField(error.details, "returnTo") : null;
-  const destination = buildCallbackErrorRedirectLocation({
-    returnTo,
-    provider,
-    errorCode: error.code,
-  });
 
-  if (destination) {
-    redirect(response, destination);
+  if (returnTo) {
+    const destination = new URL(returnTo);
+    destination.searchParams.set("deviceSyncStatus", "error");
+    destination.searchParams.set("deviceSyncProvider", provider);
+    destination.searchParams.set("deviceSyncError", error.code);
+    destination.searchParams.set("deviceSyncErrorMessage", error.message);
+    redirect(response, destination.toString());
     return;
   }
 

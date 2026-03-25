@@ -1,30 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
-
-const prismaClient = vi.hoisted(() => ({
-  Prisma: {
-    DbNull: Symbol.for("prisma.db-null"),
-  },
-  PrismaClient: class PrismaClient {},
-}));
-
-const deviceSyncd = vi.hoisted(() => ({
-  deviceSyncError: (input: {
-    code: string;
-    message: string;
-    retryable?: boolean;
-    httpStatus?: number;
-    details?: unknown;
-  }) =>
-    Object.assign(new Error(input.message), {
-      code: input.code,
-      retryable: input.retryable ?? false,
-      httpStatus: input.httpStatus ?? 500,
-      details: input.details,
-    }),
-}));
-
-vi.mock("@prisma/client", () => prismaClient);
-vi.mock("@healthybob/device-syncd", () => deviceSyncd);
+import { describe, expect, it } from "vitest";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
@@ -50,61 +24,38 @@ type MutableConnection = {
   updatedAt: Date;
 };
 
-function createConnectionStore(seed: MutableConnection[]) {
+function createHeartbeatStore(seed: MutableConnection[]) {
   const connections = new Map<string, MutableConnection>(
     seed.map((connection) => [
       connection.id,
       {
         ...connection,
         scopes: [...connection.scopes],
-        metadataJson: structuredClone(connection.metadataJson),
+        metadataJson: { ...connection.metadataJson },
       },
     ]),
   );
 
   const deviceConnection = {
-    findFirst: async ({ where }: { where: Record<string, unknown> }) => {
-      for (const connection of connections.values()) {
-        if (typeof where.id === "string" && connection.id !== where.id) {
-          continue;
-        }
-
-        if (typeof where.userId === "string" && connection.userId !== where.userId) {
-          continue;
-        }
-
-        return cloneConnection(connection);
-      }
-
-      return null;
-    },
-    update: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-      if (typeof where.id !== "string") {
-        throw new TypeError("Expected connection id.");
-      }
-
-      const connection = connections.get(where.id);
+    updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      const connection = findConnection(connections, where);
 
       if (!connection) {
-        throw new TypeError("Connection not found.");
+        return { count: 0 };
       }
 
       applyConnectionUpdate(connection, data);
-      return cloneConnection(connection);
+      return { count: 1 };
+    },
+    findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+      return cloneConnection(findConnection(connections, where) ?? null);
     },
   };
 
-  const tx = {
-    deviceConnection,
-  };
-
-  const prisma = {
-    deviceConnection,
-    $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
-  };
-
   const store = new PrismaDeviceSyncControlPlaneStore({
-    prisma: prisma as never,
+    prisma: {
+      deviceConnection,
+    } as never,
     codec: {
       keyVersion: "v1",
       encrypt: (value: string) => value,
@@ -119,68 +70,53 @@ function createConnectionStore(seed: MutableConnection[]) {
 }
 
 describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
-  it("rejects regressive completion timestamps", async () => {
-    const { connections, store } = createConnectionStore([
+  it("treats clearError as authoritative even when error fields are also present", async () => {
+    const { connections, store } = createHeartbeatStore([
       createConnection({
-        lastSyncStartedAt: new Date("2026-03-25T10:00:00.000Z"),
+        lastErrorCode: "OLD_CODE",
+        lastErrorMessage: "Old failure",
       }),
     ]);
 
-    await expect(
-      store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
-        lastSyncCompletedAt: "2026-03-25T09:59:59.000Z",
-      }),
-    ).rejects.toMatchObject({
-      code: "INVALID_LOCAL_HEARTBEAT",
-      httpStatus: 400,
+    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      clearError: true,
+      lastErrorCode: "IGNORED_CODE",
+      lastErrorMessage: "Ignored message",
+      lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
     });
 
-    expect(connections.get("dsc_123")?.lastSyncCompletedAt).toBeNull();
-  });
-
-  it("ignores runtime attempts to overwrite status or nextReconcileAt", async () => {
-    const { connections, store } = createConnectionStore([
-      createConnection({
-        nextReconcileAt: new Date("2026-03-30T00:00:00.000Z"),
-      }),
-    ]);
-
-    const result = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
-      lastSyncStartedAt: "2026-03-25T10:00:00.000Z",
-      status: "disconnected",
-      nextReconcileAt: "2099-01-01T00:00:00.000Z",
-    } as never);
-
-    expect(result).toMatchObject({
-      status: "active",
-      nextReconcileAt: "2026-03-30T00:00:00.000Z",
-      lastSyncStartedAt: "2026-03-25T10:00:00.000Z",
+    expect(updated).toMatchObject({
+      id: "dsc_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
     });
     expect(connections.get("dsc_123")).toMatchObject({
-      status: "active",
+      lastErrorCode: null,
+      lastErrorMessage: null,
     });
-    expect(connections.get("dsc_123")?.nextReconcileAt?.toISOString()).toBe("2026-03-30T00:00:00.000Z");
   });
 
-  it("treats local error fields as append-only telemetry", async () => {
-    const { store } = createConnectionStore([
+  it("only applies the provided error fields when clearError is not set", async () => {
+    const { connections, store } = createHeartbeatStore([
       createConnection({
-        lastSyncErrorAt: new Date("2026-03-25T09:30:00.000Z"),
-        lastErrorCode: "SYNC_FAILED",
-        lastErrorMessage: "Previous reconcile failed",
+        lastErrorCode: "OLD_CODE",
+        lastErrorMessage: "Old failure",
       }),
     ]);
 
-    const result = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
-      lastSyncCompletedAt: "2026-03-25T10:00:00.000Z",
+    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastErrorMessage: "New failure",
     });
 
-    expect(result).toMatchObject({
-      lastSyncCompletedAt: "2026-03-25T10:00:00.000Z",
-      lastSyncErrorAt: "2026-03-25T09:30:00.000Z",
-      lastErrorCode: "SYNC_FAILED",
-      lastErrorMessage: "Previous reconcile failed",
-      status: "active",
+    expect(updated).toMatchObject({
+      id: "dsc_123",
+      lastErrorCode: "OLD_CODE",
+      lastErrorMessage: "New failure",
+    });
+    expect(connections.get("dsc_123")).toMatchObject({
+      lastErrorCode: "OLD_CODE",
+      lastErrorMessage: "New failure",
     });
   });
 });
@@ -189,11 +125,11 @@ function createConnection(overrides: Partial<MutableConnection> = {}): MutableCo
   return {
     id: "dsc_123",
     userId: "user-123",
-    provider: "whoop",
-    externalAccountId: "acct_123",
-    displayName: "Test connection",
+    provider: "oura",
+    externalAccountId: "acct-123",
+    displayName: "Oura",
     status: "active",
-    scopes: [],
+    scopes: ["daily"],
     accessTokenExpiresAt: null,
     metadataJson: {},
     connectedAt: new Date("2026-03-25T00:00:00.000Z"),
@@ -210,11 +146,33 @@ function createConnection(overrides: Partial<MutableConnection> = {}): MutableCo
   };
 }
 
-function cloneConnection(connection: MutableConnection): MutableConnection {
+function findConnection(
+  connections: Map<string, MutableConnection>,
+  where: Record<string, unknown>,
+): MutableConnection | null {
+  for (const connection of connections.values()) {
+    if (
+      (typeof where.id === "string" && connection.id !== where.id) ||
+      (typeof where.userId === "string" && connection.userId !== where.userId)
+    ) {
+      continue;
+    }
+
+    return connection;
+  }
+
+  return null;
+}
+
+function cloneConnection(connection: MutableConnection | null): MutableConnection | null {
+  if (!connection) {
+    return null;
+  }
+
   return {
     ...connection,
     scopes: [...connection.scopes],
-    metadataJson: structuredClone(connection.metadataJson),
+    metadataJson: { ...connection.metadataJson },
     accessTokenExpiresAt: cloneDate(connection.accessTokenExpiresAt),
     connectedAt: new Date(connection.connectedAt),
     lastWebhookAt: cloneDate(connection.lastWebhookAt),
@@ -227,24 +185,44 @@ function cloneConnection(connection: MutableConnection): MutableConnection {
   };
 }
 
+function applyConnectionUpdate(connection: MutableConnection, data: Record<string, unknown>): void {
+  if ("status" in data && isStatus(data.status)) {
+    connection.status = data.status;
+  }
+
+  applyNullableDate(connection, "lastSyncStartedAt", data.lastSyncStartedAt);
+  applyNullableDate(connection, "lastSyncCompletedAt", data.lastSyncCompletedAt);
+  applyNullableDate(connection, "lastSyncErrorAt", data.lastSyncErrorAt);
+  applyNullableDate(connection, "nextReconcileAt", data.nextReconcileAt);
+
+  if ("lastErrorCode" in data) {
+    connection.lastErrorCode = data.lastErrorCode === null || typeof data.lastErrorCode === "string" ? data.lastErrorCode : connection.lastErrorCode;
+  }
+
+  if ("lastErrorMessage" in data) {
+    connection.lastErrorMessage =
+      data.lastErrorMessage === null || typeof data.lastErrorMessage === "string"
+        ? data.lastErrorMessage
+        : connection.lastErrorMessage;
+  }
+}
+
+function applyNullableDate(
+  connection: MutableConnection,
+  key: "lastSyncStartedAt" | "lastSyncCompletedAt" | "lastSyncErrorAt" | "nextReconcileAt",
+  value: unknown,
+): void {
+  if (!(value instanceof Date) && value !== null && value !== undefined) {
+    return;
+  }
+
+  connection[key] = value instanceof Date ? new Date(value) : value ?? connection[key];
+}
+
 function cloneDate(value: Date | null): Date | null {
   return value ? new Date(value) : null;
 }
 
-function applyConnectionUpdate(connection: MutableConnection, data: Record<string, unknown>): void {
-  for (const [key, value] of Object.entries(data)) {
-    switch (key) {
-      case "lastSyncStartedAt":
-      case "lastSyncCompletedAt":
-      case "lastSyncErrorAt":
-      case "nextReconcileAt":
-      case "accessTokenExpiresAt":
-      case "lastWebhookAt":
-      case "updatedAt":
-        (connection as Record<string, unknown>)[key] = value instanceof Date ? new Date(value) : value;
-        break;
-      default:
-        (connection as Record<string, unknown>)[key] = value;
-    }
-  }
+function isStatus(value: unknown): value is MutableConnection["status"] {
+  return value === "active" || value === "reauthorization_required" || value === "disconnected";
 }

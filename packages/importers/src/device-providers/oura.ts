@@ -3,9 +3,10 @@ import {
   asArray,
   asPlainObject,
   createRawArtifact,
+  emitObservationMetrics,
+  emitSampleMetrics,
   finiteNumber,
   minutesBetween,
-  pushObservationEvent,
   pushDeletionObservation as pushSharedDeletionObservation,
   pushRawArtifact,
   pushSample,
@@ -21,7 +22,11 @@ import type {
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
 } from "../core-port.js";
-import type { PlainObject } from "./shared-normalization.js";
+import type {
+  ObservationMetricDescriptor,
+  PlainObject,
+  SampleMetricDescriptor,
+} from "./shared-normalization.js";
 import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.js";
 
 export interface OuraSnapshotInput {
@@ -89,6 +94,250 @@ function firstNumber(...candidates: unknown[]): number | undefined {
 
   return undefined;
 }
+
+interface OuraWorkoutMetricSource {
+  workout: PlainObject;
+  activityType: string;
+  distanceMeters?: number;
+}
+
+const OURA_DAILY_ACTIVITY_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
+  {
+    metric: "activity-score",
+    value: (activity) => activity.score,
+    unit: "%",
+    title: "Oura activity score",
+    facet: "activity-score",
+  },
+  {
+    metric: "daily-steps",
+    value: (activity) => activity.steps,
+    unit: "count",
+    title: "Oura daily steps",
+    facet: "steps",
+  },
+  {
+    metric: "active-calories",
+    value: (activity) => activity.active_calories,
+    unit: "kcal",
+    title: "Oura active calories",
+    facet: "active-calories",
+  },
+  {
+    metric: "total-calories",
+    value: (activity) => activity.total_calories,
+    unit: "kcal",
+    title: "Oura total calories",
+    facet: "total-calories",
+  },
+  {
+    metric: "equivalent-walking-distance",
+    value: (activity) => activity.equivalent_walking_distance,
+    unit: "meter",
+    title: "Oura walking distance",
+    facet: "walking-distance",
+  },
+  {
+    metric: "non-wear-minutes",
+    value: (activity) => activity.non_wear_time,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura non-wear time",
+    facet: "non-wear-minutes",
+  },
+];
+
+const OURA_DAILY_SLEEP_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
+  {
+    metric: "sleep-score",
+    value: (summary) => summary.score,
+    unit: "%",
+    title: "Oura sleep score",
+    facet: "sleep-score",
+  },
+];
+
+const OURA_DAILY_READINESS_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
+  {
+    metric: "readiness-score",
+    value: (readiness) => readiness.score,
+    unit: "%",
+    title: "Oura readiness score",
+    facet: "readiness-score",
+  },
+  {
+    metric: "temperature-deviation",
+    value: (readiness) => readiness.temperature_deviation,
+    unit: "celsius",
+    title: "Oura temperature deviation",
+    facet: "temperature-deviation",
+  },
+  {
+    metric: "temperature-trend-deviation",
+    value: (readiness) => readiness.temperature_trend_deviation,
+    unit: "celsius",
+    title: "Oura temperature trend deviation",
+    facet: "temperature-trend-deviation",
+  },
+];
+
+const OURA_DAILY_SPO2_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
+  {
+    metric: "spo2",
+    value: (spo2) => asPlainObject(spo2.spo2_percentage)?.average,
+    unit: "%",
+    title: "Oura average SpO2",
+    facet: "spo2-average",
+  },
+  {
+    metric: "breathing-disturbance-index",
+    value: (spo2) => spo2.breathing_disturbance_index,
+    unit: "count",
+    title: "Oura breathing disturbance index",
+    facet: "breathing-disturbance-index",
+  },
+];
+
+const OURA_SLEEP_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject>[] = [
+  {
+    stream: "respiratory_rate",
+    value: (sleep) => sleep.average_breath,
+    unit: "breaths_per_minute",
+    facet: "respiratory-rate",
+  },
+  {
+    stream: "hrv",
+    value: (sleep) => sleep.average_hrv,
+    unit: "ms",
+    facet: "average-hrv",
+  },
+  {
+    stream: "heart_rate",
+    value: (sleep) => sleep.average_heart_rate,
+    unit: "bpm",
+    facet: "average-heart-rate",
+  },
+];
+
+const OURA_SLEEP_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
+  {
+    metric: "sleep-efficiency",
+    value: (sleep) => sleep.efficiency,
+    unit: "%",
+    title: "Oura sleep efficiency",
+    facet: "sleep-efficiency",
+  },
+  {
+    metric: "sleep-total-minutes",
+    value: (sleep) => sleep.total_sleep_duration,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura total sleep",
+    facet: "sleep-total-minutes",
+  },
+  {
+    metric: "time-in-bed-minutes",
+    value: (sleep) => sleep.time_in_bed,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura time in bed",
+    facet: "time-in-bed-minutes",
+  },
+  {
+    metric: "sleep-awake-minutes",
+    value: (sleep) => sleep.awake_time,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura awake time",
+    facet: "sleep-awake-minutes",
+  },
+  {
+    metric: "sleep-deep-minutes",
+    value: (sleep) => sleep.deep_sleep_duration,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura deep sleep",
+    facet: "sleep-deep-minutes",
+  },
+  {
+    metric: "sleep-light-minutes",
+    value: (sleep) => sleep.light_sleep_duration,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura light sleep",
+    facet: "sleep-light-minutes",
+  },
+  {
+    metric: "sleep-rem-minutes",
+    value: (sleep) => sleep.rem_sleep_duration,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura REM sleep",
+    facet: "sleep-rem-minutes",
+  },
+  {
+    metric: "sleep-latency-minutes",
+    value: (sleep) => sleep.latency,
+    transform: secondsToMinutes,
+    unit: "minutes",
+    title: "Oura sleep latency",
+    facet: "sleep-latency-minutes",
+  },
+  {
+    metric: "lowest-heart-rate",
+    value: (sleep) => sleep.lowest_heart_rate,
+    unit: "bpm",
+    title: "Oura lowest heart rate",
+    facet: "lowest-heart-rate",
+  },
+  {
+    metric: "sleep-score-delta",
+    value: (sleep) => sleep.sleep_score_delta,
+    unit: "score",
+    title: "Oura sleep score contribution",
+    facet: "sleep-score-delta",
+  },
+  {
+    metric: "readiness-score-delta",
+    value: (sleep) => sleep.readiness_score_delta,
+    unit: "score",
+    title: "Oura readiness contribution",
+    facet: "readiness-score-delta",
+  },
+];
+
+const OURA_SESSION_SAMPLE_METRICS: readonly SampleMetricDescriptor<PlainObject>[] = [
+  {
+    stream: "heart_rate",
+    value: (session) => session.heart_rate,
+    unit: "bpm",
+    facet: "heart-rate",
+  },
+  {
+    stream: "hrv",
+    value: (session) => session.heart_rate_variability,
+    unit: "ms",
+    facet: "hrv",
+  },
+];
+
+const OURA_WORKOUT_OBSERVATION_METRICS: readonly ObservationMetricDescriptor<OuraWorkoutMetricSource>[] = [
+  {
+    metric: "active-calories",
+    value: ({ workout }) =>
+      firstNumber(workout.calories, workout.active_calories, workout.total_calories),
+    unit: "kcal",
+    title: ({ activityType }) => `Oura ${activityType} calories`,
+    facet: "active-calories",
+  },
+  {
+    metric: "distance",
+    value: ({ distanceMeters }) => distanceMeters,
+    unit: "meter",
+    title: ({ activityType }) => `Oura ${activityType} distance`,
+    facet: "distance",
+  },
+];
 
 function pushDeletionObservation(
   events: DeviceEventPayload[],
@@ -173,69 +422,21 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const recordedAt = firstIso(activity.timestamp, activity.day) ?? importedAt;
     const occurredAt = recordedAt;
     const role = `daily-activity:${activityId}`;
+    const version = firstIso(activity.timestamp);
 
     pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-activity-${activityId}.json`, activity));
 
-    pushObservationEvent(events, {
-      metric: "activity-score",
-      value: activity.score,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "Oura activity score",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-activity", activityId, firstIso(activity.timestamp), "activity-score"),
-    });
-    pushObservationEvent(events, {
-      metric: "daily-steps",
-      value: activity.steps,
-      unit: "count",
-      occurredAt,
-      recordedAt,
-      title: "Oura daily steps",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-activity", activityId, firstIso(activity.timestamp), "steps"),
-    });
-    pushObservationEvent(events, {
-      metric: "active-calories",
-      value: activity.active_calories,
-      unit: "kcal",
-      occurredAt,
-      recordedAt,
-      title: "Oura active calories",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-activity", activityId, firstIso(activity.timestamp), "active-calories"),
-    });
-    pushObservationEvent(events, {
-      metric: "total-calories",
-      value: activity.total_calories,
-      unit: "kcal",
-      occurredAt,
-      recordedAt,
-      title: "Oura total calories",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-activity", activityId, firstIso(activity.timestamp), "total-calories"),
-    });
-    pushObservationEvent(events, {
-      metric: "equivalent-walking-distance",
-      value: activity.equivalent_walking_distance,
-      unit: "meter",
-      occurredAt,
-      recordedAt,
-      title: "Oura walking distance",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-activity", activityId, firstIso(activity.timestamp), "walking-distance"),
-    });
-    pushObservationEvent(events, {
-      metric: "non-wear-minutes",
-      value: secondsToMinutes(activity.non_wear_time),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura non-wear time",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-activity", activityId, firstIso(activity.timestamp), "non-wear-minutes"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: activity,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [role],
+        externalRef: (facet) => makeExternalRef("daily-activity", activityId, version, facet),
+      },
+      OURA_DAILY_ACTIVITY_METRICS,
+    );
   }
 
   for (const summary of dailySleep) {
@@ -243,19 +444,21 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const recordedAt = firstIso(summary.timestamp, summary.day) ?? importedAt;
     const occurredAt = recordedAt;
     const role = `daily-sleep:${summaryId}`;
+    const version = firstIso(summary.timestamp);
 
     pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-sleep-${summaryId}.json`, summary));
 
-    pushObservationEvent(events, {
-      metric: "sleep-score",
-      value: summary.score,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "Oura sleep score",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-sleep", summaryId, firstIso(summary.timestamp), "sleep-score"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: summary,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [role],
+        externalRef: (facet) => makeExternalRef("daily-sleep", summaryId, version, facet),
+      },
+      OURA_DAILY_SLEEP_METRICS,
+    );
   }
 
   for (const readiness of dailyReadiness) {
@@ -264,54 +467,21 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const recordedAt = firstIso(readiness.timestamp, readiness.day) ?? importedAt;
     const occurredAt = recordedAt;
     const role = `daily-readiness:${readinessId}`;
+    const version = firstIso(readiness.timestamp);
 
     pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-readiness-${readinessId}.json`, readiness));
 
-    pushObservationEvent(events, {
-      metric: "readiness-score",
-      value: readiness.score,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "Oura readiness score",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef(
-        "daily-readiness",
-        readinessId,
-        firstIso(readiness.timestamp),
-        "readiness-score",
-      ),
-    });
-    pushObservationEvent(events, {
-      metric: "temperature-deviation",
-      value: readiness.temperature_deviation,
-      unit: "celsius",
-      occurredAt,
-      recordedAt,
-      title: "Oura temperature deviation",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef(
-        "daily-readiness",
-        readinessId,
-        firstIso(readiness.timestamp),
-        "temperature-deviation",
-      ),
-    });
-    pushObservationEvent(events, {
-      metric: "temperature-trend-deviation",
-      value: readiness.temperature_trend_deviation,
-      unit: "celsius",
-      occurredAt,
-      recordedAt,
-      title: "Oura temperature trend deviation",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef(
-        "daily-readiness",
-        readinessId,
-        firstIso(readiness.timestamp),
-        "temperature-trend-deviation",
-      ),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: readiness,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [role],
+        externalRef: (facet) => makeExternalRef("daily-readiness", readinessId, version, facet),
+      },
+      OURA_DAILY_READINESS_METRICS,
+    );
   }
 
   for (const spo2 of dailySpO2) {
@@ -319,35 +489,21 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const recordedAt = firstIso(spo2.timestamp, spo2.day) ?? importedAt;
     const occurredAt = recordedAt;
     const role = `daily-spo2:${spo2Id}`;
-    const spo2Percentage = asPlainObject(spo2.spo2_percentage);
+    const version = firstIso(spo2.timestamp);
 
     pushRawArtifact(rawArtifacts, createRawArtifact(role, `daily-spo2-${spo2Id}.json`, spo2));
 
-    pushObservationEvent(events, {
-      metric: "spo2",
-      value: spo2Percentage?.average,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "Oura average SpO2",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("daily-spo2", spo2Id, firstIso(spo2.timestamp), "spo2-average"),
-    });
-    pushObservationEvent(events, {
-      metric: "breathing-disturbance-index",
-      value: spo2.breathing_disturbance_index,
-      unit: "count",
-      occurredAt,
-      recordedAt,
-      title: "Oura breathing disturbance index",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef(
-        "daily-spo2",
-        spo2Id,
-        firstIso(spo2.timestamp),
-        "breathing-disturbance-index",
-      ),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: spo2,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [role],
+        externalRef: (facet) => makeExternalRef("daily-spo2", spo2Id, version, facet),
+      },
+      OURA_DAILY_SPO2_METRICS,
+    );
   }
 
   for (const sleep of sleeps) {
@@ -397,138 +553,27 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       );
     }
 
-    pushSample(samples, {
-      stream: "respiratory_rate",
-      value: sleep.average_breath,
-      unit: "breaths_per_minute",
-      recordedAt,
-      externalRef: makeExternalRef("sleep", sleepId, version, "respiratory-rate"),
-    });
-    pushSample(samples, {
-      stream: "hrv",
-      value: sleep.average_hrv,
-      unit: "ms",
-      recordedAt,
-      externalRef: makeExternalRef("sleep", sleepId, version, "average-hrv"),
-    });
-    pushSample(samples, {
-      stream: "heart_rate",
-      value: sleep.average_heart_rate,
-      unit: "bpm",
-      recordedAt,
-      externalRef: makeExternalRef("sleep", sleepId, version, "average-heart-rate"),
-    });
+    emitSampleMetrics(
+      samples,
+      {
+        source: sleep,
+        recordedAt,
+        externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
+      },
+      OURA_SLEEP_SAMPLE_METRICS,
+    );
 
-    pushObservationEvent(events, {
-      metric: "sleep-efficiency",
-      value: sleep.efficiency,
-      unit: "%",
-      occurredAt,
-      recordedAt,
-      title: "Oura sleep efficiency",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-efficiency"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-total-minutes",
-      value: secondsToMinutes(sleep.total_sleep_duration),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura total sleep",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-total-minutes"),
-    });
-    pushObservationEvent(events, {
-      metric: "time-in-bed-minutes",
-      value: secondsToMinutes(sleep.time_in_bed),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura time in bed",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "time-in-bed-minutes"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-awake-minutes",
-      value: secondsToMinutes(sleep.awake_time),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura awake time",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-awake-minutes"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-deep-minutes",
-      value: secondsToMinutes(sleep.deep_sleep_duration),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura deep sleep",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-deep-minutes"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-light-minutes",
-      value: secondsToMinutes(sleep.light_sleep_duration),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura light sleep",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-light-minutes"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-rem-minutes",
-      value: secondsToMinutes(sleep.rem_sleep_duration),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura REM sleep",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-rem-minutes"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-latency-minutes",
-      value: secondsToMinutes(sleep.latency),
-      unit: "minutes",
-      occurredAt,
-      recordedAt,
-      title: "Oura sleep latency",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-latency-minutes"),
-    });
-    pushObservationEvent(events, {
-      metric: "lowest-heart-rate",
-      value: sleep.lowest_heart_rate,
-      unit: "bpm",
-      occurredAt,
-      recordedAt,
-      title: "Oura lowest heart rate",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "lowest-heart-rate"),
-    });
-    pushObservationEvent(events, {
-      metric: "sleep-score-delta",
-      value: sleep.sleep_score_delta,
-      unit: "score",
-      occurredAt,
-      recordedAt,
-      title: "Oura sleep score contribution",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "sleep-score-delta"),
-    });
-    pushObservationEvent(events, {
-      metric: "readiness-score-delta",
-      value: sleep.readiness_score_delta,
-      unit: "score",
-      occurredAt,
-      recordedAt,
-      title: "Oura readiness contribution",
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("sleep", sleepId, version, "readiness-score-delta"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: sleep,
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [role],
+        externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
+      },
+      OURA_SLEEP_OBSERVATION_METRICS,
+    );
   }
 
   for (const session of sessions) {
@@ -564,20 +609,15 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       );
     }
 
-    pushSample(samples, {
-      stream: "heart_rate",
-      value: session.heart_rate,
-      unit: "bpm",
-      recordedAt,
-      externalRef: makeExternalRef("session", sessionId, version, "heart-rate"),
-    });
-    pushSample(samples, {
-      stream: "hrv",
-      value: session.heart_rate_variability,
-      unit: "ms",
-      recordedAt,
-      externalRef: makeExternalRef("session", sessionId, version, "hrv"),
-    });
+    emitSampleMetrics(
+      samples,
+      {
+        source: session,
+        recordedAt,
+        externalRef: (facet) => makeExternalRef("session", sessionId, version, facet),
+      },
+      OURA_SESSION_SAMPLE_METRICS,
+    );
   }
 
   for (const workout of workouts) {
@@ -620,26 +660,21 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       );
     }
 
-    pushObservationEvent(events, {
-      metric: "active-calories",
-      value: firstNumber(workout.calories, workout.active_calories, workout.total_calories),
-      unit: "kcal",
-      occurredAt,
-      recordedAt,
-      title: `Oura ${activityType} calories`,
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("workout", workoutId, version, "active-calories"),
-    });
-    pushObservationEvent(events, {
-      metric: "distance",
-      value: distanceMeters,
-      unit: "meter",
-      occurredAt,
-      recordedAt,
-      title: `Oura ${activityType} distance`,
-      rawArtifactRoles: [role],
-      externalRef: makeExternalRef("workout", workoutId, version, "distance"),
-    });
+    emitObservationMetrics(
+      events,
+      {
+        source: {
+          workout,
+          activityType,
+          distanceMeters,
+        },
+        occurredAt,
+        recordedAt,
+        rawArtifactRoles: [role],
+        externalRef: (facet) => makeExternalRef("workout", workoutId, version, facet),
+      },
+      OURA_WORKOUT_OBSERVATION_METRICS,
+    );
   }
 
   for (const point of heartrate) {

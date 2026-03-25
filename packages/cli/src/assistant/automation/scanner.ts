@@ -22,9 +22,13 @@ import {
   writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts,
 } from './artifacts.js'
-import { collectAssistantAutoReplyGroup } from './grouping.js'
+import {
+  collectAssistantAutoReplyGroup,
+  type AssistantAutoReplyGroupItem,
+} from './grouping.js'
 import {
   buildAssistantAutoReplyPrompt,
+  type AssistantAutoReplyPromptCapture,
 } from './prompt-builder.js'
 import {
   createEmptyAutoReplyScanResult,
@@ -38,6 +42,45 @@ import {
 } from './shared.js'
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+
+interface AssistantAutoReplyGroupContext {
+  captureCount: number
+  captureIds: string[]
+  firstCaptureId: string
+  firstItem: AssistantAutoReplyGroupItem
+  items: readonly AssistantAutoReplyGroupItem[]
+  lastCursor: AssistantAutomationCursor
+}
+
+interface AssistantAutoReplyReplyDecision {
+  kind: 'reply'
+  primaryCapture: InboxShowResult['capture']
+  prompt: string
+}
+
+interface AssistantAutoReplySkipDecision {
+  kind: 'skip'
+  advanceCursor: boolean
+  reason: string
+  stopScanning: boolean
+}
+
+type AssistantAutoReplyDecision =
+  | { kind: 'ignore' }
+  | AssistantAutoReplyReplyDecision
+  | AssistantAutoReplySkipDecision
+
+type AssistantAutoReplyFailureDecision =
+  | AssistantAutoReplySkipDecision
+  | {
+      advanceCursor: boolean
+      detail: string
+      kind: 'failure'
+    }
+
+interface AssistantAutoReplyScanState {
+  cursor: AssistantAutomationCursor | null
+}
 
 export async function scanAssistantInboxOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
@@ -278,7 +321,9 @@ export async function scanAssistantAutoReplyOnce(input: {
   }
 
   const summary = createEmptyAutoReplyScanResult()
-  let cursor = input.afterCursor ?? null
+  const scanState: AssistantAutoReplyScanState = {
+    cursor: input.afterCursor ?? null,
+  }
 
   for (let index = 0; index < captures.length; index += 1) {
     if (input.signal?.aborted) {
@@ -293,181 +338,341 @@ export async function scanAssistantAutoReplyOnce(input: {
     index = group.endIndex
     summary.considered += group.items.length
 
-    const firstItem = group.items[0]
-    const lastItem = group.items[group.items.length - 1]
-    if (!firstItem || !lastItem) {
+    const context = createAssistantAutoReplyGroupContext(group.items)
+    if (!context) {
       continue
     }
 
     try {
-      if (!enabledChannels.includes(firstItem.summary.source)) {
-        summary.skipped += group.items.length
-        cursor = cursorFromCapture(lastItem.summary)
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: 'channel not enabled for assistant auto-reply',
-        })
-        continue
-      }
-
-      if (firstItem.summary.actorIsSelf && !(input.allowSelfAuthored ?? false)) {
-        summary.skipped += group.items.length
-        cursor = cursorFromCapture(lastItem.summary)
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: 'capture is self-authored',
-        })
-        continue
-      }
-
-      const existingArtifact = await Promise.all(
-        group.items.map((item) =>
-          assistantChatReplyArtifactExists(input.vault, item.summary.captureId),
-        ),
-      )
-      if (existingArtifact.some(Boolean)) {
-        summary.skipped += group.items.length
-        cursor = cursorFromCapture(lastItem.summary)
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: 'assistant reply already exists',
-        })
-        continue
-      }
-
-      const shownGroup = await Promise.all(
-        group.items.map(async (item) => ({
-          capture: (
-            await input.inboxServices.show({
-              vault: input.vault,
-              requestId: input.requestId ?? null,
-              captureId: item.summary.captureId,
-            })
-          ).capture,
-          telegramMetadata: item.telegramMetadata,
-        })),
-      )
-      const primaryCapture = shownGroup[0]?.capture
-      if (!primaryCapture) {
-        continue
-      }
-
-      const channelAdapter = getAssistantChannelAdapter(primaryCapture.source)
-      const autoReplySkipReason = channelAdapter?.canAutoReply(primaryCapture) ?? null
-      if (autoReplySkipReason) {
-        summary.skipped += group.items.length
-        cursor = cursorFromCapture(lastItem.summary)
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: autoReplySkipReason,
-        })
-        continue
-      }
-
-      const prompt = buildAssistantAutoReplyPrompt(shownGroup)
-      if (prompt.kind === 'defer') {
-        summary.skipped += group.items.length
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: prompt.reason,
-        })
-        break
-      }
-      if (prompt.kind === 'skip') {
-        summary.skipped += group.items.length
-        cursor = cursorFromCapture(lastItem.summary)
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: prompt.reason,
-        })
-        continue
-      }
-      if (
-        firstItem.summary.actorIsSelf &&
-        (await isRecentSelfAuthoredAssistantEcho({
-          vault: input.vault,
-          capture: primaryCapture,
-        }))
-      ) {
-        summary.skipped += group.items.length
-        cursor = cursorFromCapture(lastItem.summary)
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: 'capture matches a recent assistant delivery',
-        })
-        continue
-      }
-      const result = await sendAssistantMessage({
+      const decision = await evaluateAssistantAutoReplyGroup({
+        allowSelfAuthored: input.allowSelfAuthored ?? false,
+        enabledChannels,
+        group: context,
+        inboxServices: input.inboxServices,
+        requestId: input.requestId ?? null,
         vault: input.vault,
-        conversation: conversationRefFromCapture(primaryCapture),
-        enableFirstTurnOnboarding: true,
-        persistUserPromptOnFailure: false,
-        prompt: prompt.prompt,
-        deliverResponse: true,
+      })
+      if (decision.kind === 'ignore') {
+        continue
+      }
+      if (decision.kind === 'skip') {
+        applySkippedGroup({
+          context,
+          onEvent: input.onEvent,
+          reason: decision.reason,
+          scanState,
+          summary,
+          advanceCursor: decision.advanceCursor,
+        })
+        if (decision.stopScanning) {
+          break
+        }
+        continue
+      }
+
+      const result = await executeAssistantAutoReply({
         maxSessionAgeMs: input.sessionMaxAgeMs ?? null,
-      })
-
-      if (result.deliveryError || result.delivery === null) {
-        throw new Error(
-          result.deliveryError?.message ??
-            'assistant generated a response, but the outbound delivery channel did not confirm the send',
-        )
-      }
-
-      await writeAssistantChatResultArtifacts({
-        captureIds: group.items.map((item) => item.summary.captureId),
-        respondedAt: result.delivery.sentAt,
-        result,
+        primaryCapture: decision.primaryCapture,
+        prompt: decision.prompt,
         vault: input.vault,
       })
-      summary.replied += 1
-      cursor = cursorFromCapture(lastItem.summary)
-      input.onEvent?.({
-        type: 'capture.replied',
-        captureId: firstItem.summary.captureId,
-        details: `${result.delivery.channel} -> ${result.delivery.target}`,
+      await applySuccessfulReply({
+        context,
+        onEvent: input.onEvent,
+        result,
+        scanState,
+        summary,
+        vault: input.vault,
       })
     } catch (error) {
-      const detail = errorMessage(error)
-      if (isAssistantProviderConnectionLostError(error)) {
-        summary.skipped += group.items.length
-        input.onEvent?.({
-          type: 'capture.reply-skipped',
-          captureId: firstItem.summary.captureId,
-          details: `${detail} Will retry this capture after the provider reconnects.`,
+      const failureDecision = classifyAssistantAutoReplyFailure(error)
+      if (failureDecision.kind === 'skip') {
+        applySkippedGroup({
+          context,
+          onEvent: input.onEvent,
+          reason: failureDecision.reason,
+          scanState,
+          summary,
+          advanceCursor: failureDecision.advanceCursor,
         })
-        break
+        if (failureDecision.stopScanning) {
+          break
+        }
+        continue
       }
 
-      summary.failed += 1
-      cursor = cursorFromCapture(lastItem.summary)
-      await writeAssistantChatErrorArtifacts({
-        captureIds: group.items.map((item) => item.summary.captureId),
-        error,
+      await applyFailedGroup({
+        advanceCursor: failureDecision.advanceCursor,
+        context,
         vault: input.vault,
-      }).catch(() => {})
-      input.onEvent?.({
-        type: 'capture.reply-failed',
-        captureId: firstItem.summary.captureId,
-        details: detail,
+        error,
+        onEvent: input.onEvent,
+        scanState,
+        summary,
+        detail: failureDecision.detail,
       })
       continue
     }
   }
 
   await input.onStateProgress?.({
-    cursor,
+    cursor: scanState.cursor,
     primed: true,
   })
 
   return summary
+}
+
+function createAssistantAutoReplyGroupContext(
+  items: readonly AssistantAutoReplyGroupItem[],
+): AssistantAutoReplyGroupContext | null {
+  const firstItem = items[0]
+  const lastItem = items[items.length - 1]
+  if (!firstItem || !lastItem) {
+    return null
+  }
+
+  return {
+    captureCount: items.length,
+    captureIds: items.map((item) => item.summary.captureId),
+    firstCaptureId: firstItem.summary.captureId,
+    firstItem,
+    items,
+    lastCursor: cursorFromCapture(lastItem.summary),
+  }
+}
+
+async function evaluateAssistantAutoReplyGroup(input: {
+  allowSelfAuthored: boolean
+  enabledChannels: readonly string[]
+  group: AssistantAutoReplyGroupContext
+  inboxServices: InboxCliServices
+  requestId: string | null
+  vault: string
+}): Promise<AssistantAutoReplyDecision> {
+  if (!input.enabledChannels.includes(input.group.firstItem.summary.source)) {
+    return createAdvancingSkipDecision(
+      'channel not enabled for assistant auto-reply',
+    )
+  }
+
+  if (input.group.firstItem.summary.actorIsSelf && !input.allowSelfAuthored) {
+    return createAdvancingSkipDecision('capture is self-authored')
+  }
+
+  const existingArtifact = await Promise.all(
+    input.group.captureIds.map((captureId) =>
+      assistantChatReplyArtifactExists(input.vault, captureId),
+    ),
+  )
+  if (existingArtifact.some(Boolean)) {
+    return createAdvancingSkipDecision('assistant reply already exists')
+  }
+
+  const shownGroup = await loadAssistantAutoReplyCaptures({
+    group: input.group,
+    inboxServices: input.inboxServices,
+    requestId: input.requestId,
+    vault: input.vault,
+  })
+  const primaryCapture = shownGroup[0]?.capture
+  if (!primaryCapture) {
+    return { kind: 'ignore' }
+  }
+
+  const channelAdapter = getAssistantChannelAdapter(primaryCapture.source)
+  const autoReplySkipReason = channelAdapter?.canAutoReply(primaryCapture) ?? null
+  if (autoReplySkipReason) {
+    return createAdvancingSkipDecision(autoReplySkipReason)
+  }
+
+  const prompt = buildAssistantAutoReplyPrompt(shownGroup)
+  if (prompt.kind === 'defer') {
+    return createDeferredSkipDecision(prompt.reason)
+  }
+  if (prompt.kind === 'skip') {
+    return createAdvancingSkipDecision(prompt.reason)
+  }
+
+  if (
+    input.group.firstItem.summary.actorIsSelf &&
+    (await isRecentSelfAuthoredAssistantEcho({
+      vault: input.vault,
+      capture: primaryCapture,
+    }))
+  ) {
+    return createAdvancingSkipDecision(
+      'capture matches a recent assistant delivery',
+    )
+  }
+
+  return {
+    kind: 'reply',
+    primaryCapture,
+    prompt: prompt.prompt,
+  }
+}
+
+async function loadAssistantAutoReplyCaptures(input: {
+  group: AssistantAutoReplyGroupContext
+  inboxServices: InboxCliServices
+  requestId: string | null
+  vault: string
+}): Promise<AssistantAutoReplyPromptCapture[]> {
+  return Promise.all(
+    input.group.items.map(async (item) => ({
+      capture: (
+        await input.inboxServices.show({
+          vault: input.vault,
+          requestId: input.requestId,
+          captureId: item.summary.captureId,
+        })
+      ).capture,
+      telegramMetadata: item.telegramMetadata,
+    })),
+  )
+}
+
+async function executeAssistantAutoReply(input: {
+  maxSessionAgeMs: number | null
+  primaryCapture: InboxShowResult['capture']
+  prompt: string
+  vault: string
+}): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
+  const result = await sendAssistantMessage({
+    vault: input.vault,
+    conversation: conversationRefFromCapture(input.primaryCapture),
+    enableFirstTurnOnboarding: true,
+    persistUserPromptOnFailure: false,
+    prompt: input.prompt,
+    deliverResponse: true,
+    maxSessionAgeMs: input.maxSessionAgeMs,
+  })
+
+  if (result.deliveryError || result.delivery === null) {
+    throw new Error(
+      result.deliveryError?.message ??
+        'assistant generated a response, but the outbound delivery channel did not confirm the send',
+    )
+  }
+
+  return result
+}
+
+function classifyAssistantAutoReplyFailure(
+  error: unknown,
+): AssistantAutoReplyFailureDecision {
+  const detail = errorMessage(error)
+  if (isAssistantProviderConnectionLostError(error)) {
+    return createDeferredSkipDecision(
+      `${detail} Will retry this capture after the provider reconnects.`,
+    )
+  }
+
+  return {
+    advanceCursor: true,
+    detail,
+    kind: 'failure',
+  }
+}
+
+function createAdvancingSkipDecision(
+  reason: string,
+): AssistantAutoReplySkipDecision {
+  return {
+    advanceCursor: true,
+    kind: 'skip',
+    reason,
+    stopScanning: false,
+  }
+}
+
+// Deferred skips intentionally leave the cursor in place so the same grouped
+// capture can be retried after parser/provider state recovers.
+function createDeferredSkipDecision(
+  reason: string,
+): AssistantAutoReplySkipDecision {
+  return {
+    advanceCursor: false,
+    kind: 'skip',
+    reason,
+    stopScanning: true,
+  }
+}
+
+function applySkippedGroup(input: {
+  advanceCursor: boolean
+  context: AssistantAutoReplyGroupContext
+  onEvent?: (event: AssistantRunEvent) => void
+  reason: string
+  scanState: AssistantAutoReplyScanState
+  summary: AssistantAutoReplyScanResult
+}): void {
+  input.summary.skipped += input.context.captureCount
+  if (input.advanceCursor) {
+    input.scanState.cursor = input.context.lastCursor
+  }
+  input.onEvent?.({
+    type: 'capture.reply-skipped',
+    captureId: input.context.firstCaptureId,
+    details: input.reason,
+  })
+}
+
+async function applySuccessfulReply(input: {
+  context: AssistantAutoReplyGroupContext
+  onEvent?: (event: AssistantRunEvent) => void
+  result: Awaited<ReturnType<typeof sendAssistantMessage>>
+  scanState: AssistantAutoReplyScanState
+  summary: AssistantAutoReplyScanResult
+  vault: string
+}): Promise<void> {
+  const delivery = input.result.delivery
+  if (!delivery) {
+    throw new Error(
+      'assistant auto-reply delivery was missing after delivery confirmation',
+    )
+  }
+
+  await writeAssistantChatResultArtifacts({
+    captureIds: input.context.captureIds,
+    respondedAt: delivery.sentAt,
+    result: input.result,
+    vault: input.vault,
+  })
+  input.summary.replied += 1
+  input.scanState.cursor = input.context.lastCursor
+  input.onEvent?.({
+    type: 'capture.replied',
+    captureId: input.context.firstCaptureId,
+    details: `${delivery.channel} -> ${delivery.target}`,
+  })
+}
+
+async function applyFailedGroup(input: {
+  advanceCursor: boolean
+  context: AssistantAutoReplyGroupContext
+  detail: string
+  error: unknown
+  onEvent?: (event: AssistantRunEvent) => void
+  scanState: AssistantAutoReplyScanState
+  summary: AssistantAutoReplyScanResult
+  vault: string
+}): Promise<void> {
+  input.summary.failed += 1
+  if (input.advanceCursor) {
+    input.scanState.cursor = input.context.lastCursor
+  }
+  await writeAssistantChatErrorArtifacts({
+    captureIds: input.context.captureIds,
+    error: input.error,
+    vault: input.vault,
+  }).catch(() => {})
+  input.onEvent?.({
+    type: 'capture.reply-failed',
+    captureId: input.context.firstCaptureId,
+    details: input.detail,
+  })
 }
 
 async function isRecentSelfAuthoredAssistantEcho(input: {

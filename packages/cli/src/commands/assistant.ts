@@ -195,16 +195,6 @@ const assistantDeliveryOptionFields = {
     ),
 }
 
-function buildAssistantCronResultPaths(vault: string) {
-  const statePaths = resolveAssistantStatePaths(vault)
-  return {
-    vault: redactAssistantDisplayPath(vault),
-    stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
-    jobsPath: redactAssistantDisplayPath(statePaths.cronJobsPath),
-    runsRoot: redactAssistantDisplayPath(statePaths.cronRunsDirectory),
-  }
-}
-
 function parseAssistantCronPresetVariables(
   value: readonly string[] | undefined,
 ): Record<string, string> {
@@ -259,6 +249,104 @@ const assistantChatOptionsSchema = withBaseOptions({
 type AssistantChatArgs = z.infer<typeof assistantChatArgsSchema>
 type AssistantChatOptions = z.infer<typeof assistantChatOptionsSchema>
 
+type AssistantConversationCliOptions = {
+  alias?: string
+  channel?: string
+  identity?: string
+  participant?: string
+  session?: string
+  sourceThread?: string
+}
+
+type AssistantProviderCliOptions = {
+  apiKeyEnv?: string
+  approvalPolicy?: AssistantChatOptions['approvalPolicy']
+  baseUrl?: string
+  codexCommand?: string
+  model?: string
+  oss?: boolean
+  profile?: string
+  provider?: AssistantChatOptions['provider']
+  providerName?: string
+  sandbox?: AssistantChatOptions['sandbox']
+}
+
+type AssistantDeliveryCliOptions = {
+  deliverResponse?: boolean
+  deliveryTarget?: string
+}
+
+function buildAssistantVaultResultPath(vault: string) {
+  return {
+    vault: redactAssistantDisplayPath(vault),
+  }
+}
+
+function buildAssistantStateRootResultPaths(vault: string, stateRoot: string) {
+  return {
+    ...buildAssistantVaultResultPath(vault),
+    stateRoot: redactAssistantDisplayPath(stateRoot),
+  }
+}
+
+function buildAssistantStateResultPaths(vault: string) {
+  const statePaths = resolveAssistantStatePaths(vault)
+  return buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot)
+}
+
+function buildAssistantMemoryResultPaths(vault: string) {
+  const statePaths = resolveAssistantMemoryStoragePaths(vault)
+  return buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot)
+}
+
+function buildAssistantCronResultPaths(vault: string) {
+  const statePaths = resolveAssistantStatePaths(vault)
+  return {
+    ...buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot),
+    jobsPath: redactAssistantDisplayPath(statePaths.cronJobsPath),
+    runsRoot: redactAssistantDisplayPath(statePaths.cronRunsDirectory),
+  }
+}
+
+function assistantConversationOptionsFromCli<T extends AssistantConversationCliOptions>(
+  options: T,
+) {
+  return {
+    sessionId: options.session,
+    alias: options.alias,
+    channel: options.channel,
+    identityId: options.identity,
+    participantId: options.participant,
+    sourceThreadId: options.sourceThread,
+  }
+}
+
+function assistantProviderOverridesFromCli<T extends AssistantProviderCliOptions>(
+  options: T,
+) {
+  return {
+    provider: options.provider,
+    codexCommand: options.codexCommand,
+    model: options.model,
+    baseUrl: options.baseUrl,
+    apiKeyEnv: options.apiKeyEnv,
+    providerName: options.providerName,
+    sandbox: options.sandbox,
+    approvalPolicy: options.approvalPolicy,
+    profile: options.profile,
+    oss: options.oss,
+  }
+}
+
+function assistantDeliveryOverridesFromCli<T extends AssistantDeliveryCliOptions>(
+  options: T,
+) {
+  return {
+    deliverResponse: options.deliverResponse,
+    deliveryTarget: options.deliveryTarget,
+  }
+}
+
 async function runAssistantChatCommand(context: {
   args: AssistantChatArgs
   options: AssistantChatOptions
@@ -269,22 +357,8 @@ async function runAssistantChatCommand(context: {
     vault: context.options.vault,
     enableFirstTurnOnboarding: true,
     initialPrompt: context.args.prompt,
-    sessionId: context.options.session,
-    alias: context.options.alias,
-    channel: context.options.channel,
-    identityId: context.options.identity,
-    participantId: context.options.participant,
-    sourceThreadId: context.options.sourceThread,
-    provider: context.options.provider,
-    codexCommand: context.options.codexCommand,
-    model: context.options.model,
-    baseUrl: context.options.baseUrl,
-    apiKeyEnv: context.options.apiKeyEnv,
-    providerName: context.options.providerName,
-    sandbox: context.options.sandbox,
-    approvalPolicy: context.options.approvalPolicy,
-    profile: context.options.profile,
-    oss: context.options.oss,
+    ...assistantConversationOptionsFromCli(context.options),
+    ...assistantProviderOverridesFromCli(context.options),
   })
 
   if (!context.agent && !context.formatExplicit) {
@@ -497,914 +571,889 @@ export function registerAssistantCommands(
       'Healthy Bob-native assistant runtime with provider-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
   })
 
-  assistant.command('ask', {
-    args: z.object({
-      prompt: z.string().min(1).describe('Prompt to send to the local assistant session.'),
-    }),
-    description:
-      'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
-    hint:
-      'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
-    examples: [
-      {
-        args: {
-          prompt: 'Summarize the latest documents in this vault.',
+  const registerConversationCommands = () => {
+    assistant.command('ask', {
+      args: z.object({
+        prompt: z.string().min(1).describe('Prompt to send to the local assistant session.'),
+      }),
+      description:
+        'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
+      hint:
+        'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
+      examples: [
+        {
+          args: {
+            prompt: 'Summarize the latest documents in this vault.',
+          },
+          options: {
+            vault: './vault',
+          },
+          description: 'Start a new local assistant session rooted at the vault directory.',
         },
-        options: {
-          vault: './vault',
+        {
+          args: {
+            prompt: 'Send a quick check-in about lunch.',
+          },
+          options: {
+            vault: './vault',
+            channel: 'imessage',
+            participant: '+15551234567',
+            deliverResponse: true,
+          },
+          description: 'Generate a reply locally and deliver it over iMessage.',
         },
-        description: 'Start a new local assistant session rooted at the vault directory.',
+        {
+          args: {
+            prompt: 'Reply that I can review the latest labs tonight.',
+          },
+          options: {
+            vault: './vault',
+            channel: 'telegram',
+            participant: '123456789',
+            sourceThread: '123456789',
+            deliverResponse: true,
+          },
+          description: 'Generate a reply locally and deliver it back into a Telegram bot chat.',
+        },
+        {
+          args: {
+            prompt: "Send today's summary by email.",
+          },
+          options: {
+            vault: './vault',
+            channel: 'email',
+            identity: 'inbox_123',
+            participant: 'you@example.com',
+            deliverResponse: true,
+          },
+          description: 'Generate a reply locally and deliver it over AgentMail email.',
+        },
+      ],
+      options: withBaseOptions({
+        ...assistantSessionOptionFields,
+        ...assistantProviderOptionFields,
+        ...assistantDeliveryOptionFields,
+      }),
+      output: assistantAskResultSchema,
+      async run(context) {
+        return sendAssistantMessage({
+          vault: context.options.vault,
+          prompt: context.args.prompt,
+          ...assistantConversationOptionsFromCli(context.options),
+          ...assistantProviderOverridesFromCli(context.options),
+          ...assistantDeliveryOverridesFromCli(context.options),
+        })
       },
-      {
-        args: {
-          prompt: 'Send a quick check-in about lunch.',
+    })
+
+    assistant.command('chat', createAssistantChatCommandDefinition())
+
+    assistant.command('deliver', {
+      args: z.object({
+        message: z
+          .string()
+          .min(1)
+          .describe('Outbound message body to deliver over the mapped assistant channel.'),
+      }),
+      description:
+        'Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, Linq, and email all use the same stored assistant channel binding surface.',
+      hint:
+        'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
+      examples: [
+        {
+          args: {
+            message: 'Here is your nutrition recap for lunch.',
+          },
+          options: {
+            vault: './vault',
+            channel: 'imessage',
+            participant: '+15551234567',
+          },
+          description: 'Send a direct iMessage to one participant.',
         },
-        options: {
-          vault: './vault',
-          channel: 'imessage',
-          participant: '+15551234567',
-          deliverResponse: true,
+        {
+          args: {
+            message: 'I saw the message and queued your follow-up.',
+          },
+          options: {
+            vault: './vault',
+            channel: 'linq',
+            sourceThread: 'chat_123',
+            deliveryTarget: 'chat_123',
+          },
+          description: 'Send a Linq reply back into the same direct chat.',
         },
-        description: 'Generate a reply locally and deliver it over iMessage.',
+        {
+          args: {
+            message: 'I imported that lab report and queued the parser.',
+          },
+          options: {
+            vault: './vault',
+            channel: 'telegram',
+            sourceThread: '-1001234567890:topic:42',
+            deliveryTarget: '-1001234567890:topic:42',
+          },
+          description: 'Send a Telegram reply into a specific chat topic.',
+        },
+        {
+          args: {
+            message: 'Your weekly summary is ready.',
+          },
+          options: {
+            vault: './vault',
+            channel: 'email',
+            identity: 'inbox_123',
+            deliveryTarget: 'you@example.com',
+          },
+          description: 'Send a one-off outbound summary email through an AgentMail inbox.',
+        },
+        {
+          args: {
+            message: 'I imported that lab report and queued the parser.',
+          },
+          options: {
+            vault: './vault',
+            session: 'asst_123',
+            deliveryTarget: 'chat45e2b868',
+          },
+          description: 'Reuse an existing session and override the outbound target for one message.',
+        },
+      ],
+      options: withBaseOptions({
+        ...assistantSessionOptionFields,
+        deliveryTarget: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
+          ),
+      }),
+      output: assistantDeliverResultSchema,
+      async run(context) {
+        const deliveryOverrides = assistantDeliveryOverridesFromCli(context.options)
+        return deliverAssistantMessage({
+          vault: context.options.vault,
+          message: context.args.message,
+          ...assistantConversationOptionsFromCli(context.options),
+          target: deliveryOverrides.deliveryTarget,
+        })
       },
-      {
-        args: {
-          prompt: 'Reply that I can review the latest labs tonight.',
+    })
+
+    assistant.command(
+      'run',
+      createAssistantRunCommandDefinition(inboxServices, vaultServices),
+    )
+  }
+
+  const registerMemoryCommands = () => {
+    const memory = Cli.create('memory', {
+      description:
+        'Inspect and update non-canonical assistant memory stored outside the vault under assistant-state/.',
+    })
+
+    memory.command('search', {
+      args: emptyArgsSchema,
+      description:
+        'Search assistant memory across durable long-term notes and short-lived daily notes.',
+      hint:
+        'Use --scope long-term for durable identity/preferences/instructions and --scope daily for recent project context.',
+      examples: [
+        {
+          options: {
+            vault: './vault',
+            scope: 'long-term',
+            text: 'concise answers',
+          },
+          description: 'Search durable assistant response preferences.',
         },
-        options: {
-          vault: './vault',
-          channel: 'telegram',
-          participant: '123456789',
-          sourceThread: '123456789',
-          deliverResponse: true,
+        {
+          options: {
+            vault: './vault',
+            scope: 'daily',
+            limit: 5,
+          },
+          description: 'List the latest recent-context notes.',
         },
-        description: 'Generate a reply locally and deliver it back into a Telegram bot chat.',
+      ],
+      options: withBaseOptions({
+        text: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional lexical query for assistant memory search.'),
+        scope: z
+          .enum(assistantMemoryQueryScopeValues)
+          .default('all')
+          .describe('Choose long-term memory, daily notes, or both.'),
+        section: z
+          .enum(assistantMemoryVisibleSectionValues)
+          .optional()
+          .describe('Optional section filter such as Identity or Notes.'),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(25)
+          .default(8)
+          .describe('Maximum number of assistant memory hits to return.'),
+      }),
+      output: assistantMemorySearchResultSchema,
+      async run(context) {
+        const turnContext = resolveAssistantMemoryTurnContext()
+        if (turnContext) {
+          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+        }
+
+        const result = await searchAssistantMemory({
+          vault: context.options.vault,
+          text: context.options.text,
+          scope: context.options.scope,
+          section: context.options.section,
+          limit: context.options.limit,
+          includeSensitiveHealthContext:
+            turnContext?.allowSensitiveHealthContext ?? true,
+        })
+
+        return {
+          ...buildAssistantMemoryResultPaths(context.options.vault),
+          query: result.query,
+          scope: result.scope,
+          section: result.section,
+          results: result.results.map(redactAssistantMemorySearchHit),
+        }
       },
-      {
-        args: {
-          prompt: "Send today's summary by email.",
-        },
-        options: {
-          vault: './vault',
-          channel: 'email',
-          identity: 'inbox_123',
-          participant: 'you@example.com',
-          deliverResponse: true,
-        },
-        description: 'Generate a reply locally and deliver it over AgentMail email.',
+    })
+
+    memory.command('get', {
+      args: z.object({
+        memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
+      }),
+      description: 'Fetch one assistant memory record by id.',
+      options: withBaseOptions(),
+      output: assistantMemoryGetResultSchema,
+      async run(context) {
+        const turnContext = resolveAssistantMemoryTurnContext()
+        if (turnContext) {
+          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+        }
+
+        const memoryRecord = await getAssistantMemory({
+          vault: context.options.vault,
+          id: context.args.memoryId,
+          includeSensitiveHealthContext:
+            turnContext?.allowSensitiveHealthContext ?? true,
+        })
+
+        return {
+          ...buildAssistantMemoryResultPaths(context.options.vault),
+          memory: redactAssistantMemoryRecord(memoryRecord),
+        }
       },
-    ],
-    options: withBaseOptions({
-      ...assistantSessionOptionFields,
-      ...assistantProviderOptionFields,
-      ...assistantDeliveryOptionFields,
-    }),
-    output: assistantAskResultSchema,
-    async run(context) {
-      return sendAssistantMessage({
-        vault: context.options.vault,
-        prompt: context.args.prompt,
-        sessionId: context.options.session,
-        alias: context.options.alias,
-        channel: context.options.channel,
-        identityId: context.options.identity,
-        participantId: context.options.participant,
-        sourceThreadId: context.options.sourceThread,
-        provider: context.options.provider,
-        codexCommand: context.options.codexCommand,
-        model: context.options.model,
-        baseUrl: context.options.baseUrl,
-        apiKeyEnv: context.options.apiKeyEnv,
-        providerName: context.options.providerName,
-        sandbox: context.options.sandbox,
-        approvalPolicy: context.options.approvalPolicy,
-        profile: context.options.profile,
-        oss: context.options.oss,
-        deliverResponse: context.options.deliverResponse,
-        deliveryTarget: context.options.deliveryTarget,
-      })
-    },
-  })
+    })
 
-  assistant.command('chat', createAssistantChatCommandDefinition())
+    memory.command('upsert', {
+      args: z.object({
+        text: z
+          .string()
+          .min(1)
+          .describe('Assistant memory text to persist. Outside live turns, use the exact sentence you want stored.'),
+      }),
+      description:
+        'Create or update assistant memory through the typed memory commit layer.',
+      hint:
+        'Use --scope both to mirror durable long-term memory into today\'s daily note. Outside live assistant turns, phrase durable memory as the final stored sentence, such as "Call the user Alex.", "User prefers the default assistant tone.", or "Keep responses brief.". In live assistant turns, the host binds writes to the real user message and ignores any client-supplied --sourcePrompt.',
+      examples: [
+        {
+          args: {
+            text: 'Call the user Alex.',
+          },
+          options: {
+            vault: './vault',
+            scope: 'long-term',
+            section: 'Identity',
+          },
+          description: 'Persist a durable naming preference when you already know the canonical stored wording.',
+        },
+        {
+          args: {
+            text: 'Call me Alex.',
+          },
+          options: {
+            vault: './vault',
+            scope: 'both',
+            section: 'Identity',
+            sourcePrompt: 'Call me Alex from now on.',
+          },
+          description: 'Persist a durable naming preference from natural user wording and mirror it into the daily note.',
+        },
+        {
+          args: {
+            text: 'We are working on assistant memory tools.',
+          },
+          options: {
+            vault: './vault',
+            scope: 'daily',
+          },
+          description: 'Store short-lived project context only in the daily memory log.',
+        },
+      ],
+      options: withBaseOptions({
+        scope: z
+          .enum(assistantMemoryWriteScopeValues)
+          .default('long-term')
+          .describe('Persist long-term memory, a daily note, or both.'),
+        section: z
+          .enum(assistantMemoryLongTermSectionValues)
+          .optional()
+          .describe('Required for long-term memory writes; ignored for daily-only notes.'),
+        sourcePrompt: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional source user wording used for assistant-memory validation.'),
+      }),
+      output: assistantMemoryUpsertResultSchema,
+      async run(context) {
+        const turnContext = resolveAssistantMemoryTurnContext()
+        if (turnContext) {
+          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+        }
 
-  assistant.command('deliver', {
-    args: z.object({
-      message: z
-        .string()
-        .min(1)
-        .describe('Outbound message body to deliver over the mapped assistant channel.'),
-    }),
-    description:
-      'Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, Linq, and email all use the same stored assistant channel binding surface.',
-    hint:
-      'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
-    examples: [
-      {
-        args: {
-          message: 'Here is your nutrition recap for lunch.',
-        },
-        options: {
-          vault: './vault',
-          channel: 'imessage',
-          participant: '+15551234567',
-        },
-        description: 'Send a direct iMessage to one participant.',
+        const result = await upsertAssistantMemory({
+          vault: context.options.vault,
+          text: context.args.text,
+          scope: context.options.scope,
+          section: context.options.section,
+          sourcePrompt: context.options.sourcePrompt,
+          turnContext,
+        })
+
+        return {
+          ...buildAssistantMemoryResultPaths(context.options.vault),
+          scope: result.scope,
+          longTermAdded: result.longTermAdded,
+          dailyAdded: result.dailyAdded,
+          memories: result.memories.map(redactAssistantMemoryRecord),
+        }
       },
-      {
-        args: {
-          message: 'I saw the message and queued your follow-up.',
-        },
-        options: {
-          vault: './vault',
-          channel: 'linq',
-          sourceThread: 'chat_123',
-          deliveryTarget: 'chat_123',
-        },
-        description: 'Send a Linq reply back into the same direct chat.',
+    })
+
+    memory.command('forget', {
+      args: z.object({
+        memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
+      }),
+      description: 'Remove one assistant memory record by id.',
+      hint:
+        'Use this when a memory item is mistaken or obsolete; prefer forgetting it over appending a contradiction.',
+      options: withBaseOptions(),
+      output: assistantMemoryForgetResultSchema,
+      async run(context) {
+        const turnContext = resolveAssistantMemoryTurnContext()
+        if (turnContext) {
+          assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
+        }
+
+        const result = await forgetAssistantMemory({
+          vault: context.options.vault,
+          id: context.args.memoryId,
+        })
+
+        return {
+          ...buildAssistantMemoryResultPaths(context.options.vault),
+          removed: redactAssistantMemoryRecord(result.removed),
+        }
       },
-      {
-        args: {
-          message: 'I imported that lab report and queued the parser.',
-        },
-        options: {
-          vault: './vault',
-          channel: 'telegram',
-          sourceThread: '-1001234567890:topic:42',
-          deliveryTarget: '-1001234567890:topic:42',
-        },
-        description: 'Send a Telegram reply into a specific chat topic.',
+    })
+
+    assistant.command(memory)
+  }
+
+  const registerCronCommands = () => {
+    const cron = Cli.create('cron', {
+      description:
+        'Manage scheduled assistant prompts stored outside the canonical vault under assistant-state/cron.',
+    })
+
+    const preset = Cli.create('preset', {
+      description:
+        'Browse and materialize built-in assistant cron templates without editing scheduler state files directly.',
+    })
+
+    preset.command('list', {
+      args: emptyArgsSchema,
+      description: 'List the built-in assistant cron presets that can be installed later.',
+      hint:
+        'Presets are templates, not active jobs. Use `assistant cron preset install` to turn one into a real cron job.',
+      options: withBaseOptions(),
+      output: assistantCronPresetListResultSchema,
+      async run(context) {
+        return {
+          ...buildAssistantVaultResultPath(context.options.vault),
+          presets: listAssistantCronPresets(),
+        }
       },
-      {
-        args: {
-          message: 'Your weekly summary is ready.',
-        },
-        options: {
-          vault: './vault',
-          channel: 'email',
-          identity: 'inbox_123',
-          deliveryTarget: 'you@example.com',
-        },
-        description: 'Send a one-off outbound summary email through an AgentMail inbox.',
+    })
+
+    preset.command('show', {
+      args: z.object({
+        preset: z.string().min(1).describe('Assistant cron preset id to inspect.'),
+      }),
+      description: 'Show one built-in assistant cron preset, including its prompt template.',
+      options: withBaseOptions(),
+      output: assistantCronPresetShowResultSchema,
+      async run(context) {
+        const presetDefinition = getAssistantCronPreset(context.args.preset)
+        return {
+          ...buildAssistantVaultResultPath(context.options.vault),
+          preset: {
+            id: presetDefinition.id,
+            category: presetDefinition.category,
+            title: presetDefinition.title,
+            description: presetDefinition.description,
+            suggestedName: presetDefinition.suggestedName,
+            suggestedSchedule: presetDefinition.suggestedSchedule,
+            suggestedScheduleLabel: presetDefinition.suggestedScheduleLabel,
+            variables: presetDefinition.variables,
+          },
+          promptTemplate: presetDefinition.promptTemplate,
+        }
       },
-      {
-        args: {
-          message: 'I imported that lab report and queued the parser.',
+    })
+
+    preset.command('install', {
+      args: z.object({
+        preset: z.string().min(1).describe('Assistant cron preset id to install.'),
+      }),
+      description: 'Create one assistant cron job from a built-in preset template.',
+      hint:
+        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule.',
+      examples: [
+        {
+          args: {
+            preset: 'condition-research-roundup',
+          },
+          options: {
+            vault: './vault',
+            name: 'cholesterol-research-roundup',
+            var: ['condition_or_goal=lowering cholesterol'],
+          },
+          description: 'Install the condition research preset with a cholesterol-focused variable override.',
         },
-        options: {
-          vault: './vault',
-          session: 'asst_123',
-          deliveryTarget: 'chat45e2b868',
+        {
+          args: {
+            preset: 'environment-health-watch',
+          },
+          options: {
+            vault: './vault',
+            var: ['location_context=Brisbane, Queensland, Australia'],
+            channel: 'telegram',
+            participant: '123456789',
+            sourceThread: '123456789',
+            deliverResponse: true,
+          },
+          description: 'Install the environment-health preset and deliver the weekly report back into a Telegram chat.',
         },
-        description: 'Reuse an existing session and override the outbound target for one message.',
+      ],
+      options: withBaseOptions({
+        name: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional cron job name override. Defaults to the preset’s suggested name.'),
+        var: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Optional preset variable assignment in key=value form. Repeat --var for multiple values.',
+          ),
+        instructions: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional extra instructions appended to the preset prompt before the job is created.'),
+        at: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional one-shot ISO 8601 timestamp with an explicit offset.'),
+        every: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional recurring interval such as 30m, 2h, or 1d.'),
+        cron: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional five-field cron expression override.'),
+        disabled: z
+          .boolean()
+          .optional()
+          .describe('Create the preset-backed cron job in a disabled state without scheduling it yet.'),
+        ...assistantSessionOptionFields,
+        ...assistantDeliveryOptionFields,
+      }),
+      output: assistantCronPresetInstallResultSchema,
+      async run(context) {
+        const schedule =
+          context.options.at || context.options.every || context.options.cron
+            ? buildAssistantCronSchedule({
+                at: context.options.at,
+                every: context.options.every,
+                cron: context.options.cron,
+              })
+            : undefined
+        const result = await installAssistantCronPreset({
+          vault: context.options.vault,
+          presetId: context.args.preset,
+          name: context.options.name,
+          variables: parseAssistantCronPresetVariables(context.options.var),
+          additionalInstructions: context.options.instructions,
+          schedule,
+          enabled: context.options.disabled ? false : true,
+          ...assistantConversationOptionsFromCli(context.options),
+          ...assistantDeliveryOverridesFromCli(context.options),
+        })
+
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          preset: result.preset,
+          job: result.job,
+          resolvedPrompt: result.resolvedPrompt,
+          resolvedVariables: result.resolvedVariables,
+        }
       },
-    ],
-    options: withBaseOptions({
-      ...assistantSessionOptionFields,
-      deliveryTarget: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
-        ),
-    }),
-    output: assistantDeliverResultSchema,
-    async run(context) {
-      return deliverAssistantMessage({
-        vault: context.options.vault,
-        message: context.args.message,
-        sessionId: context.options.session,
-        alias: context.options.alias,
-        channel: context.options.channel,
-        identityId: context.options.identity,
-        participantId: context.options.participant,
-        sourceThreadId: context.options.sourceThread,
-        target: context.options.deliveryTarget,
-      })
-    },
-  })
+    })
 
-  assistant.command(
-    'run',
-    createAssistantRunCommandDefinition(inboxServices, vaultServices),
-  )
+    cron.command(preset)
 
-  const memory = Cli.create('memory', {
-    description:
-      'Inspect and update non-canonical assistant memory stored outside the vault under assistant-state/.',
-  })
-
-  memory.command('search', {
-    args: emptyArgsSchema,
-    description:
-      'Search assistant memory across durable long-term notes and short-lived daily notes.',
-    hint:
-      'Use --scope long-term for durable identity/preferences/instructions and --scope daily for recent project context.',
-    examples: [
-      {
-        options: {
-          vault: './vault',
-          scope: 'long-term',
-          text: 'concise answers',
-        },
-        description: 'Search durable assistant response preferences.',
+    cron.command('status', {
+      args: emptyArgsSchema,
+      description: 'Show scheduler counts and the next upcoming assistant cron run.',
+      hint: 'Assistant cron jobs execute while `assistant run` is active for the vault.',
+      options: withBaseOptions(),
+      output: assistantCronStatusResultSchema,
+      async run(context) {
+        const status = await getAssistantCronStatus(context.options.vault)
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          ...status,
+        }
       },
-      {
-        options: {
-          vault: './vault',
-          scope: 'daily',
-          limit: 5,
-        },
-        description: 'List the latest recent-context notes.',
+    })
+
+    cron.command('list', {
+      args: emptyArgsSchema,
+      description: 'List assistant cron jobs for one vault.',
+      options: withBaseOptions(),
+      output: assistantCronListResultSchema,
+      async run(context) {
+        const jobs = await listAssistantCronJobs(context.options.vault)
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          jobs,
+        }
       },
-    ],
-    options: withBaseOptions({
-      text: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional lexical query for assistant memory search.'),
-      scope: z
-        .enum(assistantMemoryQueryScopeValues)
-        .default('all')
-        .describe('Choose long-term memory, daily notes, or both.'),
-      section: z
-        .enum(assistantMemoryVisibleSectionValues)
-        .optional()
-        .describe('Optional section filter such as Identity or Notes.'),
-      limit: z
-        .number()
-        .int()
-        .positive()
-        .max(25)
-        .default(8)
-        .describe('Maximum number of assistant memory hits to return.'),
-    }),
-    output: assistantMemorySearchResultSchema,
-    async run(context) {
-      const turnContext = resolveAssistantMemoryTurnContext()
-      if (turnContext) {
-        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-      }
+    })
 
-      const result = await searchAssistantMemory({
-        vault: context.options.vault,
-        text: context.options.text,
-        scope: context.options.scope,
-        section: context.options.section,
-        limit: context.options.limit,
-        includeSensitiveHealthContext:
-          turnContext?.allowSensitiveHealthContext ?? true,
-      })
-      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
-
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
-        query: result.query,
-        scope: result.scope,
-        section: result.section,
-        results: result.results.map(redactAssistantMemorySearchHit),
-      }
-    },
-  })
-
-  memory.command('get', {
-    args: z.object({
-      memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
-    }),
-    description: 'Fetch one assistant memory record by id.',
-    options: withBaseOptions(),
-    output: assistantMemoryGetResultSchema,
-    async run(context) {
-      const turnContext = resolveAssistantMemoryTurnContext()
-      if (turnContext) {
-        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-      }
-
-      const memoryRecord = await getAssistantMemory({
-        vault: context.options.vault,
-        id: context.args.memoryId,
-        includeSensitiveHealthContext:
-          turnContext?.allowSensitiveHealthContext ?? true,
-      })
-      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
-
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
-        memory: redactAssistantMemoryRecord(memoryRecord),
-      }
-    },
-  })
-
-  memory.command('upsert', {
-    args: z.object({
-      text: z
-        .string()
-        .min(1)
-        .describe('Assistant memory text to persist. Outside live turns, use the exact sentence you want stored.'),
-    }),
-    description:
-      'Create or update assistant memory through the typed memory commit layer.',
-    hint:
-      'Use --scope both to mirror durable long-term memory into today\'s daily note. Outside live assistant turns, phrase durable memory as the final stored sentence, such as "Call the user Alex.", "User prefers the default assistant tone.", or "Keep responses brief.". In live assistant turns, the host binds writes to the real user message and ignores any client-supplied --sourcePrompt.',
-    examples: [
-      {
-        args: {
-          text: 'Call the user Alex.',
-        },
-        options: {
-          vault: './vault',
-          scope: 'long-term',
-          section: 'Identity',
-        },
-        description: 'Persist a durable naming preference when you already know the canonical stored wording.',
+    cron.command('show', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to inspect.'),
+      }),
+      description: 'Show one assistant cron job record.',
+      options: withBaseOptions(),
+      output: assistantCronShowResultSchema,
+      async run(context) {
+        const job = await getAssistantCronJob(context.options.vault, context.args.job)
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          job,
+        }
       },
-      {
-        args: {
-          text: 'Call me Alex.',
+    })
+
+    cron.command('add', {
+      args: z.object({
+        prompt: z.string().min(1).describe('Prompt to send when the assistant cron job fires.'),
+      }),
+      description: 'Create one assistant cron job backed by the local assistant runtime.',
+      hint:
+        'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun.',
+      examples: [
+        {
+          args: {
+            prompt: 'Check whether I have been sitting too long and remind me to stretch.',
+          },
+          options: {
+            vault: './vault',
+            name: 'stretch-reminder',
+            every: '2h',
+          },
+          description: 'Create a recurring interval job.',
         },
-        options: {
-          vault: './vault',
-          scope: 'both',
-          section: 'Identity',
-          sourcePrompt: 'Call me Alex from now on.',
+        {
+          args: {
+            prompt: 'Remind me to review my lab results after dinner.',
+          },
+          options: {
+            vault: './vault',
+            name: 'lab-review-tonight',
+            at: '2026-03-22T18:30:00+10:00',
+          },
+          description: 'Create a one-shot reminder at a specific timestamp.',
         },
-        description: 'Persist a durable naming preference from natural user wording and mirror it into the daily note.',
+        {
+          args: {
+            prompt: 'Every weekday morning, ask me for a quick symptom check-in.',
+          },
+          options: {
+            vault: './vault',
+            name: 'weekday-symptom-check',
+            cron: '0 8 * * 1-5',
+            channel: 'telegram',
+            participant: '-1001234567890',
+            deliverResponse: true,
+          },
+          description: 'Create a cron expression job that also delivers the reply back out.',
+        },
+      ],
+      options: withBaseOptions({
+        name: z
+          .string()
+          .min(1)
+          .describe('Unique assistant cron job name.'),
+        at: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('One-shot ISO 8601 timestamp with an explicit offset.'),
+        every: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Recurring interval such as 30m, 2h, or 1d.'),
+        cron: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Five-field cron expression: minute hour day-of-month month day-of-week.'),
+        keepAfterRun: z
+          .boolean()
+          .optional()
+          .describe('Keep a completed one-shot job in the scheduler instead of deleting it.'),
+        disabled: z
+          .boolean()
+          .optional()
+          .describe('Create the job in a disabled state without scheduling it yet.'),
+        ...assistantSessionOptionFields,
+        ...assistantDeliveryOptionFields,
+      }),
+      output: assistantCronAddResultSchema,
+      async run(context) {
+        const job = await addAssistantCronJob({
+          vault: context.options.vault,
+          name: context.options.name,
+          prompt: context.args.prompt,
+          schedule: buildAssistantCronSchedule({
+            at: context.options.at,
+            every: context.options.every,
+            cron: context.options.cron,
+          }),
+          enabled: context.options.disabled ? false : true,
+          keepAfterRun: context.options.keepAfterRun,
+          ...assistantConversationOptionsFromCli(context.options),
+          ...assistantDeliveryOverridesFromCli(context.options),
+        })
+
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          job,
+        }
       },
-      {
-        args: {
-          text: 'We are working on assistant memory tools.',
-        },
-        options: {
-          vault: './vault',
-          scope: 'daily',
-        },
-        description: 'Store short-lived project context only in the daily memory log.',
+    })
+
+    cron.command('remove', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to remove.'),
+      }),
+      description: 'Remove one assistant cron job from the scheduler.',
+      options: withBaseOptions(),
+      output: assistantCronRemoveResultSchema,
+      async run(context) {
+        const removed = await removeAssistantCronJob(
+          context.options.vault,
+          context.args.job,
+        )
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          removed,
+        }
       },
-    ],
-    options: withBaseOptions({
-      scope: z
-        .enum(assistantMemoryWriteScopeValues)
-        .default('long-term')
-        .describe('Persist long-term memory, a daily note, or both.'),
-      section: z
-        .enum(assistantMemoryLongTermSectionValues)
-        .optional()
-        .describe('Required for long-term memory writes; ignored for daily-only notes.'),
-      sourcePrompt: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional source user wording used for assistant-memory validation.'),
-    }),
-    output: assistantMemoryUpsertResultSchema,
-    async run(context) {
-      const turnContext = resolveAssistantMemoryTurnContext()
-      if (turnContext) {
-        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-      }
+    })
 
-      const result = await upsertAssistantMemory({
-        vault: context.options.vault,
-        text: context.args.text,
-        scope: context.options.scope,
-        section: context.options.section,
-        sourcePrompt: context.options.sourcePrompt,
-        turnContext,
-      })
-      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
-
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
-        scope: result.scope,
-        longTermAdded: result.longTermAdded,
-        dailyAdded: result.dailyAdded,
-        memories: result.memories.map(redactAssistantMemoryRecord),
-      }
-    },
-  })
-
-  memory.command('forget', {
-    args: z.object({
-      memoryId: z.string().min(1).describe('Assistant memory id returned by search.'),
-    }),
-    description: 'Remove one assistant memory record by id.',
-    hint:
-      'Use this when a memory item is mistaken or obsolete; prefer forgetting it over appending a contradiction.',
-    options: withBaseOptions(),
-    output: assistantMemoryForgetResultSchema,
-    async run(context) {
-      const turnContext = resolveAssistantMemoryTurnContext()
-      if (turnContext) {
-        assertAssistantMemoryTurnContextVault(turnContext, context.options.vault)
-      }
-
-      const result = await forgetAssistantMemory({
-        vault: context.options.vault,
-        id: context.args.memoryId,
-      })
-      const statePaths = resolveAssistantMemoryStoragePaths(context.options.vault)
-
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
-        removed: redactAssistantMemoryRecord(result.removed),
-      }
-    },
-  })
-
-  assistant.command(memory)
-
-  const cron = Cli.create('cron', {
-    description:
-      'Manage scheduled assistant prompts stored outside the canonical vault under assistant-state/cron.',
-  })
-
-  const preset = Cli.create('preset', {
-    description:
-      'Browse and materialize built-in assistant cron templates without editing scheduler state files directly.',
-  })
-
-  preset.command('list', {
-    args: emptyArgsSchema,
-    description: 'List the built-in assistant cron presets that can be installed later.',
-    hint:
-      'Presets are templates, not active jobs. Use `assistant cron preset install` to turn one into a real cron job.',
-    options: withBaseOptions(),
-    output: assistantCronPresetListResultSchema,
-    async run(context) {
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        presets: listAssistantCronPresets(),
-      }
-    },
-  })
-
-  preset.command('show', {
-    args: z.object({
-      preset: z.string().min(1).describe('Assistant cron preset id to inspect.'),
-    }),
-    description: 'Show one built-in assistant cron preset, including its prompt template.',
-    options: withBaseOptions(),
-    output: assistantCronPresetShowResultSchema,
-    async run(context) {
-      const presetDefinition = getAssistantCronPreset(context.args.preset)
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        preset: {
-          id: presetDefinition.id,
-          category: presetDefinition.category,
-          title: presetDefinition.title,
-          description: presetDefinition.description,
-          suggestedName: presetDefinition.suggestedName,
-          suggestedSchedule: presetDefinition.suggestedSchedule,
-          suggestedScheduleLabel: presetDefinition.suggestedScheduleLabel,
-          variables: presetDefinition.variables,
-        },
-        promptTemplate: presetDefinition.promptTemplate,
-      }
-    },
-  })
-
-  preset.command('install', {
-    args: z.object({
-      preset: z.string().min(1).describe('Assistant cron preset id to install.'),
-    }),
-    description: 'Create one assistant cron job from a built-in preset template.',
-    hint:
-      'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule.',
-    examples: [
-      {
-        args: {
-          preset: 'condition-research-roundup',
-        },
-        options: {
-          vault: './vault',
-          name: 'cholesterol-research-roundup',
-          var: ['condition_or_goal=lowering cholesterol'],
-        },
-        description: 'Install the condition research preset with a cholesterol-focused variable override.',
+    cron.command('enable', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to enable.'),
+      }),
+      description: 'Enable one assistant cron job.',
+      options: withBaseOptions(),
+      output: assistantCronShowResultSchema,
+      async run(context) {
+        const job = await setAssistantCronJobEnabled(
+          context.options.vault,
+          context.args.job,
+          true,
+        )
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          job,
+        }
       },
-      {
-        args: {
-          preset: 'environment-health-watch',
-        },
-        options: {
-          vault: './vault',
-          var: ['location_context=Brisbane, Queensland, Australia'],
-          channel: 'telegram',
-          participant: '123456789',
-          sourceThread: '123456789',
-          deliverResponse: true,
-        },
-        description: 'Install the environment-health preset and deliver the weekly report back into a Telegram chat.',
+    })
+
+    cron.command('disable', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to disable.'),
+      }),
+      description: 'Disable one assistant cron job without deleting it.',
+      options: withBaseOptions(),
+      output: assistantCronShowResultSchema,
+      async run(context) {
+        const job = await setAssistantCronJobEnabled(
+          context.options.vault,
+          context.args.job,
+          false,
+        )
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          job,
+        }
       },
-    ],
-    options: withBaseOptions({
-      name: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional cron job name override. Defaults to the preset’s suggested name.'),
-      var: z
-        .array(z.string().min(1))
-        .optional()
-        .describe(
-          'Optional preset variable assignment in key=value form. Repeat --var for multiple values.',
-        ),
-      instructions: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional extra instructions appended to the preset prompt before the job is created.'),
-      at: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional one-shot ISO 8601 timestamp with an explicit offset.'),
-      every: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional recurring interval such as 30m, 2h, or 1d.'),
-      cron: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional five-field cron expression override.'),
-      disabled: z
-        .boolean()
-        .optional()
-        .describe('Create the preset-backed cron job in a disabled state without scheduling it yet.'),
-      ...assistantSessionOptionFields,
-      ...assistantDeliveryOptionFields,
-    }),
-    output: assistantCronPresetInstallResultSchema,
-    async run(context) {
-      const schedule =
-        context.options.at || context.options.every || context.options.cron
-          ? buildAssistantCronSchedule({
-              at: context.options.at,
-              every: context.options.every,
-              cron: context.options.cron,
-            })
-          : undefined
-      const result = await installAssistantCronPreset({
-        vault: context.options.vault,
-        presetId: context.args.preset,
-        name: context.options.name,
-        variables: parseAssistantCronPresetVariables(context.options.var),
-        additionalInstructions: context.options.instructions,
-        schedule,
-        enabled: context.options.disabled ? false : true,
-        sessionId: context.options.session,
-        alias: context.options.alias,
-        channel: context.options.channel,
-        identityId: context.options.identity,
-        participantId: context.options.participant,
-        sourceThreadId: context.options.sourceThread,
-        deliverResponse: context.options.deliverResponse,
-        deliveryTarget: context.options.deliveryTarget,
-      })
+    })
 
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        preset: result.preset,
-        job: result.job,
-        resolvedPrompt: result.resolvedPrompt,
-        resolvedVariables: result.resolvedVariables,
-      }
-    },
-  })
-
-  cron.command(preset)
-
-  cron.command('status', {
-    args: emptyArgsSchema,
-    description: 'Show scheduler counts and the next upcoming assistant cron run.',
-    hint: 'Assistant cron jobs execute while `assistant run` is active for the vault.',
-    options: withBaseOptions(),
-    output: assistantCronStatusResultSchema,
-    async run(context) {
-      const status = await getAssistantCronStatus(context.options.vault)
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        ...status,
-      }
-    },
-  })
-
-  cron.command('list', {
-    args: emptyArgsSchema,
-    description: 'List assistant cron jobs for one vault.',
-    options: withBaseOptions(),
-    output: assistantCronListResultSchema,
-    async run(context) {
-      const jobs = await listAssistantCronJobs(context.options.vault)
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        jobs,
-      }
-    },
-  })
-
-  cron.command('show', {
-    args: z.object({
-      job: z.string().min(1).describe('Assistant cron job id or name to inspect.'),
-    }),
-    description: 'Show one assistant cron job record.',
-    options: withBaseOptions(),
-    output: assistantCronShowResultSchema,
-    async run(context) {
-      const job = await getAssistantCronJob(context.options.vault, context.args.job)
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        job,
-      }
-    },
-  })
-
-  cron.command('add', {
-    args: z.object({
-      prompt: z.string().min(1).describe('Prompt to send when the assistant cron job fires.'),
-    }),
-    description: 'Create one assistant cron job backed by the local assistant runtime.',
-    hint:
-      'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun.',
-    examples: [
-      {
-        args: {
-          prompt: 'Check whether I have been sitting too long and remind me to stretch.',
-        },
-        options: {
-          vault: './vault',
-          name: 'stretch-reminder',
-          every: '2h',
-        },
-        description: 'Create a recurring interval job.',
+    cron.command('run', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to run immediately.'),
+      }),
+      description: 'Run one assistant cron job immediately, regardless of its next scheduled time.',
+      options: withBaseOptions(),
+      output: assistantCronRunResultSchema,
+      async run(context) {
+        const result = await runAssistantCronJobNow({
+          vault: context.options.vault,
+          job: context.args.job,
+        })
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          job: result.job,
+          removedAfterRun: result.removedAfterRun,
+          run: result.run,
+        }
       },
-      {
-        args: {
-          prompt: 'Remind me to review my lab results after dinner.',
-        },
-        options: {
-          vault: './vault',
-          name: 'lab-review-tonight',
-          at: '2026-03-22T18:30:00+10:00',
-        },
-        description: 'Create a one-shot reminder at a specific timestamp.',
+    })
+
+    cron.command('runs', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to inspect run history for.'),
+      }),
+      description: 'List recent run history for one assistant cron job.',
+      options: withBaseOptions({
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(100)
+          .default(20)
+          .describe('Maximum number of recent runs to return.'),
+      }),
+      output: assistantCronRunsResultSchema,
+      async run(context) {
+        const result = await listAssistantCronRuns({
+          vault: context.options.vault,
+          job: context.args.job,
+          limit: context.options.limit,
+        })
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          jobId: result.jobId,
+          runs: result.runs,
+        }
       },
-      {
-        args: {
-          prompt: 'Every weekday morning, ask me for a quick symptom check-in.',
-        },
-        options: {
-          vault: './vault',
-          name: 'weekday-symptom-check',
-          cron: '0 8 * * 1-5',
-          channel: 'telegram',
-          participant: '-1001234567890',
-          deliverResponse: true,
-        },
-        description: 'Create a cron expression job that also delivers the reply back out.',
+    })
+
+    assistant.command(cron)
+  }
+
+  const registerSessionCommands = () => {
+    const session = Cli.create('session', {
+      description:
+        'Inspect Healthy Bob assistant session metadata stored outside the canonical vault.',
+    })
+
+    session.command('list', {
+      args: emptyArgsSchema,
+      description: 'List known assistant sessions for one vault.',
+      options: withBaseOptions(),
+      output: assistantSessionListResultSchema,
+      async run(context) {
+        const sessions = await listAssistantSessions(context.options.vault)
+        return {
+          ...buildAssistantStateResultPaths(context.options.vault),
+          sessions,
+        }
       },
-    ],
-    options: withBaseOptions({
-      name: z
-        .string()
-        .min(1)
-        .describe('Unique assistant cron job name.'),
-      at: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('One-shot ISO 8601 timestamp with an explicit offset.'),
-      every: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Recurring interval such as 30m, 2h, or 1d.'),
-      cron: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Five-field cron expression: minute hour day-of-month month day-of-week.'),
-      keepAfterRun: z
-        .boolean()
-        .optional()
-        .describe('Keep a completed one-shot job in the scheduler instead of deleting it.'),
-      disabled: z
-        .boolean()
-        .optional()
-        .describe('Create the job in a disabled state without scheduling it yet.'),
-      ...assistantSessionOptionFields,
-      ...assistantDeliveryOptionFields,
-    }),
-    output: assistantCronAddResultSchema,
-    async run(context) {
-      const job = await addAssistantCronJob({
-        vault: context.options.vault,
-        name: context.options.name,
-        prompt: context.args.prompt,
-        schedule: buildAssistantCronSchedule({
-          at: context.options.at,
-          every: context.options.every,
-          cron: context.options.cron,
-        }),
-        enabled: context.options.disabled ? false : true,
-        keepAfterRun: context.options.keepAfterRun,
-        sessionId: context.options.session,
-        alias: context.options.alias,
-        channel: context.options.channel,
-        identityId: context.options.identity,
-        participantId: context.options.participant,
-        sourceThreadId: context.options.sourceThread,
-        deliverResponse: context.options.deliverResponse,
-        deliveryTarget: context.options.deliveryTarget,
-      })
+    })
 
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        job,
-      }
-    },
-  })
+    session.command('show', {
+      args: z.object({
+        sessionId: z.string().min(1).describe('Healthy Bob assistant session id to inspect.'),
+      }),
+      description: 'Show one assistant session metadata record.',
+      options: withBaseOptions(),
+      output: assistantSessionShowResultSchema,
+      async run(context) {
+        const session = await getAssistantSession(
+          context.options.vault,
+          context.args.sessionId,
+        )
+        return {
+          ...buildAssistantStateResultPaths(context.options.vault),
+          session,
+        }
+      },
+    })
 
-  cron.command('remove', {
-    args: z.object({
-      job: z.string().min(1).describe('Assistant cron job id or name to remove.'),
-    }),
-    description: 'Remove one assistant cron job from the scheduler.',
-    options: withBaseOptions(),
-    output: assistantCronRemoveResultSchema,
-    async run(context) {
-      const removed = await removeAssistantCronJob(
-        context.options.vault,
-        context.args.job,
-      )
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        removed,
-      }
-    },
-  })
+    assistant.command(session)
+  }
 
-  cron.command('enable', {
-    args: z.object({
-      job: z.string().min(1).describe('Assistant cron job id or name to enable.'),
-    }),
-    description: 'Enable one assistant cron job.',
-    options: withBaseOptions(),
-    output: assistantCronShowResultSchema,
-    async run(context) {
-      const job = await setAssistantCronJobEnabled(
-        context.options.vault,
-        context.args.job,
-        true,
-      )
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        job,
-      }
-    },
-  })
+  const registerRootAliases = () => {
+    cli.command(
+      'chat',
+      createAssistantChatCommandDefinition({
+        description:
+          'Open the same assistant chat UI as `assistant chat` directly from the CLI root.',
+        hint:
+          'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+      }),
+    )
+    cli.command(
+      'run',
+      createAssistantRunCommandDefinition(inboxServices, vaultServices, {
+        description:
+          'Start the same assistant automation loop as `assistant run` directly from the CLI root.',
+        hint:
+          'Shorthand for `assistant run`. This starts the always-on automation loop, so it may watch inbox state, auto-reply over configured channels, and keep the terminal attached until you stop it.',
+      }),
+    )
+  }
 
-  cron.command('disable', {
-    args: z.object({
-      job: z.string().min(1).describe('Assistant cron job id or name to disable.'),
-    }),
-    description: 'Disable one assistant cron job without deleting it.',
-    options: withBaseOptions(),
-    output: assistantCronShowResultSchema,
-    async run(context) {
-      const job = await setAssistantCronJobEnabled(
-        context.options.vault,
-        context.args.job,
-        false,
-      )
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        job,
-      }
-    },
-  })
+  registerConversationCommands()
+  registerMemoryCommands()
+  registerCronCommands()
+  registerSessionCommands()
 
-  cron.command('run', {
-    args: z.object({
-      job: z.string().min(1).describe('Assistant cron job id or name to run immediately.'),
-    }),
-    description: 'Run one assistant cron job immediately, regardless of its next scheduled time.',
-    options: withBaseOptions(),
-    output: assistantCronRunResultSchema,
-    async run(context) {
-      const result = await runAssistantCronJobNow({
-        vault: context.options.vault,
-        job: context.args.job,
-      })
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        job: result.job,
-        removedAfterRun: result.removedAfterRun,
-        run: result.run,
-      }
-    },
-  })
-
-  cron.command('runs', {
-    args: z.object({
-      job: z.string().min(1).describe('Assistant cron job id or name to inspect run history for.'),
-    }),
-    description: 'List recent run history for one assistant cron job.',
-    options: withBaseOptions({
-      limit: z
-        .number()
-        .int()
-        .positive()
-        .max(100)
-        .default(20)
-        .describe('Maximum number of recent runs to return.'),
-    }),
-    output: assistantCronRunsResultSchema,
-    async run(context) {
-      const result = await listAssistantCronRuns({
-        vault: context.options.vault,
-        job: context.args.job,
-        limit: context.options.limit,
-      })
-      return {
-        ...buildAssistantCronResultPaths(context.options.vault),
-        jobId: result.jobId,
-        runs: result.runs,
-      }
-    },
-  })
-
-  assistant.command(cron)
-
-  const session = Cli.create('session', {
-    description:
-      'Inspect Healthy Bob assistant session metadata stored outside the canonical vault.',
-  })
-
-  session.command('list', {
-    args: emptyArgsSchema,
-    description: 'List known assistant sessions for one vault.',
-    options: withBaseOptions(),
-    output: assistantSessionListResultSchema,
-    async run(context) {
-      const statePaths = resolveAssistantStatePaths(context.options.vault)
-      const sessions = await listAssistantSessions(context.options.vault)
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
-        sessions,
-      }
-    },
-  })
-
-  session.command('show', {
-    args: z.object({
-      sessionId: z.string().min(1).describe('Healthy Bob assistant session id to inspect.'),
-    }),
-    description: 'Show one assistant session metadata record.',
-    options: withBaseOptions(),
-    output: assistantSessionShowResultSchema,
-    async run(context) {
-      const statePaths = resolveAssistantStatePaths(context.options.vault)
-      const session = await getAssistantSession(
-        context.options.vault,
-        context.args.sessionId,
-      )
-      return {
-        vault: redactAssistantDisplayPath(context.options.vault),
-        stateRoot: redactAssistantDisplayPath(statePaths.assistantStateRoot),
-        session,
-      }
-    },
-  })
-
-  assistant.command(session)
   cli.command(assistant)
-  cli.command(
-    'chat',
-    createAssistantChatCommandDefinition({
-      description:
-        'Open the same assistant chat UI as `assistant chat` directly from the CLI root.',
-      hint:
-        'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
-    }),
-  )
-  cli.command(
-    'run',
-    createAssistantRunCommandDefinition(inboxServices, vaultServices, {
-      description:
-        'Start the same assistant automation loop as `assistant run` directly from the CLI root.',
-      hint:
-        'Shorthand for `assistant run`. This starts the always-on automation loop, so it may watch inbox state, auto-reply over configured channels, and keep the terminal attached until you stop it.',
-    }),
-  )
+  registerRootAliases()
 }

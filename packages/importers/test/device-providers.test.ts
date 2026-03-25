@@ -288,6 +288,76 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.equal(workoutEvent?.fields?.distanceKm, 6.8);
 });
 
+test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and WHOOP unit and facet mappings", async () => {
+  const [ouraPayload, whoopPayload] = await Promise.all([
+    prepareDeviceProviderSnapshotImport({
+      provider: "oura",
+      snapshot: {
+        dailyActivity: [
+          {
+            day: "2026-03-15",
+            steps: 12034,
+            non_wear_time: 1200,
+          },
+        ],
+        dailySpO2: [
+          {
+            day: "2026-03-15",
+            spo2_percentage: {
+              average: 97.4,
+            },
+          },
+        ],
+      },
+    }),
+    prepareDeviceProviderSnapshotImport({
+      provider: "whoop",
+      snapshot: {
+        sleeps: [
+          {
+            id: "sleep-2",
+            start: "2026-03-15T22:00:00.000Z",
+            end: "2026-03-16T07:00:00.000Z",
+            updated_at: "2026-03-16T07:30:00.000Z",
+            score: {
+              stage_summary: {
+                total_rem_sleep_time_milli: 5400000,
+              },
+            },
+          },
+        ],
+        recoveries: [
+          {
+            sleep_id: "sleep-2",
+            updated_at: "2026-03-16T07:30:00.000Z",
+            score: {
+              skin_temp_celsius: 36.5,
+            },
+          },
+        ],
+      },
+    }),
+  ]);
+
+  const ouraStepsEvent = ouraPayload.events?.find((event) => event.externalRef?.facet === "steps");
+  const ouraSpo2Event = ouraPayload.events?.find((event) => event.externalRef?.facet === "spo2-average");
+  const ouraNonWearEvent = ouraPayload.events?.find((event) => event.externalRef?.facet === "non-wear-minutes");
+  const whoopRemEvent = whoopPayload.events?.find((event) => event.externalRef?.facet === "sleep-rem-minutes");
+  const whoopTemperatureSample = whoopPayload.samples?.find(
+    (sample) => sample.externalRef?.facet === "skin-temperature",
+  );
+
+  assert.equal(ouraStepsEvent?.fields?.metric, "daily-steps");
+  assert.equal(ouraStepsEvent?.fields?.unit, "count");
+  assert.equal(ouraSpo2Event?.fields?.metric, "spo2");
+  assert.equal(ouraSpo2Event?.fields?.unit, "%");
+  assert.equal(ouraNonWearEvent?.fields?.value, 20);
+  assert.equal(ouraNonWearEvent?.fields?.unit, "minutes");
+  assert.equal(whoopRemEvent?.fields?.metric, "sleep-rem-minutes");
+  assert.equal(whoopRemEvent?.fields?.unit, "minutes");
+  assert.equal(whoopTemperatureSample?.unit, "celsius");
+});
+
 test("prepareDeviceProviderSnapshotImport handles Oura string numerics through shared observation and sample helpers", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "oura",

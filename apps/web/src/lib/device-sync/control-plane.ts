@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import {
   createDeviceSyncPublicIngress,
   deviceSyncError,
@@ -22,11 +23,14 @@ import {
 } from "./auth";
 import { createHostedSecretCodec } from "./crypto";
 import { readHostedDeviceSyncEnvironment } from "./env";
-import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import { createHostedDeviceSyncRegistry, requireHostedDeviceSyncProvider } from "./providers";
 import {
   generateHostedAgentBearerToken,
+  hostedConnectionWithSecretArgs,
   type HostedAgentSessionRecord,
+  type HostedConnectionSecretBundle,
+  type HostedPrismaTransactionClient,
+  type UpdateLocalHeartbeatInput,
   mapHostedPublicAccountRecord,
   PrismaDeviceSyncControlPlaneStore,
   requireHostedConnectionBundleRecord,
@@ -359,9 +363,7 @@ export class HostedDeviceSyncControlPlane {
           id: connectionId,
           userId: session.userId,
         },
-        include: {
-          secret: true,
-        },
+        ...hostedConnectionWithSecretArgs,
       });
 
       if (!record) {
@@ -488,7 +490,7 @@ export class HostedDeviceSyncControlPlane {
   async recordLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: HostedLocalHeartbeatPatch,
+    patch: UpdateLocalHeartbeatInput,
   ) {
     const connection = await this.store.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
 
@@ -593,9 +595,9 @@ export class HostedDeviceSyncControlPlane {
   }
 
   private async refreshProviderTokensWithStatusHandling(input: {
-    tx: any;
+    tx: HostedPrismaTransactionClient;
     provider: DeviceSyncProvider;
-    bundle: ReturnType<typeof requireHostedConnectionBundleRecord>;
+    bundle: HostedConnectionSecretBundle;
     now: string;
   }): Promise<ProviderAuthTokens> {
     try {
@@ -623,7 +625,7 @@ export class HostedDeviceSyncControlPlane {
               reason: "token_refresh_failed",
               code: error.code,
               message: error.message,
-            }),
+            }) as Prisma.InputJsonObject,
             createdAt: new Date(input.now),
           },
         });
@@ -649,7 +651,7 @@ function resolveAllowedReturnOrigins(request: Request, publicBaseUrl: string, co
 }
 
 function buildTokenExport(
-  bundle: ReturnType<typeof requireHostedConnectionBundleRecord>,
+  bundle: HostedConnectionSecretBundle,
   exportedAt: string,
 ): HostedTokenExport {
   return {

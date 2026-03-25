@@ -14,9 +14,27 @@ import type {
 } from "@healthybob/device-syncd";
 import type { HostedSecretCodec } from "./crypto";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
-import { buildHostedLocalHeartbeatUpdate } from "./local-heartbeat";
-import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import { generatePrefixedId, maybeIsoTimestamp, toIsoTimestamp, toJsonRecord } from "./shared";
+
+export const hostedConnectionWithSecretArgs = {
+  include: {
+    secret: true,
+  },
+} satisfies Prisma.DeviceConnectionDefaultArgs;
+
+type HostedPublicAccountPrismaRecord = Prisma.DeviceConnectionGetPayload<Prisma.DeviceConnectionDefaultArgs>;
+type HostedSignalPrismaRecord = Prisma.DeviceSyncSignalGetPayload<Prisma.DeviceSyncSignalDefaultArgs>;
+type HostedAgentSessionPrismaRecord = Prisma.DeviceAgentSessionGetPayload<Prisma.DeviceAgentSessionDefaultArgs>;
+export type HostedConnectionWithSecretRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionWithSecretArgs>;
+export type HostedPrismaTransactionClient = Prisma.TransactionClient;
+
+type LocalHeartbeatErrorPatch =
+  | { kind: "clear" }
+  | {
+      kind: "merge";
+      lastErrorCode?: string | null;
+      lastErrorMessage?: string | null;
+    };
 
 export interface HostedAgentSessionRecord {
   id: string;
@@ -62,6 +80,17 @@ export interface CreateHostedSignalInput {
   kind: string;
   payload?: Record<string, unknown> | null;
   createdAt?: string;
+}
+
+export interface UpdateLocalHeartbeatInput {
+  status?: DeviceSyncAccountStatus;
+  lastSyncStartedAt?: string | null;
+  lastSyncCompletedAt?: string | null;
+  lastSyncErrorAt?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  nextReconcileAt?: string | null;
+  clearError?: boolean;
 }
 
 export class PrismaDeviceSyncControlPlaneStore
@@ -149,9 +178,7 @@ export class PrismaDeviceSyncControlPlaneStore
             externalAccountId: input.externalAccountId,
           },
         },
-        include: {
-          secret: true,
-        },
+        ...hostedConnectionWithSecretArgs,
       });
 
       if (existing) {
@@ -347,9 +374,7 @@ export class PrismaDeviceSyncControlPlaneStore
         id: connectionId,
         userId,
       },
-      include: {
-        secret: true,
-      },
+      ...hostedConnectionWithSecretArgs,
     });
 
     if (!record) {
@@ -684,49 +709,58 @@ export class PrismaDeviceSyncControlPlaneStore
   async updateConnectionFromLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: HostedLocalHeartbeatPatch,
+    patch: UpdateLocalHeartbeatInput,
   ): Promise<PublicDeviceSyncAccount | null> {
-    return this.prisma.$transaction(async (tx) => {
-      const existing = await tx.deviceConnection.findFirst({
-        where: {
-          id: connectionId,
-          userId,
-        },
-      });
-
-      if (!existing) {
-        return null;
-      }
-
-      const current = mapHostedPublicAccountRecord(existing);
-      const update = buildHostedLocalHeartbeatUpdate(current, patch);
-
-      if (Object.keys(update).length === 0) {
-        return current;
-      }
-
-      const updated = await tx.deviceConnection.update({
-        where: {
-          id: connectionId,
-        },
-        data: update,
-      });
-
-      return mapHostedPublicAccountRecord(updated);
+    const errorPatch = resolveLocalHeartbeatErrorPatch(patch);
+    const updated = await this.prisma.deviceConnection.updateMany({
+      where: {
+        id: connectionId,
+        userId,
+      },
+      data: {
+        ...(patch.status ? { status: patch.status } : {}),
+        ...(patch.lastSyncStartedAt !== undefined
+          ? {
+              lastSyncStartedAt: patch.lastSyncStartedAt ? new Date(patch.lastSyncStartedAt) : null,
+            }
+          : {}),
+        ...(patch.lastSyncCompletedAt !== undefined
+          ? {
+              lastSyncCompletedAt: patch.lastSyncCompletedAt ? new Date(patch.lastSyncCompletedAt) : null,
+            }
+          : {}),
+        ...(patch.lastSyncErrorAt !== undefined
+          ? {
+              lastSyncErrorAt: patch.lastSyncErrorAt ? new Date(patch.lastSyncErrorAt) : null,
+            }
+          : {}),
+        ...(patch.nextReconcileAt !== undefined
+          ? {
+              nextReconcileAt: patch.nextReconcileAt ? new Date(patch.nextReconcileAt) : null,
+            }
+          : {}),
+        ...toPrismaHeartbeatErrorPatch(errorPatch),
+      },
     });
+
+    if (updated.count === 0) {
+      return null;
+    }
+
+    return this.getConnectionForUser(userId, connectionId);
   }
 
   async withConnectionRefreshLock<TResult>(
     connectionId: string,
-    callback: (tx: any) => Promise<TResult>,
+    callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`select pg_advisory_xact_lock(hashtext(${connectionId}))`;
-      return callback(tx as unknown as PrismaClient);
+      return callback(tx);
     });
   }
 
-  private mapSignalRecord(record: any): HostedSignalRecord {
+  private mapSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRecord {
     return {
       id: record.id,
       userId: record.userId,
@@ -738,7 +772,7 @@ export class PrismaDeviceSyncControlPlaneStore
     } satisfies HostedSignalRecord;
   }
 
-  private mapAgentSessionRecord(record: any): HostedAgentSessionRecord {
+  private mapAgentSessionRecord(record: HostedAgentSessionPrismaRecord): HostedAgentSessionRecord {
     return {
       id: record.id,
       userId: record.userId,
@@ -762,7 +796,7 @@ function toNullablePrismaJsonValue(value: Record<string, unknown> | null | undef
   return value ? toPrismaJsonObject(value) : Prisma.DbNull;
 }
 
-export function mapHostedPublicAccountRecord(record: any): PublicDeviceSyncAccount {
+export function mapHostedPublicAccountRecord(record: HostedPublicAccountPrismaRecord): PublicDeviceSyncAccount {
   return {
     id: record.id,
     provider: record.provider,
@@ -785,7 +819,9 @@ export function mapHostedPublicAccountRecord(record: any): PublicDeviceSyncAccou
   } satisfies PublicDeviceSyncAccount;
 }
 
-export function requireHostedPublicAccountRecord(record: any): PublicDeviceSyncAccount {
+export function requireHostedPublicAccountRecord(
+  record: HostedPublicAccountPrismaRecord | null | undefined,
+): PublicDeviceSyncAccount {
   if (!record) {
     throw new TypeError("Expected device connection record.");
   }
@@ -794,7 +830,7 @@ export function requireHostedPublicAccountRecord(record: any): PublicDeviceSyncA
 }
 
 export function requireHostedConnectionBundleRecord(
-  record: any,
+  record: HostedConnectionWithSecretRecord | null | undefined,
   codec: HostedSecretCodec,
 ): HostedConnectionSecretBundle {
   if (!record?.secret) {
@@ -816,6 +852,34 @@ export function requireHostedConnectionBundleRecord(
     tokenVersion: record.secret.tokenVersion,
     keyVersion: record.secret.keyVersion,
   } satisfies HostedConnectionSecretBundle;
+}
+
+function resolveLocalHeartbeatErrorPatch(input: UpdateLocalHeartbeatInput): LocalHeartbeatErrorPatch {
+  if (input.clearError) {
+    return { kind: "clear" };
+  }
+
+  return {
+    kind: "merge",
+    ...(input.lastErrorCode !== undefined ? { lastErrorCode: input.lastErrorCode } : {}),
+    ...(input.lastErrorMessage !== undefined ? { lastErrorMessage: input.lastErrorMessage } : {}),
+  };
+}
+
+function toPrismaHeartbeatErrorPatch(
+  errorPatch: LocalHeartbeatErrorPatch,
+): Pick<Prisma.DeviceConnectionUpdateManyMutationInput, "lastErrorCode" | "lastErrorMessage"> {
+  if (errorPatch.kind === "clear") {
+    return {
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
+  }
+
+  return {
+    ...(errorPatch.lastErrorCode !== undefined ? { lastErrorCode: errorPatch.lastErrorCode } : {}),
+    ...(errorPatch.lastErrorMessage !== undefined ? { lastErrorMessage: errorPatch.lastErrorMessage } : {}),
+  };
 }
 
 function isUniqueViolation(error: unknown): boolean {

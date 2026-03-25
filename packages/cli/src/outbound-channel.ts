@@ -1,6 +1,7 @@
 import {
   assistantDeliverResultSchema,
   type AssistantChannelDelivery,
+  type AssistantDeliverResult,
   type AssistantSession,
 } from './assistant-cli-contracts.js'
 import {
@@ -53,10 +54,15 @@ export interface DeliverAssistantMessageInput {
   vault: string
 }
 
+export interface DeliverAssistantMessageOverBindingResult {
+  delivery: AssistantChannelDelivery
+  session?: AssistantSession
+}
+
 export async function deliverAssistantMessage(
   input: DeliverAssistantMessageInput,
   dependencies: AssistantChannelDependencies = {},
-): Promise<ReturnType<typeof assistantDeliverResultSchema.parse>> {
+): Promise<AssistantDeliverResult> {
   const normalizedMessage = normalizeRequiredText(input.message, 'message')
   const explicitTarget = input.target?.trim() ? input.target.trim() : null
   const conversation = normalizeConversationRef(
@@ -87,7 +93,7 @@ export async function deliverAssistantMessage(
     conversation,
   })
 
-  const delivery = await deliverAssistantMessageOverBinding(
+  const delivered = await deliverAssistantMessageOverBinding(
     {
       message: normalizedMessage,
       session: resolved.session,
@@ -95,17 +101,20 @@ export async function deliverAssistantMessage(
     },
     dependencies,
   )
+  const delivery = delivered.delivery
 
-  const updatedSession = await saveAssistantSession(input.vault, {
-    ...resolved.session,
-    binding: resolvePersistedBinding(
-      resolved.session.binding,
-      delivery,
-      explicitTarget,
-    ),
-    updatedAt: delivery.sentAt,
-    lastTurnAt: delivery.sentAt,
-  })
+  const updatedSession =
+    delivered.session ??
+    await saveAssistantSession(input.vault, {
+      ...resolved.session,
+      binding: resolvePersistedBinding(
+        resolved.session.binding,
+        delivery,
+        explicitTarget,
+      ),
+      updatedAt: delivery.sentAt,
+      lastTurnAt: delivery.sentAt,
+    })
 
   return assistantDeliverResultSchema.parse({
     vault: redactAssistantDisplayPath(input.vault),
@@ -170,7 +179,7 @@ export async function deliverAssistantMessageOverBinding(
     vault?: string
   },
   dependencies: AssistantChannelDependencies = {},
-) {
+): Promise<DeliverAssistantMessageOverBindingResult> {
   const binding =
     input.session?.binding ??
     createAssistantBinding({
@@ -196,7 +205,7 @@ export async function deliverAssistantMessageOverBinding(
     )
   }
 
-  return adapter.send(
+  const delivery = await adapter.send(
     {
       bindingDelivery: binding.delivery,
       explicitTarget: input.target?.trim() ? input.target.trim() : null,
@@ -205,4 +214,8 @@ export async function deliverAssistantMessageOverBinding(
     },
     dependencies,
   )
+
+  return {
+    delivery,
+  }
 }
