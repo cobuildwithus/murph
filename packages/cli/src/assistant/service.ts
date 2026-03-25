@@ -775,6 +775,8 @@ function buildOutboundReplyFormattingGuidance(channel: string | null): string | 
   return [
     'You are replying through a user-facing messaging channel, not the local terminal chat UI.',
     'Never include citations, source lists, footnotes, bracketed references, or appended file-path/source callouts in the reply unless the user explicitly asks for them.',
+    'Do not mention internal vault paths, ledger filenames, JSONL files, or other implementation-level storage details unless the user explicitly asks for that detail.',
+    'Do not surface raw machine timestamps such as ISO-8601 values by default. Prefer natural phrasing in the user-facing time context, such as "last night," "yesterday evening," or an explicit local date/time only when that precision is actually helpful.',
     'Reply naturally in plain conversational prose that fits the channel.',
   ].join('\n')
 }
@@ -817,7 +819,8 @@ function buildAssistantCronGuidanceText(
     'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
     'Cron schedules execute while `assistant run` is active for the vault.',
     'When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.',
-    'Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out.',
+    'Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Healthy Bob defaults the overall timeout to 40m.',
+    '`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.',
     'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
     'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
     `Use \`${cliAccess.rawCommand} assistant cron ...\` only as a fallback when the MCP tools are unavailable in this session.`,

@@ -39,11 +39,18 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /no longer requires a photo/u)
   assert.match(guidance, /meals, snacks, and drinks/u)
   assert.match(guidance, /Older food logs may still live/u)
+  assert.match(
+    guidance,
+    /describe what you found in user-facing terms such as meal log, journal entry, or note/u,
+  )
   assert.match(guidance, /research on a complex topic/u)
   assert.match(guidance, /vault-cli research <prompt>/u)
   assert.match(guidance, /review:gpt --deep-research --send --wait/u)
   assert.match(guidance, /10 to 60 minutes/u)
   assert.match(guidance, /long-running operation/u)
+  assert.match(guidance, /defaults the overall timeout to 40m/u)
+  assert.match(guidance, /`--timeout` is the normal knob/u)
+  assert.match(guidance, /`--wait-timeout` is the advanced override/u)
   assert.match(guidance, /vault-cli deepthink <prompt>/u)
   assert.match(guidance, /healthybob/u)
 })

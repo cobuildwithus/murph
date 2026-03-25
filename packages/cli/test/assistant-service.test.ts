@@ -213,10 +213,15 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli meal add/u)
   assert.match(firstCall?.systemPrompt ?? '', /no longer requires a photo/u)
   assert.match(firstCall?.systemPrompt ?? '', /Older food logs may still live/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /describe what you found in user-facing terms such as meal log, journal entry, or note/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /research on a complex topic/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli research <prompt>/u)
   assert.match(firstCall?.systemPrompt ?? '', /review:gpt --deep-research --send --wait/u)
   assert.match(firstCall?.systemPrompt ?? '', /10 to 60 minutes/u)
+  assert.match(firstCall?.systemPrompt ?? '', /defaults the overall timeout to 40m/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
   assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
@@ -229,6 +234,8 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
   assert.match(firstCall?.systemPrompt ?? '', /broad current-evidence scan/u)
   assert.match(firstCall?.systemPrompt ?? '', /keep waiting on the tool unless it actually errors or times out/u)
+  assert.match(firstCall?.systemPrompt ?? '', /`--timeout` is the normal control/u)
+  assert.match(firstCall?.systemPrompt ?? '', /`--wait-timeout` is only for the uncommon case/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Cron prompts may explicitly tell you to use the research tool/u,
@@ -309,11 +316,27 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
   )
   assert.match(
     outboundCall?.systemPrompt ?? '',
+    /Do not mention internal vault paths, ledger filenames, JSONL files/u,
+  )
+  assert.match(
+    outboundCall?.systemPrompt ?? '',
+    /Do not surface raw machine timestamps such as ISO-8601 values by default/u,
+  )
+  assert.match(
+    outboundCall?.systemPrompt ?? '',
     /user-facing messaging channel, not the local terminal chat UI/u,
   )
   assert.doesNotMatch(
     localChatCall?.systemPrompt ?? '',
     /Never include citations, source lists, footnotes, bracketed references/u,
+  )
+  assert.doesNotMatch(
+    localChatCall?.systemPrompt ?? '',
+    /Do not mention internal vault paths, ledger filenames, JSONL files/u,
+  )
+  assert.doesNotMatch(
+    localChatCall?.systemPrompt ?? '',
+    /Do not surface raw machine timestamps such as ISO-8601 values by default/u,
   )
   assert.doesNotMatch(
     outboundCall?.systemPrompt ?? '',
