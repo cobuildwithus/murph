@@ -18,6 +18,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_DEEPTHINK_MODEL = 'gpt-5.4-pro'
 const DEFAULT_DEEPTHINK_THINKING = 'extended'
+const DEFAULT_REVIEW_GPT_TIMEOUT = '40m'
 const WORKSPACE_ROOT_CANDIDATE = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
@@ -101,6 +102,7 @@ export function buildReviewGptCommand(input: {
   timeout?: string | null
   waitTimeout?: string | null
 }): BuiltReviewGptCommand {
+  const timeout = input.timeout ?? DEFAULT_REVIEW_GPT_TIMEOUT
   const args = [
     'review:gpt',
     '--no-zip',
@@ -127,8 +129,8 @@ export function buildReviewGptCommand(input: {
     args.push('--browser-path', input.browserPath)
   }
 
-  if (input.timeout) {
-    args.push('--timeout', input.timeout)
+  if (timeout) {
+    args.push('--timeout', timeout)
   }
 
   if (input.waitTimeout) {

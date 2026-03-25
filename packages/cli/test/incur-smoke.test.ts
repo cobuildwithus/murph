@@ -241,7 +241,7 @@ test('research schema exposes the review:gpt orchestration options', async () =>
         }
       ).description ?? '',
     ),
-    /10 to 60 minutes/u,
+    /defaults this to 40m/u,
   )
   assert.match(
     String(
@@ -251,7 +251,7 @@ test('research schema exposes the review:gpt orchestration options', async () =>
         }
       ).description ?? '',
     ),
-    /1h/u,
+    /defaults to the overall timeout/u,
   )
   assert.deepEqual(schema.options.required, ['vault'])
 })

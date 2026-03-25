@@ -46,6 +46,28 @@ test('buildReviewGptCommand selects Deep Research mode with explicit send + wait
   ])
 })
 
+test('buildReviewGptCommand defaults the overall timeout to 40m and leaves wait-timeout unset', () => {
+  const command = buildReviewGptCommand({
+    prompt: 'Research ApoB trends.',
+    responseFile: '/tmp/research-response.md',
+    mode: 'deep-research',
+  })
+
+  assert.deepEqual(command.args, [
+    'review:gpt',
+    '--no-zip',
+    '--send',
+    '--wait',
+    '--response-file',
+    '/tmp/research-response.md',
+    '--prompt',
+    'Research ApoB trends.',
+    '--deep-research',
+    '--timeout',
+    '40m',
+  ])
+})
+
 test('runResearchPrompt waits for review:gpt, saves a markdown note path, and returns the captured response', async () => {
   const fixedNow = new Date('2026-03-24T23:02:59.123Z')
   const recorded = {
@@ -111,6 +133,8 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
       '--prompt',
       'Research weekly cholesterol updates and emphasize practical interventions.',
       '--deep-research',
+      '--timeout',
+      '40m',
       '--chat',
       '69abc',
     ],
@@ -216,6 +240,8 @@ test('runDeepthinkPrompt targets GPT Pro defaults, derives a title from the prom
     'gpt-5.4-pro',
     '--thinking',
     'extended',
+    '--timeout',
+    '40m',
   ])
   assert.deepEqual(recordedSave, {
     relativePath:
