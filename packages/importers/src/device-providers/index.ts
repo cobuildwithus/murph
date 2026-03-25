@@ -10,6 +10,11 @@ export {
 } from "./registry.js";
 export { defaultDeviceProviderAdapters } from "./defaults.js";
 export {
+  normalizeGarminSnapshot,
+  garminProviderAdapter,
+  type GarminSnapshotInput,
+} from "./garmin.js";
+export {
   normalizeOuraSnapshot,
   ouraProviderAdapter,
   type OuraSnapshotInput,

@@ -413,6 +413,356 @@ test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias preceden
   assert.equal(deletionArtifact?.fileName, "deletion-session-session-42.json");
 });
 
+test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canonical device payloads", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    vault: "fixture-vault",
+    snapshot: {
+      accountId: "garmin-user-1",
+      importedAt: "2026-03-16T11:00:00.000Z",
+      profile: {
+        id: "garmin-user-1",
+        displayName: "Garmin User",
+      },
+      dailySummaries: [
+        {
+          summaryId: "2026-03-15",
+          calendarDate: "2026-03-15",
+          steps: 12034,
+          activeCalories: 640,
+          totalCalories: 2600,
+          distanceMeters: 10450,
+          floorsClimbed: 12,
+          moderateIntensityMinutes: 34,
+          vigorousIntensityMinutes: 18,
+          restingHeartRate: 52,
+          averageHeartRate: 74,
+          maxHeartRate: 168,
+          averageStressLevel: 29,
+          bodyBattery: 76,
+          averageSpo2: 97.2,
+          averageRespirationRate: 14.1,
+          systolicBloodPressure: 118,
+          diastolicBloodPressure: 76,
+          weightKg: 72.4,
+          bodyFatPercent: 14.8,
+          bmi: 22.3,
+        },
+      ],
+      epochSummaries: [
+        {
+          epochId: "epoch-1",
+          timestamp: "2026-03-15T12:00:00.000Z",
+          heartRate: 64,
+          steps: 42,
+          respirationRate: 13.9,
+          temperatureCelsius: 36.7,
+          hrvMs: 51.2,
+          stressLevel: 18,
+          bodyBattery: 74,
+          spo2: 98.1,
+          activeCalories: 4.2,
+        },
+      ],
+      sleeps: [
+        {
+          sleepId: "sleep-1",
+          startTime: "2026-03-14T22:30:00.000Z",
+          endTime: "2026-03-15T06:45:00.000Z",
+          timestamp: "2026-03-15T06:50:00.000Z",
+          sleepScore: 84,
+          averageRespirationRate: 13.6,
+          averageSpo2: 97.5,
+          averageHeartRate: 56,
+          awakeMinutes: 20,
+          deepMinutes: 90,
+          lightMinutes: 240,
+          remMinutes: 120,
+          stages: [
+            {
+              stage: "deep",
+              startTime: "2026-03-14T23:00:00.000Z",
+              endTime: "2026-03-15T00:30:00.000Z",
+            },
+            {
+              stage: "light",
+              startTime: "2026-03-15T00:30:00.000Z",
+              endTime: "2026-03-15T04:30:00.000Z",
+            },
+            {
+              stage: "rem",
+              startTime: "2026-03-15T04:30:00.000Z",
+              endTime: "2026-03-15T06:30:00.000Z",
+            },
+          ],
+        },
+      ],
+      activities: [
+        {
+          activityId: "activity-1",
+          activityType: "running",
+          startTime: "2026-03-15T17:00:00.000Z",
+          endTime: "2026-03-15T17:45:00.000Z",
+          timestamp: "2026-03-15T17:50:00.000Z",
+          distanceMeters: 7250,
+          activeCalories: 510,
+          averageHeartRate: 141,
+          maxHeartRate: 168,
+          averageSpeedMetersPerSecond: 3.9,
+          elevationGainMeters: 42,
+          aerobicTrainingEffect: 3.1,
+        },
+      ],
+      activityFiles: [
+        {
+          activityId: "activity-1",
+          fileType: "fit",
+          fileName: "activity-1.fit",
+          content: "FITDATA",
+          checksum: "abc123",
+        },
+      ],
+      womenHealth: [
+        {
+          recordId: "cycle-1",
+          recordType: "cycle",
+          recordedAt: "2026-03-15T09:00:00.000Z",
+          cycleDay: 12,
+          cycleLengthDays: 28,
+          periodLengthDays: 5,
+        },
+      ],
+      deletions: [
+        {
+          resourceType: "activity",
+          resourceId: "activity-deleted",
+          occurredAt: "2026-03-16T11:00:00.000Z",
+          eventType: "activity.deleted",
+        },
+      ],
+    },
+  });
+
+  assert.equal(payload.vaultRoot, "fixture-vault");
+  assert.equal(payload.provider, "garmin");
+  assert.equal(payload.accountId, "garmin-user-1");
+  assert.equal(payload.source, "device");
+  assert.equal(payload.provenance?.garminUserId, "garmin-user-1");
+  assert.ok(payload.events?.some((event) => event.kind === "sleep_session"));
+  assert.ok(payload.events?.some((event) => event.kind === "activity_session"));
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "daily-steps" && event.fields?.value === 12034,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "body-battery" && event.fields?.value === 76,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "systolic-blood-pressure" && event.fields?.value === 118,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "cycle-day" && event.fields?.value === 12,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) =>
+        event.kind === "observation" &&
+        event.fields?.metric === "external-resource-deleted" &&
+        event.fields?.resourceType === "activity",
+    ),
+  );
+  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 64));
+  assert.ok(payload.samples?.some((sample) => sample.stream === "steps" && sample.sample.value === 42));
+  assert.ok(
+    payload.samples?.some(
+      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.9,
+    ),
+  );
+  assert.ok(payload.samples?.some((sample) => sample.stream === "temperature" && sample.sample.value === 36.7));
+  assert.ok(payload.samples?.some((sample) => sample.stream === "hrv" && sample.sample.value === 51.2));
+  assert.ok(
+    payload.samples?.some(
+      (sample) => sample.stream === "sleep_stage" && sample.sample.stage === "deep" && sample.sample.durationMinutes === 90,
+    ),
+  );
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "profile"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "daily-summary:2026-03-15"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "epoch-summary:epoch-1"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity:activity-1"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-1:fit"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "women-health:cycle-1"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "deletion:activity:activity-deleted"));
+
+  const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
+  const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
+  const activityFile = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file:activity-1:fit");
+
+  assert.deepEqual(sleepEvent?.fields, {
+    startAt: "2026-03-14T22:30:00.000Z",
+    endAt: "2026-03-15T06:45:00.000Z",
+    durationMinutes: 495,
+  });
+  assert.equal(activityEvent?.fields?.activityType, "running");
+  assert.equal(activityEvent?.fields?.distanceKm, 7.25);
+  assert.ok(activityEvent?.rawArtifactRoles?.includes("activity-file:activity-1:fit"));
+  assert.equal(activityFile?.fileName, "activity-1.fit");
+  assert.equal(activityFile?.mediaType, "application/octet-stream");
+  assert.equal(activityFile?.metadata?.checksum, "abc123");
+});
+
+test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, aliases, and string numerics", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      profile: {
+        userId: 303,
+      },
+      dailySummary: [
+        {
+          calendarDate: "2026-03-16",
+          steps: "1500",
+          totalCalories: "2200",
+        },
+      ],
+      epochs: [
+        {
+          epochId: 9,
+          timestamp: "2026-03-16T12:05:00.000Z",
+          heartRate: "61",
+          bodyBattery: "70",
+        },
+      ],
+      activities: [
+        {
+          id: "activity-2",
+          type: "walking",
+          startAt: "2026-03-16T13:00:00.000Z",
+          endAt: "2026-03-16T13:30:00.000Z",
+          calories: "120",
+          distance: "2100",
+        },
+      ],
+      files: [
+        {
+          activity: {
+            id: "activity-2",
+          },
+          filename: "activity-2.tcx",
+          payload: "<TrainingCenterDatabase />",
+          metadata: {
+            fileType: "tcx",
+            checksum: "xyz789",
+          },
+        },
+      ],
+      womenHealthSummaries: [
+        {
+          id: "pregnancy-1",
+          timestamp: "2026-03-16T09:00:00.000Z",
+          gestationalWeek: "18",
+        },
+      ],
+      deletions: [
+        {
+          data_type: "activity",
+          object_id: "activity-3",
+          event_time: "2026-03-16T14:00:00.000Z",
+          source_event_type: "activity.deleted",
+        },
+      ],
+    },
+  });
+
+  assert.equal(payload.accountId, "303");
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "daily-steps" && event.fields?.value === 1500,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "total-calories" && event.fields?.value === 2200,
+    ),
+  );
+  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 61));
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "body-battery" && event.fields?.value === 70,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "activity_session" && event.fields?.activityType === "walking" && event.fields?.distanceKm === 2.1,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) => event.kind === "observation" && event.fields?.metric === "pregnancy-week" && event.fields?.value === 18,
+    ),
+  );
+  assert.ok(
+    payload.events?.some(
+      (event) =>
+        event.kind === "observation" &&
+        event.fields?.metric === "external-resource-deleted" &&
+        event.fields?.resourceType === "activity" &&
+        event.fields?.sourceEventType === "activity.deleted",
+    ),
+  );
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-2:tcx"));
+
+  const activityFile = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file:activity-2:tcx");
+  assert.equal(activityFile?.fileName, "activity-2.tcx");
+  assert.equal(activityFile?.mediaType, "application/xml");
+  assert.equal(activityFile?.metadata?.checksum, "xyz789");
+});
+
+
+test("importDeviceProviderSnapshot uses the default Garmin adapter registry", async () => {
+  const calls: DeviceBatchImportPayload[] = [];
+
+  const result = await importDeviceProviderSnapshot<{ ok: boolean; provider: string }>(
+    {
+      provider: "garmin",
+      snapshot: {
+        accountId: "garmin-user-2",
+        dailySummaries: [
+          {
+            calendarDate: "2026-03-16",
+            steps: 9876,
+          },
+        ],
+      },
+    },
+    {
+      corePort: {
+        async importDeviceBatch(payload: DeviceBatchImportPayload) {
+          calls.push(payload);
+          return {
+            ok: true,
+            provider: payload.provider,
+          };
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(result, { ok: true, provider: "garmin" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.provider, "garmin");
+  assert.ok(calls[0]?.events?.some((event) => event.fields?.metric === "daily-steps"));
+});
+
+
 test("importDeviceProviderSnapshot uses the default Oura adapter registry", async () => {
   const calls: DeviceBatchImportPayload[] = [];
 
@@ -488,21 +838,21 @@ test("createImporters composes custom device providers behind the same core seam
   const registry = createDeviceProviderRegistry();
   const calls: DeviceBatchImportPayload[] = [];
 
-  const garminAdapter: DeviceProviderAdapter<{ accountId?: string; steps?: number }> = {
-    provider: "garmin",
+  const polarAdapter: DeviceProviderAdapter<{ accountId?: string; steps?: number }> = {
+    provider: "polar",
     normalizeSnapshot(snapshot) {
       return {
-        provider: "garmin",
-        accountId: snapshot.accountId ?? "garmin-user-1",
+        provider: "polar",
+        accountId: snapshot.accountId ?? "polar-user-1",
         source: "device",
         events: [
           {
             kind: "observation",
             occurredAt: "2026-03-16T12:00:00.000Z",
             recordedAt: "2026-03-16T12:00:00.000Z",
-            title: "Garmin daily steps",
+            title: "Polar daily steps",
             externalRef: {
-              system: "garmin",
+              system: "polar",
               resourceType: "daily-summary",
               resourceId: "2026-03-16",
               facet: "steps",
@@ -525,7 +875,7 @@ test("createImporters composes custom device providers behind the same core seam
     },
   };
 
-  registry.register(garminAdapter);
+  registry.register(polarAdapter);
 
   const importers = createImporters({
     corePort: {
@@ -541,18 +891,18 @@ test("createImporters composes custom device providers behind the same core seam
   });
 
   const result = await importers.importDeviceProviderSnapshot({
-    provider: "garmin",
+    provider: "polar",
     snapshot: {
-      accountId: "garmin-user-9",
+      accountId: "polar-user-9",
       steps: 12345,
     },
   }) as { ok: boolean; provider: string };
 
-  assert.deepEqual(result, { ok: true, provider: "garmin" });
-  assert.equal(importers.deviceProviderRegistry.get("garmin")?.provider, "garmin");
+  assert.deepEqual(result, { ok: true, provider: "polar" });
+  assert.equal(importers.deviceProviderRegistry.get("polar")?.provider, "polar");
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.provider, "garmin");
-  assert.equal(calls[0]?.accountId, "garmin-user-9");
+  assert.equal(calls[0]?.provider, "polar");
+  assert.equal(calls[0]?.accountId, "polar-user-9");
   assert.equal(calls[0]?.events?.[0]?.kind, "observation");
   assert.equal(calls[0]?.events?.[0]?.fields?.value, 12345);
 });
