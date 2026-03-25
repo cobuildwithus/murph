@@ -14,9 +14,7 @@ export interface HostedDeviceSyncEnvironment {
   isProduction: boolean;
   ouraWebhookVerificationToken: string | null;
   publicBaseUrl: string | null;
-  trustedUserEmailHeader: string | null;
-  trustedUserIdHeader: string;
-  trustedUserNameHeader: string | null;
+  trustedUserAssertionHeader: string;
   trustedUserSignatureHeader: string;
   trustedUserSigningSecret: string | null;
   devUserEmail: string | null;
@@ -52,14 +50,8 @@ const DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
 const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS = [
   "DEVICE_SYNC_PUBLIC_BASE_URL",
 ] as const;
-const DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER_ENV_KEYS = [
-  "DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER",
-] as const;
-const DEVICE_SYNC_TRUSTED_USER_ID_HEADER_ENV_KEYS = [
-  "DEVICE_SYNC_TRUSTED_USER_ID_HEADER",
-] as const;
-const DEVICE_SYNC_TRUSTED_USER_NAME_HEADER_ENV_KEYS = [
-  "DEVICE_SYNC_TRUSTED_USER_NAME_HEADER",
+const DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS = [
+  "DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER",
 ] as const;
 const DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER",
@@ -95,10 +87,9 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
     isProduction: (source.NODE_ENV ?? "development") === "production",
     ouraWebhookVerificationToken: readEnv(source, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS) ?? null,
     publicBaseUrl: readEnv(source, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ?? null,
-    trustedUserEmailHeader: normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_EMAIL_HEADER_ENV_KEYS)),
-    trustedUserIdHeader:
-      normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ID_HEADER_ENV_KEYS)) ?? "x-healthybob-user-id",
-    trustedUserNameHeader: normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_NAME_HEADER_ENV_KEYS)),
+    trustedUserAssertionHeader:
+      normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS)) ??
+      "x-healthybob-user-assertion",
     trustedUserSignatureHeader:
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS)) ??
       "x-healthybob-user-signature",

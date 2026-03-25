@@ -146,7 +146,6 @@ export function errorToCallbackRedirect(input: {
   destination.searchParams.set("deviceSyncStatus", "error");
   destination.searchParams.set("deviceSyncProvider", input.provider);
   destination.searchParams.set("deviceSyncError", input.error.code);
-  destination.searchParams.set("deviceSyncErrorMessage", input.error.message);
   return redirectTo(destination.toString());
 }
 

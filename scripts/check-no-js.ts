@@ -20,6 +20,7 @@ const nextEnvTrailingLines = [
   "// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.",
   "",
 ];
+const bundleArtifactFlag = "--for-source-bundle";
 export const allowedDeclarationArtifacts = new Map<string, string[]>([
   [
     "packages/web/next-env.d.ts",
@@ -46,6 +47,7 @@ export const allowedDeclarationArtifacts = new Map<string, string[]>([
 ]);
 
 export async function main(): Promise<void> {
+  const checkWorkingTreeBundleArtifacts = process.argv.includes(bundleArtifactFlag);
   const sourceArtifactOffenders: string[] = [];
 
   for (const root of scanRoots) {
@@ -53,9 +55,16 @@ export async function main(): Promise<void> {
   }
 
   const trackedArtifactOffenders = await findBlockedTrackedArtifacts();
+  const workingTreeArtifactOffenders = checkWorkingTreeBundleArtifacts
+    ? await findBlockedWorkingTreeArtifacts()
+    : [];
 
-  if (sourceArtifactOffenders.length > 0 || trackedArtifactOffenders.length > 0) {
-    const message = ["Found blocked package/e2e source or tracked private/build artifacts:"];
+  if (
+    sourceArtifactOffenders.length > 0 ||
+    trackedArtifactOffenders.length > 0 ||
+    workingTreeArtifactOffenders.length > 0
+  ) {
+    const message = ["Found blocked package/e2e source or private/build artifacts:"];
 
     if (sourceArtifactOffenders.length > 0) {
       message.push(
@@ -71,7 +80,22 @@ export async function main(): Promise<void> {
       );
     }
 
+    if (workingTreeArtifactOffenders.length > 0) {
+      message.push(
+        "Working-tree private/build artifacts that would leak into a raw source bundle:",
+        ...workingTreeArtifactOffenders.map((filePath) => `- ${filePath}`),
+        "Clear generated output before packaging (for example, `pnpm clean`) and exclude local `.env` files from any shared clone/archive.",
+      );
+    }
+
     throw new Error(message.join("\n"));
+  }
+
+  if (checkWorkingTreeBundleArtifacts) {
+    console.log(
+      "No blocked handwritten source files, tracked private/build artifacts, or working-tree private/build artifacts that would leak into a source bundle, were found.",
+    );
+    return;
   }
 
   console.log(
@@ -164,6 +188,23 @@ export function isBlockedTrackedArtifactPath(filePath: string): boolean {
   return pathSegments.some((segment) => blockedTrackedArtifactDirectoryNames.has(segment));
 }
 
+export function getBlockedWorkingTreeArtifactPath(
+  filePath: string,
+  entryType: "file" | "directory",
+): string | null {
+  const normalizedPath = normalizeGitPath(filePath).replace(/\/+$/u, "");
+
+  if (entryType === "directory") {
+    return isBlockedTrackedArtifactPath(normalizedPath) ? `${normalizedPath}/` : null;
+  }
+
+  if (isBlockedTrackedEnvArtifactPath(normalizedPath) || normalizedPath.endsWith(".tsbuildinfo")) {
+    return normalizedPath;
+  }
+
+  return null;
+}
+
 async function findBlockedTrackedArtifacts(): Promise<string[]> {
   const { stdout } = await execFileAsync("git", ["ls-files"], {
     cwd: repoRoot,
@@ -174,6 +215,51 @@ async function findBlockedTrackedArtifacts(): Promise<string[]> {
     .filter((line) => line.length > 0);
 
   return trackedFiles.filter(isBlockedTrackedArtifactPath);
+}
+
+async function findBlockedWorkingTreeArtifacts(): Promise<string[]> {
+  const offenders: string[] = [];
+
+  for (const root of scanRoots) {
+    await scanWorkingTreeArtifacts(root, offenders);
+  }
+
+  return offenders;
+}
+
+async function scanWorkingTreeArtifacts(relativePath: string, offenders: string[]): Promise<void> {
+  const absolutePath = path.join(repoRoot, relativePath);
+  const entries = await readdir(absolutePath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const entryRelativePath = path.posix.join(relativePath, entry.name);
+
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules") {
+        continue;
+      }
+
+      const blockedDirectoryPath = getBlockedWorkingTreeArtifactPath(entryRelativePath, "directory");
+
+      if (blockedDirectoryPath) {
+        offenders.push(blockedDirectoryPath);
+        continue;
+      }
+
+      await scanWorkingTreeArtifacts(entryRelativePath, offenders);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const blockedFilePath = getBlockedWorkingTreeArtifactPath(entryRelativePath, "file");
+
+    if (blockedFilePath) {
+      offenders.push(blockedFilePath);
+    }
+  }
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

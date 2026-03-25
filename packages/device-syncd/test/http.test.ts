@@ -277,7 +277,7 @@ test("device sync http server redirects OAuth callback errors back to the origin
     assert.equal(destination.searchParams.get("deviceSyncStatus"), "error");
     assert.equal(destination.searchParams.get("deviceSyncProvider"), "demo");
     assert.equal(destination.searchParams.get("deviceSyncError"), "OAUTH_CALLBACK_REJECTED");
-    assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), "The user canceled the OAuth flow.");
+    assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), null);
   } finally {
     await server.close();
   }

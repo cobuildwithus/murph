@@ -116,3 +116,16 @@ model DeviceAgentSession {
   @@index([replacedBySessionId])
   @@map("device_agent_session")
 }
+
+model DeviceBrowserAssertionNonce {
+  nonceHash String   @id @map("nonce_hash")
+  userId    String   @map("user_id")
+  method    String
+  path      String
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+  @@map("device_browser_assertion_nonce")
+}

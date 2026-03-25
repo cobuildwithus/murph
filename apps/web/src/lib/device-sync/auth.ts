@@ -3,6 +3,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { deviceSyncError } from "@healthybob/device-syncd";
 
 import type { HostedDeviceSyncEnvironment } from "./env";
+import { isRecord, normalizeString, sha256Hex, toIsoTimestamp } from "./shared";
+
+const HOSTED_USER_ASSERTION_SIGNATURE_CONTEXT = "hbds-user-assertion.v1:";
+const HOSTED_USER_ASSERTION_MAX_TTL_SECONDS = 5 * 60;
+const HOSTED_USER_ASSERTION_CLOCK_SKEW_SECONDS = 60;
+const HOSTED_USER_ASSERTION_NONCE_MIN_LENGTH = 16;
 
 export interface AuthenticatedHostedUser {
   id: string;
@@ -11,11 +17,41 @@ export interface AuthenticatedHostedUser {
   source: "trusted-header" | "development-fallback";
 }
 
-export function requireAuthenticatedHostedUser(
+export interface HostedUserAssertionClaims {
+  id: string;
+  email: string | null;
+  name: string | null;
+  aud: string;
+  method: string;
+  path: string;
+  origin: string | null;
+  nonce: string;
+  iat: number;
+  exp: number;
+}
+
+export interface HostedBrowserAssertionNonceStore {
+  consumeBrowserAssertionNonce(input: {
+    nonceHash: string;
+    userId: string;
+    method: string;
+    path: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean>;
+}
+
+interface RequireAuthenticatedHostedUserOptions {
+  nonceStore?: HostedBrowserAssertionNonceStore;
+  now?: Date;
+}
+
+export async function requireAuthenticatedHostedUser(
   request: Request,
   env: HostedDeviceSyncEnvironment,
-): AuthenticatedHostedUser {
-  const signedHostedUser = readSignedHostedUser(request, env);
+  options: RequireAuthenticatedHostedUserOptions = {},
+): Promise<AuthenticatedHostedUser> {
+  const signedHostedUser = await readSignedHostedUser(request, env, options);
 
   if (signedHostedUser) {
     return signedHostedUser;
@@ -33,7 +69,7 @@ export function requireAuthenticatedHostedUser(
   throw deviceSyncError({
     code: "AUTH_REQUIRED",
     message:
-      "Hosted device-sync browser routes require cryptographically verified hosted user headers or DEVICE_SYNC_DEV_USER_ID in development.",
+      "Hosted device-sync browser routes require a cryptographically verified hosted user assertion or DEVICE_SYNC_DEV_USER_ID in development.",
     retryable: false,
     httpStatus: 401,
   });
@@ -68,29 +104,39 @@ export function assertBrowserMutationOrigin(request: Request, env: HostedDeviceS
   });
 }
 
-function readSignedHostedUser(
+export function encodeHostedUserAssertion(claims: HostedUserAssertionClaims): string {
+  return Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+}
+
+export function createHostedUserAssertionSignature(assertion: string, secret: string): string {
+  return createHmac("sha256", secret)
+    .update(HOSTED_USER_ASSERTION_SIGNATURE_CONTEXT)
+    .update(assertion)
+    .digest("hex");
+}
+
+async function readSignedHostedUser(
   request: Request,
   env: HostedDeviceSyncEnvironment,
-): AuthenticatedHostedUser | null {
-  const id = normalizeHeaderValue(request.headers.get(env.trustedUserIdHeader));
-  const email = env.trustedUserEmailHeader ? normalizeHeaderValue(request.headers.get(env.trustedUserEmailHeader)) : null;
-  const name = env.trustedUserNameHeader ? normalizeHeaderValue(request.headers.get(env.trustedUserNameHeader)) : null;
+  options: RequireAuthenticatedHostedUserOptions,
+): Promise<AuthenticatedHostedUser | null> {
+  const assertion = normalizeHeaderValue(request.headers.get(env.trustedUserAssertionHeader));
   const signature = normalizeHeaderValue(request.headers.get(env.trustedUserSignatureHeader));
-  const hasAnyTrustedHeader = Boolean(id || email || name || signature);
+  const hasAnyTrustedHeader = Boolean(assertion || signature);
 
   if (!hasAnyTrustedHeader) {
     return null;
   }
 
-  if (!id) {
+  if (!assertion) {
     throw invalidHostedUserHeaders(
-      `Hosted device-sync user headers must include the configured ${env.trustedUserIdHeader} header.`,
+      `Hosted device-sync user headers must include the configured ${env.trustedUserAssertionHeader} assertion header.`,
     );
   }
 
   if (!env.trustedUserSigningSecret) {
     throw invalidHostedUserHeaders(
-      "Hosted device-sync user headers require DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET verification.",
+      "Hosted device-sync user assertions require DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET verification.",
     );
   }
 
@@ -100,36 +146,162 @@ function readSignedHostedUser(
     );
   }
 
-  const claims = { id, email, name };
-  const expectedSignature = createHostedUserHeaderSignature(claims, env.trustedUserSigningSecret);
+  const expectedSignature = createHostedUserAssertionSignature(assertion, env.trustedUserSigningSecret);
 
   if (!secureEqual(expectedSignature, signature)) {
-    throw invalidHostedUserHeaders("Hosted device-sync user header signature is invalid.");
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion signature is invalid.");
+  }
+
+  const claims = parseHostedUserAssertion(assertion);
+  const now = options.now ?? new Date();
+  const nowIso = toIsoTimestamp(now);
+  validateHostedUserAssertionClaims(claims, request, env, now);
+
+  if (!options.nonceStore) {
+    throw deviceSyncError({
+      code: "AUTH_CONFIGURATION_INVALID",
+      message: "Hosted device-sync user assertions require a nonce store for replay protection.",
+      retryable: false,
+      httpStatus: 500,
+    });
+  }
+
+  const consumed = await options.nonceStore.consumeBrowserAssertionNonce({
+    nonceHash: sha256Hex(claims.nonce),
+    userId: claims.id,
+    method: claims.method,
+    path: claims.path,
+    now: nowIso,
+    expiresAt: new Date(claims.exp * 1000).toISOString(),
+  });
+
+  if (!consumed) {
+    throw deviceSyncError({
+      code: "AUTH_ASSERTION_REPLAYED",
+      message: "Hosted device-sync user assertion was already used and cannot be replayed.",
+      retryable: false,
+      httpStatus: 401,
+    });
   }
 
   return {
-    ...claims,
+    id: claims.id,
+    email: claims.email,
+    name: claims.name,
     source: "trusted-header",
   };
 }
 
-function createHostedUserHeaderSignature(
-  claims: Pick<AuthenticatedHostedUser, "id" | "email" | "name">,
-  secret: string,
-): string {
-  return createHmac("sha256", secret)
-    .update(serializeHostedUserClaims(claims))
-    .digest("hex");
+function parseHostedUserAssertion(assertion: string): HostedUserAssertionClaims {
+  let decoded = "";
+
+  try {
+    decoded = Buffer.from(assertion, "base64url").toString("utf8");
+  } catch {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion payload is not valid base64url JSON.");
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(decoded);
+  } catch {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion payload is not valid JSON.");
+  }
+
+  if (!isRecord(parsed)) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion payload must be a JSON object.");
+  }
+
+  const id = normalizeStringClaim(parsed.id);
+  const aud = normalizeStrictOriginClaim(parsed.aud);
+  const method = normalizeMethodClaim(parsed.method);
+  const path = normalizePathClaim(parsed.path);
+  const origin = normalizeNullableStrictOriginClaim(parsed.origin);
+  const nonce = normalizeStringClaim(parsed.nonce);
+  const iat = normalizeNumericClaim(parsed.iat);
+  const exp = normalizeNumericClaim(parsed.exp);
+
+  if (!id || !aud || !method || !path || !nonce || iat === null || exp === null) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion payload is missing required claims.");
+  }
+
+  if (nonce.length < HOSTED_USER_ASSERTION_NONCE_MIN_LENGTH) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion nonce is too short.");
+  }
+
+  return {
+    id,
+    email: normalizeNullableStringClaim(parsed.email),
+    name: normalizeNullableStringClaim(parsed.name),
+    aud,
+    method,
+    path,
+    origin,
+    nonce,
+    iat,
+    exp,
+  };
 }
 
-function serializeHostedUserClaims(
-  claims: Pick<AuthenticatedHostedUser, "id" | "email" | "name">,
-): string {
-  return JSON.stringify([
-    claims.id,
-    claims.email ?? null,
-    claims.name ?? null,
-  ]);
+function validateHostedUserAssertionClaims(
+  claims: HostedUserAssertionClaims,
+  request: Request,
+  env: HostedDeviceSyncEnvironment,
+  now: Date,
+): void {
+  const nowSeconds = Math.floor(now.getTime() / 1000);
+
+  if (!Number.isInteger(claims.iat) || !Number.isInteger(claims.exp) || claims.exp <= claims.iat) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion timestamps are invalid.");
+  }
+
+  if (claims.exp - claims.iat > HOSTED_USER_ASSERTION_MAX_TTL_SECONDS) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion lifetime is too long.");
+  }
+
+  if (claims.iat > nowSeconds + HOSTED_USER_ASSERTION_CLOCK_SKEW_SECONDS) {
+    throw deviceSyncError({
+      code: "AUTH_ASSERTION_STALE",
+      message: "Hosted device-sync user assertion is not yet valid.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+
+  if (claims.exp < nowSeconds - HOSTED_USER_ASSERTION_CLOCK_SKEW_SECONDS) {
+    throw deviceSyncError({
+      code: "AUTH_ASSERTION_STALE",
+      message: "Hosted device-sync user assertion expired.",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+
+  const url = new URL(request.url);
+  const requestMethod = request.method.toUpperCase();
+  const requestOriginHeader = normalizeStrictOriginHeaderValue(request.headers.get("origin"));
+  const allowedAudiences = new Set<string>([url.origin]);
+
+  if (env.publicBaseUrl) {
+    allowedAudiences.add(new URL(env.publicBaseUrl).origin);
+  }
+
+  if (!allowedAudiences.has(claims.aud)) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion audience is invalid.");
+  }
+
+  if (claims.method !== requestMethod) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion method binding is invalid.");
+  }
+
+  if (claims.path !== url.pathname) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion path binding is invalid.");
+  }
+
+  if (claims.origin !== requestOriginHeader) {
+    throw invalidHostedUserHeaders("Hosted device-sync user assertion origin binding is invalid.");
+  }
 }
 
 function secureEqual(expectedValue: string, providedValue: string): boolean {
@@ -148,10 +320,51 @@ function invalidHostedUserHeaders(message: string) {
 }
 
 function normalizeHeaderValue(value: string | null): string | null {
-  if (!value) {
+  const normalized = normalizeString(value);
+  return normalized ? normalized : null;
+}
+
+function normalizeStringClaim(value: unknown): string | null {
+  return typeof value === "string" ? normalizeString(value) : null;
+}
+
+function normalizeNullableStringClaim(value: unknown): string | null {
+  return typeof value === "string" ? normalizeString(value) : value === null || value === undefined ? null : null;
+}
+
+function normalizeMethodClaim(value: unknown): string | null {
+  const normalized = normalizeStringClaim(value);
+  return normalized ? normalized.toUpperCase() : null;
+}
+
+function normalizePathClaim(value: unknown): string | null {
+  const normalized = normalizeStringClaim(value);
+  return normalized && normalized.startsWith("/") ? normalized : null;
+}
+
+function normalizeStrictOriginHeaderValue(value: string | null): string | null {
+  return value ? normalizeStrictOriginClaim(value) : null;
+}
+
+function normalizeStrictOriginClaim(value: unknown): string | null {
+  const normalized = normalizeStringClaim(value);
+
+  if (!normalized) {
     return null;
   }
 
-  const normalized = value.trim();
-  return normalized ? normalized : null;
+  try {
+    const url = new URL(normalized);
+    return url.origin === normalized ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNullableStrictOriginClaim(value: unknown): string | null {
+  return value === null || value === undefined ? null : normalizeStrictOriginClaim(value);
+}
+
+function normalizeNumericClaim(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }

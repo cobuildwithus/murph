@@ -160,7 +160,7 @@ export interface ProviderWebhookContext {
 export interface ProviderWebhookResult {
   externalAccountId: string;
   eventType: string;
-  traceId?: string;
+  traceId: string;
   occurredAt?: string;
   payload?: Record<string, unknown>;
   jobs: DeviceSyncJobInput[];

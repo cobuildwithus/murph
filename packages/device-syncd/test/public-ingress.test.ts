@@ -349,6 +349,7 @@ test("public ingress preserves callback redirect context on OAuth callback failu
     (error: unknown) =>
       error instanceof DeviceSyncError &&
       error.code === "OAUTH_CALLBACK_REJECTED" &&
+      error.message === "OAuth authorization was denied or canceled." &&
       error.details?.provider === "demo" &&
       error.details?.returnTo === "https://app.healthybob.test/settings/devices",
   );

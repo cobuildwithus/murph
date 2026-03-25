@@ -15,9 +15,14 @@ import type {
   ProviderAuthTokens,
 } from "@healthybob/device-syncd";
 import { getPrisma } from "../prisma";
-import { assertBrowserMutationOrigin, requireAuthenticatedHostedUser } from "./auth";
+import {
+  assertBrowserMutationOrigin,
+  requireAuthenticatedHostedUser,
+  type AuthenticatedHostedUser,
+} from "./auth";
 import { createHostedSecretCodec } from "./crypto";
 import { readHostedDeviceSyncEnvironment } from "./env";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import { createHostedDeviceSyncRegistry, requireHostedDeviceSyncProvider } from "./providers";
 import {
   generateHostedAgentBearerToken,
@@ -62,6 +67,7 @@ export class HostedDeviceSyncControlPlane {
   });
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
+  private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
 
   constructor(request: Request) {
     this.request = request;
@@ -69,8 +75,14 @@ export class HostedDeviceSyncControlPlane {
     this.allowedReturnOrigins = resolveAllowedReturnOrigins(request, this.publicBaseUrl, this.env.allowedReturnOrigins);
   }
 
-  requireAuthenticatedUser() {
-    return requireAuthenticatedHostedUser(this.request, this.env);
+  requireAuthenticatedUser(): Promise<AuthenticatedHostedUser> {
+    if (!this.authenticatedUserPromise) {
+      this.authenticatedUserPromise = requireAuthenticatedHostedUser(this.request, this.env, {
+        nonceStore: this.store,
+      });
+    }
+
+    return this.authenticatedUserPromise;
   }
 
   assertBrowserMutationOrigin(): void {
@@ -211,7 +223,7 @@ export class HostedDeviceSyncControlPlane {
     agent: { id: string; label: string | null; createdAt: string; expiresAt: string };
     token: string;
   }> {
-    const user = this.requireAuthenticatedUser();
+    const user = await this.requireAuthenticatedUser();
 
     if (user.id !== userId) {
       throw deviceSyncError({
@@ -476,16 +488,7 @@ export class HostedDeviceSyncControlPlane {
   async recordLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: {
-      status?: "active" | "reauthorization_required" | "disconnected";
-      lastSyncStartedAt?: string | null;
-      lastSyncCompletedAt?: string | null;
-      lastSyncErrorAt?: string | null;
-      lastErrorCode?: string | null;
-      lastErrorMessage?: string | null;
-      nextReconcileAt?: string | null;
-      clearError?: boolean;
-    },
+    patch: HostedLocalHeartbeatPatch,
   ) {
     const connection = await this.store.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
 
@@ -502,7 +505,6 @@ export class HostedDeviceSyncControlPlane {
       connection,
     };
   }
-
 
   private async requireOwnedConnection(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount> {
     const connection = await this.store.getConnectionForUser(userId, connectionId);

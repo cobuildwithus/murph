@@ -36,7 +36,7 @@ describe("hosted device-sync connect/start route aliases", () => {
       requireAuthenticatedUser: mocks.requireAuthenticatedUser,
       startConnection: mocks.startConnection,
     });
-    mocks.requireAuthenticatedUser.mockReturnValue({ id: "user-123" });
+    mocks.requireAuthenticatedUser.mockResolvedValue({ id: "user-123" });
     mocks.startConnection.mockResolvedValue({
       authorizationUrl: "https://provider.example.test/oauth/authorize",
     });

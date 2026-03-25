@@ -13,7 +13,9 @@ import type {
   UpsertPublicDeviceSyncConnectionInput,
 } from "@healthybob/device-syncd";
 import type { HostedSecretCodec } from "./crypto";
-import type { AuthenticatedHostedUser } from "./auth";
+import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
+import { buildHostedLocalHeartbeatUpdate } from "./local-heartbeat";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import { generatePrefixedId, maybeIsoTimestamp, toIsoTimestamp, toJsonRecord } from "./shared";
 
 export interface HostedAgentSessionRecord {
@@ -62,18 +64,9 @@ export interface CreateHostedSignalInput {
   createdAt?: string;
 }
 
-export interface UpdateLocalHeartbeatInput {
-  status?: DeviceSyncAccountStatus;
-  lastSyncStartedAt?: string | null;
-  lastSyncCompletedAt?: string | null;
-  lastSyncErrorAt?: string | null;
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-  nextReconcileAt?: string | null;
-  clearError?: boolean;
-}
-
-export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngressStore {
+export class PrismaDeviceSyncControlPlaneStore
+  implements DeviceSyncPublicIngressStore, HostedBrowserAssertionNonceStore
+{
   readonly prisma: PrismaClient;
   readonly codec: HostedSecretCodec;
 
@@ -403,6 +396,45 @@ export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngres
     return records.map((record) => this.mapSignalRecord(record));
   }
 
+  async consumeBrowserAssertionNonce(input: {
+    nonceHash: string;
+    userId: string;
+    method: string;
+    path: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.deviceBrowserAssertionNonce.deleteMany({
+        where: {
+          expiresAt: {
+            lte: new Date(input.now),
+          },
+        },
+      });
+
+      try {
+        await tx.deviceBrowserAssertionNonce.create({
+          data: {
+            nonceHash: input.nonceHash,
+            userId: input.userId,
+            method: input.method,
+            path: input.path,
+            createdAt: new Date(input.now),
+            expiresAt: new Date(input.expiresAt),
+          },
+        });
+        return true;
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          return false;
+        }
+
+        throw error;
+      }
+    });
+  }
+
   async createAgentSession(input: {
     user: AuthenticatedHostedUser;
     label?: string | null;
@@ -652,52 +684,36 @@ export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngres
   async updateConnectionFromLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: UpdateLocalHeartbeatInput,
+    patch: HostedLocalHeartbeatPatch,
   ): Promise<PublicDeviceSyncAccount | null> {
-    const updated = await this.prisma.deviceConnection.updateMany({
-      where: {
-        id: connectionId,
-        userId,
-      },
-      data: {
-        ...(patch.status ? { status: patch.status } : {}),
-        ...(patch.lastSyncStartedAt !== undefined
-          ? {
-              lastSyncStartedAt: patch.lastSyncStartedAt ? new Date(patch.lastSyncStartedAt) : null,
-            }
-          : {}),
-        ...(patch.lastSyncCompletedAt !== undefined
-          ? {
-              lastSyncCompletedAt: patch.lastSyncCompletedAt ? new Date(patch.lastSyncCompletedAt) : null,
-            }
-          : {}),
-        ...(patch.lastSyncErrorAt !== undefined
-          ? {
-              lastSyncErrorAt: patch.lastSyncErrorAt ? new Date(patch.lastSyncErrorAt) : null,
-            }
-          : {}),
-        ...(patch.nextReconcileAt !== undefined
-          ? {
-              nextReconcileAt: patch.nextReconcileAt ? new Date(patch.nextReconcileAt) : null,
-            }
-          : {}),
-        ...(patch.clearError
-          ? {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-            }
-          : {
-              ...(patch.lastErrorCode !== undefined ? { lastErrorCode: patch.lastErrorCode } : {}),
-              ...(patch.lastErrorMessage !== undefined ? { lastErrorMessage: patch.lastErrorMessage } : {}),
-            }),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.deviceConnection.findFirst({
+        where: {
+          id: connectionId,
+          userId,
+        },
+      });
+
+      if (!existing) {
+        return null;
+      }
+
+      const current = mapHostedPublicAccountRecord(existing);
+      const update = buildHostedLocalHeartbeatUpdate(current, patch);
+
+      if (Object.keys(update).length === 0) {
+        return current;
+      }
+
+      const updated = await tx.deviceConnection.update({
+        where: {
+          id: connectionId,
+        },
+        data: update,
+      });
+
+      return mapHostedPublicAccountRecord(updated);
     });
-
-    if (updated.count === 0) {
-      return null;
-    }
-
-    return this.getConnectionForUser(userId, connectionId);
   }
 
   async withConnectionRefreshLock<TResult>(

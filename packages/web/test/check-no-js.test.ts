@@ -5,6 +5,7 @@ import { test } from "vitest";
 
 import {
   allowedDeclarationArtifacts,
+  getBlockedWorkingTreeArtifactPath,
   isAllowedDeclarationArtifactContents,
   isBlockedTrackedArtifactPath,
   isBlockedTrackedEnvArtifactPath,
@@ -44,9 +45,25 @@ test("check-no-js rejects tracked local env files while allowlisting tracked exa
 test("check-no-js flags tracked generated/private artifact paths", () => {
   assert.equal(isBlockedTrackedArtifactPath(".env"), true);
   assert.equal(isBlockedTrackedArtifactPath("apps/web/.env.example"), false);
+  assert.equal(isBlockedTrackedArtifactPath("apps/web/.next"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/web/.next/server/app.js"), true);
   assert.equal(isBlockedTrackedArtifactPath(".next/cache/tsconfig.tsbuildinfo"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/core/dist/index.js"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/core/.test-dist/index.js"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/web/next-env.d.ts"), false);
+});
+
+test("check-no-js flags bundle-only working-tree private/build artifacts", () => {
+  assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.env", "file"), "apps/web/.env");
+  assert.equal(
+    getBlockedWorkingTreeArtifactPath("packages/web/app.tsbuildinfo", "file"),
+    "packages/web/app.tsbuildinfo",
+  );
+  assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.env.example", "file"), null);
+  assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.next", "directory"), "apps/web/.next/");
+  assert.equal(
+    getBlockedWorkingTreeArtifactPath("packages/core/.test-dist", "directory"),
+    "packages/core/.test-dist/",
+  );
+  assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/src", "directory"), null);
 });

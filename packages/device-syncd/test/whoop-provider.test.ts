@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.js";
-import { subtractDays } from "../src/shared.js";
+import { sha256Text, subtractDays } from "../src/shared.js";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.js";
 
@@ -358,6 +358,7 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
       {
         kind: testCase.kind,
         priority: testCase.priority,
+        dedupeKey: `whoop-webhook:trace:${testCase.eventType}`,
         payload: {
           resourceType: testCase.resourceType,
           resourceId: "resource-1",
@@ -367,6 +368,36 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
       },
     ]);
   }
+});
+
+test("WHOOP provider synthesizes a deterministic trace id and job dedupe key when trace_id is missing", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+  });
+  const webhookPayload = {
+    user_id: "whoop-user-1",
+    type: "sleep.updated",
+    id: "resource-1",
+  };
+  const rawBody = Buffer.from(JSON.stringify(webhookPayload), "utf8");
+  const timestamp = String(Date.parse("2026-03-16T10:00:00.000Z"));
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  const expectedTraceId = sha256Text(`${Number(timestamp)}:whoop-user-1:sleep.updated:resource-1`);
+
+  assert.equal(parsed?.traceId, expectedTraceId);
+  assert.equal(parsed?.jobs[0]?.dedupeKey, `whoop-webhook:${expectedTraceId}`);
+  assert.deepEqual(parsed?.jobs[0]?.payload, {
+    resourceType: "sleep",
+    resourceId: "resource-1",
+    eventType: "sleep.updated",
+    webhookPayload,
+  });
 });
 
 test("WHOOP provider turns missing resource imports into the existing delete snapshot shape", async () => {

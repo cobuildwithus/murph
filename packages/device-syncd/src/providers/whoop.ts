@@ -6,6 +6,7 @@ import {
   coerceRecord,
   normalizeIdentifier,
   normalizeString,
+  sha256Text,
   subtractDays,
 } from "../shared.js";
 import {
@@ -414,6 +415,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     eventType: string,
     resourceId: string | null | undefined,
     payload: Record<string, unknown>,
+    traceId: string,
   ): DeviceSyncJobInput[] {
     const eventDescriptor = WHOOP_WEBHOOK_EVENT_MAP[eventType];
 
@@ -431,6 +433,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           webhookPayload: payload,
         },
         priority: eventDescriptor.priority,
+        dedupeKey: `whoop-webhook:${traceId}`,
       },
     ];
   }
@@ -746,7 +749,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       const externalAccountId = normalizeIdentifier(payload.user_id);
       const eventType = normalizeString(payload.type);
       const resourceId = normalizeIdentifier(payload.id);
-      const traceId = normalizeString(payload.trace_id);
 
       if (!externalAccountId || !eventType) {
         throw deviceSyncError({
@@ -757,13 +759,21 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         });
       }
 
+      const traceId =
+        normalizeString(payload.trace_id) ??
+        sha256Text(
+          `${timestampNumber}:${externalAccountId}:${eventType}:${
+            resourceId ?? `payload:${sha256Text(context.rawBody.toString("utf8"))}`
+          }`,
+        );
+
       return {
         externalAccountId,
         eventType,
         traceId,
         occurredAt: context.now,
         payload,
-        jobs: buildWhoopWebhookJobs(eventType, resourceId, payload),
+        jobs: buildWhoopWebhookJobs(eventType, resourceId, payload, traceId),
       };
     },
     async executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult> {

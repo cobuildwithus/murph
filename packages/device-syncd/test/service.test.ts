@@ -1,9 +1,11 @@
+import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
+import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.js";
 import { createDeviceSyncService } from "../src/service.js";
 
 import type {
@@ -16,6 +18,30 @@ import type {
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
+}
+
+function createJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+function readUrl(input: RequestInfo | URL): string {
+  return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+}
+
+function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timestamp = Date.now().toString()): Headers {
+  const signature = createHmac("sha256", clientSecret).update(Buffer.concat([Buffer.from(timestamp, "utf8"), rawBody])).digest(
+    "base64",
+  );
+
+  return new Headers({
+    "x-whoop-signature": signature,
+    "x-whoop-signature-timestamp": timestamp,
+  });
 }
 
 function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
@@ -158,6 +184,110 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   const reconcile = service.queueManualReconcile(connected.account.id);
   assert.equal(reconcile.account.id, connected.account.id);
   assert.equal(reconcile.jobs.length, 1);
+
+  service.close();
+});
+
+test("device sync service durably suppresses WHOOP webhook replays without trace_id after the first job runs", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-whoop-replay");
+  const imports: unknown[] = [];
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input);
+      return {
+        ok: true,
+      };
+    },
+  };
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+          scope: "offline read:profile",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/profile/basic") {
+        return createJsonResponse({
+          user_id: "whoop-user-1",
+          first_name: "Whoop",
+          last_name: "User",
+        });
+      }
+
+      if (
+        url.startsWith("https://api.prod.whoop.com/developer/v2/activity/sleep?") ||
+        url.startsWith("https://api.prod.whoop.com/developer/v2/recovery?") ||
+        url.startsWith("https://api.prod.whoop.com/developer/v2/cycle?") ||
+        url.startsWith("https://api.prod.whoop.com/developer/v2/activity/workout?")
+      ) {
+        return createJsonResponse({
+          records: [],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://healthybob.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [provider],
+    importer,
+  });
+
+  const begin = await service.startConnection({
+    provider: "whoop",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "whoop",
+    state: begin.state,
+    code: "abc",
+  });
+
+  assert.equal(connected.account.externalAccountId, "whoop-user-1");
+
+  await service.runWorkerOnce();
+  assert.equal(imports.length, 1);
+
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      user_id: "whoop-user-1",
+      type: "sleep.deleted",
+      id: "sleep-1",
+    }),
+    "utf8",
+  );
+  const headers = createWhoopWebhookHeaders("whoop-client-secret", rawBody, String(Date.now()));
+
+  const firstWebhook = await service.handleWebhook("whoop", headers, rawBody);
+  assert.equal(firstWebhook.accepted, true);
+  assert.equal(firstWebhook.duplicate, false);
+  assert.match(firstWebhook.traceId ?? "", /^[a-f0-9]{64}$/u);
+
+  const firstWebhookJob = await service.runWorkerOnce();
+  assert.equal(firstWebhookJob?.kind, "delete");
+  assert.equal(imports.length, 2);
+
+  const duplicateWebhook = await service.handleWebhook("whoop", headers, rawBody);
+  assert.equal(duplicateWebhook.accepted, true);
+  assert.equal(duplicateWebhook.duplicate, true);
+  assert.equal(duplicateWebhook.traceId, firstWebhook.traceId);
+
+  const duplicateWebhookJob = await service.runWorkerOnce();
+  assert.equal(duplicateWebhookJob, null);
+  assert.equal(imports.length, 2);
 
   service.close();
 });

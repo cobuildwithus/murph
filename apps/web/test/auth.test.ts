@@ -1,10 +1,17 @@
-import { createHmac } from "node:crypto";
-
 import { DeviceSyncError } from "@healthybob/device-syncd";
 import { describe, expect, it } from "vitest";
 
-import { assertBrowserMutationOrigin, requireAuthenticatedHostedUser } from "@/src/lib/device-sync/auth";
+import {
+  assertBrowserMutationOrigin,
+  createHostedUserAssertionSignature,
+  encodeHostedUserAssertion,
+  requireAuthenticatedHostedUser,
+  type HostedBrowserAssertionNonceStore,
+  type HostedUserAssertionClaims,
+} from "@/src/lib/device-sync/auth";
 import type { HostedDeviceSyncEnvironment } from "@/src/lib/device-sync/env";
+
+const NOW = new Date("2026-03-25T12:00:00.000Z");
 
 const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   allowedMutationOrigins: [],
@@ -13,10 +20,8 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   encryptionKeyVersion: "v1",
   isProduction: false,
   ouraWebhookVerificationToken: null,
-  publicBaseUrl: null,
-  trustedUserEmailHeader: "x-healthybob-user-email",
-  trustedUserIdHeader: "x-healthybob-user-id",
-  trustedUserNameHeader: "x-healthybob-user-name",
+  publicBaseUrl: "https://control.example.test/api/device-sync",
+  trustedUserAssertionHeader: "x-healthybob-user-assertion",
   trustedUserSignatureHeader: "x-healthybob-user-signature",
   trustedUserSigningSecret: "test-signing-secret",
   devUserEmail: "dev@example.com",
@@ -29,21 +34,19 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
 };
 
 describe("requireAuthenticatedHostedUser", () => {
-  it("accepts cryptographically signed hosted user headers", () => {
-    const request = new Request("https://example.test/device-sync", {
-      headers: {
-        "x-healthybob-user-id": "user-123",
-        "x-healthybob-user-email": "person@example.com",
-        "x-healthybob-user-name": "Person",
-        "x-healthybob-user-signature": createSignature({
-          id: "user-123",
-          email: "person@example.com",
-          name: "Person",
-        }),
-      },
+  it("accepts a fresh signed hosted user assertion and consumes its nonce", async () => {
+    const nonceStore = createNonceStore();
+    const request = createSignedRequest({
+      url: "https://control.example.test/api/device-sync/connections",
+      nonce: "nonce-accepted-123456",
     });
 
-    expect(requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT)).toEqual({
+    await expect(
+      requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+        nonceStore,
+        now: NOW,
+      }),
+    ).resolves.toEqual({
       id: "user-123",
       email: "person@example.com",
       name: "Person",
@@ -51,47 +54,111 @@ describe("requireAuthenticatedHostedUser", () => {
     });
   });
 
-  it("rejects forged hosted user headers instead of falling back to the development user", () => {
-    const request = new Request("https://example.test/device-sync", {
-      headers: {
-        "x-healthybob-user-id": "user-123",
-        "x-healthybob-user-email": "person@example.com",
-        "x-healthybob-user-name": "Person",
-        "x-healthybob-user-signature": createSignature({
-          id: "user-123",
-          email: "attacker@example.com",
-          name: "Person",
+  it("rejects forged hosted user assertions instead of falling back to the development user", async () => {
+    const claims = createClaims({
+      url: "https://control.example.test/api/device-sync/connections",
+      nonce: "nonce-forged-123456",
+    });
+    const signedAssertion = encodeHostedUserAssertion(claims);
+    const forgedAssertion = encodeHostedUserAssertion({
+      ...claims,
+      email: "attacker@example.com",
+    });
+    const request = createRequestWithAssertion({
+      url: "https://control.example.test/api/device-sync/connections",
+      assertion: forgedAssertion,
+      signature: createHostedUserAssertionSignature(
+        signedAssertion,
+        BASE_ENVIRONMENT.trustedUserSigningSecret ?? "",
+      ),
+    });
+
+    await expectDeviceSyncError(
+      () =>
+        requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+          nonceStore: createNonceStore(),
+          now: NOW,
         }),
-      },
-    });
-
-    expectDeviceSyncError(
-      () => requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT),
       "AUTH_HEADER_INVALID",
       401,
     );
   });
 
-  it("rejects unsigned hosted user headers instead of trusting the raw values", () => {
-    const request = new Request("https://example.test/device-sync", {
-      headers: {
-        "x-healthybob-user-id": "user-123",
-        "x-healthybob-user-email": "person@example.com",
-        "x-healthybob-user-name": "Person",
-      },
+  it("rejects expired hosted user assertions", async () => {
+    const request = createSignedRequest({
+      url: "https://control.example.test/api/device-sync/connections",
+      nonce: "nonce-expired-123456",
+      iat: toEpochSeconds("2026-03-25T11:40:00.000Z"),
+      exp: toEpochSeconds("2026-03-25T11:45:00.000Z"),
     });
 
-    expectDeviceSyncError(
-      () => requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT),
+    await expectDeviceSyncError(
+      () =>
+        requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+          nonceStore: createNonceStore(),
+          now: NOW,
+        }),
+      "AUTH_ASSERTION_STALE",
+      401,
+    );
+  });
+
+  it("rejects assertions whose signed path does not match the request path", async () => {
+    const request = createSignedRequest({
+      url: "https://control.example.test/api/device-sync/connections/dsc_123/status",
+      path: "/api/device-sync/connections",
+      nonce: "nonce-path-123456",
+    });
+
+    await expectDeviceSyncError(
+      () =>
+        requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+          nonceStore: createNonceStore(),
+          now: NOW,
+        }),
       "AUTH_HEADER_INVALID",
       401,
     );
   });
 
-  it("falls back to the development user when trusted headers are absent", () => {
+  it("rejects replayed assertions even when the user tuple is unchanged", async () => {
+    const nonceStore = createNonceStore();
+    const request = createSignedRequest({
+      url: "https://control.example.test/api/device-sync/agents/pair",
+      method: "POST",
+      origin: "https://operator.example.test",
+      nonce: "nonce-replay-123456",
+    });
+
+    await expect(
+      requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+        nonceStore,
+        now: NOW,
+      }),
+    ).resolves.toMatchObject({
+      id: "user-123",
+    });
+
+    await expectDeviceSyncError(
+      () =>
+        requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+          nonceStore,
+          now: NOW,
+        }),
+      "AUTH_ASSERTION_REPLAYED",
+      401,
+    );
+  });
+
+  it("falls back to the development user when trusted headers are absent", async () => {
     const request = new Request("https://example.test/device-sync");
 
-    expect(requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT)).toEqual({
+    await expect(
+      requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+        nonceStore: createNonceStore(),
+        now: NOW,
+      }),
+    ).resolves.toEqual({
       id: "dev-user",
       email: "dev@example.com",
       name: "Dev User",
@@ -101,9 +168,9 @@ describe("requireAuthenticatedHostedUser", () => {
 });
 
 describe("assertBrowserMutationOrigin", () => {
-  it("fails closed when a browser mutation request omits the Origin header", () => {
-    expectDeviceSyncError(
-      () =>
+  it("fails closed when a browser mutation request omits the Origin header", async () => {
+    await expectDeviceSyncError(
+      async () =>
         assertBrowserMutationOrigin(
           new Request("https://control.example.test/api/device-sync/providers/whoop/connect", {
             method: "POST",
@@ -115,9 +182,9 @@ describe("assertBrowserMutationOrigin", () => {
     );
   });
 
-  it("rejects cross-origin POST attempts even when the origin is only allowed as a redirect return origin", () => {
-    expectDeviceSyncError(
-      () =>
+  it("rejects cross-origin POST attempts even when the origin is only allowed as a redirect return origin", async () => {
+    await expectDeviceSyncError(
+      async () =>
         assertBrowserMutationOrigin(
           new Request("https://control.example.test/api/device-sync/providers/whoop/connect", {
             method: "POST",
@@ -154,19 +221,104 @@ describe("assertBrowserMutationOrigin", () => {
   });
 });
 
-function createSignature(claims: { id: string; email: string | null; name: string | null }) {
-  return createHmac("sha256", BASE_ENVIRONMENT.trustedUserSigningSecret ?? "")
-    .update(JSON.stringify([claims.id, claims.email ?? null, claims.name ?? null]))
-    .digest("hex");
+function createSignedRequest(input: {
+  url: string;
+  method?: string;
+  origin?: string | null;
+  path?: string;
+  nonce: string;
+  iat?: number;
+  exp?: number;
+  aud?: string;
+}) {
+  const claims = createClaims(input);
+  const assertion = encodeHostedUserAssertion(claims);
+
+  return createRequestWithAssertion({
+    url: input.url,
+    method: input.method,
+    origin: input.origin,
+    assertion,
+    signature: createHostedUserAssertionSignature(assertion, BASE_ENVIRONMENT.trustedUserSigningSecret ?? ""),
+  });
 }
 
-function expectDeviceSyncError(
-  action: () => unknown,
+function createClaims(input: {
+  url: string;
+  method?: string;
+  origin?: string | null;
+  path?: string;
+  nonce: string;
+  iat?: number;
+  exp?: number;
+  aud?: string;
+}): HostedUserAssertionClaims {
+  const url = new URL(input.url);
+  const method = (input.method ?? "GET").toUpperCase();
+  const iat = input.iat ?? toEpochSeconds("2026-03-25T11:58:00.000Z");
+  const exp = input.exp ?? toEpochSeconds("2026-03-25T12:03:00.000Z");
+
+  return {
+    id: "user-123",
+    email: "person@example.com",
+    name: "Person",
+    aud: input.aud ?? url.origin,
+    method,
+    path: input.path ?? url.pathname,
+    origin: input.origin ?? null,
+    nonce: input.nonce,
+    iat,
+    exp,
+  };
+}
+
+function createRequestWithAssertion(input: {
+  url: string;
+  method?: string;
+  origin?: string | null;
+  assertion: string;
+  signature: string;
+}) {
+  return new Request(input.url, {
+    method: input.method ?? "GET",
+    headers: {
+      ...(input.origin
+        ? {
+            origin: input.origin,
+          }
+        : {}),
+      "x-healthybob-user-assertion": input.assertion,
+      "x-healthybob-user-signature": input.signature,
+    },
+  });
+}
+
+function createNonceStore(): HostedBrowserAssertionNonceStore {
+  const consumed = new Set<string>();
+
+  return {
+    async consumeBrowserAssertionNonce({ nonceHash }) {
+      if (consumed.has(nonceHash)) {
+        return false;
+      }
+
+      consumed.add(nonceHash);
+      return true;
+    },
+  };
+}
+
+function toEpochSeconds(value: string): number {
+  return Math.floor(Date.parse(value) / 1000);
+}
+
+async function expectDeviceSyncError(
+  action: () => Promise<unknown>,
   expectedCode: string,
   expectedStatus: number,
 ) {
   try {
-    action();
+    await action();
   } catch (error) {
     expect(error).toBeInstanceOf(DeviceSyncError);
     expect(error).toMatchObject({

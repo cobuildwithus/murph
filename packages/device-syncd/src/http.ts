@@ -544,17 +544,33 @@ function resolveWebhookVerificationChallenge(
   });
 }
 
+export function buildCallbackErrorRedirectLocation(input: {
+  returnTo: string | null;
+  provider: string;
+  errorCode: string;
+}): string | null {
+  if (!input.returnTo) {
+    return null;
+  }
+
+  const destination = new URL(input.returnTo);
+  destination.searchParams.set("deviceSyncStatus", "error");
+  destination.searchParams.set("deviceSyncProvider", input.provider);
+  destination.searchParams.set("deviceSyncError", input.errorCode);
+  return destination.toString();
+}
+
 function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {
   const provider = error.details ? readStringField(error.details, "provider") ?? fallbackProvider : fallbackProvider;
   const returnTo = error.details ? readStringField(error.details, "returnTo") : null;
+  const destination = buildCallbackErrorRedirectLocation({
+    returnTo,
+    provider,
+    errorCode: error.code,
+  });
 
-  if (returnTo) {
-    const destination = new URL(returnTo);
-    destination.searchParams.set("deviceSyncStatus", "error");
-    destination.searchParams.set("deviceSyncProvider", provider);
-    destination.searchParams.set("deviceSyncError", error.code);
-    destination.searchParams.set("deviceSyncErrorMessage", error.message);
-    redirect(response, destination.toString());
+  if (destination) {
+    redirect(response, destination);
     return;
   }
 

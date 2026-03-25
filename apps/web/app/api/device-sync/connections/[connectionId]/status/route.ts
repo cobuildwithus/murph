@@ -8,7 +8,7 @@ export async function GET(
   try {
     const { connectionId } = await resolveRouteParams(context.params);
     const controlPlane = createHostedDeviceSyncControlPlane(request);
-    const user = controlPlane.requireAuthenticatedUser();
+    const user = await controlPlane.requireAuthenticatedUser();
     return jsonOk(await controlPlane.getConnectionStatus(user.id, decodeURIComponent(connectionId)));
   } catch (error) {
     return jsonError(error);

@@ -144,9 +144,15 @@ export class DeviceSyncPublicIngress {
       const callbackError = normalizeString(input.error);
 
       if (callbackError) {
+        this.logger.warn?.("OAuth callback was rejected by the provider.", {
+          provider: provider.provider,
+          callbackError,
+          errorDescription: normalizeString(input.errorDescription),
+        });
+
         throw deviceSyncError({
           code: "OAUTH_CALLBACK_REJECTED",
-          message: normalizeString(input.errorDescription) ?? `OAuth authorization failed: ${callbackError}`,
+          message: "OAuth authorization was denied or canceled.",
           retryable: false,
           httpStatus: 400,
         });
@@ -236,25 +242,23 @@ export class DeviceSyncPublicIngress {
       now,
     });
 
-    if (parsed.traceId) {
-      const inserted = await this.store.recordWebhookTraceIfNew({
-        provider: provider.provider,
-        traceId: parsed.traceId,
-        externalAccountId: parsed.externalAccountId,
-        eventType: parsed.eventType,
-        receivedAt: now,
-        payload: parsed.payload,
-      });
+    const inserted = await this.store.recordWebhookTraceIfNew({
+      provider: provider.provider,
+      traceId: parsed.traceId,
+      externalAccountId: parsed.externalAccountId,
+      eventType: parsed.eventType,
+      receivedAt: now,
+      payload: parsed.payload,
+    });
 
-      if (!inserted) {
-        return {
-          accepted: true,
-          duplicate: true,
-          provider: provider.provider,
-          eventType: parsed.eventType,
-          traceId: parsed.traceId,
-        };
-      }
+    if (!inserted) {
+      return {
+        accepted: true,
+        duplicate: true,
+        provider: provider.provider,
+        eventType: parsed.eventType,
+        traceId: parsed.traceId,
+      };
     }
 
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);

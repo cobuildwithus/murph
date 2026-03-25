@@ -9,7 +9,7 @@ export async function POST(
     const { connectionId } = await resolveRouteParams(context.params);
     const controlPlane = createHostedDeviceSyncControlPlane(request);
     controlPlane.assertBrowserMutationOrigin();
-    const user = controlPlane.requireAuthenticatedUser();
+    const user = await controlPlane.requireAuthenticatedUser();
     return jsonOk(await controlPlane.disconnectConnection(user.id, decodeURIComponent(connectionId)));
   } catch (error) {
     return jsonError(error);

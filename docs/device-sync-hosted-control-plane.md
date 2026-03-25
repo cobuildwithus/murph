@@ -131,12 +131,14 @@ Keep secrets in a separate table from user-visible connection metadata.
 ### Secret hygiene and rotation
 
 - Keep real hosted control-plane credentials in an untracked local `.env` for development or the deployment platform's secret manager. The repo-owned `apps/web/.env.example` file should remain placeholder-only.
+- A raw filesystem zip/tar of a repo clone is still an exposure when ignored local `apps/web/.env` or `.next` artifacts exist, even if git itself is clean. Use the guarded source-bundle path (`scripts/package-audit-context.sh` / `pnpm zip:src`) for review handoff instead of archiving the clone directly.
 - If any real hosted `.env` or deploy secret was exposed, rotate at least:
   - the Postgres credential behind `DATABASE_URL`
   - `DEVICE_SYNC_ENCRYPTION_KEY` and `DEVICE_SYNC_ENCRYPTION_KEY_VERSION`
   - `WHOOP_CLIENT_SECRET`
   - `OURA_CLIENT_SECRET`
   - `OURA_WEBHOOK_VERIFICATION_TOKEN`
+- Treat a leaked raw clone/archive that contained the local hosted `.env` the same way as a direct secret exposure for rotation and re-authorization decisions.
 - Today the hosted app records `key_version` with each `device_connection_secret` row, but runtime decryption still uses one active `DEVICE_SYNC_ENCRYPTION_KEY`. A version bump by itself does not preserve access to older escrowed token rows.
 - That means encryption-key rotation needs one of two operational paths before the cutover:
   - re-encrypt every affected escrowed token bundle while the old key is still available, then switch the deployment to the new key/version
@@ -210,6 +212,8 @@ These are internet-facing and provider-facing only.
 ### Hosted browser-authenticated routes
 
 These are for the signed-in user and return only safe metadata.
+
+Browser auth for these routes should come from a trusted front-end/auth proxy that mints a fresh signed assertion per request. The signed payload should include the user claims plus `iat`, `exp`, `nonce`, `aud`, `method`, `path`, and `origin`, with a lifetime no longer than a few minutes. Sensitive mutations such as pairing or disconnect should reject replayed assertions by consuming each nonce once server-side.
 
 - `GET /api/device-sync/connections`
 - `POST /api/device-sync/connections/:provider/connect`

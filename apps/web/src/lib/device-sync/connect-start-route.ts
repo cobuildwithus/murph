@@ -42,7 +42,7 @@ export async function hostedDeviceSyncConnectStartPost(
     const { provider } = await resolveRouteParams(context.params);
     const controlPlane = createHostedDeviceSyncControlPlane(request);
     controlPlane.assertBrowserMutationOrigin();
-    const user = controlPlane.requireAuthenticatedUser();
+    const user = await controlPlane.requireAuthenticatedUser();
     const body = await readOptionalJsonObject(request);
     const returnTo = typeof body.returnTo === "string" ? body.returnTo : null;
     return jsonOk(
