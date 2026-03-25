@@ -9,7 +9,7 @@ export async function POST(
     const { connectionId } = await resolveRouteParams(context.params);
     const controlPlane = createHostedDeviceSyncControlPlane(request);
     const session = await controlPlane.requireAgentSession();
-    return jsonOk(await controlPlane.exportTokenBundle(session.userId, decodeURIComponent(connectionId)));
+    return jsonOk(await controlPlane.exportTokenBundle(session, decodeURIComponent(connectionId)));
   } catch (error) {
     return jsonError(error);
   }

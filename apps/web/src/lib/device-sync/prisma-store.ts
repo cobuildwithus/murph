@@ -22,8 +22,18 @@ export interface HostedAgentSessionRecord {
   label: string | null;
   createdAt: string;
   updatedAt: string;
+  expiresAt: string;
   lastSeenAt: string | null;
   revokedAt: string | null;
+  revokeReason: string | null;
+  replacedBySessionId: string | null;
+}
+
+export type HostedAgentSessionAuthStatus = "active" | "expired" | "revoked" | "missing";
+
+export interface HostedAgentSessionAuthResult {
+  status: HostedAgentSessionAuthStatus;
+  session: HostedAgentSessionRecord | null;
 }
 
 export interface HostedSignalRecord {
@@ -398,6 +408,7 @@ export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngres
     label?: string | null;
     tokenHash: string;
     now?: string;
+    expiresAt: string;
   }): Promise<HostedAgentSessionRecord> {
     const now = input.now ?? toIsoTimestamp(new Date());
     const record = await this.prisma.deviceAgentSession.create({
@@ -408,6 +419,7 @@ export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngres
         tokenHash: input.tokenHash,
         createdAt: new Date(now),
         updatedAt: new Date(now),
+        expiresAt: new Date(input.expiresAt),
         lastSeenAt: new Date(now),
       },
     });
@@ -415,16 +427,36 @@ export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngres
     return this.mapAgentSessionRecord(record);
   }
 
-  async getAgentSessionByTokenHash(tokenHash: string, now: string): Promise<HostedAgentSessionRecord | null> {
-    const record = await this.prisma.deviceAgentSession.findFirst({
+  async authenticateAgentSessionByTokenHash(tokenHash: string, now: string): Promise<HostedAgentSessionAuthResult> {
+    const record = await this.prisma.deviceAgentSession.findUnique({
       where: {
         tokenHash,
-        revokedAt: null,
       },
     });
 
     if (!record) {
-      return null;
+      return {
+        status: "missing",
+        session: null,
+      };
+    }
+
+    if (record.revokedAt) {
+      return {
+        status: "revoked",
+        session: this.mapAgentSessionRecord(record),
+      };
+    }
+
+    if (record.expiresAt.getTime() <= Date.parse(now)) {
+      return {
+        status: "expired",
+        session: await this.revokeAgentSession({
+          sessionId: record.id,
+          now,
+          reason: "expired",
+        }),
+      };
     }
 
     const touched = await this.prisma.deviceAgentSession.update({
@@ -436,7 +468,114 @@ export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngres
       },
     });
 
-    return this.mapAgentSessionRecord(touched);
+    return {
+      status: "active",
+      session: this.mapAgentSessionRecord(touched),
+    };
+  }
+
+  async rotateAgentSession(input: {
+    sessionId: string;
+    tokenHash: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<HostedAgentSessionRecord> {
+    const replacementSessionId = generatePrefixedId("dsa");
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.deviceAgentSession.findFirst({
+        where: {
+          id: input.sessionId,
+          revokedAt: null,
+          expiresAt: {
+            gt: new Date(input.now),
+          },
+        },
+      });
+
+      if (!existing) {
+        throw deviceSyncError({
+          code: "AGENT_AUTH_INVALID",
+          message: "Hosted device-sync agent bearer token is no longer active.",
+          retryable: false,
+          httpStatus: 401,
+        });
+      }
+
+      const revoked = await tx.deviceAgentSession.updateMany({
+        where: {
+          id: input.sessionId,
+          revokedAt: null,
+          expiresAt: {
+            gt: new Date(input.now),
+          },
+        },
+        data: {
+          revokedAt: new Date(input.now),
+          revokeReason: "rotated",
+          replacedBySessionId: replacementSessionId,
+          updatedAt: new Date(input.now),
+        },
+      });
+
+      if (revoked.count !== 1) {
+        throw deviceSyncError({
+          code: "AGENT_AUTH_INVALID",
+          message: "Hosted device-sync agent bearer token is no longer active.",
+          retryable: false,
+          httpStatus: 401,
+        });
+      }
+
+      const record = await tx.deviceAgentSession.create({
+        data: {
+          id: replacementSessionId,
+          userId: existing.userId,
+          label: existing.label,
+          tokenHash: input.tokenHash,
+          createdAt: new Date(input.now),
+          updatedAt: new Date(input.now),
+          expiresAt: new Date(input.expiresAt),
+          lastSeenAt: new Date(input.now),
+        },
+      });
+
+      return this.mapAgentSessionRecord(record);
+    });
+  }
+
+  async revokeAgentSession(input: {
+    sessionId: string;
+    now: string;
+    reason: string;
+    replacedBySessionId?: string | null;
+  }): Promise<HostedAgentSessionRecord | null> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.deviceAgentSession.updateMany({
+        where: {
+          id: input.sessionId,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(input.now),
+          revokeReason: input.reason,
+          ...(input.replacedBySessionId !== undefined
+            ? {
+                replacedBySessionId: input.replacedBySessionId,
+              }
+            : {}),
+          updatedAt: new Date(input.now),
+        },
+      });
+
+      const record = await tx.deviceAgentSession.findUnique({
+        where: {
+          id: input.sessionId,
+        },
+      });
+
+      return record ? this.mapAgentSessionRecord(record) : null;
+    });
   }
 
   async markConnectionDisconnected(input: {
@@ -590,8 +729,11 @@ export class PrismaDeviceSyncControlPlaneStore implements DeviceSyncPublicIngres
       label: record.label,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
+      expiresAt: record.expiresAt.toISOString(),
       lastSeenAt: maybeIsoTimestamp(record.lastSeenAt),
       revokedAt: maybeIsoTimestamp(record.revokedAt),
+      revokeReason: record.revokeReason ?? null,
+      replacedBySessionId: record.replacedBySessionId ?? null,
     } satisfies HostedAgentSessionRecord;
   }
 }

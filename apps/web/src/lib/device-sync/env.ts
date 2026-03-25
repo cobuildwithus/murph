@@ -7,6 +7,7 @@ export interface HostedOAuthProviderEnvironment {
 }
 
 export interface HostedDeviceSyncEnvironment {
+  allowedMutationOrigins: string[];
   allowedReturnOrigins: string[];
   encryptionKey: Buffer;
   encryptionKeyVersion: string;
@@ -16,6 +17,8 @@ export interface HostedDeviceSyncEnvironment {
   trustedUserEmailHeader: string | null;
   trustedUserIdHeader: string;
   trustedUserNameHeader: string | null;
+  trustedUserSignatureHeader: string;
+  trustedUserSigningSecret: string | null;
   devUserEmail: string | null;
   devUserId: string | null;
   devUserName: string | null;
@@ -25,6 +28,9 @@ export interface HostedDeviceSyncEnvironment {
   };
 }
 
+const DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS = [
+  "DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS",
+] as const;
 const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
   "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
 ] as const;
@@ -55,6 +61,12 @@ const DEVICE_SYNC_TRUSTED_USER_ID_HEADER_ENV_KEYS = [
 const DEVICE_SYNC_TRUSTED_USER_NAME_HEADER_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_NAME_HEADER",
 ] as const;
+const DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS = [
+  "DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER",
+] as const;
+const DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS = [
+  "DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET",
+] as const;
 const OURA_CLIENT_ID_ENV_KEYS = ["OURA_CLIENT_ID"] as const;
 const OURA_CLIENT_SECRET_ENV_KEYS = [
   "OURA_CLIENT_SECRET",
@@ -76,6 +88,7 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
   }
 
   return {
+    allowedMutationOrigins: parseCommaSeparatedList(readEnv(source, DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS)),
     allowedReturnOrigins: parseCommaSeparatedList(readEnv(source, DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS)),
     encryptionKey: decodeHostedEncryptionKey(encryptionKey),
     encryptionKeyVersion,
@@ -86,6 +99,10 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
     trustedUserIdHeader:
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ID_HEADER_ENV_KEYS)) ?? "x-healthybob-user-id",
     trustedUserNameHeader: normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_NAME_HEADER_ENV_KEYS)),
+    trustedUserSignatureHeader:
+      normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS)) ??
+      "x-healthybob-user-signature",
+    trustedUserSigningSecret: readEnv(source, DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS),
     devUserEmail: readEnv(source, DEVICE_SYNC_DEV_USER_EMAIL_ENV_KEYS) ?? null,
     devUserId: readEnv(source, DEVICE_SYNC_DEV_USER_ID_ENV_KEYS) ?? null,
     devUserName: readEnv(source, DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS) ?? null,

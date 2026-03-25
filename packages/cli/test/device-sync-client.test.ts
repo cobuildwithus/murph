@@ -53,3 +53,17 @@ test("createDeviceSyncClient explains missing control-plane auth", async () => {
       /DEVICE_SYNC_CONTROL_TOKEN/u.test(error.message),
   );
 });
+
+test("createDeviceSyncClient rejects non-loopback base URLs when a control-plane bearer is configured", () => {
+  assert.throws(
+    () =>
+      createDeviceSyncClient({
+        baseUrl: "https://device-sync.example.test",
+        controlToken: "control-token-for-tests",
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === "DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED" &&
+      /loopback base URLs/u.test(error.message),
+  );
+});

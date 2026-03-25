@@ -1,6 +1,6 @@
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 
 import {
   assertContract,
@@ -39,6 +39,9 @@ import {
 } from "../shared.js";
 import type { InboxRuntimeStore } from "../kernel/sqlite.js";
 
+const STORED_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+const QUARANTINED_INVALID_CAPTURE_ID_SUFFIX = "quarantined-invalid-capture-id";
+
 export interface PersistRawCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -63,6 +66,26 @@ interface EnvelopeEntry {
 
 export interface StoredCaptureCanonicalEvidence {
   auditId?: string;
+}
+
+class UnsafeStoredCaptureIdError extends Error {
+  readonly captureId: string;
+  readonly canonicalCaptureId: string;
+  readonly absolutePath: string;
+
+  constructor(input: {
+    captureId: string;
+    canonicalCaptureId: string;
+    absolutePath: string;
+  }) {
+    super(
+      `Stored inbox envelope at ${input.absolutePath} contains unsafe captureId "${input.captureId}".`,
+    );
+    this.name = "UnsafeStoredCaptureIdError";
+    this.captureId = input.captureId;
+    this.canonicalCaptureId = input.canonicalCaptureId;
+    this.absolutePath = input.absolutePath;
+  }
 }
 
 export async function ensureInboxVault(vaultRoot: string): Promise<void> {
@@ -501,6 +524,11 @@ async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCa
       return null;
     }
 
+    if (error instanceof UnsafeStoredCaptureIdError) {
+      await quarantineStoredCaptureEnvelope(absolutePath);
+      return null;
+    }
+
     throw error;
   }
 }
@@ -517,21 +545,41 @@ function normalizeStoredCaptureEnvelope(
     throw new TypeError(`Missing canonical "stored" payload in stored inbox envelope at ${absolutePath}.`);
   }
 
+  if (!envelope.input || typeof envelope.input !== "object") {
+    throw new TypeError(`Missing canonical "input" payload in stored inbox envelope at ${absolutePath}.`);
+  }
+
+  if (typeof envelope.input.source !== "string" || envelope.input.source.trim().length === 0) {
+    throw new TypeError(`Missing canonical "input.source" in stored inbox envelope at ${absolutePath}.`);
+  }
+
+  if (typeof envelope.input.externalId !== "string" || envelope.input.externalId.trim().length === 0) {
+    throw new TypeError(`Missing canonical "input.externalId" in stored inbox envelope at ${absolutePath}.`);
+  }
+
   if (!Array.isArray(envelope.stored.attachments)) {
     throw new TypeError(
       `Missing canonical "stored.attachments" array in stored inbox envelope at ${absolutePath}.`,
     );
   }
 
+  const canonicalCaptureId = createDeterministicInboxCaptureId(envelope.input);
+  const captureId = normalizeStoredCaptureId({
+    captureId: envelope.captureId,
+    canonicalCaptureId,
+    absolutePath,
+  });
+
   return {
     ...envelope,
+    captureId,
     stored: {
       ...envelope.stored,
-      attachments: normalizeStoredAttachments(
-        envelope.captureId,
-        envelope.stored.attachments,
-        `stored inbox envelope at ${absolutePath}`,
-      ),
+      attachments: normalizeStoredAttachmentsForCaptureId({
+        captureId,
+        attachments: envelope.stored.attachments,
+        absolutePath,
+      }),
     },
   };
 }
@@ -571,7 +619,8 @@ function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): numb
 }
 
 function comparePreferenceScore(entry: EnvelopeEntry): number {
-  return entry.envelope.captureId === createDeterministicInboxCaptureId(entry.envelope.input) ? 0 : 1;
+  const canonicalCaptureId = createDeterministicInboxCaptureId(entry.envelope.input);
+  return path.basename(path.dirname(entry.absolutePath)) === canonicalCaptureId ? 0 : 1;
 }
 
 function isInboxCaptureEventRecord(record: unknown, envelope: StoredCaptureEnvelope): boolean {
@@ -645,6 +694,83 @@ function buildUnstoredAttachment(input: {
     storedPath: null,
     sha256: null,
   };
+}
+
+function normalizeStoredCaptureId(input: {
+  captureId: unknown;
+  canonicalCaptureId: string;
+  absolutePath: string;
+}): string {
+  const captureId = typeof input.captureId === "string" ? input.captureId.trim() : "";
+
+  if (!captureId) {
+    throw new TypeError(`Missing canonical "captureId" in stored inbox envelope at ${input.absolutePath}.`);
+  }
+
+  if (!STORED_CAPTURE_ID_PATTERN.test(captureId)) {
+    throw new UnsafeStoredCaptureIdError({
+      captureId,
+      canonicalCaptureId: input.canonicalCaptureId,
+      absolutePath: input.absolutePath,
+    });
+  }
+
+  return input.canonicalCaptureId;
+}
+
+function normalizeStoredAttachmentsForCaptureId(input: {
+  captureId: string;
+  attachments: ReadonlyArray<StoredAttachment>;
+  absolutePath: string;
+}): StoredAttachment[] {
+  const normalizedAttachments = normalizeStoredAttachments(
+    input.captureId,
+    input.attachments,
+    `stored inbox envelope at ${input.absolutePath}`,
+  );
+
+  return normalizedAttachments.map((attachment) => ({
+    ...attachment,
+    attachmentId: buildAttachmentId(input.captureId, attachment.ordinal),
+  }));
+}
+
+async function quarantineStoredCaptureEnvelope(absolutePath: string): Promise<void> {
+  const quarantinePath = await resolveQuarantinedEnvelopePath(absolutePath);
+
+  try {
+    await rename(absolutePath, quarantinePath);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function resolveQuarantinedEnvelopePath(absolutePath: string): Promise<string> {
+  const parsed = path.parse(absolutePath);
+
+  for (let index = 0; index < 1000; index += 1) {
+    const suffix = index === 0 ? "" : `-${index}`;
+    const candidate = path.join(
+      parsed.dir,
+      `${parsed.name}.${QUARANTINED_INVALID_CAPTURE_ID_SUFFIX}${suffix}${parsed.ext}`,
+    );
+
+    try {
+      await stat(candidate);
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return candidate;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new TypeError(`Unable to quarantine stored inbox envelope at ${absolutePath}.`);
 }
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {

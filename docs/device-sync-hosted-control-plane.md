@@ -128,6 +128,21 @@ Recommended tables:
 
 Keep secrets in a separate table from user-visible connection metadata.
 
+### Secret hygiene and rotation
+
+- Keep real hosted control-plane credentials in an untracked local `.env` for development or the deployment platform's secret manager. The repo-owned `apps/web/.env.example` file should remain placeholder-only.
+- If any real hosted `.env` or deploy secret was exposed, rotate at least:
+  - the Postgres credential behind `DATABASE_URL`
+  - `DEVICE_SYNC_ENCRYPTION_KEY` and `DEVICE_SYNC_ENCRYPTION_KEY_VERSION`
+  - `WHOOP_CLIENT_SECRET`
+  - `OURA_CLIENT_SECRET`
+  - `OURA_WEBHOOK_VERIFICATION_TOKEN`
+- Today the hosted app records `key_version` with each `device_connection_secret` row, but runtime decryption still uses one active `DEVICE_SYNC_ENCRYPTION_KEY`. A version bump by itself does not preserve access to older escrowed token rows.
+- That means encryption-key rotation needs one of two operational paths before the cutover:
+  - re-encrypt every affected escrowed token bundle while the old key is still available, then switch the deployment to the new key/version
+  - revoke or delete the old escrowed token rows and force each affected provider connection through a fresh authorization flow
+- If the old database credential and the old encryption key may both have been exposed together, treat the existing escrowed provider tokens as compromised and prefer revocation/re-authorization over silent carry-forward.
+
 #### `device_oauth_session`
 - `state`
 - `user_id`
@@ -158,8 +173,11 @@ Append-only mailbox for the local app to poll with a cursor:
 - `user_id`
 - `label`
 - hashed agent token or opaque credential id
+- `expires_at`
 - `last_seen_at`
 - `revoked_at`
+- `revoke_reason`
+- `replaced_by_session_id`
 - `created_at`
 
 #### optional `device_webhook_subscription`
@@ -208,9 +226,16 @@ Authenticated by a local-agent credential, not by browser cookies.
 - `GET /api/device-sync/agent/signals?after=<cursor>`
 - `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
-- `POST /api/device-sync/agent/connections/:connectionId/rotate-token-bundle`
+- `POST /api/device-sync/agent/session/revoke`
 - `POST /api/device-sync/agent/signals/ack` (optional if you keep cursor-only semantics)
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
+
+Current hosted agent-session behavior:
+- `POST /api/device-sync/agents/pair` creates a 24-hour bearer session.
+- Agent bearer lookup fails closed when the session is expired or revoked.
+- `export-token-bundle` and `refresh-token-bundle` both return a replacement bearer in `agentSession.bearerToken` plus the new session expiry.
+- The previous bearer is revoked immediately when export/refresh rotates the session.
+- `POST /api/device-sync/agent/session/revoke` lets the local agent explicitly invalidate its current bearer.
 
 ## What should move out of `device-syncd`
 
@@ -293,11 +318,13 @@ If the hosted app owns the provider client secret, do **not** ship that client s
 
 Use this pattern instead:
 1. hosted app stores encrypted tokens durably
-2. local app exports a token bundle once and caches it locally
-3. local app fetches provider data directly until access-token refresh is needed
-4. when refresh is needed, local app calls a narrow hosted refresh endpoint
-5. hosted app refreshes atomically, updates escrow, and returns the new token bundle
-6. local app continues syncing locally without proxying provider payloads through hosted
+2. local app exports a token bundle once, caches it locally, and persists the replacement agent bearer returned by the response
+3. local app fetches provider data directly until access-token refresh or bearer renewal is needed
+4. when refresh or renewal is needed, local app calls the hosted refresh endpoint with its latest bearer
+5. hosted app refreshes tokens atomically when needed, updates escrow, and returns the new token bundle plus the next bearer session
+6. local app discards the prior bearer immediately and continues syncing locally without proxying provider payloads through hosted
+
+If the local agent lets its bearer expire, the hosted app rejects export/refresh/signals/heartbeat calls until the agent is paired again.
 
 That preserves a local-first data plane without requiring every sync request to transit the hosted app.
 
@@ -306,7 +333,7 @@ That preserves a local-first data plane without requiring every sync request to 
 To avoid constant hosted chatter:
 - local app polls `device_sync_signal` on startup, on manual sync, and on a modest timer
 - hosted app never proxies normal provider data payloads
-- hosted app is only consulted for control-plane events: pending signals, token export, token refresh, disconnect state, and optional pairing/session renewal
+- hosted app is only consulted for control-plane events: pending signals, token export, token refresh, disconnect state, explicit session revoke, and bearer rotation/renewal through export or refresh
 
 ## Migration path
 

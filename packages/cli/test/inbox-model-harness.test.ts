@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { test, vi } from 'vitest'
+import type { AssistantAskResult } from '../src/assistant-cli-contracts.js'
+import { writeAssistantChatResultArtifacts } from '../src/assistant/automation/artifacts.js'
 import {
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
@@ -99,6 +101,56 @@ function createStubInboxServices(showResult: Awaited<ReturnType<InboxCliServices
     reparseAttachment: async () => {
       throw new Error('not implemented')
     },
+  }
+}
+
+function createStubAssistantResult(vault: string): AssistantAskResult {
+  return {
+    vault,
+    prompt: 'Reply to the capture.',
+    response: 'Acknowledged.',
+    session: {
+      schema: 'healthybob.assistant-session.v2',
+      sessionId: 'asst_session_1',
+      provider: 'codex-cli',
+      providerSessionId: null,
+      providerOptions: {
+        model: 'gpt-5.4',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+      },
+      alias: null,
+      binding: {
+        conversationKey: null,
+        channel: null,
+        identityId: null,
+        actorId: null,
+        threadId: null,
+        threadIsDirect: null,
+        delivery: null,
+      },
+      createdAt: '2026-03-13T10:00:00.000Z',
+      updatedAt: '2026-03-13T10:00:00.000Z',
+      lastTurnAt: '2026-03-13T10:00:00.000Z',
+      turnCount: 1,
+    },
+    delivery: null,
+    deliveryError: null,
+  }
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -233,6 +285,62 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
   }
 })
 
+test('materializeInboxModelBundle rejects malicious capture ids before writing bundle artifacts outside the vault', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-malicious-bundle-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-malicious-outside-'))
+  const maliciousCaptureId = path.posix.join('..', '..', '..', path.basename(outsideRoot))
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: maliciousCaptureId,
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-malicious',
+      threadId: 'thread-malicious',
+      threadTitle: 'Care team',
+      actorId: 'contact-unsafe',
+      actorName: 'Unsafe',
+      actorIsSelf: false,
+      occurredAt: '2026-03-13T10:00:00.000Z',
+      receivedAt: '2026-03-13T10:00:02.000Z',
+      text: 'Do not write outside the vault.',
+      attachmentCount: 0,
+      envelopePath: 'raw/inbox/captures/cap_malicious/envelope.json',
+      eventId: 'evt_malicious',
+      promotions: [],
+      createdAt: '2026-03-13T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [],
+    },
+  })
+
+  try {
+    await assert.rejects(
+      () =>
+        materializeInboxModelBundle({
+          inboxServices,
+          requestId: 'req_bundle_malicious',
+          captureId: maliciousCaptureId,
+          vault: vaultRoot,
+          vaultServices: createStubVaultServices(),
+        }),
+      (error) => {
+        assert.equal((error as { code?: string }).code, 'ASSISTANT_PATH_OUTSIDE_VAULT')
+        return true
+      },
+    )
+
+    assert.equal(
+      await pathExists(path.join(outsideRoot, 'assistant', 'bundle.json')),
+      false,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+    await rm(outsideRoot, { recursive: true, force: true })
+  }
+})
+
 test('materializeInboxModelBundle marks supported meal photos as multimodal-ready routing inputs', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-photo-bundle-'))
   const imageDirectory = path.join(
@@ -302,6 +410,36 @@ test('materializeInboxModelBundle marks supported meal photos as multimodal-read
     assert.match(result.bundle.routingText, /routingImageEligible: true/u)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('writeAssistantChatResultArtifacts rejects malicious capture ids before writing chat artifacts outside the vault', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-chat-malicious-vault-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-chat-malicious-outside-'))
+  const maliciousCaptureId = path.posix.join('..', '..', '..', path.basename(outsideRoot))
+
+  try {
+    await assert.rejects(
+      () =>
+        writeAssistantChatResultArtifacts({
+          captureIds: [maliciousCaptureId],
+          respondedAt: '2026-03-13T10:05:00.000Z',
+          result: createStubAssistantResult(vaultRoot),
+          vault: vaultRoot,
+        }),
+      (error) => {
+        assert.equal((error as { code?: string }).code, 'ASSISTANT_PATH_OUTSIDE_VAULT')
+        return true
+      },
+    )
+
+    assert.equal(
+      await pathExists(path.join(outsideRoot, 'assistant', 'chat-result.json')),
+      false,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+    await rm(outsideRoot, { recursive: true, force: true })
   }
 })
 

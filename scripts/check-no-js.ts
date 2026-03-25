@@ -8,6 +8,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const scanRoots = ["packages", "apps", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
 const allowedSourceArtifacts = new Set(["packages/web/postcss.config.mjs"]);
+const blockedTrackedArtifactDirectoryNames = new Set(["dist", ".next", ".test-dist"]);
 const execFileAsync = promisify(execFile);
 const nextEnvCommonLines = [
   '/// <reference types="next" />',
@@ -51,10 +52,10 @@ export async function main(): Promise<void> {
     await scanPath(root, sourceArtifactOffenders);
   }
 
-  const trackedBuildArtifactOffenders = await findTrackedBuildArtifacts();
+  const trackedArtifactOffenders = await findBlockedTrackedArtifacts();
 
-  if (sourceArtifactOffenders.length > 0 || trackedBuildArtifactOffenders.length > 0) {
-    const message = ["Found blocked package/e2e source or tracked build artifacts:"];
+  if (sourceArtifactOffenders.length > 0 || trackedArtifactOffenders.length > 0) {
+    const message = ["Found blocked package/e2e source or tracked private/build artifacts:"];
 
     if (sourceArtifactOffenders.length > 0) {
       message.push(
@@ -63,10 +64,10 @@ export async function main(): Promise<void> {
       );
     }
 
-    if (trackedBuildArtifactOffenders.length > 0) {
+    if (trackedArtifactOffenders.length > 0) {
       message.push(
-        "Tracked build artifacts:",
-        ...trackedBuildArtifactOffenders.map((filePath) => `- ${filePath}`),
+        "Tracked private/build artifacts:",
+        ...trackedArtifactOffenders.map((filePath) => `- ${filePath}`),
       );
     }
 
@@ -74,7 +75,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs, and no tracked dist/.next/.test-dist/*.tsbuildinfo artifacts, found under packages/, apps/, or e2e/.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs, and no tracked .env/.env.* private files or dist/.next/.test-dist/*.tsbuildinfo artifacts, were found.",
   );
 }
 
@@ -125,6 +126,10 @@ async function isAllowedDeclarationArtifact(relativePath: string): Promise<boole
   return isAllowedDeclarationArtifactContents(relativePath, contents);
 }
 
+function normalizeGitPath(filePath: string): string {
+  return filePath.replace(/\\/g, "/");
+}
+
 export function isAllowedDeclarationArtifactContents(
   relativePath: string,
   contents: string,
@@ -133,8 +138,34 @@ export function isAllowedDeclarationArtifactContents(
   return expectedContents?.includes(contents) ?? false;
 }
 
-async function findTrackedBuildArtifacts(): Promise<string[]> {
-  const { stdout } = await execFileAsync("git", ["ls-files", "--", ...scanRoots], {
+export function isBlockedTrackedEnvArtifactPath(filePath: string): boolean {
+  const normalizedPath = normalizeGitPath(filePath);
+  const baseName = path.posix.basename(normalizedPath);
+
+  if (baseName === ".env") {
+    return true;
+  }
+
+  return baseName.startsWith(".env.") && !baseName.endsWith(".example");
+}
+
+export function isBlockedTrackedArtifactPath(filePath: string): boolean {
+  const normalizedPath = normalizeGitPath(filePath);
+
+  if (isBlockedTrackedEnvArtifactPath(normalizedPath)) {
+    return true;
+  }
+
+  if (normalizedPath.endsWith(".tsbuildinfo")) {
+    return true;
+  }
+
+  const pathSegments = normalizedPath.split("/");
+  return pathSegments.some((segment) => blockedTrackedArtifactDirectoryNames.has(segment));
+}
+
+async function findBlockedTrackedArtifacts(): Promise<string[]> {
+  const { stdout } = await execFileAsync("git", ["ls-files"], {
     cwd: repoRoot,
   });
   const trackedFiles = stdout
@@ -142,13 +173,7 @@ async function findTrackedBuildArtifacts(): Promise<string[]> {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  return trackedFiles.filter(
-    (filePath) =>
-      filePath.endsWith(".tsbuildinfo") ||
-      filePath.includes("/.next/") ||
-      filePath.includes("/.test-dist/") ||
-      filePath.includes("/dist/"),
-  );
+  return trackedFiles.filter(isBlockedTrackedArtifactPath);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

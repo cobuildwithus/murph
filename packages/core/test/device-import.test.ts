@@ -18,6 +18,40 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
+interface DeviceImportManifest {
+  importId: string;
+  importKind: string;
+  rawDirectory: string;
+  artifacts: Array<{
+    role: string;
+    relativePath: string;
+    originalFileName: string;
+  }>;
+  provenance: {
+    provider?: string;
+    accountId?: string | null;
+    importedAt?: string;
+    eventCount?: number;
+    sampleCount?: number;
+    eventIds?: string[];
+    sampleIds?: string[];
+    rawArtifacts?: Array<{
+      role: string;
+      relativePath: string;
+      sha256: string;
+      metadata?: Record<string, unknown> | null;
+    }>;
+    operatorMetadata?: Record<string, unknown>;
+  };
+}
+
+async function readDeviceImportManifest(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<DeviceImportManifest> {
+  return JSON.parse(await fs.readFile(path.join(vaultRoot, relativePath), "utf8")) as DeviceImportManifest;
+}
+
 test("importDeviceBatch writes inline raw integration payloads and canonical records", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-device-import");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -133,13 +167,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     vaultRoot,
     relativePath: result.auditPath,
   })) as AuditRecord[];
-  const manifest = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, result.manifestPath), "utf8"),
-  ) as {
-    importKind: string;
-    rawDirectory: string;
-    artifacts: Array<{ role: string; relativePath: string }>;
-  };
+  const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
   assert.equal(eventRecords.length, 2);
   assert.equal(eventRecords[0]?.externalRef?.system, "whoop");
@@ -150,6 +178,103 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.equal(manifest.importKind, "device_batch");
   assert.equal(manifest.artifacts.length, 2);
   assert.equal(path.posix.dirname(manifest.artifacts[0]?.relativePath ?? ""), manifest.rawDirectory);
+  assert.deepEqual(manifest.provenance.operatorMetadata, {
+    syncMode: "test",
+  });
+});
+
+test("importDeviceBatch keeps canonical manifest provenance authoritative over caller overrides", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-import-provenance");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const attemptedOverrides = {
+    provider: "spoofed-provider",
+    accountId: "spoofed-account",
+    importedAt: "1900-01-01T00:00:00.000Z",
+    eventCount: 999,
+    sampleCount: 888,
+    eventIds: ["evt_spoofed"],
+    sampleIds: ["sample_spoofed"],
+    rawArtifacts: [
+      {
+        role: "spoofed-role",
+        relativePath: "raw/integrations/spoofed/1900/01/xfm_spoofed/spoofed.json",
+        sha256: "0".repeat(64),
+        metadata: {
+          upstreamId: "spoofed-upstream-id",
+        },
+      },
+    ],
+    syncMode: "manual",
+  };
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-03-16T07:30:00.000Z",
+        recordedAt: "2026-03-16T07:30:00.000Z",
+        title: "WHOOP recovery score",
+        fields: {
+          metric: "recovery-score",
+          value: 67,
+          unit: "%",
+        },
+      },
+    ],
+    samples: [
+      {
+        stream: "hrv",
+        recordedAt: "2026-03-16T07:30:00.000Z",
+        unit: "ms",
+        sample: {
+          recordedAt: "2026-03-16T07:30:00.000Z",
+          value: 42.5,
+        },
+      },
+    ],
+    rawArtifacts: [
+      {
+        role: "recovery:sleep-1",
+        content: {
+          sleep_id: "sleep-1",
+          updated_at: "2026-03-16T07:30:00.000Z",
+          score: { recovery_score: 67, hrv_rmssd_milli: 42.5 },
+        },
+        metadata: {
+          upstreamId: "sleep-1",
+        },
+      },
+    ],
+    provenance: attemptedOverrides,
+  });
+
+  const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
+
+  assert.equal(manifest.provenance.provider, "whoop");
+  assert.equal(manifest.provenance.accountId, "whoop-user-1");
+  assert.equal(manifest.provenance.importedAt, "2026-03-16T09:30:00.000Z");
+  assert.equal(manifest.provenance.eventCount, result.events.length);
+  assert.equal(manifest.provenance.sampleCount, result.samples.length);
+  assert.deepEqual(manifest.provenance.eventIds, result.events.map((record) => record.id));
+  assert.deepEqual(manifest.provenance.sampleIds, result.samples.map((record) => record.id));
+  assert.equal(manifest.provenance.rawArtifacts?.length, 1);
+  assert.equal(manifest.provenance.rawArtifacts?.[0]?.role, "recovery:sleep-1");
+  assert.equal(
+    manifest.provenance.rawArtifacts?.[0]?.relativePath,
+    result.rawArtifacts[0]?.relativePath,
+  );
+  assert.notEqual(
+    manifest.provenance.rawArtifacts?.[0]?.sha256,
+    attemptedOverrides.rawArtifacts[0]?.sha256,
+  );
+  assert.deepEqual(manifest.provenance.rawArtifacts?.[0]?.metadata, {
+    upstreamId: "sleep-1",
+  });
+  assert.deepEqual(manifest.provenance.operatorMetadata, attemptedOverrides);
 });
 
 test("importDeviceBatch retries reuse deterministic ids without duplicating ledgers", async () => {
@@ -259,11 +384,7 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
     vaultRoot,
     relativePath: result.eventShardPaths[0] as string,
   })) as EventRecord[];
-  const manifest = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, result.manifestPath), "utf8"),
-  ) as {
-    artifacts: Array<{ role: string; originalFileName: string }>;
-  };
+  const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
   assert.equal(eventRecords[0]?.kind, "note");
   assert.deepEqual(eventRecords[0]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);

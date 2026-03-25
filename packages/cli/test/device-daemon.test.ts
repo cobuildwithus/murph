@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -21,7 +21,7 @@ interface SpawnProcessInput {
 }
 
 test.sequential(
-  'startManagedDeviceSyncDaemon writes launcher state and starts the managed local daemon',
+  'startManagedDeviceSyncDaemon keeps launcher state non-secret and persists the managed bearer separately',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
     const livePids = new Set<number>()
@@ -92,12 +92,37 @@ test.sequential(
       ) as {
         pid: number
         baseUrl: string
-        controlToken: string
+        controlToken?: string
       }
+      const persistedControlToken = await readFile(
+        path.join(vaultRoot, '.runtime/device-syncd/control-token'),
+        'utf8',
+      )
 
       assert.equal(launcherState.pid, 4242)
       assert.equal(launcherState.baseUrl, 'http://127.0.0.1:8788')
-      assert.equal(launcherState.controlToken, 'control-token-for-tests')
+      assert.equal('controlToken' in launcherState, false)
+      assert.equal(persistedControlToken.trim(), 'control-token-for-tests')
+
+      const reusedControlPlane = await ensureManagedDeviceSyncControlPlane({
+        vault: vaultRoot,
+        dependencies: {
+          fetchImpl: async () =>
+            new Response(
+              JSON.stringify({
+                ok: healthy,
+              }),
+              {
+                status: healthy ? 200 : 503,
+              },
+            ),
+          isProcessAlive(pid) {
+            return livePids.has(pid)
+          },
+        },
+      })
+
+      assert.equal(reusedControlPlane.controlToken, 'control-token-for-tests')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -178,6 +203,84 @@ test.sequential(
       managed: false,
       started: false,
     })
+  },
+)
+
+test.sequential(
+  'ensureManagedDeviceSyncControlPlane rejects non-loopback explicit control-plane targets when a bearer token is configured',
+  async () => {
+    await assert.rejects(
+      () =>
+        ensureManagedDeviceSyncControlPlane({
+          env: {
+            DEVICE_SYNC_BASE_URL: 'https://device-sync.example.test',
+            DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          },
+        }),
+      (error) =>
+        error instanceof Error &&
+        /loopback base URLs/u.test(error.message),
+    )
+  },
+)
+
+test.sequential(
+  'getManagedDeviceSyncDaemonStatus migrates legacy launcher state tokens into the separate control-token file',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
+
+    try {
+      await mkdir(path.join(vaultRoot, '.runtime/device-syncd'), {
+        recursive: true,
+      })
+      await writeFile(
+        path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
+        JSON.stringify(
+          {
+            version: 1,
+            pid: 7171,
+            baseUrl: 'http://127.0.0.1:8788',
+            controlToken: 'legacy-control-token',
+            startedAt: '2026-03-25T00:00:00.000Z',
+          },
+          null,
+          2,
+        ),
+      )
+
+      const status = await getManagedDeviceSyncDaemonStatus({
+        vault: vaultRoot,
+        dependencies: {
+          fetchImpl: async () =>
+            new Response(
+              JSON.stringify({
+                ok: true,
+              }),
+              { status: 200 },
+            ),
+          isProcessAlive(pid) {
+            return pid === 7171
+          },
+        },
+      })
+
+      const launcherState = JSON.parse(
+        await readFile(
+          path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
+          'utf8',
+        ),
+      ) as { controlToken?: string }
+      const persistedControlToken = await readFile(
+        path.join(vaultRoot, '.runtime/device-syncd/control-token'),
+        'utf8',
+      )
+
+      assert.equal(status.managed, true)
+      assert.equal('controlToken' in launcherState, false)
+      assert.equal(persistedControlToken.trim(), 'legacy-control-token')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
   },
 )
 
@@ -307,6 +410,12 @@ test.sequential(
       await assert.rejects(() =>
         readFile(
           path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
+          'utf8',
+        ),
+      )
+      await assert.rejects(() =>
+        readFile(
+          path.join(vaultRoot, '.runtime/device-syncd/control-token'),
           'utf8',
         ),
       )

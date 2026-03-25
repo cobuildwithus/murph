@@ -1,3 +1,4 @@
+import { deviceSyncError } from "@healthybob/device-syncd";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -46,7 +47,7 @@ describe("hosted device-sync connect/start route aliases", () => {
     expect(startRoute.POST).toBe(connectRoute.POST);
   });
 
-  it("redirects GET requests to the provider authorization URL", async () => {
+  it("rejects GET requests because connect-start is POST-only", async () => {
     const request = new Request(
       "https://example.test/api/device-sync/oauth/oura%2Flegacy/start?returnTo=https%3A%2F%2Fapp.example.test%2Fdone",
     );
@@ -56,17 +57,18 @@ describe("hosted device-sync connect/start route aliases", () => {
       createRouteContext("oura%2Flegacy"),
     );
 
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe(
-      "https://provider.example.test/oauth/authorize",
-    );
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("POST");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "METHOD_NOT_ALLOWED",
+        message:
+          "Hosted device-sync connect/start routes only allow POST because starting a connection mutates server state.",
+      },
+    });
     expect(mocks.assertBrowserMutationOrigin).not.toHaveBeenCalled();
-    expect(mocks.requireAuthenticatedUser).toHaveBeenCalledTimes(1);
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "user-123",
-      "oura/legacy",
-      "https://app.example.test/done",
-    );
+    expect(mocks.requireAuthenticatedUser).not.toHaveBeenCalled();
+    expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
   it("returns JSON from POST and treats a missing returnTo as null", async () => {
@@ -95,9 +97,16 @@ describe("hosted device-sync connect/start route aliases", () => {
     );
   });
 
-  it("preserves POST error responses when the origin check fails", async () => {
+  it("preserves POST error responses when the browser origin check fails", async () => {
     mocks.assertBrowserMutationOrigin.mockImplementation(() => {
-      throw new TypeError("Origin denied.");
+      throw deviceSyncError({
+        code: "CSRF_ORIGIN_INVALID",
+        message: "Mutation origin https://evil.example.test is not allowed for hosted device-sync routes.",
+        httpStatus: 403,
+        details: {
+          origin: "https://evil.example.test",
+        },
+      });
     });
 
     const response = await startRoute.POST(
@@ -108,11 +117,15 @@ describe("hosted device-sync connect/start route aliases", () => {
       createRouteContext("oura"),
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "INVALID_REQUEST",
-        message: "Origin denied.",
+        code: "CSRF_ORIGIN_INVALID",
+        details: {
+          origin: "https://evil.example.test",
+        },
+        message: "Mutation origin https://evil.example.test is not allowed for hosted device-sync routes.",
+        retryable: false,
       },
     });
     expect(mocks.requireAuthenticatedUser).not.toHaveBeenCalled();

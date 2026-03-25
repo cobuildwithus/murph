@@ -3,7 +3,6 @@ import {
   jsonError,
   jsonOk,
   readOptionalJsonObject,
-  redirectTo,
   resolveRouteParams,
 } from "@/src/lib/device-sync/http";
 
@@ -16,23 +15,23 @@ export interface HostedDeviceSyncProviderRouteContext {
 }
 
 export async function hostedDeviceSyncConnectStartGet(
-  request: Request,
-  context: HostedDeviceSyncProviderRouteContext,
+  _request: Request,
+  _context: HostedDeviceSyncProviderRouteContext,
 ) {
-  try {
-    const { provider } = await resolveRouteParams(context.params);
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    const user = controlPlane.requireAuthenticatedUser();
-    const url = new URL(request.url);
-    const result = await controlPlane.startConnection(
-      user.id,
-      decodeURIComponent(provider),
-      url.searchParams.get("returnTo"),
-    );
-    return redirectTo(result.authorizationUrl);
-  } catch (error) {
-    return jsonError(error);
-  }
+  return Response.json(
+    {
+      error: {
+        code: "METHOD_NOT_ALLOWED",
+        message: "Hosted device-sync connect/start routes only allow POST because starting a connection mutates server state.",
+      },
+    },
+    {
+      status: 405,
+      headers: {
+        allow: "POST",
+      },
+    },
+  );
 }
 
 export async function hostedDeviceSyncConnectStartPost(

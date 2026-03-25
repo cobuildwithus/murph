@@ -1,6 +1,6 @@
-import { access } from 'node:fs/promises'
-import path from 'node:path'
+import { access, mkdir } from 'node:fs/promises'
 import { writeJsonFileAtomic, errorMessage } from '../shared.js'
+import { resolveAssistantInboxArtifactPath } from '../../assistant-vault-paths.js'
 import type { sendAssistantMessage } from '../service.js'
 
 export async function assistantResultArtifactExists(
@@ -8,16 +8,12 @@ export async function assistantResultArtifactExists(
   captureId: string,
 ): Promise<boolean> {
   try {
-    await access(
-      path.join(
-        vaultRoot,
-        'derived',
-        'inbox',
-        captureId,
-        'assistant',
-        'result.json',
-      ),
+    const artifactPath = await resolveAssistantInboxArtifactPath(
+      vaultRoot,
+      captureId,
+      'result.json',
     )
+    await access(artifactPath.absolutePath)
     return true
   } catch {
     return false
@@ -49,21 +45,25 @@ export async function writeAssistantChatResultArtifacts(input: {
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
   vault: string
 }): Promise<void> {
-  await Promise.all(
+  const artifactPaths = await Promise.all(
     input.captureIds.map((captureId) =>
-      writeJsonFileAtomic(
-        path.join(
-          input.vault,
-          'derived',
-          'inbox',
-          captureId,
-          'assistant',
-          'chat-result.json',
-        ),
+      resolveAssistantInboxArtifactPath(
+        input.vault,
+        captureId,
+        'chat-result.json',
+      ),
+    ),
+  )
+  const normalizedCaptureIds = artifactPaths.map((artifactPath) => artifactPath.captureId)
+
+  await Promise.all(
+    artifactPaths.map((artifactPath) =>
+      writeAssistantArtifactFile(
+        artifactPath,
         {
           schema: 'healthybob.assistant-chat-result.v1',
-          captureId,
-          groupCaptureIds: [...input.captureIds],
+          captureId: artifactPath.captureId,
+          groupCaptureIds: [...normalizedCaptureIds],
           sessionId: input.result.session.sessionId,
           channel: input.result.delivery?.channel ?? null,
           target: input.result.delivery?.target ?? null,
@@ -89,21 +89,25 @@ export async function writeAssistantChatErrorArtifacts(input: {
       ? (input.error as { code: string }).code
       : null
 
-  await Promise.all(
+  const artifactPaths = await Promise.all(
     input.captureIds.map((captureId) =>
-      writeJsonFileAtomic(
-        path.join(
-          input.vault,
-          'derived',
-          'inbox',
-          captureId,
-          'assistant',
-          'chat-error.json',
-        ),
+      resolveAssistantInboxArtifactPath(
+        input.vault,
+        captureId,
+        'chat-error.json',
+      ),
+    ),
+  )
+  const normalizedCaptureIds = artifactPaths.map((artifactPath) => artifactPath.captureId)
+
+  await Promise.all(
+    artifactPaths.map((artifactPath) =>
+      writeAssistantArtifactFile(
+        artifactPath,
         {
           schema: 'healthybob.assistant-chat-error.v1',
-          captureId,
-          groupCaptureIds: [...input.captureIds],
+          captureId: artifactPath.captureId,
+          groupCaptureIds: [...normalizedCaptureIds],
           code,
           failedAt: new Date().toISOString(),
           message,
@@ -119,18 +123,22 @@ async function assistantArtifactExists(
   fileName: string,
 ): Promise<boolean> {
   try {
-    await access(
-      path.join(
-        vaultRoot,
-        'derived',
-        'inbox',
-        captureId,
-        'assistant',
-        fileName,
-      ),
+    const artifactPath = await resolveAssistantInboxArtifactPath(
+      vaultRoot,
+      captureId,
+      fileName,
     )
+    await access(artifactPath.absolutePath)
     return true
   } catch {
     return false
   }
+}
+
+async function writeAssistantArtifactFile(
+  artifactPath: Awaited<ReturnType<typeof resolveAssistantInboxArtifactPath>>,
+  value: unknown,
+): Promise<void> {
+  await mkdir(artifactPath.absoluteDirectory, { recursive: true })
+  await writeJsonFileAtomic(artifactPath.absolutePath, value)
 }

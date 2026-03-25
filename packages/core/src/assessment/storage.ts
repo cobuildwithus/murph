@@ -190,7 +190,7 @@ export async function importAssessmentResponse({
         raw: stagedRaw,
       },
     ],
-    provenance: {
+    canonicalProvenance: {
       assessmentType: assessment.assessmentType,
       title: assessment.title ?? null,
       questionnaireSlug: assessment.questionnaireSlug ?? null,

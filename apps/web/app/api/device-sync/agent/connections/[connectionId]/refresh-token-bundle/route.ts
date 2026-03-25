@@ -13,7 +13,7 @@ export async function POST(
     const expectedTokenVersion = typeof body.expectedTokenVersion === "number" ? body.expectedTokenVersion : null;
     const force = body.force === true;
     return jsonOk(
-      await controlPlane.refreshTokenBundle(session.userId, decodeURIComponent(connectionId), {
+      await controlPlane.refreshTokenBundle(session, decodeURIComponent(connectionId), {
         expectedTokenVersion,
         force,
       }),

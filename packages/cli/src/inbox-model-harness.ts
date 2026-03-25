@@ -1,7 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
-import { resolveAssistantVaultPath } from './assistant-vault-paths.js'
+import {
+  resolveAssistantInboxArtifactPath,
+  resolveAssistantVaultPath,
+} from './assistant-vault-paths.js'
 import {
   createInboxRoutingAssistantToolCatalog,
 } from './assistant-cli-tools.js'
@@ -34,7 +37,6 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_MAX_FRAGMENT_CHARS = 6000
 const DEFAULT_MAX_ROUTING_CHARS = 24000
-const ASSISTANT_ARTIFACT_DIRECTORY = path.posix.join('derived', 'inbox')
 
 const parserManifestSchema = z.object({
   schema: z.literal('healthybob.parser-manifest.v1'),
@@ -695,20 +697,18 @@ async function writeAssistantArtifact(
   fileName: string,
   value: unknown,
 ): Promise<string> {
-  const relativeDirectory = path.posix.join(
-    ASSISTANT_ARTIFACT_DIRECTORY,
+  const artifactPath = await resolveAssistantInboxArtifactPath(
+    vaultRoot,
     captureId,
-    'assistant',
+    fileName,
   )
-  const relativePath = path.posix.join(relativeDirectory, fileName)
-  const absoluteDirectory = path.join(vaultRoot, relativeDirectory)
-  await mkdir(absoluteDirectory, { recursive: true })
+  await mkdir(artifactPath.absoluteDirectory, { recursive: true })
   await writeFile(
-    path.join(vaultRoot, relativePath),
+    artifactPath.absolutePath,
     `${JSON.stringify(value, null, 2)}\n`,
     'utf8',
   )
-  return relativePath
+  return artifactPath.relativePath
 }
 
 function clampText(

@@ -32,8 +32,12 @@ interface StageRawImportManifestInput {
     role: string;
     raw: RawArtifactLike;
   }>;
-  provenance: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
+  canonicalProvenance?: Record<string, unknown>;
+  operatorMetadata?: Record<string, unknown>;
 }
+
+const RAW_MANIFEST_OPERATOR_METADATA_KEY = "operatorMetadata";
 
 async function describeRawArtifact(
   artifact: RawArtifactLike,
@@ -99,7 +103,7 @@ export function resolveRawManifestPath(input: {
   );
 }
 
-function sanitizeManifestProvenance(provenance: Record<string, unknown>): JsonObject {
+function sanitizeManifestJsonObject(provenance: Record<string, unknown>): JsonObject {
   let serialized: string | undefined;
 
   try {
@@ -116,6 +120,32 @@ function sanitizeManifestProvenance(provenance: Record<string, unknown>): JsonOb
   return jsonObjectSchema.parse(JSON.parse(serialized));
 }
 
+function composeManifestProvenance(input: {
+  canonicalProvenance: Record<string, unknown>;
+  operatorMetadata?: Record<string, unknown>;
+}): JsonObject {
+  const canonicalProvenance = sanitizeManifestJsonObject(input.canonicalProvenance);
+
+  if (RAW_MANIFEST_OPERATOR_METADATA_KEY in canonicalProvenance) {
+    throw new TypeError(
+      `raw import manifest provenance reserves "${RAW_MANIFEST_OPERATOR_METADATA_KEY}" for caller metadata`,
+    );
+  }
+
+  const operatorMetadata = input.operatorMetadata
+    ? sanitizeManifestJsonObject(input.operatorMetadata)
+    : undefined;
+
+  if (!operatorMetadata || Object.keys(operatorMetadata).length === 0) {
+    return canonicalProvenance;
+  }
+
+  return {
+    ...canonicalProvenance,
+    [RAW_MANIFEST_OPERATOR_METADATA_KEY]: operatorMetadata,
+  };
+}
+
 export async function stageRawImportManifest({
   batch,
   importId,
@@ -125,7 +155,15 @@ export async function stageRawImportManifest({
   source,
   artifacts,
   provenance,
+  canonicalProvenance,
+  operatorMetadata,
 }: StageRawImportManifestInput): Promise<string> {
+  const manifestProvenance = canonicalProvenance ?? provenance;
+
+  if (!manifestProvenance) {
+    throw new TypeError("raw import manifest provenance is required");
+  }
+
   const resolvedRawDirectory = resolveRawArtifactDirectory(
     artifacts.map(({ raw }) => raw),
     rawDirectory,
@@ -144,7 +182,10 @@ export async function stageRawImportManifest({
     artifacts: await Promise.all(
       artifacts.map(({ raw, role }) => describeRawArtifact(raw, role)),
     ),
-    provenance: sanitizeManifestProvenance(provenance),
+    provenance: composeManifestProvenance({
+      canonicalProvenance: manifestProvenance,
+      operatorMetadata,
+    }),
   });
 
   await batch.stageTextWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {

@@ -3,6 +3,7 @@ import {
   DEFAULT_DEVICE_SYNC_BASE_URL,
   DEVICE_SYNC_BASE_URL_ENV,
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  isDeviceSyncLocalControlPlaneError,
   normalizeDeviceSyncBaseUrl,
   requestDeviceSyncJson as requestSharedDeviceSyncJson,
   resolveDeviceSyncBaseUrl as resolveSharedDeviceSyncBaseUrl,
@@ -53,8 +54,32 @@ export {
 export function resolveDeviceSyncBaseUrl(
   value?: string | null,
   env: NodeJS.ProcessEnv = process.env,
+  controlToken?: string | null,
 ): string {
-  return resolveSharedDeviceSyncBaseUrl({ value, env })
+  const effectiveControlToken = resolveDeviceSyncControlToken(controlToken, env)
+
+  try {
+    return resolveSharedDeviceSyncBaseUrl({
+      value,
+      env,
+      controlToken: effectiveControlToken,
+    })
+  } catch (error) {
+    if (isDeviceSyncLocalControlPlaneError(error)) {
+      throw new VaultCliError(
+        'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
+        'Device sync control-plane bearer tokens may only target loopback base URLs. Set DEVICE_SYNC_BASE_URL to localhost/127.0.0.1/::1 or unset DEVICE_SYNC_CONTROL_TOKEN/DEVICE_SYNC_SECRET.',
+        {
+          baseUrl:
+            (typeof value === 'string' && value.trim()) ||
+            env[DEVICE_SYNC_BASE_URL_ENV] ||
+            DEFAULT_DEVICE_SYNC_BASE_URL,
+        },
+      )
+    }
+
+    throw error
+  }
 }
 
 export function resolveDeviceSyncControlToken(
@@ -65,10 +90,14 @@ export function resolveDeviceSyncControlToken(
 }
 
 export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
-  const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env)
   const controlToken = resolveDeviceSyncControlToken(
     input.controlToken,
     input.env,
+  )
+  const baseUrl = resolveDeviceSyncBaseUrl(
+    input.baseUrl,
+    input.env,
+    controlToken,
   )
   const fetchImpl = input.fetchImpl ?? fetch
   const openBrowser = input.openBrowser ?? openExternalUrlInBrowser

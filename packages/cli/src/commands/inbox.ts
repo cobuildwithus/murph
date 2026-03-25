@@ -44,6 +44,7 @@ import type { InboxCliServices } from '../inbox-services.js'
 import {
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
+  resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 
@@ -593,6 +594,8 @@ export function registerInboxCommands(
     options: withBaseOptions(),
     output: inboxRunResultSchema,
     async run(context) {
+      const terminalLogOptions = resolveForegroundTerminalLogOptions(process.env)
+
       return services.run(
         {
           vault: context.options.vault,
@@ -600,7 +603,10 @@ export function registerInboxCommands(
         },
         {
           onEvent(event) {
-            const message = formatInboxRunEventForTerminal(event)
+            const message = formatInboxRunEventForTerminal(
+              event,
+              terminalLogOptions,
+            )
             if (message) {
               console.error(formatForegroundLogLine('inbox', message))
             }

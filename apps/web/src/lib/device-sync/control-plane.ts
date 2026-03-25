@@ -21,6 +21,7 @@ import { readHostedDeviceSyncEnvironment } from "./env";
 import { createHostedDeviceSyncRegistry, requireHostedDeviceSyncProvider } from "./providers";
 import {
   generateHostedAgentBearerToken,
+  type HostedAgentSessionRecord,
   mapHostedPublicAccountRecord,
   PrismaDeviceSyncControlPlaneStore,
   requireHostedConnectionBundleRecord,
@@ -28,6 +29,15 @@ import {
 import { parseInteger, sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
 
 const TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
+const HOSTED_AGENT_SESSION_TTL_MS = 24 * 60 * 60_000;
+
+export interface HostedAgentSessionBearer {
+  id: string;
+  label: string | null;
+  createdAt: string;
+  expiresAt: string;
+  bearerToken: string;
+}
 
 export interface HostedTokenExport {
   accessToken: string;
@@ -198,7 +208,7 @@ export class HostedDeviceSyncControlPlane {
   }
 
   async pairAgent(userId: string, label: string | null): Promise<{
-    agent: { id: string; label: string | null; createdAt: string };
+    agent: { id: string; label: string | null; createdAt: string; expiresAt: string };
     token: string;
   }> {
     const user = this.requireAuthenticatedUser();
@@ -213,10 +223,13 @@ export class HostedDeviceSyncControlPlane {
     }
 
     const token = generateHostedAgentBearerToken();
+    const now = toIsoTimestamp(new Date());
     const session = await this.store.createAgentSession({
       user,
       label,
       tokenHash: token.tokenHash,
+      now,
+      expiresAt: resolveHostedAgentSessionExpiry(now),
     });
 
     return {
@@ -224,6 +237,7 @@ export class HostedDeviceSyncControlPlane {
         id: session.id,
         label: session.label,
         createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
       },
       token: token.token,
     };
@@ -242,9 +256,23 @@ export class HostedDeviceSyncControlPlane {
       });
     }
 
-    const session = await this.store.getAgentSessionByTokenHash(sha256Hex(rawToken), toIsoTimestamp(new Date()));
+    const auth = await this.store.authenticateAgentSessionByTokenHash(sha256Hex(rawToken), toIsoTimestamp(new Date()));
 
-    if (!session) {
+    if (auth.status === "active" && auth.session) {
+      return auth.session;
+    }
+
+    if (auth.status === "expired") {
+      throw deviceSyncError({
+        code: "AGENT_AUTH_EXPIRED",
+        message:
+          "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+        retryable: false,
+        httpStatus: 401,
+      });
+    }
+
+    if (auth.status === "revoked" || auth.status === "missing") {
       throw deviceSyncError({
         code: "AGENT_AUTH_INVALID",
         message: "Hosted device-sync agent bearer token is invalid or revoked.",
@@ -253,7 +281,12 @@ export class HostedDeviceSyncControlPlane {
       });
     }
 
-    return session;
+    throw deviceSyncError({
+      code: "AGENT_AUTH_INVALID",
+      message: "Hosted device-sync agent bearer token is invalid or revoked.",
+      retryable: false,
+      httpStatus: 401,
+    });
   }
 
   async listSignals(agentUserId: string, url: URL) {
@@ -270,11 +303,12 @@ export class HostedDeviceSyncControlPlane {
     };
   }
 
-  async exportTokenBundle(userId: string, connectionId: string): Promise<{
+  async exportTokenBundle(session: HostedAgentSessionRecord, connectionId: string): Promise<{
     connection: PublicDeviceSyncAccount;
     tokenBundle: HostedTokenExport;
+    agentSession: HostedAgentSessionBearer;
   }> {
-    const bundle = await this.store.getConnectionBundleForUser(userId, connectionId);
+    const bundle = await this.store.getConnectionBundleForUser(session.userId, connectionId);
 
     if (!bundle) {
       throw deviceSyncError({
@@ -285,14 +319,17 @@ export class HostedDeviceSyncControlPlane {
       });
     }
 
+    const now = toIsoTimestamp(new Date());
+
     return {
-      connection: await this.requireOwnedConnection(userId, connectionId),
-      tokenBundle: buildTokenExport(bundle, toIsoTimestamp(new Date())),
+      connection: await this.requireOwnedConnection(session.userId, connectionId),
+      tokenBundle: buildTokenExport(bundle, now),
+      agentSession: await this.rotateAgentSession(session, now),
     };
   }
 
   async refreshTokenBundle(
-    userId: string,
+    session: HostedAgentSessionRecord,
     connectionId: string,
     options: { expectedTokenVersion?: number | null; force?: boolean } = {},
   ): Promise<{
@@ -300,14 +337,15 @@ export class HostedDeviceSyncControlPlane {
     tokenBundle: HostedTokenExport;
     refreshed: boolean;
     tokenVersionChanged: boolean;
+    agentSession: HostedAgentSessionBearer;
   }> {
     const now = toIsoTimestamp(new Date());
 
-    return this.store.withConnectionRefreshLock(connectionId, async (tx) => {
+    const result = await this.store.withConnectionRefreshLock(connectionId, async (tx) => {
       const record = await tx.deviceConnection.findFirst({
         where: {
           id: connectionId,
-          userId,
+          userId: session.userId,
         },
         include: {
           secret: true,
@@ -396,6 +434,43 @@ export class HostedDeviceSyncControlPlane {
         tokenVersionChanged: false,
       };
     });
+
+    return {
+      ...result,
+      agentSession: await this.rotateAgentSession(session, now),
+    };
+  }
+
+  async revokeAgentSession(session: HostedAgentSessionRecord): Promise<{
+    agentSession: {
+      id: string;
+      revokedAt: string;
+      revokeReason: string | null;
+    };
+  }> {
+    const now = toIsoTimestamp(new Date());
+    const revoked = await this.store.revokeAgentSession({
+      sessionId: session.id,
+      now,
+      reason: "agent_request",
+    });
+
+    if (!revoked?.revokedAt) {
+      throw deviceSyncError({
+        code: "AGENT_AUTH_INVALID",
+        message: "Hosted device-sync agent bearer token is invalid or revoked.",
+        retryable: false,
+        httpStatus: 401,
+      });
+    }
+
+    return {
+      agentSession: {
+        id: revoked.id,
+        revokedAt: revoked.revokedAt,
+        revokeReason: revoked.revokeReason,
+      },
+    };
   }
 
   async recordLocalHeartbeat(
@@ -442,6 +517,24 @@ export class HostedDeviceSyncControlPlane {
     }
 
     return connection;
+  }
+
+  private async rotateAgentSession(session: HostedAgentSessionRecord, now: string): Promise<HostedAgentSessionBearer> {
+    const token = generateHostedAgentBearerToken();
+    const rotated = await this.store.rotateAgentSession({
+      sessionId: session.id,
+      tokenHash: token.tokenHash,
+      now,
+      expiresAt: resolveHostedAgentSessionExpiry(now),
+    });
+
+    return {
+      id: rotated.id,
+      label: rotated.label,
+      createdAt: rotated.createdAt,
+      expiresAt: rotated.expiresAt,
+      bearerToken: token.token,
+    };
   }
 
   private createIngress() {
@@ -565,6 +658,10 @@ function buildTokenExport(
     keyVersion: bundle.keyVersion,
     exportedAt,
   };
+}
+
+function resolveHostedAgentSessionExpiry(now: string): string {
+  return new Date(Date.parse(now) + HOSTED_AGENT_SESSION_TTL_MS).toISOString();
 }
 
 function shouldRefreshHostedToken(accessTokenExpiresAt: string | null, now: string): boolean {

@@ -759,7 +759,7 @@ export async function importDocument({
             raw: stagedRaw,
           },
         ],
-        provenance: {
+        canonicalProvenance: {
           eventId: event.record.id,
           lookupId: event.record.id,
           occurredAt: event.record.occurredAt,
@@ -891,7 +891,7 @@ export async function addMeal({
               ]
             : []),
         ],
-        provenance: {
+        canonicalProvenance: {
           eventId: event.record.id,
           lookupId: event.record.id,
           occurredAt: event.record.occurredAt,
@@ -1072,7 +1072,7 @@ export async function importSamples({
                 raw: stagedRaw,
               },
             ],
-            provenance: {
+            canonicalProvenance: {
               stream: normalizedStream,
               unit,
               importedCount: records.length,
@@ -1497,7 +1497,7 @@ export async function importDeviceBatch({
             importedAt: normalizedImportedAt,
             source: source ?? null,
             artifacts: stagedRawArtifacts,
-            provenance: {
+            canonicalProvenance: {
               provider: normalizedProvider,
               accountId: normalizedAccountId ?? null,
               importedAt: normalizedImportedAt,
@@ -1511,8 +1511,8 @@ export async function importDeviceBatch({
                 sha256: artifact.sha256,
                 metadata: artifact.metadata ?? null,
               })),
-              ...normalizedProvenance,
             },
+            operatorMetadata: normalizedProvenance,
           })
         : "";
 

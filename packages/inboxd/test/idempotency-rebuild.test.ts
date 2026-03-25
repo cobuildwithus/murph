@@ -5,7 +5,7 @@ import { promises as fs } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
-import { initializeVault, readJsonlRecords } from "@healthybob/core";
+import { initializeVault, isVaultError, readJsonlRecords } from "@healthybob/core";
 import { resolveRuntimePaths } from "@healthybob/runtime-state";
 
 import {
@@ -28,6 +28,15 @@ async function writeExternalFile(directory: string, fileName: string, content: s
   const filePath = path.join(directory, fileName);
   await fs.writeFile(filePath, content, "utf8");
   return filePath;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture {
@@ -62,17 +71,36 @@ function countRows(databasePath: string, table: "attachment_parse_job" | "captur
 }
 
 async function readEventRecordsForCapture(vaultRoot: string, occurredAt: string) {
-  return readJsonlRecords({
-    vaultRoot,
-    relativePath: `ledger/events/${occurredAt.slice(0, 4)}/${occurredAt.slice(0, 7)}.jsonl`,
-  });
+  try {
+    return await readJsonlRecords({
+      vaultRoot,
+      relativePath: `ledger/events/${occurredAt.slice(0, 4)}/${occurredAt.slice(0, 7)}.jsonl`,
+    });
+  } catch (error) {
+    if (isVaultError(error) && error.code === "VAULT_FILE_MISSING") {
+      return [];
+    }
+
+    throw error;
+  }
 }
 
 async function readImportAuditsForCapture(vaultRoot: string, storedAt: string) {
-  const records = await readJsonlRecords({
-    vaultRoot,
-    relativePath: `audit/${storedAt.slice(0, 4)}/${storedAt.slice(0, 7)}.jsonl`,
-  });
+  let records: unknown[];
+
+  try {
+    records = await readJsonlRecords({
+      vaultRoot,
+      relativePath: `audit/${storedAt.slice(0, 4)}/${storedAt.slice(0, 7)}.jsonl`,
+    });
+  } catch (error) {
+    if (isVaultError(error) && error.code === "VAULT_FILE_MISSING") {
+      return [];
+    }
+
+    throw error;
+  }
+
   return records.filter((record) => record.action === "intake_import");
 }
 
@@ -344,6 +372,119 @@ test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent a
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
   assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+
+  runtime.close();
+});
+
+test("rebuildRuntimeFromVault canonicalizes safe stored capture ids back to the deterministic runtime id", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-canonicalize-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-inbox-rebuild-canonicalize-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const attachmentPath = await writeExternalFile(sourceRoot, "canonicalize.jpg", "image");
+  const inbound = createCapture({
+    externalId: "msg-rebuild-canonicalize",
+    occurredAt: "2026-03-13T11:05:00.000Z",
+    text: "Canonicalize my stored id",
+    attachments: [
+      {
+        externalId: "att-canonicalize",
+        kind: "image",
+        mime: "image/jpeg",
+        originalPath: attachmentPath,
+        fileName: "canonicalize.jpg",
+      },
+    ],
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const stored = await persistRawCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W9",
+    input: inbound,
+    storedAt: "2026-03-13T11:06:00.000Z",
+  });
+  const envelopePath = path.join(vaultRoot, stored.envelopePath);
+  const envelope = JSON.parse(await fs.readFile(envelopePath, "utf8")) as {
+    captureId: string;
+    stored: {
+      attachments: Array<{ attachmentId: string; ordinal: number }>;
+    };
+  };
+  const legacyCaptureId = "cap_legacysafe";
+  envelope.captureId = legacyCaptureId;
+  envelope.stored.attachments = envelope.stored.attachments.map((attachment) => ({
+    ...attachment,
+    attachmentId: `att_${legacyCaptureId}_${String(attachment.ordinal).padStart(2, "0")}`,
+  }));
+  await fs.writeFile(envelopePath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+
+  const capture = runtime.getCapture(captureId);
+  assert.ok(capture);
+  assert.equal(capture.captureId, captureId);
+  assert.equal(runtime.getCapture(legacyCaptureId), null);
+  assert.equal(capture.attachments.length, 1);
+  assert.equal(capture.attachments[0]?.attachmentId, `att_${captureId}_01`);
+  assert.equal(countRows(runtime.databasePath, "capture"), 1);
+  assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
+
+  runtime.close();
+});
+
+test("rebuildRuntimeFromVault quarantines stored envelopes with malicious capture ids", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-quarantine-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const inbound = createCapture({
+    externalId: "msg-rebuild-malicious-id",
+    occurredAt: "2026-03-13T11:10:00.000Z",
+    text: "Quarantine this stored id",
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const stored = await persistRawCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2WA",
+    input: inbound,
+    storedAt: "2026-03-13T11:11:00.000Z",
+  });
+  const envelopePath = path.join(vaultRoot, stored.envelopePath);
+  const envelope = JSON.parse(await fs.readFile(envelopePath, "utf8")) as {
+    captureId: string;
+  };
+  envelope.captureId = path.posix.join("..", "..", "..", "escaped-capture");
+  await fs.writeFile(envelopePath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  await rebuildRuntimeFromVault({ vaultRoot, runtime });
+
+  assert.equal(runtime.getCapture(captureId), null);
+  assert.equal(countRows(runtime.databasePath, "capture"), 0);
+  assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 0);
+  assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 0);
+  assert.equal(await pathExists(envelopePath), false);
+  assert.equal(
+    await pathExists(
+      path.join(
+        path.dirname(envelopePath),
+        "envelope.quarantined-invalid-capture-id.json",
+      ),
+    ),
+    true,
+  );
+  assert.equal(
+    await findStoredCaptureEnvelope({
+      vaultRoot,
+      inbound,
+      captureId,
+    }),
+    null,
+  );
 
   runtime.close();
 });

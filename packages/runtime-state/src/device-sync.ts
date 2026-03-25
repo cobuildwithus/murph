@@ -7,6 +7,8 @@ export const DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS = [
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
 ] as const;
 export const DEFAULT_DEVICE_SYNC_BASE_URL = "http://127.0.0.1:8788";
+export const DEVICE_SYNC_LOCAL_CONTROL_PLANE_ERROR_PREFIX =
+  "Device sync control-plane bearer tokens from DEVICE_SYNC_CONTROL_TOKEN or DEVICE_SYNC_SECRET may only target loopback DEVICE_SYNC_BASE_URL values.";
 export const DEVICE_SYNC_SECRET_ENV = "DEVICE_SYNC_SECRET";
 export const DEVICE_SYNC_SECRET_ENV_KEYS = [
   DEVICE_SYNC_SECRET_ENV,
@@ -71,6 +73,7 @@ export interface DeviceSyncErrorPayload {
 export interface ResolveDeviceSyncBaseUrlInput {
   value?: string | null;
   env?: NodeJS.ProcessEnv;
+  controlToken?: string | null;
 }
 
 export interface ResolveDeviceSyncControlTokenInput {
@@ -128,8 +131,18 @@ export function resolveDeviceSyncBaseUrl(
     (typeof input.value === "string" && input.value.trim()) ||
     readEnvValue(input.env, DEVICE_SYNC_BASE_URL_ENV_KEYS) ||
     DEFAULT_DEVICE_SYNC_BASE_URL;
+  const controlToken =
+    (typeof input.controlToken === "string" && input.controlToken.trim()) ||
+    readEnvValue(input.env, DEVICE_SYNC_CONTROL_TOKEN_COMPAT_ENV_KEYS) ||
+    null;
+  const baseUrl = normalizeDeviceSyncBaseUrl(configured);
 
-  return normalizeDeviceSyncBaseUrl(configured);
+  assertLocalDeviceSyncControlPlaneBaseUrl({
+    baseUrl,
+    controlToken,
+  });
+
+  return baseUrl;
 }
 
 export function resolveDeviceSyncControlToken(
@@ -145,6 +158,37 @@ export function resolveDeviceSyncControlToken(
   return configured || null;
 }
 
+export function isLoopbackDeviceSyncBaseUrl(baseUrl: string): boolean {
+  const url = new URL(baseUrl);
+  return isLoopbackHostname(url.hostname);
+}
+
+export function assertLocalDeviceSyncControlPlaneBaseUrl(input: {
+  baseUrl: string;
+  controlToken?: string | null;
+}): void {
+  if (!input.controlToken) {
+    return;
+  }
+
+  if (isLoopbackDeviceSyncBaseUrl(input.baseUrl)) {
+    return;
+  }
+
+  throw new TypeError(
+    `${DEVICE_SYNC_LOCAL_CONTROL_PLANE_ERROR_PREFIX} Received ${input.baseUrl}.`,
+  );
+}
+
+export function isDeviceSyncLocalControlPlaneError(
+  error: unknown,
+): error is TypeError {
+  return (
+    error instanceof TypeError &&
+    error.message.startsWith(DEVICE_SYNC_LOCAL_CONTROL_PLANE_ERROR_PREFIX)
+  );
+}
+
 function readEnvValue(
   env: NodeJS.ProcessEnv | undefined,
   keys: readonly string[],
@@ -157,6 +201,16 @@ function readEnvValue(
   }
 
   return null;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase().replace(/^\[(.*)\]$/u, "$1");
+  return (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "127.0.0.1" ||
+    normalized.startsWith("127.")
+  );
 }
 
 export function withControlPlaneAuth(

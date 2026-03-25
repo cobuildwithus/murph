@@ -76,6 +76,7 @@ import {
   formatAssistantRunEventForTerminal,
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
+  resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
@@ -437,6 +438,8 @@ function createAssistantRunCommandDefinition(
     options: assistantRunOptionsSchema,
     output: assistantRunResultSchema,
     async run(context: { options: z.infer<typeof assistantRunOptionsSchema> }) {
+      const terminalLogOptions = resolveForegroundTerminalLogOptions(process.env)
+
       return runAssistantAutomation({
         inboxServices,
         vaultServices,
@@ -462,13 +465,19 @@ function createAssistantRunCommandDefinition(
         once: context.options.once,
         startDaemon: context.options.skipDaemon ? false : true,
         onEvent(event) {
-          const message = formatAssistantRunEventForTerminal(event)
+          const message = formatAssistantRunEventForTerminal(
+            event,
+            terminalLogOptions,
+          )
           if (message) {
             console.error(formatForegroundLogLine('assistant', message))
           }
         },
         onInboxEvent(event) {
-          const message = formatInboxRunEventForTerminal(event)
+          const message = formatInboxRunEventForTerminal(
+            event,
+            terminalLogOptions,
+          )
           if (message) {
             console.error(formatForegroundLogLine('assistant', message))
           }

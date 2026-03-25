@@ -123,6 +123,25 @@ test("loadDeviceSyncOverviewFromEnv explains missing control-plane auth", async 
   assert.match(result.suggestedCommand, /pnpm web:dev/u);
 });
 
+test("loadDeviceSyncOverviewFromEnv reports remote base URLs as unsupported when a control bearer is configured", async () => {
+  const result = await loadDeviceSyncOverviewFromEnv({
+    env: {
+      NODE_ENV: "test",
+      DEVICE_SYNC_BASE_URL: "https://device-sync.example.test",
+      DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+    },
+  });
+
+  assert.equal(result.status, "unavailable");
+  if (result.status !== "unavailable") {
+    return;
+  }
+
+  assert.match(result.message, /restricted to localhost/u);
+  assert.match(result.hint, /DEVICE_SYNC_BASE_URL/u);
+  assert.match(result.suggestedCommand, /127\.0\.0\.1:8788/u);
+});
+
 test("buildWebReturnTo keeps relative paths on the current origin", () => {
   const result = buildWebReturnTo(
     new URL("http://127.0.0.1:3000/devices/connect/whoop?returnTo=/settings/devices"),

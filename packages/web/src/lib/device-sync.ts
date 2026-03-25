@@ -2,6 +2,7 @@ import {
   DEFAULT_DEVICE_SYNC_BASE_URL,
   DEVICE_SYNC_BASE_URL_ENV,
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  isDeviceSyncLocalControlPlaneError,
   normalizeDeviceSyncBaseUrl,
   requestDeviceSyncJson as requestSharedDeviceSyncJson,
   resolveDeviceSyncBaseUrl as resolveSharedDeviceSyncBaseUrl,
@@ -68,7 +69,7 @@ export function isDeviceSyncWebError(error: unknown): error is DeviceSyncWebErro
 export function resolveDeviceSyncBaseUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return resolveSharedDeviceSyncBaseUrl({ env });
+  return resolveDeviceSyncControlPlane(env).baseUrl;
 }
 
 export function resolveDeviceSyncControlToken(
@@ -81,11 +82,13 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
 } = {}): Promise<DeviceSyncOverview> {
-  const baseUrl = resolveDeviceSyncBaseUrl(input.env);
-  const controlToken = resolveDeviceSyncControlToken(input.env);
+  const env = input.env ?? process.env;
+  let baseUrl = DEFAULT_DEVICE_SYNC_BASE_URL;
+  let controlToken: string | null = null;
   const fetchImpl = input.fetchImpl ?? fetch;
 
   try {
+    ({ baseUrl, controlToken } = resolveDeviceSyncControlPlane(env));
     const [providerResult, accountResult] = await Promise.all([
       requestDeviceSyncJson<{ providers: DeviceSyncProviderDescriptor[] }>(
         baseUrl,
@@ -106,10 +109,24 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
       accounts: accountResult.accounts,
     };
   } catch (error) {
+    const isLocalityError =
+      isDeviceSyncWebError(error) &&
+      error.code === "device_sync_remote_control_plane_unsupported";
     const isAuthError =
       isDeviceSyncWebError(error) && error.code === "CONTROL_PLANE_AUTH_REQUIRED";
+    const unavailableBaseUrl =
+      isLocalityError &&
+      isDeviceSyncWebError(error) &&
+      error.details &&
+      typeof error.details === "object" &&
+      !Array.isArray(error.details) &&
+      typeof (error.details as { baseUrl?: unknown }).baseUrl === "string"
+        ? ((error.details as { baseUrl: string }).baseUrl)
+        : baseUrl;
     const message =
-      isAuthError
+      isLocalityError
+        ? "Device sync control-plane credentials are restricted to localhost."
+        : isAuthError
         ? "Device sync control plane authentication failed."
         : isDeviceSyncWebError(error) && error.code !== "device_sync_unavailable"
         ? error.message
@@ -117,12 +134,16 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
 
     return {
       status: "unavailable",
-      baseUrl,
+      baseUrl: unavailableBaseUrl,
       message,
-      hint: isAuthError
+      hint: isLocalityError
+        ? "Set DEVICE_SYNC_BASE_URL to a loopback URL such as http://127.0.0.1:8788 whenever DEVICE_SYNC_CONTROL_TOKEN or DEVICE_SYNC_SECRET is configured."
+        : isAuthError
         ? "Set DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
         : "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
-      suggestedCommand: isAuthError
+      suggestedCommand: isLocalityError
+        ? "DEVICE_SYNC_BASE_URL=http://127.0.0.1:8788 DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
+        : isAuthError
         ? "DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
         : "healthybob device daemon start --vault <your-vault>",
     };
@@ -140,8 +161,7 @@ export async function beginDeviceConnection(input: {
   expiresAt: string;
   authorizationUrl: string;
 }> {
-  const baseUrl = resolveDeviceSyncBaseUrl(input.env);
-  const controlToken = resolveDeviceSyncControlToken(input.env);
+  const { baseUrl, controlToken } = resolveDeviceSyncControlPlane(input.env);
 
   return await requestDeviceSyncJson(
     baseUrl,
@@ -165,8 +185,7 @@ export async function reconcileDeviceAccount(input: {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
 }): Promise<{ account: DeviceSyncAccountRecord }> {
-  const baseUrl = resolveDeviceSyncBaseUrl(input.env);
-  const controlToken = resolveDeviceSyncControlToken(input.env);
+  const { baseUrl, controlToken } = resolveDeviceSyncControlPlane(input.env);
 
   return await requestDeviceSyncJson(
     baseUrl,
@@ -184,8 +203,7 @@ export async function disconnectDeviceAccount(input: {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
 }): Promise<{ account: DeviceSyncAccountRecord }> {
-  const baseUrl = resolveDeviceSyncBaseUrl(input.env);
-  const controlToken = resolveDeviceSyncControlToken(input.env);
+  const { baseUrl, controlToken } = resolveDeviceSyncControlPlane(input.env);
 
   return await requestDeviceSyncJson(
     baseUrl,
@@ -196,6 +214,41 @@ export async function disconnectDeviceAccount(input: {
       controlToken,
     },
   );
+}
+
+function resolveDeviceSyncControlPlane(
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  baseUrl: string;
+  controlToken: string | null;
+} {
+  const controlToken = resolveSharedDeviceSyncControlToken({ env });
+
+  try {
+    return {
+      baseUrl: resolveSharedDeviceSyncBaseUrl({
+        env,
+        controlToken,
+      }),
+      controlToken,
+    };
+  } catch (error) {
+    if (isDeviceSyncLocalControlPlaneError(error)) {
+      throw new DeviceSyncWebError({
+        code: "device_sync_remote_control_plane_unsupported",
+        message:
+          "Device sync control-plane bearer tokens may only target loopback base URLs.",
+        status: 500,
+        details: {
+          baseUrl:
+            env[DEVICE_SYNC_BASE_URL_ENV] ?? DEFAULT_DEVICE_SYNC_BASE_URL,
+        },
+        cause: error,
+      });
+    }
+
+    throw error;
+  }
 }
 
 export function buildWebReturnTo(requestUrl: URL, fallbackPath = "/"): string {

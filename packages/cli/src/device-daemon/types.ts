@@ -25,7 +25,6 @@ export interface DeviceDaemonStateRecord {
   version: number
   pid: number
   baseUrl: string
-  controlToken: string
   startedAt: string
 }
 
