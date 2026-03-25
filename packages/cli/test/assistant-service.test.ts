@@ -213,7 +213,9 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli meal add/u)
   assert.match(firstCall?.systemPrompt ?? '', /no longer requires a photo/u)
   assert.match(firstCall?.systemPrompt ?? '', /Older food logs may still live/u)
+  assert.match(firstCall?.systemPrompt ?? '', /research on a complex topic/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli research <prompt>/u)
+  assert.match(firstCall?.systemPrompt ?? '', /review:gpt --deep-research/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
   assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
@@ -224,6 +226,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron preset install/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
+  assert.match(firstCall?.systemPrompt ?? '', /broad current-evidence scan/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Cron prompts may explicitly tell you to use the research tool/u,
