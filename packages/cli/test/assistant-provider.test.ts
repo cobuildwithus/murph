@@ -21,6 +21,7 @@ vi.mock('../src/model-harness.js', () => ({
 
 import {
   executeAssistantProviderTurn,
+  resolveAssistantProviderCapabilities,
   resolveAssistantProviderOptions,
 } from '../src/chat-provider.js'
 
@@ -54,6 +55,15 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
       providerName: 'ollama',
     },
   )
+})
+
+test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {
+  assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
+    supportsDirectCliExecution: true,
+  })
+  assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
+    supportsDirectCliExecution: false,
+  })
 })
 
 test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves the provider session id', async () => {

@@ -26,14 +26,18 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
     setupCommand: 'healthybob',
+  }, {
+    supportsDirectCliExecution: true,
   })
 
-  assert.match(guidance, /raw Healthy Bob CLI/u)
+  assert.match(guidance, /Direct Healthy Bob CLI execution is available in this session/u)
   assert.match(guidance, /vault-cli <command> --help/u)
   assert.match(guidance, /vault-cli <command> --schema --format json/u)
   assert.match(guidance, /vault-cli --llms/u)
   assert.match(guidance, /vault-cli --llms-full/u)
   assert.match(guidance, /broad CLI discovery/u)
+  assert.match(guidance, /healthybob chat/u)
+  assert.match(guidance, /healthybob run/u)
   assert.match(guidance, /meal photo, audio note, or a text-only description/u)
   assert.match(guidance, /vault-cli meal add/u)
   assert.match(guidance, /no longer requires a photo/u)
@@ -53,4 +57,26 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /`--wait-timeout` is the advanced override/u)
   assert.match(guidance, /vault-cli deepthink <prompt>/u)
   assert.match(guidance, /healthybob/u)
+})
+
+test('buildAssistantCliGuidanceText falls back to exact command suggestions when the provider path is prompt-only', () => {
+  const guidance = buildAssistantCliGuidanceText({
+    rawCommand: 'vault-cli',
+    setupCommand: 'healthybob',
+  }, {
+    supportsDirectCliExecution: false,
+  })
+
+  assert.match(
+    guidance,
+    /does not expose direct CLI execution/u,
+  )
+  assert.match(
+    guidance,
+    /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Healthy Bob chat session/u,
+  )
+  assert.match(
+    guidance,
+    /instead of pretending you already ran it/u,
+  )
 })

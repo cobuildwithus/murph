@@ -161,7 +161,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
   )
 })
 
-test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and MCP-backed memory tools', async () => {
+test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and capability-aware assistant tool guidance', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
@@ -194,16 +194,33 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const expectedUserBinDirectory = path.join(homeRoot, '.local', 'bin')
   const turnContext = resolveAssistantMemoryTurnContext(firstCall?.env)
+  const memoryMcpExposed =
+    firstCall?.configOverrides?.some((value: string) =>
+      value.includes('"assistant","memory","--mcp"'),
+    ) ?? false
+  const cronMcpExposed =
+    firstCall?.configOverrides?.some((value: string) =>
+      value.includes('"assistant","cron","--mcp"'),
+    ) ?? false
 
   assert.equal(firstCall?.workingDirectory, vaultRoot)
+  assert.match(firstCall?.systemPrompt ?? '', /bound to one active vault/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Vault operator mode \(default\)/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Repo coding mode/u)
+  assert.match(firstCall?.systemPrompt ?? '', /healthybob chat/u)
+  assert.match(firstCall?.systemPrompt ?? '', /healthybob run/u)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /treat that as a vault operation rather than a coding task/u,
+    /Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows/u,
+    /Treat capture-style requests like meal logging as explicit permission/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Direct Healthy Bob CLI execution is available in this session/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
   assert.match(
@@ -223,7 +240,11 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /10 to 60 minutes/u)
   assert.match(firstCall?.systemPrompt ?? '', /defaults the overall timeout to 40m/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
-  assert.match(firstCall?.systemPrompt ?? '', /native Codex MCP tools/u)
+  assert.match(firstCall?.systemPrompt ?? '', /search assistant memory before answering/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /consider offering one short remember suggestion/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -245,21 +266,28 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
+  if (memoryMcpExposed) {
+    assert.match(firstCall?.systemPrompt ?? '', /Assistant memory MCP tools are exposed in this session/u)
+  } else {
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /Assistant memory MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available/u,
+    )
+  }
+  if (cronMcpExposed) {
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /Scheduled assistant automation MCP tools are exposed in this session/u,
+    )
+  } else {
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /Scheduled assistant automation MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available/u,
+    )
+  }
   assert.equal(
-    firstCall?.configOverrides?.some((value: string) => value.includes('.args=[')),
-    true,
-  )
-  assert.equal(
-    firstCall?.configOverrides?.some((value: string) =>
-      value.includes('"assistant","memory","--mcp"'),
-    ),
-    true,
-  )
-  assert.equal(
-    firstCall?.configOverrides?.some((value: string) =>
-      value.includes('"assistant","cron","--mcp"'),
-    ),
-    true,
+    Boolean(firstCall?.configOverrides?.some((value: string) => value.includes('.args=['))),
+    memoryMcpExposed || cronMcpExposed,
   )
   assert.equal(
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],
@@ -411,6 +439,26 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.equal(secondCall?.provider, 'openai-compatible')
     assert.match(firstCall?.systemPrompt ?? '', /You are Healthy Bob/u)
     assert.match(secondCall?.systemPrompt ?? '', /You are Healthy Bob/u)
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /does not expose Healthy Bob assistant-memory tools or direct shell access/u,
+    )
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /does not expose Healthy Bob cron tools or direct shell access/u,
+    )
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /does not expose direct CLI execution/u,
+    )
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Healthy Bob chat session/u,
+    )
+    assert.doesNotMatch(
+      firstCall?.systemPrompt ?? '',
+      /Assistant memory MCP tools are exposed in this session/u,
+    )
     assert.match(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
     assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
     assert.match(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)

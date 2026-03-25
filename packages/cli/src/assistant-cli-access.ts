@@ -23,6 +23,10 @@ export interface AssistantCliMcpConfig {
   configOverrides: string[]
 }
 
+export interface AssistantCliGuidanceCapabilities {
+  supportsDirectCliExecution: boolean
+}
+
 export function resolveAssistantCliAccessContext(
   env: NodeJS.ProcessEnv = process.env,
 ): AssistantCliAccessContext {
@@ -38,12 +42,18 @@ export function resolveAssistantCliAccessContext(
 
 export function buildAssistantCliGuidanceText(
   access: Pick<AssistantCliAccessContext, 'rawCommand' | 'setupCommand'>,
+  capabilities: AssistantCliGuidanceCapabilities,
 ): string {
   return [
-    `The raw Healthy Bob CLI is available in this session through the existing Incur command surface. Use \`${access.rawCommand}\` for vault and inbox operations. Use \`${access.setupCommand}\` only for setup-oriented flows.`,
+    capabilities.supportsDirectCliExecution
+      ? `Direct Healthy Bob CLI execution is available in this session. \`${access.rawCommand}\` is the raw Healthy Bob operator/data-plane surface for vault, inbox, and assistant operations, so prefer the \`${access.rawCommand}\` spelling when you need the exact command.`
+      : `\`${access.rawCommand}\` is the raw Healthy Bob operator/data-plane surface for vault, inbox, and assistant operations, but this provider path does not expose direct CLI execution. If the user needs a CLI operation here, give them the exact \`${access.rawCommand} ...\` command to run or switch to a Codex-backed Healthy Bob chat session.`,
+    `\`${access.setupCommand}\` is the setup/onboarding entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup. Do not treat \`${access.setupCommand} chat\` or \`${access.setupCommand} run\` as separate products from the assistant surfaces.`,
     `Do not rely on this prompt for command semantics. Start with the narrowest CLI discovery that answers the user: use \`${access.rawCommand} <command> --help\` for syntax and examples, \`${access.rawCommand} <command> --schema --format json\` when you need exact flags or output shapes, and \`${access.rawCommand} --llms\` or \`${access.rawCommand} --llms-full\` only for broad CLI discovery.`,
-    'When a user asks you to inspect or operate through Healthy Bob, prefer using the CLI directly over manually inferring behavior from files alone.',
-    `If the user shares a meal photo, audio note, or a text-only description of what they ate or drank, default to logging it through \`${access.rawCommand} meal add\` instead of treating it as generic chat. Meal logging no longer requires a photo, so use the same meal surface for meals, snacks, and drinks even when only freeform text is available, preserving "snack" or "drink" in the note when that is the right label.`,
+    capabilities.supportsDirectCliExecution
+      ? 'When a user asks you to inspect or operate through Healthy Bob, prefer using the CLI directly over manually inferring behavior from files alone.'
+      : 'When this prompt-only provider path cannot execute a command directly, map the request onto the canonical CLI surface and tell the user the exact command they should run instead of pretending you already ran it.',
+    `If the user shares a meal photo, audio note, or a text-only description of what they ate or drank, treat that as a meal-logging request that maps to \`${access.rawCommand} meal add\` instead of generic chat. Meal logging no longer requires a photo, so use the same meal surface for meals, snacks, and drinks even when only freeform text is available, preserving "snack" or "drink" in the note when that is the right label.`,
     'Older food logs may still live in same-day journal or note records. Before saying nothing was logged for today, check meal records first and then same-day journal/note entries as a fallback, and describe what you found in user-facing terms such as meal log, journal entry, or note rather than internal file paths or ledger filenames unless the user explicitly asks for those details.',
     `When the user asks for research on a complex topic, default to \`${access.rawCommand} research <prompt>\` so Healthy Bob runs \`review:gpt --deep-research --send --wait\`, saves the captured markdown note into \`research/\` inside the vault, and waits for completion.`,
     'Deep Research can legitimately take 10 to 60 minutes, sometimes longer. Treat it as a long-running operation and keep waiting unless the command actually errors. Healthy Bob defaults the overall timeout to 40m.',

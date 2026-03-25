@@ -58,6 +58,10 @@ export interface AssistantProviderTurnResult {
   rawEvents: unknown[]
 }
 
+export interface AssistantProviderCapabilities {
+  supportsDirectCliExecution: boolean
+}
+
 export function resolveAssistantProviderOptions(input: {
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
@@ -79,6 +83,14 @@ export function resolveAssistantProviderOptions(input: {
     baseUrl: normalizeNullableString(input.baseUrl) ?? undefined,
     apiKeyEnv: normalizeNullableString(input.apiKeyEnv) ?? undefined,
     providerName: normalizeNullableString(input.providerName) ?? undefined,
+  }
+}
+
+export function resolveAssistantProviderCapabilities(
+  provider: AssistantChatProvider,
+): AssistantProviderCapabilities {
+  return {
+    supportsDirectCliExecution: provider === 'codex-cli',
   }
 }
 

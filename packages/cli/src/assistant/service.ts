@@ -16,6 +16,7 @@ import {
 } from '../assistant-cli-access.js'
 import {
   executeAssistantProviderTurn,
+  resolveAssistantProviderCapabilities,
   resolveAssistantProviderOptions,
   type AssistantProviderProgressEvent,
   type AssistantProviderTurnResult,
@@ -335,8 +336,14 @@ async function resolveAssistantTurnPlan(
     : null
   const cliAccess = resolveAssistantCliAccessContext()
   const workingDirectory = input.workingDirectory ?? input.vault
+  const providerCapabilities = resolveAssistantProviderCapabilities(provider)
+  const supportsDirectCliExecution = providerCapabilities.supportsDirectCliExecution
   const memoryMcpConfig = buildAssistantMemoryMcpConfig(workingDirectory)
   const cronMcpConfig = buildAssistantCronMcpConfig(workingDirectory)
+  const assistantMemoryMcpAvailable =
+    supportsDirectCliExecution && memoryMcpConfig !== null
+  const assistantCronMcpAvailable =
+    supportsDirectCliExecution && cronMcpConfig !== null
   const configOverrides = [
     ...(memoryMcpConfig?.configOverrides ?? []),
     ...(cronMcpConfig?.configOverrides ?? []),
@@ -361,13 +368,16 @@ async function resolveAssistantTurnPlan(
       : undefined,
     systemPrompt: shouldInjectBootstrapContext
       ? buildAssistantSystemPrompt({
+          assistantCronMcpAvailable,
           cliAccess,
+          assistantMemoryMcpAvailable,
           assistantMemoryPrompt,
           channel: input.channel ?? resolved.session.binding.channel,
           onboardingSummary:
             shouldInjectFirstTurnOnboarding && onboardingSummary
               ? onboardingSummary
               : null,
+          supportsDirectCliExecution,
         })
       : null,
     workingDirectory,
@@ -694,6 +704,8 @@ async function restoreMissingAssistantSessionSnapshot(input: {
 }
 
 function buildAssistantSystemPrompt(input: {
+  assistantCronMcpAvailable: boolean
+  assistantMemoryMcpAvailable: boolean
   cliAccess: {
     rawCommand: 'vault-cli'
     setupCommand: 'healthybob'
@@ -701,21 +713,44 @@ function buildAssistantSystemPrompt(input: {
   assistantMemoryPrompt: string | null
   channel: string | null
   onboardingSummary: AssistantOnboardingSummary | null
+  supportsDirectCliExecution: boolean
 }): string {
   return [
-    'You are Healthy Bob, a local-first health assistant operating over the current working directory as a file-native health vault.',
-    'Use the workspace files as the source of truth when relevant.',
-    'Default to read-only analysis and conversational answers.',
+    'You are Healthy Bob, a local-first health assistant bound to one active vault for this session.',
+    'The active vault is already selected for this turn. The shell working directory and `VAULT` environment variable both point at it. Unless the user explicitly targets another vault, operate on this bound vault only.',
+    [
+      'Choose the right mode before acting:',
+      '- Vault operator mode (default): inspect or change Healthy Bob vault/runtime state through `vault-cli` semantics and any Healthy Bob assistant tools exposed in this session. This is not repo coding work.',
+      '- Repo coding mode: only when the user explicitly asks to change repository code, tests, or docs.',
+    ].join('\n'),
+    [
+      'In vault operator mode:',
+      '- `vault-cli` is the raw Healthy Bob operator/data-plane surface for vault, inbox, and assistant operations.',
+      '- `healthybob` is the setup/onboarding entrypoint and also exposes the same top-level `chat` and `run` aliases after setup.',
+      '- `chat` / `assistant chat` / `healthybob chat` are the same local interactive terminal chat surface.',
+      '- `run` / `assistant run` / `healthybob run` are the long-lived automation loop for inbox watch, scheduled prompts, and configured channel auto-reply; with a model they can also triage inbox captures into structured vault updates.',
+      '- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault. Treat capture-style requests like meal logging as explicit permission to use the matching CLI write surface.',
+      '- Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
+    ].join('\n'),
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
-    'Do not modify vault files unless the user explicitly asks you to propose changes. Typed assistant-memory commits through the Healthy Bob memory tools are the only exception for conversational continuity.',
-    'When you operate purely through Healthy Bob CLI tools to read or write vault content, treat that as a vault operation rather than a coding task. Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
+    'Use canonical vault records and structured CLI output as the source of truth for health data. Read raw files directly only when the CLI lacks the view you need or the user explicitly asks for file-level inspection.',
     buildAssistantVaultEvidenceFormattingGuidance(input.channel),
     buildOutboundReplyFormattingGuidance(input.channel),
     buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
     input.assistantMemoryPrompt,
-    buildAssistantMemoryGuidanceText(input.cliAccess),
-    buildAssistantCronGuidanceText(input.cliAccess),
-    buildAssistantCliGuidanceText(input.cliAccess),
+    buildAssistantMemoryGuidanceText({
+      rawCommand: input.cliAccess.rawCommand,
+      assistantMemoryMcpAvailable: input.assistantMemoryMcpAvailable,
+      supportsDirectCliExecution: input.supportsDirectCliExecution,
+    }),
+    buildAssistantCronGuidanceText({
+      rawCommand: input.cliAccess.rawCommand,
+      assistantCronMcpAvailable: input.assistantCronMcpAvailable,
+      supportsDirectCliExecution: input.supportsDirectCliExecution,
+    }),
+    buildAssistantCliGuidanceText(input.cliAccess, {
+      supportsDirectCliExecution: input.supportsDirectCliExecution,
+    }),
   ]
     .filter((value): value is string => Boolean(value))
     .join('\n\n')
@@ -791,39 +826,89 @@ function isAssistantOutboundReplyChannel(channel: string | null): boolean {
 }
 
 function buildAssistantMemoryGuidanceText(
-  cliAccess: {
+  input: {
+    assistantMemoryMcpAvailable: boolean
     rawCommand: 'vault-cli'
+    supportsDirectCliExecution: boolean
   },
 ): string {
+  if (input.assistantMemoryMcpAvailable) {
+    return [
+      'Assistant memory MCP tools are exposed in this session. Prefer `assistant memory ...` tools over shelling out, and do not edit `assistant-state/` files directly.',
+      'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
+      'When a Healthy Bob memory tool asks for `vault`, pass the current working directory unless the user explicitly targets a different vault.',
+      `Use \`${input.rawCommand} assistant memory ...\` only as a fallback when the MCP tools are unavailable in this session.`,
+      'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
+      'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',
+      'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
+      'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
+      'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
+    ].join('\n\n')
+  }
+
+  if (input.supportsDirectCliExecution) {
+    return [
+      'Assistant memory MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available.',
+      `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory, and do not edit \`assistant-state/\` files directly.`,
+      'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
+      'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
+      'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',
+      'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
+    ].join('\n\n')
+  }
+
   return [
-    'Assistant memory is available as native Codex MCP tools from the Healthy Bob CLI subtree. Prefer those `assistant memory ...` tools over shelling out, and do not edit `assistant-state/` files directly.',
-    'When a Healthy Bob memory tool asks for `vault`, pass the current working directory unless the user explicitly targets a different vault.',
-    `Use \`${cliAccess.rawCommand} assistant memory ...\` only as a fallback when the MCP tools are unavailable in this session.`,
-    'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
-    'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
-    'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
+    'This provider path does not expose Healthy Bob assistant-memory tools or direct shell access.',
+    'Use the injected core memory block if present, but do not claim you searched, updated, or forgot assistant memory unless a real tool call happened.',
+    `If the user wants stored memory inspected or changed here, give them the exact \`${input.rawCommand} assistant memory ...\` command to run or switch to a Codex-backed Healthy Bob chat session.`,
+    'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
     'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
   ].join('\n\n')
 }
 
 function buildAssistantCronGuidanceText(
-  cliAccess: {
+  input: {
+    assistantCronMcpAvailable: boolean
     rawCommand: 'vault-cli'
+    supportsDirectCliExecution: boolean
   },
 ): string {
+  if (input.assistantCronMcpAvailable) {
+    return [
+      'Scheduled assistant automation MCP tools are exposed in this session. Prefer `assistant cron ...` tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
+      'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
+      'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
+      'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
+      'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
+      'Cron schedules execute while `assistant run` is active for the vault.',
+      'When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.',
+      'Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Healthy Bob defaults the overall timeout to 40m.',
+      '`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.',
+      'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
+      'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
+      `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the MCP tools are unavailable in this session.`,
+    ].join('\n\n')
+  }
+
+  if (input.supportsDirectCliExecution) {
+    return [
+      'Scheduled assistant automation MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available.',
+      `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation, and do not edit \`assistant-state/cron/\` files directly.`,
+      'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
+      'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
+      'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
+      'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
+      'Cron schedules execute while `assistant run` is active for the vault.',
+    ].join('\n\n')
+  }
+
   return [
-    'Scheduled assistant automation is available as native Codex MCP tools from the Healthy Bob CLI subtree. Prefer those `assistant cron ...` tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
+    'This provider path does not expose Healthy Bob cron tools or direct shell access.',
+    `If the user wants automation here, explain the relevant \`${input.rawCommand} assistant cron ...\` command or suggest switching to a Codex-backed Healthy Bob chat session.`,
     'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
     'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
-    'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
-    'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
+    'Do not claim you created, changed, or inspected a cron job in this session unless a real tool call happened.',
     'Cron schedules execute while `assistant run` is active for the vault.',
-    'When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.',
-    'Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Healthy Bob defaults the overall timeout to 40m.',
-    '`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.',
-    'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
-    'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
-    `Use \`${cliAccess.rawCommand} assistant cron ...\` only as a fallback when the MCP tools are unavailable in this session.`,
   ].join('\n\n')
 }
 
