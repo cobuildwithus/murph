@@ -1,3 +1,4 @@
+import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_AGENTMAIL_BASE_URL = 'https://api.agentmail.to/v0'
@@ -657,15 +658,6 @@ function normalizeRequiredText(
   )
 }
 
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
-}
-
 function normalizeStringArray(
   values: readonly string[] | null | undefined,
 ): string[] | undefined {
@@ -702,12 +694,4 @@ function compactRecord(
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return String(error)
 }

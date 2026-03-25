@@ -17,6 +17,7 @@ import {
   type AssistantToolExecutionResult,
   type AssistantToolSpec,
 } from './inbox-model-contracts.js'
+import { errorMessage } from './text/shared.js'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -356,12 +357,4 @@ function inferAssistantErrorCode(error: unknown): string {
   }
 
   return 'ASSISTANT_TOOL_EXECUTION_FAILED'
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return String(error)
 }

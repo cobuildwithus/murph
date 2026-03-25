@@ -123,13 +123,12 @@ const allergyRegistryApi = createMarkdownRegistryApi<AllergyRecord>({
 
 export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAllergyResult> {
   const normalizedAllergyId = normalizeId(input.allergyId, "allergyId", "alg");
-  const existingRecords = await allergyRegistryApi.loadRecords(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const existingRecord = allergyRegistryApi.selectExistingRecord(
-    existingRecords,
-    normalizedAllergyId,
-    requestedSlug,
-  );
+  const existingRecord = await allergyRegistryApi.resolveExistingRecord({
+    vaultRoot: input.vaultRoot,
+    recordId: normalizedAllergyId,
+    slug: requestedSlug,
+  });
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
   return allergyRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,

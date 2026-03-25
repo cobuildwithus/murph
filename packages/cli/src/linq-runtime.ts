@@ -2,6 +2,7 @@ import type {
   LinqListPhoneNumbersResponse,
   LinqSendMessageResponse,
 } from '@healthybob/inboxd'
+import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
@@ -204,15 +205,6 @@ function extractLinqErrorMessage(payload: unknown, rawText: string | null): stri
 
 function normalizeLinqBaseUrl(value: string): string {
   return normalizeRequiredString(value, 'base url').replace(/\/+$/u, '')
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 function normalizeRequiredString(value: string | null | undefined, label: string): string {

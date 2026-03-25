@@ -204,13 +204,12 @@ const recipeRegistryApi = createMarkdownRegistryApi<RecipeRecord>({
 
 export async function upsertRecipe(input: UpsertRecipeInput): Promise<UpsertRecipeResult> {
   const normalizedRecipeId = normalizeId(input.recipeId, "recipeId", "rcp");
-  const existingRecords = await recipeRegistryApi.loadRecords(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const existingRecord = recipeRegistryApi.selectExistingRecord(
-    existingRecords,
-    normalizedRecipeId,
-    requestedSlug,
-  );
+  const existingRecord = await recipeRegistryApi.resolveExistingRecord({
+    vaultRoot: input.vaultRoot,
+    recordId: normalizedRecipeId,
+    slug: requestedSlug,
+  });
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
   const prepTimeMinutes = resolveOptionalUpsertValue(
     input.prepTimeMinutes,

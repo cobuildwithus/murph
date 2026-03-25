@@ -27,6 +27,7 @@ import {
   createAssistantCronRunId,
   ensureAssistantCronState,
   isAssistantCronJobDue,
+  normalizeRequiredAssistantCronText,
   readAssistantCronRuns,
   readAssistantCronStore,
   resolveAssistantCronJobFromStore,
@@ -690,19 +691,4 @@ function truncateAssistantCronResponse(response: string | null): string | null {
   }
 
   return response.slice(0, ASSISTANT_CRON_MAX_RESPONSE_LENGTH)
-}
-
-function normalizeRequiredAssistantCronText(
-  value: string,
-  fieldName: string,
-): string {
-  const normalized = normalizeNullableString(value)
-  if (normalized) {
-    return normalized
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CRON_INVALID_INPUT',
-    `${fieldName} must be a non-empty string.`,
-  )
 }

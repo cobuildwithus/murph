@@ -6,6 +6,7 @@ import {
   type InboxConnectorConfig,
   type InboxDoctorCheck,
 } from '../inbox-cli-contracts.js'
+import { errorMessage, normalizeNullableString } from '../text/shared.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {
   RuntimeAttachmentParseJobRecord,
@@ -13,6 +14,8 @@ import type {
   RuntimeCaptureRecord,
   RuntimeStore,
 } from '../inbox-app/types.js'
+
+export { errorMessage, normalizeNullableString } from '../text/shared.js'
 
 export async function readJsonWithSchema<T>(
   absolutePath: string,
@@ -44,17 +47,6 @@ export async function fileExists(absolutePath: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-export function normalizeNullableString(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 export function runtimeNamespaceAccountId(
@@ -147,14 +139,6 @@ export function normalizeOptionalCommandLimit(
   }
 
   return value
-}
-
-export function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
 }
 
 export function passCheck(

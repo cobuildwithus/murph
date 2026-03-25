@@ -44,6 +44,53 @@ type SetupChannelInboxServices = Pick<InboxCliServices, 'bootstrap'> &
     Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
   >
 
+type SetupListedConnector =
+  Awaited<ReturnType<NonNullable<SetupChannelInboxServices['sourceList']>>>['connectors'][number]
+type SetupAddedConnectorResult = Awaited<
+  ReturnType<NonNullable<SetupChannelInboxServices['sourceAdd']>>
+>
+type SetupAddedEmailConnectorResult = SetupAddedConnectorResult & {
+  selectedInbox: SetupAgentmailInboxSelection | null
+}
+type ManagedSetupChannel = Exclude<SetupChannel, 'imessage'>
+type SetupReadiness = Awaited<ReturnType<typeof probeSetupReadiness>>
+
+type ManagedSetupChannelMessages = {
+  stepDetail: string
+  detail: string
+}
+
+type ManagedSetupChannelDefinition<
+  TAdded extends SetupAddedConnectorResult = SetupAddedConnectorResult,
+> = {
+  channel: ManagedSetupChannel
+  connectorId: string
+  title: string
+  stepId: string
+  readyForSetup: boolean
+  missingEnv: string[]
+  dryRunStepDetail: string
+  dryRunDetail: string
+  runtimeUnavailableMessage: string
+  fallbackReason: string
+  treatProbeWarnAsReady?: boolean
+  findExistingConnector(connectors: readonly SetupListedConnector[]): SetupListedConnector | null
+  addConnector(
+    sourceAdd: NonNullable<SetupChannelInboxServices['sourceAdd']>,
+  ): Promise<TAdded>
+  describeMissingEnv(
+    existingConnector: SetupListedConnector | null,
+  ): ManagedSetupChannelMessages
+  describeReused(input: {
+    connector: SetupListedConnector
+    readiness: SetupReadiness
+  }): ManagedSetupChannelMessages
+  describeAdded(input: {
+    added: TAdded
+    readiness: SetupReadiness
+  }): ManagedSetupChannelMessages
+}
+
 function isSetupChannel(value: string): value is SetupChannel {
   return setupChannelValues.includes(value as SetupChannel)
 }
@@ -88,7 +135,6 @@ export async function configureSetupChannels(input: {
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
-        platform,
         requestId: input.requestId,
         steps: input.steps,
         vault: input.vault,
@@ -102,7 +148,6 @@ export async function configureSetupChannels(input: {
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
-        platform,
         requestId: input.requestId,
         steps: input.steps,
         vault: input.vault,
@@ -117,7 +162,6 @@ export async function configureSetupChannels(input: {
         dryRun: input.dryRun,
         env: input.env,
         inboxServices: input.inboxServices,
-        platform,
         requestId: input.requestId,
         resolveAgentmailInboxSelection: input.resolveAgentmailInboxSelection,
         steps: input.steps,
@@ -301,7 +345,6 @@ async function configureTelegramChannel(input: {
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
-  platform: NodeJS.Platform
   requestId: string | null
   steps: SetupStepResult[]
   vault: string
@@ -309,163 +352,82 @@ async function configureTelegramChannel(input: {
   const telegramAdapter = getAssistantChannelAdapter('telegram')
   const token = resolveTelegramBotToken(input.env)
   const readyForSetup = telegramAdapter?.isReadyForSetup(input.env) ?? Boolean(token)
-  const doctor = input.inboxServices.doctor
-  const sourceList = input.inboxServices.sourceList
-  const sourceAdd = input.inboxServices.sourceAdd
-  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
   const missingEnv = resolveSetupChannelMissingEnv('telegram', input.env)
 
-  if (input.dryRun) {
-    input.steps.push(
-      createStep({
-        detail: token
-          ? 'Would verify the Telegram bot token, add or reuse the telegram:bot inbox connector, and enable assistant auto-reply for Telegram direct chats.'
-          : 'Would configure Telegram once TELEGRAM_BOT_TOKEN is available in the shell or local `.env`.',
-        id: 'channel-telegram',
-        kind: 'configure',
-        status: 'planned',
-        title: 'Telegram channel',
-      }),
-    )
-
-    return {
-      autoReply: readyForSetup,
+  return configureManagedSetupChannel({
+    definition: {
       channel: 'telegram',
-      configured: false,
       connectorId: TELEGRAM_SETUP_CONNECTOR_ID,
-      detail: token
+      title: 'Telegram channel',
+      stepId: 'channel-telegram',
+      readyForSetup,
+      missingEnv,
+      dryRunStepDetail: token
+        ? 'Would verify the Telegram bot token, add or reuse the telegram:bot inbox connector, and enable assistant auto-reply for Telegram direct chats.'
+        : 'Would configure Telegram once TELEGRAM_BOT_TOKEN is available in the shell or local `.env`.',
+      dryRunDetail: token
         ? 'Would configure the Telegram bot connector and enable assistant auto-reply for Telegram direct chats.'
         : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
-      enabled: true,
-      missingEnv,
-    }
-  }
-
-  if (!sourceList || !sourceAdd) {
-    throw new VaultCliError(
-      'runtime_unavailable',
-      'Healthy Bob setup cannot configure Telegram because the inbox source management services are unavailable in this build.',
-    )
-  }
-
-  const listed = await sourceList({
-    vault: input.vault,
-    requestId: input.requestId,
-  })
-  const existingConnector =
-    listed.connectors.find((connector) => connector.id === TELEGRAM_SETUP_CONNECTOR_ID) ??
-    listed.connectors.find(
-      (connector) =>
-        connector.source === 'telegram' && connector.accountId === TELEGRAM_SETUP_ACCOUNT_ID,
-    ) ??
-    null
-
-  if (!readyForSetup) {
-    input.steps.push(
-      createStep({
-        detail: existingConnector
-          ? `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because TELEGRAM_BOT_TOKEN was not available in the shell or local \`.env\`.`
-          : 'Telegram was selected, but setup did not add the connector because TELEGRAM_BOT_TOKEN was not available in the shell or local `.env`.',
-        id: 'channel-telegram',
-        kind: 'configure',
-        status: existingConnector ? 'reused' : 'skipped',
-        title: 'Telegram channel',
-      }),
-    )
-
-    return {
-      autoReply: false,
-      channel: 'telegram',
-      configured: existingConnector !== null,
-      connectorId: existingConnector?.id ?? null,
-      detail: existingConnector
-        ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-        : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-      enabled: true,
-      missingEnv,
-    }
-  }
-
-  if (existingConnector) {
-    await ensureSetupConnectorEnabled({
-      connectorId: existingConnector.id,
-      enabled: existingConnector.enabled,
-      requestId: input.requestId,
-      sourceSetEnabled,
-      vault: input.vault,
-    })
-    const readiness = await probeSetupReadiness({
-      connectorId: existingConnector.id,
-      doctor,
-      requestId: input.requestId,
-      vault: input.vault,
+      runtimeUnavailableMessage:
+        'Healthy Bob setup cannot configure Telegram because the inbox source management services are unavailable in this build.',
       fallbackReason: 'Telegram readiness probe failed',
-    })
-
-    input.steps.push(
-      createStep({
-        detail: readiness.ready
-          ? `Reusing the Telegram inbox connector "${existingConnector.id}" and enabling assistant auto-reply for Telegram direct chats.`
-          : `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        id: 'channel-telegram',
-        kind: 'configure',
-        status: 'reused',
-        title: 'Telegram channel',
-      }),
-    )
-
-    return {
-      autoReply: readiness.ready,
-      channel: 'telegram',
-      configured: readiness.ready,
-      connectorId: existingConnector.id,
-      detail: readiness.ready
-        ? `Reused the Telegram connector "${existingConnector.id}" and enabled assistant auto-reply for Telegram direct chats.`
-        : `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      enabled: true,
-      missingEnv: [],
-    }
-  }
-
-  const added = await sourceAdd({
-    account: TELEGRAM_SETUP_ACCOUNT_ID,
-    id: TELEGRAM_SETUP_CONNECTOR_ID,
+      findExistingConnector(connectors) {
+        return (
+          connectors.find((connector) => connector.id === TELEGRAM_SETUP_CONNECTOR_ID) ??
+          connectors.find(
+            (connector) =>
+              connector.source === 'telegram' &&
+              connector.accountId === TELEGRAM_SETUP_ACCOUNT_ID,
+          ) ??
+          null
+        )
+      },
+      async addConnector(sourceAdd) {
+        return sourceAdd({
+          account: TELEGRAM_SETUP_ACCOUNT_ID,
+          id: TELEGRAM_SETUP_CONNECTOR_ID,
+          requestId: input.requestId,
+          source: 'telegram',
+          vault: input.vault,
+        })
+      },
+      describeMissingEnv(existingConnector) {
+        return {
+          stepDetail: existingConnector
+            ? `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because TELEGRAM_BOT_TOKEN was not available in the shell or local \`.env\`.`
+            : 'Telegram was selected, but setup did not add the connector because TELEGRAM_BOT_TOKEN was not available in the shell or local `.env`.',
+          detail: existingConnector
+            ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+            : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        }
+      },
+      describeReused({ connector, readiness }) {
+        return {
+          stepDetail: readiness.ready
+            ? `Reusing the Telegram inbox connector "${connector.id}" and enabling assistant auto-reply for Telegram direct chats.`
+            : `Reused the Telegram inbox connector "${connector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+          detail: readiness.ready
+            ? `Reused the Telegram connector "${connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
+            : `Reused the Telegram connector "${connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        }
+      },
+      describeAdded({ added, readiness }) {
+        return {
+          stepDetail: readiness.ready
+            ? `Added the Telegram inbox connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
+            : `Added the Telegram inbox connector "${added.connector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+          detail: readiness.ready
+            ? `Configured the Telegram connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
+            : `Configured the Telegram connector "${added.connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        }
+      },
+    },
+    dryRun: input.dryRun,
+    inboxServices: input.inboxServices,
     requestId: input.requestId,
-    source: 'telegram',
+    steps: input.steps,
     vault: input.vault,
   })
-
-  const readiness = await probeSetupReadiness({
-    connectorId: added.connector.id,
-    doctor,
-    requestId: input.requestId,
-    vault: input.vault,
-    fallbackReason: 'Telegram readiness probe failed',
-  })
-
-  input.steps.push(
-    createStep({
-      detail: readiness.ready
-        ? `Added the Telegram inbox connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
-        : `Added the Telegram inbox connector "${added.connector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      id: 'channel-telegram',
-      kind: 'configure',
-      status: 'completed',
-      title: 'Telegram channel',
-    }),
-  )
-
-  return {
-    autoReply: readiness.ready,
-    channel: 'telegram',
-    configured: readiness.ready,
-    connectorId: added.connector.id,
-    detail: readiness.ready
-      ? `Configured the Telegram connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
-      : `Configured the Telegram connector "${added.connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-    enabled: true,
-    missingEnv: [],
-  }
 }
 
 function describeLinqConnectorEndpoint(input: {
@@ -485,172 +447,90 @@ async function configureLinqChannel(input: {
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
-  platform: NodeJS.Platform
   requestId: string | null
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel> {
   const linqAdapter = getAssistantChannelAdapter('linq')
   const readyForSetup = linqAdapter?.isReadyForSetup(input.env) ?? false
-  const doctor = input.inboxServices.doctor
-  const sourceList = input.inboxServices.sourceList
-  const sourceAdd = input.inboxServices.sourceAdd
-  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
   const missingEnv = resolveSetupChannelMissingEnv('linq', input.env)
 
-  if (input.dryRun) {
-    input.steps.push(
-      createStep({
-        detail: readyForSetup
-          ? 'Would verify the Linq API token, add or reuse the linq:default inbox connector, and enable assistant auto-reply for Linq direct chats.'
-          : 'Would configure Linq once LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN is available in the shell or local `.env`.',
-        id: 'channel-linq',
-        kind: 'configure',
-        status: 'planned',
-        title: 'Linq channel',
-      }),
-    )
-
-    return {
-      autoReply: readyForSetup,
+  return configureManagedSetupChannel({
+    definition: {
       channel: 'linq',
-      configured: false,
       connectorId: LINQ_SETUP_CONNECTOR_ID,
-      detail: readyForSetup
+      title: 'Linq channel',
+      stepId: 'channel-linq',
+      readyForSetup,
+      missingEnv,
+      dryRunStepDetail: readyForSetup
+        ? 'Would verify the Linq API token, add or reuse the linq:default inbox connector, and enable assistant auto-reply for Linq direct chats.'
+        : 'Would configure Linq once LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN is available in the shell or local `.env`.',
+      dryRunDetail: readyForSetup
         ? 'Would configure the Linq webhook connector and enable assistant auto-reply for Linq direct chats.'
         : `Linq needs LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
-      enabled: true,
-      missingEnv,
-    }
-  }
-
-  if (!sourceList || !sourceAdd) {
-    throw new VaultCliError(
-      'runtime_unavailable',
-      'Healthy Bob setup cannot configure Linq because the inbox source management services are unavailable in this build.',
-    )
-  }
-
-  const listed = await sourceList({
-    vault: input.vault,
-    requestId: input.requestId,
-  })
-  const existingConnector =
-    listed.connectors.find((connector) => connector.id === LINQ_SETUP_CONNECTOR_ID) ??
-    listed.connectors.find(
-      (connector) => connector.source === 'linq' && connector.accountId === LINQ_SETUP_ACCOUNT_ID,
-    ) ??
-    listed.connectors.find((connector) => connector.source === 'linq') ??
-    null
-
-  if (!readyForSetup) {
-    input.steps.push(
-      createStep({
-        detail: existingConnector
-          ? `Reused the Linq inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN was not available in the shell or local \`.env\`.`
-          : 'Linq was selected, but setup did not add the connector because LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN was not available in the shell or local `.env`.',
-        id: 'channel-linq',
-        kind: 'configure',
-        status: existingConnector ? 'reused' : 'skipped',
-        title: 'Linq channel',
-      }),
-    )
-
-    return {
-      autoReply: false,
-      channel: 'linq',
-      configured: existingConnector !== null,
-      connectorId: existingConnector?.id ?? null,
-      detail: existingConnector
-        ? `Reused the Linq connector "${existingConnector.id}", but skipped assistant auto-reply until a Linq API token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-        : `Linq needs LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-      enabled: true,
-      missingEnv,
-    }
-  }
-
-  if (existingConnector) {
-    await ensureSetupConnectorEnabled({
-      connectorId: existingConnector.id,
-      enabled: existingConnector.enabled,
-      requestId: input.requestId,
-      sourceSetEnabled,
-      vault: input.vault,
-    })
-    const readiness = await probeSetupReadiness({
-      connectorId: existingConnector.id,
-      doctor,
-      requestId: input.requestId,
-      vault: input.vault,
+      runtimeUnavailableMessage:
+        'Healthy Bob setup cannot configure Linq because the inbox source management services are unavailable in this build.',
       fallbackReason: 'Linq readiness probe failed',
-    })
-    const endpoint = describeLinqConnectorEndpoint(existingConnector)
-
-    input.steps.push(
-      createStep({
-        detail: readiness.ready
-          ? `Reusing the Linq inbox connector "${existingConnector.id}" at ${endpoint} and enabling assistant auto-reply for Linq direct chats.`
-          : `Reused the Linq inbox connector "${existingConnector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        id: 'channel-linq',
-        kind: 'configure',
-        status: 'reused',
-        title: 'Linq channel',
-      }),
-    )
-
-    return {
-      autoReply: readiness.ready,
-      channel: 'linq',
-      configured: readiness.ready,
-      connectorId: existingConnector.id,
-      detail: readiness.ready
-        ? `Reused the Linq connector "${existingConnector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
-        : `Reused the Linq connector "${existingConnector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      enabled: true,
-      missingEnv: [],
-    }
-  }
-
-  const added = await sourceAdd({
-    account: LINQ_SETUP_ACCOUNT_ID,
-    id: LINQ_SETUP_CONNECTOR_ID,
+      findExistingConnector(connectors) {
+        return (
+          connectors.find((connector) => connector.id === LINQ_SETUP_CONNECTOR_ID) ??
+          connectors.find(
+            (connector) =>
+              connector.source === 'linq' && connector.accountId === LINQ_SETUP_ACCOUNT_ID,
+          ) ??
+          connectors.find((connector) => connector.source === 'linq') ??
+          null
+        )
+      },
+      async addConnector(sourceAdd) {
+        return sourceAdd({
+          account: LINQ_SETUP_ACCOUNT_ID,
+          id: LINQ_SETUP_CONNECTOR_ID,
+          requestId: input.requestId,
+          source: 'linq',
+          vault: input.vault,
+        })
+      },
+      describeMissingEnv(existingConnector) {
+        return {
+          stepDetail: existingConnector
+            ? `Reused the Linq inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN was not available in the shell or local \`.env\`.`
+            : 'Linq was selected, but setup did not add the connector because LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN was not available in the shell or local `.env`.',
+          detail: existingConnector
+            ? `Reused the Linq connector "${existingConnector.id}", but skipped assistant auto-reply until a Linq API token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+            : `Linq needs LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        }
+      },
+      describeReused({ connector, readiness }) {
+        const endpoint = describeLinqConnectorEndpoint(connector)
+        return {
+          stepDetail: readiness.ready
+            ? `Reusing the Linq inbox connector "${connector.id}" at ${endpoint} and enabling assistant auto-reply for Linq direct chats.`
+            : `Reused the Linq inbox connector "${connector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+          detail: readiness.ready
+            ? `Reused the Linq connector "${connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
+            : `Reused the Linq connector "${connector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        }
+      },
+      describeAdded({ added, readiness }) {
+        const endpoint = describeLinqConnectorEndpoint(added.connector)
+        return {
+          stepDetail: readiness.ready
+            ? `Added the Linq inbox connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
+            : `Added the Linq inbox connector "${added.connector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+          detail: readiness.ready
+            ? `Configured the Linq connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
+            : `Configured the Linq connector "${added.connector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        }
+      },
+    },
+    dryRun: input.dryRun,
+    inboxServices: input.inboxServices,
     requestId: input.requestId,
-    source: 'linq',
+    steps: input.steps,
     vault: input.vault,
   })
-
-  const readiness = await probeSetupReadiness({
-    connectorId: added.connector.id,
-    doctor,
-    requestId: input.requestId,
-    vault: input.vault,
-    fallbackReason: 'Linq readiness probe failed',
-  })
-  const endpoint = describeLinqConnectorEndpoint(added.connector)
-
-  input.steps.push(
-    createStep({
-      detail: readiness.ready
-        ? `Added the Linq inbox connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
-        : `Added the Linq inbox connector "${added.connector.id}" at ${endpoint}, but did not enable assistant auto-reply because the API token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      id: 'channel-linq',
-      kind: 'configure',
-      status: 'completed',
-      title: 'Linq channel',
-    }),
-  )
-
-  return {
-    autoReply: readiness.ready,
-    channel: 'linq',
-    configured: readiness.ready,
-    connectorId: added.connector.id,
-    detail: readiness.ready
-      ? `Configured the Linq connector "${added.connector.id}" at ${endpoint} and enabled assistant auto-reply for Linq direct chats.`
-      : `Configured the Linq connector "${added.connector.id}" at ${endpoint}, but skipped assistant auto-reply until the Linq API token authenticates successfully${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-    enabled: true,
-    missingEnv: [],
-  }
 }
 
 async function configureEmailChannel(input: {
@@ -658,84 +538,179 @@ async function configureEmailChannel(input: {
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
-  platform: NodeJS.Platform
   requestId: string | null
   resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel> {
   const apiKey = resolveAgentmailApiKey(input.env)
-  const doctor = input.inboxServices.doctor
-  const sourceList = input.inboxServices.sourceList
-  const sourceAdd = input.inboxServices.sourceAdd
-  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
   const missingEnv = resolveSetupChannelMissingEnv('email', input.env)
+
+  return configureManagedSetupChannel<SetupAddedEmailConnectorResult>({
+    definition: {
+      channel: 'email',
+      connectorId: EMAIL_SETUP_CONNECTOR_ID,
+      title: 'Email channel',
+      stepId: 'channel-email',
+      readyForSetup: Boolean(apiKey),
+      missingEnv,
+      dryRunStepDetail: apiKey
+        ? 'Would provision or reuse an AgentMail inbox, verify email polling, and enable assistant auto-reply for direct email threads.'
+        : 'Would configure email once AGENTMAIL_API_KEY is available in the shell or local `.env`.',
+      dryRunDetail: apiKey
+        ? 'Would reuse an existing AgentMail inbox when possible, or provision a new inbox connector and enable assistant auto-reply for direct email threads.'
+        : `Email needs AGENTMAIL_API_KEY in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      runtimeUnavailableMessage:
+        'Healthy Bob setup cannot configure email because the inbox source management services are unavailable in this build.',
+      fallbackReason: 'Email readiness probe failed',
+      treatProbeWarnAsReady: true,
+      findExistingConnector(connectors) {
+        return (
+          connectors.find((connector) => connector.id === EMAIL_SETUP_CONNECTOR_ID) ??
+          connectors.find((connector) => connector.source === 'email') ??
+          null
+        )
+      },
+      async addConnector(sourceAdd): Promise<SetupAddedEmailConnectorResult> {
+        const selectedInbox =
+          input.resolveAgentmailInboxSelection && apiKey
+            ? await input.resolveAgentmailInboxSelection({
+                allowPrompt: input.allowPrompt,
+                env: input.env,
+              })
+            : null
+
+        const added = await sourceAdd({
+          account: selectedInbox?.accountId,
+          address: selectedInbox?.emailAddress ?? undefined,
+          id: EMAIL_SETUP_CONNECTOR_ID,
+          provision: selectedInbox === null,
+          emailDisplayName: EMAIL_SETUP_DISPLAY_NAME,
+          requestId: input.requestId,
+          source: 'email',
+          vault: input.vault,
+        })
+
+        return { ...added, selectedInbox }
+      },
+      describeMissingEnv(existingConnector) {
+        return {
+          stepDetail: existingConnector
+            ? `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because AGENTMAIL_API_KEY was not available in the shell or local \`.env\`.`
+            : 'Email was selected, but setup did not add the connector because AGENTMAIL_API_KEY was not available in the shell or local `.env`.',
+          detail: existingConnector
+            ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+            : `Email needs AGENTMAIL_API_KEY in the current environment before setup can reuse or provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        }
+      },
+      describeReused({ connector, readiness }) {
+        return {
+          stepDetail: readiness.ready
+            ? `Reusing the email inbox connector "${connector.id}" and enabling assistant auto-reply for direct email threads.`
+            : `Reused the email inbox connector "${connector.id}", but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+          detail: readiness.ready
+            ? `Reused the email connector "${connector.id}" and enabled assistant auto-reply for direct email threads.`
+            : `Reused the email connector "${connector.id}", but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        }
+      },
+      describeAdded({ added, readiness }) {
+        const configuredAddress =
+          added.provisionedMailbox?.emailAddress ??
+          added.reusedMailbox?.emailAddress ??
+          added.selectedInbox?.emailAddress ??
+          added.connector.options.emailAddress ??
+          null
+        const actionVerb = describeConfiguredEmailAction({
+          added,
+          selectedInbox: added.selectedInbox ?? null,
+        })
+
+        return {
+          stepDetail: readiness.ready
+            ? `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
+            : `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+          detail: readiness.ready
+            ? `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
+            : `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+        }
+      },
+    },
+    dryRun: input.dryRun,
+    inboxServices: input.inboxServices,
+    requestId: input.requestId,
+    steps: input.steps,
+    vault: input.vault,
+  })
+}
+
+async function configureManagedSetupChannel<
+  TAdded extends SetupAddedConnectorResult = SetupAddedConnectorResult,
+>(input: {
+  definition: ManagedSetupChannelDefinition<TAdded>
+  dryRun: boolean
+  inboxServices: SetupChannelInboxServices
+  requestId: string | null
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<SetupConfiguredChannel> {
+  const { definition } = input
 
   if (input.dryRun) {
     input.steps.push(
       createStep({
-        detail: apiKey
-          ? 'Would provision or reuse an AgentMail inbox, verify email polling, and enable assistant auto-reply for direct email threads.'
-          : 'Would configure email once AGENTMAIL_API_KEY is available in the shell or local `.env`.',
-        id: 'channel-email',
+        detail: definition.dryRunStepDetail,
+        id: definition.stepId,
         kind: 'configure',
         status: 'planned',
-        title: 'Email channel',
+        title: definition.title,
       }),
     )
 
     return {
-      autoReply: Boolean(apiKey),
-      channel: 'email',
+      autoReply: definition.readyForSetup,
+      channel: definition.channel,
       configured: false,
-      connectorId: EMAIL_SETUP_CONNECTOR_ID,
-      detail: apiKey
-        ? 'Would reuse an existing AgentMail inbox when possible, or provision a new inbox connector and enable assistant auto-reply for direct email threads.'
-        : `Email needs AGENTMAIL_API_KEY in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      connectorId: definition.connectorId,
+      detail: definition.dryRunDetail,
       enabled: true,
-      missingEnv,
+      missingEnv: definition.missingEnv,
     }
   }
 
+  const doctor = input.inboxServices.doctor
+  const sourceList = input.inboxServices.sourceList
+  const sourceAdd = input.inboxServices.sourceAdd
+  const sourceSetEnabled = input.inboxServices.sourceSetEnabled
   if (!sourceList || !sourceAdd) {
-    throw new VaultCliError(
-      'runtime_unavailable',
-      'Healthy Bob setup cannot configure email because the inbox source management services are unavailable in this build.',
-    )
+    throw new VaultCliError('runtime_unavailable', definition.runtimeUnavailableMessage)
   }
 
   const listed = await sourceList({
     vault: input.vault,
     requestId: input.requestId,
   })
-  const existingConnector =
-    listed.connectors.find((connector) => connector.id === EMAIL_SETUP_CONNECTOR_ID) ??
-    listed.connectors.find((connector) => connector.source === 'email') ??
-    null
+  const existingConnector = definition.findExistingConnector(listed.connectors)
 
-  if (!apiKey) {
+  if (!definition.readyForSetup) {
+    const messages = definition.describeMissingEnv(existingConnector)
     input.steps.push(
       createStep({
-        detail: existingConnector
-          ? `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because AGENTMAIL_API_KEY was not available in the shell or local \`.env\`.`
-          : 'Email was selected, but setup did not add the connector because AGENTMAIL_API_KEY was not available in the shell or local `.env`.',
-        id: 'channel-email',
+        detail: messages.stepDetail,
+        id: definition.stepId,
         kind: 'configure',
         status: existingConnector ? 'reused' : 'skipped',
-        title: 'Email channel',
+        title: definition.title,
       }),
     )
 
     return {
       autoReply: false,
-      channel: 'email',
+      channel: definition.channel,
       configured: existingConnector !== null,
       connectorId: existingConnector?.id ?? null,
-      detail: existingConnector
-        ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-        : `Email needs AGENTMAIL_API_KEY in the current environment before setup can reuse or provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      detail: messages.detail,
       enabled: true,
-      missingEnv,
+      missingEnv: definition.missingEnv,
     }
   }
 
@@ -751,94 +726,66 @@ async function configureEmailChannel(input: {
       connectorId: existingConnector.id,
       doctor,
       requestId: input.requestId,
-      treatProbeWarnAsReady: true,
+      treatProbeWarnAsReady: definition.treatProbeWarnAsReady,
       vault: input.vault,
-      fallbackReason: 'Email readiness probe failed',
+      fallbackReason: definition.fallbackReason,
+    })
+    const messages = definition.describeReused({
+      connector: existingConnector,
+      readiness,
     })
 
     input.steps.push(
       createStep({
-        detail: readiness.ready
-          ? `Reusing the email inbox connector "${existingConnector.id}" and enabling assistant auto-reply for direct email threads.`
-          : `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        id: 'channel-email',
+        detail: messages.stepDetail,
+        id: definition.stepId,
         kind: 'configure',
         status: 'reused',
-        title: 'Email channel',
+        title: definition.title,
       }),
     )
 
     return {
       autoReply: readiness.ready,
-      channel: 'email',
+      channel: definition.channel,
       configured: readiness.ready,
       connectorId: existingConnector.id,
-      detail: readiness.ready
-        ? `Reused the email connector "${existingConnector.id}" and enabled assistant auto-reply for direct email threads.`
-        : `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      detail: messages.detail,
       enabled: true,
       missingEnv: [],
     }
   }
 
-  const selectedInbox =
-    input.resolveAgentmailInboxSelection && apiKey
-      ? await input.resolveAgentmailInboxSelection({
-          allowPrompt: input.allowPrompt,
-          env: input.env,
-        })
-      : null
-
-  const added = await sourceAdd({
-    account: selectedInbox?.accountId,
-    address: selectedInbox?.emailAddress ?? undefined,
-    id: EMAIL_SETUP_CONNECTOR_ID,
-    provision: selectedInbox === null,
-    emailDisplayName: EMAIL_SETUP_DISPLAY_NAME,
-    requestId: input.requestId,
-    source: 'email',
-    vault: input.vault,
-  })
-
+  const added = await definition.addConnector(sourceAdd)
   const readiness = await probeSetupReadiness({
     connectorId: added.connector.id,
     doctor,
     requestId: input.requestId,
-    treatProbeWarnAsReady: true,
+    treatProbeWarnAsReady: definition.treatProbeWarnAsReady,
     vault: input.vault,
-    fallbackReason: 'Email readiness probe failed',
+    fallbackReason: definition.fallbackReason,
+  })
+  const messages = definition.describeAdded({
+    added,
+    readiness,
   })
 
-  const configuredAddress =
-    added.provisionedMailbox?.emailAddress ??
-    added.reusedMailbox?.emailAddress ??
-    selectedInbox?.emailAddress ??
-    added.connector.options.emailAddress ??
-    null
-  const actionVerb = describeConfiguredEmailAction({
-    added,
-    selectedInbox,
-  })
   input.steps.push(
     createStep({
-      detail: readiness.ready
-        ? `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
-        : `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      id: 'channel-email',
+      detail: messages.stepDetail,
+      id: definition.stepId,
       kind: 'configure',
       status: 'completed',
-      title: 'Email channel',
+      title: definition.title,
     }),
   )
 
   return {
     autoReply: readiness.ready,
-    channel: 'email',
+    channel: definition.channel,
     configured: readiness.ready,
     connectorId: added.connector.id,
-    detail: readiness.ready
-      ? `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
-      : `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+    detail: messages.detail,
     enabled: true,
     missingEnv: [],
   }

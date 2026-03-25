@@ -3128,6 +3128,81 @@ test.sequential('setup service dry-run on Linux keeps cross-platform channels an
   }
 })
 
+test.sequential('Linux dry-run still plans PaddleX OCR when PATH Python lacks venv support', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-python-dryrun-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const binRoot = path.join(tempRoot, 'bin')
+  const ffmpegCommand = path.join(binRoot, 'ffmpeg')
+  const pdftotextCommand = path.join(binRoot, 'pdftotext')
+  const whisperCommand = path.join(binRoot, 'whisper-cli')
+  const pythonCommand = path.join(binRoot, 'python3')
+  const runCalls: Array<{ file: string; args: string[] }> = []
+
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperCommand)
+  await writeExecutable(pythonCommand)
+
+  const services = createSetupServices({
+    arch: () => 'x64',
+    env: () => ({ PATH: binRoot }),
+    getHomeDirectory: () => homeRoot,
+    log() {},
+    platform: () => 'linux',
+    runCommand: async ({ file, args }) => {
+      runCalls.push({ args, file })
+      if (file === pythonCommand && args[0] === '-m' && args[1] === 'venv' && args[2] === '--help') {
+        return {
+          exitCode: 1,
+          stderr: 'venv unavailable\n',
+          stdout: '',
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+  })
+
+  try {
+    const result = await services.setupHost({
+      dryRun: true,
+      vault: './vault',
+      whisperModel: 'base.en',
+    })
+
+    assert.equal(result.platform, 'linux')
+    assert.equal(
+      result.steps.some(
+        (step) =>
+          step.id === 'python' &&
+          step.status === 'planned' &&
+          /Would reuse Python 3 with venv support/u.test(step.detail),
+      ),
+      true,
+    )
+    assert.equal(
+      result.steps.some(
+        (step) =>
+          step.id === 'paddlex-ocr' &&
+          step.status === 'planned' &&
+          /Would create .*paddlex-ocr.*install paddlepaddle plus paddlex\[ocr\]/u.test(
+            step.detail,
+          ),
+      ),
+      true,
+    )
+    assert.equal(result.tools.paddleocrCommand, null)
+    assert.deepEqual(runCalls, [
+      {
+        args: ['-m', 'venv', '--help'],
+        file: pythonCommand,
+      },
+    ])
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('Linux setup preserves existing iMessage state while adding Telegram on the same vault', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-preserve-imessage-'))
   const homeRoot = path.join(tempRoot, 'home')

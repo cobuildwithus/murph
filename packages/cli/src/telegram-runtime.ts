@@ -3,6 +3,7 @@ import {
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from '@healthybob/inboxd'
+import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export type TelegramSendTarget = TelegramThreadTarget
@@ -118,15 +119,4 @@ function normalizePositiveInteger(
   }
 
   return value
-}
-
-function normalizeNullableString(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }

@@ -3,6 +3,7 @@ import type {
   InboxRunEvent,
   RuntimeCaptureRecordInput,
 } from './inbox-services.js'
+import { normalizeNullableString as normalizeLabel } from './text/shared.js'
 
 export type ForegroundLogScope = 'assistant' | 'inbox'
 
@@ -216,15 +217,6 @@ function resolvePreviewLabel(capture?: RuntimeCaptureRecordInput): string {
   }
 
   return 'message with no text preview'
-}
-
-function normalizeLabel(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 function normalizePreviewText(value: string | null | undefined): string | null {

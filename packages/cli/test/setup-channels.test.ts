@@ -153,6 +153,105 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
   }
 })
 
+test('configureSetupChannels reuses a disabled Telegram connector and re-enables it before probing readiness', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-channels-'))
+
+  try {
+    const doctorCalls: string[] = []
+    const sourceSetEnabledCalls: Array<{
+      connectorId: string
+      enabled: boolean
+    }> = []
+    const configured = await configureSetupChannels({
+      channels: ['telegram'],
+      dryRun: false,
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not be called in this test')
+        },
+        async doctor(input) {
+          doctorCalls.push(input.sourceId ?? '')
+          return {
+            vault,
+            checks: [
+              {
+                message: 'bot authenticated',
+                name: 'probe',
+                status: 'pass' as const,
+              },
+            ],
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+            databasePath: '.runtime/inboxd.sqlite',
+            ok: true,
+            parserToolchain: null,
+            target: input.sourceId ?? null,
+          }
+        },
+        async sourceAdd() {
+          throw new Error('sourceAdd should not be called when a Telegram connector exists')
+        },
+        async sourceList() {
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [
+              {
+                accountId: 'bot',
+                enabled: false,
+                id: 'telegram:bot',
+                options: {},
+                source: 'telegram' as const,
+              },
+            ],
+          }
+        },
+        async sourceSetEnabled(input) {
+          sourceSetEnabledCalls.push({
+            connectorId: input.connectorId,
+            enabled: input.enabled,
+          })
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connector: {
+              accountId: 'bot',
+              enabled: input.enabled,
+              id: input.connectorId,
+              options: {},
+              source: 'telegram',
+            },
+            connectorCount: 1,
+          }
+        },
+      },
+      requestId: null,
+      steps: [],
+      vault,
+    })
+
+    assert.equal(configured[0]?.channel, 'telegram')
+    assert.equal(configured[0]?.configured, true)
+    assert.equal(configured[0]?.autoReply, true)
+    assert.equal(configured[0]?.connectorId, 'telegram:bot')
+    assert.deepEqual(doctorCalls, ['telegram:bot'])
+    assert.deepEqual(sourceSetEnabledCalls, [
+      {
+        connectorId: 'telegram:bot',
+        enabled: true,
+      },
+    ])
+
+    const automationState = await readAssistantAutomationState(vault)
+    assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
 test('configureSetupChannels adds a Linq connector and persists auto-reply when the doctor probe passes', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linq-'))
 

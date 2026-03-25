@@ -32,6 +32,7 @@ import {
   getRoutingImageEligibility,
   type RoutingImageEligibility,
 } from './inbox-routing-vision.js'
+import { errorMessage, normalizeNullableString } from './text/shared.js'
 import type { VaultCliServices } from './vault-cli-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -732,21 +733,4 @@ function clampText(
     text: `${normalized.slice(0, safeLimit)}${suffix}`,
     truncated: true,
   }
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return String(error)
 }

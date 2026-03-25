@@ -128,6 +128,48 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   assert.equal(listed[0]?.jobId, installed.job.jobId)
 })
 
+test('assistant cron job creation preserves required-text validation errors', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-invalid-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  await assert.rejects(
+    () =>
+      addAssistantCronJob({
+        vault: vaultRoot,
+        name: '   ',
+        prompt: 'Run a quick daily check-in.',
+        schedule: buildAssistantCronSchedule({
+          every: '2h',
+        }),
+      }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CRON_INVALID_INPUT')
+      assert.equal(error.message, 'name must be a non-empty string.')
+      return true
+    },
+  )
+
+  await assert.rejects(
+    () =>
+      addAssistantCronJob({
+        vault: vaultRoot,
+        name: 'daily-check-in',
+        prompt: '   ',
+        schedule: buildAssistantCronSchedule({
+          every: '2h',
+        }),
+      }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CRON_INVALID_INPUT')
+      assert.equal(error.message, 'prompt must be a non-empty string.')
+      return true
+    },
+  )
+})
+
 test('assistant cron jobs persist cleanly and can be enabled, disabled, and removed', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-store-'))
   const vaultRoot = path.join(parent, 'vault')

@@ -9,6 +9,7 @@ import {
   type AgentmailInbox,
 } from './agentmail-runtime.js'
 import { prepareSetupPromptInput } from './setup-prompt-io.js'
+import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export interface SetupAgentmailInboxSelection {
@@ -210,13 +211,4 @@ async function promptForLine(input: {
       resolve(answer.trim())
     })
   })
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }

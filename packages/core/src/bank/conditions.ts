@@ -157,13 +157,12 @@ export async function upsertCondition(
   input: UpsertConditionInput,
 ): Promise<UpsertConditionResult> {
   const normalizedConditionId = normalizeId(input.conditionId, "conditionId", "cond");
-  const existingRecords = await conditionRegistryApi.loadRecords(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const existingRecord = conditionRegistryApi.selectExistingRecord(
-    existingRecords,
-    normalizedConditionId,
-    requestedSlug,
-  );
+  const existingRecord = await conditionRegistryApi.resolveExistingRecord({
+    vaultRoot: input.vaultRoot,
+    recordId: normalizedConditionId,
+    slug: requestedSlug,
+  });
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
   return conditionRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,

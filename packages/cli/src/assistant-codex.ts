@@ -10,6 +10,7 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export interface CodexExecInput {
@@ -1622,15 +1623,6 @@ async function readOptionalTextFile(filePath: string): Promise<string | null> {
 
     throw error
   }
-}
-
-function normalizeNullableString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

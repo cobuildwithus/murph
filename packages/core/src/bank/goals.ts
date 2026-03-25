@@ -173,9 +173,12 @@ function ensureGoalLinks(record: GoalRecord): GoalRecord {
 
 export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResult> {
   const normalizedGoalId = normalizeId(input.goalId, "goalId", "goal");
-  const existingRecords = await goalRegistryApi.loadRecords(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const existingRecord = goalRegistryApi.selectExistingRecord(existingRecords, normalizedGoalId, requestedSlug);
+  const existingRecord = await goalRegistryApi.resolveExistingRecord({
+    vaultRoot: input.vaultRoot,
+    recordId: normalizedGoalId,
+    slug: requestedSlug,
+  });
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
   const existingWindow = existingRecord?.window;
   return goalRegistryApi.upsertRecord({

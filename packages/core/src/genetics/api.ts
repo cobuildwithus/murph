@@ -148,17 +148,16 @@ export async function upsertGeneticVariant(
   input: UpsertGeneticVariantInput,
 ): Promise<UpsertGeneticVariantResult> {
   const normalizedVariantId = normalizeId(input.variantId, "variantId", "var");
-  const existingRecords = await geneticsRegistryApi.loadRecords(input.vaultRoot);
   const selectorSlug =
     (input.slug ? normalizeSlug(input.slug, "slug") : undefined) ??
     (input.gene && (input.title ?? input.label)
       ? normalizeSlug(undefined, "slug", `${input.gene}-${input.title ?? input.label}`)
       : undefined);
-  const existingRecord = geneticsRegistryApi.selectExistingRecord(
-    existingRecords,
-    normalizedVariantId,
-    selectorSlug,
-  );
+  const existingRecord = await geneticsRegistryApi.resolveExistingRecord({
+    vaultRoot: input.vaultRoot,
+    recordId: normalizedVariantId,
+    slug: selectorSlug,
+  });
   const title = requireString(input.title ?? input.label ?? existingRecord?.title, "title", GENETIC_TITLE_MAX_LENGTH);
   const gene = requireString(input.gene ?? existingRecord?.gene, "gene", GENETIC_GENE_MAX_LENGTH);
   const sourceIdsInput = input.sourceFamilyMemberIds ?? input.familyMemberIds;

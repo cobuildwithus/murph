@@ -146,6 +146,12 @@ interface AptInstallResult {
   reason: string | null
 }
 
+interface LinuxResolvedCommandContext {
+  command: string
+  env: NodeJS.ProcessEnv
+  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
+}
+
 export function createSetupServices(
   dependencies: SetupServicesDependencies = {},
 ): SetupServices {
@@ -552,7 +558,7 @@ async function provisionLinuxToolchain(
     env: input.env,
     id: 'ffmpeg',
     installPackages: ['ffmpeg'],
-    missingDetail:
+    missingStepDetail:
       'ffmpeg was not found on PATH and Healthy Bob could not install it automatically. Install ffmpeg manually or rerun setup with apt/sudo access.',
     missingPlanDetail:
       'Would reuse ffmpeg from PATH when available, or install the ffmpeg package via apt-get for audio/video normalization.',
@@ -570,7 +576,7 @@ async function provisionLinuxToolchain(
     env: ffmpeg.env,
     id: 'pdftotext',
     installPackages: ['poppler-utils'],
-    missingDetail:
+    missingStepDetail:
       'pdftotext was not found on PATH and Healthy Bob could not install it automatically. Install poppler-utils manually or rerun setup with apt/sudo access.',
     missingPlanDetail:
       'Would reuse pdftotext from PATH when available, or install poppler-utils via apt-get for PDF parsing.',
@@ -588,7 +594,7 @@ async function provisionLinuxToolchain(
     env: pdftotext.env,
     id: 'whisper-cpp',
     installPackages: ['whisper-cpp'],
-    missingDetail:
+    missingStepDetail:
       'whisper.cpp was not found on PATH and Healthy Bob could not install it automatically. Install whisper.cpp manually or rerun setup with apt/sudo access.',
     missingPlanDetail:
       'Would reuse whisper.cpp from PATH when available, or install the whisper-cpp package via apt-get for local transcription.',
@@ -724,24 +730,65 @@ async function ensureLinuxCommand(input: {
   commandCandidates: string[]
   dryRun: boolean
   env: NodeJS.ProcessEnv
+  completedDetail?: string
   id: string
   installPackages: string[]
-  missingDetail: string
+  missingNoteDetail?: string
+  missingStepDetail: string
   missingPlanDetail: string
   notes: string[]
   runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
+  reuseDetail?: (command: string) => string
   steps: SetupStepResult[]
   title: string
+  validateResolvedCommand?: (
+    context: LinuxResolvedCommandContext,
+  ) => Promise<boolean>
 }): Promise<{
   apt: AptRunnerState
   command: string | null
   env: NodeJS.ProcessEnv
 }> {
-  const existing = await resolveExecutablePath(input.commandCandidates, input.env)
+  const resolveValidatedCommand = async (): Promise<{
+    command: string | null
+    rawCommand: string | null
+  }> => {
+    const rawCommand = await resolveExecutablePath(
+      input.commandCandidates,
+      input.env,
+    )
+    if (!rawCommand) {
+      return {
+        command: null,
+        rawCommand: null,
+      }
+    }
+    if (
+      input.validateResolvedCommand &&
+      !(await input.validateResolvedCommand({
+        command: rawCommand,
+        env: input.env,
+        runCommand: input.runCommand,
+      }))
+    ) {
+      return {
+        command: null,
+        rawCommand,
+      }
+    }
+    return {
+      command: rawCommand,
+      rawCommand,
+    }
+  }
+
+  const existingResolution = await resolveValidatedCommand()
+  const existing = existingResolution.command
   if (existing) {
     input.steps.push(
       createStep({
-        detail: `Reusing ${input.title} from ${existing}.`,
+        detail:
+          input.reuseDetail?.(existing) ?? `Reusing ${input.title} from ${existing}.`,
         id: input.id,
         kind: 'install',
         status: 'reused',
@@ -767,7 +814,7 @@ async function ensureLinuxCommand(input: {
     )
     return {
       apt: input.apt,
-      command: null,
+      command: existingResolution.rawCommand,
       env: input.env,
     }
   }
@@ -778,11 +825,12 @@ async function ensureLinuxCommand(input: {
     packages: input.installPackages,
     runCommand: input.runCommand,
   })
-  const resolved = await resolveExecutablePath(input.commandCandidates, input.env)
+  const resolved = (await resolveValidatedCommand()).command
   if (resolved) {
     input.steps.push(
       createStep({
-        detail: `Installed ${input.title} through apt-get.`,
+        detail:
+          input.completedDetail ?? `Installed ${input.title} through apt-get.`,
         id: input.id,
         kind: 'install',
         status: 'completed',
@@ -798,15 +846,15 @@ async function ensureLinuxCommand(input: {
 
   input.steps.push(
     createStep({
-      detail: install.reason ?? input.missingDetail,
+      detail: install.reason ?? input.missingStepDetail,
       id: input.id,
       kind: 'install',
       status: 'skipped',
       title: input.title,
     }),
   )
-  input.notes.push(input.missingDetail)
-  if (install.reason && install.reason !== input.missingDetail) {
+  input.notes.push(input.missingNoteDetail ?? input.missingStepDetail)
+  if (install.reason && install.reason !== input.missingStepDetail) {
     input.notes.push(`${input.title} auto-install detail: ${install.reason}`)
   }
 
@@ -830,91 +878,29 @@ async function ensureLinuxPythonCommand(input: {
   env: NodeJS.ProcessEnv
 }> {
   const title = 'Python 3'
-  const id = 'python'
-  const candidates = ['python3.12', 'python3', 'python']
-  const existing = await resolveExecutablePath(candidates, input.env)
-  if (existing && (await pythonSupportsVenv(existing, input.env, input.runCommand))) {
-    input.steps.push(
-      createStep({
-        detail: `Reusing ${title} from ${existing} for OCR tooling.`,
-        id,
-        kind: 'install',
-        status: 'reused',
-        title,
-      }),
-    )
-    return {
-      apt: input.apt,
-      command: existing,
-      env: input.env,
-    }
-  }
-
-  if (input.dryRun) {
-    input.steps.push(
-      createStep({
-        detail:
-          'Would reuse Python 3 with venv support from PATH when available, or install python3 plus python3-venv via apt-get for OCR tooling.',
-        id,
-        kind: 'install',
-        status: 'planned',
-        title,
-      }),
-    )
-    return {
-      apt: input.apt,
-      command: existing,
-      env: input.env,
-    }
-  }
-
-  const install = await ensureAptPackages({
+  return ensureLinuxCommand({
     apt: input.apt,
+    commandCandidates: ['python3.12', 'python3', 'python'],
+    completedDetail:
+      'Installed Python 3 with venv support through apt-get for OCR tooling.',
+    dryRun: input.dryRun,
     env: input.env,
-    packages: ['python3', 'python3-venv'],
+    id: 'python',
+    installPackages: ['python3', 'python3-venv'],
+    missingNoteDetail:
+      'OCR setup could not resolve Python 3 with venv support automatically. Install python3 and python3-venv manually or rerun setup with apt/sudo access.',
+    missingStepDetail:
+      'Python 3 with venv support was not found on PATH and Healthy Bob could not install it automatically.',
+    missingPlanDetail:
+      'Would reuse Python 3 with venv support from PATH when available, or install python3 plus python3-venv via apt-get for OCR tooling.',
+    notes: input.notes,
+    reuseDetail: (command) => `Reusing ${title} from ${command} for OCR tooling.`,
     runCommand: input.runCommand,
+    steps: input.steps,
+    title,
+    validateResolvedCommand: async ({ command, env, runCommand }) =>
+      pythonSupportsVenv(command, env, runCommand),
   })
-  const resolved = await resolveExecutablePath(candidates, input.env)
-  if (resolved && (await pythonSupportsVenv(resolved, input.env, input.runCommand))) {
-    input.steps.push(
-      createStep({
-        detail: 'Installed Python 3 with venv support through apt-get for OCR tooling.',
-        id,
-        kind: 'install',
-        status: 'completed',
-        title,
-      }),
-    )
-    return {
-      apt: install.apt,
-      command: resolved,
-      env: input.env,
-    }
-  }
-
-  input.steps.push(
-    createStep({
-      detail:
-        install.reason ??
-        'Python 3 with venv support was not found on PATH and Healthy Bob could not install it automatically.',
-      id,
-      kind: 'install',
-      status: 'skipped',
-      title,
-    }),
-  )
-  input.notes.push(
-    'OCR setup could not resolve Python 3 with venv support automatically. Install python3 and python3-venv manually or rerun setup with apt/sudo access.',
-  )
-  if (install.reason) {
-    input.notes.push(`Python auto-install detail: ${install.reason}`)
-  }
-
-  return {
-    apt: install.apt,
-    command: null,
-    env: input.env,
-  }
 }
 
 async function pythonSupportsVenv(

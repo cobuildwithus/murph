@@ -148,15 +148,14 @@ export async function upsertFamilyMember(
   input: UpsertFamilyMemberInput,
 ): Promise<UpsertFamilyMemberResult> {
   const normalizedFamilyMemberId = normalizeId(input.familyMemberId, "familyMemberId", "fam");
-  const existingRecords = await familyRegistryApi.loadRecords(input.vaultRoot);
   const selectorSlug =
     (input.slug ? normalizeSlug(input.slug, "slug") : undefined) ??
     (input.title ?? input.name ? normalizeSlug(undefined, "slug", input.title ?? input.name) : undefined);
-  const existingRecord = familyRegistryApi.selectExistingRecord(
-    existingRecords,
-    normalizedFamilyMemberId,
-    selectorSlug,
-  );
+  const existingRecord = await familyRegistryApi.resolveExistingRecord({
+    vaultRoot: input.vaultRoot,
+    recordId: normalizedFamilyMemberId,
+    slug: selectorSlug,
+  });
   const title = requireString(input.title ?? input.name ?? existingRecord?.title, "title", FAMILY_TITLE_MAX_LENGTH);
   const relationship = requireString(
     input.relationship ?? input.relation ?? existingRecord?.relationship,

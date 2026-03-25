@@ -13,6 +13,7 @@ import {
   type ResearchExecutionMode,
   type ResearchRunResult,
 } from './research-cli-contracts.js'
+import { normalizeNullableString as normalizeOptionalText } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_DEEPTHINK_MODEL = 'gpt-5.4-pro'
@@ -504,15 +505,6 @@ function normalizePrompt(value: string): string {
 
 function normalizePromptTitleSource(value: string): string {
   return normalizePrompt(value).replace(/\s+/gu, ' ')
-}
-
-function normalizeOptionalText(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 function normalizeResponse(value: string): string {

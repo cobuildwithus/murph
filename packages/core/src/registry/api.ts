@@ -56,6 +56,12 @@ interface ReadMarkdownRegistryApiRecordInput {
   slug?: string;
 }
 
+interface ResolveExistingMarkdownRegistryApiRecordInput {
+  vaultRoot: string;
+  recordId?: string;
+  slug?: string;
+}
+
 export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
   directory,
   recordFromParts,
@@ -100,6 +106,14 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
       conflictCode,
       conflictMessage,
     });
+  }
+
+  async function resolveExistingRecord({
+    vaultRoot,
+    recordId,
+    slug,
+  }: ResolveExistingMarkdownRegistryApiRecordInput): Promise<TRecord | null> {
+    return selectExistingRecord(await loadRecords(vaultRoot), recordId, slug);
   }
 
   async function upsertRecord({
@@ -166,6 +180,7 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
   return {
     loadRecords,
     selectExistingRecord,
+    resolveExistingRecord,
     listRecords: loadRecords,
     upsertRecord,
     readRecord,
