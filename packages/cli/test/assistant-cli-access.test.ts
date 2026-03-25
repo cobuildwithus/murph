@@ -39,5 +39,7 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /no longer requires a photo/u)
   assert.match(guidance, /meals, snacks, and drinks/u)
   assert.match(guidance, /Older food logs may still live/u)
+  assert.match(guidance, /vault-cli research <prompt>/u)
+  assert.match(guidance, /vault-cli deepthink <prompt>/u)
   assert.match(guidance, /healthybob/u)
 })

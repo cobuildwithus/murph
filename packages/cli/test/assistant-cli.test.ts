@@ -23,7 +23,9 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
 } from '../src/assistant-state.js'
+import type { AssistantRunEvent } from '../src/assistant/automation/shared.js'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { formatAssistantRunEventForTerminal } from '../src/run-terminal-logging.js'
 import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
@@ -83,6 +85,19 @@ afterEach(async () => {
 
 beforeEach(() => {
   runtimeMocks.runAssistantChat.mockReset()
+})
+
+test('formatAssistantRunEventForTerminal redacts delivery targets by default', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details: 'telegram -> +15550001111',
+    type: 'capture.replied',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(message, 'replied cap_safe_123')
+  assert.doesNotMatch(message ?? '', /\+15550001111/u)
 })
 
 test('assistant memory path resolver exposes only the memory path subset', async () => {
@@ -419,6 +434,7 @@ test.sequential(
     )
     assert.equal(presetShown.preset.id, 'condition-research-roundup')
     assert.match(presetShown.promptTemplate, /condition or goal/u)
+    assert.match(presetShown.promptTemplate, /research tool/u)
 
     const installed = requireData(
       await runCli<{
@@ -459,6 +475,7 @@ test.sequential(
       installed.resolvedVariables.condition_or_goal,
       'lowering LDL cholesterol',
     )
+    assert.match(installed.resolvedPrompt, /research tool/u)
     assert.match(installed.resolvedPrompt, /Flag anything that looks directly actionable/u)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
@@ -773,6 +790,14 @@ test('root chat alias participates in default-vault injection', () => {
   assert.deepEqual(
     applyDefaultVaultToArgs(['workout', 'add', 'Ran 5k'], '/tmp/default-vault'),
     ['workout', 'add', 'Ran 5k', '--vault', '/tmp/default-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['research', 'Check ApoB updates'], '/tmp/default-vault'),
+    ['research', 'Check ApoB updates', '--vault', '/tmp/default-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['deepthink', 'Think through recovery tradeoffs'], '/tmp/default-vault'),
+    ['deepthink', 'Think through recovery tradeoffs', '--vault', '/tmp/default-vault'],
   )
   assert.deepEqual(
     applyDefaultVaultToArgs(['chat', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),

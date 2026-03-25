@@ -53,6 +53,7 @@ function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
     isPlainObject(value) &&
     Array.isArray(value.REQUIRED_DIRECTORIES) &&
     hasCallableMembers(value, [
+      "applyCanonicalWriteBatch",
       "initializeVault",
       "validateVault",
       "repairVault",

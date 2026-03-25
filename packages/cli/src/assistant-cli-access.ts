@@ -45,6 +45,8 @@ export function buildAssistantCliGuidanceText(
     'When a user asks you to inspect or operate through Healthy Bob, prefer using the CLI directly over manually inferring behavior from files alone.',
     `If the user shares a meal photo, audio note, or a text-only description of what they ate or drank, default to logging it through \`${access.rawCommand} meal add\` instead of treating it as generic chat. Meal logging no longer requires a photo, so use the same meal surface for meals, snacks, and drinks even when only freeform text is available, preserving "snack" or "drink" in the note when that is the right label.`,
     'Older food logs may still live in same-day journal or note records. Before saying nothing was logged for today, check meal records first and then same-day journal/note entries as a fallback, and be explicit about which source you found.',
+    `Use \`${access.rawCommand} research <prompt>\` when you need ChatGPT Deep Research to wait for a result and save the captured markdown note into \`research/\` inside the vault.`,
+    `Use \`${access.rawCommand} deepthink <prompt>\` when you want the same save-to-vault flow through GPT Pro instead of Deep Research.`,
   ].join('\n\n')
 }
 

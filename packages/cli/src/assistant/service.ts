@@ -678,6 +678,8 @@ function buildAssistantCronGuidanceText(
     'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
     'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
     'Cron schedules execute while `assistant run` is active for the vault.',
+    'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
+    'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
     `Use \`${cliAccess.rawCommand} assistant cron ...\` only as a fallback when the MCP tools are unavailable in this session.`,
   ].join('\n\n')
 }

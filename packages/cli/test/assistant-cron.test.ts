@@ -67,6 +67,7 @@ test('assistant cron presets stay separate from scheduler state until installed'
   assert.ok(presets.some((preset) => preset.id === 'environment-health-watch'))
   assert.equal(conditionPreset.id, 'condition-research-roundup')
   assert.match(conditionPreset.promptTemplate, /condition or goal/u)
+  assert.match(conditionPreset.promptTemplate, /research tool/u)
   assert.equal(conditionPreset.suggestedSchedule.kind, 'cron')
   assert.deepEqual(listedJobs, [])
 })
@@ -119,6 +120,7 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
     'lowering LDL cholesterol',
   )
   assert.match(installed.resolvedPrompt, /lowering LDL cholesterol/u)
+  assert.match(installed.resolvedPrompt, /research tool/u)
   assert.match(installed.resolvedPrompt, /Additional user instructions/u)
 
   const listed = await listAssistantCronJobs(vaultRoot)
