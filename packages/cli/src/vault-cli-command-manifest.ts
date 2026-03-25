@@ -425,13 +425,13 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['research'],
         description:
-          'Run ChatGPT Deep Research through review:gpt, wait for the response, and save the markdown note into research/ inside the vault.',
+          'Run ChatGPT Deep Research through review:gpt, auto-send the staged prompt, wait for the response, and save the markdown note into research/ inside the vault. These runs commonly take 10 to 60 minutes.',
         output: researchRunResultSchema,
       },
       {
         path: ['deepthink'],
         description:
-          'Run GPT Pro through review:gpt, wait for the response, and save the markdown note into research/ inside the vault.',
+          'Run GPT Pro through review:gpt, auto-send the staged prompt, wait for the response, and save the markdown note into research/ inside the vault.',
         output: researchRunResultSchema,
       },
     ],

@@ -13,7 +13,7 @@ import {
   runResearchPrompt,
 } from '../src/research-runtime.js'
 
-test('buildReviewGptCommand selects Deep Research mode with prompt-only upload flow', () => {
+test('buildReviewGptCommand selects Deep Research mode with explicit send + wait prompt-only flow', () => {
   const command = buildReviewGptCommand({
     prompt: 'Research longevity biotech updates.',
     responseFile: '/tmp/research-response.md',
@@ -28,6 +28,7 @@ test('buildReviewGptCommand selects Deep Research mode with prompt-only upload f
   assert.deepEqual(command.args, [
     'review:gpt',
     '--no-zip',
+    '--send',
     '--wait',
     '--response-file',
     '/tmp/research-response.md',
@@ -103,6 +104,7 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
     args: [
       'review:gpt',
       '--no-zip',
+      '--send',
       '--wait',
       '--response-file',
       '/tmp/healthybob-research-case/response.md',
@@ -204,6 +206,7 @@ test('runDeepthinkPrompt targets GPT Pro defaults, derives a title from the prom
   assert.deepEqual(recordedArgs, [
     'review:gpt',
     '--no-zip',
+    '--send',
     '--wait',
     '--response-file',
     '/tmp/healthybob-deepthink-case/response.md',

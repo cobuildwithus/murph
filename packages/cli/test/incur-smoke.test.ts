@@ -233,6 +233,26 @@ test('research schema exposes the review:gpt orchestration options', async () =>
   assert.equal('browserPath' in schema.options.properties, true)
   assert.equal('timeout' in schema.options.properties, true)
   assert.equal('waitTimeout' in schema.options.properties, true)
+  assert.match(
+    String(
+      (
+        schema.options.properties.timeout as {
+          description?: string
+        }
+      ).description ?? '',
+    ),
+    /10 to 60 minutes/u,
+  )
+  assert.match(
+    String(
+      (
+        schema.options.properties.waitTimeout as {
+          description?: string
+        }
+      ).description ?? '',
+    ),
+    /1h/u,
+  )
   assert.deepEqual(schema.options.required, ['vault'])
 })
 

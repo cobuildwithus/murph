@@ -104,6 +104,7 @@ export function buildReviewGptCommand(input: {
   const args = [
     'review:gpt',
     '--no-zip',
+    '--send',
     '--wait',
     '--response-file',
     input.responseFile,

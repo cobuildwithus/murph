@@ -45,8 +45,9 @@ export function buildAssistantCliGuidanceText(
     'When a user asks you to inspect or operate through Healthy Bob, prefer using the CLI directly over manually inferring behavior from files alone.',
     `If the user shares a meal photo, audio note, or a text-only description of what they ate or drank, default to logging it through \`${access.rawCommand} meal add\` instead of treating it as generic chat. Meal logging no longer requires a photo, so use the same meal surface for meals, snacks, and drinks even when only freeform text is available, preserving "snack" or "drink" in the note when that is the right label.`,
     'Older food logs may still live in same-day journal or note records. Before saying nothing was logged for today, check meal records first and then same-day journal/note entries as a fallback, and be explicit about which source you found.',
-    `When the user asks for research on a complex topic, default to \`${access.rawCommand} research <prompt>\` so Healthy Bob runs \`review:gpt --deep-research\`, waits for the result, and saves the captured markdown note into \`research/\` inside the vault.`,
-    `Use \`${access.rawCommand} deepthink <prompt>\` when you want the same save-to-vault flow through GPT Pro instead of Deep Research.`,
+    `When the user asks for research on a complex topic, default to \`${access.rawCommand} research <prompt>\` so Healthy Bob runs \`review:gpt --deep-research --send --wait\`, saves the captured markdown note into \`research/\` inside the vault, and waits for completion.`,
+    'Deep Research can legitimately take 10 to 60 minutes, sometimes longer. Treat it as a long-running operation and keep waiting unless the command actually errors.',
+    `Use \`${access.rawCommand} deepthink <prompt>\` when you want the same auto-send and save-to-vault flow through GPT Pro instead of Deep Research.`,
   ].join('\n\n')
 }
 
