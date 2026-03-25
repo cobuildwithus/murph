@@ -19,8 +19,8 @@ export default function HomePage() {
           }}
         >
           <span style={{ display: "block" }}>Healthy Bob hosted</span>
-          <span style={{ display: "block" }}>device-sync</span>
           <span style={{ display: "block" }}>control plane</span>
+          <span style={{ display: "block" }}>and onboarding</span>
         </h1>
         <p
           style={{
@@ -33,7 +33,7 @@ export default function HomePage() {
             overflowWrap: "anywhere",
           }}
         >
-          This app hosts OAuth callbacks, webhooks, sparse local-agent APIs for WHOOP and Oura, and a hosted Linq webhook ingress for "text your agent" routing.
+          This app hosts OAuth callbacks, webhooks, sparse local-agent APIs for WHOOP and Oura, a hosted Linq webhook ingress for "text your agent" routing, and the first pass of hosted SMS -&gt; passkey -&gt; checkout onboarding.
         </p>
       </div>
     </main>

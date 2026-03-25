@@ -55,6 +55,22 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
 
+Hosted onboarding extras:
+
+- `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
+- `HOSTED_ONBOARDING_PASSKEY_ORIGIN`
+- `HOSTED_ONBOARDING_PASSKEY_RP_ID`
+- `HOSTED_ONBOARDING_PASSKEY_RP_NAME`
+- `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
+- `HOSTED_ONBOARDING_SESSION_TTL_DAYS`
+- `HOSTED_ONBOARDING_SESSION_COOKIE_NAME`
+- `HOSTED_ONBOARDING_STRIPE_BILLING_MODE`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `LINQ_API_TOKEN`
+- `LINQ_API_BASE_URL`
+
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
 Development fallback only:
@@ -125,3 +141,28 @@ Local-agent routes:
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
 - `POST /api/linq/agents/pair`
 - `GET /api/linq/agent/events`
+
+## Hosted onboarding routes
+
+This repo now also includes a first hosted onboarding lane for phone-bound invites:
+
+- `GET /join/:inviteCode`
+- `GET /join/:inviteCode/success`
+- `GET /join/:inviteCode/cancel`
+- `GET /api/hosted-onboarding/invites/:inviteCode/status`
+- `POST /api/hosted-onboarding/passkeys/register/options`
+- `POST /api/hosted-onboarding/passkeys/register/verify`
+- `POST /api/hosted-onboarding/passkeys/authenticate/options`
+- `POST /api/hosted-onboarding/passkeys/authenticate/verify`
+- `POST /api/hosted-onboarding/billing/checkout`
+- `POST /api/hosted-onboarding/session/logout`
+- `GET|POST /api/hosted-onboarding/linq/webhook`
+- `POST /api/hosted-onboarding/stripe/webhook`
+
+The onboarding lane is intentionally thin:
+
+- a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
+- the invite page binds the phone number to a hosted member row in Postgres
+- passkeys create/authenticate that hosted member without reusing the local-first browser auth model
+- checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
+- a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step

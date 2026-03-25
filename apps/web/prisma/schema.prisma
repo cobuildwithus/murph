@@ -130,6 +130,198 @@ model DeviceBrowserAssertionNonce {
   @@map("device_browser_assertion_nonce")
 }
 
+enum HostedMemberStatus {
+  invited
+  registered
+  active
+  suspended
+}
+
+enum HostedInviteStatus {
+  pending
+  opened
+  authenticated
+  paid
+  expired
+}
+
+enum HostedPasskeyChallengeType {
+  registration
+  authentication
+}
+
+enum HostedBillingStatus {
+  not_started
+  checkout_open
+  active
+  incomplete
+  past_due
+  canceled
+  unpaid
+  paused
+}
+
+enum HostedBillingMode {
+  payment
+  subscription
+}
+
+enum HostedBillingCheckoutStatus {
+  open
+  completed
+  expired
+  failed
+}
+
+model HostedMember {
+  id                           String              @id
+  phoneNumber                  String              @map("phone_number")
+  normalizedPhoneNumber        String              @unique @map("normalized_phone_number")
+  phoneNumberVerifiedAt        DateTime?           @map("phone_number_verified_at")
+  webauthnUserId               String              @unique @map("webauthn_user_id")
+  status                       HostedMemberStatus  @default(invited)
+  billingStatus                HostedBillingStatus @default(not_started) @map("billing_status")
+  billingMode                  HostedBillingMode?  @map("billing_mode")
+  stripeCustomerId             String?             @unique @map("stripe_customer_id")
+  stripeSubscriptionId         String?             @unique @map("stripe_subscription_id")
+  stripeLatestCheckoutSessionId String?            @map("stripe_latest_checkout_session_id")
+  linqChatId                   String?             @map("linq_chat_id")
+  encryptedBootstrapSecret     String?             @map("encrypted_bootstrap_secret")
+  encryptionKeyVersion         String?             @map("encryption_key_version")
+  createdAt                    DateTime            @default(now()) @map("created_at")
+  updatedAt                    DateTime            @updatedAt @map("updated_at")
+  invites                      HostedInvite[]
+  passkeys                     HostedPasskey[]
+  sessions                     HostedSession[]
+  challenges                   HostedPasskeyChallenge[]
+  checkouts                    HostedBillingCheckout[]
+
+  @@index([status])
+  @@index([billingStatus])
+  @@map("hosted_member")
+}
+
+model HostedInvite {
+  id              String             @id
+  memberId        String             @map("member_id")
+  inviteCode      String             @unique @map("invite_code")
+  status          HostedInviteStatus @default(pending)
+  channel         String             @default("linq")
+  triggerText     String?            @map("trigger_text")
+  linqEventId     String?            @map("linq_event_id")
+  linqChatId      String?            @map("linq_chat_id")
+  sentAt          DateTime?          @map("sent_at")
+  openedAt        DateTime?          @map("opened_at")
+  authenticatedAt DateTime?          @map("authenticated_at")
+  paidAt          DateTime?          @map("paid_at")
+  expiresAt       DateTime           @map("expires_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  member          HostedMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  challenges      HostedPasskeyChallenge[]
+  checkouts       HostedBillingCheckout[]
+  sessions        HostedSession[]
+
+  @@index([memberId, createdAt])
+  @@index([expiresAt])
+  @@map("hosted_invite")
+}
+
+model HostedPasskey {
+  id           String       @id
+  memberId     String       @map("member_id")
+  credentialId String       @unique @map("credential_id")
+  publicKey    Bytes        @map("public_key")
+  counter      Int          @default(0)
+  transports   String[]     @default([])
+  deviceType   String?      @map("device_type")
+  backedUp     Boolean      @default(false) @map("backed_up")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  lastUsedAt   DateTime?    @map("last_used_at")
+  member       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+  @@map("hosted_passkey")
+}
+
+model HostedSession {
+  id           String        @id
+  memberId     String        @map("member_id")
+  inviteId     String?       @map("invite_id")
+  tokenHash    String        @unique @map("token_hash")
+  userAgent    String?       @map("user_agent")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  expiresAt    DateTime      @map("expires_at")
+  lastSeenAt   DateTime?     @map("last_seen_at")
+  revokedAt    DateTime?     @map("revoked_at")
+  revokeReason String?       @map("revoke_reason")
+  member       HostedMember  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  invite       HostedInvite? @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  @@index([memberId])
+  @@index([inviteId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("hosted_session")
+}
+
+model HostedPasskeyChallenge {
+  id        String                     @id
+  memberId  String                     @map("member_id")
+  inviteId  String?                    @map("invite_id")
+  type      HostedPasskeyChallengeType
+  challenge String
+  expiresAt DateTime                   @map("expires_at")
+  createdAt DateTime                   @default(now()) @map("created_at")
+  member    HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  invite    HostedInvite?              @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  @@unique([type, challenge])
+  @@index([memberId, type, expiresAt])
+  @@index([inviteId, type, expiresAt])
+  @@index([expiresAt])
+  @@map("hosted_passkey_challenge")
+}
+
+model HostedBillingCheckout {
+  id                      String                      @id
+  memberId                String                      @map("member_id")
+  inviteId                String?                     @map("invite_id")
+  stripeCheckoutSessionId String                      @unique @map("stripe_checkout_session_id")
+  stripeCustomerId        String?                     @map("stripe_customer_id")
+  stripeSubscriptionId    String?                     @map("stripe_subscription_id")
+  priceId                 String                      @map("price_id")
+  mode                    HostedBillingMode
+  status                  HostedBillingCheckoutStatus @default(open)
+  checkoutUrl             String?                     @map("checkout_url")
+  amountTotal             Int?                        @map("amount_total")
+  currency                String?                     @map("currency")
+  createdAt               DateTime                    @default(now()) @map("created_at")
+  completedAt             DateTime?                   @map("completed_at")
+  expiredAt               DateTime?                   @map("expired_at")
+  member                  HostedMember                @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  invite                  HostedInvite?               @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  @@index([memberId, createdAt])
+  @@index([inviteId, createdAt])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+  @@map("hosted_billing_checkout")
+}
+
+model HostedWebhookReceipt {
+  source          String
+  eventId         String   @map("event_id")
+  firstReceivedAt DateTime @map("first_received_at")
+  payloadJson     Json?    @map("payload_json")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@id([source, eventId])
+  @@index([firstReceivedAt])
+  @@map("hosted_webhook_receipt")
+}
+
 
 model LinqRecipientBinding {
   id             String             @id
