@@ -241,6 +241,14 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
+    /Do not edit canonical vault files such as `vault\.json`, `CORE\.md`, `ledger\/\*\*`, `bank\/\*\*`, or `raw\/\*\*` directly/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /use the matching `vault-cli` write surface so the write follows Healthy Bob's intended validation and audit path/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
     /Direct Healthy Bob CLI execution is available in this session/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)

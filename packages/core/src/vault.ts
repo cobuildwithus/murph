@@ -23,6 +23,7 @@ import {
   safeParseContract,
   sampleRecordSchema,
   vaultMetadataSchema,
+  workoutFormatFrontmatterSchema,
 } from "@healthybob/contracts";
 
 import {
@@ -459,6 +460,33 @@ function rawManifestPathForArtifact(relativePath: string): string {
   return path.posix.join(path.posix.dirname(relativePath), "manifest.json");
 }
 
+function isEnvelopeBasedInboxRawPath(relativePath: string): boolean {
+  return relativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/inbox/`);
+}
+
+function inboxCaptureRootForRawPath(relativePath: string): string | null {
+  if (!isEnvelopeBasedInboxRawPath(relativePath)) {
+    return null;
+  }
+
+  if (path.posix.basename(relativePath) === "envelope.json") {
+    return path.posix.dirname(relativePath);
+  }
+
+  const attachmentsMarker = "/attachments/";
+  const attachmentIndex = relativePath.indexOf(attachmentsMarker);
+
+  if (attachmentIndex !== -1) {
+    return relativePath.slice(0, attachmentIndex);
+  }
+
+  return null;
+}
+
+function inboxAttachmentManifestPathForCaptureDirectory(captureDirectory: string): string {
+  return path.posix.join(captureDirectory, "attachments", "manifest.json");
+}
+
 async function validateExistingVaultFile(
   vaultRoot: string,
   relativePath: string,
@@ -554,7 +582,10 @@ async function validateEventRecordReferences(
       )),
     );
 
-    if (referencedPath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`)) {
+    if (
+      referencedPath.startsWith(`${VAULT_LAYOUT.rawDirectory}/`) &&
+      !isEnvelopeBasedInboxRawPath(referencedPath)
+    ) {
       manifestPaths.add(rawManifestPathForArtifact(referencedPath));
     }
   }
@@ -668,18 +699,60 @@ async function validateRawManifestFile(
 async function validateRawImportManifests(vaultRoot: string): Promise<ValidationIssue[]> {
   const rawFiles = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.rawDirectory);
   const artifactDirectories = new Set<string>();
+  const inboxCaptureDirectories = new Set<string>();
+  const inboxAttachmentManifestFiles = new Set<string>();
   const manifestFiles: string[] = [];
 
   for (const relativePath of rawFiles) {
+    const inboxCaptureDirectory = inboxCaptureRootForRawPath(relativePath);
+
+    if (inboxCaptureDirectory !== null) {
+      inboxCaptureDirectories.add(inboxCaptureDirectory);
+    }
+
     if (path.posix.basename(relativePath) === "manifest.json") {
+      if (isEnvelopeBasedInboxRawPath(relativePath)) {
+        if (relativePath === inboxAttachmentManifestPathForCaptureDirectory(path.posix.dirname(path.posix.dirname(relativePath)))) {
+          inboxAttachmentManifestFiles.add(relativePath);
+        }
+
+        continue;
+      }
+
       manifestFiles.push(relativePath);
       continue;
     }
 
-    artifactDirectories.add(path.posix.dirname(relativePath));
+    const directory = path.posix.dirname(relativePath);
+
+    if (isEnvelopeBasedInboxRawPath(directory)) {
+      continue;
+    }
+
+    artifactDirectories.add(directory);
   }
 
   const issues: ValidationIssue[] = [];
+
+  for (const captureDirectory of [...inboxCaptureDirectories].sort()) {
+    const envelopePath = path.posix.join(captureDirectory, "envelope.json");
+    const attachmentManifestPath = inboxAttachmentManifestPathForCaptureDirectory(captureDirectory);
+
+    const hasEnvelope = await pathExists(resolveVaultPath(vaultRoot, envelopePath).absolutePath);
+    const hasAttachmentManifest = await pathExists(
+      resolveVaultPath(vaultRoot, attachmentManifestPath).absolutePath,
+    );
+
+    if (!hasEnvelope && !hasAttachmentManifest) {
+      issues.push(
+        validationIssue(
+          "HB_RAW_REFERENCE_MISSING",
+          `Inbox capture directory "${captureDirectory}" is missing envelope.json and has no attachment recovery manifest.`,
+          envelopePath,
+        ),
+      );
+    }
+  }
 
   for (const directory of [...artifactDirectories].sort()) {
     const manifestPath = path.posix.join(directory, "manifest.json");
@@ -696,6 +769,10 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   }
 
   for (const manifestPath of manifestFiles.sort()) {
+    issues.push(...(await validateRawManifestFile(vaultRoot, manifestPath)));
+  }
+
+  for (const manifestPath of [...inboxAttachmentManifestFiles].sort()) {
     issues.push(...(await validateRawManifestFile(vaultRoot, manifestPath)));
   }
 
@@ -927,6 +1004,14 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.recipesDirectory,
       schema: recipeFrontmatterSchema,
+      code: "HB_FRONTMATTER_INVALID",
+    })),
+  );
+  issues.push(
+    ...(await validateFrontmatterDirectory({
+      vaultRoot: absoluteRoot,
+      relativeDirectory: VAULT_LAYOUT.workoutFormatsDirectory,
+      schema: workoutFormatFrontmatterSchema,
       code: "HB_FRONTMATTER_INVALID",
     })),
   );

@@ -1488,6 +1488,133 @@ test("validateVault reports raw artifact directories that are missing manifest.j
   );
 });
 
+test("validateVault allows envelope-based inbox raw evidence without manifest sidecars", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const captureDirectory = path.join(
+    vaultRoot,
+    "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab",
+  );
+  const envelopeRelativePath =
+    "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab/envelope.json";
+  const attachmentRelativePath =
+    "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab/attachments/photo.jpg";
+
+  await fs.mkdir(path.join(captureDirectory, "attachments"), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, envelopeRelativePath),
+    JSON.stringify({
+      id: "cap_251f7d1222f2dc12f9666f54ab",
+      channel: "telegram",
+      capturedAt: "2026-03-27T08:09:31.000+11:00",
+      attachments: [
+        {
+          path: attachmentRelativePath,
+        },
+      ],
+    }),
+    "utf8",
+  );
+  await fs.writeFile(path.join(vaultRoot, attachmentRelativePath), "jpeg-bytes", "utf8");
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-03.jsonl",
+    record: {
+      schemaVersion: "hb.event.v1",
+      id: "evt_01JQ8PWXP5A68SQM1W0GYM40V4",
+      kind: "note",
+      occurredAt: "2026-03-27T08:09:31.000Z",
+      recordedAt: "2026-03-27T08:09:31.000Z",
+      dayKey: "2026-03-27",
+      source: "manual",
+      title: "Inbox capture",
+      note: "Envelope-backed raw inbox evidence.",
+      rawRefs: [envelopeRelativePath, attachmentRelativePath],
+    },
+  });
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
+test("validateVault allows inbox attachment recovery manifests without envelope.json", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const attachmentRelativePath =
+    "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab/attachments/photo.jpg";
+  const manifestRelativePath =
+    "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab/attachments/manifest.json";
+
+  await fs.mkdir(path.join(vaultRoot, path.posix.dirname(attachmentRelativePath)), {
+    recursive: true,
+  });
+  await fs.writeFile(path.join(vaultRoot, attachmentRelativePath), "jpeg-bytes", "utf8");
+  await fs.writeFile(
+    path.join(vaultRoot, manifestRelativePath),
+    JSON.stringify({
+      schemaVersion: "hb.raw-import-manifest.v1",
+      importId: "evt_01JQ8PWXP5A68SQM1W0GYM40V5",
+      importKind: "document",
+      importedAt: "2026-03-27T08:09:31.000Z",
+      source: "telegram",
+      rawDirectory: "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab/attachments",
+      artifacts: [
+        {
+          role: "attachment_01",
+          relativePath: attachmentRelativePath,
+          originalFileName: "photo.jpg",
+          mediaType: "image/jpeg",
+          byteSize: 10,
+          sha256: "a".repeat(64),
+        },
+      ],
+      provenance: {
+        syntheticBackfill: true,
+        reason: "orphan attachments directory without envelope.json",
+        captureId: "cap_251f7d1222f2dc12f9666f54ab",
+        attachmentCount: 1,
+      },
+    }),
+    "utf8",
+  );
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
+test("validateVault reports inbox capture roots that have neither envelope nor recovery manifest", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const attachmentRelativePath =
+    "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab/attachments/photo.jpg";
+  const expectedEnvelopePath =
+    "raw/inbox/telegram/bot/2026/03/cap_251f7d1222f2dc12f9666f54ab/envelope.json";
+
+  await fs.mkdir(path.join(vaultRoot, path.posix.dirname(attachmentRelativePath)), {
+    recursive: true,
+  });
+  await fs.writeFile(path.join(vaultRoot, attachmentRelativePath), "jpeg-bytes", "utf8");
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_RAW_REFERENCE_MISSING" &&
+        issue.path === expectedEnvelopePath &&
+        issue.message.includes("attachment recovery manifest"),
+    ),
+  );
+});
+
 test("WriteBatch rolls back earlier writes when a later staged action fails during commit", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });

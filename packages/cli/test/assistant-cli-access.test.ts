@@ -36,6 +36,8 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /vault-cli --llms/u)
   assert.match(guidance, /vault-cli --llms-full/u)
   assert.match(guidance, /broad CLI discovery/u)
+  assert.match(guidance, /Do not edit canonical vault files such as `vault\.json`, `CORE\.md`, `ledger\/\*\*`, `bank\/\*\*`, or `raw\/\*\*` directly/u)
+  assert.match(guidance, /use the matching `vault-cli` write surface/u)
   assert.match(guidance, /assistant self-target list/u)
   assert.match(guidance, /assistant self-target show <channel>/u)
   assert.match(guidance, /phone number, Telegram chat\/thread, email address, or AgentMail identity/u)
