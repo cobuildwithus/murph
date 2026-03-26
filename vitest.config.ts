@@ -47,6 +47,7 @@ export default defineConfig({
       "packages/query/test/query.test.ts",
       "packages/cli/test/health-tail.test.ts",
       "packages/cli/test/canonical-write-lock.test.ts",
+      "packages/cli/test/canonical-write-source-audit.test.ts",
       "packages/cli/test/assistant-harness.test.ts",
       "packages/cli/test/assistant-state.test.ts",
       "packages/cli/test/assistant-provider.test.ts",

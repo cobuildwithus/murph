@@ -1,6 +1,6 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readdir, readFile } from 'node:fs/promises'
 import {
+  applyCanonicalWriteBatch,
   parseFrontmatterDocument,
   resolveVaultPathOnDisk,
   stringifyFrontmatterDocument,
@@ -93,8 +93,19 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
     markdown: existingMarkdown ?? '',
   })
 
-  await mkdir(path.dirname(resolved.absolutePath), { recursive: true })
-  await writeFile(resolved.absolutePath, markdown, 'utf8')
+  await applyCanonicalWriteBatch({
+    vaultRoot: input.vault,
+    operationType: 'workout_format_save',
+    summary: `Save workout format ${slug}`,
+    textWrites: [
+      {
+        relativePath,
+        content: markdown,
+        overwrite: true,
+        allowExistingMatch: true,
+      },
+    ],
+  })
 
   return {
     vault: input.vault,

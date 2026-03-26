@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import {
+  listWriteOperationMetadataPaths,
+  readStoredWriteOperation,
+} from '@healthybob/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
@@ -174,6 +178,34 @@ test.sequential(
       )
       assert.equal(requireData(saveFormat).created, true)
 
+      const workoutFormatOperation = (
+        await Promise.all(
+          (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+            readStoredWriteOperation(vaultRoot, relativePath),
+          ),
+        )
+      ).find((operation) => operation.operationType === 'workout_format_save')
+      assert.ok(workoutFormatOperation)
+      assert.equal(workoutFormatOperation.status, 'committed')
+      const firstAction = workoutFormatOperation.actions[0]
+      assert.ok(firstAction)
+      assert.deepEqual(
+        workoutFormatOperation.actions.map((action) => ({
+          kind: action.kind,
+          targetRelativePath: action.targetRelativePath,
+        })),
+        [
+          {
+            kind: 'text_write',
+            targetRelativePath: 'bank/workout-formats/push-day-a.md',
+          },
+        ],
+      )
+      if (firstAction.kind !== 'text_write') {
+        throw new Error('Expected workout_format_save to stage a text_write action.')
+      }
+      assert.equal(typeof firstAction.committedPayloadBase64, 'string')
+
       const savedMarkdownPath = path.join(vaultRoot, requireData(saveFormat).path)
       const savedMarkdown = await readFile(savedMarkdownPath, 'utf8')
       assert.match(savedMarkdown, /schemaVersion: hb\.frontmatter\.workout-format\.v1/u)
@@ -294,6 +326,77 @@ test.sequential(
       assert.match(
         invalidSavedFormat.error.message ?? '',
         /Pass --duration <minutes> to record it explicitly/u,
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'workout format save updates an existing saved format through the audited write path',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-format-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const firstSave = await runCli<WorkoutFormatSaveEnvelope>([
+        'workout',
+        'format',
+        'save',
+        'Push Day A',
+        '20 min strength training. 4 sets of 20 pushups.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(firstSave.ok, true)
+      assert.equal(requireData(firstSave).created, true)
+
+      const secondSave = await runCli<WorkoutFormatSaveEnvelope>([
+        'workout',
+        'format',
+        'save',
+        'Push Day A',
+        '25 min strength training. 5 sets of 10 pushups.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(secondSave.ok, true)
+      assert.equal(requireData(secondSave).created, false)
+      assert.equal(requireData(secondSave).path, 'bank/workout-formats/push-day-a.md')
+
+      const savedMarkdown = await readFile(
+        path.join(vaultRoot, 'bank/workout-formats/push-day-a.md'),
+        'utf8',
+      )
+      assert.match(savedMarkdown, /25 min strength training/u)
+      assert.doesNotMatch(savedMarkdown, /20 min strength training/u)
+
+      const operations = await Promise.all(
+        (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+          readStoredWriteOperation(vaultRoot, relativePath),
+        ),
+      )
+      const workoutFormatOperations = operations.filter(
+        (operation) => operation.operationType === 'workout_format_save',
+      )
+      assert.equal(workoutFormatOperations.length, 2)
+      assert.equal(
+        workoutFormatOperations.every(
+          (operation) =>
+            operation.status === 'committed' &&
+            operation.actions.length === 1 &&
+            operation.actions[0]?.kind === 'text_write' &&
+            operation.actions[0]?.targetRelativePath === 'bank/workout-formats/push-day-a.md',
+        ),
+        true,
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })

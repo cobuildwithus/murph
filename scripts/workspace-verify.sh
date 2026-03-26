@@ -54,6 +54,7 @@ readonly cli_verify_test_files=(
   "packages/cli/test/runtime.test.ts"
   "packages/cli/test/device-daemon.test.ts"
   "packages/cli/test/health-tail.test.ts"
+  "packages/cli/test/canonical-write-source-audit.test.ts"
   "packages/cli/test/assistant-harness.test.ts"
   "packages/cli/test/assistant-cron.test.ts"
   "packages/cli/test/assistant-observability.test.ts"
