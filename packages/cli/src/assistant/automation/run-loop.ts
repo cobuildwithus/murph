@@ -18,7 +18,10 @@ import {
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
 } from '../store.js'
-import { errorMessage } from '../shared.js'
+import {
+  errorMessage,
+  formatStructuredErrorMessage,
+} from '../shared.js'
 import {
   bridgeAbortSignals,
   createEmptyAutoReplyScanResult,
@@ -90,7 +93,7 @@ export async function runAssistantAutomation(
         },
       )
       .catch((error) => {
-        const detail = errorMessage(error)
+        const detail = formatStructuredErrorMessage(error)
         lastError = detail
         input.onEvent?.({
           type: 'daemon.failed',

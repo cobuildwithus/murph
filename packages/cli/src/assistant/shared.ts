@@ -2,10 +2,18 @@ import {
   writeJsonFileAtomic as writeRuntimeJsonFileAtomic,
   writeTextFileAtomic as writeRuntimeTextFileAtomic,
 } from '@healthybob/runtime-state'
-import { errorMessage, normalizeNullableString } from '../text/shared.js'
+import {
+  errorMessage,
+  formatStructuredErrorMessage,
+  normalizeNullableString,
+} from '../text/shared.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 
-export { errorMessage, normalizeNullableString } from '../text/shared.js'
+export {
+  errorMessage,
+  formatStructuredErrorMessage,
+  normalizeNullableString,
+} from '../text/shared.js'
 
 export function normalizeRequiredText(value: string, fieldName: string): string {
   const normalized = normalizeNullableString(value)

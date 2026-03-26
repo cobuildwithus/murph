@@ -27,6 +27,7 @@ import {
 import type { AssistantRunEvent } from '../src/assistant/automation/shared.js'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
 import { formatAssistantRunEventForTerminal } from '../src/run-terminal-logging.js'
+import { formatStructuredErrorMessage } from '../src/text/shared.js'
 import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
@@ -164,6 +165,56 @@ test('formatAssistantRunEventForTerminal keeps long-running auto-reply heartbeat
   assert.equal(
     message,
     'reply-progress cap_safe_123: assistant still running after 45m; deepthink command active for 43m; last provider activity 43m ago',
+  )
+})
+
+test('formatStructuredErrorMessage expands structured validation details and redacts home paths', () => {
+  const error = Object.assign(
+    new Error('Vault metadata failed contract validation.'),
+    {
+      code: 'VAULT_INVALID_METADATA',
+      details: {
+        errors: [
+          '$.paths.protocolsRoot: Invalid input: expected "bank/protocols"',
+          'Invalid JSON in "/Users/example/vault/vault.json".',
+        ],
+        repairedFields: ['paths.protocolsRoot'],
+      },
+    },
+  )
+
+  assert.equal(
+    formatStructuredErrorMessage(error),
+    [
+      'Vault metadata failed contract validation.',
+      'details:',
+      '- $.paths.protocolsRoot: Invalid input: expected "bank/protocols"',
+      '- Invalid JSON in "<HOME_DIR>/vault/vault.json".',
+      'compatibility repairs detected:',
+      '- paths.protocolsRoot',
+    ].join('\n'),
+  )
+})
+
+test('formatAssistantRunEventForTerminal shows daemon failure details by default', () => {
+  const event: AssistantRunEvent = {
+    type: 'daemon.failed',
+    details: [
+      'Vault metadata failed contract validation.',
+      'details:',
+      '- $.paths: Unrecognized key: "regimensRoot"',
+    ].join('\n'),
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(
+    message,
+    [
+      'inbox daemon failed Vault metadata failed contract validation.',
+      'details:',
+      '- $.paths: Unrecognized key: "regimensRoot"',
+    ].join('\n'),
   )
 })
 

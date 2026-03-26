@@ -3464,6 +3464,66 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   )
 })
 
+test('runAssistantAutomation preserves structured daemon failure details in the aggregate result', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-daemon-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const assistantEvents: Array<{ type: string; details?: string }> = []
+  const structuredError = Object.assign(
+    new Error('Vault metadata failed contract validation.'),
+    {
+      code: 'VAULT_INVALID_METADATA',
+      details: {
+        errors: [
+          '$.idPolicy.prefixes.protocol: Invalid input: expected "prot"',
+          '$.paths: Unrecognized key: "regimensRoot"',
+        ],
+        repairedFields: ['paths.protocolsRoot'],
+      },
+    },
+  )
+
+  const result = await runAssistantAutomation({
+    vault: vaultRoot,
+    once: false,
+    scanIntervalMs: 5,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+    },
+    inboxServices: {
+      list: async () => ({
+        items: [],
+      }),
+      run: async () => {
+        throw structuredError
+      },
+    } as any,
+    onEvent(event) {
+      assistantEvents.push(event)
+    },
+  })
+
+  const expectedDetail = [
+    'Vault metadata failed contract validation.',
+    'details:',
+    '- $.idPolicy.prefixes.protocol: Invalid input: expected "prot"',
+    '- $.paths: Unrecognized key: "regimensRoot"',
+    'compatibility repairs detected:',
+    '- paths.protocolsRoot',
+  ].join('\n')
+
+  assert.equal(result.reason, 'error')
+  assert.equal(result.lastError, expectedDetail)
+  assert.equal(
+    assistantEvents.some(
+      (event) => event.type === 'daemon.failed' && event.details === expectedDetail,
+    ),
+    true,
+  )
+})
+
 test('bridgeAbortSignals forces process exit after local SIGINT grace when teardown hangs', async () => {
   vi.useFakeTimers()
   const controller = new AbortController()
