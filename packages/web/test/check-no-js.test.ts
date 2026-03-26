@@ -10,6 +10,7 @@ import {
   isBlockedTrackedArtifactPath,
   isBlockedTrackedEnvArtifactPath,
 } from "../../../scripts/check-no-js";
+import { getGeneratedSourceSidecarSourcePath } from "../../../scripts/prune-generated-source-sidecars";
 
 test("check-no-js allowlists the current Next.js declaration stub exactly", async () => {
   const nextEnvContents = await readFile("packages/web/next-env.d.ts", "utf8");
@@ -66,4 +67,65 @@ test("check-no-js flags bundle-only working-tree private/build artifacts", () =>
     "packages/core/.test-dist/",
   );
   assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/src", "directory"), null);
+});
+
+test("prune-generated-source-sidecars matches generated sidecars to tracked TypeScript sources", () => {
+  const trackedSourceFiles = new Set([
+    "packages/contracts/src/index.ts",
+    "apps/web/src/lib/http.ts",
+    "packages/web/src/example.tsx",
+  ]);
+
+  assert.equal(
+    getGeneratedSourceSidecarSourcePath("packages/contracts/src/index.js", trackedSourceFiles),
+    "packages/contracts/src/index.ts",
+  );
+  assert.equal(
+    getGeneratedSourceSidecarSourcePath("packages/contracts/src/index.d.ts.map", trackedSourceFiles),
+    "packages/contracts/src/index.ts",
+  );
+  assert.equal(
+    getGeneratedSourceSidecarSourcePath("apps/web/src/lib/http.d.ts", trackedSourceFiles),
+    "apps/web/src/lib/http.ts",
+  );
+  assert.equal(
+    getGeneratedSourceSidecarSourcePath("packages/web/src/example.js.map", trackedSourceFiles),
+    "packages/web/src/example.tsx",
+  );
+  assert.equal(
+    getGeneratedSourceSidecarSourcePath("packages/contracts/src/missing.js", trackedSourceFiles),
+    null,
+  );
+  assert.equal(
+    getGeneratedSourceSidecarSourcePath("packages/contracts/dist/index.js", trackedSourceFiles),
+    null,
+  );
+});
+
+test("TypeScript configs keep the shared base non-emitting while build projects opt back into emit", async () => {
+  const baseTsconfig = JSON.parse(await readFile("tsconfig.base.json", "utf8")) as {
+    compilerOptions?: { noEmit?: boolean };
+  };
+  const emitConfigs = [
+    "packages/contracts/tsconfig.build.json",
+    "packages/contracts/tsconfig.scripts.json",
+    "packages/runtime-state/tsconfig.json",
+    "packages/importers/tsconfig.json",
+    "packages/device-syncd/tsconfig.json",
+    "packages/query/tsconfig.json",
+    "packages/query/tsconfig.test.json",
+    "packages/inboxd/tsconfig.json",
+    "packages/parsers/tsconfig.json",
+    "packages/cli/tsconfig.json",
+  ];
+
+  assert.equal(baseTsconfig.compilerOptions?.noEmit, true);
+
+  for (const configPath of emitConfigs) {
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      compilerOptions?: { noEmit?: boolean };
+    };
+
+    assert.equal(config.compilerOptions?.noEmit, false, `${configPath} must opt back into emit.`);
+  }
 });
