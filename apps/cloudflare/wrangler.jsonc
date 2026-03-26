@@ -30,7 +30,8 @@
     "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS": "900000",
     "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
     "HOSTED_EXECUTION_RETRY_DELAY_MS": "30000",
-    "HOSTED_EXECUTION_RUNNER_BASE_URL": "https://REPLACE_ME-hosted-runner.example.invalid"
+    "HOSTED_EXECUTION_RUNNER_BASE_URL": "https://REPLACE_ME-hosted-runner.example.invalid",
+    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "60000"
   },
   // Configure these outside source control for real deployments:
   // - HOSTED_EXECUTION_SIGNING_SECRET

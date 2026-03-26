@@ -8,9 +8,13 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "runner:local": "pnpm --dir ../.. exec tsx --eval \"import { startHostedRunnerServer } from './src/runner-server.ts'; const port = Number.parseInt(process.env.PORT ?? '8080', 10) || 8080; await startHostedRunnerServer({ controlToken: process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN ?? null, port }); await new Promise(() => {});\"",
+    "runner:local": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/src/runner-local.ts",
     "typecheck": "tsc -p tsconfig.json --pretty false",
-    "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1"
+    "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1",
+    "runner:docker:build": "docker build -f ../../Dockerfile.cloudflare-hosted-runner -t healthybob-cloudflare-runner ../..",
+    "runner:docker:run": "docker run --rm -p 8080:8080 --env-file .runner.env healthybob-cloudflare-runner",
+    "worker:deploy": "pnpm dlx wrangler@latest deploy",
+    "worker:dev": "pnpm dlx wrangler@latest dev"
   },
   "dependencies": {
     "@healthybob/device-syncd": "workspace:*",

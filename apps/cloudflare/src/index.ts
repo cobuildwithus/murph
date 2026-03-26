@@ -19,6 +19,7 @@ interface DurableObjectNamespaceLike {
 
 interface WorkerEnvironmentSource {
   BUNDLES: import("./bundle-store.js").R2BucketLike;
+  HB_HOSTED_BUNDLE_KEY?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
   HOSTED_EXECUTION_CONTROL_TOKEN?: string;
@@ -27,7 +28,9 @@ interface WorkerEnvironmentSource {
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_BASE_URL?: string;
   HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
+  HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_SIGNING_SECRET?: string;
+  HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET?: string;
   USER_RUNNER: DurableObjectNamespaceLike;
 }
 
@@ -35,9 +38,6 @@ export default {
   async fetch(request: Request, env: WorkerEnvironmentSource): Promise<Response> {
     try {
       const url = new URL(request.url);
-      const environment = readHostedExecutionEnvironment(
-        env as unknown as Readonly<Record<string, string | undefined>>,
-      );
 
       if (request.method === "GET" && url.pathname === "/health") {
         return json({
@@ -45,6 +45,17 @@ export default {
           service: "cloudflare-hosted-runner",
         });
       }
+
+      if (request.method === "GET" && url.pathname === "/") {
+        return json({
+          ok: true,
+          service: "cloudflare-hosted-runner",
+        });
+      }
+
+      const environment = readHostedExecutionEnvironment(
+        env as unknown as Readonly<Record<string, string | undefined>>,
+      );
 
       if (
         request.method === "POST"
@@ -86,14 +97,22 @@ export default {
         }
 
         const [, userId, action] = match;
+        const decodedUserId = decodeURIComponent(userId);
+        const body = action === "run"
+          ? {
+              ...(await readOptionalJsonObject(request)),
+              userId: decodedUserId,
+            }
+          : null;
+
         return env.USER_RUNNER
-          .getByName(decodeURIComponent(userId))
+          .getByName(decodedUserId)
           .fetch(new Request(
             action === "status"
-              ? `https://runner.internal/status?userId=${encodeURIComponent(decodeURIComponent(userId))}`
+              ? `https://runner.internal/status?userId=${encodeURIComponent(decodedUserId)}`
               : "https://runner.internal/run",
             {
-              body: action === "run" ? JSON.stringify(await readJsonObject(request)) : null,
+              body: body ? JSON.stringify(body) : null,
               method: request.method,
             },
           ));
@@ -163,4 +182,21 @@ export class UserRunnerDurableObject {
   async alarm(): Promise<void> {
     await this.runner.alarm();
   }
+}
+
+
+async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
+  const payload = await request.text();
+
+  if (!payload.trim()) {
+    return {};
+  }
+
+  const parsed = JSON.parse(payload) as unknown;
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("Request body must be a JSON object.");
+  }
+
+  return parsed as Record<string, unknown>;
 }

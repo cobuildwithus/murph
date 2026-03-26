@@ -23,3 +23,7 @@ vault/
 .env
 .env.*
 !.env.example
+
+# Local Cloudflare runner secrets
+apps/cloudflare/.dev.vars
+apps/cloudflare/.runner.env

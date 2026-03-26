@@ -14,6 +14,7 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.defaultAlarmDelayMs).toBe(15 * 60 * 1000);
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.retryDelayMs).toBe(30_000);
+    expect(environment.runnerTimeoutMs).toBe(60_000);
   });
 
   it("normalizes the runner base url", () => {
@@ -24,6 +25,17 @@ describe("readHostedExecutionEnvironment", () => {
     });
 
     expect(environment.runnerBaseUrl).toBe("https://runner.example.test");
+  });
+
+
+  it("reads the runner timeout when configured", () => {
+    const environment = readHostedExecutionEnvironment({
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "15000",
+      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+    });
+
+    expect(environment.runnerTimeoutMs).toBe(15_000);
   });
 
   it("accepts the recovered handoff env aliases", () => {

@@ -10,6 +10,7 @@ export interface HostedExecutionEnvironment {
   retryDelayMs: number;
   runnerBaseUrl: string | null;
   runnerControlToken: string | null;
+  runnerTimeoutMs: number;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -49,6 +50,11 @@ export function readHostedExecutionEnvironment(
     ),
     runnerBaseUrl: normalizeBaseUrl(source.HOSTED_EXECUTION_RUNNER_BASE_URL),
     runnerControlToken: normalizeString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN),
+    runnerTimeoutMs: parsePositiveInteger(
+      normalizeString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
+      60_000,
+      "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+    ),
   };
 }
 

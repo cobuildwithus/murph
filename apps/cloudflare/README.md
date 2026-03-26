@@ -32,8 +32,8 @@ Current worker bindings read directly by `src/index.ts`:
 
 Current worker env/config names read directly by `src/env.ts`:
 
-- required secret: `HOSTED_EXECUTION_SIGNING_SECRET`
-- required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
+- required secret: `HOSTED_EXECUTION_SIGNING_SECRET` (the worker also accepts the historical alias `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`)
+- required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` (the worker also accepts the historical alias `HB_HOSTED_BUNDLE_KEY`)
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
 - optional secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `900000`
@@ -41,10 +41,11 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
 - required in practice for actual runs: `HOSTED_EXECUTION_RUNNER_BASE_URL`
 - optional secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN`
+- optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `60000`
 
 Current worker routes:
 
-- `GET /health` returns a lightweight health payload
+- `GET /health` returns a lightweight health payload and does not require the runtime secrets to be present
 - `GET /` returns the service banner payload
 - `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web`
 - `POST /internal/events` is an alias for the same signed internal dispatch contract
@@ -57,6 +58,7 @@ Current worker routes:
 
 The Durable Object calls a separate Node HTTP runner at:
 
+- `GET /health`
 - `POST /__internal/run`
 
 Current expectations for that runner container:
@@ -66,16 +68,18 @@ Current expectations for that runner container:
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - `PORT` to choose the listen port, defaulting to `8080`
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` when the internal runner endpoint should require bearer auth
-- optional provider/runtime env such as `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET`, and `DEVICE_SYNC_PUBLIC_BASE_URL` when the one-shot runner should execute hosted device-sync work instead of skipping it
+- optional provider/runtime env such as `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET`, `DEVICE_SYNC_PUBLIC_BASE_URL`, `DEVICE_SYNC_SECRET`, `LINQ_API_BASE_URL`, and `LINQ_API_TOKEN` when the one-shot runner should execute hosted device-sync work and assistant replies instead of skipping them
 - any additional operator/provider env needed by the reused Healthy Bob CLI and inbox runtime seams remains operator-supplied and is intentionally not hard-coded here
 
-`Dockerfile.cloudflare-hosted-runner` is the current manual scaffold for that container. It is intentionally unoptimized and repo-source-based because the repo does not yet expose a packaged standalone runner binary.
+`Dockerfile.cloudflare-hosted-runner` is the current manual scaffold for that container. It installs the repo workspace plus common Linux parser dependencies (`ffmpeg`, `poppler-utils`, Python tooling) so the runtime does not reinstall those packages on each wake. Large model weights and any custom toolchain artifacts are still expected to be mounted or baked in separately under `/root/.healthybob`.
 
 ## Deployment status
 
 Current scaffold files:
 
 - `apps/cloudflare/wrangler.jsonc`
+- `apps/cloudflare/.dev.vars.example`
+- `apps/cloudflare/.runner.env.example`
 - `Dockerfile.cloudflare-hosted-runner`
 - `.dockerignore`
 
@@ -86,6 +90,30 @@ Still intentionally placeholder:
 - secret provisioning automation
 - CI/CD deploy jobs
 - a slim production image or standalone built runner entrypoint
+
+## Setup
+
+1. Create or choose a Cloudflare Workers Paid account and create the R2 bucket names you want for hosted bundles.
+2. Update `apps/cloudflare/wrangler.jsonc` with the real bucket names and the real worker name.
+3. Copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` for local development, or set the same values through the Cloudflare secret/vars UI for deployed environments. Generate `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` with a 32-byte base64 value such as `openssl rand -base64 32`.
+4. Build and run the separate hosted runner container:
+   - `cp apps/cloudflare/.runner.env.example apps/cloudflare/.runner.env`
+   - `pnpm --dir apps/cloudflare runner:docker:build`
+   - `pnpm --dir apps/cloudflare runner:docker:run`
+5. Point `HOSTED_EXECUTION_RUNNER_BASE_URL` at the runner container's internal HTTPS URL.
+6. Deploy the worker with Wrangler from `apps/cloudflare`:
+   - `pnpm --dir apps/cloudflare worker:deploy`
+7. In `apps/web` / Vercel, set:
+   - `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL`
+   - `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`
+8. Confirm the Cloudflare worker answers `GET /health` and the runner container answers `GET /health`, then trigger `POST /internal/users/:userId/run` with the operator token for a smoke run.
+
+## Operational notes
+
+- The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references.
+- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` now includes sibling `assistant-state`, hosted `.runtime/**`, and the minimal operator-home config needed for bootstrap.
+- Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.
+- The operator control routes are internal surfaces only. Put them behind service-to-service auth and keep `HOSTED_EXECUTION_CONTROL_TOKEN` set outside source control.
 
 ## Typecheck note
 

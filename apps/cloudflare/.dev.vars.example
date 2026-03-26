@@ -1,0 +1,12 @@
+# Copy to apps/cloudflare/.dev.vars for wrangler dev or set these as real Cloudflare secrets/vars.
+
+HOSTED_EXECUTION_SIGNING_SECRET=replace-me-with-a-random-shared-secret
+HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=replace-me-with-a-base64-32-byte-key
+HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID=v1
+HOSTED_EXECUTION_CONTROL_TOKEN=replace-me-with-an-operator-token
+HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS=900000
+HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3
+HOSTED_EXECUTION_RETRY_DELAY_MS=30000
+HOSTED_EXECUTION_RUNNER_BASE_URL=https://replace-me-hosted-runner.example.com
+HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=replace-me-with-a-runner-token
+HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000

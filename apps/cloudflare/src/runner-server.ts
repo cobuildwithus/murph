@@ -10,6 +10,13 @@ export async function startHostedRunnerServer(input: {
 }): Promise<ReturnType<typeof createServer>> {
   const server = createServer(async (request, response) => {
     try {
+      if (request.method === "GET" && request.url === "/health") {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner-node" }));
+        return;
+      }
+
       if (request.method !== "POST" || request.url !== "/__internal/run") {
         response.statusCode = 404;
         response.end("Not found");

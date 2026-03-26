@@ -1,6 +1,7 @@
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
+  sha256HostedBundleHex,
   type HostedExecutionBundleKind,
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
@@ -13,9 +14,10 @@ import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 
 export interface DurableObjectStorageLike {
+  deleteAlarm?(): Promise<void>;
   get<T>(key: string): Promise<T | undefined>;
-  put<T>(key: string, value: T): Promise<void>;
   getAlarm(): Promise<number | null>;
+  put<T>(key: string, value: T): Promise<void>;
   setAlarm(scheduledTime: number | Date): Promise<void>;
 }
 
@@ -146,10 +148,20 @@ export class HostedUserRunner {
           ...removePendingDispatch(record, nextPending.dispatch.eventId),
           bundleRefs: {
             agentState: result.bundles.agentState
-              ? await this.writeBundle(record.userId, "agent-state", result.bundles.agentState)
+              ? await this.writeBundle(
+                  record.userId,
+                  "agent-state",
+                  result.bundles.agentState,
+                  record.bundleRefs.agentState,
+                )
               : record.bundleRefs.agentState,
             vault: result.bundles.vault
-              ? await this.writeBundle(record.userId, "vault", result.bundles.vault)
+              ? await this.writeBundle(
+                  record.userId,
+                  "vault",
+                  result.bundles.vault,
+                  record.bundleRefs.vault,
+                )
               : record.bundleRefs.vault,
           },
           inFlight: false,
@@ -218,6 +230,7 @@ export class HostedUserRunner {
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
+      signal: AbortSignal.timeout(this.env.runnerTimeoutMs),
     });
 
     if (!response.ok) {
@@ -231,6 +244,7 @@ export class HostedUserRunner {
     userId: string,
     kind: HostedExecutionBundleKind,
     value: string,
+    currentRef: HostedExecutionBundleRef | null,
   ): Promise<HostedExecutionBundleRef> {
     const store = createHostedBundleStore({
       bucket: this.bucket,
@@ -238,6 +252,12 @@ export class HostedUserRunner {
       keyId: this.env.bundleEncryptionKeyId,
     });
     const plaintext = decodeHostedBundleBase64(value) ?? new Uint8Array();
+    const hash = sha256HostedBundleHex(plaintext);
+
+    if (currentRef && currentRef.hash === hash && currentRef.size === plaintext.byteLength) {
+      return currentRef;
+    }
+
     const ref = await store.writeBundle(userId, kind, plaintext);
 
     return {
@@ -256,6 +276,8 @@ export class HostedUserRunner {
 
     if (nextWakeAt) {
       await this.state.storage.setAlarm(new Date(nextWakeAt));
+    } else {
+      await this.state.storage.deleteAlarm?.();
     }
 
     return {

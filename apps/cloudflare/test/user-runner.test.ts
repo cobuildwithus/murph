@@ -15,6 +15,7 @@ describe("HostedUserRunner", () => {
     retryDelayMs: 10_000,
     runnerBaseUrl: "https://runner.example.test",
     runnerControlToken: "runner-token",
+    runnerTimeoutMs: 60_000,
   };
 
   beforeEach(() => {
@@ -73,6 +74,58 @@ describe("HostedUserRunner", () => {
     ]);
   });
 
+
+  it("reuses existing bundle refs when the runner returns unchanged bundle payloads", async () => {
+    const encodedAgent = Buffer.from("agent-state").toString("base64");
+    const encodedVault = Buffer.from("vault").toString("base64");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            bundles: {
+              agentState: encodedAgent,
+              vault: encodedVault,
+            },
+            result: {
+              eventsHandled: 1,
+              summary: "ok",
+            },
+          }),
+          {
+            status: 200,
+          },
+        ),
+      ),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const first = await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        linqChatId: "chat_123",
+        normalizedPhoneNumber: "+15551234567",
+        userId: "member_123",
+      },
+      eventId: "evt_first",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+    const writeCountAfterFirstRun = bucket.putCount();
+
+    const second = await runner.dispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_second",
+      occurredAt: "2026-03-26T12:01:00.000Z",
+    });
+
+    expect(second.bundleRefs).toEqual(first.bundleRefs);
+    expect(bucket.putCount()).toBe(writeCountAfterFirstRun);
+  });
+
   it("retries failed events and eventually poisons them after repeated runner failures", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
@@ -112,10 +165,52 @@ describe("HostedUserRunner", () => {
     expect(final.retryingEventId).toBeNull();
     expect(final.lastError).toContain("HTTP 503");
   });
+
+  it("clears the durable-object alarm when no next wake remains", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            bundles: {
+              agentState: Buffer.from("agent-state").toString("base64"),
+              vault: Buffer.from("vault").toString("base64"),
+            },
+            result: {
+              eventsHandled: 1,
+              summary: "ok",
+            },
+          }),
+          {
+            status: 200,
+          },
+        ),
+      ),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        linqChatId: "chat_123",
+        normalizedPhoneNumber: "+15551234567",
+        userId: "member_123",
+      },
+      eventId: "evt_alarm_clear",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+    expect(storage.lastAlarm).not.toBeNull();
+
+    storage.clear();
+    await runner.alarm();
+
+    expect(storage.lastAlarm).toBeNull();
+  });
 });
 
 function createBucket() {
   const values = new Map<string, string>();
+  let writes = 0;
 
   return {
     api: {
@@ -133,14 +228,19 @@ function createBucket() {
         };
       },
       async put(key: string, value: string) {
+        writes += 1;
         values.set(key, value);
       },
     },
     clear() {
       values.clear();
+      writes = 0;
     },
     keys() {
       return [...values.keys()].sort();
+    },
+    putCount() {
+      return writes;
     },
   };
 }
@@ -154,6 +254,9 @@ function createStorage() {
       },
       async put<T>(key: string, value: T): Promise<void> {
         values.set(key, value);
+      },
+      async deleteAlarm(): Promise<void> {
+        storage.lastAlarm = null;
       },
       async getAlarm(): Promise<number | null> {
         return storage.lastAlarm;
