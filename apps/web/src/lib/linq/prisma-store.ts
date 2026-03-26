@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
-import { generatePrefixedId, toIsoTimestamp, toJsonRecord } from "../device-sync/shared";
+import { generatePrefixedId, toIsoTimestamp } from "../device-sync/shared";
 import { hostedLinqError } from "./errors";
 
 export interface HostedLinqBindingRecord {
@@ -24,7 +24,6 @@ export interface HostedLinqWebhookEventRecord {
   messageId: string | null;
   occurredAt: string | null;
   receivedAt: string;
-  payload: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -39,7 +38,6 @@ export interface QueueHostedLinqWebhookEventInput {
   messageId?: string | null;
   occurredAt?: string | null;
   receivedAt: string;
-  payload: Record<string, unknown>;
 }
 
 type LinqBindingPrismaRecord = Prisma.LinqRecipientBindingGetPayload<Prisma.LinqRecipientBindingDefaultArgs>;
@@ -168,7 +166,6 @@ export class PrismaLinqControlPlaneStore {
           messageId: input.messageId ?? null,
           occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
           receivedAt: new Date(input.receivedAt),
-          payloadJson: input.payload as Prisma.InputJsonObject,
         },
       });
 
@@ -249,7 +246,6 @@ export function mapHostedLinqWebhookEventRecord(record: LinqWebhookEventPrismaRe
     messageId: record.messageId,
     occurredAt: record.occurredAt ? record.occurredAt.toISOString() : null,
     receivedAt: record.receivedAt.toISOString(),
-    payload: toJsonRecord(record.payloadJson),
     createdAt: record.createdAt.toISOString(),
   };
 }

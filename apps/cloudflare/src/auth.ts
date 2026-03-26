@@ -4,6 +4,8 @@ import { HOSTED_EXECUTION_SIGNATURE_HEADER, HOSTED_EXECUTION_TIMESTAMP_HEADER } 
 
 const HMAC_ALGORITHM = "HMAC";
 const HMAC_HASH = "SHA-256";
+const DEFAULT_MAX_TIMESTAMP_SKEW_MS = 5 * 60_000;
+const ISO_UTC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 export async function createHostedExecutionSignature(input: {
   payload: string;
@@ -25,8 +27,23 @@ export async function verifyHostedExecutionSignature(input: {
   secret: string;
   signature: string | null;
   timestamp: string | null;
+  nowMs?: number;
+  maxTimestampSkewMs?: number;
 }): Promise<boolean> {
   if (!input.signature || !input.timestamp) {
+    return false;
+  }
+
+  const timestampMs = parseHostedExecutionTimestampMs(input.timestamp);
+
+  if (timestampMs === null) {
+    return false;
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  const maxTimestampSkewMs = input.maxTimestampSkewMs ?? DEFAULT_MAX_TIMESTAMP_SKEW_MS;
+
+  if (Math.abs(nowMs - timestampMs) > maxTimestampSkewMs) {
     return false;
   }
 
@@ -64,6 +81,20 @@ async function importHmacKey(secret: string): Promise<CryptoKey> {
 
 function normalizeHex(value: string): string {
   return value.trim().replace(/^sha256=/iu, "").toLowerCase();
+}
+
+function parseHostedExecutionTimestampMs(value: string): number | null {
+  if (value.trim() !== value || !ISO_UTC_TIMESTAMP_PATTERN.test(value)) {
+    return null;
+  }
+
+  const parsedMs = Date.parse(value);
+
+  if (!Number.isFinite(parsedMs)) {
+    return null;
+  }
+
+  return new Date(parsedMs).toISOString() === value ? parsedMs : null;
 }
 
 function timingSafeHexEqual(left: string, right: string): boolean {

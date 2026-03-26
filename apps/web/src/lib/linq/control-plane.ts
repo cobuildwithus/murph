@@ -1,6 +1,6 @@
 import { getPrisma } from "../prisma";
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
-import { normalizeString, parseInteger, toIsoTimestamp, toJsonRecord } from "../device-sync/shared";
+import { normalizeString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
 import { readRawBodyBuffer } from "../http";
 import { hostedLinqError } from "./errors";
 import { readHostedLinqEnvironment } from "./env";
@@ -180,7 +180,6 @@ export class HostedLinqControlPlane {
       messageId: normalizeString(messageEvent.data.message?.id),
       occurredAt: resolveWebhookOccurredAt(event),
       receivedAt: toIsoTimestamp(new Date()),
-      payload: sanitizeHostedLinqWebhookEvent(event),
     });
 
     return {
@@ -243,8 +242,4 @@ function normalizeRequiredString(value: unknown, label: string): string {
   }
 
   return normalized;
-}
-
-function sanitizeHostedLinqWebhookEvent(event: LinqWebhookEvent): Record<string, unknown> {
-  return toJsonRecord(event as unknown as Record<string, unknown>);
 }

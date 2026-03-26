@@ -5,6 +5,7 @@ export interface HostedExecutionEnvironment {
   allowedUserEnvPrefixes: string | null;
   bundleEncryptionKey: Uint8Array;
   bundleEncryptionKeyId: string;
+  cloudflareBaseUrl: string | null;
   controlToken: string | null;
   defaultAlarmDelayMs: number;
   dispatchSigningSecret: string;
@@ -35,6 +36,7 @@ export function readHostedExecutionEnvironment(
     allowedUserEnvPrefixes: normalizeString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
     bundleEncryptionKey: decodeBase64Key(bundleEncryptionKey),
     bundleEncryptionKeyId: normalizeString(source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID) ?? "v1",
+    cloudflareBaseUrl: normalizeBaseUrl(source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL),
     controlToken: normalizeString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
     defaultAlarmDelayMs: parsePositiveInteger(
       normalizeString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),

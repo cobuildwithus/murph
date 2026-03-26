@@ -373,7 +373,6 @@ model LinqWebhookEvent {
   messageId      String?              @map("message_id")
   occurredAt     DateTime?            @map("occurred_at")
   receivedAt     DateTime             @map("received_at")
-  payloadJson    Json                 @map("payload_json")
   createdAt      DateTime             @default(now()) @map("created_at")
   binding        LinqRecipientBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
 

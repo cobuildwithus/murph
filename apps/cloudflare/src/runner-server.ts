@@ -1,8 +1,6 @@
 import { createServer } from "node:http";
 
-import type { HostedExecutionRunnerRequest } from "@healthybob/runtime-state";
-
-import { runHostedExecutionJob } from "./node-runner.js";
+import { runHostedExecutionJob, type HostedExecutionRunnerJobRequest } from "./node-runner.js";
 
 export async function startHostedRunnerServer(input: {
   controlToken: string | null;
@@ -40,7 +38,7 @@ export async function startHostedRunnerServer(input: {
       }
 
       const result = await runHostedExecutionJob(
-        JSON.parse(Buffer.concat(chunks).toString("utf8")) as HostedExecutionRunnerRequest,
+        JSON.parse(Buffer.concat(chunks).toString("utf8")) as HostedExecutionRunnerJobRequest,
       );
 
       response.statusCode = 200;

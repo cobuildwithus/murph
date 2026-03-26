@@ -1,6 +1,7 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+import { normalizeParserArtifactIdentity } from "../contracts/artifact.js";
 import type { ParserOutput } from "../contracts/parse.js";
 import {
   normalizeRelativePath,
@@ -18,21 +19,23 @@ export interface PublishedParserArtifacts {
   tablesPath?: string | null;
 }
 
+const DERIVED_INBOX_ROOT = normalizeRelativePath("derived/inbox");
+
 export async function writeParserArtifacts(input: {
   attempt: number;
   vaultRoot: string;
   output: ParserOutput;
 }): Promise<PublishedParserArtifacts> {
-  const baseDirectory = normalizeRelativePath(
+  const artifact = normalizeParserArtifactIdentity(input.output.artifact);
+  const baseDirectory = normalizePublishedParserPath(
     path.posix.join(
-      "derived",
-      "inbox",
-      input.output.artifact.captureId,
+      DERIVED_INBOX_ROOT,
+      artifact.captureId,
       "attachments",
-      input.output.artifact.attachmentId,
+      artifact.attachmentId,
     ),
   );
-  const attemptDirectoryPath = normalizeRelativePath(
+  const attemptDirectoryPath = normalizePublishedParserPath(
     path.posix.join(
       baseDirectory,
       "attempts",
@@ -41,12 +44,12 @@ export async function writeParserArtifacts(input: {
   );
   await resetVaultDirectory(input.vaultRoot, attemptDirectoryPath);
 
-  const plainTextPath = normalizeRelativePath(path.posix.join(attemptDirectoryPath, "plain.txt"));
-  const markdownPath = normalizeRelativePath(path.posix.join(attemptDirectoryPath, "normalized.md"));
-  const chunksPath = normalizeRelativePath(path.posix.join(attemptDirectoryPath, "chunks.jsonl"));
-  const manifestPath = normalizeRelativePath(path.posix.join(attemptDirectoryPath, "manifest.json"));
+  const plainTextPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "plain.txt"));
+  const markdownPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "normalized.md"));
+  const chunksPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "chunks.jsonl"));
+  const manifestPath = normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "manifest.json"));
   const tablesPath = input.output.tables.length > 0
-    ? normalizeRelativePath(path.posix.join(attemptDirectoryPath, "tables.json"))
+    ? normalizePublishedParserPath(path.posix.join(attemptDirectoryPath, "tables.json"))
     : null;
 
   try {
@@ -81,7 +84,7 @@ export async function writeParserArtifacts(input: {
           schema: "healthybob.parser-manifest.v1",
           providerId: input.output.providerId,
           createdAt: input.output.createdAt,
-          artifact: input.output.artifact,
+          artifact,
           metadata: input.output.metadata,
           paths: {
             plainTextPath,
@@ -108,4 +111,17 @@ export async function writeParserArtifacts(input: {
     chunksPath,
     tablesPath,
   };
+}
+
+function normalizePublishedParserPath(relativePath: string): string {
+  const normalized = normalizeRelativePath(relativePath);
+
+  if (
+    normalized !== DERIVED_INBOX_ROOT &&
+    !normalized.startsWith(`${DERIVED_INBOX_ROOT}/`)
+  ) {
+    throw new TypeError("Published parser artifacts must stay within derived/inbox.");
+  }
+
+  return normalized;
 }

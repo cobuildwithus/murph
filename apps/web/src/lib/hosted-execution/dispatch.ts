@@ -21,17 +21,18 @@ export async function dispatchHostedExecutionStatus(
   }
 
   const payload = JSON.stringify(input);
+  const envelopeTimestamp = new Date().toISOString();
   const signature = createExecutionSignature({
     payload,
     secret: environment.signingSecret,
-    timestamp: input.occurredAt,
+    timestamp: envelopeTimestamp,
   });
   const response = await fetch(`${environment.dispatchUrl}/internal/dispatch`, {
     body: payload,
     headers: {
       "content-type": "application/json; charset=utf-8",
       [HOSTED_EXECUTION_SIGNATURE_HEADER]: signature,
-      [HOSTED_EXECUTION_TIMESTAMP_HEADER]: input.occurredAt,
+      [HOSTED_EXECUTION_TIMESTAMP_HEADER]: envelopeTimestamp,
     },
     method: "POST",
     signal: AbortSignal.timeout(HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS),

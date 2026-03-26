@@ -1,4 +1,8 @@
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionDispatchRequest,
+  HostedExecutionRunnerResult,
+} from "@healthybob/runtime-state";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.js";
 import { readHostedExecutionEnvironment } from "./env.js";
@@ -24,6 +28,7 @@ interface WorkerEnvironmentSource {
   HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
+  HOSTED_EXECUTION_CLOUDFLARE_BASE_URL?: string;
   HOSTED_EXECUTION_CONTROL_TOKEN?: string;
   HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
@@ -58,6 +63,32 @@ export default {
       const environment = readHostedExecutionEnvironment(
         env as unknown as Readonly<Record<string, string | undefined>>,
       );
+
+      const runnerCommitMatch = url.pathname.match(
+        /^\/internal\/runner-events\/([^/]+)\/([^/]+)\/commit$/u,
+      );
+
+      if (runnerCommitMatch && request.method === "POST") {
+        if (environment.runnerControlToken) {
+          const authorization = request.headers.get("authorization");
+
+          if (authorization !== `Bearer ${environment.runnerControlToken}`) {
+            return json({ error: "Unauthorized" }, 401);
+          }
+        }
+
+        const [, userId, eventId] = runnerCommitMatch;
+        const payload = parseHostedExecutionCommitRequest(await readJsonObject(request));
+        return env.USER_RUNNER.getByName(decodeURIComponent(userId)).fetch(
+          new Request(
+            `https://runner.internal/commit?eventId=${encodeURIComponent(decodeURIComponent(eventId))}&userId=${encodeURIComponent(decodeURIComponent(userId))}`,
+            {
+              body: JSON.stringify(payload),
+              method: "POST",
+            },
+          ),
+        );
+      }
 
       if (
         request.method === "POST"
@@ -142,7 +173,30 @@ export class UserRunnerDurableObject {
     const url = new URL(request.url);
 
     if (request.method === "POST" && url.pathname === "/dispatch") {
-      return json(await this.runner.dispatch(JSON.parse(await request.text())));
+      const dispatch = JSON.parse(await request.text()) as HostedExecutionDispatchRequest;
+      const status = await this.runner.dispatch(dispatch);
+
+      return isBackpressuredStatus(status, dispatch.eventId)
+        ? json(status, 429)
+        : json(status);
+    }
+
+    if (request.method === "POST" && url.pathname === "/commit") {
+      const userId = url.searchParams.get("userId");
+      const eventId = url.searchParams.get("eventId");
+
+      if (!userId || !eventId) {
+        return json({ error: "userId and eventId are required." }, 400);
+      }
+
+      return json({
+        committed: await this.runner.commit({
+          eventId,
+          payload: parseHostedExecutionCommitRequest(await readJsonObject(request)),
+          userId,
+        }),
+        ok: true,
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/run") {
@@ -153,17 +207,20 @@ export class UserRunnerDurableObject {
         return json({ error: "userId is required." }, 400);
       }
 
-      return json(
-        await this.runner.run({
-          event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
-            userId,
-          },
-          eventId: `manual:${Date.now()}`,
-          occurredAt: new Date().toISOString(),
-        }),
-      );
+      const dispatch: HostedExecutionDispatchRequest = {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId,
+        },
+        eventId: `manual:${Date.now()}`,
+        occurredAt: new Date().toISOString(),
+      };
+      const status = await this.runner.run(dispatch);
+
+      return isBackpressuredStatus(status, dispatch.eventId)
+        ? json(status, 429)
+        : json(status);
     }
 
     if (request.method === "GET" && url.pathname === "/status") {
@@ -254,6 +311,113 @@ async function buildDurableObjectControlRequest(input: {
     default:
       return json({ error: "Not found" }, 404);
   }
+}
+
+function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionRunnerResult & {
+  currentBundleRefs: {
+    agentState: HostedExecutionBundleRef | null;
+    vault: HostedExecutionBundleRef | null;
+  };
+} {
+  const bundles = requireRecord(payload.bundles, "bundles");
+  const result = requireRecord(payload.result, "result");
+
+  return {
+    bundles: {
+      agentState: readHostedBundleBase64Value(bundles.agentState, "bundles.agentState"),
+      vault: readHostedBundleBase64Value(bundles.vault, "bundles.vault"),
+    },
+    currentBundleRefs: readCommittedBundleRefs(payload.currentBundleRefs),
+    result: {
+      eventsHandled: requireNumber(result.eventsHandled, "result.eventsHandled"),
+      summary: requireString(result.summary, "result.summary"),
+    },
+  };
+}
+
+function isBackpressuredStatus(
+  status: { backpressuredEventIds?: string[] },
+  eventId: string,
+): boolean {
+  return status.backpressuredEventIds?.includes(eventId) ?? false;
+}
+
+function readCommittedBundleRefs(value: unknown): {
+  agentState: HostedExecutionBundleRef | null;
+  vault: HostedExecutionBundleRef | null;
+} {
+  const record = requireRecord(value, "currentBundleRefs");
+
+  return {
+    agentState: readHostedBundleRef(record.agentState),
+    vault: readHostedBundleRef(record.vault),
+  };
+}
+
+function readHostedBundleRef(value: unknown): HostedExecutionBundleRef | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (!isRecord(value)) {
+    throw new TypeError("Commit bundle refs must be objects or null.");
+  }
+
+  if (
+    typeof value.hash !== "string"
+    || typeof value.key !== "string"
+    || typeof value.size !== "number"
+    || typeof value.updatedAt !== "string"
+  ) {
+    throw new TypeError("Commit bundle refs must include hash, key, size, and updatedAt.");
+  }
+
+  return {
+    hash: value.hash,
+    key: value.key,
+    size: value.size,
+    updatedAt: value.updatedAt,
+  };
+}
+
+function readHostedBundleBase64Value(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a base64 string or null.`);
+  }
+
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string.`);
+  }
+
+  return value;
 }
 
 

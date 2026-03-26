@@ -9,6 +9,7 @@ export interface R2ObjectBodyLike {
 }
 
 export interface R2BucketLike {
+  delete?(key: string): Promise<void>;
   get(key: string): Promise<R2ObjectBodyLike | null>;
   put(key: string, value: string): Promise<void>;
 }

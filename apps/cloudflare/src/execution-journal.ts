@@ -1,0 +1,172 @@
+import { Buffer } from "node:buffer";
+
+import {
+  decodeHostedBundleBase64,
+  sha256HostedBundleHex,
+  type HostedExecutionBundleRef,
+  type HostedExecutionRunnerResult,
+} from "@healthybob/runtime-state";
+
+import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
+import { decryptHostedBundle, encryptHostedBundle } from "./crypto.js";
+
+export interface HostedExecutionRunnerCommitRequest {
+  bundleRefs: {
+    agentState: HostedExecutionBundleRef | null;
+    vault: HostedExecutionBundleRef | null;
+  };
+  token: string | null;
+  url: string;
+}
+
+export interface HostedExecutionCommittedResult {
+  bundleRefs: {
+    agentState: HostedExecutionBundleRef | null;
+    vault: HostedExecutionBundleRef | null;
+  };
+  committedAt: string;
+  eventId: string;
+  result: HostedExecutionRunnerResult["result"];
+}
+
+export interface HostedExecutionCommitPayload {
+  bundles: HostedExecutionRunnerResult["bundles"];
+  result: HostedExecutionRunnerResult["result"];
+}
+
+export interface HostedExecutionJournalStore {
+  deleteCommittedResult(userId: string, eventId: string): Promise<void>;
+  readCommittedResult(userId: string, eventId: string): Promise<HostedExecutionCommittedResult | null>;
+  writeCommittedResult(userId: string, eventId: string, value: HostedExecutionCommittedResult): Promise<void>;
+}
+
+export function createHostedExecutionJournalStore(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+}): HostedExecutionJournalStore {
+  return {
+    async deleteCommittedResult(userId, eventId) {
+      await input.bucket.delete?.(committedResultObjectKey(userId, eventId));
+    },
+
+    async readCommittedResult(userId, eventId) {
+      const object = await input.bucket.get(committedResultObjectKey(userId, eventId));
+
+      if (!object) {
+        return null;
+      }
+
+      const plaintext = await decryptHostedBundle({
+        envelope: JSON.parse(Buffer.from(await object.arrayBuffer()).toString("utf8")),
+        key: input.key,
+      });
+
+      return JSON.parse(Buffer.from(plaintext).toString("utf8")) as HostedExecutionCommittedResult;
+    },
+
+    async writeCommittedResult(userId, eventId, value) {
+      const plaintext = Buffer.from(JSON.stringify(value), "utf8");
+      const envelope = await encryptHostedBundle({
+        key: input.key,
+        keyId: input.keyId,
+        plaintext,
+      });
+
+      await input.bucket.put(
+        committedResultObjectKey(userId, eventId),
+        JSON.stringify(envelope),
+      );
+    },
+  };
+}
+
+export async function persistHostedExecutionCommit(input: {
+  bucket: R2BucketLike;
+  currentBundleRefs: HostedExecutionRunnerCommitRequest["bundleRefs"];
+  eventId: string;
+  key: Uint8Array;
+  keyId: string;
+  payload: HostedExecutionCommitPayload;
+  userId: string;
+}): Promise<HostedExecutionCommittedResult> {
+  const existing = await createHostedExecutionJournalStore({
+    bucket: input.bucket,
+    key: input.key,
+    keyId: input.keyId,
+  }).readCommittedResult(input.userId, input.eventId);
+
+  if (existing) {
+    return existing;
+  }
+
+  const bundleStore = createHostedBundleStore({
+    bucket: input.bucket,
+    key: input.key,
+    keyId: input.keyId,
+  });
+  const committedAt = new Date().toISOString();
+  const committedResult: HostedExecutionCommittedResult = {
+    bundleRefs: {
+      agentState: await writeCommittedBundle({
+        bundleStore,
+        currentRef: input.currentBundleRefs.agentState,
+        kind: "agent-state",
+        userId: input.userId,
+        value: input.payload.bundles.agentState,
+      }),
+      vault: await writeCommittedBundle({
+        bundleStore,
+        currentRef: input.currentBundleRefs.vault,
+        kind: "vault",
+        userId: input.userId,
+        value: input.payload.bundles.vault,
+      }),
+    },
+    committedAt,
+    eventId: input.eventId,
+    result: input.payload.result,
+  };
+
+  await createHostedExecutionJournalStore({
+    bucket: input.bucket,
+    key: input.key,
+    keyId: input.keyId,
+  }).writeCommittedResult(input.userId, input.eventId, committedResult);
+
+  return committedResult;
+}
+
+async function writeCommittedBundle(input: {
+  bundleStore: ReturnType<typeof createHostedBundleStore>;
+  currentRef: HostedExecutionBundleRef | null;
+  kind: "agent-state" | "vault";
+  userId: string;
+  value: string | null;
+}): Promise<HostedExecutionBundleRef | null> {
+  if (input.value === null) {
+    return null;
+  }
+
+  const plaintext = decodeHostedBundleBase64(input.value) ?? new Uint8Array();
+  const hash = sha256HostedBundleHex(plaintext);
+
+  if (
+    input.currentRef
+    && input.currentRef.hash === hash
+    && input.currentRef.size === plaintext.byteLength
+  ) {
+    return input.currentRef;
+  }
+
+  const ref = await input.bundleStore.writeBundle(input.userId, input.kind, plaintext);
+
+  return {
+    ...ref,
+    size: ref.size ?? plaintext.byteLength,
+  };
+}
+
+function committedResultObjectKey(userId: string, eventId: string): string {
+  return `users/${encodeURIComponent(userId)}/execution-journal/${encodeURIComponent(eventId)}.json`;
+}

@@ -11,6 +11,7 @@ export { VaultError, isVaultError } from "./errors.js";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
+  normalizeOpaquePathSegment,
   normalizeRelativeVaultPath,
   normalizeVaultRoot,
   resolveVaultPath,

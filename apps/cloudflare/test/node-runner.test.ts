@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildSharePackFromVault, initializeVault, readFood, upsertFood, upsertProtocolItem } from "@healthybob/core";
 import { restoreHostedExecutionContext } from "@healthybob/runtime-state";
@@ -12,6 +12,10 @@ import { writeHostedUserEnvToAgentStateBundle } from "../src/user-env.js";
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
 
   afterEach(async () => {
     await Promise.all(cleanupPaths.splice(0).map((target) => rm(target, { force: true, recursive: true })));
@@ -206,6 +210,56 @@ describe("runHostedExecutionJob", () => {
       restoreEnvVar("HEALTHYBOB_HOSTED_MEMBER_ID", previousHostedMemberId);
       restoreEnvVar("VAULT", previousVault);
     }
+  });
+
+  it("posts a durable commit before returning when a commit callback is configured", async () => {
+    const commitFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", commitFetch);
+
+    const result = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      commit: {
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        token: "runner-token",
+        url: "https://worker.example.test/internal/runner-events/member_123/evt_commit/commit",
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          userId: "member_123",
+        },
+        eventId: "evt_commit",
+        occurredAt: "2026-03-26T12:10:00.000Z",
+      },
+    });
+
+    expect(commitFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = commitFetch.mock.calls[0] ?? [];
+    expect(url).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/commit");
+    expect(init?.headers).toMatchObject({
+      authorization: "Bearer runner-token",
+      "content-type": "application/json; charset=utf-8",
+    });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      bundles: result.bundles,
+      currentBundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      result: result.result,
+    });
   });
 
 });

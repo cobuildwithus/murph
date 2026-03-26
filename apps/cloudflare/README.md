@@ -37,6 +37,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the per-user encrypted env key allowlist in both the worker and runner
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` extends the per-user encrypted env prefix allowlist in both the worker and runner
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
+- required in practice for replay-safe hosted runs: `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL` so the separate Node runner can durably commit completed bundle refs back through the worker before the original runner response is trusted
 - optional secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `900000`
 - optional non-secret: `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` defaults to `3`
@@ -56,6 +57,7 @@ Current worker routes:
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
 - `PUT /internal/users/:userId/env` merges or replaces encrypted per-user runner env overrides inside the user's `agent-state` bundle
 - `DELETE /internal/users/:userId/env` clears the encrypted per-user runner env override file while preserving other `agent-state` contents
+- `POST /internal/runner-events/:userId/:eventId/commit` is the internal runner callback used to durably write the completed bundle refs plus per-event commit journal before the original runner response is treated as authoritative
 
 `apps/cloudflare/wrangler.jsonc` is the current manual scaffold for those bindings and env names. It intentionally leaves bucket names, service names, and secrets as explicit placeholders until a real Cloudflare account target exists.
 
@@ -65,6 +67,8 @@ The Durable Object calls a separate Node HTTP runner at:
 
 - `GET /health`
 - `POST /__internal/run`
+
+During `POST /__internal/run`, the runner now snapshots the finished hosted context, calls the worker's internal commit route with the completed bundle payloads keyed by `eventId`, and only then returns the original HTTP response. The Durable Object treats that durable commit as authoritative on timeout or lost-response retry paths.
 
 Current expectations for that runner container:
 

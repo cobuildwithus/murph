@@ -88,6 +88,7 @@ export interface HostedExecutionBundleRef {
 }
 
 export interface HostedExecutionUserStatus {
+  backpressuredEventIds?: string[];
   bundleRefs: {
     agentState: HostedExecutionBundleRef | null;
     vault: HostedExecutionBundleRef | null;

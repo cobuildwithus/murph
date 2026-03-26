@@ -129,4 +129,99 @@ describe("HostedLinqControlPlane", () => {
     expect(mocks.createHostedDeviceSyncControlPlane).toHaveBeenCalledTimes(1);
     expect(mocks.store.listBindingsForUser).toHaveBeenCalledWith("user-123");
   });
+
+  it("queues only sparse routing fields for hosted webhook events", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+    const event = {
+      api_version: "v3",
+      event_id: "evt_sparse_123",
+      created_at: "2026-03-25T10:00:00.000Z",
+      event_type: "message.received",
+      trace_id: "trace_sparse_123",
+      data: {
+        chat_id: "chat_123",
+        from: "+15550001111",
+        recipient_phone: "+15557654321",
+        received_at: "2026-03-25T10:00:05.000Z",
+        is_from_me: false,
+        message: {
+          id: "msg_123",
+          parts: [
+            {
+              type: "text",
+              value: "private message body",
+            },
+            {
+              type: "media",
+              url: "https://cdn.example.test/private.png",
+              attachment_id: "att_private_123",
+            },
+          ],
+        },
+      },
+    };
+
+    mocks.verifyAndParseLinqWebhookRequest.mockReturnValue(event);
+    mocks.requireLinqMessageReceivedEvent.mockReturnValue(event);
+    mocks.store.getBindingByRecipientPhone.mockResolvedValue({
+      id: "linqb_123",
+      userId: "user-123",
+      recipientPhone: "+15557654321",
+      label: "Primary",
+      createdAt: "2026-03-25T09:00:00.000Z",
+      updatedAt: "2026-03-25T09:00:00.000Z",
+    });
+    mocks.store.queueWebhookEventIfNew.mockResolvedValue({
+      inserted: true,
+      event: {
+        id: 7,
+        userId: "user-123",
+        bindingId: "linqb_123",
+        recipientPhone: "+15557654321",
+        eventId: "evt_sparse_123",
+        traceId: "trace_sparse_123",
+        eventType: "message.received",
+        chatId: "chat_123",
+        messageId: "msg_123",
+        occurredAt: "2026-03-25T10:00:05.000Z",
+        receivedAt: "2026-03-25T10:00:06.000Z",
+        createdAt: "2026-03-25T10:00:06.000Z",
+      },
+    });
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook()).resolves.toMatchObject({
+      accepted: true,
+      duplicate: false,
+      routed: true,
+      bindingId: "linqb_123",
+      recipientPhone: "+15557654321",
+      eventId: "evt_sparse_123",
+      queueId: 7,
+    });
+
+    expect(mocks.store.queueWebhookEventIfNew).toHaveBeenCalledTimes(1);
+    const queuedInput = mocks.store.queueWebhookEventIfNew.mock.calls[0]?.[0];
+    expect(queuedInput).toEqual({
+      userId: "user-123",
+      bindingId: "linqb_123",
+      recipientPhone: "+15557654321",
+      eventId: "evt_sparse_123",
+      traceId: "trace_sparse_123",
+      eventType: "message.received",
+      chatId: "chat_123",
+      messageId: "msg_123",
+      occurredAt: "2026-03-25T10:00:05.000Z",
+      receivedAt: expect.any(String),
+    });
+    expect(JSON.stringify(queuedInput)).not.toContain("private message body");
+    expect(JSON.stringify(queuedInput)).not.toContain("https://cdn.example.test/private.png");
+    expect(JSON.stringify(queuedInput)).not.toContain("att_private_123");
+  });
 });

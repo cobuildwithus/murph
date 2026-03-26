@@ -1,7 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { ParserArtifactRef } from "../contracts/artifact.js";
+import {
+  normalizeParserArtifactIdentity,
+  type ParserArtifactRef,
+} from "../contracts/artifact.js";
 import type { ParseRequest, ParserOutput, ProviderRunResult } from "../contracts/parse.js";
 import type { ParserRegistry } from "../registry/registry.js";
 import { prepareAudioInput, type FfmpegToolOptions } from "../adapters/ffmpeg.js";
@@ -26,27 +29,27 @@ export interface ParseAttachmentResult {
 }
 
 export async function parseAttachment(input: ParseAttachmentInput): Promise<ParseAttachmentResult> {
-  const scratchAttachmentRoot = path.resolve(input.scratchRoot, input.artifact.attachmentId);
-  await ensureDirectory(scratchAttachmentRoot);
-
-  const scratchDirectory = await fs.mkdtemp(path.join(scratchAttachmentRoot, "run-"));
+  const artifact = normalizeParserArtifactIdentity(input.artifact);
+  const scratchRoot = path.resolve(input.scratchRoot);
+  await ensureDirectory(scratchRoot);
+  const scratchDirectory = await fs.mkdtemp(path.join(scratchRoot, "attachment-"));
 
   try {
     const preparedMedia = await prepareAudioInput({
-      artifact: input.artifact,
+      artifact,
       scratchDirectory,
       ffmpeg: input.ffmpeg,
     });
     const request: ParseRequest = {
       intent: "attachment_text",
-      artifact: input.artifact,
+      artifact,
       inputPath: preparedMedia.inputPath,
       preparedKind: preparedMedia.preparedKind,
       scratchDirectory,
     };
     const { selection, result } = await input.registry.run(request);
     const output = normalizeParserOutput({
-      artifact: input.artifact,
+      artifact,
       providerId: selection.provider.id,
       result,
     });

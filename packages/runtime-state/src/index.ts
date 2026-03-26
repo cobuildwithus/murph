@@ -5,6 +5,7 @@ export * from "./hosted-bundle.js";
 export * from "./hosted-bundles.js";
 export * from "./hosted-execution.js";
 export * from "./locks.js";
+export * from "./process-env.js";
 export * from "./runtime-paths.js";
 export * from "./shared.js";
 export * from "./sqlite.js";

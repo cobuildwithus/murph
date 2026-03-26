@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { test } from "vitest";
 
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
+  HOSTED_BUNDLE_SCHEMA,
   readHostedBundleTextFile,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
@@ -193,3 +195,55 @@ test("hosted bundle text helpers patch and remove individual files deterministic
     null,
   );
 });
+
+test("hosted bundle restore rejects backslash and drive-style traversal archive paths", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-bundle-paths-"));
+
+  try {
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    const outsidePath = path.join(workspaceRoot, "outside.txt");
+    const maliciousPaths = [
+      "..\\..\\outside.txt",
+      "..\\nested/../../outside.txt",
+      "C:\\windows\\system32\\drivers\\etc\\hosts",
+    ];
+
+    for (const archivePath of maliciousPaths) {
+      await assert.rejects(
+        restoreHostedBundleRoots({
+          bytes: createHostedBundleArchiveBytes(archivePath),
+          expectedKind: "agent-state",
+          roots: {
+            alpha: restoreRoot,
+          },
+        }),
+        /Hosted bundle path is invalid/u,
+      );
+    }
+
+    await assert.rejects(readFile(outsidePath, "utf8"));
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+function createHostedBundleArchiveBytes(archivePath: string): Uint8Array {
+  return Uint8Array.from(
+    gzipSync(
+      Buffer.from(
+        JSON.stringify({
+          files: [
+            {
+              contentsBase64: Buffer.from("blocked\n", "utf8").toString("base64"),
+              path: archivePath,
+              root: "alpha",
+            },
+          ],
+          kind: "agent-state",
+          schema: HOSTED_BUNDLE_SCHEMA,
+        }),
+        "utf8",
+      ),
+    ),
+  );
+}

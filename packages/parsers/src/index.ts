@@ -72,6 +72,8 @@ export type { ParseAttachmentInput, ParseAttachmentResult } from "./pipelines/pa
 export { parseAttachment } from "./pipelines/parse-attachment.js";
 export type { RunAttachmentParseJobResult, RunAttachmentParseWorkerInput } from "./pipelines/worker.js";
 export { runAttachmentParseJobOnce, runAttachmentParseWorker } from "./pipelines/worker.js";
+export type { CommandResult } from "./shared.js";
+export { runCommand } from "./shared.js";
 
 import { createPaddleOcrProvider } from "./adapters/paddleocr.js";
 import { createPdfToTextProvider, type PdfToTextProviderOptions } from "./adapters/pdftotext.js";

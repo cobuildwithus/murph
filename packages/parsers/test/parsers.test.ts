@@ -5,7 +5,12 @@ import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
 import { initializeVault } from "@healthybob/core";
-import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@healthybob/inboxd";
+import {
+  createInboxPipeline,
+  openInboxRuntime,
+  rebuildRuntimeFromVault,
+  type InboxRuntimeStore,
+} from "@healthybob/inboxd";
 
 import {
   createConfiguredParserRegistry,
@@ -886,10 +891,94 @@ test("parseAttachment uses isolated scratch directories across reruns", async ()
 
   assert.equal(first.output.text, "fresh parse 1");
   assert.equal(second.output.text, "fresh parse 2");
-  assert.deepEqual(
-    await fs.readdir(path.join(scratchRoot, artifact.attachmentId)),
-    [],
-  );
+  assert.deepEqual(await fs.readdir(scratchRoot), []);
+});
+
+test("parseAttachment rejects unsafe or malformed attachment IDs before using scratch paths", async () => {
+  const scratchRoot = await makeTempDirectory("healthybob-parser-scratch-unsafe-id");
+  const sourceRoot = await makeTempDirectory("healthybob-parser-scratch-unsafe-id-source");
+  const inputPath = await writeExternalFile(sourceRoot, "scan.png", "image-bytes-placeholder");
+  let runCount = 0;
+  const registry = createParserRegistry([
+    {
+      id: "fake-image",
+      locality: "local",
+      openness: "open_source",
+      runtime: "embedded",
+      priority: 100,
+      async discover() {
+        return {
+          available: true,
+          reason: "available for unsafe attachment id validation test",
+        };
+      },
+      supports() {
+        return true;
+      },
+      async run() {
+        runCount += 1;
+        return {
+          text: "should not run",
+        };
+      },
+    },
+  ]);
+
+  for (const attachmentId of [
+    "../escape",
+    "/tmp/escape",
+    "..\\..\\raw\\inbox\\foo",
+    " att_whitespace ",
+    "\natt_newline\n",
+    123,
+  ]) {
+    await assert.rejects(
+      () =>
+        parseAttachment({
+          artifact: {
+            captureId: "cap_safe",
+            attachmentId: attachmentId as string,
+            kind: "image",
+            fileName: "scan.png",
+            mime: "image/png",
+            storedPath: "raw/inbox/example/scan.png",
+            absolutePath: inputPath,
+          },
+          registry,
+          scratchRoot,
+        }),
+      /Parser attachment ID/u,
+    );
+  }
+
+  for (const captureId of [
+    "../escape",
+    "..\\..\\raw\\inbox\\foo",
+    " cap_whitespace ",
+    "\ncap_newline\n",
+    123,
+  ]) {
+    await assert.rejects(
+      () =>
+        parseAttachment({
+          artifact: {
+            captureId: captureId as string,
+            attachmentId: "att_safe",
+            kind: "image",
+            fileName: "scan.png",
+            mime: "image/png",
+            storedPath: "raw/inbox/example/scan.png",
+            absolutePath: inputPath,
+          },
+          registry,
+          scratchRoot,
+        }),
+      /Parser capture ID/u,
+    );
+  }
+
+  assert.equal(runCount, 0);
+  assert.deepEqual(await fs.readdir(scratchRoot), []);
 });
 
 test("writeParserArtifacts removes stale optional files on rerun", async () => {
@@ -956,6 +1045,126 @@ test("writeParserArtifacts removes stale optional files on rerun", async () => {
   assert.equal(second.manifestPath, "derived/inbox/cap_publish_rerun/attachments/att_publish_rerun/attempts/0002/manifest.json");
   await fs.access(path.join(vaultRoot, first.tablesPath ?? ""));
   await assert.rejects(fs.access(path.join(vaultRoot, second.attemptDirectoryPath, "tables.json")));
+});
+
+test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publishing outside derived inbox", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parser-publish-unsafe-ids");
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  await assert.rejects(
+    () =>
+      writeParserArtifacts({
+        attempt: 1,
+        vaultRoot,
+        output: {
+          schema: "healthybob.parser-output.v1",
+          providerId: "fake-provider",
+          artifact: {
+            captureId: "../../raw/inbox/foo",
+            attachmentId: "att_publish_escape",
+            kind: "image",
+            fileName: "scan.png",
+            mime: "image/png",
+            storedPath: "raw/inbox/example/scan.png",
+          },
+          text: "blocked",
+          markdown: "blocked",
+          blocks: [],
+          tables: [],
+          metadata: {},
+          createdAt: "2026-03-13T12:06:00.000Z",
+        },
+      }),
+    /Parser capture ID/u,
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, "raw", "inbox", "foo")));
+
+  await assert.rejects(
+    () =>
+      writeParserArtifacts({
+        attempt: 1,
+        vaultRoot,
+        output: {
+          schema: "healthybob.parser-output.v1",
+          providerId: "fake-provider",
+          artifact: {
+            captureId: " cap_publish_space ",
+            attachmentId: "att_publish_space",
+            kind: "image",
+            fileName: "scan.png",
+            mime: "image/png",
+            storedPath: "raw/inbox/example/scan.png",
+          },
+          text: "blocked",
+          markdown: "blocked",
+          blocks: [],
+          tables: [],
+          metadata: {},
+          createdAt: "2026-03-13T12:06:30.000Z",
+        },
+      }),
+    /Parser capture ID/u,
+  );
+
+  await assert.rejects(
+    () =>
+      writeParserArtifacts({
+        attempt: 1,
+        vaultRoot,
+        output: {
+          schema: "healthybob.parser-output.v1",
+          providerId: "fake-provider",
+          artifact: {
+            captureId: "cap_publish_alias",
+            attachmentId: "alias/other",
+            kind: "image",
+            fileName: "scan.png",
+            mime: "image/png",
+            storedPath: "raw/inbox/example/scan.png",
+          },
+          text: "blocked",
+          markdown: "blocked",
+          blocks: [],
+          tables: [],
+          metadata: {},
+          createdAt: "2026-03-13T12:07:00.000Z",
+        },
+      }),
+    /Parser attachment ID/u,
+  );
+  await assert.rejects(
+    fs.access(path.join(vaultRoot, "derived", "inbox", "cap_publish_alias", "attachments", "alias")),
+  );
+
+  await assert.rejects(
+    () =>
+      writeParserArtifacts({
+        attempt: 1,
+        vaultRoot,
+        output: {
+          schema: "healthybob.parser-output.v1",
+          providerId: "fake-provider",
+          artifact: {
+            captureId: "cap_publish_type",
+            attachmentId: 123 as unknown as string,
+            kind: "image",
+            fileName: "scan.png",
+            mime: "image/png",
+            storedPath: "raw/inbox/example/scan.png",
+          },
+          text: "blocked",
+          markdown: "blocked",
+          blocks: [],
+          tables: [],
+          metadata: {},
+          createdAt: "2026-03-13T12:07:30.000Z",
+        },
+      }),
+    /Parser attachment ID/u,
+  );
 });
 
 test("writeParserArtifacts rejects derived attempt paths that traverse symlinks", async () => {
@@ -1035,6 +1244,150 @@ test("parser cleanup helper rejects attempt directories that traverse symlinks",
   );
 
   assert.equal(await fs.readFile(outsideFile, "utf8"), "do not delete");
+});
+
+test("attachment parse worker fails closed on malformed attachment IDs", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-malformed-id-vault");
+  const scratchRoot = await makeTempDirectory("healthybob-parser-worker-malformed-id-scratch");
+  const storedPath = "raw/inbox/example/malformed-id.png";
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+  await fs.mkdir(path.join(vaultRoot, path.dirname(storedPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, storedPath), "image-bytes-placeholder", "utf8");
+
+  const attachment = {
+    attachmentId: "../escape",
+    kind: "image" as const,
+    mime: "image/png",
+    fileName: "malformed-id.png",
+    storedPath,
+    parseState: "pending" as "failed" | "pending" | "running",
+    derivedPath: null,
+    extractedText: null,
+    transcriptText: null,
+  };
+  const capture = {
+    captureId: "cap_worker_malformed_id",
+    attachments: [attachment],
+  };
+  let job = {
+    jobId: "job_worker_malformed_id",
+    captureId: capture.captureId,
+    attachmentId: attachment.attachmentId,
+    state: "pending" as "failed" | "pending" | "running",
+    attempts: 0,
+    errorCode: null as string | null,
+    errorMessage: null as string | null,
+    providerId: null as string | null,
+    resultPath: null as string | null,
+  };
+
+  const runtime = {
+    databasePath: path.join(vaultRoot, ".runtime", "inboxd.sqlite"),
+    close() {},
+    getCursor() {
+      return null;
+    },
+    setCursor() {},
+    findByExternalId() {
+      return null;
+    },
+    upsertCaptureIndex() {
+      throw new Error("not used in malformed attachment ID test");
+    },
+    enqueueDerivedJobs() {},
+    listAttachmentParseJobs() {
+      return [job];
+    },
+    claimNextAttachmentParseJob() {
+      if (job.state !== "pending") {
+        return null;
+      }
+
+      job = {
+        ...job,
+        state: "running",
+        attempts: job.attempts + 1,
+      };
+      attachment.parseState = "running";
+      return job;
+    },
+    requeueAttachmentParseJobs() {
+      return 0;
+    },
+    completeAttachmentParseJob() {
+      throw new Error("worker should not complete malformed attachment IDs");
+    },
+    failAttachmentParseJob(input) {
+      job = {
+        ...job,
+        state: "failed",
+        attempts: input.attempt,
+        errorCode: input.errorCode ?? null,
+        errorMessage: input.errorMessage,
+        providerId: input.providerId ?? null,
+      };
+      attachment.parseState = "failed";
+      return {
+        applied: true,
+        job,
+      };
+    },
+    listCaptures() {
+      return [capture] as unknown[];
+    },
+    searchCaptures() {
+      return [];
+    },
+    getCapture(captureId) {
+      return captureId === capture.captureId ? (capture as unknown) : null;
+    },
+  } as unknown as InboxRuntimeStore;
+
+  const results = await runAttachmentParseWorker({
+    vaultRoot,
+    runtime,
+    registry: createParserRegistry([
+      {
+        id: "unexpected-success-provider",
+        locality: "local",
+        openness: "open_source",
+        runtime: "embedded",
+        priority: 100,
+        async discover() {
+          return {
+            available: true,
+            reason: "available for malformed attachment ID worker test",
+          };
+        },
+        supports() {
+          return true;
+        },
+        async run() {
+          return {
+            text: "should not run",
+          };
+        },
+      },
+    ]),
+    scratchRoot,
+    maxJobs: 1,
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.status, "failed");
+  assert.equal(results[0]?.errorCode, "parser_failed");
+  assert.match(results[0]?.errorMessage ?? "", /Parser attachment ID/u);
+  assert.equal(attachment.parseState, "failed");
+  assert.equal(attachment.derivedPath, null);
+  assert.equal(attachment.extractedText, null);
+  assert.equal(attachment.transcriptText, null);
+  assert.equal(job.state, "failed");
+  assert.equal(job.resultPath, null);
+  assert.deepEqual(await fs.readdir(scratchRoot), []);
+  await assert.rejects(fs.access(path.join(vaultRoot, "derived", "inbox", capture.captureId)));
 });
 
 test("attachment parse worker consumes inbox jobs, writes derived artifacts, and updates runtime search", async () => {

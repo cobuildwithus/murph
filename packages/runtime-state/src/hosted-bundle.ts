@@ -6,6 +6,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import type { HostedExecutionBundleKind } from "./hosted-execution.js";
 
 export const HOSTED_BUNDLE_SCHEMA = "healthybob.hosted-bundle.v1";
+const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 
 interface HostedBundleArchiveFile {
   contentsBase64: string;
@@ -87,7 +88,7 @@ export async function restoreHostedBundleRoots(input: {
       throw new Error(`Hosted bundle root "${file.root}" is not mapped for restore.`);
     }
 
-    const absolutePath = path.join(root, normalizeBundlePath(file.path));
+    const absolutePath = resolveHostedBundleRestorePath(root, file.path);
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, Buffer.from(file.contentsBase64, "base64"));
   }
@@ -275,18 +276,48 @@ async function collectBundleFiles(input: {
 }
 
 function normalizeBundlePath(value: string): string {
-  const normalized = path.posix.normalize(value);
+  const candidate = value.replace(/\\/g, "/");
+
+  if (!candidate || candidate.includes("\u0000")) {
+    throw new Error(`Hosted bundle path is invalid: ${value}`);
+  }
+
+  if (WINDOWS_DRIVE_PREFIX_PATTERN.test(candidate) || path.posix.isAbsolute(candidate)) {
+    throw new Error(`Hosted bundle path is invalid: ${value}`);
+  }
+
+  const normalized = path.posix.normalize(candidate);
 
   if (
     normalized === "."
+    || normalized === ".."
     || normalized.startsWith("../")
     || normalized.includes("/../")
-    || path.posix.isAbsolute(normalized)
   ) {
     throw new Error(`Hosted bundle path is invalid: ${value}`);
   }
 
   return normalized;
+}
+
+function resolveHostedBundleRestorePath(root: string, relativePath: string): string {
+  const absoluteRoot = path.resolve(root);
+  const absolutePath = path.resolve(absoluteRoot, normalizeBundlePath(relativePath));
+  assertPathWithinRoot(absoluteRoot, absolutePath, relativePath);
+  return absolutePath;
+}
+
+function assertPathWithinRoot(root: string, absolutePath: string, originalPath: string): void {
+  const relative = path.relative(root, absolutePath);
+
+  if (
+    relative === ".."
+    || relative.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relative)
+    || WINDOWS_DRIVE_PREFIX_PATTERN.test(relative)
+  ) {
+    throw new Error(`Hosted bundle path escapes restore root: ${originalPath}`);
+  }
 }
 
 function sortHostedBundleFiles(files: readonly HostedBundleArchiveFile[]): HostedBundleArchiveFile[] {

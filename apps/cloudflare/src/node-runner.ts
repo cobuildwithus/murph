@@ -14,6 +14,7 @@ import {
   type HostedExecutionRunnerResult,
 } from "@healthybob/runtime-state";
 
+import type { HostedExecutionRunnerCommitRequest } from "./execution-journal.js";
 import {
   createHostedCliRuntime,
   createHostedDeviceSyncRuntime,
@@ -25,8 +26,12 @@ import { loadHostedUserEnvForRunner } from "./user-env.js";
 const HOSTED_MAX_PARSER_JOBS = 50;
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 
+export interface HostedExecutionRunnerJobRequest extends HostedExecutionRunnerRequest {
+  commit?: HostedExecutionRunnerCommitRequest | null;
+}
+
 export async function runHostedExecutionJob(
-  input: HostedExecutionRunnerRequest,
+  input: HostedExecutionRunnerJobRequest,
 ): Promise<HostedExecutionRunnerResult> {
   const cli = createHostedCliRuntime();
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-runner-"));
@@ -81,7 +86,7 @@ export async function runHostedExecutionJob(
           vaultRoot: restored.vaultRoot,
         });
 
-        return {
+        const result: HostedExecutionRunnerResult = {
           bundles: {
             agentState: encodeHostedBundleBase64(bundles.agentStateBundle),
             vault: encodeHostedBundleBase64(bundles.vaultBundle),
@@ -96,10 +101,50 @@ export async function runHostedExecutionJob(
             }),
           },
         };
+
+        await commitHostedExecutionResult({
+          commit: input.commit ?? null,
+          dispatch: input.dispatch,
+          result,
+        });
+
+        return result;
       },
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
+  }
+}
+
+async function commitHostedExecutionResult(input: {
+  commit: HostedExecutionRunnerCommitRequest | null;
+  dispatch: HostedExecutionDispatchRequest;
+  result: HostedExecutionRunnerResult;
+}): Promise<void> {
+  if (!input.commit) {
+    return;
+  }
+
+  const response = await fetch(input.commit.url, {
+    body: JSON.stringify({
+      currentBundleRefs: input.commit.bundleRefs,
+      ...input.result,
+    }),
+    headers: {
+      ...(input.commit.token
+        ? {
+            authorization: `Bearer ${input.commit.token}`,
+          }
+        : {}),
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Hosted runner durable commit failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
+    );
   }
 }
 

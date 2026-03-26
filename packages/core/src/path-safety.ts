@@ -5,6 +5,7 @@ import { VaultError } from "./errors.js";
 import { isErrnoException } from "./types.js";
 
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
 
 function toVaultRelativeDisplayPath(value: string): string {
   return value.split(path.sep).join("/");
@@ -54,6 +55,64 @@ export function normalizeRelativeVaultPath(relativePath: unknown): string {
   }
 
   return normalized;
+}
+
+export function normalizeOpaquePathSegment(value: unknown, label = "Path segment"): string {
+  if (typeof value !== "string") {
+    throw new VaultError("VAULT_INVALID_PATH_SEGMENT", `${label} must be a string.`, {
+      value: String(value ?? ""),
+    });
+  }
+
+  const candidate = value;
+
+  if (!candidate) {
+    throw new VaultError("VAULT_INVALID_PATH_SEGMENT", `${label} is required.`);
+  }
+
+  if (CONTROL_CHARACTER_PATTERN.test(candidate)) {
+    throw new VaultError(
+      "VAULT_INVALID_PATH_SEGMENT",
+      `${label} may not contain control characters.`,
+      {
+        value: String(value ?? ""),
+      },
+    );
+  }
+
+  if (candidate !== candidate.trim()) {
+    throw new VaultError(
+      "VAULT_INVALID_PATH_SEGMENT",
+      `${label} must not contain leading or trailing whitespace.`,
+      {
+        value,
+      },
+    );
+  }
+
+  if (
+    WINDOWS_DRIVE_PREFIX_PATTERN.test(candidate) ||
+    path.posix.isAbsolute(candidate) ||
+    path.win32.isAbsolute(candidate)
+  ) {
+    throw new VaultError("VAULT_INVALID_PATH_SEGMENT", `${label} must not be absolute.`, {
+      value: String(value ?? ""),
+    });
+  }
+
+  if (candidate.includes("/") || candidate.includes("\\")) {
+    throw new VaultError("VAULT_INVALID_PATH_SEGMENT", `${label} must not contain path separators.`, {
+      value: String(value ?? ""),
+    });
+  }
+
+  if (candidate === "." || candidate === "..") {
+    throw new VaultError("VAULT_INVALID_PATH_SEGMENT", `${label} must not contain traversal segments.`, {
+      value: String(value ?? ""),
+    });
+  }
+
+  return candidate;
 }
 
 export function resolveVaultPath(vaultRoot: unknown, relativePath: unknown): {
