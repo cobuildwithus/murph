@@ -110,19 +110,13 @@ export async function runInboxDaemon(input: {
   signal: AbortSignal;
   continueOnConnectorFailure?: boolean;
   connectorRestartPolicy?: ConnectorRestartPolicy;
-  restartConnectorOnFailure?: boolean;
-  connectorRestartDelayMs?: number;
-  maxConnectorRestartDelayMs?: number;
 }): Promise<void> {
   const controller = new AbortController();
   const releaseAbortRelay = relayAbort(input.signal, controller);
   const continueOnConnectorFailure = input.continueOnConnectorFailure ?? false;
-  const connectorRestartPolicy = resolveConnectorRestartPolicy({
-    connectorRestartPolicy: input.connectorRestartPolicy,
-    restartConnectorOnFailure: input.restartConnectorOnFailure,
-    connectorRestartDelayMs: input.connectorRestartDelayMs,
-    maxConnectorRestartDelayMs: input.maxConnectorRestartDelayMs,
-  });
+  const connectorRestartPolicy = resolveConnectorRestartPolicy(
+    input.connectorRestartPolicy,
+  );
   const runners = input.connectors.map((connector) =>
     runConnectorWithRestart({
       connector,
@@ -220,25 +214,13 @@ function resolveConnectorRestartDelayMs(
   return policy.backoffMs[index] ?? policy.backoffMs[policy.backoffMs.length - 1] ?? 0;
 }
 
-function resolveConnectorRestartPolicy(input: {
-  connectorRestartPolicy?: ConnectorRestartPolicy;
-  restartConnectorOnFailure?: boolean;
-  connectorRestartDelayMs?: number;
-  maxConnectorRestartDelayMs?: number;
-}): ResolvedConnectorRestartPolicy {
+function resolveConnectorRestartPolicy(
+  policy: ConnectorRestartPolicy | undefined,
+): ResolvedConnectorRestartPolicy {
   return {
-    enabled:
-      input.connectorRestartPolicy?.enabled ?? input.restartConnectorOnFailure ?? false,
-    backoffMs:
-      input.connectorRestartPolicy?.backoffMs !== undefined
-        ? normalizeRestartBackoffMs(input.connectorRestartPolicy.backoffMs)
-        : buildLegacyRestartBackoffMs(
-            input.connectorRestartDelayMs,
-            input.maxConnectorRestartDelayMs,
-          ),
-    maxAttempts: normalizeRestartMaxAttempts(
-      input.connectorRestartPolicy?.maxAttempts,
-    ),
+    enabled: policy?.enabled ?? false,
+    backoffMs: normalizeRestartBackoffMs(policy?.backoffMs),
+    maxAttempts: normalizeRestartMaxAttempts(policy?.maxAttempts),
   };
 }
 
@@ -268,38 +250,6 @@ function normalizeRestartMaxAttempts(value: number | null | undefined): number |
   }
 
   return Math.max(0, Math.floor(value));
-}
-
-function buildLegacyRestartBackoffMs(
-  connectorRestartDelayMs: number | undefined,
-  maxConnectorRestartDelayMs: number | undefined,
-): readonly number[] {
-  const normalizedRestartDelayMs = normalizeRestartDelay(
-    connectorRestartDelayMs ?? DEFAULT_CONNECTOR_RESTART_DELAY_MS,
-    "Connector restart delay",
-  );
-  const normalizedMaxRestartDelayMs = normalizeRestartDelay(
-    maxConnectorRestartDelayMs ?? DEFAULT_MAX_CONNECTOR_RESTART_DELAY_MS,
-    "Connector max restart delay",
-  );
-  if (normalizedMaxRestartDelayMs < normalizedRestartDelayMs) {
-    throw new TypeError("Connector max restart delay must be at least the restart delay.");
-  }
-
-  const backoffMs: number[] = [];
-  let nextRestartDelayMs = normalizedRestartDelayMs;
-
-  while (true) {
-    backoffMs.push(nextRestartDelayMs);
-    if (nextRestartDelayMs >= normalizedMaxRestartDelayMs) {
-      return Object.freeze(backoffMs);
-    }
-
-    nextRestartDelayMs = Math.min(
-      nextRestartDelayMs * 2,
-      normalizedMaxRestartDelayMs,
-    );
-  }
 }
 
 function relayAbort(signal: AbortSignal, controller: AbortController): () => void {

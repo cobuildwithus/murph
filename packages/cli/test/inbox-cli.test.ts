@@ -489,9 +489,6 @@ function createFakeParsersRuntimeModule(input?: {
       backoffMs?: readonly number[]
       maxAttempts?: number | null
     }
-    restartConnectorOnFailure?: boolean
-    connectorRestartDelayMs?: number
-    maxConnectorRestartDelayMs?: number
   }): Promise<void> | void
 }) {
   const discoveredAt = input?.discoveredAt ?? '2026-03-13T12:34:56.000Z'
@@ -666,18 +663,12 @@ function createFakeParsersRuntimeModule(input?: {
         backoffMs?: readonly number[]
         maxAttempts?: number | null
       }
-      restartConnectorOnFailure?: boolean
-      connectorRestartDelayMs?: number
-      maxConnectorRestartDelayMs?: number
     }) {
       try {
         await input?.onRunInboxDaemonWithParsers?.({
           connectors: payload.connectors,
           continueOnConnectorFailure: payload.continueOnConnectorFailure,
           connectorRestartPolicy: payload.connectorRestartPolicy,
-          restartConnectorOnFailure: payload.restartConnectorOnFailure,
-          connectorRestartDelayMs: payload.connectorRestartDelayMs,
-          maxConnectorRestartDelayMs: payload.maxConnectorRestartDelayMs,
           runtime: payload.runtime,
           signal: payload.signal,
           vaultRoot: payload.vaultRoot,

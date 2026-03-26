@@ -23,9 +23,6 @@ export interface RunInboxDaemonWithParsersInput extends CreateParsedInboxPipelin
   signal: AbortSignal;
   continueOnConnectorFailure?: boolean;
   connectorRestartPolicy?: ConnectorRestartPolicy;
-  restartConnectorOnFailure?: boolean;
-  connectorRestartDelayMs?: number;
-  maxConnectorRestartDelayMs?: number;
 }
 
 export async function createParsedInboxPipeline(
@@ -58,9 +55,6 @@ export async function runInboxDaemonWithParsers(
     signal,
     continueOnConnectorFailure,
     connectorRestartPolicy,
-    restartConnectorOnFailure,
-    connectorRestartDelayMs,
-    maxConnectorRestartDelayMs,
     ...pipelineInput
   } = input;
   let pipeline: ParsedInboxPipeline | null = null;
@@ -91,9 +85,6 @@ export async function runInboxDaemonWithParsers(
       signal,
       continueOnConnectorFailure,
       connectorRestartPolicy,
-      restartConnectorOnFailure,
-      connectorRestartDelayMs,
-      maxConnectorRestartDelayMs,
     });
   } catch (error) {
     await closeConnectors(connectors);
