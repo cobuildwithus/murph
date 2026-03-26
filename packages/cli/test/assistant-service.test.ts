@@ -84,6 +84,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     approvalPolicy: 'on-request' as const,
     profile: 'ops',
     oss: true,
+    selfDeliveryTargets: null,
   }
 
   assert.deepEqual(
@@ -223,6 +224,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Only use repo coding workflows when you edit repo code\/docs or the user explicitly asks for software changes/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',

@@ -77,7 +77,7 @@ import { errorMessage, normalizeNullableString } from './shared.js'
 
 // Bump this when changing the durable Codex bootstrap prompt text so existing
 // Codex provider sessions re-bootstrap cleanly on their next turn.
-export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.2'
+export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.3'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -1399,6 +1399,7 @@ function buildAssistantSystemPrompt(input: {
       '- `chat` / `assistant chat` / `healthybob chat` are the same local interactive terminal chat surface.',
       '- `run` / `assistant run` / `healthybob run` are the long-lived automation loop for inbox watch, scheduled prompts, and configured channel auto-reply; with a model they can also triage inbox captures into structured vault updates.',
       '- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault. Treat capture-style requests like meal logging as explicit permission to use the matching CLI write surface.',
+      '- For vault-only tasks, do not read repo `AGENTS.md`, `agent-docs/**`, or `COORDINATION_LEDGER.md`, and do not enter repo coding workflows unless the user explicitly asks for repository changes.',
       '- Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
     ].join('\n'),
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
