@@ -114,7 +114,7 @@ test(
 
       assert.equal(vault.format, "healthybob.query.v1");
       assert.equal(vault.metadata?.vaultId, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
-      assert.equal(vault.coreDocument?.id, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
+      assert.equal(vault.coreDocument?.displayId, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
       assert.equal(vault.experiments.length, 1);
       assert.equal(vault.journalEntries.length, 2);
       assert.equal(vault.events.length, 3);
@@ -174,6 +174,8 @@ test("list helpers apply date, tag, text, and kind filters against contract data
         "journal:2026-03-10",
         "smp_01JNV4GLU000000000000001",
         "smp_01JNV4HR0000000000000001",
+        "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+        "var_01JNW7YJ7MNE7M9Q2QWQK4Z400",
         "meal_01JNV4MEAL00000000000001",
         "smp_01JNV4GLU000000000000002",
         "smp_01JNV4HR0000000000000002",
@@ -672,7 +674,7 @@ test("model helpers return null or empty results for unmatched ids and filters",
   assert.deepEqual(listExperiments(vault, { slug: "missing" }), []);
   assert.deepEqual(listJournalEntries(vault, { from: "2026-03-13" }), []);
   assert.deepEqual(listRecords(vault, { streams: ["glucose"] }), []);
-  assert.deepEqual(listRecords(vault, { from: "2026-03-10" }).map((record) => record.id), [
+  assert.deepEqual(listRecords(vault, { from: "2026-03-10" }).map((record) => record.displayId), [
     "journal:2026-03-12",
   ]);
 });
@@ -1757,7 +1759,6 @@ function createSampleRecord(overrides: {
   return {
     displayId: overrides.id,
     primaryLookupId: overrides.id,
-    id: overrides.id,
     lookupIds: [overrides.id],
     recordType: "sample",
     sourcePath: overrides.sourcePath,
@@ -1797,7 +1798,6 @@ function createRecord(
   return {
     displayId,
     primaryLookupId,
-    id: displayId,
     lookupIds,
     recordType: overrides.recordType,
     sourcePath: overrides.sourcePath,

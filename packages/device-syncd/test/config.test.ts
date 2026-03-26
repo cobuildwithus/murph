@@ -14,6 +14,7 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
     DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
     DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
     DEVICE_SYNC_SECRET: "secret-for-tests",
+    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
   });
@@ -21,23 +22,7 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
   assert.equal(loaded.service.providers.length, 1);
   assert.equal(loaded.service.providers[0]?.provider, "oura");
   assert.equal(loaded.http.host, "127.0.0.1");
-  assert.equal(loaded.http.controlToken, "secret-for-tests");
-});
-
-test("loadDeviceSyncEnvironment prefers DEVICE_SYNC_CONTROL_TOKEN over DEVICE_SYNC_SECRET", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
-    DEVICE_SYNC_SECRET: "secret-for-tests",
-    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
-    DEVICE_SYNC_HOST: "127.0.0.2",
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-  });
-
-  assert.equal(loaded.service.secret, "secret-for-tests");
   assert.equal(loaded.http.controlToken, "control-token-for-tests");
-  assert.equal(loaded.http.host, "127.0.0.2");
 });
 
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
@@ -45,6 +30,7 @@ test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () =
     DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
     DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
     DEVICE_SYNC_SECRET: "secret-for-tests",
+    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     WHOOP_CLIENT_ID: "whoop-client-id",
     WHOOP_CLIENT_SECRET: "whoop-client-secret",
     OURA_CLIENT_ID: "oura-client-id",
@@ -64,6 +50,7 @@ test("loadDeviceSyncEnvironment rejects incomplete provider credentials", () => 
         DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
         DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
         DEVICE_SYNC_SECRET: "secret-for-tests",
+        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
         OURA_CLIENT_ID: "oura-client-id",
       }),
     /Oura configuration is incomplete/u,
@@ -94,6 +81,7 @@ test("loadDeviceSyncEnvironment rejects partial public listener configuration", 
         DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
         DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
         DEVICE_SYNC_SECRET: "secret-for-tests",
+        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
         DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
@@ -109,8 +97,23 @@ test("loadDeviceSyncEnvironment requires at least one provider", () => {
         DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
         DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
         DEVICE_SYNC_SECRET: "secret-for-tests",
+        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
       }),
     /No device sync providers are configured/u,
+  );
+});
+
+test("loadDeviceSyncEnvironment requires DEVICE_SYNC_CONTROL_TOKEN", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+        DEVICE_SYNC_SECRET: "secret-for-tests",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+      }),
+    /DEVICE_SYNC_CONTROL_TOKEN/u,
   );
 });
 
@@ -119,6 +122,7 @@ test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification t
     DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
     DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
     DEVICE_SYNC_SECRET: "secret-for-tests",
+    DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",
     OURA_CLIENT_SECRET: "oura-client-secret",
     OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",

@@ -25,15 +25,6 @@ export function resolveAssistantMemoryStoragePaths(
   return pickAssistantMemoryPaths(resolveAssistantStatePaths(vault))
 }
 
-/**
- * @deprecated Use `resolveAssistantMemoryStoragePaths` for memory-only operations
- * or `resolveAssistantStatePaths` when non-memory assistant-state paths are
- * intentionally required.
- */
-export function resolveAssistantMemoryPaths(vault: string): AssistantStatePaths {
-  return resolveAssistantStatePaths(vault)
-}
-
 export function resolveAssistantDailyMemoryPath(
   paths: Pick<AssistantMemoryPaths, 'dailyMemoryDirectory'>,
   now = new Date(),

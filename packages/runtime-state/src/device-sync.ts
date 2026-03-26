@@ -8,14 +8,10 @@ export const DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS = [
 ] as const;
 export const DEFAULT_DEVICE_SYNC_BASE_URL = "http://127.0.0.1:8788";
 export const DEVICE_SYNC_LOCAL_CONTROL_PLANE_ERROR_PREFIX =
-  "Device sync control-plane bearer tokens from DEVICE_SYNC_CONTROL_TOKEN or DEVICE_SYNC_SECRET may only target loopback DEVICE_SYNC_BASE_URL values.";
+  "Device sync control-plane bearer tokens from DEVICE_SYNC_CONTROL_TOKEN may only target loopback DEVICE_SYNC_BASE_URL values.";
 export const DEVICE_SYNC_SECRET_ENV = "DEVICE_SYNC_SECRET";
 export const DEVICE_SYNC_SECRET_ENV_KEYS = [
   DEVICE_SYNC_SECRET_ENV,
-] as const;
-export const DEVICE_SYNC_CONTROL_TOKEN_COMPAT_ENV_KEYS = [
-  ...DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS,
-  ...DEVICE_SYNC_SECRET_ENV_KEYS,
 ] as const;
 
 export interface DeviceSyncApiErrorPayload {
@@ -133,7 +129,7 @@ export function resolveDeviceSyncBaseUrl(
     DEFAULT_DEVICE_SYNC_BASE_URL;
   const controlToken =
     (typeof input.controlToken === "string" && input.controlToken.trim()) ||
-    readEnvValue(input.env, DEVICE_SYNC_CONTROL_TOKEN_COMPAT_ENV_KEYS) ||
+    readEnvValue(input.env, DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS) ||
     null;
   const baseUrl = normalizeDeviceSyncBaseUrl(configured);
 
@@ -148,11 +144,9 @@ export function resolveDeviceSyncBaseUrl(
 export function resolveDeviceSyncControlToken(
   input: ResolveDeviceSyncControlTokenInput = {},
 ): string | null {
-  // Keep DEVICE_SYNC_SECRET as a compatibility alias until every caller
-  // provides a dedicated control-plane token.
   const configured =
     (typeof input.value === "string" && input.value.trim()) ||
-    readEnvValue(input.env, DEVICE_SYNC_CONTROL_TOKEN_COMPAT_ENV_KEYS) ||
+    readEnvValue(input.env, DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS) ||
     null;
 
   return configured || null;

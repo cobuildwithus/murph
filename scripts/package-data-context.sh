@@ -33,12 +33,6 @@ Options:
   --name <prefix>            Output filename prefix (default: healthybob-data-bundle)
   --with-assistant-state     Include the matching assistant-state bucket (default)
   --no-assistant-state       Exclude assistant-state files
-  --with-tests               Accepted for compatibility; ignored
-  --no-tests                 Accepted for compatibility; ignored
-  --with-docs                Accepted for compatibility; ignored
-  --no-docs                  Accepted for compatibility; ignored
-  --with-ci                  Accepted for compatibility; ignored
-  --no-ci                    Accepted for compatibility; ignored
   -h, --help                 Show this help message
 USAGE
   exit "$exit_code"
@@ -257,9 +251,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-assistant-state)
       include_assistant_state=0
-      shift
-      ;;
-    --with-tests|--no-tests|--with-docs|--no-docs|--with-ci|--no-ci)
       shift
       ;;
     -h|--help)

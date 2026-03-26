@@ -1,6 +1,6 @@
 import {
+  DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS,
   DEVICE_SYNC_SECRET_ENV_KEYS,
-  resolveDeviceSyncControlToken,
 } from "@healthybob/runtime-state";
 
 import { createOuraDeviceSyncProvider } from "./providers/oura.js";
@@ -140,9 +140,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
   const vaultRoot = requireEnv(env, DEVICE_SYNC_VAULT_ROOT_ENV_KEYS);
   const publicBaseUrl = requireEnv(env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS);
   const secret = requireEnv(env, DEVICE_SYNC_SECRET_ENV_KEYS);
-  // Keep DEVICE_SYNC_SECRET as the control-token fallback for local bootstrap
-  // compatibility until callers fully migrate to DEVICE_SYNC_CONTROL_TOKEN.
-  const controlToken = resolveDeviceSyncControlToken({ env }) ?? secret;
+  const controlToken = requireEnv(env, DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS);
   const logger = createConsoleDeviceSyncLogger();
   const providers = createConfiguredProviders(env);
   const publicListener = readOptionalPublicListener(env);

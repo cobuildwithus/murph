@@ -437,7 +437,7 @@ function requireControlToken(controlToken: string | undefined): string {
   }
 
   throw new TypeError(
-    "Device sync control routes require DEVICE_SYNC_CONTROL_TOKEN or DEVICE_SYNC_SECRET.",
+    "Device sync control routes require DEVICE_SYNC_CONTROL_TOKEN.",
   );
 }
 

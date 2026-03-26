@@ -23,8 +23,6 @@ export type VaultRecordType = CanonicalEntityFamily;
 export interface VaultRecord {
   displayId: string;
   primaryLookupId: string;
-  /** @deprecated Use `displayId` instead. */
-  id: string;
   lookupIds: string[];
   recordType: VaultRecordType;
   sourcePath: string;
@@ -164,17 +162,6 @@ export const ALL_VAULT_RECORD_TYPES = [
   "sample",
 ] as const satisfies readonly VaultRecordType[];
 
-// `listRecords()` preserves this historical subset by default for compatibility.
-// It is intentionally narrower than the full read-model coverage in `ALL_VAULT_RECORD_TYPES`.
-const LEGACY_DEFAULT_LIST_RECORD_TYPES = [
-  "audit",
-  "core",
-  "event",
-  "experiment",
-  "journal",
-  "sample",
-] as const satisfies readonly VaultRecordType[];
-
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
   return readVaultWithHealthMode(vaultRoot, "strict-async");
 }
@@ -306,7 +293,7 @@ export function listRecords(
 ): VaultRecord[] {
   const { recordTypes } = filters;
   const recordLikeFilter = prepareRecordLikeFilter(filters);
-  const typeSet = new Set(recordTypes ?? LEGACY_DEFAULT_LIST_RECORD_TYPES);
+  const typeSet = new Set(recordTypes ?? ALL_VAULT_RECORD_TYPES);
 
   return vault.records.filter((record) => {
     if (!matchesRequiredSet(record.recordType, typeSet)) {
@@ -816,7 +803,6 @@ function toVaultRecord(entity: CanonicalEntity, vaultRoot: string): VaultRecord 
   return {
     displayId: entity.entityId,
     primaryLookupId: entity.primaryLookupId,
-    id: entity.entityId,
     lookupIds: entity.lookupIds,
     recordType: entity.family,
     sourcePath: entity.path,

@@ -151,66 +151,11 @@ export async function removeManagedControlToken(
   await dependencies.removeFile(resolveManagedControlTokenPath(paths))
 }
 
-export async function migrateLegacyManagedControlToken(
-  paths: DeviceDaemonPaths,
-  state: DeviceDaemonStateRecord,
-  dependencies: Pick<
-    DeviceDaemonDependencies,
-    'readFile' | 'mkdir' | 'writeFile' | 'chmod'
-  >,
-): Promise<void> {
-  let text: string
-
-  try {
-    text = await dependencies.readFile(paths.launcherStatePath)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return
-    }
-
-    throw error
-  }
-
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(text) as unknown
-  } catch {
-    throw new VaultCliError(
-      'DEVICE_SYNC_STATE_INVALID',
-      'Device sync daemon launcher state is invalid.',
-    )
-  }
-
-  const legacyControlToken =
-    parsed &&
-    typeof parsed === 'object' &&
-    !Array.isArray(parsed) &&
-    typeof (parsed as { controlToken?: unknown }).controlToken === 'string'
-      ? (parsed as { controlToken: string }).controlToken
-      : null
-
-  if (!legacyControlToken) {
-    return
-  }
-
-  await writeManagedControlToken(paths, legacyControlToken, dependencies)
-  await writeDeviceDaemonState(paths, state, dependencies)
-}
-
 export function resolveManagedControlToken(paths: DeviceDaemonPaths): string | null {
   try {
     return readFileSync(resolveManagedControlTokenPath(paths), 'utf8').trim() || null
   } catch {
-    try {
-      const text = readFileSync(paths.launcherStatePath, 'utf8')
-      const parsed = JSON.parse(text) as Partial<DeviceDaemonStateRecord> & {
-        controlToken?: unknown
-      }
-      return typeof parsed.controlToken === 'string' ? parsed.controlToken : null
-    } catch {
-      return null
-    }
+    return null
   }
 }
 

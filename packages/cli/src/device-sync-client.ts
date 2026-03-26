@@ -68,7 +68,7 @@ export function resolveDeviceSyncBaseUrl(
     if (isDeviceSyncLocalControlPlaneError(error)) {
       throw new VaultCliError(
         'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
-        'Device sync control-plane bearer tokens may only target loopback base URLs. Set DEVICE_SYNC_BASE_URL to localhost/127.0.0.1/::1 or unset DEVICE_SYNC_CONTROL_TOKEN/DEVICE_SYNC_SECRET.',
+        'Device sync control-plane bearer tokens may only target loopback base URLs. Set DEVICE_SYNC_BASE_URL to localhost/127.0.0.1/::1 or unset DEVICE_SYNC_CONTROL_TOKEN.',
         {
           baseUrl:
             (typeof value === 'string' && value.trim()) ||

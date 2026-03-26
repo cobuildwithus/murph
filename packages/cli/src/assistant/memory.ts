@@ -23,7 +23,6 @@ import {
 } from './memory/paths.js'
 export {
   resolveAssistantDailyMemoryPath,
-  resolveAssistantMemoryPaths,
   resolveAssistantMemoryStoragePaths,
 } from './memory/paths.js'
 export type { AssistantMemoryPaths } from './memory/paths.js'

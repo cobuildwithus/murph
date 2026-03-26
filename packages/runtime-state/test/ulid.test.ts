@@ -71,26 +71,14 @@ test("resolveDeviceSyncControlToken reads the unprefixed control token", () => {
   );
 });
 
-test("resolveDeviceSyncControlToken falls back to DEVICE_SYNC_SECRET", () => {
+test("resolveDeviceSyncControlToken ignores DEVICE_SYNC_SECRET-only configuration", () => {
   assert.equal(
     resolveDeviceSyncControlToken({
       env: {
         DEVICE_SYNC_SECRET: "secret-token",
       },
     }),
-    "secret-token",
-  );
-});
-
-test("resolveDeviceSyncControlToken prefers DEVICE_SYNC_CONTROL_TOKEN over DEVICE_SYNC_SECRET", () => {
-  assert.equal(
-    resolveDeviceSyncControlToken({
-      env: {
-        DEVICE_SYNC_CONTROL_TOKEN: "control-token",
-        DEVICE_SYNC_SECRET: "secret-token",
-      },
-    }),
-    "control-token",
+    null,
   );
 });
 

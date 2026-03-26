@@ -469,7 +469,6 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
   return {
     displayId: overrides.displayId,
     primaryLookupId: overrides.primaryLookupId ?? overrides.displayId,
-    id: overrides.id ?? overrides.displayId,
     lookupIds: overrides.lookupIds ?? [overrides.displayId],
     recordType: overrides.recordType,
     sourcePath: overrides.sourcePath ?? `${overrides.recordType}/${overrides.displayId}`,
@@ -759,7 +758,7 @@ test("canonical entity helpers filter projected health families and preserve leg
   );
   assert.deepEqual(
     listRecords(vault).map((record) => record.recordType),
-    ["sample"],
+    ["assessment", "goal", "sample"],
   );
   assert.deepEqual(
     listRecords(vault, {
@@ -1082,9 +1081,9 @@ test("buildExportPack preserves the five-file pack while embedding health contex
       ),
     );
 
-    const recordsPayload = JSON.parse(recordsFile.contents) as Array<{ id: string }>;
+    const recordsPayload = JSON.parse(recordsFile.contents) as Array<{ displayId: string }>;
     assert.ok(Array.isArray(recordsPayload));
-    assert.deepEqual(recordsPayload.map((entry) => entry.id), ["evt_health_01"]);
+    assert.deepEqual(recordsPayload.map((entry) => entry.displayId), ["evt_health_01"]);
     assert.match(assistantFile.contents, /## Intake Assessments/);
     assert.match(assistantFile.contents, /## Current Profile/);
     assert.match(assistantFile.contents, /## Health History/);

@@ -74,10 +74,10 @@ export function buildManagedDeviceSyncEnvironment(input: {
     [DEVICE_SYNC_PUBLIC_BASE_URL_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ||
       input.baseUrl,
-    // Keep mirroring the chosen control token into DEVICE_SYNC_SECRET unless
-    // the operator already provided a distinct secret, because device-syncd
-    // still requires DEVICE_SYNC_SECRET and treats it as the control-token
-    // fallback for local bootstrap compatibility.
+    // device-syncd still needs a stable service secret for local token
+    // encryption, so managed launches seed DEVICE_SYNC_SECRET from the
+    // operator-provided secret when available and otherwise reuse the managed
+    // control token value.
     [DEVICE_SYNC_SECRET_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_SECRET_ENV_KEYS) ||
       input.controlToken,

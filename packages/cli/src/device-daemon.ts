@@ -30,7 +30,6 @@ import {
   buildDeviceDaemonStartResult,
   buildDeviceDaemonStatusResult,
   buildDeviceDaemonStopResult,
-  migrateLegacyManagedControlToken,
   removeManagedControlToken,
   readDeviceDaemonState,
   resolveManagedControlToken,
@@ -117,9 +116,6 @@ export async function getManagedDeviceSyncDaemonStatus(input: {
   const paths = resolveDeviceDaemonPaths(vault)
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
   const state = await readDeviceDaemonState(paths, dependencies)
-  if (state !== null) {
-    await migrateLegacyManagedControlToken(paths, state, dependencies)
-  }
   const healthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl)
   const managed = state !== null && state.baseUrl === baseUrl
   const running =
@@ -165,9 +161,6 @@ export async function startManagedDeviceSyncDaemon(input: {
 
   const paths = resolveDeviceDaemonPaths(vault)
   const state = await readDeviceDaemonState(paths, dependencies)
-  if (state !== null) {
-    await migrateLegacyManagedControlToken(paths, state, dependencies)
-  }
   const existingHealthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl)
 
   if (state !== null && state.baseUrl === baseUrl) {
@@ -299,9 +292,6 @@ export async function stopManagedDeviceSyncDaemon(input: {
   const paths = resolveDeviceDaemonPaths(vault)
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
   const state = await readDeviceDaemonState(paths, dependencies)
-  if (state !== null) {
-    await migrateLegacyManagedControlToken(paths, state, dependencies)
-  }
 
   if (state === null || state.baseUrl !== baseUrl) {
     throw new VaultCliError(

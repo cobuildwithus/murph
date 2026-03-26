@@ -66,7 +66,7 @@ export function summarizeDailySamples(
 
     const { summary, values, unitSet } = group;
     summary.sampleCount += 1;
-    summary.sampleIds.push(sample.id);
+    summary.sampleIds.push(sample.displayId);
 
     if (!summary.sourcePaths.includes(sample.sourcePath)) {
       summary.sourcePaths.push(sample.sourcePath);

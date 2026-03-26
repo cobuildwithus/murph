@@ -137,7 +137,7 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
       baseUrl: unavailableBaseUrl,
       message,
       hint: isLocalityError
-        ? "Set DEVICE_SYNC_BASE_URL to a loopback URL such as http://127.0.0.1:8788 whenever DEVICE_SYNC_CONTROL_TOKEN or DEVICE_SYNC_SECRET is configured."
+        ? "Set DEVICE_SYNC_BASE_URL to a loopback URL such as http://127.0.0.1:8788 whenever DEVICE_SYNC_CONTROL_TOKEN is configured."
         : isAuthError
         ? "Set DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
         : "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",

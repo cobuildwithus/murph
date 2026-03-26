@@ -8,8 +8,6 @@ import type {
   EventRecord,
   EventSource,
   ExperimentEventRecord,
-  ExperimentFrontmatter,
-  ExperimentStatus,
   JournalDayFrontmatter,
   SampleQuality,
   SampleRecord,
@@ -29,7 +27,6 @@ import {
   BASELINE_SAMPLE_STREAMS,
   EVENT_SCHEMA_VERSION,
   EVENT_SOURCES,
-  EXPERIMENT_STATUSES,
   FRONTMATTER_SCHEMA_VERSIONS,
   ID_PREFIXES,
   SAMPLE_QUALITIES,
@@ -52,7 +49,7 @@ import { toDateOnly, toIsoTimestamp } from "./time.js";
 import { loadVault } from "./vault.js";
 
 import type { RawArtifact } from "./raw.js";
-import type { DateInput, FrontmatterObject, UnknownRecord } from "./types.js";
+import type { DateInput, UnknownRecord } from "./types.js";
 
 type EventRecordByKind<K extends EventKind> = Extract<EventRecord, { kind: K }>;
 type LooseRecord = Record<string, unknown>;
@@ -298,10 +295,6 @@ const EVENT_SOURCE_SET = new Set<EventSource>(EVENT_SOURCES as readonly EventSou
 const SAMPLE_STREAM_SET = new Set<SampleStream>(BASELINE_SAMPLE_STREAMS as readonly SampleStream[]);
 const SAMPLE_SOURCE_SET = new Set<SampleSource>(SAMPLE_SOURCES as readonly SampleSource[]);
 const SAMPLE_QUALITY_SET = new Set<SampleQuality>(SAMPLE_QUALITIES as readonly SampleQuality[]);
-const EXPERIMENT_STATUS_SET = new Set<ExperimentStatus>(
-  EXPERIMENT_STATUSES as readonly ExperimentStatus[],
-);
-
 function compactRecord(record: LooseRecord): UnknownRecord {
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => {
@@ -446,33 +439,6 @@ function trimStringList(value: unknown): string[] | undefined {
     .filter(Boolean);
 
   return entries.length > 0 ? entries : undefined;
-}
-
-function normalizeExperimentHypothesis(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function coerceExperimentStatus(value: unknown): ExperimentStatus {
-  return typeof value === "string" && EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)
-    ? (value as ExperimentStatus)
-    : "active";
-}
-
-function frontmatterString(value: FrontmatterObject, key: string): string {
-  const candidate = value[key];
-  return typeof candidate === "string" ? candidate : "";
-}
-
-function toExperimentComparableAttributes(
-  attributes: Pick<ExperimentFrontmatter, "slug" | "status" | "title" | "startedOn" | "hypothesis"> | FrontmatterObject,
-): UnknownRecord {
-  return compactRecord({
-    slug: frontmatterString(attributes as FrontmatterObject, "slug").trim(),
-    status: coerceExperimentStatus((attributes as FrontmatterObject).status),
-    title: frontmatterString(attributes as FrontmatterObject, "title").trim(),
-    startedOn: frontmatterString(attributes as FrontmatterObject, "startedOn").trim(),
-    hypothesis: normalizeExperimentHypothesis((attributes as FrontmatterObject).hypothesis),
-  });
 }
 
 const NUMERIC_UNIT_ALIASES = {

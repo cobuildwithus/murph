@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -221,66 +221,6 @@ test.sequential(
         error instanceof Error &&
         /loopback base URLs/u.test(error.message),
     )
-  },
-)
-
-test.sequential(
-  'getManagedDeviceSyncDaemonStatus migrates legacy launcher state tokens into the separate control-token file',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
-
-    try {
-      await mkdir(path.join(vaultRoot, '.runtime/device-syncd'), {
-        recursive: true,
-      })
-      await writeFile(
-        path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
-        JSON.stringify(
-          {
-            version: 1,
-            pid: 7171,
-            baseUrl: 'http://127.0.0.1:8788',
-            controlToken: 'legacy-control-token',
-            startedAt: '2026-03-25T00:00:00.000Z',
-          },
-          null,
-          2,
-        ),
-      )
-
-      const status = await getManagedDeviceSyncDaemonStatus({
-        vault: vaultRoot,
-        dependencies: {
-          fetchImpl: async () =>
-            new Response(
-              JSON.stringify({
-                ok: true,
-              }),
-              { status: 200 },
-            ),
-          isProcessAlive(pid) {
-            return pid === 7171
-          },
-        },
-      })
-
-      const launcherState = JSON.parse(
-        await readFile(
-          path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
-          'utf8',
-        ),
-      ) as { controlToken?: string }
-      const persistedControlToken = await readFile(
-        path.join(vaultRoot, '.runtime/device-syncd/control-token'),
-        'utf8',
-      )
-
-      assert.equal(status.managed, true)
-      assert.equal('controlToken' in launcherState, false)
-      assert.equal(persistedControlToken.trim(), 'legacy-control-token')
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
   },
 )
 
