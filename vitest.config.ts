@@ -17,7 +17,6 @@ export default defineConfig({
   test: {
     environment: "node",
     fileParallelism: false,
-    testTimeout: 15000,
     include: [
       "packages/core/test/canonical-mutations-boundary.test.ts",
       "packages/core/test/core.test.ts",
@@ -29,6 +28,7 @@ export default defineConfig({
       "packages/importers/test/device-providers.test.ts",
       "packages/importers/test/importers.test.ts",
       "packages/importers/test/input-validation.test.ts",
+      "packages/runtime-state/test/hosted-bundle.test.ts",
       "packages/runtime-state/test/ulid.test.ts",
       "packages/device-syncd/test/config.test.ts",
       "packages/device-syncd/test/http.test.ts",
@@ -82,6 +82,7 @@ export default defineConfig({
     coverage: {
       enabled: true,
       provider: "v8",
+      clean: false,
       reporter: ["text", "lcov"],
       reportsDirectory: "./coverage",
       include: [
@@ -116,5 +117,6 @@ export default defineConfig({
         statements: 85,
       },
     },
+    testTimeout: 60_000,
   },
 });

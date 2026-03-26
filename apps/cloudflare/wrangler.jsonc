@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "healthybob-hosted-runner",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_RUNNER",
+        "class_name": "UserRunnerDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserRunnerDurableObject"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUNDLES",
+      "bucket_name": "REPLACE_ME_hosted_execution_bundles",
+      "preview_bucket_name": "REPLACE_ME_hosted_execution_bundles_preview"
+    }
+  ],
+  "vars": {
+    "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID": "v1",
+    "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS": "900000",
+    "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
+    "HOSTED_EXECUTION_RETRY_DELAY_MS": "30000",
+    "HOSTED_EXECUTION_RUNNER_BASE_URL": "https://REPLACE_ME-hosted-runner.example.invalid"
+  },
+  // Configure these outside source control for real deployments:
+  // - HOSTED_EXECUTION_SIGNING_SECRET
+  // - HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY
+  // - HOSTED_EXECUTION_CONTROL_TOKEN
+  // - HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN
+}

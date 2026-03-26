@@ -6,6 +6,8 @@ export interface HostedExecutionEnvironment {
   controlToken: string | null;
   defaultAlarmDelayMs: number;
   dispatchSigningSecret: string;
+  maxEventAttempts: number;
+  retryDelayMs: number;
   runnerBaseUrl: string | null;
   runnerControlToken: string | null;
 }
@@ -16,11 +18,12 @@ export function readHostedExecutionEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionEnvironment {
   const dispatchSigningSecret = requireString(
-    source.HOSTED_EXECUTION_SIGNING_SECRET,
+    source.HOSTED_EXECUTION_SIGNING_SECRET
+      ?? source.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET,
     "HOSTED_EXECUTION_SIGNING_SECRET",
   );
   const bundleEncryptionKey = requireString(
-    source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY,
+    source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY ?? source.HB_HOSTED_BUNDLE_KEY,
     "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
   );
 
@@ -34,6 +37,16 @@ export function readHostedExecutionEnvironment(
       "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS",
     ),
     dispatchSigningSecret,
+    maxEventAttempts: parsePositiveInteger(
+      normalizeString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
+      3,
+      "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
+    ),
+    retryDelayMs: parsePositiveInteger(
+      normalizeString(source.HOSTED_EXECUTION_RETRY_DELAY_MS),
+      30_000,
+      "HOSTED_EXECUTION_RETRY_DELAY_MS",
+    ),
     runnerBaseUrl: normalizeBaseUrl(source.HOSTED_EXECUTION_RUNNER_BASE_URL),
     runnerControlToken: normalizeString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN),
   };

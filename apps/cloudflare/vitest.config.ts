@@ -20,6 +20,7 @@ export default defineConfig({
         "@healthybob/device-syncd": "packages/device-syncd/src/index.ts",
         "@healthybob/importers": "packages/importers/src/index.ts",
         "@healthybob/inboxd": "packages/inboxd/src/index.ts",
+        "@healthybob/parsers": "packages/parsers/src/index.ts",
         "@healthybob/query": "packages/query/src/index.ts",
         "@healthybob/runtime-state": "packages/runtime-state/src/index.ts",
       }),

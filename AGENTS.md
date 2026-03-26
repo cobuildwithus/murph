@@ -41,6 +41,7 @@ If instructions still conflict after applying this order, ask the user before ac
 - COORDINATION_LEDGER hard gate applies to repo code/docs/test/config changes only. It does not apply to vault-only data tasks whose writes stay under `vault/**`.
 - Ledger rows are active-work notices by default, not hard file locks. Read overlapping rows first, preserve adjacent edits, and coordinate through scope/symbol notes. Treat a row as exclusive only when it explicitly says overlap is unsafe, the lane is a large refactor, or the user gives a conflicting direction.
 - Any spawned subagent that may review or edit code must read `COORDINATION_LEDGER.md`, follow the same hard gate before making code changes, and honor any explicit exclusive/refactor notes on overlapping rows.
+- Spawned subagents should default to a non-mini frontier model with `high` reasoning effort. Do not use mini variants unless the user explicitly asks for one or the task is purely trivial and the user has not asked for deeper thinking.
 - For non-doc repo changes that touch production code or tests, run completion workflow audit passes in order: `simplify` -> `test-coverage-audit` -> `task-finish-review`.
 - Those required audit passes must be executed explicitly via spawned subagents using the matching docs in `agent-docs/prompts/`; do not treat local self-review by the main implementation agent as satisfying the requirement.
 - Docs/process-only changes and vault-only data tasks skip completion workflow audit passes unless the user explicitly asks to run them.

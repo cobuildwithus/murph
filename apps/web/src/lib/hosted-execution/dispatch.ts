@@ -8,6 +8,8 @@ import {
 
 import { readHostedExecutionDispatchEnvironment } from "./env";
 
+const HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = 2_000;
+
 export async function dispatchHostedExecution(
   input: HostedExecutionDispatchRequest,
 ): Promise<{ dispatched: boolean; reason?: string }> {
@@ -34,6 +36,7 @@ export async function dispatchHostedExecution(
       [HOSTED_EXECUTION_TIMESTAMP_HEADER]: input.occurredAt,
     },
     method: "POST",
+    signal: AbortSignal.timeout(HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -43,6 +46,27 @@ export async function dispatchHostedExecution(
   return {
     dispatched: true,
   };
+}
+
+export async function dispatchHostedExecutionBestEffort(
+  input: HostedExecutionDispatchRequest,
+  options: {
+    context?: string;
+  } = {},
+): Promise<{ dispatched: boolean; reason?: string }> {
+  try {
+    return await dispatchHostedExecution(input);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      options.context ? `Hosted execution dispatch failed (${options.context}).` : "Hosted execution dispatch failed.",
+      message,
+    );
+    return {
+      dispatched: false,
+      reason: "dispatch-failed",
+    };
+  }
 }
 
 function createExecutionSignature(input: {

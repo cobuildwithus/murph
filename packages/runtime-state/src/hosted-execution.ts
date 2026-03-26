@@ -4,7 +4,8 @@ export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hb-execution-timestamp";
 export type HostedExecutionEventKind =
   | "member.activated"
   | "linq.message.received"
-  | "assistant.cron.tick";
+  | "assistant.cron.tick"
+  | "device-sync.wake";
 
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
@@ -26,13 +27,21 @@ export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecution
 
 export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
   kind: "assistant.cron.tick";
-  reason: "alarm" | "manual";
+  reason: "alarm" | "manual" | "device-sync";
+}
+
+export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
+  kind: "device-sync.wake";
+  connectionId: string | null;
+  provider: string | null;
+  reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
 }
 
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionLinqMessageReceivedEvent
-  | HostedExecutionAssistantCronTickEvent;
+  | HostedExecutionAssistantCronTickEvent
+  | HostedExecutionDeviceSyncWakeEvent;
 
 export interface HostedExecutionDispatchRequest {
   event: HostedExecutionEvent;
@@ -78,5 +87,8 @@ export interface HostedExecutionUserStatus {
   lastEventId: string | null;
   lastRunAt: string | null;
   nextWakeAt: string | null;
+  pendingEventCount: number;
+  poisonedEventIds: string[];
+  retryingEventId: string | null;
   userId: string;
 }

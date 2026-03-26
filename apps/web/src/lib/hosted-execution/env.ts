@@ -9,8 +9,14 @@ export function readHostedExecutionDispatchEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionDispatchEnvironment {
   return {
-    dispatchUrl: normalizeBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL),
-    signingSecret: normalizeString(source.HOSTED_EXECUTION_SIGNING_SECRET),
+    dispatchUrl: normalizeBaseUrl(
+      source.HOSTED_EXECUTION_DISPATCH_URL
+        ?? source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL,
+    ),
+    signingSecret: normalizeString(
+      source.HOSTED_EXECUTION_SIGNING_SECRET
+        ?? source.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET,
+    ),
   };
 }
 

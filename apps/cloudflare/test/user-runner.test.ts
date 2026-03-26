@@ -11,6 +11,8 @@ describe("HostedUserRunner", () => {
     controlToken: null,
     defaultAlarmDelayMs: 60_000,
     dispatchSigningSecret: "dispatch-secret",
+    maxEventAttempts: 3,
+    retryDelayMs: 10_000,
     runnerBaseUrl: "https://runner.example.test",
     runnerControlToken: "runner-token",
   };
@@ -19,6 +21,7 @@ describe("HostedUserRunner", () => {
     bucket.clear();
     storage.clear();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("dispatches work through the runner endpoint and persists encrypted bundles", async () => {
@@ -60,11 +63,54 @@ describe("HostedUserRunner", () => {
     expect(status.lastError).toBeNull();
     expect(status.bundleRefs.vault?.size).toBe(5);
     expect(status.bundleRefs.agentState?.size).toBe(11);
+    expect(status.pendingEventCount).toBe(0);
+    expect(status.poisonedEventIds).toEqual([]);
+    expect(status.retryingEventId).toBeNull();
     expect(storage.lastAlarm).not.toBeNull();
     expect(bucket.keys()).toEqual([
       "users/member_123/agent-state.bundle.json",
       "users/member_123/vault.bundle.json",
     ]);
+  });
+
+  it("retries failed events and eventually poisons them after repeated runner failures", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("runner failed", {
+          status: 503,
+        }),
+      ),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const first = await runner.dispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_retry_1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(first.lastError).toContain("HTTP 503");
+    expect(first.pendingEventCount).toBe(1);
+    expect(first.retryingEventId).toBe("evt_retry_1");
+
+    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
+    await runner.alarm();
+    vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
+    await runner.alarm();
+
+    const final = await runner.status("member_123");
+
+    expect(final.pendingEventCount).toBe(0);
+    expect(final.poisonedEventIds).toEqual(["evt_retry_1"]);
+    expect(final.retryingEventId).toBeNull();
+    expect(final.lastError).toContain("HTTP 503");
   });
 });
 

@@ -44,7 +44,11 @@ describe("runHostedExecutionJob", () => {
     ) as { autoReplyChannels: string[] };
 
     expect(result.result.summary).toContain("Initialized");
+    expect(result.result.summary).toContain("Parser jobs: 0.");
     expect(automationState.autoReplyChannels).toContain("linq");
+    await expect(
+      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "config.json"), "utf8"),
+    ).rejects.toThrow();
     await expect(readFile(path.join(restored.vaultRoot, "vault.json"), "utf8")).resolves.toContain("{");
   });
 });

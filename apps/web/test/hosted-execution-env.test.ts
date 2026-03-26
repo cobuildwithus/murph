@@ -12,4 +12,14 @@ describe("readHostedExecutionDispatchEnvironment", () => {
     expect(environment.dispatchUrl).toBe("https://runner.example.test");
     expect(environment.signingSecret).toBe("secret");
   });
+
+  it("accepts the recovered Cloudflare env aliases", () => {
+    const environment = readHostedExecutionDispatchEnvironment({
+      HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://runner.example.test/",
+      HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "secret",
+    });
+
+    expect(environment.dispatchUrl).toBe("https://runner.example.test");
+    expect(environment.signingSecret).toBe("secret");
+  });
 });

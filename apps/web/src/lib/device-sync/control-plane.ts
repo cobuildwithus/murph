@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
 import {
   createDeviceSyncPublicIngress,
   deviceSyncError,
@@ -16,6 +17,7 @@ import type {
   ProviderAuthTokens,
 } from "@healthybob/device-syncd";
 import { getPrisma } from "../prisma";
+import { dispatchHostedExecutionBestEffort } from "../hosted-execution/dispatch";
 import {
   assertBrowserMutationOrigin,
   requireAuthenticatedHostedUser,
@@ -56,6 +58,8 @@ export interface HostedTokenExport {
   keyVersion: string;
   exportedAt: string;
 }
+
+export type HostedDeviceSyncWakeSource = "connection-established" | "disconnect" | "webhook-accepted";
 
 export class HostedDeviceSyncControlPlane {
   readonly request: Request;
@@ -215,6 +219,13 @@ export class HostedDeviceSyncControlPlane {
             reason: "user_disconnect",
           },
       createdAt: now,
+    });
+    await dispatchHostedDeviceSyncWake({
+      connectionId,
+      occurredAt: now,
+      provider: connection.provider,
+      source: "disconnect",
+      userId,
     });
 
     return {
@@ -567,6 +578,13 @@ export class HostedDeviceSyncControlPlane {
             },
             createdAt: now,
           });
+          await dispatchHostedDeviceSyncWake({
+            connectionId: account.id,
+            occurredAt: now,
+            provider: account.provider,
+            source: "connection-established",
+            userId: ownerId,
+          });
         },
         onWebhookAccepted: async ({ account, webhook, now }) => {
           const ownerId = await this.store.getConnectionOwnerId(account.id);
@@ -588,6 +606,14 @@ export class HostedDeviceSyncControlPlane {
               payload: webhook.payload ?? {},
             },
             createdAt: now,
+          });
+          await dispatchHostedDeviceSyncWake({
+            connectionId: account.id,
+            occurredAt: now,
+            provider: account.provider,
+            source: "webhook-accepted",
+            traceId: webhook.traceId ?? null,
+            userId: ownerId,
           });
         },
       },
@@ -640,6 +666,19 @@ export function createHostedDeviceSyncControlPlane(request: Request): HostedDevi
   return new HostedDeviceSyncControlPlane(request);
 }
 
+export async function dispatchHostedDeviceSyncWake(input: {
+  connectionId: string;
+  occurredAt: string;
+  provider: string;
+  source: HostedDeviceSyncWakeSource;
+  traceId?: string | null;
+  userId: string;
+}): Promise<{ dispatched: boolean; reason?: string }> {
+  return dispatchHostedExecutionBestEffort(buildHostedDeviceSyncWakeDispatch(input), {
+    context: `device-sync ${input.source} user=${input.userId} provider=${input.provider} connection=${input.connectionId}`,
+  });
+}
+
 function resolveHostedPublicBaseUrl(request: Request, configuredBaseUrl: string | null): string {
   return (configuredBaseUrl ?? `${new URL(request.url).origin}/api/device-sync`).replace(/\/+$/u, "");
 }
@@ -674,4 +713,58 @@ function shouldRefreshHostedToken(accessTokenExpiresAt: string | null, now: stri
   }
 
   return Date.parse(accessTokenExpiresAt) <= Date.parse(now) + TOKEN_REFRESH_LEEWAY_MS;
+}
+
+function buildHostedDeviceSyncWakeDispatch(input: {
+  connectionId: string;
+  occurredAt: string;
+  provider: string;
+  source: HostedDeviceSyncWakeSource;
+  traceId?: string | null;
+  userId: string;
+}): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      kind: "device-sync.wake",
+      connectionId: input.connectionId,
+      provider: input.provider,
+      reason: mapHostedDeviceSyncWakeReason(input.source),
+      userId: input.userId,
+    },
+    eventId: buildHostedDeviceSyncWakeEventId(input),
+    occurredAt: input.occurredAt,
+  };
+}
+
+function buildHostedDeviceSyncWakeEventId(input: {
+  connectionId: string;
+  occurredAt: string;
+  provider: string;
+  source: HostedDeviceSyncWakeSource;
+  traceId?: string | null;
+  userId: string;
+}): string {
+  return [
+    "device-sync",
+    input.source,
+    input.userId,
+    input.provider,
+    input.connectionId,
+    input.traceId ?? input.occurredAt,
+  ].join(":");
+}
+
+function mapHostedDeviceSyncWakeReason(
+  source: HostedDeviceSyncWakeSource,
+): Extract<HostedExecutionDispatchRequest["event"], { kind: "device-sync.wake" }>["reason"] {
+  switch (source) {
+    case "connection-established":
+      return "connected";
+    case "disconnect":
+      return "disconnected";
+    case "webhook-accepted":
+      return "webhook_hint";
+    default:
+      return source satisfies never;
+  }
 }

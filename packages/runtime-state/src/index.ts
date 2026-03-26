@@ -1,6 +1,7 @@
 export * from "./assistant-state.js";
 export * from "./atomic-write.js";
 export * from "./device-sync.js";
+export * from "./hosted-bundle.js";
 export * from "./hosted-bundles.js";
 export * from "./hosted-execution.js";
 export * from "./locks.js";

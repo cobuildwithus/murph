@@ -23,6 +23,8 @@ interface WorkerEnvironmentSource {
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
   HOSTED_EXECUTION_CONTROL_TOKEN?: string;
   HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
+  HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
+  HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_BASE_URL?: string;
   HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
   HOSTED_EXECUTION_SIGNING_SECRET?: string;
@@ -37,7 +39,17 @@ export default {
         env as unknown as Readonly<Record<string, string | undefined>>,
       );
 
-      if (request.method === "POST" && url.pathname === "/internal/dispatch") {
+      if (request.method === "GET" && url.pathname === "/health") {
+        return json({
+          ok: true,
+          service: "cloudflare-hosted-runner",
+        });
+      }
+
+      if (
+        request.method === "POST"
+        && (url.pathname === "/internal/dispatch" || url.pathname === "/internal/events")
+      ) {
         const payload = await request.text();
         const { signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
         const verified = await verifyHostedExecutionSignature({
