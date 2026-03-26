@@ -164,7 +164,6 @@ export const assistantProviderFailoverRouteSchema = z
     apiKeyEnv: z.string().min(1).nullable().optional(),
     providerName: z.string().min(1).nullable().optional(),
     cooldownMs: z.number().int().positive().nullable().default(null),
-    maxAttempts: z.number().int().positive().nullable().default(null),
   })
   .strict()
 

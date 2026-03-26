@@ -11,6 +11,7 @@ import {
 } from '../assistant-cli-contracts.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
 
 const ASSISTANT_DIAGNOSTIC_EVENT_SCHEMA = 'healthybob.assistant-diagnostic-event.v1'
@@ -65,11 +66,12 @@ export async function saveAssistantDiagnosticsSnapshot(
   vault: string,
   snapshot: AssistantDiagnosticsSnapshot,
 ): Promise<AssistantDiagnosticsSnapshot> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-  const parsed = assistantDiagnosticsSnapshotSchema.parse(snapshot)
-  await writeJsonFileAtomic(paths.diagnosticSnapshotPath, parsed)
-  return parsed
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const parsed = assistantDiagnosticsSnapshotSchema.parse(snapshot)
+    await writeJsonFileAtomic(paths.diagnosticSnapshotPath, parsed)
+    return parsed
+  })
 }
 
 export async function recordAssistantDiagnosticEvent(input: {
@@ -86,42 +88,65 @@ export async function recordAssistantDiagnosticEvent(input: {
   turnId?: string | null
   vault: string
 }): Promise<AssistantDiagnosticEvent> {
-  const paths = resolveAssistantStatePaths(input.vault)
-  await ensureAssistantState(paths)
-  const at = input.at ?? new Date().toISOString()
-  const event = assistantDiagnosticEventSchema.parse({
-    schema: ASSISTANT_DIAGNOSTIC_EVENT_SCHEMA,
-    at,
-    level: input.level ?? 'info',
-    component: input.component,
-    kind: input.kind,
-    message: input.message,
-    code: input.code ?? null,
-    sessionId: input.sessionId ?? null,
-    turnId: input.turnId ?? null,
-    intentId: input.intentId ?? null,
-    dataJson: input.data ? JSON.stringify(input.data) : null,
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const at = input.at ?? new Date().toISOString()
+    const event = assistantDiagnosticEventSchema.parse({
+      schema: ASSISTANT_DIAGNOSTIC_EVENT_SCHEMA,
+      at,
+      level: input.level ?? 'info',
+      component: input.component,
+      kind: input.kind,
+      message: input.message,
+      code: input.code ?? null,
+      sessionId: input.sessionId ?? null,
+      turnId: input.turnId ?? null,
+      intentId: input.intentId ?? null,
+      dataJson: input.data ? JSON.stringify(input.data) : null,
+    })
+
+    await appendFile(paths.diagnosticEventsPath, `${JSON.stringify(event)}\n`, 'utf8')
+
+    const snapshot = await readAssistantDiagnosticsSnapshotAtPath(paths.diagnosticSnapshotPath)
+    const nextSnapshot = assistantDiagnosticsSnapshotSchema.parse({
+      ...snapshot,
+      updatedAt: at,
+      lastEventAt: at,
+      lastErrorAt: event.level === 'error' ? at : snapshot.lastErrorAt,
+      counters: applyCounterDeltas(snapshot.counters, input.counterDeltas),
+      recentWarnings: trimRecentWarnings([
+        ...snapshot.recentWarnings,
+        ...(event.level === 'warn' || event.level === 'error'
+          ? [`${event.at} ${event.component}/${event.kind}: ${event.message}`]
+          : []),
+      ]),
+    })
+    await writeJsonFileAtomic(paths.diagnosticSnapshotPath, nextSnapshot)
+
+    return event
   })
+}
 
-  await appendFile(paths.diagnosticEventsPath, `${JSON.stringify(event)}\n`, 'utf8')
+async function readAssistantDiagnosticsSnapshotAtPath(
+  snapshotPath: string,
+): Promise<AssistantDiagnosticsSnapshot> {
+  try {
+    const raw = await readFile(snapshotPath, 'utf8')
+    return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw) as unknown)
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+  }
 
-  const snapshot = await readAssistantDiagnosticsSnapshot(input.vault)
-  const nextSnapshot = assistantDiagnosticsSnapshotSchema.parse({
-    ...snapshot,
-    updatedAt: at,
-    lastEventAt: at,
-    lastErrorAt: event.level === 'error' ? at : snapshot.lastErrorAt,
-    counters: applyCounterDeltas(snapshot.counters, input.counterDeltas),
-    recentWarnings: trimRecentWarnings([
-      ...snapshot.recentWarnings,
-      ...(event.level === 'warn' || event.level === 'error'
-        ? [`${event.at} ${event.component}/${event.kind}: ${event.message}`]
-        : []),
-    ]),
+  return assistantDiagnosticsSnapshotSchema.parse({
+    schema: ASSISTANT_DIAGNOSTIC_SNAPSHOT_SCHEMA,
+    updatedAt: new Date(0).toISOString(),
+    lastEventAt: null,
+    lastErrorAt: null,
+    counters: createEmptyAssistantDiagnosticsCounters(),
+    recentWarnings: [],
   })
-  await saveAssistantDiagnosticsSnapshot(input.vault, nextSnapshot)
-
-  return event
 }
 
 function applyCounterDeltas(

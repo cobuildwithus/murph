@@ -18,7 +18,7 @@ interface AssistantAutomationRunLockMetadata {
   startedAt: string
 }
 
-const activeAutomationRoots = new Set<string>()
+const activeAutomationRoots = new Map<string, AssistantAutomationRunLockMetadata>()
 
 export async function acquireAssistantAutomationRunLock(input: {
   once?: boolean
@@ -29,20 +29,21 @@ export async function acquireAssistantAutomationRunLock(input: {
   const ownerKey = `assistant-automation:${input.paths.assistantStateRoot}`
   const lockPath = resolveAssistantAutomationRunLockPath(input.paths)
   const metadataPath = resolveAssistantAutomationRunLockMetadataPath(input.paths)
+  const metadata = {
+    command: buildProcessCommand(),
+    mode: input.once ? 'once' : 'continuous',
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  } satisfies AssistantAutomationRunLockMetadata
 
   if (activeAutomationRoots.has(input.paths.assistantStateRoot)) {
     throw createAssistantAlreadyRunningError({
-      metadata: {
-        command: buildProcessCommand(),
-        mode: input.once ? 'once' : 'continuous',
-        pid: process.pid,
-        startedAt: new Date().toISOString(),
-      },
+      metadata: activeAutomationRoots.get(input.paths.assistantStateRoot) ?? metadata,
       sameProcess: true,
     })
   }
 
-  activeAutomationRoots.add(input.paths.assistantStateRoot)
+  activeAutomationRoots.set(input.paths.assistantStateRoot, metadata)
   let handle: { release(): Promise<void> } | null = null
 
   try {
@@ -50,12 +51,7 @@ export async function acquireAssistantAutomationRunLock(input: {
       ownerKey,
       lockPath,
       metadataPath,
-      metadata: {
-        command: buildProcessCommand(),
-        mode: input.once ? 'once' : 'continuous',
-        pid: process.pid,
-        startedAt: new Date().toISOString(),
-      } satisfies AssistantAutomationRunLockMetadata,
+      metadata,
       parseMetadata(value) {
         return isAssistantAutomationRunLockMetadata(value) ? value : null
       },
@@ -92,13 +88,14 @@ export async function acquireAssistantAutomationRunLock(input: {
 export async function inspectAssistantAutomationRunLock(
   paths: AssistantStatePaths,
 ): Promise<AssistantStatusRunLock> {
-  if (activeAutomationRoots.has(paths.assistantStateRoot)) {
+  const activeMetadata = activeAutomationRoots.get(paths.assistantStateRoot)
+  if (activeMetadata) {
     return {
       state: 'active',
-      pid: process.pid,
-      startedAt: null,
-      mode: null,
-      command: buildProcessCommand(),
+      pid: activeMetadata.pid,
+      startedAt: activeMetadata.startedAt,
+      mode: activeMetadata.mode,
+      command: activeMetadata.command,
       reason: 'assistant automation already active in this process',
     }
   }

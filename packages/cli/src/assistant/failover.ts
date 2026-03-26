@@ -10,6 +10,7 @@ import {
   type AssistantProviderSessionOptions,
 } from '../assistant-cli-contracts.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
@@ -22,7 +23,6 @@ export interface ResolvedAssistantFailoverRoute {
   codexCommand: string | null
   cooldownMs: number
   label: string
-  maxAttempts: number | null
   provider: AssistantChatProvider
   providerOptions: AssistantProviderSessionOptions
   routeId: string
@@ -54,11 +54,12 @@ export async function saveAssistantFailoverState(
   vault: string,
   state: AssistantFailoverState,
 ): Promise<AssistantFailoverState> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-  const parsed = assistantFailoverStateSchema.parse(state)
-  await writeJsonFileAtomic(paths.failoverStatePath, parsed)
-  return parsed
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const parsed = assistantFailoverStateSchema.parse(state)
+    await writeJsonFileAtomic(paths.failoverStatePath, parsed)
+    return parsed
+  })
 }
 
 export function buildAssistantFailoverRoutes(input: {
@@ -74,7 +75,6 @@ export function buildAssistantFailoverRoutes(input: {
     codexCommand: input.codexCommand ?? input.defaults?.codexCommand ?? null,
     providerOptions: input.providerOptions,
     cooldownMs: null,
-    maxAttempts: null,
   })
   const backupRoutes = (input.backups ?? []).map((route) =>
     createResolvedAssistantFailoverRoute({
@@ -94,7 +94,6 @@ export function buildAssistantFailoverRoutes(input: {
         sandbox: route.sandbox,
       }),
       cooldownMs: route.cooldownMs,
-      maxAttempts: route.maxAttempts,
     }),
   )
 
@@ -131,30 +130,35 @@ export async function recordAssistantFailoverRouteSuccess(input: {
   route: ResolvedAssistantFailoverRoute
   vault: string
 }): Promise<AssistantFailoverState> {
-  const at = input.at ?? new Date().toISOString()
-  const state = await readAssistantFailoverState(input.vault)
-  const routes = upsertAssistantProviderRouteState(
-    state.routes,
-    {
-      routeId: input.route.routeId,
-      label: input.route.label,
-      provider: input.route.provider,
-      model: input.route.providerOptions.model,
-      failureCount: 0,
-      successCount: 1,
-      consecutiveFailures: 0,
-      lastFailureAt: null,
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      cooldownUntil: null,
-    },
-    'success',
-  )
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const at = input.at ?? new Date().toISOString()
+    const state = await readAssistantFailoverStateAtPath(paths.failoverStatePath)
+    const routes = upsertAssistantProviderRouteState(
+      state.routes,
+      {
+        routeId: input.route.routeId,
+        label: input.route.label,
+        provider: input.route.provider,
+        model: input.route.providerOptions.model,
+        failureCount: 0,
+        successCount: 1,
+        consecutiveFailures: 0,
+        lastFailureAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        cooldownUntil: null,
+      },
+      'success',
+    )
 
-  return saveAssistantFailoverState(input.vault, {
-    ...state,
-    updatedAt: at,
-    routes,
+    const nextState = assistantFailoverStateSchema.parse({
+      ...state,
+      updatedAt: at,
+      routes,
+    })
+    await writeJsonFileAtomic(paths.failoverStatePath, nextState)
+    return nextState
   })
 }
 
@@ -165,38 +169,44 @@ export async function recordAssistantFailoverRouteFailure(input: {
   route: ResolvedAssistantFailoverRoute
   vault: string
 }): Promise<AssistantFailoverState> {
-  const at = input.at ?? new Date().toISOString()
-  const state = await readAssistantFailoverState(input.vault)
-  const cooldownMs =
-    normalizePositiveInt(input.cooldownMs) ??
-    resolveAssistantFailoverCooldownMs(input.error) ??
-    input.route.cooldownMs
-  const cooldownUntil =
-    cooldownMs && cooldownMs > 0
-      ? new Date(Date.parse(at) + cooldownMs).toISOString()
-      : null
-  const routes = upsertAssistantProviderRouteState(
-    state.routes,
-    {
-      routeId: input.route.routeId,
-      label: input.route.label,
-      provider: input.route.provider,
-      model: input.route.providerOptions.model,
-      failureCount: 1,
-      successCount: 0,
-      consecutiveFailures: 1,
-      lastFailureAt: at,
-      lastErrorCode: readErrorCode(input.error),
-      lastErrorMessage: readErrorMessage(input.error),
-      cooldownUntil,
-    },
-    'failure',
-  )
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const at = input.at ?? new Date().toISOString()
+    const state = await readAssistantFailoverStateAtPath(paths.failoverStatePath)
+    const explicitCooldownMs = normalizePositiveInt(input.cooldownMs)
+    const derivedCooldownMs = resolveAssistantFailoverCooldownMs(input.error)
+    const cooldownMs =
+      explicitCooldownMs ??
+      Math.max(input.route.cooldownMs, derivedCooldownMs ?? input.route.cooldownMs)
+    const cooldownUntil =
+      cooldownMs && cooldownMs > 0
+        ? new Date(Date.parse(at) + cooldownMs).toISOString()
+        : null
+    const routes = upsertAssistantProviderRouteState(
+      state.routes,
+      {
+        routeId: input.route.routeId,
+        label: input.route.label,
+        provider: input.route.provider,
+        model: input.route.providerOptions.model,
+        failureCount: 1,
+        successCount: 0,
+        consecutiveFailures: 1,
+        lastFailureAt: at,
+        lastErrorCode: readErrorCode(input.error),
+        lastErrorMessage: readErrorMessage(input.error),
+        cooldownUntil,
+      },
+      'failure',
+    )
 
-  return saveAssistantFailoverState(input.vault, {
-    ...state,
-    updatedAt: at,
-    routes,
+    const nextState = assistantFailoverStateSchema.parse({
+      ...state,
+      updatedAt: at,
+      routes,
+    })
+    await writeJsonFileAtomic(paths.failoverStatePath, nextState)
+    return nextState
   })
 }
 
@@ -219,7 +229,6 @@ export function shouldAttemptAssistantProviderFailover(input: {
 function createResolvedAssistantFailoverRoute(input: {
   codexCommand: string | null
   cooldownMs: number | null | undefined
-  maxAttempts: number | null | undefined
   name: string | null | undefined
   provider: AssistantChatProvider
   providerOptions: AssistantProviderSessionOptions
@@ -244,8 +253,26 @@ function createResolvedAssistantFailoverRoute(input: {
     codexCommand: normalizeNullableString(input.codexCommand),
     cooldownMs:
       normalizePositiveInt(input.cooldownMs) ?? DEFAULT_FAILOVER_COOLDOWN_MS,
-    maxAttempts: normalizePositiveInt(input.maxAttempts),
   }
+}
+
+async function readAssistantFailoverStateAtPath(
+  failoverStatePath: string,
+): Promise<AssistantFailoverState> {
+  try {
+    const raw = await readFile(failoverStatePath, 'utf8')
+    return assistantFailoverStateSchema.parse(JSON.parse(raw) as unknown)
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+  }
+
+  return assistantFailoverStateSchema.parse({
+    schema: ASSISTANT_FAILOVER_STATE_SCHEMA,
+    updatedAt: new Date(0).toISOString(),
+    routes: [],
+  })
 }
 
 function normalizeAssistantProviderSessionOptions(input: {

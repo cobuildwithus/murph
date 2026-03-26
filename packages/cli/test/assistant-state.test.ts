@@ -28,6 +28,7 @@ import {
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
 import { withAssistantMemoryWriteLock } from '../src/assistant/memory/locking.js'
+import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.js'
 
 const cleanupPaths: string[] = []
 
@@ -325,6 +326,59 @@ test('assistant memory write locks allow nested reentry while serializing concur
   await firstHolding.promise
 
   const second = withAssistantMemoryWriteLock(paths, async () => {
+    events.push('second:start')
+    events.push('second:end')
+  })
+
+  await Promise.resolve()
+  assert.deepEqual(events, [
+    'first:start',
+    'nested:start',
+    'nested:end',
+    'first:after-nested',
+  ])
+
+  releaseFirst.resolve()
+  await Promise.all([first, second])
+
+  assert.deepEqual(events, [
+    'first:start',
+    'nested:start',
+    'nested:end',
+    'first:after-nested',
+    'first:end',
+    'second:start',
+    'second:end',
+  ])
+})
+
+test('assistant runtime write locks allow nested reentry while serializing concurrent same-root callers', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-runtime-lock-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const events: string[] = []
+  const firstHolding = createDeferred<void>()
+  const releaseFirst = createDeferred<void>()
+
+  const first = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    events.push('first:start')
+
+    await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+      events.push('nested:start')
+      events.push('nested:end')
+    })
+
+    events.push('first:after-nested')
+    firstHolding.resolve()
+    await releaseFirst.promise
+    events.push('first:end')
+  })
+
+  await firstHolding.promise
+
+  const second = withAssistantRuntimeWriteLock(vaultRoot, async () => {
     events.push('second:start')
     events.push('second:end')
   })

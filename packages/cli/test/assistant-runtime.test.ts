@@ -1367,6 +1367,141 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   ])
 })
 
+test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifacts for retryable delivery failures', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-deferred-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-deferred',
+    response: 'queued auto reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockRejectedValueOnce(
+    new VaultCliError(
+      'ASSISTANT_DELIVERY_FAILED',
+      'Temporary network interruption while delivering the reply.',
+      {
+        retryable: true,
+      },
+    ),
+  )
+
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    primed: boolean
+  }> = []
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-new',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-2',
+            threadId: 'chat-2',
+            threadTitle: null,
+            actorId: '+15551234567',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:05:00Z',
+            receivedAt: null,
+            text: 'How are my macros today?',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/2.json',
+            eventId: 'evt-2',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show() {
+      return {
+        capture: {
+          captureId: 'cap-new',
+          source: 'imessage',
+          threadTitle: null,
+          threadId: 'chat-2',
+          threadIsDirect: true,
+          actorId: '+15551234567',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:05:00Z',
+          text: 'How are my macros today?',
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const first = await scanAssistantAutoReplyOnce({
+    afterCursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-old',
+    },
+    autoReplyPrimed: true,
+    enabledChannels: ['imessage'],
+    inboxServices,
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(first, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.deepEqual(stateProgress[0], {
+    cursor: {
+      occurredAt: '2026-03-18T09:05:00Z',
+      captureId: 'cap-new',
+    },
+    primed: true,
+  })
+  const deferredArtifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-new',
+        'assistant',
+        'chat-deferred.json',
+      ),
+      'utf8',
+    ),
+  ) as {
+    deliveryIntentId: string | null
+    schema: string
+  }
+  assert.equal(deferredArtifact.schema, 'healthybob.assistant-chat-deferred.v1')
+  assert.equal(typeof deferredArtifact.deliveryIntentId, 'string')
+
+  const second = await scanAssistantAutoReplyOnce({
+    afterCursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-old',
+    },
+    autoReplyPrimed: true,
+    enabledChannels: ['imessage'],
+    inboxServices,
+    vault: vaultRoot,
+  })
+
+  assert.equal(second.replied, 0)
+  assert.equal(second.skipped, 1)
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+})
+
 test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks only for missing items', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-onboarding-memory-'))
   const vaultRoot = path.join(parent, 'vault')

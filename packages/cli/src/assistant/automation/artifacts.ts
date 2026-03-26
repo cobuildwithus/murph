@@ -36,6 +36,12 @@ export async function assistantChatReplyArtifactExists(
       captureId,
       'chat-error.json',
     )
+  ) || (
+    await assistantArtifactExists(
+      vaultRoot,
+      captureId,
+      'chat-deferred.json',
+    )
   )
 }
 
@@ -69,6 +75,42 @@ export async function writeAssistantChatResultArtifacts(input: {
           target: input.result.delivery?.target ?? null,
           respondedAt: input.respondedAt,
           response: input.result.response,
+        },
+      ),
+    ),
+  )
+}
+
+export async function writeAssistantChatDeferredArtifacts(input: {
+  captureIds: readonly string[]
+  queuedAt: string
+  result: Awaited<ReturnType<typeof sendAssistantMessage>>
+  vault: string
+}): Promise<void> {
+  const artifactPaths = await Promise.all(
+    input.captureIds.map((captureId) =>
+      resolveAssistantInboxArtifactPath(
+        input.vault,
+        captureId,
+        'chat-deferred.json',
+      ),
+    ),
+  )
+  const normalizedCaptureIds = artifactPaths.map((artifactPath) => artifactPath.captureId)
+
+  await Promise.all(
+    artifactPaths.map((artifactPath) =>
+      writeAssistantArtifactFile(
+        artifactPath,
+        {
+          schema: 'healthybob.assistant-chat-deferred.v1',
+          captureId: artifactPath.captureId,
+          groupCaptureIds: [...normalizedCaptureIds],
+          sessionId: input.result.session.sessionId,
+          queuedAt: input.queuedAt,
+          response: input.result.response,
+          deliveryIntentId: input.result.deliveryIntentId,
+          deliveryError: input.result.deliveryError,
         },
       ),
     ),

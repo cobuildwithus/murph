@@ -24,8 +24,7 @@ import {
   normalizeConversationRef,
 } from './assistant/conversation-ref.js'
 import {
-  createAssistantOutboxIntent,
-  dispatchAssistantOutboxIntent,
+  deliverAssistantOutboxMessage,
   normalizeAssistantDeliveryError,
 } from './assistant/outbox.js'
 import {
@@ -111,8 +110,9 @@ export async function deliverAssistantMessage(
     prompt: normalizedMessage,
     deliveryRequested: true,
   })
+  let deliveryIntentId: string | null = null
   try {
-    const intent = await createAssistantOutboxIntent({
+    const outcome = await deliverAssistantOutboxMessage({
       vault: input.vault,
       turnId: receipt.turnId,
       sessionId: resolved.session.sessionId,
@@ -123,49 +123,35 @@ export async function deliverAssistantMessage(
       threadId: resolved.session.binding.threadId,
       threadIsDirect: resolved.session.binding.threadIsDirect,
       bindingDelivery: resolved.session.binding.delivery,
-      explicitTarget,
+      explicitTarget: explicitTarget ?? null,
+      dependencies,
     })
+    deliveryIntentId = outcome.intent.intentId
 
-    const dispatched =
-      intent.status === 'sent' && intent.delivery
-        ? {
-            intent,
-            deliveryError: null,
-            session: null,
-          }
-        : await dispatchAssistantOutboxIntent({
-            vault: input.vault,
-            intentId: intent.intentId,
-            force: true,
-            dependencies,
-          })
-
-    if (dispatched.intent.status !== 'sent' || !dispatched.intent.delivery) {
+    if (outcome.kind !== 'sent' || !outcome.delivery) {
       throw attachAssistantOutboxIntentId(
-        dispatched.deliveryError ??
+        outcome.deliveryError ??
           new VaultCliError(
             'ASSISTANT_DELIVERY_FAILED',
             'Assistant outbound delivery did not complete successfully.',
           ),
-        dispatched.intent.intentId,
+        outcome.intent.intentId,
       )
     }
 
-    const delivery = dispatched.intent.delivery
+    const delivery = outcome.delivery
     const updatedSession =
-      dispatched.session ??
-      (intent.status === 'sent' && intent.delivery
-        ? resolved.session
-        : await saveAssistantSession(input.vault, {
-            ...resolved.session,
-            binding: resolvePersistedBinding(
-              resolved.session.binding,
-              delivery,
-              explicitTarget,
-            ),
-            updatedAt: delivery.sentAt,
-            lastTurnAt: delivery.sentAt,
-          }))
+      outcome.session ??
+      (await saveAssistantSession(input.vault, {
+        ...resolved.session,
+        binding: resolvePersistedBinding(
+          resolved.session.binding,
+          delivery,
+          explicitTarget,
+        ),
+        updatedAt: delivery.sentAt,
+        lastTurnAt: delivery.sentAt,
+      }))
 
     return assistantDeliverResultSchema.parse({
       vault: redactAssistantDisplayPath(input.vault),
@@ -179,6 +165,7 @@ export async function deliverAssistantMessage(
       vault: input.vault,
       turnId: receipt.turnId,
       error: deliveryError,
+      outboxIntentId: deliveryIntentId,
     })
     throw error
   }
@@ -290,12 +277,27 @@ export async function deliverAssistantMessageOverBinding(
 
 async function dispatchAssistantFallbackReceiptFailure(input: {
   error: ReturnType<typeof normalizeAssistantDeliveryError>
+  outboxIntentId?: string | null
   turnId: string
   vault: string
 }): Promise<void> {
-  const { appendAssistantTurnReceiptEvent, updateAssistantTurnReceipt } = await import(
+  const {
+    appendAssistantTurnReceiptEvent,
+    updateAssistantTurnReceipt,
+  } = await import(
     './assistant/turns.js'
   )
+  if (input.outboxIntentId) {
+    const { readAssistantOutboxIntent } = await import('./assistant/outbox.js')
+    const intent = await readAssistantOutboxIntent(
+      input.vault,
+      input.outboxIntentId,
+    ).catch(() => null)
+    if (intent && intent.status !== 'failed') {
+      return
+    }
+  }
+
   const failedAt = new Date().toISOString()
   await appendAssistantTurnReceiptEvent({
     vault: input.vault,

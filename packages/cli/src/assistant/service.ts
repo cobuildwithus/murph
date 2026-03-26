@@ -29,8 +29,7 @@ import {
   type AssistantOperatorDefaults,
 } from '../operator-config.js'
 import {
-  createAssistantOutboxIntent,
-  dispatchAssistantOutboxIntent,
+  deliverAssistantOutboxMessage,
   normalizeAssistantDeliveryError,
 } from './outbox.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -128,8 +127,15 @@ export interface AssistantChatInput
   initialPrompt?: string | null
 }
 
-interface AssistantTurnPlan {
+interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
+  cliAccess: ReturnType<typeof resolveAssistantCliAccessContext>
+  onboardingSummary: AssistantOnboardingSummary | null
+  persistUserPromptOnFailure: boolean
+  workingDirectory: string
+}
+
+interface AssistantRouteTurnPlan {
   cliEnv: NodeJS.ProcessEnv
   configOverrides?: readonly string[]
   conversationMessages?: ReadonlyArray<{
@@ -137,17 +143,13 @@ interface AssistantTurnPlan {
     role: 'assistant' | 'user'
   }>
   continuityContext: string | null
-  persistUserPromptOnFailure: boolean
   provider: AssistantChatProvider
-  usedConversationTranscript: boolean
-  usedMemoryPrompt: boolean
-  providerOptions: ReturnType<typeof resolveAssistantProviderOptions>
+  providerOptions: AssistantSession['providerOptions']
   resumeProviderSessionId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
   }
   systemPrompt: string | null
-  workingDirectory: string
 }
 
 interface PersistedUserTurn {
@@ -259,12 +261,14 @@ export async function sendAssistantMessage(
 ): Promise<AssistantAskResult> {
   const defaults = await resolveAssistantOperatorDefaults()
   const resolved = await resolveAssistantSessionForMessage(input, defaults)
-  const plan = await resolveAssistantTurnPlan(input, defaults, resolved)
+  const sharedPlan = await resolveAssistantTurnSharedPlan(input, resolved)
+  const routes = resolveAssistantTurnRoutes(input, defaults, resolved)
+  const primaryRoute = routes[0] ?? null
   const receipt = await createAssistantTurnReceipt({
     vault: input.vault,
     sessionId: resolved.session.sessionId,
-    provider: plan.provider,
-    providerModel: plan.providerOptions.model ?? null,
+    provider: primaryRoute?.provider ?? resolved.session.provider,
+    providerModel: primaryRoute?.providerOptions.model ?? null,
     prompt: input.prompt,
     deliveryRequested: input.deliverResponse === true,
   })
@@ -284,11 +288,12 @@ export async function sendAssistantMessage(
   let responseText: string | null = null
 
   try {
-    const userTurn = await persistUserTurn(input, resolved, plan, receipt.turnId)
+    const userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
     const providerResult = await executeProviderTurnWithRecovery({
       defaults,
       input,
-      plan,
+      routes,
+      plan: sharedPlan,
       resolvedSession: resolved.session,
       turnCreatedAt: userTurn.turnCreatedAt,
       turnId: userTurn.turnId,
@@ -296,7 +301,7 @@ export async function sendAssistantMessage(
     responseText = providerResult.response
     const session = await persistAssistantTurnAndSession({
       input,
-      plan,
+      plan: sharedPlan,
       providerResult,
       session: providerResult.session,
       turnCreatedAt: userTurn.turnCreatedAt,
@@ -491,11 +496,33 @@ export async function updateAssistantSessionOptions(input: {
   })
 }
 
-async function resolveAssistantTurnPlan(
+async function resolveAssistantTurnSharedPlan(
+  input: AssistantMessageInput,
+  resolved: ResolvedAssistantSession,
+): Promise<AssistantTurnSharedPlan> {
+  const cliAccess = resolveAssistantCliAccessContext()
+  return {
+    allowSensitiveHealthContext: shouldExposeSensitiveHealthContext(
+      resolved.session.binding,
+    ),
+    cliAccess,
+    onboardingSummary:
+      input.enableFirstTurnOnboarding === true
+        ? await updateAssistantOnboardingSummary({
+            prompt: input.prompt,
+            vault: input.vault,
+          })
+        : null,
+    persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
+    workingDirectory: input.workingDirectory ?? input.vault,
+  }
+}
+
+function resolveAssistantTurnRoutes(
   input: AssistantMessageInput,
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
-): Promise<AssistantTurnPlan> {
+): ResolvedAssistantFailoverRoute[] {
   const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
   const providerOptions = resolveAssistantProviderOptions({
     model: input.model ?? resolved.session.providerOptions.model ?? defaults?.model,
@@ -532,108 +559,113 @@ async function resolveAssistantTurnPlan(
       resolved.session.providerOptions.providerName ??
       defaults?.providerName,
   })
+  return buildAssistantFailoverRoutes({
+    backups: input.failoverRoutes ?? defaults?.failoverRoutes ?? null,
+    codexCommand: input.codexCommand ?? defaults?.codexCommand ?? null,
+    defaults,
+    provider,
+    providerOptions,
+  })
+}
+
+async function resolveAssistantRouteTurnPlan(input: {
+  input: AssistantMessageInput
+  route: ResolvedAssistantFailoverRoute
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): Promise<AssistantRouteTurnPlan> {
   const shouldResetCodexProviderSession =
     shouldResetCodexProviderSessionForPromptVersion({
-      provider,
-      session: resolved.session,
+      provider: input.route.provider,
+      session: input.session,
     })
   const shouldInjectBootstrapContext =
-    resolved.created ||
-    resolved.session.turnCount === 0 ||
-    provider === 'openai-compatible' ||
-    provider !== resolved.session.provider ||
-    resolved.session.providerSessionId === null ||
+    input.session.turnCount === 0 ||
+    input.route.provider === 'openai-compatible' ||
+    input.route.provider !== input.session.provider ||
+    input.session.providerSessionId === null ||
     shouldResetCodexProviderSession
   const shouldInjectFirstTurnOnboarding =
-    input.enableFirstTurnOnboarding === true &&
-    (resolved.created || resolved.session.turnCount === 0)
-  const conversationMessages = shouldUseLocalTranscriptContext(provider)
-    ? await loadAssistantConversationMessages({
-        limit: 20,
-        sessionId: resolved.session.sessionId,
-        vault: input.vault,
-      })
+    input.input.enableFirstTurnOnboarding === true && input.session.turnCount === 0
+  const conversationMessages = shouldUseLocalTranscriptContext(input.route.provider)
+    ? removeTrailingCurrentUserPrompt(
+        await loadAssistantConversationMessages({
+          limit: 20,
+          sessionId: input.session.sessionId,
+          vault: input.input.vault,
+        }),
+        input.input.prompt,
+      )
     : undefined
-  const onboardingSummary =
-    input.enableFirstTurnOnboarding === true
-      ? await updateAssistantOnboardingSummary({
-          prompt: input.prompt,
-          vault: input.vault,
-        })
-      : null
-  const allowSensitiveHealthContext = shouldExposeSensitiveHealthContext(
-    resolved.session.binding,
-  )
   const assistantMemoryPrompt = shouldInjectBootstrapContext
     ? await loadAssistantMemoryPromptBlock({
-        includeSensitiveHealthContext: allowSensitiveHealthContext,
-        vault: input.vault,
+        includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+        vault: input.input.vault,
       })
     : null
   const continuityContext = shouldResetCodexProviderSession
     ? await buildCodexPromptResetContinuityContext({
-        sessionId: resolved.session.sessionId,
-        vault: input.vault,
+        sessionId: input.session.sessionId,
+        vault: input.input.vault,
       })
     : null
-  const cliAccess = resolveAssistantCliAccessContext()
-  const workingDirectory = input.workingDirectory ?? input.vault
-  const providerCapabilities = resolveAssistantProviderCapabilities(provider)
+  const providerCapabilities = resolveAssistantProviderCapabilities(input.route.provider)
   const supportsDirectCliExecution = providerCapabilities.supportsDirectCliExecution
-  const memoryMcpConfig = buildAssistantMemoryMcpConfig(workingDirectory)
-  const cronMcpConfig = buildAssistantCronMcpConfig(workingDirectory)
+  const memoryMcpConfig = buildAssistantMemoryMcpConfig(
+    input.sharedPlan.workingDirectory,
+  )
+  const cronMcpConfig = buildAssistantCronMcpConfig(
+    input.sharedPlan.workingDirectory,
+  )
   const assistantMemoryMcpAvailable =
     supportsDirectCliExecution && memoryMcpConfig !== null
   const assistantCronMcpAvailable =
     supportsDirectCliExecution && cronMcpConfig !== null
-  const configOverrides = [
-    ...(memoryMcpConfig?.configOverrides ?? []),
-    ...(cronMcpConfig?.configOverrides ?? []),
-  ]
+  const configOverrides = supportsDirectCliExecution
+    ? [
+        ...(memoryMcpConfig?.configOverrides ?? []),
+        ...(cronMcpConfig?.configOverrides ?? []),
+      ]
+    : []
 
   return {
-    allowSensitiveHealthContext,
-    cliEnv: cliAccess.env,
+    cliEnv: input.sharedPlan.cliAccess.env,
     configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
     conversationMessages,
     continuityContext,
-    persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
-    provider,
-    usedConversationTranscript:
-      (conversationMessages?.length ?? 0) > 0 || continuityContext !== null,
-    usedMemoryPrompt: assistantMemoryPrompt !== null,
-    providerOptions,
+    provider: input.route.provider,
+    providerOptions: normalizeAssistantProviderOptions(input.route.providerOptions),
     resumeProviderSessionId:
-      provider === resolved.session.provider && !shouldResetCodexProviderSession
-        ? resolved.session.providerSessionId
+      input.route.provider === input.session.provider &&
+      !shouldResetCodexProviderSession
+        ? input.session.providerSessionId
         : null,
     sessionContext: shouldInjectBootstrapContext
       ? {
-          binding: resolved.session.binding,
+          binding: input.session.binding,
         }
       : undefined,
     systemPrompt: shouldInjectBootstrapContext
       ? buildAssistantSystemPrompt({
           assistantCronMcpAvailable,
-          cliAccess,
+          cliAccess: input.sharedPlan.cliAccess,
           assistantMemoryMcpAvailable,
           assistantMemoryPrompt,
-          channel: input.channel ?? resolved.session.binding.channel,
+          channel: input.input.channel ?? input.session.binding.channel,
           onboardingSummary:
-            shouldInjectFirstTurnOnboarding && onboardingSummary
-              ? onboardingSummary
+            shouldInjectFirstTurnOnboarding
+              ? input.sharedPlan.onboardingSummary
               : null,
           supportsDirectCliExecution,
         })
       : null,
-    workingDirectory,
   }
 }
 
 async function persistUserTurn(
   input: AssistantMessageInput,
   resolved: ResolvedAssistantSession,
-  plan: AssistantTurnPlan,
+  plan: AssistantTurnSharedPlan,
   turnId: string,
 ): Promise<PersistedUserTurn> {
   let turnCreatedAt = new Date().toISOString()
@@ -670,19 +702,13 @@ async function persistUserTurn(
 async function executeProviderTurnWithRecovery(input: {
   defaults: AssistantOperatorDefaults | null
   input: AssistantMessageInput
-  plan: AssistantTurnPlan
+  plan: AssistantTurnSharedPlan
   resolvedSession: AssistantSession
+  routes: readonly ResolvedAssistantFailoverRoute[]
   turnCreatedAt: string
   turnId: string
 }): Promise<ExecutedAssistantProviderTurnResult> {
-  const routes = buildAssistantFailoverRoutes({
-    backups: input.input.failoverRoutes ?? input.defaults?.failoverRoutes ?? null,
-    codexCommand: input.input.codexCommand ?? input.defaults?.codexCommand ?? null,
-    defaults: input.defaults,
-    provider: input.plan.provider,
-    providerOptions: input.plan.providerOptions,
-  })
-  const primaryRoute = routes[0] ?? null
+  const primaryRoute = input.routes[0] ?? null
   let failoverState = await readAssistantFailoverState(input.input.vault)
   let workingSession = input.resolvedSession
   let attemptCount = 0
@@ -696,9 +722,9 @@ async function executeProviderTurnWithRecovery(input: {
     vault: input.input.vault,
   })
 
-  while (attemptedRouteIds.size < routes.length) {
+  while (attemptedRouteIds.size < input.routes.length) {
     const remainingRoutes = prioritizeAssistantFailoverRoutes(
-      routes.filter((route) => !attemptedRouteIds.has(route.routeId)),
+      input.routes.filter((route) => !attemptedRouteIds.has(route.routeId)),
       failoverState,
     )
     const route = remainingRoutes[0] ?? null
@@ -775,12 +801,12 @@ async function executeProviderTurnWithRecovery(input: {
     })
 
     try {
-      const resumeProviderSessionId =
-        route.provider === workingSession.provider
-          ? attemptCount === 1
-            ? input.plan.resumeProviderSessionId
-            : workingSession.providerSessionId
-          : null
+      const routePlan = await resolveAssistantRouteTurnPlan({
+        input: input.input,
+        route,
+        session: workingSession,
+        sharedPlan: input.plan,
+      })
       maybeThrowInjectedAssistantFault({
         component: 'provider',
         fault: 'provider',
@@ -790,20 +816,25 @@ async function executeProviderTurnWithRecovery(input: {
         abortSignal: input.input.abortSignal,
         provider: route.provider,
         workingDirectory: input.plan.workingDirectory,
-        configOverrides: input.plan.configOverrides,
+        configOverrides: routePlan.configOverrides,
         env: {
-          ...input.plan.cliEnv,
+          ...routePlan.cliEnv,
           ...memoryTurnEnv,
         },
         userPrompt: input.input.prompt,
-        continuityContext: input.plan.continuityContext,
-        systemPrompt: input.plan.systemPrompt,
-        sessionContext: input.plan.sessionContext
+        continuityContext: routePlan.continuityContext,
+        systemPrompt: routePlan.systemPrompt,
+        sessionContext: routePlan.sessionContext
           ? {
               binding: workingSession.binding,
             }
           : undefined,
-        resumeProviderSessionId,
+        resumeProviderSessionId:
+          attemptCount === 1
+            ? routePlan.resumeProviderSessionId
+            : route.provider === workingSession.provider
+              ? workingSession.providerSessionId
+              : null,
         codexCommand:
           route.codexCommand ??
           input.input.codexCommand ??
@@ -816,9 +847,7 @@ async function executeProviderTurnWithRecovery(input: {
         baseUrl: route.providerOptions.baseUrl,
         apiKeyEnv: route.providerOptions.apiKeyEnv,
         providerName: route.providerOptions.providerName,
-        conversationMessages: shouldUseLocalTranscriptContext(route.provider)
-          ? input.plan.conversationMessages
-          : undefined,
+        conversationMessages: routePlan.conversationMessages,
         onEvent: input.input.onProviderEvent ?? undefined,
         profile: route.providerOptions.profile,
         oss: route.providerOptions.oss,
@@ -932,7 +961,7 @@ async function executeProviderTurnWithRecovery(input: {
       }
 
       const remainingCandidates = prioritizeAssistantFailoverRoutes(
-        routes.filter((candidate) => !attemptedRouteIds.has(candidate.routeId)),
+        input.routes.filter((candidate) => !attemptedRouteIds.has(candidate.routeId)),
         failoverState,
       )
       const nextRoute = remainingCandidates[0] ?? null
@@ -990,7 +1019,7 @@ function normalizeAssistantProviderOptions(
 
 async function persistAssistantTurnAndSession(input: {
   input: AssistantMessageInput
-  plan: AssistantTurnPlan
+  plan: AssistantTurnSharedPlan
   providerResult: ExecutedAssistantProviderTurnResult
   session: AssistantSession
   turnCreatedAt: string
@@ -1062,7 +1091,7 @@ async function deliverAssistantReply(input: {
     }
   }
 
-  const intent = await createAssistantOutboxIntent({
+  const outcome = await deliverAssistantOutboxMessage({
     vault: input.input.vault,
     turnId: input.turnId,
     sessionId: input.session.sessionId,
@@ -1077,53 +1106,41 @@ async function deliverAssistantReply(input: {
     threadIsDirect: input.session.binding.threadIsDirect,
     bindingDelivery: input.session.binding.delivery,
     explicitTarget: input.input.deliveryTarget ?? null,
+    dependencies: undefined,
   })
+  const session = outcome.session ?? input.session
 
-  if (intent.status === 'sent' && intent.delivery) {
-    return {
-      kind: 'sent',
-      delivery: intent.delivery,
-      intentId: intent.intentId,
-      session: input.session,
-    }
-  }
-
-  const dispatched = await dispatchAssistantOutboxIntent({
-    vault: input.input.vault,
-    intentId: intent.intentId,
-    force: true,
-  })
-  const session = dispatched.session ?? input.session
-
-  if (dispatched.intent.status === 'sent' && dispatched.intent.delivery) {
-    return {
-      kind: 'sent',
-      delivery: dispatched.intent.delivery,
-      intentId: dispatched.intent.intentId,
-      session,
-    }
-  }
-
-  if (
-    dispatched.intent.status === 'pending' ||
-    dispatched.intent.status === 'retryable' ||
-    dispatched.intent.status === 'sending'
-  ) {
-    return {
-      kind: 'queued',
-      error: dispatched.deliveryError,
-      intentId: dispatched.intent.intentId,
-      session,
-    }
-  }
-
-  return {
-    kind: 'failed',
-    error:
-      dispatched.deliveryError ??
-      normalizeAssistantDeliveryError(new Error('Assistant outbound delivery failed.')),
-    intentId: dispatched.intent.intentId,
-    session,
+  switch (outcome.kind) {
+    case 'sent':
+      return {
+        kind: 'sent',
+        delivery: outcome.delivery!,
+        intentId: outcome.intent.intentId,
+        session,
+      }
+    case 'queued':
+      return {
+        kind: 'queued',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        session,
+      }
+    case 'failed':
+      return {
+        kind: 'failed',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        session,
+      }
+    default:
+      return {
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(
+          new Error('Assistant outbound delivery failed.'),
+        ),
+        intentId: 'unknown',
+        session,
+      }
   }
 }
 
@@ -1143,6 +1160,27 @@ function prioritizeAssistantFailoverRoutes(
   }
 
   return ready.length > 0 ? [...ready, ...cooling] : [...routes]
+}
+
+function removeTrailingCurrentUserPrompt(
+  messages: ReadonlyArray<{
+    content: string
+    role: 'assistant' | 'user'
+  }>,
+  currentPrompt: string,
+): ReadonlyArray<{
+  content: string
+  role: 'assistant' | 'user'
+}> {
+  const lastMessage = messages.at(-1)
+  if (
+    lastMessage?.role === 'user' &&
+    lastMessage.content === currentPrompt
+  ) {
+    return messages.slice(0, -1)
+  }
+
+  return messages
 }
 
 function readAssistantErrorCode(error: unknown): string | null {

@@ -9,6 +9,7 @@ import { buildAssistantOutboxSummary } from './outbox.js'
 import { readAssistantDiagnosticsSnapshot } from './diagnostics.js'
 import { readAssistantFailoverState } from './failover.js'
 import { inspectAssistantAutomationRunLock } from './automation/runtime-lock.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
   readAssistantAutomationState,
   redactAssistantDisplayPath,
@@ -75,8 +76,9 @@ export async function refreshAssistantStatusSnapshot(
   vault: string,
 ): Promise<AssistantStatusResult> {
   const status = await getAssistantStatus(vault)
-  const paths = resolveAssistantStatePaths(vault)
-  await writeJsonFileAtomic(paths.statusPath, status)
+  await withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await writeJsonFileAtomic(paths.statusPath, status)
+  })
   return status
 }
 
@@ -112,7 +114,9 @@ function buildAssistantStatusWarnings(input: {
   if (input.outbox.retryable > 0) {
     warnings.push(`${input.outbox.retryable} assistant outbox intent(s) are waiting for retry`)
   }
-  const coolingDown = input.failover.routes.filter((route) => route.cooldownUntil)
+  const coolingDown = input.failover.routes.filter(
+    (route) => route.cooldownUntil && Date.parse(route.cooldownUntil) > Date.now(),
+  )
   if (coolingDown.length > 0) {
     warnings.push(
       `${coolingDown.length} provider failover route(s) are cooling down`,
@@ -133,10 +137,14 @@ async function resolveRecentTurns(
     | undefined,
 ): Promise<AssistantTurnReceipt[]> {
   const limit = normalizeTurnLimit(input?.limit)
-  const recentTurns = await listRecentAssistantTurnReceipts(vault, Math.max(limit, 50))
+  const sessionFilter = input?.sessionId?.trim()
+  const recentTurns = await listRecentAssistantTurnReceipts(
+    vault,
+    sessionFilter ? Number.MAX_SAFE_INTEGER : limit,
+  )
   const filtered =
-    input?.sessionId && input.sessionId.trim().length > 0
-      ? recentTurns.filter((turn) => turn.sessionId === input.sessionId)
+    sessionFilter
+      ? recentTurns.filter((turn) => turn.sessionId === sessionFilter)
       : recentTurns
   return filtered.slice(0, limit)
 }

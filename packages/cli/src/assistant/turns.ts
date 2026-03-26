@@ -15,6 +15,7 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store/paths.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
 
 const ASSISTANT_TURN_RECEIPT_SCHEMA = 'healthybob.assistant-turn-receipt.v1'
@@ -79,11 +80,12 @@ export async function saveAssistantTurnReceipt(
   vault: string,
   receipt: AssistantTurnReceipt,
 ): Promise<AssistantTurnReceipt> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-  const parsed = assistantTurnReceiptSchema.parse(receipt)
-  await writeJsonFileAtomic(resolveAssistantTurnReceiptPath(paths, parsed.turnId), parsed)
-  return parsed
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const parsed = assistantTurnReceiptSchema.parse(receipt)
+    await writeJsonFileAtomic(resolveAssistantTurnReceiptPath(paths, parsed.turnId), parsed)
+    return parsed
+  })
 }
 
 export async function appendAssistantTurnReceiptEvent(input: {
@@ -94,25 +96,30 @@ export async function appendAssistantTurnReceiptEvent(input: {
   turnId: string
   vault: string
 }): Promise<AssistantTurnReceipt | null> {
-  const existing = await readAssistantTurnReceipt(input.vault, input.turnId)
-  if (!existing) {
-    return null
-  }
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const receiptPath = resolveAssistantTurnReceiptPath(paths, input.turnId)
+    const existing = await readAssistantTurnReceiptAtPath(receiptPath)
+    if (!existing) {
+      return null
+    }
 
-  const at = input.at ?? new Date().toISOString()
-
-  return saveAssistantTurnReceipt(input.vault, {
-    ...existing,
-    updatedAt: at,
-    timeline: [
-      ...existing.timeline,
-      assistantTurnTimelineEventSchema.parse({
-        at,
-        kind: input.kind,
-        detail: input.detail ?? null,
-        metadata: input.metadata ?? {},
-      }),
-    ],
+    const at = input.at ?? new Date().toISOString()
+    const updated = assistantTurnReceiptSchema.parse({
+      ...existing,
+      updatedAt: at,
+      timeline: [
+        ...existing.timeline,
+        assistantTurnTimelineEventSchema.parse({
+          at,
+          kind: input.kind,
+          detail: input.detail ?? null,
+          metadata: input.metadata ?? {},
+        }),
+      ],
+    })
+    await writeJsonFileAtomic(receiptPath, updated)
+    return updated
   })
 }
 
@@ -121,12 +128,18 @@ export async function updateAssistantTurnReceipt(input: {
   turnId: string
   vault: string
 }): Promise<AssistantTurnReceipt | null> {
-  const existing = await readAssistantTurnReceipt(input.vault, input.turnId)
-  if (!existing) {
-    return null
-  }
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const receiptPath = resolveAssistantTurnReceiptPath(paths, input.turnId)
+    const existing = await readAssistantTurnReceiptAtPath(receiptPath)
+    if (!existing) {
+      return null
+    }
 
-  return saveAssistantTurnReceipt(input.vault, input.mutate(existing))
+    const updated = assistantTurnReceiptSchema.parse(input.mutate(existing))
+    await writeJsonFileAtomic(receiptPath, updated)
+    return updated
+  })
 }
 
 export async function finalizeAssistantTurnReceipt(input: {

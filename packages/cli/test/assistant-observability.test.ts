@@ -152,3 +152,77 @@ test('assistant automation ignores legacy outbox records after the outbox cutove
   assert.equal(doctor.ok, false)
   assert.equal(outboxCheck?.status, 'fail')
 })
+
+test('assistant status ignores expired cooldown warnings and can find an older requested session beyond the global recent-turn window', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-observability-status-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const olderSession = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      alias: 'chat:older',
+      channel: 'imessage',
+      participantId: '+15550000001',
+      message: 'older session message',
+    },
+    {
+      sendImessage: async () => {},
+    },
+  )
+
+  for (let index = 0; index < 55; index += 1) {
+    await deliverAssistantMessage(
+      {
+        vault: vaultRoot,
+        alias: 'chat:newer',
+        channel: 'imessage',
+        participantId: '+15550000002',
+        message: `newer session message ${index}`,
+      },
+      {
+        sendImessage: async () => {},
+      },
+    )
+  }
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await writeFile(
+    statePaths.failoverStatePath,
+    JSON.stringify({
+      schema: 'healthybob.assistant-failover-state.v1',
+      updatedAt: '2026-03-26T12:00:00.000Z',
+      routes: [
+        {
+          routeId: 'route-expired',
+          label: 'expired',
+          provider: 'codex-cli',
+          model: 'gpt-oss:20b',
+          failureCount: 1,
+          successCount: 0,
+          consecutiveFailures: 1,
+          lastFailureAt: '2000-01-01T00:00:00.000Z',
+          lastErrorCode: 'ASSISTANT_PROVIDER_TIMEOUT',
+          lastErrorMessage: 'provider timed out',
+          cooldownUntil: '2000-01-01T00:01:00.000Z',
+        },
+      ],
+    }),
+    'utf8',
+  )
+
+  const status = await getAssistantStatus({
+    vault: vaultRoot,
+    limit: 5,
+    sessionId: olderSession.session.sessionId,
+  })
+  assert.equal(status.recentTurns.length, 1)
+  assert.equal(status.recentTurns[0]?.sessionId, olderSession.session.sessionId)
+  assert.equal(
+    status.warnings.some((warning) =>
+      warning.includes('provider failover route(s) are cooling down'),
+    ),
+    false,
+  )
+})

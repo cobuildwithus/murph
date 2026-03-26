@@ -23,6 +23,7 @@ import {
 import {
   assistantChatReplyArtifactExists,
   assistantResultArtifactExists,
+  writeAssistantChatDeferredArtifacts,
   writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts,
 } from './artifacts.js'
@@ -407,14 +408,25 @@ export async function scanAssistantAutoReplyOnce(input: {
         replyCaptureId: context.firstCaptureId,
         vault: input.vault,
       })
-      await applySuccessfulReply({
-        context,
-        onEvent: input.onEvent,
-        result,
-        scanState,
-        summary,
-        vault: input.vault,
-      })
+      if (result.deliveryDeferred) {
+        await applyDeferredReply({
+          context,
+          onEvent: input.onEvent,
+          result,
+          scanState,
+          summary,
+          vault: input.vault,
+        })
+      } else {
+        await applySuccessfulReply({
+          context,
+          onEvent: input.onEvent,
+          result,
+          scanState,
+          summary,
+          vault: input.vault,
+        })
+      }
     } catch (error) {
       const failureDecision = classifyAssistantAutoReplyFailure(error)
       if (failureDecision.kind === 'skip') {
@@ -1035,6 +1047,32 @@ async function applySuccessfulReply(input: {
     type: 'capture.replied',
     captureId: input.context.firstCaptureId,
     details: `${delivery.channel} -> ${delivery.target}`,
+  })
+}
+
+async function applyDeferredReply(input: {
+  context: AssistantAutoReplyGroupContext
+  onEvent?: (event: AssistantRunEvent) => void
+  result: Awaited<ReturnType<typeof sendAssistantMessage>>
+  scanState: AssistantAutoReplyScanState
+  summary: AssistantAutoReplyScanResult
+  vault: string
+}): Promise<void> {
+  const queuedAt = new Date().toISOString()
+  await writeAssistantChatDeferredArtifacts({
+    captureIds: input.context.captureIds,
+    queuedAt,
+    result: input.result,
+    vault: input.vault,
+  })
+  input.summary.replied += 1
+  input.scanState.cursor = input.context.lastCursor
+  input.onEvent?.({
+    type: 'capture.replied',
+    captureId: input.context.firstCaptureId,
+    details: input.result.deliveryIntentId
+      ? `delivery queued for retry as ${input.result.deliveryIntentId}`
+      : 'delivery queued for retry',
   })
 }
 

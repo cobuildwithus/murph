@@ -167,6 +167,70 @@ test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbo
   assert.equal(intent.intentId, receipt.deliveryIntentId)
 })
 
+test('deliverAssistantMessage preserves a deferred receipt when outbound delivery fails retryably', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-deferred-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  await assert.rejects(
+    () =>
+      deliverAssistantMessage(
+        {
+          vault: vaultRoot,
+          channel: 'imessage',
+          participantId: '+15551234567',
+          message: 'Lunch is logged.',
+        },
+        {
+          sendImessage: async () => {
+            throw new VaultCliError(
+              'ASSISTANT_DELIVERY_FAILED',
+              'Temporary network interruption while delivering the reply.',
+              {
+                retryable: true,
+              },
+            )
+          },
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(
+        typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code?: unknown }).code === 'ASSISTANT_DELIVERY_FAILED',
+        true,
+      )
+      return true
+    },
+  )
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const receiptFiles = await readdir(statePaths.turnsDirectory)
+  assert.equal(receiptFiles.length, 1)
+  const receipt = JSON.parse(
+    await readFile(
+      path.join(statePaths.turnsDirectory, receiptFiles[0]!),
+      'utf8',
+    ),
+  ) as {
+    deliveryDisposition: string
+    status: string
+  }
+  assert.equal(receipt.status, 'deferred')
+  assert.equal(receipt.deliveryDisposition, 'retryable')
+
+  const outboxFiles = await readdir(statePaths.outboxDirectory)
+  assert.equal(outboxFiles.length, 1)
+  const intent = JSON.parse(
+    await readFile(path.join(statePaths.outboxDirectory, outboxFiles[0]!), 'utf8'),
+  ) as {
+    status: string
+  }
+  assert.equal(intent.status, 'retryable')
+})
+
 test('deliverAssistantMessage uses one-off targets only for the current send and does not rewrite the stored binding', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-override-'))
   const vaultRoot = path.join(parent, 'vault')

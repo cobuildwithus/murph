@@ -41,7 +41,11 @@ import {
 } from '../src/assistant-runtime.js'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.js'
-import { readAssistantFailoverState } from '../src/assistant/failover.js'
+import {
+  buildAssistantFailoverRoutes,
+  readAssistantFailoverState,
+  recordAssistantFailoverRouteFailure,
+} from '../src/assistant/failover.js'
 import { resetInjectedAssistantFaults } from '../src/assistant/fault-injection.js'
 import {
   drainAssistantOutbox,
@@ -217,25 +221,28 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
           providerName: 'ollama',
           apiKeyEnv: 'OLLAMA_API_KEY',
           cooldownMs: null,
-          maxAttempts: null,
         },
       ],
     })
 
     assert.equal(result.response, 'backup reply')
     assert.equal(robustnessMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+    const primaryCall = robustnessMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    const backupCall = robustnessMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
     assert.equal(
-      robustnessMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]?.provider,
+      primaryCall?.provider,
       'codex-cli',
     )
     assert.equal(
-      robustnessMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.provider,
+      backupCall?.provider,
       'openai-compatible',
     )
-    assert.equal(
-      robustnessMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.model,
-      'backup-model',
-    )
+    assert.equal(backupCall?.model, 'backup-model')
+    assert.equal(primaryCall?.conversationMessages, undefined)
+    assert.equal(Array.isArray(primaryCall?.configOverrides), true)
+    assert.equal(backupCall?.configOverrides, undefined)
+    assert.equal(backupCall?.conversationMessages?.length ?? 0, 0)
+    assert.equal(backupCall?.userPrompt, 'summarize the latest updates')
 
     const failoverState = await readAssistantFailoverState(vaultRoot)
     assert.equal(failoverState.routes.length, 2)
@@ -269,6 +276,59 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
   }
 })
 
+test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the derived default', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-failover-cooldown-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+  await mkdir(vaultRoot, { recursive: true })
+
+  const routes = buildAssistantFailoverRoutes({
+    provider: 'codex-cli',
+    providerOptions: {
+      model: 'gpt-oss:20b',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+    },
+    backups: [
+      {
+        name: 'backup-ollama',
+        provider: 'openai-compatible',
+        codexCommand: null,
+        model: 'backup-model',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        providerName: 'ollama',
+        apiKeyEnv: null,
+        cooldownMs: 300_000,
+      },
+    ],
+  })
+  const backupRoute = routes.find((route) => route.provider === 'openai-compatible')
+  assert.ok(backupRoute)
+
+  const nextState = await recordAssistantFailoverRouteFailure({
+    vault: vaultRoot,
+    at: '2026-03-26T12:00:00.000Z',
+    route: backupRoute,
+    error: new VaultCliError(
+      'ASSISTANT_PROVIDER_TIMEOUT',
+      'Backup provider timed out before it produced a response.',
+    ),
+  })
+  const routeState = nextState.routes.find((route) => route.routeId === backupRoute.routeId)
+  assert.equal(routeState?.cooldownUntil, '2026-03-26T12:05:00.000Z')
+})
+
 test('runAssistantAutomation exposes active run-lock status and rejects concurrent vault automation loops', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-robustness-runlock-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -288,6 +348,9 @@ test('runAssistantAutomation exposes active run-lock status and rejects concurre
 
   const during = await getAssistantStatus(vaultRoot)
   assert.equal(during.runLock.state, 'active')
+  assert.equal(typeof during.runLock.startedAt, 'string')
+  assert.equal(during.runLock.mode, 'continuous')
+  assert.equal(typeof during.runLock.command, 'string')
 
   await assert.rejects(
     () =>
