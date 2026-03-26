@@ -17,7 +17,6 @@ import {
   applyJsonlAppendTarget,
   applyTextWriteTarget,
   assertWriteTargetPolicy,
-  fileContentsEqual,
   prepareVerifiedWriteTarget,
 } from "../write-policy.js";
 import { acquireCanonicalWriteLock } from "./canonical-write-lock.js";
@@ -66,6 +65,13 @@ interface StageRawTextInput extends StageRawCopyOptions {
   content: string;
 }
 
+interface StageRawBytesInput extends StageRawCopyOptions {
+  targetRelativePath: string;
+  originalFileName: string;
+  mediaType: string;
+  content: Uint8Array;
+}
+
 interface StagedRawCopy {
   relativePath: string;
   originalFileName: string;
@@ -84,6 +90,7 @@ type StoredWriteAction =
       mediaType: string;
       effect?: "copy" | "reuse";
       existedBefore?: boolean;
+      committedPayloadBase64?: string;
       appliedAt?: string;
       rolledBackAt?: string;
     }
@@ -98,6 +105,7 @@ type StoredWriteAction =
       effect?: "create" | "update" | "reuse";
       existedBefore?: boolean;
       backupRelativePath?: string;
+      committedPayloadBase64?: string;
       appliedAt?: string;
       rolledBackAt?: string;
     }
@@ -109,6 +117,7 @@ type StoredWriteAction =
       effect?: "append";
       existedBefore?: boolean;
       originalSize?: number;
+      committedPayloadBase64?: string;
       appliedAt?: string;
       rolledBackAt?: string;
     }
@@ -157,6 +166,10 @@ function nowIso(): string {
 
 function generateOperationId(): string {
   return `op_${randomUUID().replace(/-/g, "")}`;
+}
+
+function encodeCommittedPayload(content: string | Uint8Array): string | undefined {
+  return Buffer.from(content).toString("base64");
 }
 
 function metadataRelativePath(operationId: string): string {
@@ -468,6 +481,49 @@ export class WriteBatch {
     };
   }
 
+  async stageRawBytes({
+    targetRelativePath,
+    originalFileName,
+    mediaType,
+    content,
+    allowExistingMatch = false,
+  }: StageRawBytesInput): Promise<StagedRawCopy> {
+    this.assertMutable();
+    const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
+    assertWriteTargetPolicy(normalizedTarget, {
+      kind: "raw",
+      messages: {
+        rawRequired: "Raw copies must target the raw/ tree.",
+      },
+    });
+
+    const stageRelativePath = stageArtifactRelativePath(
+      this.operationId,
+      `${String(this.record.actions.length).padStart(4, "0")}.raw`,
+    );
+    const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
+    await ensureDirectory(path.dirname(stageAbsolutePath));
+    await fs.writeFile(stageAbsolutePath, content);
+
+    this.record.actions.push({
+      kind: "raw_copy",
+      state: "staged",
+      targetRelativePath: normalizedTarget,
+      stageRelativePath,
+      allowExistingMatch,
+      originalFileName,
+      mediaType,
+    });
+    await this.persist();
+
+    return {
+      relativePath: normalizedTarget,
+      originalFileName,
+      mediaType,
+      stagedAbsolutePath: stageAbsolutePath,
+    };
+  }
+
   async stageTextWrite(
     targetRelativePath: string,
     content: string,
@@ -655,17 +711,22 @@ export class WriteBatch {
   private async applyRawCopy(index: number, action: Extract<StoredWriteAction, { kind: "raw_copy" }>): Promise<void> {
     const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
+    const stagedContent = await fs.readFile(stageAbsolutePath);
     const result = await applyImmutableWriteTarget({
       allowExistingMatch: action.allowExistingMatch,
       createEffect: "copy",
       createTarget: () => fs.copyFile(stageAbsolutePath, target.absolutePath, fsConstants.COPYFILE_EXCL),
       existsErrorMessage: "Raw target already exists and may not be overwritten.",
-      matchesExistingContent: () => fileContentsEqual(stageAbsolutePath, target.absolutePath),
+      matchesExistingContent: async () => {
+        const existingContent = await fs.readFile(target.absolutePath);
+        return existingContent.equals(stagedContent);
+      },
       target,
     });
     action.state = result.effect === "reuse" ? "reused" : "applied";
     action.effect = result.effect === "reuse" ? "reuse" : "copy";
     action.existedBefore = result.existedBefore;
+    action.committedPayloadBase64 = encodeCommittedPayload(stagedContent);
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();
@@ -703,6 +764,7 @@ export class WriteBatch {
     action.state = result.effect === "reuse" ? "reused" : "applied";
     action.effect = result.effect;
     action.existedBefore = result.existedBefore;
+    action.committedPayloadBase64 = encodeCommittedPayload(stagedContent);
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();
@@ -714,15 +776,17 @@ export class WriteBatch {
   ): Promise<void> {
     const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
+    const payload = await readText(stageAbsolutePath);
     const result = await applyJsonlAppendTarget({
       appendPayload: (payload) => fs.appendFile(target.absolutePath, payload, "utf8"),
-      readPayload: () => readText(stageAbsolutePath),
+      readPayload: async () => payload,
       target,
     });
     action.state = "applied";
     action.effect = result.effect;
     action.existedBefore = result.existedBefore;
     action.originalSize = result.originalSize;
+    action.committedPayloadBase64 = encodeCommittedPayload(payload);
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();

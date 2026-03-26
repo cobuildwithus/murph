@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import {
+  applyCanonicalWriteBatch,
+  initializeVault,
+  readJsonlRecords,
+  updateVaultSummary,
+} from '@healthybob/core'
+import {
+  createInboxPipeline,
+  openInboxRuntime,
+} from '@healthybob/inboxd'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const serviceMocks = vi.hoisted(() => ({
@@ -1461,4 +1471,605 @@ test('sendAssistantMessage does not persist a recovered provider session id for 
 
   assert.equal(resolved.session.providerSessionId, null)
   assert.equal(resolved.session.turnCount, 0)
+})
+
+test('sendAssistantMessage rolls back unauthorized direct canonical vault edits and fails the turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-guard-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const metadataPath = path.join(vaultRoot, 'vault.json')
+  const beforeMetadata = await readFile(metadataPath, 'utf8')
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'broken',
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-direct-write',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-guard',
+      prompt: 'Inspect the vault.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.deepEqual(error.context?.paths, ['vault.json'])
+      return true
+    },
+  )
+
+  assert.equal(await readFile(metadataPath, 'utf8'), beforeMetadata)
+
+  const session = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:canonical-guard',
+  })
+  assert.equal(session.session.turnCount, 0)
+  assert.equal(session.session.providerSessionId, null)
+})
+
+test('sendAssistantMessage allows committed audited canonical writes from core mutation paths', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-allow-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await updateVaultSummary({
+      vaultRoot,
+      title: 'Guarded Vault Title',
+    })
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-legit-write',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-allow',
+    prompt: 'Update the vault title.',
+  })
+
+  const metadata = JSON.parse(await readFile(path.join(vaultRoot, 'vault.json'), 'utf8'))
+  assert.equal(metadata.title, 'Guarded Vault Title')
+  assert.equal(result.response, 'assistant reply')
+  assert.equal(result.session.turnCount, 1)
+  assert.equal(result.session.providerSessionId, 'thread-legit-write')
+})
+
+test('sendAssistantMessage allows concurrent inbox canonical writes that go through audited core write operations', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-inbox-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  let persistedCapture:
+    | {
+        eventId: string
+        auditId?: string
+        envelopePath: string
+      }
+    | null = null
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+
+    try {
+      persistedCapture = await pipeline.processCapture({
+        source: 'telegram',
+        externalId: 'assistant-guarded-inbox-capture',
+        accountId: 'bot',
+        thread: {
+          id: 'thread-guarded',
+        },
+        actor: {
+          isSelf: false,
+        },
+        occurredAt: '2026-03-27T00:31:00.000Z',
+        receivedAt: '2026-03-27T00:31:01.000Z',
+        text: 'Guard-safe inbox capture',
+        attachments: [],
+        raw: {},
+      })
+    } finally {
+      pipeline.close()
+    }
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-inbox-guard',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-inbox-allow',
+    prompt: 'Handle the inbound capture.',
+  })
+
+  assert.equal(result.response, 'assistant reply')
+  assert.equal(result.session.turnCount, 1)
+  assert.equal(result.session.providerSessionId, 'thread-inbox-guard')
+  assert.ok(persistedCapture)
+  if (!persistedCapture) {
+    throw new Error('Expected persisted inbox capture result.')
+  }
+  const persisted = persistedCapture as {
+    eventId: string
+    auditId?: string
+    envelopePath: string
+  }
+
+  const eventRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: 'ledger/events/2026/2026-03.jsonl',
+  })
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: 'audit/2026/2026-03.jsonl',
+  })
+  assert.equal(eventRecords.filter((record) => record.id === persisted.eventId).length, 1)
+  assert.equal(auditRecords.filter((record) => record.id === persisted.auditId).length, 1)
+  assert.match(persisted.envelopePath, /^raw\/inbox\/telegram\/bot\/2026\/03\/cap_/u)
+})
+
+test('sendAssistantMessage restores the committed canonical content when a provider tampers with the same file after an audited write', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-tamper-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const metadataPath = path.join(vaultRoot, 'vault.json')
+  const corePath = path.join(vaultRoot, 'CORE.md')
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await updateVaultSummary({
+      vaultRoot,
+      title: 'Legit Guarded Title',
+    })
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'broken-again',
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    await writeFile(corePath, 'Tampered after write.\n')
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-tamper',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-tamper',
+      prompt: 'Inspect the vault.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.deepEqual(error.context?.paths, ['CORE.md', 'vault.json'])
+      return true
+    },
+  )
+
+  const metadata = JSON.parse(await readFile(metadataPath, 'utf8'))
+  assert.equal(metadata.title, 'Legit Guarded Title')
+})
+
+test('sendAssistantMessage prefers the canonical write guard error when the provider both writes directly and throws', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-provider-error-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const metadataPath = path.join(vaultRoot, 'vault.json')
+  const beforeMetadata = await readFile(metadataPath, 'utf8')
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'broken-after-provider-error',
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex CLI failed after mutating the vault.',
+    )
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-provider-error',
+      prompt: 'Inspect the vault.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.equal(error.context?.providerErrorCode, 'ASSISTANT_CODEX_FAILED')
+      return true
+    },
+  )
+
+  assert.equal(await readFile(metadataPath, 'utf8'), beforeMetadata)
+})
+
+test('sendAssistantMessage reconstructs audited ledger appends and rolls back later shard tampering', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-append-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const ledgerRelativePath = 'ledger/events/2026/2026-03.jsonl'
+  const ledgerPath = path.join(vaultRoot, ledgerRelativePath)
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_append_test',
+      summary: 'Append guarded ledger shard',
+      jsonlAppends: [
+        {
+          relativePath: ledgerRelativePath,
+          record: {
+            id: 'evt_test_guard',
+            kind: 'guard-test',
+          },
+        },
+      ],
+    })
+    await writeFile(ledgerPath, '{"tampered":true}\n')
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-jsonl-append',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-append',
+      prompt: 'Append to the event ledger.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.deepEqual(error.context?.paths, [ledgerRelativePath])
+      return true
+    },
+  )
+
+  assert.equal(
+    await readFile(ledgerPath, 'utf8'),
+    '{"id":"evt_test_guard","kind":"guard-test"}\n',
+  )
+})
+
+test('sendAssistantMessage preserves large audited protected text writes after later tampering', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'healthybob-assistant-service-canonical-large-text-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-large.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const largeContent = `# Guarded large write\n\n${'a'.repeat(2_200_000)}\n`
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_large_text_test',
+      summary: 'Write large protected bank note',
+      textWrites: [
+        {
+          relativePath: targetRelativePath,
+          content: largeContent,
+        },
+      ],
+    })
+    await writeFile(targetPath, 'tampered-large-text\n')
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-large-text',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-large-text',
+      prompt: 'Write a large protected bank note.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.deepEqual(error.context?.paths, [targetRelativePath])
+      return true
+    },
+  )
+
+  assert.equal(await readFile(targetPath, 'utf8'), largeContent)
+})
+
+test('sendAssistantMessage preserves large audited protected jsonl appends after later tampering', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'healthybob-assistant-service-canonical-large-append-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const ledgerRelativePath = 'ledger/events/2026/2026-04.jsonl'
+  const ledgerPath = path.join(vaultRoot, ledgerRelativePath)
+  const largePayload = 'b'.repeat(2_200_000)
+  const expectedAppend = `${JSON.stringify({
+    id: 'evt_large_guard',
+    kind: 'guard-test-large',
+    payload: largePayload,
+  })}\n`
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_large_append_test',
+      summary: 'Append large protected ledger shard',
+      jsonlAppends: [
+        {
+          relativePath: ledgerRelativePath,
+          record: {
+            id: 'evt_large_guard',
+            kind: 'guard-test-large',
+            payload: largePayload,
+          },
+        },
+      ],
+    })
+    await writeFile(ledgerPath, '{"tampered":true}\n')
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-large-append',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-large-append',
+      prompt: 'Append a large protected ledger record.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.deepEqual(error.context?.paths, [ledgerRelativePath])
+      return true
+    },
+  )
+
+  assert.equal(await readFile(ledgerPath, 'utf8'), expectedAppend)
+})
+
+test('sendAssistantMessage preserves audited protected deletes', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-delete-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-delete.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+
+  await applyCanonicalWriteBatch({
+    vaultRoot,
+    operationType: 'assistant_guard_delete_seed',
+    summary: 'Seed protected delete target',
+    textWrites: [
+      {
+        relativePath: targetRelativePath,
+        content: '# Seeded file\n',
+      },
+    ],
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_delete_test',
+      summary: 'Delete protected bank file',
+      deletes: [
+        {
+          relativePath: targetRelativePath,
+        },
+      ],
+    })
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-delete',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-delete',
+    prompt: 'Delete the protected bank note.',
+  })
+
+  assert.equal(result.response, 'assistant reply')
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+})
+
+test('sendAssistantMessage does not fail over or start cooldown when the canonical write guard blocks a provider turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-no-failover-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const metadataPath = path.join(vaultRoot, 'vault.json')
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockImplementationOnce(async () => {
+      await writeFile(
+        metadataPath,
+        `${JSON.stringify(
+          {
+            schemaVersion: 'broken-again',
+          },
+          null,
+          2,
+        )}\n`,
+      )
+
+      return {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-no-failover',
+        response: 'assistant reply',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      }
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-primary-still-healthy',
+      response: 'safe reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-no-failover',
+      prompt: 'Inspect the vault.',
+      failoverRoutes: [
+        {
+          name: 'backup',
+          provider: 'openai-compatible',
+          codexCommand: null,
+          model: null,
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          cooldownMs: null,
+          baseUrl: null,
+          apiKeyEnv: null,
+          providerName: null,
+        },
+      ],
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      return true
+    },
+  )
+
+  const second = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-no-failover',
+    prompt: 'Try again safely.',
+    failoverRoutes: [
+      {
+        name: 'backup',
+        provider: 'openai-compatible',
+        codexCommand: null,
+        model: null,
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        cooldownMs: null,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+      },
+    ],
+  })
+
+  assert.equal(second.response, 'safe reply')
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.equal(
+    serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]?.provider,
+    'codex-cli',
+  )
+  assert.equal(
+    serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.provider,
+    'codex-cli',
+  )
 })

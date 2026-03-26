@@ -223,7 +223,11 @@ export function shouldAttemptAssistantProviderFailover(input: {
     return true
   }
 
-  return !new Set(['ASSISTANT_PROMPT_REQUIRED', 'invalid_payload']).has(code)
+  return !new Set([
+    'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
+    'ASSISTANT_PROMPT_REQUIRED',
+    'invalid_payload',
+  ]).has(code)
 }
 
 function createResolvedAssistantFailoverRoute(input: {

@@ -949,6 +949,7 @@ async function executeProviderTurnWithRecovery(input: {
       }
     } catch (error) {
       lastError = error
+      const errorCode = readAssistantErrorCode(error)
       const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
         codexPromptVersion:
           route.provider === 'codex-cli' ? CURRENT_CODEX_PROMPT_VERSION : null,
@@ -962,17 +963,21 @@ async function executeProviderTurnWithRecovery(input: {
         workingSession = recoveredSession
       }
       attachRecoveredAssistantSession(error, recoveredSession)
-      failoverState = await recordAssistantFailoverRouteFailure({
-        error,
-        route,
-        vault: input.input.vault,
-      })
-      const cooldownUntil = getAssistantFailoverCooldownUntil({
-        route,
-        state: failoverState,
-      })
+      const shouldRecordRouteFailure = shouldRecordAssistantRouteFailure(errorCode)
+      if (shouldRecordRouteFailure) {
+        failoverState = await recordAssistantFailoverRouteFailure({
+          error,
+          route,
+          vault: input.input.vault,
+        })
+      }
+      const cooldownUntil = shouldRecordRouteFailure
+        ? getAssistantFailoverCooldownUntil({
+            route,
+            state: failoverState,
+          })
+        : null
       const detail = errorMessage(error)
-      const errorCode = readAssistantErrorCode(error)
 
       await recordProviderAttemptFailed({
         attemptCount,
@@ -1340,6 +1345,10 @@ function readAssistantErrorCode(error: unknown): string | null {
 
   const code = (error as { code?: unknown }).code
   return typeof code === 'string' && code.trim().length > 0 ? code : null
+}
+
+function shouldRecordAssistantRouteFailure(errorCode: string | null): boolean {
+  return errorCode !== 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED'
 }
 
 function shouldUseLocalTranscriptContext(
