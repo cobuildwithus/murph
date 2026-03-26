@@ -2,11 +2,22 @@ import { NextResponse } from "next/server";
 
 import { isHostedOnboardingError } from "./errors";
 
-export function jsonOk(payload: unknown, status = 200): NextResponse {
-  return NextResponse.json(payload, { status });
+const HOSTED_ONBOARDING_DEFAULT_HEADERS = {
+  "Cache-Control": "no-store",
+} as const;
+
+export function jsonOk(
+  payload: unknown,
+  status = 200,
+  headers?: HeadersInit,
+): NextResponse {
+  return NextResponse.json(payload, {
+    headers: mergeHostedOnboardingHeaders(headers),
+    status,
+  });
 }
 
-export function jsonError(error: unknown): NextResponse {
+export function jsonError(error: unknown, headers?: HeadersInit): NextResponse {
   if (isHostedOnboardingError(error)) {
     return NextResponse.json(
       {
@@ -17,7 +28,10 @@ export function jsonError(error: unknown): NextResponse {
           details: error.details,
         },
       },
-      { status: error.httpStatus },
+      {
+        headers: mergeHostedOnboardingHeaders(headers),
+        status: error.httpStatus,
+      },
     );
   }
 
@@ -29,7 +43,10 @@ export function jsonError(error: unknown): NextResponse {
           message: error.message,
         },
       },
-      { status: 400 },
+      {
+        headers: mergeHostedOnboardingHeaders(headers),
+        status: 400,
+      },
     );
   }
 
@@ -41,7 +58,10 @@ export function jsonError(error: unknown): NextResponse {
           message: error.message,
         },
       },
-      { status: 400 },
+      {
+        headers: mergeHostedOnboardingHeaders(headers),
+        status: 400,
+      },
     );
   }
 
@@ -53,7 +73,10 @@ export function jsonError(error: unknown): NextResponse {
         message: "Hosted onboarding route failed unexpectedly.",
       },
     },
-    { status: 500 },
+    {
+      headers: mergeHostedOnboardingHeaders(headers),
+      status: 500,
+    },
   );
 }
 
@@ -65,4 +88,18 @@ export async function readJsonObject(request: Request): Promise<Record<string, u
   }
 
   return payload as Record<string, unknown>;
+}
+
+function mergeHostedOnboardingHeaders(headers?: HeadersInit): Headers {
+  const merged = new Headers(HOSTED_ONBOARDING_DEFAULT_HEADERS);
+
+  if (headers) {
+    const requestedHeaders = new Headers(headers);
+
+    for (const [key, value] of requestedHeaders.entries()) {
+      merged.set(key, value);
+    }
+  }
+
+  return merged;
 }

@@ -204,10 +204,54 @@ describe("hosted onboarding passkey service flow", () => {
       },
     });
   });
+
+  it("consumes the stored challenge before authentication verification so failures require a fresh ceremony", async () => {
+    verifyHostedAuthentication.mockReturnValue(false);
+    const prisma = createPrismaStub({
+      challenge: {
+        challenge: "0xabcdef",
+        type: "authentication",
+      },
+      invite: makeInvite({
+        passkeys: [
+          {
+            credentialId: "cred-existing",
+            publicKey: Uint8Array.from([1, 2, 3]),
+          },
+        ],
+      }),
+      passkey: {
+        credentialId: "cred-existing",
+        id: "passkey-1",
+        memberId: "member-1",
+        publicKey: Uint8Array.from([1, 2, 3]),
+      },
+    });
+
+    await expect(
+      finishHostedPasskeyAuthentication({
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+        response: {
+          id: "cred-existing",
+        },
+        userAgent: "test-agent",
+      }),
+    ).rejects.toMatchObject({
+      code: "PASSKEY_AUTH_FAILED",
+    });
+
+    expect(prisma.hostedPasskeyChallenge.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: "challenge-1",
+      },
+    });
+  });
 });
 
 function createPrismaStub(input: {
-  challenge?: { challenge: string };
+  challenge?: { challenge: string; type?: string };
   invite: any;
   passkey?: any;
 }) {
@@ -235,7 +279,7 @@ function createPrismaStub(input: {
               id: "challenge-1",
               inviteId: "invite-1",
               memberId: "member-1",
-              type: "registration",
+              type: input.challenge.type ?? "registration",
               ...input.challenge,
             }
           : null,

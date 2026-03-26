@@ -342,7 +342,7 @@ export async function finishHostedPasskeyRegistration(input: {
   const now = input.now ?? new Date();
   const passkeyConfig = requireHostedOnboardingPasskeyConfig();
   const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
-  const challenge = await requireHostedPasskeyChallenge({
+  const challenge = await consumeHostedPasskeyChallenge({
     inviteId: invite.id,
     memberId: invite.memberId,
     now,
@@ -390,13 +390,6 @@ export async function finishHostedPasskeyRegistration(input: {
     });
   }
 
-  await prisma.hostedPasskeyChallenge.deleteMany({
-    where: {
-      memberId: invite.memberId,
-      inviteId: invite.id,
-      type: HostedPasskeyChallengeType.registration,
-    },
-  });
   await prisma.hostedMember.update({
     where: {
       id: invite.memberId,
@@ -497,7 +490,7 @@ export async function finishHostedPasskeyAuthentication(input: {
   const now = input.now ?? new Date();
   const passkeyConfig = requireHostedOnboardingPasskeyConfig();
   const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
-  const challenge = await requireHostedPasskeyChallenge({
+  const challenge = await consumeHostedPasskeyChallenge({
     inviteId: invite.id,
     memberId: invite.memberId,
     now,
@@ -557,13 +550,6 @@ export async function finishHostedPasskeyAuthentication(input: {
     },
     data: {
       lastUsedAt: now,
-    },
-  });
-  await prisma.hostedPasskeyChallenge.deleteMany({
-    where: {
-      memberId: invite.memberId,
-      inviteId: invite.id,
-      type: HostedPasskeyChallengeType.authentication,
     },
   });
   await prisma.hostedMember.update({
@@ -956,7 +942,7 @@ async function requireHostedInviteForAuthentication(
   return invite;
 }
 
-async function requireHostedPasskeyChallenge(input: {
+async function consumeHostedPasskeyChallenge(input: {
   inviteId: string;
   memberId: string;
   now: Date;
@@ -986,6 +972,20 @@ async function requireHostedPasskeyChallenge(input: {
   });
 
   if (!challenge) {
+    throw hostedOnboardingError({
+      code: "PASSKEY_CHALLENGE_EXPIRED",
+      message: "That passkey challenge expired. Reload the link and try again.",
+      httpStatus: 410,
+    });
+  }
+
+  const deleted = await input.prisma.hostedPasskeyChallenge.deleteMany({
+    where: {
+      id: challenge.id,
+    },
+  });
+
+  if (deleted.count !== 1) {
     throw hostedOnboardingError({
       code: "PASSKEY_CHALLENGE_EXPIRED",
       message: "That passkey challenge expired. Reload the link and try again.",

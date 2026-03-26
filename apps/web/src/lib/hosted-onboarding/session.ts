@@ -46,6 +46,22 @@ export async function createHostedSession(input: {
       lastSeenAt: now,
     },
   });
+  await prisma.hostedSession.updateMany({
+    where: {
+      expiresAt: {
+        gt: now,
+      },
+      id: {
+        not: sessionId,
+      },
+      memberId: input.memberId,
+      revokedAt: null,
+    },
+    data: {
+      revokedAt: now,
+      revokeReason: "rotated",
+    },
+  });
 
   return {
     expiresAt,
@@ -89,6 +105,16 @@ export async function requireHostedSessionFromRequest(
   }
 
   return session;
+}
+
+export async function revokeHostedSessionFromRequest(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+  now: Date = new Date(),
+  reason = "logout",
+): Promise<boolean> {
+  const token = readHostedSessionTokenFromCookieHeader(request.headers.get("cookie"));
+  return token ? revokeHostedSessionByToken(token, prisma, now, reason) : false;
 }
 
 export function applyHostedSessionCookie(
@@ -147,6 +173,29 @@ async function findHostedSessionByToken(
     member: session.member,
     session,
   };
+}
+
+async function revokeHostedSessionByToken(
+  token: string,
+  prisma: PrismaClient,
+  now: Date,
+  reason: string,
+): Promise<boolean> {
+  const result = await prisma.hostedSession.updateMany({
+    where: {
+      expiresAt: {
+        gt: now,
+      },
+      revokedAt: null,
+      tokenHash: hashHostedSessionToken(token),
+    },
+    data: {
+      revokedAt: now,
+      revokeReason: reason,
+    },
+  });
+
+  return result.count > 0;
 }
 
 function readHostedSessionTokenFromCookieHeader(cookieHeader: string | null): string | null {
