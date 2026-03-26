@@ -31,6 +31,7 @@ export interface AssistantProviderTurnInput {
     content: string
     role: 'assistant' | 'user'
   }>
+  continuityContext?: string | null
   env?: NodeJS.ProcessEnv
   model?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -202,7 +203,7 @@ export async function executeAssistantProviderTurn(
 export function flattenAssistantProviderPrompt(
   input: Pick<
     AssistantProviderTurnInput,
-    'prompt' | 'sessionContext' | 'systemPrompt' | 'userPrompt'
+    'continuityContext' | 'prompt' | 'sessionContext' | 'systemPrompt' | 'userPrompt'
   >,
 ): string {
   const explicitPrompt = normalizeNullableString(input.prompt)
@@ -229,6 +230,7 @@ export function flattenAssistantProviderPrompt(
     contextLines.length > 0
       ? `Conversation context:\n${contextLines.join('\n')}`
       : null,
+    normalizeNullableString(input.continuityContext),
     `User message:\n${userPrompt}`,
   ]
     .filter((line): line is string => Boolean(line))
@@ -238,7 +240,7 @@ export function flattenAssistantProviderPrompt(
 export function buildAssistantProviderMessages(
   input: Pick<
     AssistantProviderTurnInput,
-    'conversationMessages' | 'prompt' | 'sessionContext' | 'userPrompt'
+    'continuityContext' | 'conversationMessages' | 'prompt' | 'sessionContext' | 'userPrompt'
   >,
 ): Array<{
   content: string
@@ -271,6 +273,7 @@ export function buildAssistantProviderMessages(
     contextLines.length > 0
       ? `Conversation context:\n${contextLines.join('\n')}`
       : null,
+    normalizeNullableString(input.continuityContext),
     userPrompt,
   ]
     .filter((line): line is string => Boolean(line))

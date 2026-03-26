@@ -74,7 +74,11 @@ import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
-import { errorMessage } from './shared.js'
+import { errorMessage, normalizeNullableString } from './shared.js'
+
+// Bump this when changing the durable Codex bootstrap prompt text so existing
+// Codex provider sessions re-bootstrap cleanly on their next turn.
+export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.1'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -132,6 +136,7 @@ interface AssistantTurnPlan {
     content: string
     role: 'assistant' | 'user'
   }>
+  continuityContext: string | null
   persistUserPromptOnFailure: boolean
   provider: AssistantChatProvider
   usedConversationTranscript: boolean
@@ -527,12 +532,18 @@ async function resolveAssistantTurnPlan(
       resolved.session.providerOptions.providerName ??
       defaults?.providerName,
   })
+  const shouldResetCodexProviderSession =
+    shouldResetCodexProviderSessionForPromptVersion({
+      provider,
+      session: resolved.session,
+    })
   const shouldInjectBootstrapContext =
     resolved.created ||
     resolved.session.turnCount === 0 ||
     provider === 'openai-compatible' ||
     provider !== resolved.session.provider ||
-    resolved.session.providerSessionId === null
+    resolved.session.providerSessionId === null ||
+    shouldResetCodexProviderSession
   const shouldInjectFirstTurnOnboarding =
     input.enableFirstTurnOnboarding === true &&
     (resolved.created || resolved.session.turnCount === 0)
@@ -559,6 +570,12 @@ async function resolveAssistantTurnPlan(
         vault: input.vault,
       })
     : null
+  const continuityContext = shouldResetCodexProviderSession
+    ? await buildCodexPromptResetContinuityContext({
+        sessionId: resolved.session.sessionId,
+        vault: input.vault,
+      })
+    : null
   const cliAccess = resolveAssistantCliAccessContext()
   const workingDirectory = input.workingDirectory ?? input.vault
   const providerCapabilities = resolveAssistantProviderCapabilities(provider)
@@ -579,13 +596,15 @@ async function resolveAssistantTurnPlan(
     cliEnv: cliAccess.env,
     configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
     conversationMessages,
+    continuityContext,
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     provider,
-    usedConversationTranscript: (conversationMessages?.length ?? 0) > 0,
+    usedConversationTranscript:
+      (conversationMessages?.length ?? 0) > 0 || continuityContext !== null,
     usedMemoryPrompt: assistantMemoryPrompt !== null,
     providerOptions,
     resumeProviderSessionId:
-      provider === resolved.session.provider
+      provider === resolved.session.provider && !shouldResetCodexProviderSession
         ? resolved.session.providerSessionId
         : null,
     sessionContext: shouldInjectBootstrapContext
@@ -756,6 +775,12 @@ async function executeProviderTurnWithRecovery(input: {
     })
 
     try {
+      const resumeProviderSessionId =
+        route.provider === workingSession.provider
+          ? attemptCount === 1
+            ? input.plan.resumeProviderSessionId
+            : workingSession.providerSessionId
+          : null
       maybeThrowInjectedAssistantFault({
         component: 'provider',
         fault: 'provider',
@@ -771,16 +796,14 @@ async function executeProviderTurnWithRecovery(input: {
           ...memoryTurnEnv,
         },
         userPrompt: input.input.prompt,
+        continuityContext: input.plan.continuityContext,
         systemPrompt: input.plan.systemPrompt,
         sessionContext: input.plan.sessionContext
           ? {
               binding: workingSession.binding,
             }
           : undefined,
-        resumeProviderSessionId:
-          route.provider === workingSession.provider
-            ? workingSession.providerSessionId
-            : null,
+        resumeProviderSessionId,
         codexCommand:
           route.codexCommand ??
           input.input.codexCommand ??
@@ -831,6 +854,8 @@ async function executeProviderTurnWithRecovery(input: {
     } catch (error) {
       lastError = error
       const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
+        codexPromptVersion:
+          route.provider === 'codex-cli' ? CURRENT_CODEX_PROMPT_VERSION : null,
         error,
         provider: route.provider,
         providerOptions: route.providerOptions,
@@ -1013,6 +1038,10 @@ async function persistAssistantTurnAndSession(input: {
       previousProvider: input.session.provider,
       previousProviderSessionId: input.session.providerSessionId,
     }),
+    codexPromptVersion:
+      input.providerResult.provider === 'codex-cli'
+        ? CURRENT_CODEX_PROMPT_VERSION
+        : null,
     providerOptions: input.providerResult.providerOptions,
     updatedAt,
     lastTurnAt: updatedAt,
@@ -1131,6 +1160,59 @@ function shouldUseLocalTranscriptContext(
   return provider === 'openai-compatible'
 }
 
+function shouldResetCodexProviderSessionForPromptVersion(input: {
+  provider: AssistantChatProvider
+  session: AssistantSession
+}): boolean {
+  return (
+    input.provider === 'codex-cli' &&
+    input.session.provider === 'codex-cli' &&
+    input.session.providerSessionId !== null &&
+    normalizeNullableString(input.session.codexPromptVersion) !==
+      CURRENT_CODEX_PROMPT_VERSION
+  )
+}
+
+async function buildCodexPromptResetContinuityContext(input: {
+  sessionId: string
+  vault: string
+}): Promise<string | null> {
+  const transcript = await listAssistantTranscriptEntries(
+    input.vault,
+    input.sessionId,
+  )
+  const recentConversation = transcript
+    .flatMap((entry) =>
+      isAssistantConversationTranscriptEntry(entry)
+        ? [
+            `${entry.kind === 'user' ? 'User' : 'Assistant'}: ${truncateAssistantContinuityText(
+              entry.text,
+            )}`,
+          ]
+        : [],
+    )
+    .slice(-6)
+
+  if (recentConversation.length === 0) {
+    return null
+  }
+
+  return [
+    'Recent local conversation transcript from this same Healthy Bob session:',
+    recentConversation.join('\n\n'),
+    'Use this only as continuity context while bootstrapping the fresh Codex provider session.',
+  ].join('\n\n')
+}
+
+function truncateAssistantContinuityText(text: string): string {
+  const normalized = text.replace(/\s+/gu, ' ').trim()
+  if (normalized.length <= 400) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, 397)}...`
+}
+
 async function loadAssistantConversationMessages(input: {
   limit: number
   sessionId: string
@@ -1227,8 +1309,27 @@ async function restoreMissingAssistantSessionSnapshot(input: {
 
   // Live Ink chat already has the hydrated session in memory, so recreate the
   // missing local session file and retry the normal resolution path once.
-  await saveAssistantSession(input.input.vault, snapshot)
+  await saveAssistantSession(
+    input.input.vault,
+    normalizeRestoredAssistantSessionSnapshot(snapshot),
+  )
   return true
+}
+
+function normalizeRestoredAssistantSessionSnapshot(
+  snapshot: AssistantSession,
+): AssistantSession {
+  if (
+    snapshot.provider === 'codex-cli' &&
+    normalizeNullableString(snapshot.codexPromptVersion) === null
+  ) {
+    return {
+      ...snapshot,
+      codexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
+    }
+  }
+
+  return snapshot
 }
 
 function buildAssistantSystemPrompt(input: {
@@ -1250,6 +1351,7 @@ function buildAssistantSystemPrompt(input: {
       'Choose the right mode before acting:',
       '- Vault operator mode (default): inspect or change Healthy Bob vault/runtime state through `vault-cli` semantics and any Healthy Bob assistant tools exposed in this session. This is not repo coding work.',
       '- Repo coding mode: only when the user explicitly asks to change repository code, tests, or docs.',
+      `- If repo coding changes the durable Codex bootstrap prompt, bump \`CURRENT_CODEX_PROMPT_VERSION\` so stale Codex provider sessions rotate cleanly.`,
     ].join('\n'),
     [
       'In vault operator mode:',

@@ -6,6 +6,7 @@ import {
 import { saveAssistantSession } from './store.js'
 
 export async function recoverAssistantSessionAfterProviderFailure(input: {
+  codexPromptVersion?: string | null
   error: unknown
   provider: AssistantChatProvider
   providerOptions: AssistantSession['providerOptions']
@@ -26,6 +27,10 @@ export async function recoverAssistantSessionAfterProviderFailure(input: {
       ...input.session,
       provider: input.provider,
       providerSessionId,
+      codexPromptVersion:
+        input.provider === 'codex-cli'
+          ? input.codexPromptVersion ?? input.session.codexPromptVersion ?? null
+          : null,
       providerOptions: input.providerOptions,
       updatedAt: new Date().toISOString(),
     })

@@ -81,6 +81,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
     abortSignal: abortController.signal,
     provider: 'codex-cli',
     configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
+    continuityContext: 'Recent local conversation transcript:\nUser: prior question',
     env: {
       PATH: '/tmp/healthybob-bin',
     },
@@ -129,6 +130,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.match(call?.prompt ?? '', /system prompt/u)
   assert.match(call?.prompt ?? '', /channel: imessage/u)
   assert.match(call?.prompt ?? '', /thread: chat-123/u)
+  assert.match(call?.prompt ?? '', /Recent local conversation transcript/u)
   assert.match(call?.prompt ?? '', /User message:\nhello/u)
   assert.deepEqual(result, {
     provider: 'codex-cli',

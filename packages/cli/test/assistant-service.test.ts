@@ -33,6 +33,7 @@ vi.mock('../src/chat-provider.js', async () => {
 })
 
 import {
+  CURRENT_CODEX_PROMPT_VERSION,
   buildResolveAssistantSessionInput,
   sendAssistantMessage,
 } from '../src/assistant/service.js'
@@ -45,6 +46,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
 } from '../src/operator-config.js'
 import {
+  appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
@@ -210,6 +212,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /healthybob chat/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob run/u)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /bump `CURRENT_CODEX_PROMPT_VERSION` so stale Codex provider sessions rotate cleanly/u,
+  )
   assert.match(
     firstCall?.systemPrompt ?? '',
     /Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows/u,
@@ -588,6 +594,70 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
+})
+
+test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-version change while keeping local transcript continuity', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-codex-prompt-version-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:codex-version',
+    provider: 'codex-cli',
+  })
+  await appendAssistantTranscriptEntries(vaultRoot, resolved.session.sessionId, [
+    {
+      kind: 'user',
+      text: 'Old question about dinner.',
+    },
+    {
+      kind: 'assistant',
+      text: 'Old answer about dinner.',
+    },
+  ])
+  await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'codex-cli',
+    providerSessionId: 'thread-stale-codex',
+    codexPromptVersion: '2026-03-20.1',
+    updatedAt: '2026-03-26T00:00:00.000Z',
+    lastTurnAt: '2026-03-26T00:00:00.000Z',
+    turnCount: 2,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-fresh-codex',
+    response: 'Fresh reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:codex-version',
+    prompt: 'What should I eat tonight?',
+  })
+
+  const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(call?.resumeProviderSessionId, null)
+  assert.match(
+    call?.continuityContext ?? '',
+    /Recent local conversation transcript from this same Healthy Bob session/u,
+  )
+  assert.match(call?.continuityContext ?? '', /User: Old question about dinner\./u)
+  assert.match(call?.continuityContext ?? '', /Assistant: Old answer about dinner\./u)
+  assert.match(
+    call?.continuityContext ?? '',
+    /bootstrapping the fresh Codex provider session/u,
+  )
+  assert.equal(result.session.providerSessionId, 'thread-fresh-codex')
+  assert.equal(result.session.codexPromptVersion, CURRENT_CODEX_PROMPT_VERSION)
+  assert.equal(result.session.turnCount, 3)
 })
 
 test('sendAssistantMessage onboarding persists answered slots and asks only for missing items in later new sessions', async () => {

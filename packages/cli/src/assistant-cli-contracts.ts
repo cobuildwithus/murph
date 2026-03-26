@@ -209,6 +209,7 @@ export const assistantSessionSchema = z
     sessionId: z.string().min(1),
     provider: z.enum(assistantChatProviderValues),
     providerSessionId: z.string().min(1).nullable(),
+    codexPromptVersion: z.string().min(1).nullable().optional(),
     providerOptions: assistantProviderSessionOptionsSchema,
     alias: z.string().min(1).nullable(),
     binding: assistantSessionBindingSchema,
