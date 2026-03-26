@@ -24,3 +24,6 @@ Add a first-class operator recovery path for a stuck `healthybob run` / `assista
 - No manual lock-file deletion command.
 - No broad process manager or background supervisor.
 - No change to canonical vault data or assistant memory semantics.
+Status: completed
+Updated: 2026-03-26
+Completed: 2026-03-26
