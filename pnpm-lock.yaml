@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@cobuild/review-gpt@0.5.0':
-    hash: qmvfq4kprn3iwr24n53apogaye
-    path: patches/@cobuild__review-gpt@0.5.0.patch
-
 importers:
 
   .:
@@ -17,8 +12,8 @@ importers:
         specifier: ^0.1.14
         version: 0.1.14
       '@cobuild/review-gpt':
-        specifier: ^0.5.0
-        version: 0.5.0(patch_hash=qmvfq4kprn3iwr24n53apogaye)(openapi-types@12.1.3)
+        specifier: ^0.5.1
+        version: 0.5.1(openapi-types@12.1.3)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -354,8 +349,8 @@ packages:
     resolution: {integrity: sha512-/DKNFA3n1Y1pMKnbSiIctY57pZNdnVCNcB9ukKqAwQQRjt7sc9NoYuWBmb9H407Of9GvBNGg2BCMmQemKLtN6w==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.0':
-    resolution: {integrity: sha512-eZMPqjyUdOi7pS3ySt6wxzl3okOvum6oJvhtzw0oENvgt64R3nVITMJGBp+qoHTTBwR5ArRZau//0FyQTptAUQ==}
+  '@cobuild/review-gpt@0.5.1':
+    resolution: {integrity: sha512-kgrRY4O3Z2RYrH3+6rxrj1rSZ1PjB6DmpKeqr/u6BL3mVj2dNOapZ05+WzZuof/v0dGdnBQCDf39/yqwSwLmIw==}
     hasBin: true
 
   '@electric-sql/pglite-socket@0.0.20':
@@ -2825,7 +2820,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.14': {}
 
-  '@cobuild/review-gpt@0.5.0(patch_hash=qmvfq4kprn3iwr24n53apogaye)(openapi-types@12.1.3)':
+  '@cobuild/review-gpt@0.5.1(openapi-types@12.1.3)':
     dependencies:
       incur: 0.3.13(openapi-types@12.1.3)
     transitivePeerDependencies:
