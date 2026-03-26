@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-03-26
+Last verified: 2026-03-27
 
 This workflow applies to repo code/docs/test/config changes.
 Vault-only data tasks under `vault/**` skip this workflow unless the user explicitly asks for repo/process work.
@@ -26,6 +26,7 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 - The three named audit passes are mandatory subagent work, not optional self-review.
 - Use explicitly spawned subagents for `simplify`, `test-coverage-audit`, and `task-finish-review`.
 - Treat the main implementation agent as the integrator of audit findings, not the auditor of record.
+- Within this repo, those three mandatory audit passes are standing-authorized by repo policy. When the current environment supports spawned agents, run them without stopping only to ask for separate delegation permission.
 - Use a fresh subagent per pass unless the user explicitly instructs otherwise.
 - If subagent tooling is unavailable in the current environment, stop and escalate instead of silently downgrading the audit requirement to local review.
 
