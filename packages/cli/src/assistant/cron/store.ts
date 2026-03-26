@@ -8,12 +8,8 @@ import {
   type AssistantCronJob,
   type AssistantCronRunRecord,
   type AssistantCronTarget,
-  type AssistantSelfDeliveryTarget,
 } from '../../assistant-cli-contracts.js'
-import { resolvePreferredAssistantSelfDeliveryTarget } from '../../operator-config.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
-import { getAssistantChannelAdapter } from '../channel-adapters.js'
-import { resolveAssistantBindingDelivery } from '../bindings.js'
 import type { AssistantStatePaths } from '../store.js'
 import {
   isMissingFileError,
@@ -59,16 +55,6 @@ export async function ensureAssistantCronState(
 export async function readAssistantCronStore(
   paths: AssistantStatePaths,
 ): Promise<AssistantCronStore> {
-  const normalized = await inspectAssistantCronStore(paths)
-  return normalized.store
-}
-
-export async function inspectAssistantCronStore(
-  paths: AssistantStatePaths,
-): Promise<{
-  changed: boolean
-  store: AssistantCronStore
-}> {
   await ensureAssistantCronState(paths)
 
   try {
@@ -79,11 +65,8 @@ export async function inspectAssistantCronStore(
   } catch (error) {
     if (isMissingFileError(error)) {
       return {
-        changed: false,
-        store: {
-          version: ASSISTANT_CRON_STORE_VERSION,
-          jobs: [],
-        },
+        version: ASSISTANT_CRON_STORE_VERSION,
+        jobs: [],
       }
     }
 
@@ -252,126 +235,32 @@ export function normalizeRequiredAssistantCronText(
   )
 }
 
-async function normalizeAssistantCronStore(store: AssistantCronStore): Promise<{
-  changed: boolean
-  store: AssistantCronStore
-}> {
-  const fallbackTarget = await resolvePreferredAssistantSelfDeliveryTarget({
-    preferredChannel: 'telegram',
-    allowSingleSavedTargetFallback: true,
-  })
-  const migratedAt = new Date().toISOString()
-  let changed = false
-  const jobs = store.jobs.map((job) => {
-    const normalizedJob = normalizeAssistantCronJob(job, fallbackTarget, migratedAt)
-    if (normalizedJob !== job) {
-      changed = true
-    }
-    return normalizedJob
-  })
-
+function normalizeAssistantCronStore(store: AssistantCronStore): AssistantCronStore {
   return {
-    changed,
-    store: {
-      ...store,
-      jobs,
-    },
+    ...store,
+    jobs: store.jobs.map((job) => normalizeAssistantCronJob(job)),
   }
 }
 
-function normalizeAssistantCronJob(
-  job: AssistantCronJob,
-  fallbackTarget: AssistantSelfDeliveryTarget | null,
-  migratedAt: string,
-): AssistantCronJob {
-  let normalizedJob = job
+function normalizeAssistantCronJob(job: AssistantCronJob): AssistantCronJob {
+  if (job.state.runningPid === null || job.state.runningAt === null) {
+    return job
+  }
 
-  if (job.state.runningPid !== null && job.state.runningAt !== null) {
-    if (process.pid === job.state.runningPid) {
-      normalizedJob = job
-    } else if (!isForeignAssistantCronProcessRunning(job.state.runningPid)) {
-      normalizedJob = assistantCronJobSchema.parse({
-        ...normalizedJob,
+  if (process.pid === job.state.runningPid) {
+    return job
+  }
+
+  return isForeignAssistantCronProcessRunning(job.state.runningPid)
+    ? job
+    : assistantCronJobSchema.parse({
+        ...job,
         state: {
-          ...normalizedJob.state,
+          ...job.state,
           runningAt: null,
           runningPid: null,
         },
       })
-    }
-  }
-
-  const migratedTarget = migrateLegacyAssistantCronTarget(
-    normalizedJob,
-    fallbackTarget,
-  )
-  if (migratedTarget === normalizedJob.target) {
-    return normalizedJob
-  }
-
-  return assistantCronJobSchema.parse({
-    ...normalizedJob,
-    target: migratedTarget,
-    updatedAt: migratedAt,
-  })
-}
-
-function migrateLegacyAssistantCronTarget(
-  job: AssistantCronJob,
-  fallbackTarget: AssistantSelfDeliveryTarget | null,
-): AssistantCronTarget {
-  if (job.foodAutoLog) {
-    return job.target
-  }
-
-  if (assistantCronTargetCanAutoDeliver(job.target)) {
-    if (job.target.deliverResponse) {
-      return job.target
-    }
-
-    return {
-      ...job.target,
-      deliverResponse: true,
-    }
-  }
-
-  if (!fallbackTarget) {
-    return job.target
-  }
-
-  return {
-    sessionId: job.target.sessionId,
-    alias: job.target.alias,
-    channel: fallbackTarget.channel,
-    identityId: fallbackTarget.identityId,
-    participantId: fallbackTarget.participantId,
-    sourceThreadId: fallbackTarget.sourceThreadId,
-    deliveryTarget: fallbackTarget.deliveryTarget,
-    deliverResponse: true,
-  }
-}
-
-function assistantCronTargetCanAutoDeliver(target: AssistantCronTarget): boolean {
-  const channel = normalizeNullableString(target.channel)
-  if (!channel || !getAssistantChannelAdapter(channel)) {
-    return false
-  }
-
-  if (channel === 'email' && !normalizeNullableString(target.identityId)) {
-    return false
-  }
-
-  if (normalizeNullableString(target.deliveryTarget)) {
-    return true
-  }
-
-  return (
-    resolveAssistantBindingDelivery({
-      channel,
-      actorId: normalizeNullableString(target.participantId),
-      threadId: normalizeNullableString(target.sourceThreadId),
-    }) !== null
-  )
 }
 
 function resolveAssistantCronRunsPath(

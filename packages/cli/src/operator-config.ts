@@ -446,20 +446,15 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
   input: AssistantSelfDeliveryTargetLookupInput,
   options?: {
     allowSingleSavedTargetFallback?: boolean
-    preferredChannel?: string | null
   },
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTargetLookupInput> {
   const normalizedChannel = normalizeOperatorConfigString(input.channel)?.toLowerCase() ?? null
   const savedTarget = normalizedChannel
     ? await resolveAssistantSelfDeliveryTarget(normalizedChannel, homeDirectory)
-    : await resolvePreferredAssistantSelfDeliveryTarget(
-        {
-          preferredChannel: options?.preferredChannel,
-          allowSingleSavedTargetFallback: options?.allowSingleSavedTargetFallback,
-        },
-        homeDirectory,
-      )
+    : options?.allowSingleSavedTargetFallback
+      ? await resolveSingleAssistantSelfDeliveryTarget(homeDirectory)
+      : null
 
   if (!savedTarget) {
     return {
@@ -486,33 +481,6 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
       savedTarget.deliveryTarget ??
       null,
   }
-}
-
-export async function resolvePreferredAssistantSelfDeliveryTarget(
-  options?: {
-    allowSingleSavedTargetFallback?: boolean
-    preferredChannel?: string | null
-  },
-  homeDirectory = resolveOperatorHomeDirectory(),
-): Promise<AssistantSelfDeliveryTarget | null> {
-  const preferredChannel =
-    normalizeOperatorConfigString(options?.preferredChannel)?.toLowerCase() ?? null
-
-  if (preferredChannel) {
-    const savedPreferredTarget = await resolveAssistantSelfDeliveryTarget(
-      preferredChannel,
-      homeDirectory,
-    )
-    if (savedPreferredTarget) {
-      return savedPreferredTarget
-    }
-  }
-
-  if (options?.allowSingleSavedTargetFallback) {
-    return resolveSingleAssistantSelfDeliveryTarget(homeDirectory)
-  }
-
-  return null
 }
 
 function readEnvValue(
