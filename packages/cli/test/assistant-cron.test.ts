@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -40,6 +40,7 @@ import {
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.js'
+import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 import { saveAssistantSelfDeliveryTarget } from '../src/operator-config.js'
 
 const cleanupPaths: string[] = []
@@ -74,6 +75,7 @@ test('assistant cron presets stay separate from scheduler state until installed'
 
   const presets = listAssistantCronPresets()
   const mindfulnessPreset = getAssistantCronPreset('morning-mindfulness')
+  const weeklyPreset = getAssistantCronPreset('weekly-health-snapshot')
   const listedJobs = await listAssistantCronJobs(vaultRoot)
 
   assert.ok(presets.some((preset) => preset.id === 'environment-health-watch'))
@@ -81,6 +83,10 @@ test('assistant cron presets stay separate from scheduler state until installed'
   assert.equal(mindfulnessPreset.id, 'morning-mindfulness')
   assert.match(mindfulnessPreset.promptTemplate, /morning mindfulness prompt/u)
   assert.match(mindfulnessPreset.promptTemplate, /text-message friendly/u)
+  assert.equal(weeklyPreset.title, 'Weekly health compass')
+  assert.match(weeklyPreset.promptTemplate, /weekly health compass/u)
+  assert.match(weeklyPreset.promptTemplate, /what changed, what stayed steady/u)
+  assert.match(weeklyPreset.promptTemplate, /Do not sound like a nagging coach/u)
   assert.equal(mindfulnessPreset.suggestedSchedule.kind, 'cron')
   assert.equal(mindfulnessPreset.suggestedSchedule.expression, '0 7 * * *')
   assert.deepEqual(listedJobs, [])
@@ -192,6 +198,285 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
   }
 })
 
+test('assistant cron store migrates legacy unrouted jobs onto a saved telegram target', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-migrate-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  try {
+    await saveAssistantSelfDeliveryTarget(
+      {
+        channel: 'linq',
+        participantId: null,
+        sourceThreadId: null,
+        deliveryTarget: 'linq-chat-42',
+        identityId: null,
+      },
+      homeRoot,
+    )
+    await saveAssistantSelfDeliveryTarget(
+      {
+        channel: 'telegram',
+        participantId: 'telegram:bob',
+        sourceThreadId: 'saved-chat',
+        deliveryTarget: null,
+        identityId: null,
+      },
+      homeRoot,
+    )
+
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
+    await mkdir(statePaths.cronDirectory, { recursive: true })
+    await writeFile(
+      statePaths.cronJobsPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          jobs: [
+            {
+              schema: 'healthybob.assistant-cron-job.v1',
+              jobId: 'cron_legacy',
+              name: 'legacy-job',
+              enabled: true,
+              keepAfterRun: true,
+              prompt: 'Send my daily note.',
+              schedule: {
+                kind: 'every',
+                everyMs: 60 * 60 * 1000,
+              },
+              target: {
+                sessionId: null,
+                alias: null,
+                channel: null,
+                identityId: null,
+                participantId: null,
+                sourceThreadId: null,
+                deliveryTarget: null,
+                deliverResponse: false,
+              },
+              createdAt: '2026-03-20T00:00:00.000Z',
+              updatedAt: '2026-03-20T00:00:00.000Z',
+              state: {
+                nextRunAt: '2026-03-27T00:00:00.000Z',
+                lastRunAt: null,
+                lastSucceededAt: null,
+                lastFailedAt: null,
+                consecutiveFailures: 0,
+                lastError: null,
+                runningAt: null,
+                runningPid: null,
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    )
+
+    const listed = await listAssistantCronJobs(vaultRoot)
+    const persisted = JSON.parse(await readFile(statePaths.cronJobsPath, 'utf8')) as {
+      jobs: Array<{
+        target: {
+          channel: string | null
+          deliverResponse: boolean
+          participantId: string | null
+          sourceThreadId: string | null
+        }
+      }>
+    }
+
+    assert.equal(listed[0]?.target.channel, 'telegram')
+    assert.equal(listed[0]?.target.participantId, 'telegram:bob')
+    assert.equal(listed[0]?.target.sourceThreadId, 'saved-chat')
+    assert.equal(listed[0]?.target.deliverResponse, true)
+    assert.equal(persisted.jobs[0]?.target.channel, 'telegram')
+    assert.equal(persisted.jobs[0]?.target.participantId, 'telegram:bob')
+    assert.equal(persisted.jobs[0]?.target.sourceThreadId, 'saved-chat')
+    assert.equal(persisted.jobs[0]?.target.deliverResponse, true)
+  } finally {
+    process.env.HOME = originalHome
+  }
+})
+
+test('assistant cron store preserves explicit routes when only autosend migration is needed', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preserve-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  try {
+    await saveAssistantSelfDeliveryTarget(
+      {
+        channel: 'telegram',
+        participantId: 'telegram:bob',
+        sourceThreadId: 'saved-chat',
+        deliveryTarget: null,
+        identityId: null,
+      },
+      homeRoot,
+    )
+
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
+    await mkdir(statePaths.cronDirectory, { recursive: true })
+    await writeFile(
+      statePaths.cronJobsPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          jobs: [
+            {
+              schema: 'healthybob.assistant-cron-job.v1',
+              jobId: 'cron_explicit',
+              name: 'explicit-job',
+              enabled: true,
+              keepAfterRun: true,
+              prompt: 'Send my Linq update.',
+              schedule: {
+                kind: 'every',
+                everyMs: 60 * 60 * 1000,
+              },
+              target: {
+                sessionId: null,
+                alias: null,
+                channel: 'linq',
+                identityId: null,
+                participantId: null,
+                sourceThreadId: null,
+                deliveryTarget: 'linq-chat-42',
+                deliverResponse: false,
+              },
+              createdAt: '2026-03-20T00:00:00.000Z',
+              updatedAt: '2026-03-20T00:00:00.000Z',
+              state: {
+                nextRunAt: '2026-03-27T00:00:00.000Z',
+                lastRunAt: null,
+                lastSucceededAt: null,
+                lastFailedAt: null,
+                consecutiveFailures: 0,
+                lastError: null,
+                runningAt: null,
+                runningPid: null,
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    )
+
+    const listed = await listAssistantCronJobs(vaultRoot)
+
+    assert.equal(listed[0]?.target.channel, 'linq')
+    assert.equal(listed[0]?.target.deliveryTarget, 'linq-chat-42')
+    assert.equal(listed[0]?.target.deliverResponse, true)
+  } finally {
+    process.env.HOME = originalHome
+  }
+})
+
+test('assistant cron store reroutes invalid legacy email jobs onto the saved telegram target', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-email-migrate-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  try {
+    await saveAssistantSelfDeliveryTarget(
+      {
+        channel: 'telegram',
+        participantId: 'telegram:bob',
+        sourceThreadId: 'saved-chat',
+        deliveryTarget: null,
+        identityId: null,
+      },
+      homeRoot,
+    )
+
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
+    await mkdir(statePaths.cronDirectory, { recursive: true })
+    await writeFile(
+      statePaths.cronJobsPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          jobs: [
+            {
+              schema: 'healthybob.assistant-cron-job.v1',
+              jobId: 'cron_email_legacy',
+              name: 'legacy-email-job',
+              enabled: true,
+              keepAfterRun: true,
+              prompt: 'Send my email digest.',
+              schedule: {
+                kind: 'every',
+                everyMs: 60 * 60 * 1000,
+              },
+              target: {
+                sessionId: null,
+                alias: null,
+                channel: 'email',
+                identityId: null,
+                participantId: null,
+                sourceThreadId: null,
+                deliveryTarget: 'me@example.com',
+                deliverResponse: false,
+              },
+              createdAt: '2026-03-20T00:00:00.000Z',
+              updatedAt: '2026-03-20T00:00:00.000Z',
+              state: {
+                nextRunAt: '2026-03-27T00:00:00.000Z',
+                lastRunAt: null,
+                lastSucceededAt: null,
+                lastFailedAt: null,
+                consecutiveFailures: 0,
+                lastError: null,
+                runningAt: null,
+                runningPid: null,
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    )
+
+    const listed = await listAssistantCronJobs(vaultRoot)
+
+    assert.equal(listed[0]?.target.channel, 'telegram')
+    assert.equal(listed[0]?.target.participantId, 'telegram:bob')
+    assert.equal(listed[0]?.target.sourceThreadId, 'saved-chat')
+    assert.equal(listed[0]?.target.deliveryTarget, null)
+    assert.equal(listed[0]?.target.deliverResponse, true)
+  } finally {
+    process.env.HOME = originalHome
+  }
+})
+
 test('assistant cron job creation preserves required-text validation errors', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-invalid-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -238,53 +523,62 @@ test('assistant cron job creation preserves required-text validation errors', as
 
 test('assistant cron jobs require explicit outbound delivery routing', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-delivery-'))
+  const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
+  await mkdir(homeRoot, { recursive: true })
   await mkdir(vaultRoot, { recursive: true })
 
-  await assert.rejects(
-    () =>
-      addAssistantCronJob({
-        vault: vaultRoot,
-        name: 'missing-route',
-        prompt: 'Run a quick daily check-in.',
-        schedule: buildAssistantCronSchedule({
-          every: '2h',
-        }),
-      }),
-    /must declare an outbound channel and delivery route/u,
-  )
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
 
-  await assert.rejects(
-    () =>
-      addAssistantCronJob({
-        vault: vaultRoot,
-        name: 'email-missing-identity',
-        prompt: 'Send my weekly update.',
-        schedule: buildAssistantCronSchedule({
-          every: '1d',
+  try {
+    await assert.rejects(
+      () =>
+        addAssistantCronJob({
+          vault: vaultRoot,
+          name: 'missing-route',
+          prompt: 'Run a quick daily check-in.',
+          schedule: buildAssistantCronSchedule({
+            every: '2h',
+          }),
         }),
-        channel: 'email',
-        deliveryTarget: 'me@example.com',
-      }),
-    /Email cron jobs require an AgentMail inbox identity/u,
-  )
+      /must declare an outbound channel and delivery route/u,
+    )
 
-  await assert.rejects(
-    () =>
-      addAssistantCronJob({
-        vault: vaultRoot,
-        name: 'explicitly-disabled-delivery',
-        prompt: 'Send my weekly update.',
-        schedule: buildAssistantCronSchedule({
-          every: '1d',
+    await assert.rejects(
+      () =>
+        addAssistantCronJob({
+          vault: vaultRoot,
+          name: 'email-missing-identity',
+          prompt: 'Send my weekly update.',
+          schedule: buildAssistantCronSchedule({
+            every: '1d',
+          }),
+          channel: 'email',
+          deliveryTarget: 'me@example.com',
         }),
-        ...testCronDeliveryTarget,
-        deliverResponse: false,
-      }),
-    /always deliver their response/u,
-  )
+      /Email cron jobs require an AgentMail inbox identity/u,
+    )
+
+    await assert.rejects(
+      () =>
+        addAssistantCronJob({
+          vault: vaultRoot,
+          name: 'explicitly-disabled-delivery',
+          prompt: 'Send my weekly update.',
+          schedule: buildAssistantCronSchedule({
+            every: '1d',
+          }),
+          ...testCronDeliveryTarget,
+          deliverResponse: false,
+        }),
+      /always deliver their response/u,
+    )
+  } finally {
+    process.env.HOME = originalHome
+  }
 })
 
 test('assistant cron jobs persist cleanly and can be enabled, disabled, and removed', async () => {

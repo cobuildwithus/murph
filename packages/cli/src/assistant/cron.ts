@@ -29,6 +29,7 @@ import {
   createAssistantCronJobId,
   createAssistantCronRunId,
   ensureAssistantCronState,
+  inspectAssistantCronStore,
   isAssistantCronJobDue,
   normalizeRequiredAssistantCronText,
   readAssistantCronRuns,
@@ -255,6 +256,7 @@ async function resolveAssistantCronTargetDefaults(
     },
     {
       allowSingleSavedTargetFallback: true,
+      preferredChannel: 'telegram',
     },
   )
 
@@ -272,7 +274,7 @@ export async function listAssistantCronJobs(
   vault: string,
 ): Promise<AssistantCronJob[]> {
   const paths = resolveAssistantStatePaths(vault)
-  const store = await readAssistantCronStore(paths)
+  const store = await readAssistantCronStoreForDisplay(paths)
   return sortAssistantCronJobs(store.jobs)
 }
 
@@ -281,7 +283,7 @@ export async function getAssistantCronJob(
   job: string,
 ): Promise<AssistantCronJob> {
   const paths = resolveAssistantStatePaths(vault)
-  const store = await readAssistantCronStore(paths)
+  const store = await readAssistantCronStoreForDisplay(paths)
   return resolveAssistantCronJobFromStore(store, job)
 }
 
@@ -346,7 +348,7 @@ export async function getAssistantCronStatus(
   vault: string,
 ): Promise<AssistantCronStatusSnapshot> {
   const paths = resolveAssistantStatePaths(vault)
-  const store = await readAssistantCronStore(paths)
+  const store = await readAssistantCronStoreForDisplay(paths)
   const now = new Date().toISOString()
 
   const enabledJobs = store.jobs.filter((job) => job.enabled)
@@ -472,6 +474,20 @@ export async function processDueAssistantCronJobs(
 }
 
 export { buildAssistantCronSchedule }
+
+async function readAssistantCronStoreForDisplay(
+  paths: AssistantStatePaths,
+): Promise<Awaited<ReturnType<typeof readAssistantCronStore>>> {
+  await ensureAssistantCronState(paths)
+
+  return withAssistantCronWriteLock(paths, async () => {
+    const normalized = await inspectAssistantCronStore(paths)
+    if (normalized.changed) {
+      await writeAssistantCronStore(paths, normalized.store)
+    }
+    return normalized.store
+  })
+}
 
 function buildValidatedAssistantCronTarget(
   input: AddAssistantCronJobInput,
