@@ -19,6 +19,7 @@ import {
   type DeviceDaemonDependencies,
   type DeviceDaemonPaths,
 } from './types.js'
+import { readEnvValue } from '../env-values.js'
 
 const require = createRequire(import.meta.url)
 
@@ -91,18 +92,4 @@ export function buildManagedDeviceSyncEnvironment(input: {
       readEnvValue(input.env, DEVICE_SYNC_STATE_DB_PATH_ENV_KEYS) ||
       input.paths.stateDbPath,
   }
-}
-
-function readEnvValue(
-  env: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = env[key]?.trim()
-    if (value) {
-      return value
-    }
-  }
-
-  return null
 }

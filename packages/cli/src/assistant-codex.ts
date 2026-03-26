@@ -10,6 +10,7 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import { sanitizeChildProcessEnv } from './child-process-env.js'
 import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -280,14 +281,6 @@ export async function executeCodexPrompt(
       force: true,
     })
   }
-}
-
-function sanitizeChildProcessEnv(
-  env: NodeJS.ProcessEnv | undefined,
-): NodeJS.ProcessEnv {
-  const nextEnv = { ...(env ?? process.env) }
-  delete nextEnv.NODE_V8_COVERAGE
-  return nextEnv
 }
 
 export async function resolveCodexDisplayOptions(input: {

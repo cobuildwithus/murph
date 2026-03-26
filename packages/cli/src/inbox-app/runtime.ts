@@ -33,6 +33,7 @@ import {
   relativeToVault,
   runtimeNamespaceAccountId,
 } from '../inbox-services/shared.js'
+import { tryKillProcess } from '../process-kill.js'
 
 const FOREGROUND_CONNECTOR_RESTART_POLICY = {
   enabled: true,
@@ -167,27 +168,6 @@ function emitConnectorSkipped(
     source: connector.source,
     type: 'connector.skipped',
   })
-}
-
-function tryKillProcess(
-  killProcess: (pid: number, signal?: NodeJS.Signals | number) => void,
-  pid: number,
-  signal: NodeJS.Signals | number,
-): void {
-  try {
-    killProcess(pid, signal)
-  } catch (error) {
-    const code =
-      error && typeof error === 'object' && 'code' in error
-        ? String((error as { code?: string }).code ?? '')
-        : ''
-
-    if (code === 'ESRCH') {
-      return
-    }
-
-    throw error
-  }
 }
 
 async function waitForDaemonStop(

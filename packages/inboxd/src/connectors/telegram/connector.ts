@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api, type ApiClientOptions, type RawApi } from "grammy";
+import { relayAbort } from "../../shared.js";
 import {
   createNormalizedChatPollConnector,
   type ChatPollDriver,
@@ -436,17 +437,6 @@ function looksLikeLocalBotApiFilePath(filePath: string): boolean {
     path.posix.isAbsolute(filePath) ||
     path.win32.isAbsolute(filePath)
   );
-}
-
-function relayAbort(signal: AbortSignal, controller: AbortController): () => void {
-  if (signal.aborted) {
-    controller.abort();
-    return () => {};
-  }
-
-  const onAbort = () => controller.abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return () => signal.removeEventListener("abort", onAbort);
 }
 
 function shouldRetryTelegramPollingError(error: unknown): boolean {

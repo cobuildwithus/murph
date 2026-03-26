@@ -1,13 +1,10 @@
 import {
   createAssistantStateWriteLock,
-  type AssistantStateWriteLockMetadata,
 } from '../state-write-lock.js'
 import type { AssistantStatePaths } from '../store.js'
 
 const ASSISTANT_CRON_LOCK_DIRECTORY = '.locks/assistant-cron-write'
 const ASSISTANT_CRON_LOCK_METADATA_PATH = `${ASSISTANT_CRON_LOCK_DIRECTORY}/owner.json`
-
-type AssistantCronWriteLockMetadata = AssistantStateWriteLockMetadata
 
 const assistantCronWriteLock = createAssistantStateWriteLock<AssistantStatePaths>({
   ownerKeyPrefix: 'assistant-cron',
@@ -27,16 +24,4 @@ export async function withAssistantCronWriteLock<TResult>(
   run: () => Promise<TResult>,
 ): Promise<TResult> {
   return assistantCronWriteLock.withWriteLock(paths, run)
-}
-
-async function acquireAssistantCronWriteLock(paths: AssistantStatePaths): Promise<{
-  release(): Promise<void>
-}> {
-  return assistantCronWriteLock.acquireWriteLock(paths)
-}
-
-function isAssistantCronWriteLockMetadata(
-  value: unknown,
-): value is AssistantCronWriteLockMetadata {
-  return assistantCronWriteLock.isWriteLockMetadata(value)
 }

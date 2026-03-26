@@ -4,15 +4,8 @@ import { access, mkdir, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { sanitizeChildProcessEnv } from '../child-process-env.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-
-function sanitizeChildProcessEnv(
-  env: NodeJS.ProcessEnv | undefined,
-): NodeJS.ProcessEnv {
-  const nextEnv = { ...(env ?? process.env) }
-  delete nextEnv.NODE_V8_COVERAGE
-  return nextEnv
-}
 
 export interface CommandRunInput {
   file: string

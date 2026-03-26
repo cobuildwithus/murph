@@ -94,6 +94,8 @@ function normalizeExperimentHypothesis(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+// Preserve the legacy create/idempotency behavior: unknown statuses still normalize
+// to "active" here, while update flows use requireExperimentStatus for strict validation.
 function coerceExperimentStatus(value: unknown): ExperimentStatus {
   return typeof value === "string" && EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)
     ? (value as ExperimentStatus)
@@ -142,7 +144,7 @@ function validateExperimentFrontmatter(
   );
 }
 
-async function readExperimentFrontmatterDocument(
+export async function readExperimentFrontmatterDocument(
   vaultRoot: string,
   relativePath: string,
 ): Promise<{

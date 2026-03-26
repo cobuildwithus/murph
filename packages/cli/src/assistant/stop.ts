@@ -1,4 +1,5 @@
 import { assistantStopResultSchema } from '../assistant-cli-contracts.js'
+import { tryKillProcess } from '../process-kill.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   redactAssistantDisplayPath,
@@ -218,27 +219,6 @@ async function waitForRunLockChange(input: {
   }
 
   return inspectAssistantAutomationRunLock(input.paths)
-}
-
-function tryKillProcess(
-  killProcess: (pid: number, signal?: NodeJS.Signals | number) => void,
-  pid: number,
-  signal: NodeJS.Signals | number,
-): void {
-  try {
-    killProcess(pid, signal)
-  } catch (error) {
-    const code =
-      error && typeof error === 'object' && 'code' in error
-        ? String((error as { code?: string }).code ?? '')
-        : ''
-
-    if (code === 'ESRCH') {
-      return
-    }
-
-    throw error
-  }
 }
 
 function normalizePositiveInt(value: number | undefined, fallback: number): number {

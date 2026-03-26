@@ -1,19 +1,17 @@
-import type {
-  ContractSchema,
-  ExperimentFrontmatter,
-  JournalDayFrontmatter,
-} from "@healthybob/contracts";
+import type { JournalDayFrontmatter } from "@healthybob/contracts";
 import {
-  experimentFrontmatterSchema,
   journalDayFrontmatterSchema,
   safeParseContract,
 } from "@healthybob/contracts";
 
 import { VAULT_LAYOUT } from "./constants.js";
 import { VaultError } from "./errors.js";
-import { readUtf8File } from "./fs.js";
-import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
-import { ensureJournalDay as ensureJournalDayInternal } from "./domains/journal.js";
+import { readExperimentFrontmatterDocument } from "./domains/experiments.js";
+import {
+  ensureJournalDay as ensureJournalDayInternal,
+  readJournalDayFrontmatterDocument,
+} from "./domains/journal.js";
+import { stringifyFrontmatterDocument } from "./frontmatter.js";
 import { runCanonicalWrite } from "./operations/write-batch.js";
 
 interface InboxPromotionCaptureAttachment {
@@ -112,78 +110,6 @@ const EXPERIMENT_PROMOTION_MARKDOWN_SPEC = {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)];
-}
-
-function safeParseDocument<T>(
-  schema: ContractSchema<T>,
-  markdown: string,
-  relativePath: string,
-  code: string,
-  message: string,
-): {
-  attributes: T;
-  body: string;
-} {
-  const document = parseFrontmatterDocument(markdown);
-  const result = safeParseContract(schema, document.attributes);
-
-  if (!result.success) {
-    throw new VaultError(code, message, {
-      relativePath,
-      errors: result.errors,
-    });
-  }
-
-  return {
-    attributes: result.data,
-    body: document.body,
-  };
-}
-
-async function readExperimentFrontmatterDocument(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<{
-  rawDocument: string;
-  document: {
-    attributes: ExperimentFrontmatter;
-    body: string;
-  };
-}> {
-  const rawDocument = await readUtf8File(vaultRoot, relativePath);
-  return {
-    rawDocument,
-    document: safeParseDocument(
-      experimentFrontmatterSchema,
-      rawDocument,
-      relativePath,
-      "HB_EXPERIMENT_FRONTMATTER_INVALID",
-      `Experiment frontmatter for "${relativePath}" is invalid.`,
-    ),
-  };
-}
-
-async function readJournalDayFrontmatterDocument(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<{
-  rawDocument: string;
-  document: {
-    attributes: JournalDayFrontmatter;
-    body: string;
-  };
-}> {
-  const rawDocument = await readUtf8File(vaultRoot, relativePath);
-  return {
-    rawDocument,
-    document: safeParseDocument(
-      journalDayFrontmatterSchema,
-      rawDocument,
-      relativePath,
-      "HB_JOURNAL_FRONTMATTER_INVALID",
-      `Journal frontmatter for "${relativePath}" is invalid.`,
-    ),
-  };
 }
 
 function validateJournalFrontmatter(

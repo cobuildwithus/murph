@@ -221,7 +221,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
           200,
           renderCallbackHtml({
             title: `${formatProviderLabel(result.account.provider)} connected`,
-            body: `Connected ${escapeHtml(formatProviderLabel(result.account.provider))} account ${escapeHtml(result.account.id)} successfully.`,
+            body: `Connected ${formatProviderLabel(result.account.provider)} account ${result.account.id} successfully.`,
           }),
         );
       } catch (error) {
@@ -685,7 +685,7 @@ function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: s
     error.httpStatus,
     renderCallbackHtml({
       title: `${formatProviderLabel(provider)} connection failed`,
-      body: escapeHtml(error.message),
+      body: error.message,
     }),
   );
 }
@@ -783,7 +783,7 @@ function formatProviderLabel(provider: string): string {
   );
 }
 
-function renderCallbackHtml(input: { title: string; body: string }): string {
+export function renderCallbackHtml(input: { title: string; body: string }): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -798,7 +798,7 @@ function renderCallbackHtml(input: { title: string; body: string }): string {
   </head>
   <body>
     <h1>${escapeHtml(input.title)}</h1>
-    <p>${input.body}</p>
+    <p>${escapeHtml(input.body)}</p>
   </body>
 </html>`;
 }

@@ -14,6 +14,7 @@ import {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
+import { readEnvValue } from './env-values.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
@@ -481,20 +482,6 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
       savedTarget.deliveryTarget ??
       null,
   }
-}
-
-function readEnvValue(
-  env: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = env[key]?.trim()
-    if (value) {
-      return value
-    }
-  }
-
-  return null
 }
 
 function mergeAssistantOperatorDefaults(

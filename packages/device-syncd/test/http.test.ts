@@ -5,6 +5,7 @@ import { test } from "vitest";
 import { DeviceSyncError } from "../src/errors.js";
 import {
   assertDeviceSyncControlRequest,
+  renderCallbackHtml,
   startDeviceSyncHttpServer,
 } from "../src/http.js";
 
@@ -147,6 +148,35 @@ test("device sync http server protects control routes and keeps webhooks on the 
   } finally {
     await server.close();
   }
+});
+
+test("renderCallbackHtml escapes plain-text body content", () => {
+  const html = renderCallbackHtml({
+    title: `Demo connected`,
+    body: `Connected Demo<script>alert(1)</script> account acct_<tag>&"' successfully.`,
+  });
+
+  assert.match(
+    html,
+    /<p>Connected Demo&lt;script&gt;alert\(1\)&lt;\/script&gt; account acct_&lt;tag&gt;&amp;&quot;&#39; successfully\.<\/p>/u,
+  );
+  assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/u);
+  assert.doesNotMatch(html, /acct_<tag>&"'/u);
+  assert.doesNotMatch(
+    html,
+    /Demo&amp;lt;script&amp;gt;alert\(1\)&amp;lt;\/script&amp;gt;/u,
+  );
+});
+
+test("renderCallbackHtml escapes callback errors once without requiring pre-escaped text", () => {
+  const html = renderCallbackHtml({
+    title: "Demo connection failed",
+    body: `OAuth failed because <bad>&"' details`,
+  });
+
+  assert.match(html, /<p>OAuth failed because &lt;bad&gt;&amp;&quot;&#39; details<\/p>/u);
+  assert.doesNotMatch(html, /OAuth failed because <bad>&"'/u);
+  assert.doesNotMatch(html, /OAuth failed because &amp;lt;bad&amp;gt;/u);
 });
 
 function createStubService(

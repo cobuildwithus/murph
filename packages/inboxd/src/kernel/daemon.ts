@@ -1,6 +1,6 @@
 import type { PollConnector } from "../connectors/types.js";
 import type { InboxPipeline } from "./pipeline.js";
-import { createCaptureCheckpoint } from "../shared.js";
+import { createCaptureCheckpoint, relayAbort, waitForAbortOrTimeout } from "../shared.js";
 
 const DEFAULT_CONNECTOR_RESTART_BACKOFF_MS = Object.freeze([1_000, 5_000, 15_000, 30_000]);
 const DEFAULT_CONNECTOR_RESTART_DELAY_MS = 1_000;
@@ -252,17 +252,6 @@ function normalizeRestartMaxAttempts(value: number | null | undefined): number |
   return Math.max(0, Math.floor(value));
 }
 
-function relayAbort(signal: AbortSignal, controller: AbortController): () => void {
-  if (signal.aborted) {
-    controller.abort();
-    return () => {};
-  }
-
-  const onAbort = () => controller.abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return () => signal.removeEventListener("abort", onAbort);
-}
-
 function createConnectorFailure(connector: PollConnector, error: unknown): Error {
   const detail = error instanceof Error ? error.message : String(error);
   const failure = new Error(`Connector "${connector.id}" (${connector.source}) failed: ${detail}`);
@@ -297,28 +286,4 @@ function normalizeRestartDelay(value: number, label: string): number {
   }
 
   return Math.floor(value);
-}
-
-async function waitForAbortOrTimeout(
-  signal: AbortSignal,
-  milliseconds: number,
-): Promise<void> {
-  if (signal.aborted) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-
-    const onAbort = () => {
-      clearTimeout(timeout);
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    };
-
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

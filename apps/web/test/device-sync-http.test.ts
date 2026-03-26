@@ -128,6 +128,25 @@ describe("device sync callback redirect helpers", () => {
     });
   });
 
+  it("renders callback html from plain-text title and body", async () => {
+    const response = httpModule.callbackHtml(
+      `Connected <demo>`,
+      `Connection details: <ok>&"'`,
+      201,
+    );
+
+    expect(response.status).toBe(201);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+
+    const html = await response.text();
+
+    expect(html).toContain("<title>Connected &lt;demo&gt;</title>");
+    expect(html).toContain("<h1>Connected &lt;demo&gt;</h1>");
+    expect(html).toContain("<p>Connection details: &lt;ok&gt;&amp;&quot;&#39;</p>");
+    expect(html).not.toContain("Connection details: <ok>&\"'");
+    expect(html).not.toContain("Connection details: &amp;lt;ok&amp;gt;");
+  });
+
   it("keeps raw callback error text out of redirect query params", () => {
     const response = httpModule.errorToCallbackRedirect({
       returnTo: "https://app.healthybob.test/settings/devices?tab=wearables",

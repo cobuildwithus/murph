@@ -271,6 +271,176 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
       ),
       true,
     )
+    const failoverReceipts = await listRecentAssistantTurnReceipts(vaultRoot, 1)
+    assert.deepEqual(
+      failoverReceipts[0]?.timeline.map((entry) => entry.kind),
+      [
+        'turn.started',
+        'user.persisted',
+        'provider.attempt.started',
+        'provider.attempt.failed',
+        'provider.cooldown.started',
+        'provider.failover.applied',
+        'provider.attempt.started',
+        'provider.attempt.succeeded',
+        'turn.completed',
+      ],
+    )
+    assert.deepEqual(failoverReceipts[0]?.timeline[2]?.metadata, {
+      attempt: '1',
+      provider: 'codex-cli',
+      model: 'gpt-oss:20b',
+      routeId: primaryRoute?.routeId ?? '',
+    })
+    assert.deepEqual(failoverReceipts[0]?.timeline[3]?.metadata, {
+      attempt: '1',
+      provider: 'codex-cli',
+      model: 'gpt-oss:20b',
+      routeId: primaryRoute?.routeId ?? '',
+      code: 'ASSISTANT_PROVIDER_TIMEOUT',
+    })
+    assert.deepEqual(failoverReceipts[0]?.timeline[4]?.metadata, {
+      routeId: primaryRoute?.routeId ?? '',
+      cooldownUntil: primaryRoute?.cooldownUntil ?? '',
+    })
+    assert.deepEqual(failoverReceipts[0]?.timeline[5]?.metadata, {
+      from: primaryRoute?.label ?? '',
+      to: backupRoute?.label ?? '',
+      fromRouteId: primaryRoute?.routeId ?? '',
+      toRouteId: backupRoute?.routeId ?? '',
+    })
+    assert.deepEqual(failoverReceipts[0]?.timeline[6]?.metadata, {
+      attempt: '2',
+      provider: 'openai-compatible',
+      model: 'backup-model',
+      routeId: backupRoute?.routeId ?? '',
+    })
+    assert.deepEqual(failoverReceipts[0]?.timeline[7]?.metadata, {
+      attempt: '2',
+      provider: 'openai-compatible',
+      model: 'backup-model',
+      routeId: backupRoute?.routeId ?? '',
+    })
+    const cooldownRoutes = buildAssistantFailoverRoutes({
+      provider: 'codex-cli',
+      providerOptions: {
+        model: 'gpt-oss:20b',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+      },
+      backups: [
+        {
+          name: 'backup-ollama',
+          provider: 'openai-compatible',
+          codexCommand: null,
+          model: 'backup-model',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          providerName: 'ollama',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          cooldownMs: null,
+        },
+      ],
+    })
+    const cooldownPrimaryRoute = cooldownRoutes.find(
+      (route) => route.provider === 'codex-cli',
+    )
+    assert.ok(cooldownPrimaryRoute)
+    await recordAssistantFailoverRouteFailure({
+      vault: vaultRoot,
+      route: cooldownPrimaryRoute,
+      error: new VaultCliError(
+        'ASSISTANT_PROVIDER_TIMEOUT',
+        'Primary provider timed out before it produced a response.',
+      ),
+      at: '2026-03-26T22:00:00.000Z',
+    })
+
+    const cooldownResult = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:cooldown',
+      prompt: 'send the cooled-over route',
+      provider: 'codex-cli',
+      model: 'gpt-oss:20b',
+      failoverRoutes: [
+        {
+          name: 'backup-ollama',
+          provider: 'openai-compatible',
+          codexCommand: null,
+          model: 'backup-model',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          providerName: 'ollama',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          cooldownMs: null,
+        },
+      ],
+    })
+
+    assert.equal(cooldownResult.response, 'backup reply')
+    const cooldownStatus = await getAssistantStatus(vaultRoot)
+    const cooldownFailoverEntry = cooldownStatus.recentTurns
+      .flatMap((turn) => turn.timeline)
+      .find(
+        (entry) =>
+          entry.kind === 'provider.failover.applied' &&
+          entry.metadata?.reason === 'cooldown',
+      )
+    assert.equal(cooldownFailoverEntry?.metadata?.reason, 'cooldown')
+    assert.equal(typeof cooldownFailoverEntry?.metadata?.fromRouteId, 'string')
+    assert.equal(typeof cooldownFailoverEntry?.metadata?.toRouteId, 'string')
+    const updatedFailoverState = await readAssistantFailoverState(vaultRoot)
+    const updatedPrimaryRoute = updatedFailoverState.routes.find(
+      (route) => route.provider === 'codex-cli',
+    )
+    const updatedBackupRoute = updatedFailoverState.routes.find(
+      (route) => route.provider === 'openai-compatible',
+    )
+    const latestReceipts = await listRecentAssistantTurnReceipts(vaultRoot, 2)
+    assert.deepEqual(
+      latestReceipts[0]?.timeline.map((entry) => entry.kind),
+      [
+        'turn.started',
+        'user.persisted',
+        'provider.failover.applied',
+        'provider.attempt.started',
+        'provider.attempt.succeeded',
+        'turn.completed',
+      ],
+    )
+    assert.deepEqual(latestReceipts[0]?.timeline[2]?.metadata, {
+      from: updatedPrimaryRoute?.label ?? '',
+      to: updatedBackupRoute?.label ?? '',
+      fromRouteId: updatedPrimaryRoute?.routeId ?? '',
+      toRouteId: updatedBackupRoute?.routeId ?? '',
+      reason: 'cooldown',
+    })
+    assert.deepEqual(latestReceipts[0]?.timeline[3]?.metadata, {
+      attempt: '1',
+      provider: 'openai-compatible',
+      model: 'backup-model',
+      routeId: updatedBackupRoute?.routeId ?? '',
+    })
+    assert.deepEqual(latestReceipts[0]?.timeline[4]?.metadata, {
+      attempt: '1',
+      provider: 'openai-compatible',
+      model: 'backup-model',
+      routeId: updatedBackupRoute?.routeId ?? '',
+    })
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }

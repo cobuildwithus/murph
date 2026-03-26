@@ -1,5 +1,5 @@
 import type { InboundCapture, PersistedCapture } from "../../contracts/capture.js";
-import { createCaptureCheckpoint } from "../../shared.js";
+import { createCaptureCheckpoint, waitForAbortOrTimeout } from "../../shared.js";
 import type { Cursor, EmitCapture, PollConnector } from "../types.js";
 import { normalizeAgentmailMessage } from "./normalize.js";
 import type {
@@ -411,28 +411,4 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-async function waitForAbortOrTimeout(
-  signal: AbortSignal,
-  milliseconds: number,
-): Promise<void> {
-  if (signal.aborted) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-
-    const onAbort = () => {
-      clearTimeout(timeout);
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    };
-
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

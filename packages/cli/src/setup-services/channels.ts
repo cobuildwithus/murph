@@ -4,6 +4,7 @@ import {
 } from '../assistant-state.js'
 import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
 import { getAssistantChannelAdapter } from '../assistant/channel-adapters.js'
+import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '../inbox-app/linq-endpoint.js'
 import type { InboxCliServices } from '../inbox-services.js'
 import type {
   SetupAgentmailInboxSelection,
@@ -217,10 +218,14 @@ function describeLinqConnectorEndpoint(input: {
     linqWebhookPort?: number | null
   }
 }): string {
-  const host = input.options.linqWebhookHost ?? '0.0.0.0'
-  const path = input.options.linqWebhookPath ?? '/linq-webhook'
-  const port = input.options.linqWebhookPort ?? 8789
-  return `${host}:${port}${path}`
+  const endpoint = describeLinqEndpoint({
+    options: {
+      linqWebhookHost: input.options.linqWebhookHost,
+      linqWebhookPath: input.options.linqWebhookPath,
+      linqWebhookPort: input.options.linqWebhookPort ?? undefined,
+    },
+  })
+  return `${endpoint.host}:${endpoint.port}${endpoint.path}`
 }
 
 function describeConfiguredEmailAction(input: {

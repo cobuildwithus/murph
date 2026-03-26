@@ -9,6 +9,12 @@ import {
   inputFileOptionSchema,
   normalizeInputFileOption,
 } from '../json-input.js'
+import type {
+  CommandContext,
+  EntityLookupInput as ShowCommandContext,
+  HealthListInput as ListCommandContext,
+  JsonFileInput as UpsertCommandContext,
+} from '../health-cli-method-types.js'
 export { healthPayloadSchema } from '../health-cli-descriptors.js'
 export { inputFileOptionSchema, normalizeInputFileOption } from '../json-input.js'
 
@@ -17,27 +23,6 @@ const localDateOptionSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected YYYY-MM-DD.')
 const statusOptionSchema = z.string().min(1).optional()
-
-interface CommandContext {
-  requestId: string | null
-  vault: string
-}
-
-interface UpsertCommandContext extends CommandContext {
-  input: string
-}
-
-interface ShowCommandContext extends CommandContext {
-  id: string
-}
-
-interface ListCommandContext extends CommandContext {
-  from?: string
-  to?: string
-  kind?: string
-  limit?: number
-  status?: string
-}
 
 interface CrudDescriptions {
   list: string

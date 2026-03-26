@@ -85,19 +85,6 @@ function toAssistantCronPreset(
   }
 }
 
-function formatScheduledUpdateList(
-  presets: readonly AssistantCronPreset[],
-): string {
-  if (presets.length === 1) {
-    const preset = presets[0] as AssistantCronPreset
-    return `1 assistant scheduled update: ${preset.title} (${preset.suggestedScheduleLabel})`
-  }
-
-  return `${presets.length} assistant scheduled updates: ${presets
-    .map((preset) => `${preset.title} (${preset.suggestedScheduleLabel})`)
-    .join(', ')}`
-}
-
 function formatDeferredScheduledUpdatesDetail(
   presets: readonly AssistantCronPreset[],
   dryRun: boolean,
