@@ -59,6 +59,11 @@ beforeEach(() => {
   cronServiceMocks.sendAssistantMessage.mockReset()
 })
 
+const testCronDeliveryTarget = {
+  channel: 'telegram' as const,
+  sourceThreadId: '123456789',
+}
+
 test('assistant cron presets stay separate from scheduler state until installed', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-list-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -67,14 +72,16 @@ test('assistant cron presets stay separate from scheduler state until installed'
   await mkdir(vaultRoot, { recursive: true })
 
   const presets = listAssistantCronPresets()
-  const conditionPreset = getAssistantCronPreset('condition-research-roundup')
+  const mindfulnessPreset = getAssistantCronPreset('morning-mindfulness')
   const listedJobs = await listAssistantCronJobs(vaultRoot)
 
   assert.ok(presets.some((preset) => preset.id === 'environment-health-watch'))
-  assert.equal(conditionPreset.id, 'condition-research-roundup')
-  assert.match(conditionPreset.promptTemplate, /condition or goal/u)
-  assert.match(conditionPreset.promptTemplate, /research tool/u)
-  assert.equal(conditionPreset.suggestedSchedule.kind, 'cron')
+  assert.ok(presets.some((preset) => preset.id === 'morning-mindfulness'))
+  assert.equal(mindfulnessPreset.id, 'morning-mindfulness')
+  assert.match(mindfulnessPreset.promptTemplate, /morning mindfulness prompt/u)
+  assert.match(mindfulnessPreset.promptTemplate, /text-message friendly/u)
+  assert.equal(mindfulnessPreset.suggestedSchedule.kind, 'cron')
+  assert.equal(mindfulnessPreset.suggestedSchedule.expression, '0 7 * * *')
   assert.deepEqual(listedJobs, [])
 })
 
@@ -90,6 +97,7 @@ test('assistant cron preset install rejects unknown preset variables', async () 
       installAssistantCronPreset({
         vault: vaultRoot,
         presetId: 'condition-research-roundup',
+        ...testCronDeliveryTarget,
         variables: {
           unsupported_key: 'value',
         },
@@ -107,26 +115,36 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
 
   const installed = await installAssistantCronPreset({
     vault: vaultRoot,
-    presetId: 'condition-research-roundup',
-    name: 'cholesterol-research-roundup',
+    presetId: 'morning-mindfulness',
+    name: 'morning-mindfulness-text',
+    ...testCronDeliveryTarget,
     variables: {
-      condition_or_goal: 'lowering LDL cholesterol',
+      practice_window: 'a 10 minute seated meditation before work',
+      focus_for_today: 'breath awareness, relaxing my shoulders, and gratitude',
     },
-    additionalInstructions: 'Call out anything that seems immediately actionable.',
-    alias: 'research:cholesterol',
+    additionalInstructions: 'If you include a quote-like line, keep it short.',
+    alias: 'routine:mindfulness',
   })
 
-  assert.equal(installed.preset.id, 'condition-research-roundup')
-  assert.equal(installed.job.name, 'cholesterol-research-roundup')
+  assert.equal(installed.preset.id, 'morning-mindfulness')
+  assert.equal(installed.job.name, 'morning-mindfulness-text')
   assert.equal(installed.job.schedule.kind, 'cron')
   assert.equal(installed.job.enabled, true)
-  assert.equal(installed.job.target.alias, 'research:cholesterol')
+  assert.equal(installed.job.target.channel, 'telegram')
+  assert.equal(installed.job.target.alias, 'routine:mindfulness')
+  assert.equal(installed.job.target.sourceThreadId, '123456789')
+  assert.equal(installed.job.target.deliverResponse, true)
   assert.equal(
-    installed.resolvedVariables.condition_or_goal,
-    'lowering LDL cholesterol',
+    installed.resolvedVariables.practice_window,
+    'a 10 minute seated meditation before work',
   )
-  assert.match(installed.resolvedPrompt, /lowering LDL cholesterol/u)
-  assert.match(installed.resolvedPrompt, /research tool/u)
+  assert.equal(
+    installed.resolvedVariables.focus_for_today,
+    'breath awareness, relaxing my shoulders, and gratitude',
+  )
+  assert.match(installed.resolvedPrompt, /10 minute seated meditation before work/u)
+  assert.match(installed.resolvedPrompt, /relaxing my shoulders, and gratitude/u)
+  assert.match(installed.resolvedPrompt, /text-message friendly/u)
   assert.match(installed.resolvedPrompt, /Additional user instructions/u)
 
   const listed = await listAssistantCronJobs(vaultRoot)
@@ -147,6 +165,7 @@ test('assistant cron job creation preserves required-text validation errors', as
         vault: vaultRoot,
         name: '   ',
         prompt: 'Run a quick daily check-in.',
+        ...testCronDeliveryTarget,
         schedule: buildAssistantCronSchedule({
           every: '2h',
         }),
@@ -164,6 +183,7 @@ test('assistant cron job creation preserves required-text validation errors', as
         vault: vaultRoot,
         name: 'daily-check-in',
         prompt: '   ',
+        ...testCronDeliveryTarget,
         schedule: buildAssistantCronSchedule({
           every: '2h',
         }),
@@ -173,6 +193,57 @@ test('assistant cron job creation preserves required-text validation errors', as
       assert.equal(error.message, 'prompt must be a non-empty string.')
       return true
     },
+  )
+})
+
+test('assistant cron jobs require explicit outbound delivery routing', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-delivery-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  await assert.rejects(
+    () =>
+      addAssistantCronJob({
+        vault: vaultRoot,
+        name: 'missing-route',
+        prompt: 'Run a quick daily check-in.',
+        schedule: buildAssistantCronSchedule({
+          every: '2h',
+        }),
+      }),
+    /must declare an outbound channel and delivery route/u,
+  )
+
+  await assert.rejects(
+    () =>
+      addAssistantCronJob({
+        vault: vaultRoot,
+        name: 'email-missing-identity',
+        prompt: 'Send my weekly update.',
+        schedule: buildAssistantCronSchedule({
+          every: '1d',
+        }),
+        channel: 'email',
+        deliveryTarget: 'me@example.com',
+      }),
+    /Email cron jobs require an AgentMail inbox identity/u,
+  )
+
+  await assert.rejects(
+    () =>
+      addAssistantCronJob({
+        vault: vaultRoot,
+        name: 'explicitly-disabled-delivery',
+        prompt: 'Send my weekly update.',
+        schedule: buildAssistantCronSchedule({
+          every: '1d',
+        }),
+        ...testCronDeliveryTarget,
+        deliverResponse: false,
+      }),
+    /always deliver their response/u,
   )
 })
 
@@ -187,6 +258,7 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
     vault: vaultRoot,
     name: 'stretch-reminder',
     prompt: 'Check whether I have been sitting too long and remind me to stretch.',
+    ...testCronDeliveryTarget,
     schedule: buildAssistantCronSchedule({
       every: '2h',
     }),
@@ -197,6 +269,7 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
   assert.equal(job.schedule.kind, 'every')
   assert.equal(job.keepAfterRun, true)
   assert.equal(job.enabled, true)
+  assert.equal(job.target.deliverResponse, true)
   assert.equal(job.state.nextRunAt !== null, true)
 
   const listed = await listAssistantCronJobs(vaultRoot)
@@ -272,6 +345,7 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     vault: vaultRoot,
     name: 'drink-water',
     prompt: 'Remind me to drink water.',
+    ...testCronDeliveryTarget,
     schedule: buildAssistantCronSchedule({
       at: new Date(Date.now() + 60_000).toISOString(),
     }),
@@ -286,6 +360,14 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   assert.equal(result.removedAfterRun, true)
   assert.equal(result.run.sessionId, 'asst_cron_manual')
   assert.equal(result.run.response, 'Drink water now.')
+  assert.equal(
+    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.deliverResponse,
+    true,
+  )
+  assert.equal(
+    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.channel,
+    'telegram',
+  )
 
   await assert.rejects(
     () => getAssistantCronJob(vaultRoot, job.jobId),
@@ -382,6 +464,7 @@ test('assistant cron scheduler processes due jobs and backs off failed runs', as
     vault: vaultRoot,
     name: 'due-failure',
     prompt: 'Run a quick daily check-in.',
+    ...testCronDeliveryTarget,
     schedule: buildAssistantCronSchedule({
       every: '5m',
     }),

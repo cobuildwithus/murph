@@ -421,6 +421,10 @@ test.sequential(
         job: {
           jobId: string
           name: string
+          target: {
+            channel: string | null
+            deliverResponse: boolean
+          }
           schedule: {
             kind: string
           }
@@ -437,12 +441,18 @@ test.sequential(
         'stretch-reminder',
         '--every',
         '2h',
+        '--channel',
+        'telegram',
+        '--sourceThread',
+        '123456789',
       ]),
     )
 
     assert.equal(added.job.name, 'stretch-reminder')
     assert.equal(added.job.schedule.kind, 'every')
     assert.equal(added.job.enabled, true)
+    assert.equal(added.job.target.channel, 'telegram')
+    assert.equal(added.job.target.deliverResponse, true)
     assert.equal(added.jobsPath.includes(path.join(parent, 'assistant-state')), true)
 
     const status = requireData(
@@ -530,6 +540,9 @@ test.sequential(
       presetList.presets.some((preset) => preset.id === 'environment-health-watch'),
     )
     assert.ok(
+      presetList.presets.some((preset) => preset.id === 'morning-mindfulness'),
+    )
+    assert.ok(
       presetList.presets.some((preset) => preset.id === 'weekly-health-snapshot'),
     )
 
@@ -545,14 +558,15 @@ test.sequential(
         'cron',
         'preset',
         'show',
-        'condition-research-roundup',
+        'morning-mindfulness',
         '--vault',
         vaultRoot,
       ]),
     )
-    assert.equal(presetShown.preset.id, 'condition-research-roundup')
-    assert.match(presetShown.promptTemplate, /condition or goal/u)
-    assert.match(presetShown.promptTemplate, /research tool/u)
+    assert.equal(presetShown.preset.id, 'morning-mindfulness')
+    assert.equal(presetShown.preset.suggestedScheduleLabel, 'Daily at 7:00')
+    assert.match(presetShown.promptTemplate, /morning mindfulness prompt/u)
+    assert.match(presetShown.promptTemplate, /text-message friendly/u)
 
     const installed = requireData(
       await runCli<{
@@ -562,6 +576,12 @@ test.sequential(
         job: {
           name: string
           enabled: boolean
+          target: {
+            channel: string | null
+            participantId: string | null
+            sourceThreadId: string | null
+            deliverResponse: boolean
+          }
           schedule: {
             kind: string
           }
@@ -573,28 +593,44 @@ test.sequential(
         'cron',
         'preset',
         'install',
-        'condition-research-roundup',
+        'morning-mindfulness',
         '--vault',
         vaultRoot,
         '--name',
-        'cholesterol-research-roundup',
+        'morning-mindfulness-text',
         '--var',
-        'condition_or_goal=lowering LDL cholesterol',
+        'practice_window=a 10 minute seated meditation before work',
+        '--var',
+        'focus_for_today=breath awareness and relaxing my shoulders and gratitude',
+        '--channel',
+        'telegram',
+        '--participant',
+        'mindfulness-chat',
+        '--sourceThread',
+        'mindfulness-chat',
         '--instructions',
-        'Flag anything that looks directly actionable.',
+        'If you include a quote-like line, keep it short.',
       ]),
     )
 
-    assert.equal(installed.preset.id, 'condition-research-roundup')
-    assert.equal(installed.job.name, 'cholesterol-research-roundup')
+    assert.equal(installed.preset.id, 'morning-mindfulness')
+    assert.equal(installed.job.name, 'morning-mindfulness-text')
     assert.equal(installed.job.enabled, true)
     assert.equal(installed.job.schedule.kind, 'cron')
+    assert.equal(installed.job.target.channel, 'telegram')
+    assert.equal(installed.job.target.participantId, 'mindfulness-chat')
+    assert.equal(installed.job.target.sourceThreadId, 'mindfulness-chat')
+    assert.equal(installed.job.target.deliverResponse, true)
     assert.equal(
-      installed.resolvedVariables.condition_or_goal,
-      'lowering LDL cholesterol',
+      installed.resolvedVariables.practice_window,
+      'a 10 minute seated meditation before work',
     )
-    assert.match(installed.resolvedPrompt, /research tool/u)
-    assert.match(installed.resolvedPrompt, /Flag anything that looks directly actionable/u)
+    assert.equal(
+      installed.resolvedVariables.focus_for_today,
+      'breath awareness and relaxing my shoulders and gratitude',
+    )
+    assert.match(installed.resolvedPrompt, /text-message friendly/u)
+    assert.match(installed.resolvedPrompt, /If you include a quote-like line, keep it short/u)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )
