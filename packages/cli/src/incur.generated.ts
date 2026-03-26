@@ -143,7 +143,6 @@ declare module 'incur' {
       'provider scaffold': { args: {}; options: { vault: string; requestId: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId: string } }
       'provider upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'food add-daily': { args: { title: string }; options: { vault: string; requestId: string; time: string; note: string; slug: string } }
       'food list': { args: {}; options: { vault: string; requestId: string; status: "active" | "archived"; limit: number } }
       'food schedule': { args: { title: string }; options: { vault: string; requestId: string; time: string; note: string; slug: string } }
       'food scaffold': { args: {}; options: { vault: string; requestId: string } }

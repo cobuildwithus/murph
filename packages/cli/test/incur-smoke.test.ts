@@ -413,6 +413,13 @@ test('food schedule schema exposes the recurring food options', async () => {
   assert.deepEqual(schema.options.required, ['vault', 'time'])
 })
 
+test('food help exposes schedule and no longer exposes add-daily', async () => {
+  const help = await runRawCli(['food', '--help'])
+
+  assert.match(help, /schedule\s+Schedule one remembered food for daily auto-log meal creation\./u)
+  assert.doesNotMatch(help, /add-daily/u)
+})
+
 test('profile show help exposes only the global format flag', async () => {
   const help = await runRawCli(['profile', 'show', '--help'])
 

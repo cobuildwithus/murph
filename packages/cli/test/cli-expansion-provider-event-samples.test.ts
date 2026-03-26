@@ -422,7 +422,7 @@ test.sequential(
 )
 
 test.sequential(
-  'food schedule creates a remembered food plus a daily auto-log job while keeping add-daily as a compatibility alias',
+  'food schedule creates a remembered food plus a daily auto-log job',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-daily-'))
 
@@ -465,21 +465,6 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const legacyAlias = await runSliceCli<{
-        foodId: string
-        path: string
-        created: boolean
-        time: string
-        jobId: string
-      }>([
-        'food',
-        'add-daily',
-        'Second Smoothie',
-        '--time',
-        '09:00',
-        '--vault',
-        vaultRoot,
-      ])
       const jobs = await listAssistantCronJobs(vaultRoot)
 
       assert.equal(foodSchedule.ok, true, JSON.stringify(foodSchedule))
@@ -501,12 +486,7 @@ test.sequential(
         'Bone broth protein, inulin, prebiotic GOS, creatine, and coconut water.',
       )
 
-      assert.equal(legacyAlias.ok, true, JSON.stringify(legacyAlias))
-      assert.equal(legacyAlias.meta?.command, 'food add-daily')
-      assert.match(requireData(legacyAlias).foodId, /^food_/u)
-      assert.equal(requireData(legacyAlias).time, '09:00')
-
-      assert.equal(jobs.length, 2)
+      assert.equal(jobs.length, 1)
       assert.equal(jobs[0]?.jobId, requireData(foodSchedule).jobId)
       assert.equal(jobs[0]?.name, 'food-daily:morning-smoothie')
       assert.equal(jobs[0]?.schedule.kind, 'cron')
@@ -514,8 +494,6 @@ test.sequential(
       assert.deepEqual(jobs[0]?.foodAutoLog, {
         foodId: requireData(foodSchedule).foodId,
       })
-      assert.equal(jobs[1]?.jobId, requireData(legacyAlias).jobId)
-      assert.equal(jobs[1]?.name, 'food-daily:second-smoothie')
 
       const foodMarkdown = await readFile(
         path.join(vaultRoot, requireData(foodSchedule).path),

@@ -28,7 +28,7 @@ const foodUpsertResultSchema = z.object({
   created: z.boolean(),
 })
 
-const foodAddDailyResultSchema = z.object({
+const foodScheduleResultSchema = z.object({
   vault: pathSchema,
   foodId: z.string().min(1),
   lookupId: z.string().min(1),
@@ -72,7 +72,7 @@ function createFoodScheduleCommandConfig(services: VaultCliServices) {
         .optional()
         .describe('Optional stable slug override for the remembered food record.'),
     }),
-    output: foodAddDailyResultSchema,
+    output: foodScheduleResultSchema,
     async run(context: {
       args: {
         title: string
@@ -153,12 +153,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
   })
 
   food.command('schedule', createFoodScheduleCommandConfig(services))
-
-  food.command('add-daily', {
-    ...createFoodScheduleCommandConfig(services),
-    description: 'Legacy alias for `food schedule`.',
-    hint: 'Prefer `food schedule`. This compatibility alias still creates the same recurring meal auto-log rule.',
-  })
 
   cli.command(food)
 }
