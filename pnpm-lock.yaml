@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@cobuild/review-gpt@0.4.2':
+    hash: aeldg2ewwvs664onhy66pe53sq
+    path: patches/@cobuild__review-gpt@0.4.2.patch
+
 importers:
 
   .:
@@ -13,7 +18,7 @@ importers:
         version: 0.1.14
       '@cobuild/review-gpt':
         specifier: ^0.4.2
-        version: 0.4.2
+        version: 0.4.2(patch_hash=aeldg2ewwvs664onhy66pe53sq)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -2817,7 +2822,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.14': {}
 
-  '@cobuild/review-gpt@0.4.2': {}
+  '@cobuild/review-gpt@0.4.2(patch_hash=aeldg2ewwvs664onhy66pe53sq)': {}
 
   '@electric-sql/pglite-socket@0.0.20(@electric-sql/pglite@0.3.15)':
     dependencies:
