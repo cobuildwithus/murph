@@ -117,6 +117,57 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
   ]);
 });
 
+test("Oura provider requires a replacement refresh token during refresh", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.ouraring.com/oauth/token") {
+        return createJsonResponse({
+          access_token: "refreshed-access-token",
+          expires_in: 3600,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    provider.refreshTokens(createAccount(["personal"])),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_REFRESH_TOKEN_ROTATION_MISSING" &&
+      error.accountStatus === "reauthorization_required",
+  );
+});
+
+test("Oura provider requires an existing refresh token before attempting refresh", async () => {
+  let fetchCalled = false;
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async () => {
+      fetchCalled = true;
+      throw new Error("refresh should not reach the token endpoint without a refresh token");
+    },
+  });
+
+  await assert.rejects(
+    provider.refreshTokens({
+      ...createAccount(["personal"]),
+      refreshToken: null,
+    }),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_REFRESH_TOKEN_MISSING" &&
+      error.accountStatus === "reauthorization_required",
+  );
+  assert.equal(fetchCalled, false);
+});
+
 test("Oura provider backfills snapshot windows with polling-friendly collection fetches", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];

@@ -9,6 +9,7 @@ import {
   ALLERGY_STATUSES,
 } from "./types.js";
 import {
+  buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
   listSection,
@@ -168,14 +169,12 @@ export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAl
         }) as AllergyRecord,
       );
 
-      return {
+      return buildDocumentFromAttributes<FrontmatterObject, AllergyRecord>({
         attributes,
-        body: buildBody({
-          ...attributes,
-          relativePath: target.relativePath,
-          markdown: existingRecord?.markdown ?? "",
-        } as AllergyRecord),
-      };
+        relativePath: target.relativePath,
+        markdown: existingRecord?.markdown,
+        buildBody,
+      });
     },
   });
 }

@@ -9,6 +9,7 @@ import {
   FOOD_STATUSES,
 } from "./types.js";
 import {
+  buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
   listSection,
@@ -268,14 +269,12 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
         }) as FoodRecord,
       );
 
-      return {
+      return buildDocumentFromAttributes<FrontmatterObject, FoodRecord>({
         attributes,
-        body: buildBody({
-          ...attributes,
-          relativePath: target.relativePath,
-          markdown: existingRecord?.markdown ?? "",
-        } as FoodRecord),
-      };
+        relativePath: target.relativePath,
+        markdown: existingRecord?.markdown,
+        buildBody,
+      });
     },
   });
 }

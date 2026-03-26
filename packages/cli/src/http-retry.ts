@@ -35,6 +35,87 @@ export function parseRetryAfterHeaderMs(input: {
   return clampRetryDelay(retryAt - (input.nowMs ?? Date.now()), maxDelayMs)
 }
 
+export async function waitForRetryDelay(input: {
+  attempt: number
+  headers?: ResponseHeadersLike | null
+  retryDelaysMs: readonly number[]
+  signal?: AbortSignal
+}): Promise<void> {
+  const delay =
+    parseRetryAfterHeaderMs({
+      headers: input.headers,
+    }) ??
+    (input.retryDelaysMs[
+      Math.min(Math.max(input.attempt - 1, 0), input.retryDelaysMs.length - 1)
+    ] ?? 0)
+
+  if (delay <= 0) {
+    return
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    if (input.signal?.aborted) {
+      reject(createAbortError())
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, delay)
+
+    const onAbort = () => {
+      clearTimeout(timeout)
+      cleanup()
+      reject(createAbortError())
+    }
+
+    const cleanup = () => input.signal?.removeEventListener('abort', onAbort)
+    input.signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+export function createTimeoutAbortController(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): {
+  cleanup(): void
+  signal: AbortSignal
+  timedOut(): boolean
+} {
+  const controller = new AbortController()
+  let didTimeout = false
+
+  const onAbort = () => controller.abort()
+  if (signal?.aborted) {
+    controller.abort()
+  } else {
+    signal?.addEventListener('abort', onAbort, { once: true })
+  }
+
+  const timeout = setTimeout(() => {
+    didTimeout = signal?.aborted !== true
+    controller.abort()
+  }, timeoutMs)
+
+  return {
+    cleanup() {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+    },
+    signal: controller.signal,
+    timedOut() {
+      return didTimeout
+    },
+  }
+}
+
+export function createAbortError(): Error {
+  const error = new Error('Operation aborted.')
+  error.name = 'AbortError'
+  return error
+}
+
 function resolveHeaderValue(
   headers: ResponseHeadersLike | null | undefined,
   name: string,

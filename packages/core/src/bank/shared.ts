@@ -171,6 +171,30 @@ export function buildMarkdownBody(title: string, summary: string, sections: read
   return [`# ${title}`, summary, ...sections, ""].join("\n\n");
 }
 
+export function buildDocumentFromAttributes<
+  TAttributes extends FrontmatterObject,
+  TRecord extends { relativePath: string; markdown: string },
+>({
+  attributes,
+  relativePath,
+  markdown,
+  buildBody,
+}: {
+  attributes: TAttributes;
+  relativePath: string;
+  markdown: string | undefined;
+  buildBody: (record: TRecord) => string;
+}): { attributes: TAttributes; body: string } {
+  return {
+    attributes,
+    body: buildBody({
+      ...(attributes as Record<string, unknown>),
+      relativePath,
+      markdown: markdown ?? "",
+    } as TRecord),
+  };
+}
+
 export function detailList(entries: Array<[string, string | number | undefined | null]>): string {
   return bulletList(
     entries.map(([label, value]) => {

@@ -11,6 +11,7 @@ import {
   CONDITION_VERIFICATION_STATUSES,
 } from "./types.js";
 import {
+  buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
   listSection,
@@ -219,14 +220,12 @@ export async function upsertCondition(
         ),
       );
 
-      return {
+      return buildDocumentFromAttributes<FrontmatterObject, ConditionRecord>({
         attributes,
-        body: buildBody({
-          ...attributes,
-          relativePath: target.relativePath,
-          markdown: existingRecord?.markdown ?? "",
-        } as ConditionRecord),
-      };
+        relativePath: target.relativePath,
+        markdown: existingRecord?.markdown,
+        buildBody,
+      });
     },
   });
 }

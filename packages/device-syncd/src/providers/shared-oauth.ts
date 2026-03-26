@@ -1,5 +1,5 @@
 import { deviceSyncError } from "../errors.js";
-import { addMilliseconds, computeRetryDelayMs, sha256Text, sleep, subtractDays } from "../shared.js";
+import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, subtractDays } from "../shared.js";
 
 import type { DeviceSyncErrorOptions } from "../errors.js";
 import type { DeviceSyncAccount, ProviderAuthTokens, ProviderJobContext, ProviderScheduleResult } from "../types.js";
@@ -162,6 +162,87 @@ export function tokenResponseToAuthTokens<T extends {
     refreshToken,
     accessTokenExpiresAt: isoFromExpiresIn(payload.expires_in),
   };
+}
+
+export function requireRefreshToken(refreshToken: unknown, buildMissingRefreshTokenError: () => Error): string {
+  const normalized = normalizeString(refreshToken);
+
+  if (!normalized) {
+    throw buildMissingRefreshTokenError();
+  }
+
+  return normalized;
+}
+
+export async function exchangeOAuthAuthorizationCode<T extends {
+  access_token?: unknown;
+  expires_in?: unknown;
+  refresh_token?: unknown;
+}>(input: {
+  postTokenRequest: (parameters: Record<string, string>) => Promise<T>;
+  clientId: string;
+  clientSecret: string;
+  callbackUrl: string;
+  code: string;
+  tokenResponseToAuthTokens: (payload: T) => ProviderAuthTokens;
+  buildMissingRefreshTokenError: () => Error;
+  extraParameters?: Record<string, string>;
+}): Promise<{
+  tokenPayload: T;
+  tokens: ProviderAuthTokens;
+}> {
+  const tokenPayload = await input.postTokenRequest({
+    grant_type: "authorization_code",
+    client_id: input.clientId,
+    client_secret: input.clientSecret,
+    redirect_uri: input.callbackUrl,
+    code: input.code,
+    ...input.extraParameters,
+  });
+  const tokens = input.tokenResponseToAuthTokens(tokenPayload);
+  tokens.refreshToken = requireRefreshToken(tokens.refreshToken, input.buildMissingRefreshTokenError);
+
+  return {
+    tokenPayload,
+    tokens,
+  };
+}
+
+export async function refreshOAuthTokens<T extends {
+  access_token?: unknown;
+  expires_in?: unknown;
+  refresh_token?: unknown;
+}>(input: {
+  postTokenRequest: (parameters: Record<string, string>) => Promise<T>;
+  account: Pick<DeviceSyncAccount, "refreshToken">;
+  clientId: string;
+  clientSecret: string;
+  tokenResponseToAuthTokens: (payload: T) => ProviderAuthTokens;
+  buildMissingRefreshTokenError: () => Error;
+  resolveRefreshToken?: (input: {
+    currentRefreshToken: string;
+    responseRefreshToken: string | null;
+  }) => string;
+  extraParameters?: Record<string, string>;
+}): Promise<ProviderAuthTokens> {
+  const currentRefreshToken = requireRefreshToken(input.account.refreshToken, input.buildMissingRefreshTokenError);
+  const tokenPayload = await input.postTokenRequest({
+    grant_type: "refresh_token",
+    refresh_token: currentRefreshToken,
+    client_id: input.clientId,
+    client_secret: input.clientSecret,
+    ...input.extraParameters,
+  });
+  const tokens = input.tokenResponseToAuthTokens(tokenPayload);
+
+  if (input.resolveRefreshToken) {
+    tokens.refreshToken = input.resolveRefreshToken({
+      currentRefreshToken,
+      responseRefreshToken: tokens.refreshToken ?? null,
+    });
+  }
+
+  return tokens;
 }
 
 export function createRefreshingApiSession(input: {

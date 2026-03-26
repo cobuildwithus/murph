@@ -81,6 +81,53 @@ describe("device sync callback redirect helpers", () => {
     httpModule = await import("../src/lib/device-sync/http");
   });
 
+  it("maps device-sync domain errors through the shared JSON error helper", async () => {
+    const response = httpModule.jsonError(
+      mocks.deviceSyncError({
+        code: "ACCOUNT_REQUIRES_REAUTH",
+        details: { provider: "oura" },
+        httpStatus: 409,
+        message: "Reconnect the account to continue syncing.",
+        retryable: true,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "ACCOUNT_REQUIRES_REAUTH",
+        details: { provider: "oura" },
+        message: "Reconnect the account to continue syncing.",
+        retryable: true,
+      },
+    });
+  });
+
+  it("maps shared malformed request errors to the existing 400 JSON shapes", async () => {
+    const invalidJsonResponse = httpModule.jsonError(
+      new SyntaxError("Unexpected token ] in JSON at position 3"),
+    );
+    const invalidRequestResponse = httpModule.jsonError(
+      new RangeError("Expected a shorter callback state value."),
+    );
+
+    expect(invalidJsonResponse.status).toBe(400);
+    await expect(invalidJsonResponse.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_JSON",
+        message: "Unexpected token ] in JSON at position 3",
+      },
+    });
+
+    expect(invalidRequestResponse.status).toBe(400);
+    await expect(invalidRequestResponse.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Expected a shorter callback state value.",
+      },
+    });
+  });
+
   it("keeps raw callback error text out of redirect query params", () => {
     const response = httpModule.errorToCallbackRedirect({
       returnTo: "https://app.healthybob.test/settings/devices?tab=wearables",

@@ -14,8 +14,11 @@ import {
   buildProviderApiError,
   buildScheduledReconcileJobs,
   createRefreshingApiSession,
+  exchangeOAuthAuthorizationCode,
   fetchBearerJson,
   postOAuthTokenRequest,
+  refreshOAuthTokens,
+  requireRefreshToken,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.js";
@@ -422,24 +425,22 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       });
     },
     async exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult> {
-      const tokenPayload = await postTokenRequest({
-        grant_type: "authorization_code",
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        redirect_uri: context.callbackUrl,
+      const { tokenPayload, tokens } = await exchangeOAuthAuthorizationCode({
+        postTokenRequest,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        callbackUrl: context.callbackUrl,
         code,
+        tokenResponseToAuthTokens,
+        buildMissingRefreshTokenError: () =>
+          deviceSyncError({
+            code: "OURA_REFRESH_TOKEN_MISSING",
+            message:
+              "Oura did not return a refresh token. Use the server-side OAuth flow so the connection can auto-sync.",
+            retryable: false,
+            httpStatus: 502,
+          }),
       });
-      const tokens = tokenResponseToAuthTokens(tokenPayload);
-
-      if (!tokens.refreshToken) {
-        throw deviceSyncError({
-          code: "OURA_REFRESH_TOKEN_MISSING",
-          message:
-            "Oura did not return a refresh token. Use the server-side OAuth flow so the connection can auto-sync.",
-          retryable: false,
-          httpStatus: 502,
-        });
-      }
 
       const grantedScopesFromToken = splitScopes(tokenPayload.scope);
       const grantedScopes =
@@ -493,35 +494,29 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       };
     },
     async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
-      const refreshToken = normalizeString(account.refreshToken);
-
-      if (!refreshToken) {
-        throw deviceSyncError({
-          code: "OURA_REFRESH_TOKEN_MISSING",
-          message: "Oura account does not have a refresh token and must be reconnected.",
-          retryable: false,
-          accountStatus: "reauthorization_required",
-        });
-      }
-
-      const tokenPayload = await postTokenRequest({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
+      return refreshOAuthTokens({
+        postTokenRequest,
+        account,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        tokenResponseToAuthTokens,
+        buildMissingRefreshTokenError: () =>
+          deviceSyncError({
+            code: "OURA_REFRESH_TOKEN_MISSING",
+            message: "Oura account does not have a refresh token and must be reconnected.",
+            retryable: false,
+            accountStatus: "reauthorization_required",
+          }),
+        resolveRefreshToken: ({ responseRefreshToken }) =>
+          requireRefreshToken(responseRefreshToken, () =>
+            deviceSyncError({
+              code: "OURA_REFRESH_TOKEN_ROTATION_MISSING",
+              message: "Oura refresh response did not include a replacement refresh token.",
+              retryable: false,
+              accountStatus: "reauthorization_required",
+            }),
+          ),
       });
-      const tokens = tokenResponseToAuthTokens(tokenPayload);
-
-      if (!tokens.refreshToken) {
-        throw deviceSyncError({
-          code: "OURA_REFRESH_TOKEN_ROTATION_MISSING",
-          message: "Oura refresh response did not include a replacement refresh token.",
-          retryable: false,
-          accountStatus: "reauthorization_required",
-        });
-      }
-
-      return tokens;
     },
     webhookPath: OURA_WEBHOOK_PATH,
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {

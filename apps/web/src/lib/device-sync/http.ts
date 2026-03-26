@@ -1,57 +1,19 @@
 import { DeviceSyncError, isDeviceSyncError } from "@healthybob/device-syncd";
 import { NextResponse } from "next/server";
 
+import {
+  createJsonErrorResponse,
+  mapDomainJsonError,
+} from "../http";
+
 export { jsonOk, readJsonObject, readOptionalJsonObject, readRawBodyBuffer, resolveRouteParams } from "../http";
 
 export function jsonError(error: unknown): NextResponse {
-  if (isDeviceSyncError(error)) {
-    return NextResponse.json(
-      {
-        error: {
-          code: error.code,
-          message: error.message,
-          retryable: error.retryable,
-          details: error.details,
-        },
-      },
-      { status: error.httpStatus },
-    );
-  }
-
-  if (error instanceof SyntaxError) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "INVALID_JSON",
-          message: error.message,
-        },
-      },
-      { status: 400 },
-    );
-  }
-
-  if (error instanceof TypeError || error instanceof RangeError) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "INVALID_REQUEST",
-          message: error.message,
-        },
-      },
-      { status: 400 },
-    );
-  }
-
-  console.error("Hosted device-sync route failed.", error);
-  return NextResponse.json(
-    {
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "Hosted device-sync route failed unexpectedly.",
-      },
-    },
-    { status: 500 },
-  );
+  return createJsonErrorResponse(error, {
+    internalMessage: "Hosted device-sync route failed unexpectedly.",
+    logMessage: "Hosted device-sync route failed.",
+    matchers: [mapDeviceSyncError],
+  });
 }
 
 export function callbackHtml(title: string, body: string, status = 200): NextResponse {
@@ -113,4 +75,8 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function mapDeviceSyncError(error: unknown) {
+  return isDeviceSyncError(error) ? mapDomainJsonError(error) : null;
 }

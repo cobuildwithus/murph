@@ -1,4 +1,8 @@
-import { parseRetryAfterHeaderMs, type ResponseHeadersLike } from './http-retry.js'
+import {
+  createTimeoutAbortController,
+  waitForRetryDelay,
+  type ResponseHeadersLike,
+} from './http-retry.js'
 import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -611,80 +615,12 @@ async function waitForAgentmailRetryDelay(
   signal?: AbortSignal,
   headers?: ResponseHeadersLike | null,
 ): Promise<void> {
-  const delay =
-    parseRetryAfterHeaderMs({
-      headers,
-      maxDelayMs: 30_000,
-    }) ??
-    (AGENTMAIL_HTTP_RETRY_DELAYS_MS[
-      Math.min(Math.max(attempt - 1, 0), AGENTMAIL_HTTP_RETRY_DELAYS_MS.length - 1)
-    ] ?? 0)
-
-  if (delay <= 0) {
-    return
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(createAbortError())
-      return
-    }
-
-    const timeout = setTimeout(() => {
-      cleanup()
-      resolve()
-    }, delay)
-
-    const onAbort = () => {
-      clearTimeout(timeout)
-      cleanup()
-      reject(createAbortError())
-    }
-
-    const cleanup = () => signal?.removeEventListener('abort', onAbort)
-    signal?.addEventListener('abort', onAbort, { once: true })
+  await waitForRetryDelay({
+    attempt,
+    headers,
+    retryDelaysMs: AGENTMAIL_HTTP_RETRY_DELAYS_MS,
+    signal,
   })
-}
-
-function createTimeoutAbortController(
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-): {
-  cleanup(): void
-  signal: AbortSignal
-  timedOut(): boolean
-} {
-  const controller = new AbortController()
-  let didTimeout = false
-
-  const onAbort = () => controller.abort()
-  if (signal?.aborted) {
-    controller.abort()
-  } else {
-    signal?.addEventListener('abort', onAbort, { once: true })
-  }
-
-  const timeout = setTimeout(() => {
-    didTimeout = signal?.aborted !== true
-    controller.abort()
-  }, timeoutMs)
-
-  return {
-    cleanup() {
-      clearTimeout(timeout)
-      signal?.removeEventListener('abort', onAbort)
-    },
-    signal: controller.signal,
-    timedOut() {
-      return didTimeout
-    },
-  }
-}
-
-function createAbortError(): Error {
-  const error = new Error('Operation aborted.')
-  error.name = 'AbortError'
-  return error
 }
 
 async function createAgentmailHttpError(

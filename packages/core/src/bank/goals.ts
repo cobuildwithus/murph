@@ -10,6 +10,7 @@ import {
   GOAL_STATUSES,
 } from "./types.js";
 import {
+  buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
   listSection,
@@ -233,14 +234,12 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
         ),
       );
 
-      return {
+      return buildDocumentFromAttributes<FrontmatterObject, GoalRecord>({
         attributes,
-        body: buildBody({
-          ...attributes,
-          relativePath: target.relativePath,
-          markdown: existingRecord?.markdown ?? "",
-        } as GoalRecord),
-      };
+        relativePath: target.relativePath,
+        markdown: existingRecord?.markdown,
+        buildBody,
+      });
     },
   });
 }

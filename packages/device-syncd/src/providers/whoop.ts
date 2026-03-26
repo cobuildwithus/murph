@@ -14,10 +14,12 @@ import {
   buildProviderApiError,
   buildScheduledReconcileJobs,
   createRefreshingApiSession,
+  exchangeOAuthAuthorizationCode,
   fetchBearerJson,
   isTokenNearExpiry,
   parseResponseBody,
   postOAuthTokenRequest,
+  refreshOAuthTokens,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.js";
@@ -571,24 +573,22 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       });
     },
     async exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult> {
-      const tokenPayload = await postTokenRequest({
-        grant_type: "authorization_code",
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        redirect_uri: context.callbackUrl,
+      const { tokenPayload, tokens } = await exchangeOAuthAuthorizationCode({
+        postTokenRequest,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        callbackUrl: context.callbackUrl,
         code,
+        tokenResponseToAuthTokens,
+        buildMissingRefreshTokenError: () =>
+          deviceSyncError({
+            code: "WHOOP_REFRESH_TOKEN_MISSING",
+            message:
+              "WHOOP did not return a refresh token. Ensure the offline scope is enabled so the connection can auto-sync.",
+            retryable: false,
+            httpStatus: 502,
+          }),
       });
-      const tokens = tokenResponseToAuthTokens(tokenPayload);
-
-      if (!tokens.refreshToken) {
-        throw deviceSyncError({
-          code: "WHOOP_REFRESH_TOKEN_MISSING",
-          message:
-            "WHOOP did not return a refresh token. Ensure the offline scope is enabled so the connection can auto-sync.",
-          retryable: false,
-          httpStatus: 502,
-        });
-      }
 
       const profile = await fetchWhoopJson<Record<string, unknown>>({
         path: "/v2/user/profile/basic",
@@ -631,31 +631,24 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       };
     },
     async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
-      const refreshToken = normalizeString(account.refreshToken);
-
-      if (!refreshToken) {
-        throw deviceSyncError({
-          code: "WHOOP_REFRESH_TOKEN_MISSING",
-          message: "WHOOP account does not have a refresh token and must be reconnected.",
-          retryable: false,
-          accountStatus: "reauthorization_required",
-        });
-      }
-
-      const tokenPayload = await postTokenRequest({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        scope: "offline",
+      return refreshOAuthTokens({
+        postTokenRequest,
+        account,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        tokenResponseToAuthTokens,
+        buildMissingRefreshTokenError: () =>
+          deviceSyncError({
+            code: "WHOOP_REFRESH_TOKEN_MISSING",
+            message: "WHOOP account does not have a refresh token and must be reconnected.",
+            retryable: false,
+            accountStatus: "reauthorization_required",
+          }),
+        resolveRefreshToken: ({ currentRefreshToken, responseRefreshToken }) => responseRefreshToken ?? currentRefreshToken,
+        extraParameters: {
+          scope: "offline",
+        },
       });
-      const tokens = tokenResponseToAuthTokens(tokenPayload);
-
-      if (!tokens.refreshToken) {
-        tokens.refreshToken = refreshToken;
-      }
-
-      return tokens;
     },
     async revokeAccess(account: DeviceSyncAccount): Promise<void> {
       const accessToken = await refreshAccountForRevoke(account);

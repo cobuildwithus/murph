@@ -1,16 +1,11 @@
-import { jsonError, jsonOk, readJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { requireHostedInviteCodeFromRequest } from "@/src/lib/hosted-onboarding/route-helpers";
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/service";
 import { requireHostedSessionFromRequest } from "@/src/lib/hosted-onboarding/session";
 
 export async function POST(request: Request) {
   try {
-    const body = await readJsonObject(request);
-    const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode : null;
-
-    if (!inviteCode) {
-      throw new TypeError("inviteCode is required.");
-    }
-
+    const { inviteCode } = await requireHostedInviteCodeFromRequest(request);
     const sessionRecord = await requireHostedSessionFromRequest(request);
     return jsonOk(
       await createHostedBillingCheckout({

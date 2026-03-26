@@ -34,9 +34,9 @@ import {
 } from "./history/api.js";
 import {
   checkpointExperiment as checkpointExperimentInternal,
-  createExperiment as createExperimentViaLegacyMutationsInternal,
-  stopExperiment as stopExperimentViaCanonicalMutationsInternal,
-  updateExperiment as updateExperimentViaCanonicalMutationsInternal,
+  createExperiment as createExperimentInternal,
+  stopExperiment as stopExperimentInternal,
+  updateExperiment as updateExperimentInternal,
 } from "./domains/experiments.js";
 import {
   appendJournal as appendJournalInternal,
@@ -107,6 +107,13 @@ async function withCanonicalWriteLock<TResult>(
   }
 }
 
+function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResult>(
+  input: TInput,
+  operation: (input: TInput) => Promise<TResult>,
+): Promise<TResult> {
+  return withCanonicalWriteLock(input.vaultRoot, () => operation(input));
+}
+
 function buildStaleCanonicalWriteLockIssue(
   issue: Awaited<ReturnType<typeof inspectCanonicalWriteLock>>,
 ): ValidationIssue | null {
@@ -157,7 +164,7 @@ export async function appendJsonlRecord<TRecord extends object>(input: {
   relativePath: string;
   record: TRecord;
 }): Promise<TRecord> {
-  return withCanonicalWriteLock(input.vaultRoot, () => appendJsonlRecordInternal(input));
+  return withCanonicalInputWriteLock(input, appendJsonlRecordInternal);
 }
 
 export async function applyCanonicalWriteBatch(
@@ -214,79 +221,79 @@ export async function applyCanonicalWriteBatch(
 export async function copyRawArtifact(
   input: Parameters<typeof copyRawArtifactInternal>[0],
 ): ReturnType<typeof copyRawArtifactInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => copyRawArtifactInternal(input));
+  return withCanonicalInputWriteLock(input, copyRawArtifactInternal);
 }
 
 export async function ensureJournalDay(
   input: Parameters<typeof ensureJournalDayInternal>[0],
 ): ReturnType<typeof ensureJournalDayInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => ensureJournalDayInternal(input));
+  return withCanonicalInputWriteLock(input, ensureJournalDayInternal);
 }
 
 export async function appendJournal(
   input: Parameters<typeof appendJournalInternal>[0],
 ): ReturnType<typeof appendJournalInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => appendJournalInternal(input));
+  return withCanonicalInputWriteLock(input, appendJournalInternal);
 }
 
 export async function linkJournalEventIds(
   input: Parameters<typeof linkJournalEventIdsInternal>[0],
 ): ReturnType<typeof linkJournalEventIdsInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => linkJournalEventIdsInternal(input));
+  return withCanonicalInputWriteLock(input, linkJournalEventIdsInternal);
 }
 
 export async function unlinkJournalEventIds(
   input: Parameters<typeof unlinkJournalEventIdsInternal>[0],
 ): ReturnType<typeof unlinkJournalEventIdsInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => unlinkJournalEventIdsInternal(input));
+  return withCanonicalInputWriteLock(input, unlinkJournalEventIdsInternal);
 }
 
 export async function linkJournalStreams(
   input: Parameters<typeof linkJournalStreamsInternal>[0],
 ): ReturnType<typeof linkJournalStreamsInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => linkJournalStreamsInternal(input));
+  return withCanonicalInputWriteLock(input, linkJournalStreamsInternal);
 }
 
 export async function unlinkJournalStreams(
   input: Parameters<typeof unlinkJournalStreamsInternal>[0],
 ): ReturnType<typeof unlinkJournalStreamsInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => unlinkJournalStreamsInternal(input));
+  return withCanonicalInputWriteLock(input, unlinkJournalStreamsInternal);
 }
 
 export async function createExperiment(
-  input: Parameters<typeof createExperimentViaLegacyMutationsInternal>[0],
-): ReturnType<typeof createExperimentViaLegacyMutationsInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => createExperimentViaLegacyMutationsInternal(input));
+  input: Parameters<typeof createExperimentInternal>[0],
+): ReturnType<typeof createExperimentInternal> {
+  return withCanonicalInputWriteLock(input, createExperimentInternal);
 }
 
 export async function updateExperiment(
-  input: Parameters<typeof updateExperimentViaCanonicalMutationsInternal>[0],
-): ReturnType<typeof updateExperimentViaCanonicalMutationsInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => updateExperimentViaCanonicalMutationsInternal(input));
+  input: Parameters<typeof updateExperimentInternal>[0],
+): ReturnType<typeof updateExperimentInternal> {
+  return withCanonicalInputWriteLock(input, updateExperimentInternal);
 }
 
 export async function checkpointExperiment(
   input: Parameters<typeof checkpointExperimentInternal>[0],
 ): ReturnType<typeof checkpointExperimentInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => checkpointExperimentInternal(input));
+  return withCanonicalInputWriteLock(input, checkpointExperimentInternal);
 }
 
 export async function stopExperiment(
-  input: Parameters<typeof stopExperimentViaCanonicalMutationsInternal>[0],
-): ReturnType<typeof stopExperimentViaCanonicalMutationsInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => stopExperimentViaCanonicalMutationsInternal(input));
+  input: Parameters<typeof stopExperimentInternal>[0],
+): ReturnType<typeof stopExperimentInternal> {
+  return withCanonicalInputWriteLock(input, stopExperimentInternal);
 }
 
 export async function importDocument(
   input: Parameters<typeof importDocumentInternal>[0],
 ): ReturnType<typeof importDocumentInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => importDocumentInternal(input));
+  return withCanonicalInputWriteLock(input, importDocumentInternal);
 }
 
 export async function addMeal(
   input: Parameters<typeof addMealInternal>[0],
 ): ReturnType<typeof addMealInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => addMealInternal(input));
+  return withCanonicalInputWriteLock(input, addMealInternal);
 }
 
 export const importMeal = addMeal;
@@ -294,25 +301,25 @@ export const importMeal = addMeal;
 export async function importSamples(
   input: Parameters<typeof importSamplesInternal>[0],
 ): ReturnType<typeof importSamplesInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => importSamplesInternal(input));
+  return withCanonicalInputWriteLock(input, importSamplesInternal);
 }
 
 export async function upsertProvider(
   input: Parameters<typeof upsertProviderInternal>[0],
 ): ReturnType<typeof upsertProviderInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertProviderInternal(input));
+  return withCanonicalInputWriteLock(input, upsertProviderInternal);
 }
 
 export async function upsertEvent(
   input: Parameters<typeof upsertEventInternal>[0],
 ): ReturnType<typeof upsertEventInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertEventInternal(input));
+  return withCanonicalInputWriteLock(input, upsertEventInternal);
 }
 
 export async function updateVaultSummary(
   input: Parameters<typeof updateVaultSummaryInternal>[0],
 ): ReturnType<typeof updateVaultSummaryInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => updateVaultSummaryInternal(input));
+  return withCanonicalInputWriteLock(input, updateVaultSummaryInternal);
 }
 
 export async function repairVault(
@@ -324,101 +331,101 @@ export async function repairVault(
 export async function promoteInboxJournal(
   input: Parameters<typeof promoteInboxJournalInternal>[0],
 ): ReturnType<typeof promoteInboxJournalInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => promoteInboxJournalInternal(input));
+  return withCanonicalInputWriteLock(input, promoteInboxJournalInternal);
 }
 
 export async function promoteInboxExperimentNote(
   input: Parameters<typeof promoteInboxExperimentNoteInternal>[0],
 ): ReturnType<typeof promoteInboxExperimentNoteInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => promoteInboxExperimentNoteInternal(input));
+  return withCanonicalInputWriteLock(input, promoteInboxExperimentNoteInternal);
 }
 
 export async function importDeviceBatch(
   input: Parameters<typeof importDeviceBatchInternal>[0],
 ): ReturnType<typeof importDeviceBatchInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => importDeviceBatchInternal(input));
+  return withCanonicalInputWriteLock(input, importDeviceBatchInternal);
 }
 
 export async function importAssessmentResponse(
   input: Parameters<typeof importAssessmentResponseInternal>[0],
 ): ReturnType<typeof importAssessmentResponseInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => importAssessmentResponseInternal(input));
+  return withCanonicalInputWriteLock(input, importAssessmentResponseInternal);
 }
 
 export async function appendProfileSnapshot(
   input: Parameters<typeof appendProfileSnapshotInternal>[0],
 ): ReturnType<typeof appendProfileSnapshotInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => appendProfileSnapshotInternal(input));
+  return withCanonicalInputWriteLock(input, appendProfileSnapshotInternal);
 }
 
 export async function rebuildCurrentProfile(
   input: Parameters<typeof rebuildCurrentProfileInternal>[0],
 ): ReturnType<typeof rebuildCurrentProfileInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => rebuildCurrentProfileInternal(input));
+  return withCanonicalInputWriteLock(input, rebuildCurrentProfileInternal);
 }
 
 export async function appendHistoryEvent(
   input: Parameters<typeof appendHistoryEventInternal>[0],
 ): ReturnType<typeof appendHistoryEventInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => appendHistoryEventInternal(input));
+  return withCanonicalInputWriteLock(input, appendHistoryEventInternal);
 }
 
 export async function appendBloodTest(
   input: Parameters<typeof appendBloodTestInternal>[0],
 ): ReturnType<typeof appendBloodTestInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => appendBloodTestInternal(input));
+  return withCanonicalInputWriteLock(input, appendBloodTestInternal);
 }
 
 export async function upsertFamilyMember(
   input: Parameters<typeof upsertFamilyMemberInternal>[0],
 ): ReturnType<typeof upsertFamilyMemberInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertFamilyMemberInternal(input));
+  return withCanonicalInputWriteLock(input, upsertFamilyMemberInternal);
 }
 
 export async function upsertGeneticVariant(
   input: Parameters<typeof upsertGeneticVariantInternal>[0],
 ): ReturnType<typeof upsertGeneticVariantInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertGeneticVariantInternal(input));
+  return withCanonicalInputWriteLock(input, upsertGeneticVariantInternal);
 }
 
 export async function upsertAllergy(
   input: Parameters<typeof upsertAllergyInternal>[0],
 ): ReturnType<typeof upsertAllergyInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertAllergyInternal(input));
+  return withCanonicalInputWriteLock(input, upsertAllergyInternal);
 }
 
 export async function upsertCondition(
   input: Parameters<typeof upsertConditionInternal>[0],
 ): ReturnType<typeof upsertConditionInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertConditionInternal(input));
+  return withCanonicalInputWriteLock(input, upsertConditionInternal);
 }
 
 export async function upsertGoal(
   input: Parameters<typeof upsertGoalInternal>[0],
 ): ReturnType<typeof upsertGoalInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertGoalInternal(input));
+  return withCanonicalInputWriteLock(input, upsertGoalInternal);
 }
 
 export async function upsertRecipe(
   input: Parameters<typeof upsertRecipeInternal>[0],
 ): ReturnType<typeof upsertRecipeInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertRecipeInternal(input));
+  return withCanonicalInputWriteLock(input, upsertRecipeInternal);
 }
 
 export async function upsertFood(
   input: Parameters<typeof upsertFoodInternal>[0],
 ): ReturnType<typeof upsertFoodInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertFoodInternal(input));
+  return withCanonicalInputWriteLock(input, upsertFoodInternal);
 }
 
 export async function upsertProtocolItem(
   input: Parameters<typeof upsertProtocolItemInternal>[0],
 ): ReturnType<typeof upsertProtocolItemInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertProtocolItemInternal(input));
+  return withCanonicalInputWriteLock(input, upsertProtocolItemInternal);
 }
 
 export async function stopProtocolItem(
   input: Parameters<typeof stopProtocolItemInternal>[0],
 ): ReturnType<typeof stopProtocolItemInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => stopProtocolItemInternal(input));
+  return withCanonicalInputWriteLock(input, stopProtocolItemInternal);
 }

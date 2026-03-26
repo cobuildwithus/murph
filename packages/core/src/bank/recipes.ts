@@ -9,6 +9,7 @@ import {
   RECIPE_STATUSES,
 } from "./types.js";
 import {
+  buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
   listSection,
@@ -285,14 +286,12 @@ export async function upsertRecipe(input: UpsertRecipeInput): Promise<UpsertReci
         }) as RecipeRecord,
       );
 
-      return {
+      return buildDocumentFromAttributes<FrontmatterObject, RecipeRecord>({
         attributes,
-        body: buildBody({
-          ...attributes,
-          relativePath: target.relativePath,
-          markdown: existingRecord?.markdown ?? "",
-        } as RecipeRecord),
-      };
+        relativePath: target.relativePath,
+        markdown: existingRecord?.markdown,
+        buildBody,
+      });
     },
   });
 }

@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { DeviceSyncError } from "../src/errors.js";
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.js";
 import { sha256Text, subtractDays } from "../src/shared.js";
 
@@ -83,6 +84,14 @@ function readAuthorizationHeader(init?: RequestInit): string | null {
   return new Headers(init?.headers).get("Authorization");
 }
 
+function readRequestBody(init?: RequestInit): string | null {
+  if (typeof init?.body === "string") {
+    return init.body;
+  }
+
+  return init?.body instanceof URLSearchParams ? init.body.toString() : null;
+}
+
 function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timestamp = Date.now().toString()): Headers {
   const signature = createHmac("sha256", clientSecret).update(Buffer.concat([Buffer.from(timestamp, "utf8"), rawBody])).digest(
     "base64",
@@ -161,6 +170,64 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
     "https://api.prod.whoop.com/oauth/oauth2/token",
     "https://api.prod.whoop.com/developer/v2/user/profile/basic",
   ]);
+});
+
+test("WHOOP provider keeps the stored refresh token when refresh omits a replacement", async () => {
+  let requestBody: string | null = null;
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        requestBody = readRequestBody(init);
+        return createJsonResponse({
+          access_token: "refreshed-access-token",
+          expires_in: 3600,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const tokens = await provider.refreshTokens(
+    createAccount(["offline"], {
+      refreshToken: "persisted-refresh-token",
+    }),
+  );
+
+  assert.equal(tokens.accessToken, "refreshed-access-token");
+  assert.equal(tokens.refreshToken, "persisted-refresh-token");
+  assert.equal(new URLSearchParams(requestBody ?? "").get("grant_type"), "refresh_token");
+  assert.equal(new URLSearchParams(requestBody ?? "").get("refresh_token"), "persisted-refresh-token");
+  assert.equal(new URLSearchParams(requestBody ?? "").get("scope"), "offline");
+});
+
+test("WHOOP provider requires an existing refresh token before attempting refresh", async () => {
+  let fetchCalled = false;
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async () => {
+      fetchCalled = true;
+      throw new Error("refresh should not reach the token endpoint without a refresh token");
+    },
+  });
+
+  await assert.rejects(
+    provider.refreshTokens(
+      createAccount(["offline"], {
+        refreshToken: null,
+      }),
+    ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_REFRESH_TOKEN_MISSING" &&
+      error.accountStatus === "reauthorization_required",
+  );
+  assert.equal(fetchCalled, false);
 });
 
 test("WHOOP provider backfills snapshot windows and refreshes once after a 401", async () => {

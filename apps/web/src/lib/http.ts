@@ -8,14 +8,28 @@ export function jsonOk(payload: unknown, status = 200): NextResponse {
   return NextResponse.json(payload, { status });
 }
 
+export interface JsonErrorMapping {
+  error: {
+    code: string;
+    message: string;
+    retryable?: boolean;
+    details?: unknown;
+  };
+  status: number;
+}
+
+export type JsonErrorMatcher = (error: unknown) => JsonErrorMapping | null;
+
+interface JsonErrorResponseOptions {
+  defaultHeaders?: HeadersInit;
+  headers?: HeadersInit;
+  internalMessage: string;
+  logMessage: string;
+  matchers?: JsonErrorMatcher[];
+}
+
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  const body = (await request.json()) as unknown;
-
-  if (!isRecord(body)) {
-    throw new TypeError("Request body must be a JSON object.");
-  }
-
-  return body;
+  return requireJsonObject((await request.json()) as unknown);
 }
 
 export async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
@@ -25,13 +39,7 @@ export async function readOptionalJsonObject(request: Request): Promise<Record<s
     return {};
   }
 
-  const body = JSON.parse(text) as unknown;
-
-  if (!isRecord(body)) {
-    throw new TypeError("Request body must be a JSON object.");
-  }
-
-  return body;
+  return requireJsonObject(JSON.parse(text) as unknown);
 }
 
 export async function readRawBodyBuffer(request: Request): Promise<Buffer> {
@@ -42,4 +50,129 @@ export async function resolveRouteParams<TParams extends Record<string, string>>
   params: Promise<TParams> | TParams,
 ): Promise<TParams> {
   return Promise.resolve(params);
+}
+
+export function mapDomainJsonError(error: {
+  code: string;
+  message: string;
+  retryable?: boolean;
+  details?: unknown;
+  httpStatus: number;
+}): JsonErrorMapping {
+  return {
+    error: {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      details: error.details,
+    },
+    status: error.httpStatus,
+  };
+}
+
+export function createJsonErrorResponse(
+  error: unknown,
+  options: JsonErrorResponseOptions,
+): NextResponse {
+  const matchedError = matchJsonError(error, options.matchers);
+
+  if (matchedError) {
+    return NextResponse.json(
+      { error: matchedError.error },
+      buildJsonResponseInit(options, matchedError.status),
+    );
+  }
+
+  if (error instanceof SyntaxError) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "INVALID_JSON",
+          message: error.message,
+        },
+      },
+      buildJsonResponseInit(options, 400),
+    );
+  }
+
+  if (error instanceof TypeError || error instanceof RangeError) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "INVALID_REQUEST",
+          message: error.message,
+        },
+      },
+      buildJsonResponseInit(options, 400),
+    );
+  }
+
+  console.error(options.logMessage, error);
+  return NextResponse.json(
+    {
+      error: {
+        code: "INTERNAL_ERROR",
+        message: options.internalMessage,
+      },
+    },
+    buildJsonResponseInit(options, 500),
+  );
+}
+
+export function mergeJsonHeaders(
+  defaultHeaders?: HeadersInit,
+  headers?: HeadersInit,
+): Headers | undefined {
+  if (!defaultHeaders && !headers) {
+    return undefined;
+  }
+
+  const merged = new Headers(defaultHeaders);
+
+  if (headers) {
+    const requestedHeaders = new Headers(headers);
+
+    for (const [key, value] of requestedHeaders.entries()) {
+      merged.set(key, value);
+    }
+  }
+
+  return merged;
+}
+
+function requireJsonObject(body: unknown): Record<string, unknown> {
+  if (!isRecord(body)) {
+    throw new TypeError("Request body must be a JSON object.");
+  }
+
+  return body;
+}
+
+function buildJsonResponseInit(
+  options: JsonErrorResponseOptions,
+  status: number,
+): ResponseInit {
+  return {
+    headers: mergeJsonHeaders(options.defaultHeaders, options.headers),
+    status,
+  };
+}
+
+function matchJsonError(
+  error: unknown,
+  matchers: JsonErrorMatcher[] | undefined,
+): JsonErrorMapping | null {
+  if (!matchers) {
+    return null;
+  }
+
+  for (const matcher of matchers) {
+    const mappedError = matcher(error);
+
+    if (mappedError) {
+      return mappedError;
+    }
+  }
+
+  return null;
 }
