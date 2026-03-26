@@ -6,7 +6,9 @@ import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
   assistantProviderFailoverRouteSchema,
+  assistantSelfDeliveryTargetSchema,
   assistantSandboxValues,
+  type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
 import {
   ROOT_OPTIONS_WITH_VALUES,
@@ -72,6 +74,10 @@ const assistantOperatorDefaultsSchema = z.object({
     .strict()
     .nullable()
     .optional(),
+  selfDeliveryTargets: z
+    .record(z.string().min(1), assistantSelfDeliveryTargetSchema)
+    .nullable()
+    .default(null),
 })
 
 const operatorConfigSchema = z.object({
@@ -85,6 +91,13 @@ export type OperatorConfig = z.infer<typeof operatorConfigSchema>
 export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
+export interface AssistantSelfDeliveryTargetLookupInput {
+  channel?: string | null
+  deliveryTarget?: string | null
+  identityId?: string | null
+  participantId?: string | null
+  sourceThreadId?: string | null
+}
 
 export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'allergy',
@@ -146,6 +159,7 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'assistant cron',
   'assistant memory',
   'assistant session',
+  'assistant self-target',
   'audit',
   'blood-test',
   'condition',
@@ -185,6 +199,10 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'supplement compound',
   'vault',
   'workout',
+])
+
+const COMMAND_PATHS_EXEMPT_FROM_VAULT = new Set([
+  'assistant self-target',
 ])
 
 export function resolveOperatorHomeDirectory(
@@ -340,6 +358,131 @@ export async function resolveAssistantOperatorDefaults(
   return config?.assistant ?? null
 }
 
+export async function listAssistantSelfDeliveryTargets(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<AssistantSelfDeliveryTarget[]> {
+  const defaults = await resolveAssistantOperatorDefaults(homeDirectory)
+  return sortAssistantSelfDeliveryTargets(defaults?.selfDeliveryTargets ?? null)
+}
+
+export async function resolveAssistantSelfDeliveryTarget(
+  channel: string,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<AssistantSelfDeliveryTarget | null> {
+  const normalizedChannel = normalizeOperatorConfigString(channel)?.toLowerCase()
+  if (!normalizedChannel) {
+    return null
+  }
+
+  const defaults = await resolveAssistantOperatorDefaults(homeDirectory)
+  return defaults?.selfDeliveryTargets?.[normalizedChannel] ?? null
+}
+
+export async function saveAssistantSelfDeliveryTarget(
+  target: AssistantSelfDeliveryTarget,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<AssistantSelfDeliveryTarget> {
+  const normalizedTarget = normalizeAssistantSelfDeliveryTarget(target)
+  const existing = await resolveAssistantOperatorDefaults(homeDirectory)
+  const nextTargets = {
+    ...(existing?.selfDeliveryTargets ?? {}),
+    [normalizedTarget.channel]: normalizedTarget,
+  }
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      selfDeliveryTargets: nextTargets,
+    },
+    homeDirectory,
+  )
+
+  return normalizedTarget
+}
+
+export async function clearAssistantSelfDeliveryTargets(
+  channel?: string | null,
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<string[]> {
+  const existing = await resolveAssistantOperatorDefaults(homeDirectory)
+  const currentTargets = {
+    ...(existing?.selfDeliveryTargets ?? {}),
+  }
+  const normalizedChannel = normalizeOperatorConfigString(channel)?.toLowerCase() ?? null
+
+  if (normalizedChannel) {
+    if (!currentTargets[normalizedChannel]) {
+      return []
+    }
+
+    delete currentTargets[normalizedChannel]
+    await saveAssistantOperatorDefaultsPatch(
+      {
+        selfDeliveryTargets:
+          Object.keys(currentTargets).length > 0 ? currentTargets : null,
+      },
+      homeDirectory,
+    )
+    return [normalizedChannel]
+  }
+
+  const clearedChannels = sortAssistantSelfDeliveryTargets(currentTargets).map(
+    (target) => target.channel,
+  )
+  if (clearedChannels.length === 0) {
+    return []
+  }
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      selfDeliveryTargets: null,
+    },
+    homeDirectory,
+  )
+
+  return clearedChannels
+}
+
+export async function applyAssistantSelfDeliveryTargetDefaults(
+  input: AssistantSelfDeliveryTargetLookupInput,
+  options?: {
+    allowSingleSavedTargetFallback?: boolean
+  },
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<AssistantSelfDeliveryTargetLookupInput> {
+  const normalizedChannel = normalizeOperatorConfigString(input.channel)?.toLowerCase() ?? null
+  const savedTarget = normalizedChannel
+    ? await resolveAssistantSelfDeliveryTarget(normalizedChannel, homeDirectory)
+    : options?.allowSingleSavedTargetFallback
+      ? await resolveSingleAssistantSelfDeliveryTarget(homeDirectory)
+      : null
+
+  if (!savedTarget) {
+    return {
+      channel: normalizedChannel,
+      identityId: normalizeOperatorConfigString(input.identityId),
+      participantId: normalizeOperatorConfigString(input.participantId),
+      sourceThreadId: normalizeOperatorConfigString(input.sourceThreadId),
+      deliveryTarget: normalizeOperatorConfigString(input.deliveryTarget),
+    }
+  }
+
+  return {
+    channel: normalizedChannel ?? savedTarget.channel,
+    identityId:
+      normalizeOperatorConfigString(input.identityId) ?? savedTarget.identityId ?? null,
+    participantId:
+      normalizeOperatorConfigString(input.participantId) ?? savedTarget.participantId ?? null,
+    sourceThreadId:
+      normalizeOperatorConfigString(input.sourceThreadId) ??
+      savedTarget.sourceThreadId ??
+      null,
+    deliveryTarget:
+      normalizeOperatorConfigString(input.deliveryTarget) ??
+      savedTarget.deliveryTarget ??
+      null,
+  }
+}
+
 function readEnvValue(
   env: NodeJS.ProcessEnv,
   keys: readonly string[],
@@ -387,7 +530,63 @@ function mergeAssistantOperatorDefaults(
         ? patch.failoverRoutes
         : existing?.failoverRoutes ?? null,
     account: 'account' in patch ? patch.account : existing?.account ?? null,
+    selfDeliveryTargets:
+      'selfDeliveryTargets' in patch
+        ? normalizeAssistantSelfDeliveryTargetMap(patch.selfDeliveryTargets ?? null)
+        : existing?.selfDeliveryTargets ?? null,
   })
+}
+
+function normalizeAssistantSelfDeliveryTargetMap(
+  targets: Record<string, AssistantSelfDeliveryTarget> | null,
+): Record<string, AssistantSelfDeliveryTarget> | null {
+  if (!targets || Object.keys(targets).length === 0) {
+    return null
+  }
+
+  return Object.fromEntries(
+    Object.values(targets).map((target) => {
+      const normalized = normalizeAssistantSelfDeliveryTarget(target)
+      return [normalized.channel, normalized]
+    }),
+  )
+}
+
+function normalizeAssistantSelfDeliveryTarget(
+  target: AssistantSelfDeliveryTarget,
+): AssistantSelfDeliveryTarget {
+  const channel = normalizeOperatorConfigString(target.channel)?.toLowerCase()
+  if (!channel) {
+    throw new Error('Assistant self delivery targets require a channel.')
+  }
+
+  return assistantSelfDeliveryTargetSchema.parse({
+    channel,
+    identityId: normalizeOperatorConfigString(target.identityId),
+    participantId: normalizeOperatorConfigString(target.participantId),
+    sourceThreadId: normalizeOperatorConfigString(target.sourceThreadId),
+    deliveryTarget: normalizeOperatorConfigString(target.deliveryTarget),
+  })
+}
+
+function sortAssistantSelfDeliveryTargets(
+  targets: Record<string, AssistantSelfDeliveryTarget> | null,
+): AssistantSelfDeliveryTarget[] {
+  return Object.values(targets ?? {}).sort((left, right) =>
+    left.channel.localeCompare(right.channel),
+  )
+}
+
+async function resolveSingleAssistantSelfDeliveryTarget(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<AssistantSelfDeliveryTarget | null> {
+  const targets = await listAssistantSelfDeliveryTargets(homeDirectory)
+  return targets.length === 1 ? targets[0] ?? null : null
+}
+
+function normalizeOperatorConfigString(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : null
 }
 
 export function hasExplicitVaultOption(args: readonly string[]): boolean {
@@ -417,6 +616,10 @@ export function applyDefaultVaultToArgs(
     return [...args]
   }
 
+  if (hasVaultExemptCommandPath(args)) {
+    return [...args]
+  }
+
   if (hasIncompleteCommandGroupPath(args)) {
     return [...args]
   }
@@ -439,6 +642,26 @@ function hasNonExecutingBuiltinFlag(args: readonly string[]): boolean {
 }
 
 function hasIncompleteCommandGroupPath(args: readonly string[]): boolean {
+  const commandPath = getCommandPath(args)
+  if (commandPath === null) {
+    return false
+  }
+
+  return COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND.has(commandPath)
+}
+
+function hasVaultExemptCommandPath(args: readonly string[]): boolean {
+  const commandPath = getCommandPath(args)
+  if (commandPath === null) {
+    return false
+  }
+
+  return [...COMMAND_PATHS_EXEMPT_FROM_VAULT].some(
+    (prefix) => commandPath === prefix || commandPath.startsWith(`${prefix} `),
+  )
+}
+
+function getCommandPath(args: readonly string[]): string | null {
   const commandTokens: string[] = []
 
   for (let index = 0; index < args.length; index += 1) {
@@ -459,5 +682,5 @@ function hasIncompleteCommandGroupPath(args: readonly string[]): boolean {
     commandTokens.push(token)
   }
 
-  return COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND.has(commandTokens.join(' '))
+  return commandTokens.length > 0 ? commandTokens.join(' ') : null
 }

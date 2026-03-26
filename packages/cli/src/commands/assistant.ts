@@ -25,6 +25,10 @@ import {
   assistantMemoryVisibleSectionValues,
   assistantMemoryWriteScopeValues,
   assistantRunResultSchema,
+  assistantSelfDeliveryTargetClearResultSchema,
+  assistantSelfDeliveryTargetListResultSchema,
+  assistantSelfDeliveryTargetSetResultSchema,
+  assistantSelfDeliveryTargetShowResultSchema,
   assistantSandboxValues,
   assistantSessionListResultSchema,
   assistantSessionShowResultSchema,
@@ -79,6 +83,13 @@ import {
 import type { InboxCliServices } from '../inbox-services.js'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
+  applyAssistantSelfDeliveryTargetDefaults,
+  clearAssistantSelfDeliveryTargets,
+  listAssistantSelfDeliveryTargets,
+  resolveOperatorConfigPath,
+  saveAssistantSelfDeliveryTarget,
+} from '../operator-config.js'
+import {
   formatAssistantRunEventForTerminal,
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
@@ -86,6 +97,7 @@ import {
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
+import { requestIdSchema } from '../vault-cli-contracts.js'
 
 const assistantSessionOptionFields = {
   session: z
@@ -211,6 +223,31 @@ const assistantCronDeliveryOptionFields = {
     ),
 }
 
+const assistantSelfDeliveryTargetOptionFields = {
+  identity: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional local assistant identity id to reuse for this saved channel target.'),
+  participant: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional remote actor id to reuse for this saved channel target.'),
+  sourceThread: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional upstream thread id to reuse for this saved channel target.'),
+  deliveryTarget: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional explicit outbound destination to save for this channel target, such as a phone number, Telegram chat id, or email address.',
+    ),
+}
+
 function parseAssistantCronPresetVariables(
   value: readonly string[] | undefined,
 ): Record<string, string> {
@@ -247,6 +284,28 @@ function parseAssistantCronPresetVariables(
   }
 
   return variables
+}
+
+function assertAssistantSelfDeliveryTargetInput(input: {
+  channel: string
+  deliveryTarget?: string
+  identity?: string
+  participant?: string
+  sourceThread?: string
+}) {
+  if (!input.deliveryTarget && !input.participant && !input.sourceThread) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Saved self delivery targets require at least --participant, --sourceThread, or --deliveryTarget.',
+    )
+  }
+
+  if (input.channel === 'email' && !input.identity) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Saved email self delivery targets require --identity with the configured AgentMail inbox id.',
+    )
+  }
 }
 
 const assistantChatArgsSchema = z.object({
@@ -417,6 +476,12 @@ function buildAssistantCronResultPaths(vault: string) {
   }
 }
 
+function buildAssistantOperatorConfigResult() {
+  return {
+    configPath: redactAssistantDisplayPath(resolveOperatorConfigPath()),
+  }
+}
+
 function assistantConversationOptionsFromCli<T extends AssistantConversationCliOptions>(
   options: T,
 ) {
@@ -454,6 +519,28 @@ function assistantDeliveryOverridesFromCli<T extends AssistantDeliveryCliOptions
     deliverResponse: options.deliverResponse,
     deliveryTarget: options.deliveryTarget,
   }
+}
+
+async function resolveAssistantDeliveryRouteFromCli(input: {
+  allowSingleSavedTargetFallback?: boolean
+  channel?: string
+  deliveryTarget?: string
+  identity?: string
+  participant?: string
+  sourceThread?: string
+}) {
+  return applyAssistantSelfDeliveryTargetDefaults(
+    {
+      channel: input.channel,
+      identityId: input.identity,
+      participantId: input.participant,
+      sourceThreadId: input.sourceThread,
+      deliveryTarget: input.deliveryTarget,
+    },
+    {
+      allowSingleSavedTargetFallback: input.allowSingleSavedTargetFallback,
+    },
+  )
 }
 
 async function runAssistantChatCommand(context: {
@@ -745,12 +832,32 @@ export function registerAssistantCommands(
       }),
       output: assistantAskResultSchema,
       async run(context) {
+        const deliveryOverrides = assistantDeliveryOverridesFromCli(context.options)
+        const savedRoute =
+          deliveryOverrides.deliverResponse && !context.options.session
+            ? await resolveAssistantDeliveryRouteFromCli({
+                allowSingleSavedTargetFallback: true,
+                channel: context.options.channel,
+                identity: context.options.identity,
+                participant: context.options.participant,
+                sourceThread: context.options.sourceThread,
+                deliveryTarget: deliveryOverrides.deliveryTarget,
+              })
+            : null
+
         return sendAssistantMessage({
           vault: context.options.vault,
           prompt: context.args.prompt,
-          ...assistantConversationOptionsFromCli(context.options),
+          ...assistantConversationOptionsFromCli({
+            ...context.options,
+            channel: savedRoute?.channel ?? context.options.channel,
+            identity: savedRoute?.identityId ?? context.options.identity,
+            participant: savedRoute?.participantId ?? context.options.participant,
+            sourceThread: savedRoute?.sourceThreadId ?? context.options.sourceThread,
+          }),
           ...assistantProviderOverridesFromCli(context.options),
-          ...assistantDeliveryOverridesFromCli(context.options),
+          ...deliveryOverrides,
+          deliveryTarget: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
         })
       },
     })
@@ -841,11 +948,27 @@ export function registerAssistantCommands(
       output: assistantDeliverResultSchema,
       async run(context) {
         const deliveryOverrides = assistantDeliveryOverridesFromCli(context.options)
+        const savedRoute = context.options.session
+          ? null
+          : await resolveAssistantDeliveryRouteFromCli({
+              allowSingleSavedTargetFallback: true,
+              channel: context.options.channel,
+              identity: context.options.identity,
+              participant: context.options.participant,
+              sourceThread: context.options.sourceThread,
+              deliveryTarget: deliveryOverrides.deliveryTarget,
+            })
         return deliverAssistantMessage({
           vault: context.options.vault,
           message: context.args.message,
-          ...assistantConversationOptionsFromCli(context.options),
-          target: deliveryOverrides.deliveryTarget,
+          ...assistantConversationOptionsFromCli({
+            ...context.options,
+            channel: savedRoute?.channel ?? context.options.channel,
+            identity: savedRoute?.identityId ?? context.options.identity,
+            participant: savedRoute?.participantId ?? context.options.participant,
+            sourceThread: savedRoute?.sourceThreadId ?? context.options.sourceThread,
+          }),
+          target: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
         })
       },
     })
@@ -1079,6 +1202,111 @@ export function registerAssistantCommands(
     assistant.command(memory)
   }
 
+  const registerSelfTargetCommands = () => {
+    const selfTarget = Cli.create('self-target', {
+      description:
+        'Manage local saved self-delivery targets for outbound assistant actions without storing them in the canonical vault.',
+    })
+
+    selfTarget.command('list', {
+      args: emptyArgsSchema,
+      description: 'List saved self-delivery targets from local operator config.',
+      options: z.object({
+        requestId: requestIdSchema,
+      }),
+      output: assistantSelfDeliveryTargetListResultSchema,
+      async run() {
+        return {
+          ...buildAssistantOperatorConfigResult(),
+          targets: await listAssistantSelfDeliveryTargets(),
+        }
+      },
+    })
+
+    selfTarget.command('show', {
+      args: z.object({
+        channel: z.string().min(1).describe('Saved outbound channel to inspect.'),
+      }),
+      description: 'Show one saved self-delivery target for a specific outbound channel.',
+      options: z.object({
+        requestId: requestIdSchema,
+      }),
+      output: assistantSelfDeliveryTargetShowResultSchema,
+      async run(context) {
+        const targets = await listAssistantSelfDeliveryTargets()
+        return {
+          ...buildAssistantOperatorConfigResult(),
+          target:
+            targets.find((target) => target.channel === context.args.channel.trim().toLowerCase()) ??
+            null,
+        }
+      },
+    })
+
+    selfTarget.command('set', {
+      args: z.object({
+        channel: z
+          .string()
+          .min(1)
+          .describe('Outbound channel to save, such as telegram, imessage, linq, or email.'),
+      }),
+      description: 'Save or replace the local default outbound target for one channel.',
+      hint:
+        'Use this after the user gives you a phone number, Telegram chat, or email target so later actions can reuse it without asking again.',
+      options: z.object({
+        requestId: requestIdSchema,
+        ...assistantSelfDeliveryTargetOptionFields,
+      }),
+      output: assistantSelfDeliveryTargetSetResultSchema,
+      async run(context) {
+        const channel = context.args.channel.trim().toLowerCase()
+        assertAssistantSelfDeliveryTargetInput({
+          channel,
+          identity: context.options.identity,
+          participant: context.options.participant,
+          sourceThread: context.options.sourceThread,
+          deliveryTarget: context.options.deliveryTarget,
+        })
+
+        const target = await saveAssistantSelfDeliveryTarget({
+          channel,
+          identityId: context.options.identity ?? null,
+          participantId: context.options.participant ?? null,
+          sourceThreadId: context.options.sourceThread ?? null,
+          deliveryTarget: context.options.deliveryTarget ?? null,
+        })
+
+        return {
+          ...buildAssistantOperatorConfigResult(),
+          target,
+        }
+      },
+    })
+
+    selfTarget.command('clear', {
+      args: z.object({
+        channel: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional saved outbound channel to clear. Omit to clear all saved self-targets.'),
+      }),
+      description: 'Clear one saved self-delivery target or remove all of them.',
+      options: z.object({
+        requestId: requestIdSchema,
+      }),
+      output: assistantSelfDeliveryTargetClearResultSchema,
+      async run(context) {
+        return {
+          ...buildAssistantOperatorConfigResult(),
+          clearedChannels: await clearAssistantSelfDeliveryTargets(context.args.channel),
+        }
+      },
+    })
+
+    assistant.command(selfTarget)
+  }
+
   const registerCronCommands = () => {
     const cron = Cli.create('cron', {
       description:
@@ -1213,6 +1441,14 @@ export function registerAssistantCommands(
                 cron: context.options.cron,
               })
             : undefined
+        const savedRoute = await resolveAssistantDeliveryRouteFromCli({
+          allowSingleSavedTargetFallback: true,
+          channel: context.options.channel,
+          identity: context.options.identity,
+          participant: context.options.participant,
+          sourceThread: context.options.sourceThread,
+          deliveryTarget: context.options.deliveryTarget,
+        })
         const result = await installAssistantCronPreset({
           vault: context.options.vault,
           presetId: context.args.preset,
@@ -1221,8 +1457,14 @@ export function registerAssistantCommands(
           additionalInstructions: context.options.instructions,
           schedule,
           enabled: context.options.disabled ? false : true,
-          ...assistantConversationOptionsFromCli(context.options),
-          ...assistantDeliveryOverridesFromCli(context.options),
+          ...assistantConversationOptionsFromCli({
+            ...context.options,
+            channel: savedRoute.channel ?? context.options.channel,
+            identity: savedRoute.identityId ?? context.options.identity,
+            participant: savedRoute.participantId ?? context.options.participant,
+            sourceThread: savedRoute.sourceThreadId ?? context.options.sourceThread,
+          }),
+          deliveryTarget: savedRoute.deliveryTarget ?? context.options.deliveryTarget,
         })
 
         return {
@@ -1359,6 +1601,14 @@ export function registerAssistantCommands(
       }),
       output: assistantCronAddResultSchema,
       async run(context) {
+        const savedRoute = await resolveAssistantDeliveryRouteFromCli({
+          allowSingleSavedTargetFallback: true,
+          channel: context.options.channel,
+          identity: context.options.identity,
+          participant: context.options.participant,
+          sourceThread: context.options.sourceThread,
+          deliveryTarget: context.options.deliveryTarget,
+        })
         const job = await addAssistantCronJob({
           vault: context.options.vault,
           name: context.options.name,
@@ -1370,8 +1620,14 @@ export function registerAssistantCommands(
           }),
           enabled: context.options.disabled ? false : true,
           keepAfterRun: context.options.keepAfterRun,
-          ...assistantConversationOptionsFromCli(context.options),
-          ...assistantDeliveryOverridesFromCli(context.options),
+          ...assistantConversationOptionsFromCli({
+            ...context.options,
+            channel: savedRoute.channel ?? context.options.channel,
+            identity: savedRoute.identityId ?? context.options.identity,
+            participant: savedRoute.participantId ?? context.options.participant,
+            sourceThread: savedRoute.sourceThreadId ?? context.options.sourceThread,
+          }),
+          deliveryTarget: savedRoute.deliveryTarget ?? context.options.deliveryTarget,
         })
 
         return {
@@ -1591,6 +1847,7 @@ export function registerAssistantCommands(
 
   registerConversationCommands()
   registerMemoryCommands()
+  registerSelfTargetCommands()
   registerCronCommands()
   registerObservabilityCommands()
   registerSessionCommands()

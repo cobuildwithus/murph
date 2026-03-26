@@ -12,6 +12,7 @@ import {
   VAULT_ENV,
   applyDefaultVaultToArgs,
   readOperatorConfig,
+  resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from '../src/operator-config.js'
@@ -636,6 +637,98 @@ test.sequential(
 )
 
 test.sequential(
+  'assistant self-target commands manage local saved outbound routes without needing a vault',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-self-target-cli-'))
+    const homeRoot = path.join(parent, 'home')
+    await mkdir(homeRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const env = {
+      HOME: homeRoot,
+    }
+
+    const setResult = requireData(
+      await runCli<{
+        configPath: string
+        target: {
+          channel: string
+          participantId: string | null
+          sourceThreadId: string | null
+          deliveryTarget: string | null
+          identityId: string | null
+        }
+      }>([
+        'assistant',
+        'self-target',
+        'set',
+        'telegram',
+        '--participant',
+        'saved-chat',
+        '--sourceThread',
+        'saved-chat',
+      ], {
+        env,
+      }),
+    )
+
+    assert.equal(setResult.configPath, '~/.healthybob/config.json')
+    assert.equal(setResult.target.channel, 'telegram')
+    assert.equal(setResult.target.participantId, 'saved-chat')
+    assert.equal(setResult.target.sourceThreadId, 'saved-chat')
+
+    const listed = requireData(
+      await runCli<{
+        targets: Array<{
+          channel: string
+        }>
+      }>(['assistant', 'self-target', 'list'], {
+        env,
+      }),
+    )
+    assert.deepEqual(listed.targets.map((target) => target.channel), ['telegram'])
+
+    const shown = requireData(
+      await runCli<{
+        target: {
+          channel: string
+          participantId: string | null
+        } | null
+      }>(['assistant', 'self-target', 'show', 'telegram'], {
+        env,
+      }),
+    )
+    assert.equal(shown.target?.channel, 'telegram')
+    assert.equal(shown.target?.participantId, 'saved-chat')
+
+    const config = await readOperatorConfig(homeRoot)
+    assert.equal(config?.assistant?.selfDeliveryTargets?.telegram?.sourceThreadId, 'saved-chat')
+    assert.equal(resolveOperatorConfigPath(homeRoot).endsWith(path.join('.healthybob', 'config.json')), true)
+
+    const cleared = requireData(
+      await runCli<{
+        clearedChannels: string[]
+      }>(['assistant', 'self-target', 'clear', 'telegram'], {
+        env,
+      }),
+    )
+    assert.deepEqual(cleared.clearedChannels, ['telegram'])
+
+    const emptyList = requireData(
+      await runCli<{
+        targets: Array<{
+          channel: string
+        }>
+      }>(['assistant', 'self-target', 'list'], {
+        env,
+      }),
+    )
+    assert.deepEqual(emptyList.targets, [])
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
   'assistant memory search/get/upsert/forget expose typed memory records through the CLI',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-cli-'))
@@ -1015,6 +1108,10 @@ test('default-vault injection skips incomplete command groups', () => {
   assert.deepEqual(
     applyDefaultVaultToArgs(['assistant', 'session', 'list'], '/tmp/default-vault'),
     ['assistant', 'session', 'list', '--vault', '/tmp/default-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['assistant', 'self-target', 'list'], '/tmp/default-vault'),
+    ['assistant', 'self-target', 'list'],
   )
 })
 

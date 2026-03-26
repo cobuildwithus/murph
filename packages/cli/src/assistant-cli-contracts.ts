@@ -535,6 +535,16 @@ export const assistantCronTargetSchema = z
   })
   .strict()
 
+export const assistantSelfDeliveryTargetSchema = z
+  .object({
+    channel: z.string().min(1),
+    identityId: z.string().min(1).nullable(),
+    participantId: z.string().min(1).nullable(),
+    sourceThreadId: z.string().min(1).nullable(),
+    deliveryTarget: z.string().min(1).nullable(),
+  })
+  .strict()
+
 export const assistantCronJobStateSchema = z
   .object({
     nextRunAt: isoTimestampSchema.nullable(),
@@ -758,6 +768,26 @@ export const assistantCronPresetInstallResultSchema = z.object({
   resolvedVariables: z.record(z.string(), z.string()),
 })
 
+export const assistantSelfDeliveryTargetListResultSchema = z.object({
+  configPath: pathSchema,
+  targets: z.array(assistantSelfDeliveryTargetSchema),
+})
+
+export const assistantSelfDeliveryTargetShowResultSchema = z.object({
+  configPath: pathSchema,
+  target: assistantSelfDeliveryTargetSchema.nullable(),
+})
+
+export const assistantSelfDeliveryTargetSetResultSchema = z.object({
+  configPath: pathSchema,
+  target: assistantSelfDeliveryTargetSchema,
+})
+
+export const assistantSelfDeliveryTargetClearResultSchema = z.object({
+  configPath: pathSchema,
+  clearedChannels: z.array(z.string().min(1)),
+})
+
 export const assistantRunResultSchema = z.object({
   vault: pathSchema,
   startedAt: isoTimestampSchema,
@@ -922,6 +952,21 @@ export type AssistantCronPresetShowResult = z.infer<
 >
 export type AssistantCronPresetInstallResult = z.infer<
   typeof assistantCronPresetInstallResultSchema
+>
+export type AssistantSelfDeliveryTarget = z.infer<
+  typeof assistantSelfDeliveryTargetSchema
+>
+export type AssistantSelfDeliveryTargetListResult = z.infer<
+  typeof assistantSelfDeliveryTargetListResultSchema
+>
+export type AssistantSelfDeliveryTargetShowResult = z.infer<
+  typeof assistantSelfDeliveryTargetShowResultSchema
+>
+export type AssistantSelfDeliveryTargetSetResult = z.infer<
+  typeof assistantSelfDeliveryTargetSetResultSchema
+>
+export type AssistantSelfDeliveryTargetClearResult = z.infer<
+  typeof assistantSelfDeliveryTargetClearResultSchema
 >
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantStopResult = z.infer<typeof assistantStopResultSchema>

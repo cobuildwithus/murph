@@ -40,6 +40,7 @@ import {
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.js'
+import { saveAssistantSelfDeliveryTarget } from '../src/operator-config.js'
 
 const cleanupPaths: string[] = []
 
@@ -150,6 +151,45 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   const listed = await listAssistantCronJobs(vaultRoot)
   assert.equal(listed.length, 1)
   assert.equal(listed[0]?.jobId, installed.job.jobId)
+})
+
+test('assistant cron jobs reuse the sole saved self-delivery target when no route flags are provided', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-saved-target-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  try {
+    await saveAssistantSelfDeliveryTarget(
+      {
+        channel: 'telegram',
+        participantId: 'saved-chat',
+        sourceThreadId: 'saved-chat',
+        deliveryTarget: null,
+        identityId: null,
+      },
+      homeRoot,
+    )
+
+    const installed = await installAssistantCronPreset({
+      vault: vaultRoot,
+      presetId: 'morning-mindfulness',
+      name: 'saved-target-mindfulness',
+    })
+
+    assert.equal(installed.job.target.channel, 'telegram')
+    assert.equal(installed.job.target.participantId, 'saved-chat')
+    assert.equal(installed.job.target.sourceThreadId, 'saved-chat')
+    assert.equal(installed.job.target.deliverResponse, true)
+  } finally {
+    process.env.HOME = originalHome
+  }
 })
 
 test('assistant cron job creation preserves required-text validation errors', async () => {

@@ -43,6 +43,7 @@ import {
 import { sendAssistantMessage } from './service.js'
 import { getAssistantChannelAdapter } from './channel-adapters.js'
 import { resolveAssistantBindingDelivery } from './bindings.js'
+import { applyAssistantSelfDeliveryTargetDefaults } from '../operator-config.js'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -180,14 +181,17 @@ export async function installAssistantCronPreset(
 export async function addAssistantCronJob(
   input: AddAssistantCronJobInput,
 ): Promise<AssistantCronJob> {
+  const resolvedInput = await resolveAssistantCronTargetDefaults(input)
   const paths = resolveAssistantStatePaths(input.vault)
-  const now = input.now ?? new Date()
-  const name = normalizeRequiredAssistantCronText(input.name, 'name')
-  const prompt = normalizeRequiredAssistantCronText(input.prompt, 'prompt')
-  const enabled = input.enabled ?? true
+  const now = resolvedInput.now ?? new Date()
+  const name = normalizeRequiredAssistantCronText(resolvedInput.name, 'name')
+  const prompt = normalizeRequiredAssistantCronText(resolvedInput.prompt, 'prompt')
+  const enabled = resolvedInput.enabled ?? true
   const keepAfterRun =
-    input.schedule.kind === 'at' ? input.keepAfterRun ?? false : true
-  const nextRunAt = computeAssistantCronNextRunAt(input.schedule, now)
+    resolvedInput.schedule.kind === 'at'
+      ? resolvedInput.keepAfterRun ?? false
+      : true
+  const nextRunAt = computeAssistantCronNextRunAt(resolvedInput.schedule, now)
 
   if (enabled && nextRunAt === null) {
     throw new VaultCliError(
@@ -197,7 +201,7 @@ export async function addAssistantCronJob(
   }
 
   await ensureAssistantCronState(paths)
-  const target = buildValidatedAssistantCronTarget(input)
+  const target = buildValidatedAssistantCronTarget(resolvedInput)
 
   return withAssistantCronWriteLock(paths, async () => {
     const store = await readAssistantCronStore(paths)
@@ -211,9 +215,9 @@ export async function addAssistantCronJob(
       enabled,
       keepAfterRun,
       prompt,
-      schedule: input.schedule,
+      schedule: resolvedInput.schedule,
       target,
-      foodAutoLog: input.foodAutoLog,
+      foodAutoLog: resolvedInput.foodAutoLog,
       createdAt: timestamp,
       updatedAt: timestamp,
       state: {
@@ -232,6 +236,36 @@ export async function addAssistantCronJob(
     await writeAssistantCronStore(paths, store)
     return job
   })
+}
+
+async function resolveAssistantCronTargetDefaults(
+  input: AddAssistantCronJobInput,
+): Promise<AddAssistantCronJobInput> {
+  if (input.foodAutoLog) {
+    return input
+  }
+
+  const resolvedTarget = await applyAssistantSelfDeliveryTargetDefaults(
+    {
+      channel: input.channel,
+      identityId: input.identityId,
+      participantId: input.participantId,
+      sourceThreadId: input.sourceThreadId,
+      deliveryTarget: input.deliveryTarget,
+    },
+    {
+      allowSingleSavedTargetFallback: true,
+    },
+  )
+
+  return {
+    ...input,
+    channel: resolvedTarget.channel ?? undefined,
+    identityId: resolvedTarget.identityId ?? undefined,
+    participantId: resolvedTarget.participantId ?? undefined,
+    sourceThreadId: resolvedTarget.sourceThreadId ?? undefined,
+    deliveryTarget: resolvedTarget.deliveryTarget ?? undefined,
+  }
 }
 
 export async function listAssistantCronJobs(
