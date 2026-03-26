@@ -290,6 +290,45 @@ interface BuildSampleRecordInput {
   externalRef?: unknown;
 }
 
+interface NormalizedEventSeed<K extends EventKind> {
+  kind: K;
+  occurredAt: string;
+  recordedAt: string;
+  dayKey: string;
+  source: EventSource;
+  title: string;
+  note?: string;
+  tags?: string[];
+  relatedIds?: string[];
+  rawRefs?: string[];
+  externalRef?: ExternalRef;
+  fields: LooseRecord;
+}
+
+type NormalizedSampleMeasurement =
+  | {
+      kind: "numeric";
+      value: number;
+    }
+  | {
+      kind: "sleep_stage";
+      stage: string;
+      startAt: string;
+      endAt: string;
+      durationMinutes: number;
+    };
+
+interface NormalizedSampleSeed {
+  stream: SampleStream;
+  recordedAt: string;
+  dayKey: string;
+  source: SampleSource;
+  quality: SampleQuality;
+  externalRef?: ExternalRef;
+  unit: string;
+  measurement: NormalizedSampleMeasurement;
+}
+
 const EVENT_KIND_SET = new Set<EventKind>(BASELINE_EVENT_KINDS as readonly EventKind[]);
 const EVENT_SOURCE_SET = new Set<EventSource>(EVENT_SOURCES as readonly EventSource[]);
 const SAMPLE_STREAM_SET = new Set<SampleStream>(BASELINE_SAMPLE_STREAMS as readonly SampleStream[]);
@@ -470,6 +509,8 @@ const NUMERIC_UNIT_ALIASES = {
 } as const;
 
 const CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const EVENT_VALIDATION_PLACEHOLDER_ID = `${ID_PREFIXES.event}_00000000000000000000000000`;
+const SAMPLE_VALIDATION_PLACEHOLDER_ID = `${ID_PREFIXES.sample}_00000000000000000000000000`;
 
 function normalizeNumericUnit(stream: SampleStream, unit: unknown): string {
   const normalized = String(unit ?? "").trim();
@@ -519,7 +560,7 @@ function deterministicContractId(prefix: string, seed: string): string {
   return `${prefix}_${encodeBase32(hash, 26)}`;
 }
 
-function buildEventRecord<K extends EventKind>({
+function buildNormalizedEventSeed<K extends EventKind>({
   kind,
   occurredAt,
   recordedAt = new Date(),
@@ -531,8 +572,7 @@ function buildEventRecord<K extends EventKind>({
   rawRefs,
   externalRef,
   fields = {},
-  recordId,
-}: BuildEventRecordInput<K>): EventRecordByKind<K> {
+}: Omit<BuildEventRecordInput<K>, "recordId">): NormalizedEventSeed<K> {
   if (!EVENT_KIND_SET.has(kind)) {
     throw new VaultError(
       "VAULT_UNSUPPORTED_EVENT_KIND",
@@ -550,9 +590,8 @@ function buildEventRecord<K extends EventKind>({
   );
   const occurredTimestamp = toIsoTimestamp(occurredAt, "occurredAt");
   const recordedTimestamp = toIsoTimestamp(recordedAt, "recordedAt");
-  const record = compactRecord({
-    schemaVersion: EVENT_SCHEMA_VERSION,
-    id: recordId ?? generateRecordId(ID_PREFIXES.event),
+
+  const seed: NormalizedEventSeed<K> = {
     kind,
     occurredAt: occurredTimestamp,
     recordedAt: recordedTimestamp,
@@ -564,8 +603,52 @@ function buildEventRecord<K extends EventKind>({
     relatedIds: trimStringList(relatedIds),
     rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
-    ...normalizedFields,
+    fields: normalizedFields,
+  };
+
+  assertContractShape(
+    eventRecordSchema,
+    materializeEventRecord({ seed, recordId: EVENT_VALIDATION_PLACEHOLDER_ID }),
+    "HB_EVENT_INVALID",
+    "Event record failed contract validation before write.",
+  );
+
+  return seed;
+}
+
+function materializeEventRecord<K extends EventKind>({
+  seed,
+  recordId,
+}: {
+  seed: NormalizedEventSeed<K>;
+  recordId?: string;
+}): UnknownRecord {
+  return compactRecord({
+    schemaVersion: EVENT_SCHEMA_VERSION,
+    id: recordId,
+    kind: seed.kind,
+    occurredAt: seed.occurredAt,
+    recordedAt: seed.recordedAt,
+    dayKey: seed.dayKey,
+    source: seed.source,
+    title: seed.title,
+    note: seed.note,
+    tags: seed.tags,
+    relatedIds: seed.relatedIds,
+    rawRefs: seed.rawRefs,
+    externalRef: seed.externalRef,
+    ...seed.fields,
   });
+}
+
+function finalizeEventRecord<K extends EventKind>({
+  seed,
+  recordId,
+}: {
+  seed: NormalizedEventSeed<K>;
+  recordId: string;
+}): EventRecordByKind<K> {
+  const record = materializeEventRecord({ seed, recordId });
 
   assertContractShape(
     eventRecordSchema,
@@ -575,6 +658,16 @@ function buildEventRecord<K extends EventKind>({
   );
 
   return record as EventRecordByKind<K>;
+}
+
+function buildEventRecord<K extends EventKind>({
+  recordId,
+  ...input
+}: BuildEventRecordInput<K>): EventRecordByKind<K> {
+  return finalizeEventRecord({
+    seed: buildNormalizedEventSeed(input),
+    recordId: recordId ?? generateRecordId(ID_PREFIXES.event),
+  });
 }
 
 function prepareEventRecord<K extends EventKind>(
@@ -599,69 +692,108 @@ async function stageJsonlRecord(
   return batch.stageJsonlAppend(relativePath, `${JSON.stringify(record)}\n`);
 }
 
-function buildSampleRecord({
+function buildNormalizedSampleSeed({
   stream,
   recordedAt,
   source,
   quality,
   sample,
   unit,
-  recordId,
   externalRef,
-}: BuildSampleRecordInput): SampleRecord {
+}: Omit<BuildSampleRecordInput, "recordId">): NormalizedSampleSeed {
   const recordedTimestamp = toIsoTimestamp(sample.recordedAt ?? recordedAt, "recordedAt");
-  const baseFields: LooseRecord = {
+  const normalizedUnit = normalizeNumericUnit(stream, unit);
+
+  const baseSeed = {
     stream,
     recordedAt: recordedTimestamp,
+    dayKey: toDateOnly(recordedTimestamp),
     source: normalizeSource(source, SAMPLE_SOURCE_SET, "import"),
     quality: normalizeSource(quality, SAMPLE_QUALITY_SET, "raw"),
     externalRef: normalizeExternalRef(externalRef),
   };
 
-  if (stream === "sleep_stage") {
-    const fields = compactRecord({
-      ...baseFields,
-      stage: String(sample.stage ?? "").trim(),
-      startAt: toIsoTimestamp(sample.startAt, "startAt"),
-      endAt: toIsoTimestamp(sample.endAt, "endAt"),
-      durationMinutes: Number(sample.durationMinutes),
-      unit: normalizeNumericUnit(stream, unit),
-    });
-    const record = compactRecord({
-      schemaVersion: SAMPLE_SCHEMA_VERSION,
-      id: recordId ?? generateRecordId(ID_PREFIXES.sample),
-      dayKey: toDateOnly(recordedTimestamp),
-      ...fields,
-    });
+  const seed: NormalizedSampleSeed = stream === "sleep_stage"
+    ? {
+      ...baseSeed,
+      unit: normalizedUnit,
+      measurement: {
+        kind: "sleep_stage",
+        stage: String(sample.stage ?? "").trim(),
+        startAt: toIsoTimestamp(sample.startAt, "startAt"),
+        endAt: toIsoTimestamp(sample.endAt, "endAt"),
+        durationMinutes: Number(sample.durationMinutes),
+      },
+    }
+    : (() => {
+        if (typeof sample.value !== "number" || !Number.isFinite(sample.value)) {
+          throw new VaultError("VAULT_INVALID_SAMPLE", "Sample value must be a finite number.", {
+            stream,
+            sampleSummary: JSON.stringify(sample),
+          });
+        }
 
-    assertContractShape<SampleRecord>(
-      sampleRecordSchema,
-      record,
-      "HB_SAMPLE_INVALID",
-      "Sample record failed contract validation before write.",
-    );
+        return {
+          ...baseSeed,
+          unit: normalizedUnit,
+          measurement: {
+            kind: "numeric",
+            value: sample.value,
+          },
+        };
+      })();
 
-    return record;
-  }
+  assertContractShape<SampleRecord>(
+    sampleRecordSchema,
+    materializeSampleRecord({ seed, recordId: SAMPLE_VALIDATION_PLACEHOLDER_ID }),
+    "HB_SAMPLE_INVALID",
+    "Sample record failed contract validation before write.",
+  );
 
-  if (typeof sample.value !== "number" || !Number.isFinite(sample.value)) {
-    throw new VaultError("VAULT_INVALID_SAMPLE", "Sample value must be a finite number.", {
-      stream,
-      sampleSummary: JSON.stringify(sample),
-    });
-  }
+  return seed;
+}
 
-  const fields = compactRecord({
-    ...baseFields,
-    value: sample.value,
-    unit: normalizeNumericUnit(stream, unit),
-  });
-  const record = compactRecord({
+function materializeSampleRecord({
+  seed,
+  recordId,
+}: {
+  seed: NormalizedSampleSeed;
+  recordId?: string;
+}): UnknownRecord {
+  const measurementFields = seed.measurement.kind === "sleep_stage"
+    ? {
+        stage: seed.measurement.stage,
+        startAt: seed.measurement.startAt,
+        endAt: seed.measurement.endAt,
+        durationMinutes: seed.measurement.durationMinutes,
+        unit: seed.unit,
+      }
+    : {
+        value: seed.measurement.value,
+        unit: seed.unit,
+      };
+
+  return compactRecord({
     schemaVersion: SAMPLE_SCHEMA_VERSION,
-    id: recordId ?? generateRecordId(ID_PREFIXES.sample),
-    dayKey: toDateOnly(recordedTimestamp),
-    ...fields,
+    id: recordId,
+    dayKey: seed.dayKey,
+    stream: seed.stream,
+    recordedAt: seed.recordedAt,
+    source: seed.source,
+    quality: seed.quality,
+    externalRef: seed.externalRef,
+    ...measurementFields,
   });
+}
+
+function finalizeSampleRecord({
+  seed,
+  recordId,
+}: {
+  seed: NormalizedSampleSeed;
+  recordId: string;
+}): SampleRecord {
+  const record = materializeSampleRecord({ seed, recordId });
 
   assertContractShape<SampleRecord>(
     sampleRecordSchema,
@@ -671,6 +803,16 @@ function buildSampleRecord({
   );
 
   return record;
+}
+
+function buildSampleRecord({
+  recordId,
+  ...input
+}: BuildSampleRecordInput): SampleRecord {
+  return finalizeSampleRecord({
+    seed: buildNormalizedSampleSeed(input),
+    recordId: recordId ?? generateRecordId(ID_PREFIXES.sample),
+  });
 }
 
 async function readExistingRecordIds(
@@ -814,7 +956,7 @@ function prepareDeviceBatchPlan({
       `Device event ${index + 1} fields must be a plain object.`,
     ) ?? {};
     const rawArtifactRoles = trimStringList(eventInput.rawArtifactRoles) ?? [];
-    const fingerprintRecord = buildEventRecord({
+    const seed = buildNormalizedEventSeed({
       kind,
       occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? normalizedImportedAt,
       recordedAt: eventInput.recordedAt ?? eventInput.occurredAt,
@@ -825,9 +967,8 @@ function prepareDeviceBatchPlan({
       relatedIds: eventInput.relatedIds,
       externalRef: eventInput.externalRef,
       fields,
-      recordId: `${ID_PREFIXES.event}_00000000000000000000000000`,
     });
-    const { id: _recordId, rawRefs: _rawRefs, ...seedRecord } = fingerprintRecord;
+    const { rawRefs: _rawRefs, ...seedRecord } = materializeEventRecord({ seed });
     const recordId = deterministicContractId(
       ID_PREFIXES.event,
       stableStringify({
@@ -839,19 +980,9 @@ function prepareDeviceBatchPlan({
     );
 
     return {
-      kind,
-      occurredAt: fingerprintRecord.occurredAt,
-      recordedAt: fingerprintRecord.recordedAt,
-      source: fingerprintRecord.source,
-      title: fingerprintRecord.title,
-      note: fingerprintRecord.note,
-      tags: fingerprintRecord.tags,
-      relatedIds: fingerprintRecord.relatedIds,
-      externalRef: fingerprintRecord.externalRef,
-      fields,
+      seed,
       rawArtifactRoles,
       recordId,
-      fingerprintRecord,
     };
   });
 
@@ -871,17 +1002,16 @@ function prepareDeviceBatchPlan({
       "VAULT_INVALID_SAMPLE",
       `Device sample ${index + 1} must include a sample object.`,
     );
-    const fingerprintRecord = buildSampleRecord({
+    const seed = buildNormalizedSampleSeed({
       stream,
       recordedAt: sampleInput.recordedAt ?? samplePayload.recordedAt ?? samplePayload.occurredAt,
       source: sampleInput.source ?? source,
       quality: sampleInput.quality ?? "normalized",
       sample: samplePayload,
       unit: String(sampleInput.unit ?? ""),
-      recordId: `${ID_PREFIXES.sample}_00000000000000000000000000`,
       externalRef: sampleInput.externalRef,
     });
-    const { id: _recordId, ...seedRecord } = fingerprintRecord;
+    const seedRecord = materializeSampleRecord({ seed });
     const recordId = deterministicContractId(
       ID_PREFIXES.sample,
       stableStringify({
@@ -892,15 +1022,8 @@ function prepareDeviceBatchPlan({
     );
 
     return {
-      stream,
-      recordedAt: fingerprintRecord.recordedAt,
-      source: fingerprintRecord.source,
-      quality: fingerprintRecord.quality,
-      unit: fingerprintRecord.unit,
-      sample: samplePayload,
-      externalRef: fingerprintRecord.externalRef,
+      seed,
       recordId,
-      fingerprintRecord,
     };
   });
 
@@ -947,8 +1070,8 @@ function prepareDeviceBatchPlan({
 
   const effectiveOccurredAt = earliestTimestamp(
     [
-      ...preparedEventSeeds.map(({ fingerprintRecord }) => fingerprintRecord.occurredAt),
-      ...preparedSampleSeeds.map(({ fingerprintRecord }) => fingerprintRecord.recordedAt),
+      ...preparedEventSeeds.map(({ seed }) => seed.occurredAt),
+      ...preparedSampleSeeds.map(({ seed }) => seed.recordedAt),
     ],
     normalizedImportedAt,
   );
@@ -1003,38 +1126,33 @@ function prepareDeviceBatchPlan({
       : soleRawArtifactPath
         ? [soleRawArtifactPath]
         : undefined;
-
-    return prepareEventRecord({
-      kind: eventSeed.kind,
-      occurredAt: eventSeed.occurredAt,
-      recordedAt: eventSeed.recordedAt,
-      source: eventSeed.source,
-      title: eventSeed.title,
-      note: eventSeed.note,
-      tags: eventSeed.tags,
-      relatedIds: eventSeed.relatedIds,
-      rawRefs,
-      externalRef: eventSeed.externalRef,
-      fields: eventSeed.fields,
+    const record = finalizeEventRecord({
+      seed: {
+        ...eventSeed.seed,
+        rawRefs,
+      },
       recordId: eventSeed.recordId,
-    });
-  });
-  const preparedSamples = preparedSampleSeeds.map((sampleSeed) => {
-    const record = buildSampleRecord({
-      stream: sampleSeed.stream,
-      recordedAt: sampleSeed.recordedAt,
-      source: sampleSeed.source,
-      quality: sampleSeed.quality,
-      sample: sampleSeed.sample,
-      unit: sampleSeed.unit,
-      recordId: sampleSeed.recordId,
-      externalRef: sampleSeed.externalRef,
     });
 
     return {
       record,
       relativePath: toMonthlyShardRelativePath(
-        `${VAULT_LAYOUT.sampleLedgerDirectory}/${sampleSeed.stream}`,
+        VAULT_LAYOUT.eventLedgerDirectory,
+        record.occurredAt,
+        "occurredAt",
+      ),
+    };
+  });
+  const preparedSamples = preparedSampleSeeds.map((sampleSeed) => {
+    const record = finalizeSampleRecord({
+      seed: sampleSeed.seed,
+      recordId: sampleSeed.recordId,
+    });
+
+    return {
+      record,
+      relativePath: toMonthlyShardRelativePath(
+        `${VAULT_LAYOUT.sampleLedgerDirectory}/${sampleSeed.seed.stream}`,
         record.recordedAt,
         "recordedAt",
       ),

@@ -158,11 +158,63 @@ interface PersistedUserTurn {
   userPersisted: boolean
 }
 
+interface AssistantProviderExecutionState {
+  attemptCount: number
+  attemptedRouteIds: ReadonlySet<string>
+  failoverState: Awaited<ReturnType<typeof readAssistantFailoverState>>
+  lastError: unknown
+  session: AssistantSession
+}
+
+interface AssistantProviderAttemptSelection {
+  attemptCount: number
+  failoverNotice: AssistantProviderFailoverNotice | null
+  remainingRoutes: readonly ResolvedAssistantFailoverRoute[]
+  route: ResolvedAssistantFailoverRoute
+  session: AssistantSession
+}
+
 interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnResult {
   attemptCount: number
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
+}
+
+interface AssistantProviderAttemptSuccess {
+  kind: 'success'
+  attemptCount: number
+  failoverState: Awaited<ReturnType<typeof readAssistantFailoverState>>
+  result: AssistantProviderTurnResult
+  route: ResolvedAssistantFailoverRoute
+  session: AssistantSession
+}
+
+interface AssistantProviderAttemptRetry {
+  error: unknown
+  failoverState: Awaited<ReturnType<typeof readAssistantFailoverState>>
+  kind: 'retry'
+  session: AssistantSession
+}
+
+interface AssistantProviderAttemptFailure {
+  error: unknown
+  failoverState: Awaited<ReturnType<typeof readAssistantFailoverState>>
+  kind: 'failed'
+  session: AssistantSession
+}
+
+type AssistantProviderAttemptOutcome =
+  | AssistantProviderAttemptFailure
+  | AssistantProviderAttemptRetry
+  | AssistantProviderAttemptSuccess
+
+interface AssistantProviderFailoverNotice {
+  code: string | null
+  from: ResolvedAssistantFailoverRoute
+  reason: 'cooldown' | 'failure'
+  sessionId: string
+  to: ResolvedAssistantFailoverRoute
 }
 
 type AssistantDeliveryOutcome =
@@ -188,6 +240,11 @@ type AssistantDeliveryOutcome =
       intentId: string | null
       session: AssistantSession
     }
+
+interface AssistantTurnDeliveryFinalizationPlan {
+  diagnostic: Parameters<typeof recordAssistantDiagnosticEvent>[0]
+  receipt: Parameters<typeof finalizeAssistantTurnReceipt>[0]
+}
 
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
@@ -314,111 +371,12 @@ export async function sendAssistantMessage(
       turnId: userTurn.turnId,
     })
 
-    const completedAt = new Date().toISOString()
-    switch (deliveryOutcome.kind) {
-      case 'not-requested':
-        await finalizeAssistantTurnReceipt({
-          vault: input.vault,
-          turnId: userTurn.turnId,
-          status: 'completed',
-          deliveryDisposition: 'not-requested',
-          response: providerResult.response,
-          completedAt,
-        })
-        await recordAssistantDiagnosticEvent({
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.completed',
-          message: 'Assistant turn completed without outbound delivery.',
-          sessionId: session.sessionId,
-          turnId: userTurn.turnId,
-          counterDeltas: {
-            turnsCompleted: 1,
-          },
-          at: completedAt,
-        })
-        break
-      case 'sent':
-        await finalizeAssistantTurnReceipt({
-          vault: input.vault,
-          turnId: userTurn.turnId,
-          status: 'completed',
-          deliveryDisposition: 'sent',
-          deliveryIntentId: deliveryOutcome.intentId,
-          response: providerResult.response,
-          completedAt,
-        })
-        await recordAssistantDiagnosticEvent({
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.completed',
-          message: 'Assistant turn completed and delivered successfully.',
-          sessionId: deliveryOutcome.session.sessionId,
-          turnId: userTurn.turnId,
-          intentId: deliveryOutcome.intentId,
-          counterDeltas: {
-            turnsCompleted: 1,
-          },
-          at: completedAt,
-        })
-        break
-      case 'queued':
-        await finalizeAssistantTurnReceipt({
-          vault: input.vault,
-          turnId: userTurn.turnId,
-          status: 'deferred',
-          deliveryDisposition: 'retryable',
-          deliveryIntentId: deliveryOutcome.intentId,
-          error: deliveryOutcome.error,
-          response: providerResult.response,
-          completedAt,
-        })
-        await recordAssistantDiagnosticEvent({
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.deferred',
-          level: 'warn',
-          message:
-            deliveryOutcome.error?.message ??
-            'Assistant turn deferred with a queued outbound delivery retry.',
-          code: deliveryOutcome.error?.code ?? null,
-          sessionId: deliveryOutcome.session.sessionId,
-          turnId: userTurn.turnId,
-          intentId: deliveryOutcome.intentId,
-          counterDeltas: {
-            turnsDeferred: 1,
-          },
-          at: completedAt,
-        })
-        break
-      case 'failed':
-        await finalizeAssistantTurnReceipt({
-          vault: input.vault,
-          turnId: userTurn.turnId,
-          status: 'failed',
-          deliveryDisposition: 'failed',
-          deliveryIntentId: deliveryOutcome.intentId,
-          error: deliveryOutcome.error,
-          response: providerResult.response,
-          completedAt,
-        })
-        await recordAssistantDiagnosticEvent({
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.failed',
-          level: 'error',
-          message: deliveryOutcome.error.message,
-          code: deliveryOutcome.error.code,
-          sessionId: deliveryOutcome.session.sessionId,
-          turnId: userTurn.turnId,
-          intentId: deliveryOutcome.intentId,
-          counterDeltas: {
-            turnsFailed: 1,
-          },
-          at: completedAt,
-        })
-        break
-    }
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      outcome: deliveryOutcome,
+      response: providerResult.response,
+      turnId: userTurn.turnId,
+      vault: input.vault,
+    })
 
     return assistantAskResultSchema.parse({
       vault: redactAssistantDisplayPath(input.vault),
@@ -442,34 +400,41 @@ export async function sendAssistantMessage(
     const normalizedError = normalizeAssistantDeliveryError(error)
     const failedAt = new Date().toISOString()
 
-    await finalizeAssistantTurnReceipt({
-      vault: input.vault,
-      turnId: receipt.turnId,
-      status: 'failed',
-      deliveryDisposition: input.deliverResponse === true ? 'failed' : 'not-requested',
-      error: normalizedError,
-      response: responseText,
-      completedAt: failedAt,
-    }).catch(() => undefined)
+    await runAssistantTurnBestEffort(() =>
+      finalizeAssistantTurnReceipt({
+        vault: input.vault,
+        turnId: receipt.turnId,
+        status: 'failed',
+        deliveryDisposition:
+          input.deliverResponse === true ? 'failed' : 'not-requested',
+        error: normalizedError,
+        response: responseText,
+        completedAt: failedAt,
+      }),
+    )
 
-    await recordAssistantDiagnosticEvent({
-      vault: input.vault,
-      component: 'assistant',
-      kind: 'turn.failed',
-      level: 'error',
-      message: normalizedError.message,
-      code: normalizedError.code,
-      sessionId: resolved.session.sessionId,
-      turnId: receipt.turnId,
-      counterDeltas: {
-        turnsFailed: 1,
-      },
-      at: failedAt,
-    }).catch(() => undefined)
+    await runAssistantTurnBestEffort(() =>
+      recordAssistantDiagnosticEvent({
+        vault: input.vault,
+        component: 'assistant',
+        kind: 'turn.failed',
+        level: 'error',
+        message: normalizedError.message,
+        code: normalizedError.code,
+        sessionId: resolved.session.sessionId,
+        turnId: receipt.turnId,
+        counterDeltas: {
+          turnsFailed: 1,
+        },
+        at: failedAt,
+      }),
+    )
 
     throw error
   } finally {
-    await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
+    await runAssistantTurnBestEffort(() =>
+      refreshAssistantStatusSnapshot(input.vault),
+    )
   }
 }
 
@@ -709,301 +674,72 @@ async function executeProviderTurnWithRecovery(input: {
   turnId: string
 }): Promise<ExecutedAssistantProviderTurnResult> {
   const primaryRoute = input.routes[0] ?? null
-  let failoverState = await readAssistantFailoverState(input.input.vault)
-  let workingSession = input.resolvedSession
-  let attemptCount = 0
-  let lastError: unknown = null
-  const attemptedRouteIds = new Set<string>()
   const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-    sessionId: workingSession.sessionId,
+    sessionId: input.resolvedSession.sessionId,
     sourcePrompt: input.input.prompt,
-    turnId: `${workingSession.sessionId}:${input.turnCreatedAt}`,
+    turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
+    vault: input.input.vault,
+  })
+  let state = await createInitialAssistantProviderExecutionState({
+    session: input.resolvedSession,
     vault: input.input.vault,
   })
 
-  while (attemptedRouteIds.size < input.routes.length) {
-    const remainingRoutes = prioritizeAssistantFailoverRoutes(
-      input.routes.filter((route) => !attemptedRouteIds.has(route.routeId)),
-      failoverState,
-    )
-    const route = remainingRoutes[0] ?? null
-    if (!route) {
+  while (state.attemptedRouteIds.size < input.routes.length) {
+    const selection = selectAssistantProviderAttempt({
+      primaryRoute,
+      routes: input.routes,
+      state,
+    })
+    if (!selection) {
       break
     }
+    state = selection.state
 
-    attemptCount += 1
-    attemptedRouteIds.add(route.routeId)
-
-    if (attemptCount === 1 && primaryRoute && route.routeId !== primaryRoute.routeId) {
-      await appendAssistantTurnReceiptEvent({
-        vault: input.input.vault,
+    if (selection.attempt.failoverNotice) {
+      await recordAssistantProviderFailoverApplied({
+        notice: selection.attempt.failoverNotice,
         turnId: input.turnId,
-        kind: 'provider.failover.applied',
-        detail: `${primaryRoute.label} -> ${route.label}`,
-        metadata: {
-          from: primaryRoute.label,
-          to: route.label,
-          reason: 'cooldown',
-        },
-      })
-      await recordAssistantDiagnosticEvent({
         vault: input.input.vault,
-        component: 'provider',
-        kind: 'provider.failover.applied',
-        level: 'warn',
-        message: `Primary assistant provider route ${primaryRoute.label} is cooling down; using ${route.label}.`,
-        sessionId: workingSession.sessionId,
-        turnId: input.turnId,
-        data: {
-          from: primaryRoute.label,
-          to: route.label,
-          fromRouteId: primaryRoute.routeId,
-          toRouteId: route.routeId,
-        },
-        counterDeltas: {
-          providerFailovers: 1,
-        },
       })
     }
 
-    const attemptAt = new Date().toISOString()
-    await appendAssistantTurnReceiptEvent({
-      vault: input.input.vault,
+    const outcome = await executeAssistantProviderAttempt({
+      attempt: selection.attempt,
+      defaults: input.defaults,
+      input: input.input,
+      memoryTurnEnv,
+      sharedPlan: input.plan,
       turnId: input.turnId,
-      kind: 'provider.attempt.started',
-      detail: route.label,
-      metadata: {
-        attempt: String(attemptCount),
-        provider: route.provider,
-        model: route.providerOptions.model ?? 'default',
-        routeId: route.routeId,
-      },
-      at: attemptAt,
-    })
-    await recordAssistantDiagnosticEvent({
       vault: input.input.vault,
-      component: 'provider',
-      kind: 'provider.attempt.started',
-      message: `Assistant provider attempt ${attemptCount} started with ${route.label}.`,
-      sessionId: workingSession.sessionId,
-      turnId: input.turnId,
-      data: {
-        attempt: attemptCount,
-        routeId: route.routeId,
-        provider: route.provider,
-        model: route.providerOptions.model,
-      },
-      counterDeltas: {
-        providerAttempts: 1,
-      },
-      at: attemptAt,
     })
+    state = {
+      ...state,
+      failoverState: outcome.failoverState,
+      lastError:
+        outcome.kind === 'success' ? state.lastError : outcome.error,
+      session: outcome.session,
+    }
 
-    try {
-      const routePlan = await resolveAssistantRouteTurnPlan({
-        input: input.input,
-        route,
-        session: workingSession,
-        sharedPlan: input.plan,
-      })
-      maybeThrowInjectedAssistantFault({
-        component: 'provider',
-        fault: 'provider',
-        message: 'Injected assistant provider failure.',
-      })
-      const result = await executeAssistantProviderTurn({
-        abortSignal: input.input.abortSignal,
-        provider: route.provider,
-        workingDirectory: input.plan.workingDirectory,
-        configOverrides: routePlan.configOverrides,
-        env: {
-          ...routePlan.cliEnv,
-          ...memoryTurnEnv,
-        },
-        userPrompt: input.input.prompt,
-        continuityContext: routePlan.continuityContext,
-        systemPrompt: routePlan.systemPrompt,
-        sessionContext: routePlan.sessionContext
-          ? {
-              binding: workingSession.binding,
-            }
-          : undefined,
-        resumeProviderSessionId:
-          attemptCount === 1
-            ? routePlan.resumeProviderSessionId
-            : route.provider === workingSession.provider
-              ? workingSession.providerSessionId
-              : null,
-        codexCommand:
-          route.codexCommand ??
-          input.input.codexCommand ??
-          input.defaults?.codexCommand ??
-          undefined,
-        model: route.providerOptions.model,
-        reasoningEffort: route.providerOptions.reasoningEffort,
-        sandbox: route.providerOptions.sandbox,
-        approvalPolicy: route.providerOptions.approvalPolicy,
-        baseUrl: route.providerOptions.baseUrl,
-        apiKeyEnv: route.providerOptions.apiKeyEnv,
-        providerName: route.providerOptions.providerName,
-        conversationMessages: routePlan.conversationMessages,
-        onEvent: input.input.onProviderEvent ?? undefined,
-        profile: route.providerOptions.profile,
-        oss: route.providerOptions.oss,
-        onTraceEvent: input.input.onTraceEvent,
-        showThinkingTraces: input.input.showThinkingTraces ?? false,
-      })
-
-      failoverState = await recordAssistantFailoverRouteSuccess({
-        vault: input.input.vault,
-        route,
-        at: new Date().toISOString(),
-      })
-      await appendAssistantTurnReceiptEvent({
-        vault: input.input.vault,
-        turnId: input.turnId,
-        kind: 'provider.attempt.succeeded',
-        detail: route.label,
-        metadata: {
-          attempt: String(attemptCount),
-          provider: route.provider,
-          model: route.providerOptions.model ?? 'default',
-          routeId: route.routeId,
-        },
-      })
-
+    if (outcome.kind === 'success') {
       return {
-        ...result,
-        attemptCount,
-        providerOptions: normalizeAssistantProviderOptions(route.providerOptions),
-        route,
-        session: workingSession,
+        ...outcome.result,
+        attemptCount: outcome.attemptCount,
+        providerOptions: normalizeAssistantProviderOptions(
+          outcome.route.providerOptions,
+        ),
+        route: outcome.route,
+        session: outcome.session,
       }
-    } catch (error) {
-      lastError = error
-      const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
-        codexPromptVersion:
-          route.provider === 'codex-cli' ? CURRENT_CODEX_PROMPT_VERSION : null,
-        error,
-        provider: route.provider,
-        providerOptions: route.providerOptions,
-        session: workingSession,
-        vault: input.input.vault,
-      })
-      if (recoveredSession) {
-        workingSession = recoveredSession
-      }
-      attachRecoveredAssistantSession(error, recoveredSession)
-      failoverState = await recordAssistantFailoverRouteFailure({
-        error,
-        route,
-        vault: input.input.vault,
-      })
-      const cooldownUntil = getAssistantFailoverCooldownUntil({
-        route,
-        state: failoverState,
-      })
-      const detail = errorMessage(error)
-      const errorCode = readAssistantErrorCode(error)
+    }
 
-      await appendAssistantTurnReceiptEvent({
-        vault: input.input.vault,
-        turnId: input.turnId,
-        kind: 'provider.attempt.failed',
-        detail,
-        metadata: {
-          attempt: String(attemptCount),
-          provider: route.provider,
-          model: route.providerOptions.model ?? 'default',
-          routeId: route.routeId,
-          code: errorCode ?? 'unknown',
-        },
-      })
-      if (cooldownUntil) {
-        await appendAssistantTurnReceiptEvent({
-          vault: input.input.vault,
-          turnId: input.turnId,
-          kind: 'provider.cooldown.started',
-          detail: `${route.label} cooling down until ${cooldownUntil}`,
-          metadata: {
-            routeId: route.routeId,
-            cooldownUntil,
-          },
-        })
-      }
-      await recordAssistantDiagnosticEvent({
-        vault: input.input.vault,
-        component: 'provider',
-        kind: 'provider.attempt.failed',
-        level: 'warn',
-        message: detail,
-        code: errorCode,
-        sessionId: workingSession.sessionId,
-        turnId: input.turnId,
-        data: {
-          attempt: attemptCount,
-          routeId: route.routeId,
-          provider: route.provider,
-          model: route.providerOptions.model,
-          cooldownUntil,
-        },
-        counterDeltas: {
-          providerFailures: 1,
-        },
-      })
-
-      if (!shouldAttemptAssistantProviderFailover({
-        abortSignal: input.input.abortSignal,
-        error,
-      })) {
-        throw error
-      }
-
-      const remainingCandidates = prioritizeAssistantFailoverRoutes(
-        input.routes.filter((candidate) => !attemptedRouteIds.has(candidate.routeId)),
-        failoverState,
-      )
-      const nextRoute = remainingCandidates[0] ?? null
-      if (!nextRoute) {
-        throw error
-      }
-
-      await appendAssistantTurnReceiptEvent({
-        vault: input.input.vault,
-        turnId: input.turnId,
-        kind: 'provider.failover.applied',
-        detail: `${route.label} -> ${nextRoute.label}`,
-        metadata: {
-          from: route.label,
-          to: nextRoute.label,
-          fromRouteId: route.routeId,
-          toRouteId: nextRoute.routeId,
-        },
-      })
-      await recordAssistantDiagnosticEvent({
-        vault: input.input.vault,
-        component: 'provider',
-        kind: 'provider.failover.applied',
-        level: 'warn',
-        message: `Failing over assistant provider from ${route.label} to ${nextRoute.label}.`,
-        code: errorCode,
-        sessionId: workingSession.sessionId,
-        turnId: input.turnId,
-        data: {
-          from: route.label,
-          to: nextRoute.label,
-          fromRouteId: route.routeId,
-          toRouteId: nextRoute.routeId,
-        },
-        counterDeltas: {
-          providerFailovers: 1,
-        },
-      })
+    if (outcome.kind === 'failed') {
+      throw outcome.error
     }
   }
 
-  throw (lastError ?? new Error('Assistant provider routes were exhausted.'))
+  throw (state.lastError ?? new Error('Assistant provider routes were exhausted.'))
 }
 
 function normalizeAssistantProviderOptions(
@@ -1160,6 +896,515 @@ function prioritizeAssistantFailoverRoutes(
   }
 
   return ready.length > 0 ? [...ready, ...cooling] : [...routes]
+}
+
+async function createInitialAssistantProviderExecutionState(input: {
+  session: AssistantSession
+  vault: string
+}): Promise<AssistantProviderExecutionState> {
+  return {
+    attemptCount: 0,
+    attemptedRouteIds: new Set<string>(),
+    failoverState: await readAssistantFailoverState(input.vault),
+    lastError: null,
+    session: input.session,
+  }
+}
+
+function selectAssistantProviderAttempt(input: {
+  primaryRoute: ResolvedAssistantFailoverRoute | null
+  routes: readonly ResolvedAssistantFailoverRoute[]
+  state: AssistantProviderExecutionState
+}): { attempt: AssistantProviderAttemptSelection; state: AssistantProviderExecutionState } | null {
+  const remainingRoutes = prioritizeAssistantFailoverRoutes(
+    input.routes.filter(
+      (route) => !input.state.attemptedRouteIds.has(route.routeId),
+    ),
+    input.state.failoverState,
+  )
+  const route = remainingRoutes[0] ?? null
+  if (!route) {
+    return null
+  }
+
+  const attemptCount = input.state.attemptCount + 1
+  const attemptedRouteIds = new Set(input.state.attemptedRouteIds)
+  attemptedRouteIds.add(route.routeId)
+  const unattemptedRoutes = input.routes.filter(
+    (candidate) => !attemptedRouteIds.has(candidate.routeId),
+  )
+
+  return {
+    attempt: {
+      attemptCount,
+      failoverNotice:
+        attemptCount === 1 &&
+        input.primaryRoute &&
+        route.routeId !== input.primaryRoute.routeId
+          ? {
+              code: null,
+              from: input.primaryRoute,
+              reason: 'cooldown',
+              sessionId: input.state.session.sessionId,
+              to: route,
+            }
+          : null,
+      remainingRoutes: unattemptedRoutes,
+      route,
+      session: input.state.session,
+    },
+    state: {
+      ...input.state,
+      attemptCount,
+      attemptedRouteIds,
+    },
+  }
+}
+
+async function executeAssistantProviderAttempt(input: {
+  attempt: AssistantProviderAttemptSelection
+  defaults: AssistantOperatorDefaults | null
+  input: AssistantMessageInput
+  memoryTurnEnv: NodeJS.ProcessEnv
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+  vault: string
+}): Promise<AssistantProviderAttemptOutcome> {
+  const { attempt, turnId, vault } = input
+  await recordAssistantProviderAttemptStarted({
+    attemptCount: attempt.attemptCount,
+    route: attempt.route,
+    sessionId: attempt.session.sessionId,
+    turnId,
+    vault,
+  })
+
+  try {
+    const routePlan = await resolveAssistantRouteTurnPlan({
+      input: input.input,
+      route: attempt.route,
+      session: attempt.session,
+      sharedPlan: input.sharedPlan,
+    })
+    maybeThrowInjectedAssistantFault({
+      component: 'provider',
+      fault: 'provider',
+      message: 'Injected assistant provider failure.',
+    })
+    const result = await executeAssistantProviderTurn({
+      abortSignal: input.input.abortSignal,
+      provider: attempt.route.provider,
+      workingDirectory: input.sharedPlan.workingDirectory,
+      configOverrides: routePlan.configOverrides,
+      env: {
+        ...routePlan.cliEnv,
+        ...input.memoryTurnEnv,
+      },
+      userPrompt: input.input.prompt,
+      continuityContext: routePlan.continuityContext,
+      systemPrompt: routePlan.systemPrompt,
+      sessionContext: routePlan.sessionContext
+        ? {
+            binding: attempt.session.binding,
+          }
+        : undefined,
+      resumeProviderSessionId:
+        attempt.attemptCount === 1
+          ? routePlan.resumeProviderSessionId
+          : attempt.route.provider === attempt.session.provider
+            ? attempt.session.providerSessionId
+            : null,
+      codexCommand:
+        attempt.route.codexCommand ??
+        input.input.codexCommand ??
+        input.defaults?.codexCommand ??
+        undefined,
+      model: attempt.route.providerOptions.model,
+      reasoningEffort: attempt.route.providerOptions.reasoningEffort,
+      sandbox: attempt.route.providerOptions.sandbox,
+      approvalPolicy: attempt.route.providerOptions.approvalPolicy,
+      baseUrl: attempt.route.providerOptions.baseUrl,
+      apiKeyEnv: attempt.route.providerOptions.apiKeyEnv,
+      providerName: attempt.route.providerOptions.providerName,
+      conversationMessages: routePlan.conversationMessages,
+      onEvent: input.input.onProviderEvent ?? undefined,
+      profile: attempt.route.providerOptions.profile,
+      oss: attempt.route.providerOptions.oss,
+      onTraceEvent: input.input.onTraceEvent,
+      showThinkingTraces: input.input.showThinkingTraces ?? false,
+    })
+
+    const failoverState = await recordAssistantFailoverRouteSuccess({
+      vault,
+      route: attempt.route,
+      at: new Date().toISOString(),
+    })
+    await appendAssistantTurnReceiptEvent({
+      vault,
+      turnId,
+      kind: 'provider.attempt.succeeded',
+      detail: attempt.route.label,
+      metadata: {
+        attempt: String(attempt.attemptCount),
+        provider: attempt.route.provider,
+        model: attempt.route.providerOptions.model ?? 'default',
+        routeId: attempt.route.routeId,
+      },
+    })
+
+    return {
+      attemptCount: attempt.attemptCount,
+      failoverState,
+      kind: 'success',
+      result,
+      route: attempt.route,
+      session: attempt.session,
+    }
+  } catch (error) {
+    const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
+      codexPromptVersion:
+        attempt.route.provider === 'codex-cli'
+          ? CURRENT_CODEX_PROMPT_VERSION
+          : null,
+      error,
+      provider: attempt.route.provider,
+      providerOptions: attempt.route.providerOptions,
+      session: attempt.session,
+      vault,
+    })
+    const session = recoveredSession ?? attempt.session
+    attachRecoveredAssistantSession(error, recoveredSession)
+
+    const failoverState = await recordAssistantFailoverRouteFailure({
+      error,
+      route: attempt.route,
+      vault,
+    })
+    const cooldownUntil = getAssistantFailoverCooldownUntil({
+      route: attempt.route,
+      state: failoverState,
+    })
+    const detail = errorMessage(error)
+    const errorCode = readAssistantErrorCode(error)
+
+    await appendAssistantTurnReceiptEvent({
+      vault,
+      turnId,
+      kind: 'provider.attempt.failed',
+      detail,
+      metadata: {
+        attempt: String(attempt.attemptCount),
+        provider: attempt.route.provider,
+        model: attempt.route.providerOptions.model ?? 'default',
+        routeId: attempt.route.routeId,
+        code: errorCode ?? 'unknown',
+      },
+    })
+    if (cooldownUntil) {
+      await appendAssistantTurnReceiptEvent({
+        vault,
+        turnId,
+        kind: 'provider.cooldown.started',
+        detail: `${attempt.route.label} cooling down until ${cooldownUntil}`,
+        metadata: {
+          routeId: attempt.route.routeId,
+          cooldownUntil,
+        },
+      })
+    }
+    await recordAssistantDiagnosticEvent({
+      vault,
+      component: 'provider',
+      kind: 'provider.attempt.failed',
+      level: 'warn',
+      message: detail,
+      code: errorCode,
+      sessionId: session.sessionId,
+      turnId,
+      data: {
+        attempt: attempt.attemptCount,
+        routeId: attempt.route.routeId,
+        provider: attempt.route.provider,
+        model: attempt.route.providerOptions.model,
+        cooldownUntil,
+      },
+      counterDeltas: {
+        providerFailures: 1,
+      },
+    })
+
+    if (
+      !shouldAttemptAssistantProviderFailover({
+        abortSignal: input.input.abortSignal,
+        error,
+      })
+    ) {
+      return {
+        error,
+        failoverState,
+        kind: 'failed',
+        session,
+      }
+    }
+
+    const nextRoute = prioritizeAssistantFailoverRoutes(
+      attempt.remainingRoutes,
+      failoverState,
+    )[0]
+    if (!nextRoute) {
+      return {
+        error,
+        failoverState,
+        kind: 'failed',
+        session,
+      }
+    }
+
+    await recordAssistantProviderFailoverApplied({
+      notice: {
+        code: errorCode,
+        from: attempt.route,
+        reason: 'failure',
+        sessionId: session.sessionId,
+        to: nextRoute,
+      },
+      turnId,
+      vault,
+    })
+
+    return {
+      error,
+      failoverState,
+      kind: 'retry',
+      session,
+    }
+  }
+}
+
+async function recordAssistantProviderAttemptStarted(input: {
+  attemptCount: number
+  route: ResolvedAssistantFailoverRoute
+  sessionId: string
+  turnId: string
+  vault: string
+}): Promise<void> {
+  const attemptAt = new Date().toISOString()
+  await appendAssistantTurnReceiptEvent({
+    vault: input.vault,
+    turnId: input.turnId,
+    kind: 'provider.attempt.started',
+    detail: input.route.label,
+    metadata: {
+      attempt: String(input.attemptCount),
+      provider: input.route.provider,
+      model: input.route.providerOptions.model ?? 'default',
+      routeId: input.route.routeId,
+    },
+    at: attemptAt,
+  })
+  await recordAssistantDiagnosticEvent({
+    vault: input.vault,
+    component: 'provider',
+    kind: 'provider.attempt.started',
+    message: `Assistant provider attempt ${input.attemptCount} started with ${input.route.label}.`,
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    data: {
+      attempt: input.attemptCount,
+      routeId: input.route.routeId,
+      provider: input.route.provider,
+      model: input.route.providerOptions.model,
+    },
+    counterDeltas: {
+      providerAttempts: 1,
+    },
+    at: attemptAt,
+  })
+}
+
+async function recordAssistantProviderFailoverApplied(input: {
+  notice: AssistantProviderFailoverNotice
+  turnId: string
+  vault: string
+}): Promise<void> {
+  await appendAssistantTurnReceiptEvent({
+    vault: input.vault,
+    turnId: input.turnId,
+    kind: 'provider.failover.applied',
+    detail: `${input.notice.from.label} -> ${input.notice.to.label}`,
+    metadata: {
+      from: input.notice.from.label,
+      to: input.notice.to.label,
+      fromRouteId: input.notice.from.routeId,
+      toRouteId: input.notice.to.routeId,
+      ...(input.notice.reason === 'cooldown'
+        ? { reason: 'cooldown' }
+        : {}),
+    },
+  })
+  await recordAssistantDiagnosticEvent({
+    vault: input.vault,
+    component: 'provider',
+    kind: 'provider.failover.applied',
+    level: 'warn',
+    message:
+      input.notice.reason === 'cooldown'
+        ? `Primary assistant provider route ${input.notice.from.label} is cooling down; using ${input.notice.to.label}.`
+        : `Failing over assistant provider from ${input.notice.from.label} to ${input.notice.to.label}.`,
+    code: input.notice.reason === 'failure' ? input.notice.code : undefined,
+    sessionId: input.notice.sessionId,
+    turnId: input.turnId,
+    data: {
+      from: input.notice.from.label,
+      to: input.notice.to.label,
+      fromRouteId: input.notice.from.routeId,
+      toRouteId: input.notice.to.routeId,
+    },
+    counterDeltas: {
+      providerFailovers: 1,
+    },
+  })
+}
+
+async function finalizeAssistantTurnFromDeliveryOutcome(input: {
+  outcome: AssistantDeliveryOutcome
+  response: string
+  turnId: string
+  vault: string
+}): Promise<void> {
+  const completedAt = new Date().toISOString()
+  const plan = buildAssistantTurnDeliveryFinalizationPlan({
+    completedAt,
+    outcome: input.outcome,
+    response: input.response,
+    turnId: input.turnId,
+    vault: input.vault,
+  })
+  await finalizeAssistantTurnReceipt(plan.receipt)
+  await recordAssistantDiagnosticEvent(plan.diagnostic)
+}
+
+function buildAssistantTurnDeliveryFinalizationPlan(input: {
+  completedAt: string
+  outcome: AssistantDeliveryOutcome
+  response: string
+  turnId: string
+  vault: string
+}): AssistantTurnDeliveryFinalizationPlan {
+  switch (input.outcome.kind) {
+    case 'not-requested':
+      return {
+        receipt: {
+          vault: input.vault,
+          turnId: input.turnId,
+          status: 'completed',
+          deliveryDisposition: 'not-requested',
+          response: input.response,
+          completedAt: input.completedAt,
+        },
+        diagnostic: {
+          vault: input.vault,
+          component: 'assistant',
+          kind: 'turn.completed',
+          message: 'Assistant turn completed without outbound delivery.',
+          sessionId: input.outcome.session.sessionId,
+          turnId: input.turnId,
+          counterDeltas: {
+            turnsCompleted: 1,
+          },
+          at: input.completedAt,
+        },
+      }
+    case 'sent':
+      return {
+        receipt: {
+          vault: input.vault,
+          turnId: input.turnId,
+          status: 'completed',
+          deliveryDisposition: 'sent',
+          deliveryIntentId: input.outcome.intentId,
+          response: input.response,
+          completedAt: input.completedAt,
+        },
+        diagnostic: {
+          vault: input.vault,
+          component: 'assistant',
+          kind: 'turn.completed',
+          message: 'Assistant turn completed and delivered successfully.',
+          sessionId: input.outcome.session.sessionId,
+          turnId: input.turnId,
+          intentId: input.outcome.intentId,
+          counterDeltas: {
+            turnsCompleted: 1,
+          },
+          at: input.completedAt,
+        },
+      }
+    case 'queued':
+      return {
+        receipt: {
+          vault: input.vault,
+          turnId: input.turnId,
+          status: 'deferred',
+          deliveryDisposition: 'retryable',
+          deliveryIntentId: input.outcome.intentId,
+          error: input.outcome.error,
+          response: input.response,
+          completedAt: input.completedAt,
+        },
+        diagnostic: {
+          vault: input.vault,
+          component: 'assistant',
+          kind: 'turn.deferred',
+          level: 'warn',
+          message:
+            input.outcome.error?.message ??
+            'Assistant turn deferred with a queued outbound delivery retry.',
+          code: input.outcome.error?.code ?? null,
+          sessionId: input.outcome.session.sessionId,
+          turnId: input.turnId,
+          intentId: input.outcome.intentId,
+          counterDeltas: {
+            turnsDeferred: 1,
+          },
+          at: input.completedAt,
+        },
+      }
+    case 'failed':
+      return {
+        receipt: {
+          vault: input.vault,
+          turnId: input.turnId,
+          status: 'failed',
+          deliveryDisposition: 'failed',
+          deliveryIntentId: input.outcome.intentId,
+          error: input.outcome.error,
+          response: input.response,
+          completedAt: input.completedAt,
+        },
+        diagnostic: {
+          vault: input.vault,
+          component: 'assistant',
+          kind: 'turn.failed',
+          level: 'error',
+          message: input.outcome.error.message,
+          code: input.outcome.error.code,
+          sessionId: input.outcome.session.sessionId,
+          turnId: input.turnId,
+          intentId: input.outcome.intentId,
+          counterDeltas: {
+            turnsFailed: 1,
+          },
+          at: input.completedAt,
+        },
+      }
+  }
+}
+
+async function runAssistantTurnBestEffort(
+  task: () => Promise<unknown>,
+): Promise<void> {
+  await task().catch(() => undefined)
 }
 
 function removeTrailingCurrentUserPrompt(

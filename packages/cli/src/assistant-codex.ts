@@ -259,7 +259,7 @@ export async function executeCodexPrompt(
     })
 
     const finalMessage =
-      (await readOptionalTextFile(outputFile)) ??
+      (await readOptionalNonBlankTextFile(outputFile)) ??
       extractAssistantMessageFallback({
         assistantStreams,
         assistantStreamOrder,
@@ -298,8 +298,9 @@ export async function resolveCodexDisplayOptions(input: {
   const explicitModel = normalizeNullableString(input.model)
   const explicitProfile = normalizeNullableString(input.profile)
   const config = await readCodexDisplayConfig(input.configPath)
-  const activeProfile = explicitProfile
-    ? config.profiles[explicitProfile] ?? null
+  const activeProfileName = explicitProfile ?? config.defaultProfile
+  const activeProfile = activeProfileName
+    ? config.profiles[activeProfileName] ?? null
     : null
 
   return {
@@ -1606,11 +1607,13 @@ function tailText(value: string): string | null {
   return lines.slice(-3).join(' ')
 }
 
-async function readOptionalTextFile(filePath: string): Promise<string | null> {
+async function readOptionalNonBlankTextFile(
+  filePath: string,
+): Promise<string | null> {
   try {
     const raw = await readFile(filePath, 'utf8')
     const trimmed = raw.trim()
-    return trimmed.length > 0 ? trimmed : ''
+    return trimmed.length > 0 ? trimmed : null
   } catch (error) {
     if (
       error &&

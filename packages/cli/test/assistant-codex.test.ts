@@ -229,6 +229,25 @@ test('executeCodexPrompt emits progress events and can fall back to the last age
   ])
 })
 
+test('executeCodexPrompt ignores a blank last-message file and falls back to assistant output', async () => {
+  installSpawnMock(async (child, args) => {
+    const outputFile = readOutputFilePath(args)
+    await writeFile(outputFile, '  \n', 'utf8')
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ type: 'item.completed', item: { id: 'item-blank-1', type: 'agent_message', text: 'assistant reply from blank-file fallback' } })}\n`,
+    )
+    child.emit('close', 0, null)
+  })
+
+  const result = await executeCodexPrompt({
+    prompt: 'What changed?',
+    workingDirectory: '/tmp/vault',
+  })
+
+  assert.equal(result.finalMessage, 'assistant reply from blank-file fallback')
+})
+
 test('executeCodexPrompt emits reconnect status events and classifies connection losses as resumable failures', async () => {
   installSpawnMock((child) => {
     child.stdout.emit(
@@ -439,7 +458,7 @@ test('resolveCodexDisplayOptions uses explicit model overrides but keeps reasoni
   })
 })
 
-test('resolveCodexDisplayOptions falls back to config defaults when no explicit model is set', async () => {
+test('resolveCodexDisplayOptions uses the configured default profile when no explicit profile is set', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-codex-config-'))
   cleanupPaths.push(tempRoot)
   const configPath = path.join(tempRoot, 'config.toml')
@@ -452,6 +471,30 @@ test('resolveCodexDisplayOptions falls back to config defaults when no explicit 
       '',
       '[profiles.full_access]',
       'model = "gpt-5.3-codex"',
+      'model_reasoning_effort = "xhigh"',
+    ].join('\n'),
+    'utf8',
+  )
+
+  assert.deepEqual(
+    await resolveCodexDisplayOptions({
+      configPath,
+    }),
+    {
+      model: 'gpt-5.3-codex',
+      reasoningEffort: 'xhigh',
+    },
+  )
+})
+
+test('resolveCodexDisplayOptions falls back to top-level config defaults when no profile is configured', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-codex-config-'))
+  cleanupPaths.push(tempRoot)
+  const configPath = path.join(tempRoot, 'config.toml')
+  await writeFile(
+    configPath,
+    [
+      'model = "gpt-5.4"',
       'model_reasoning_effort = "xhigh"',
     ].join('\n'),
     'utf8',

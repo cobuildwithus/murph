@@ -18,17 +18,29 @@ export type FormulaCommandKey =
   | 'pdftotextCommand'
   | 'whisperCommand'
 
-export interface FormulaSpec {
-  commandCandidates: string[]
+export interface MacosToolRequirementSpec {
   formula: string
-  id: string
   installDetail: string
   missingPlanDetail: string
   title: string
 }
 
-export interface ToolFormulaSpec extends FormulaSpec {
+export interface LinuxToolRequirementSpec {
+  completedDetail?: string
+  installPackages: string[]
+  missingNoteDetail?: string
+  missingPlanDetail: string
+  missingStepDetail: string
+  reuseDetail?: (command: string) => string
+  title: string
+}
+
+export interface ToolRequirementSpec {
+  commandCandidates: string[]
+  id: string
   key: FormulaCommandKey
+  linux: LinuxToolRequirementSpec
+  macos: MacosToolRequirementSpec
 }
 
 export const modelFileNames: Record<WhisperModel, string> = {
@@ -47,50 +59,102 @@ export function whisperModelDownloadUrl(model: WhisperModel): string {
   return `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${modelFileNames[model]}`
 }
 
-export function buildBaseFormulaSpecs(): ToolFormulaSpec[] {
+export function resolveWhisperModelPath(
+  toolchainRoot: string,
+  model: WhisperModel,
+): string {
+  return path.join(toolchainRoot, 'models', 'whisper', modelFileNames[model])
+}
+
+export function buildBaseFormulaSpecs(): ToolRequirementSpec[] {
   return [
     {
       commandCandidates: ['ffmpeg'],
-      formula: 'ffmpeg',
       id: 'ffmpeg',
-      installDetail: 'Installed ffmpeg through Homebrew.',
       key: 'ffmpegCommand',
-      missingPlanDetail:
-        'Would install ffmpeg through Homebrew for audio/video normalization.',
-      title: 'ffmpeg',
+      linux: {
+        installPackages: ['ffmpeg'],
+        missingPlanDetail:
+          'Would reuse ffmpeg from PATH when available, or install the ffmpeg package via apt-get for audio/video normalization.',
+        missingStepDetail:
+          'ffmpeg was not found on PATH and Healthy Bob could not install it automatically. Install ffmpeg manually or rerun setup with apt/sudo access.',
+        title: 'ffmpeg',
+      },
+      macos: {
+        formula: 'ffmpeg',
+        installDetail: 'Installed ffmpeg through Homebrew.',
+        missingPlanDetail:
+          'Would install ffmpeg through Homebrew for audio/video normalization.',
+        title: 'ffmpeg',
+      },
     },
     {
       commandCandidates: ['pdftotext'],
-      formula: 'poppler',
       id: 'pdftotext',
-      installDetail: 'Installed poppler so pdftotext is available for PDF parsing.',
       key: 'pdftotextCommand',
-      missingPlanDetail:
-        'Would install poppler through Homebrew so pdftotext is available for PDF parsing.',
-      title: 'pdftotext',
+      linux: {
+        installPackages: ['poppler-utils'],
+        missingPlanDetail:
+          'Would reuse pdftotext from PATH when available, or install poppler-utils via apt-get for PDF parsing.',
+        missingStepDetail:
+          'pdftotext was not found on PATH and Healthy Bob could not install it automatically. Install poppler-utils manually or rerun setup with apt/sudo access.',
+        title: 'pdftotext',
+      },
+      macos: {
+        formula: 'poppler',
+        installDetail: 'Installed poppler so pdftotext is available for PDF parsing.',
+        missingPlanDetail:
+          'Would install poppler through Homebrew so pdftotext is available for PDF parsing.',
+        title: 'pdftotext',
+      },
     },
     {
       commandCandidates: ['whisper-cli', 'whisper-cpp'],
-      formula: 'whisper-cpp',
       id: 'whisper-cpp',
-      installDetail: 'Installed whisper.cpp through Homebrew.',
       key: 'whisperCommand',
-      missingPlanDetail:
-        'Would install whisper.cpp through Homebrew for local transcription.',
-      title: 'whisper.cpp',
+      linux: {
+        installPackages: ['whisper-cpp'],
+        missingPlanDetail:
+          'Would reuse whisper.cpp from PATH when available, or install the whisper-cpp package via apt-get for local transcription.',
+        missingStepDetail:
+          'whisper.cpp was not found on PATH and Healthy Bob could not install it automatically. Install whisper.cpp manually or rerun setup with apt/sudo access.',
+        title: 'whisper.cpp',
+      },
+      macos: {
+        formula: 'whisper-cpp',
+        installDetail: 'Installed whisper.cpp through Homebrew.',
+        missingPlanDetail:
+          'Would install whisper.cpp through Homebrew for local transcription.',
+        title: 'whisper.cpp',
+      },
     },
   ]
 }
 
-export function buildPythonFormulaSpec(): FormulaSpec {
+export function buildPythonFormulaSpec(): Omit<ToolRequirementSpec, 'key'> {
   return {
     commandCandidates: ['python3.12', 'python3', 'python'],
-    formula: 'python@3.12',
     id: 'python',
-    installDetail: 'Installed Python 3.12 through Homebrew for OCR tooling.',
-    missingPlanDetail:
-      'Would install Python 3.12 through Homebrew for OCR tooling.',
-    title: 'Python 3.12',
+    linux: {
+      completedDetail:
+        'Installed Python 3 with venv support through apt-get for OCR tooling.',
+      installPackages: ['python3', 'python3-venv'],
+      missingNoteDetail:
+        'OCR setup could not resolve Python 3 with venv support automatically. Install python3 and python3-venv manually or rerun setup with apt/sudo access.',
+      missingPlanDetail:
+        'Would reuse Python 3 with venv support from PATH when available, or install python3 plus python3-venv via apt-get for OCR tooling.',
+      missingStepDetail:
+        'Python 3 with venv support was not found on PATH and Healthy Bob could not install it automatically.',
+      reuseDetail: (command) => `Reusing Python 3 from ${command} for OCR tooling.`,
+      title: 'Python 3',
+    },
+    macos: {
+      formula: 'python@3.12',
+      installDetail: 'Installed Python 3.12 through Homebrew for OCR tooling.',
+      missingPlanDetail:
+        'Would install Python 3.12 through Homebrew for OCR tooling.',
+      title: 'Python 3.12',
+    },
   }
 }
 

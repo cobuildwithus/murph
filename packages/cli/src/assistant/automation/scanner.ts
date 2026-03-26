@@ -99,6 +99,13 @@ interface AssistantAutoReplyLongRunningOperation {
   startedAtMs: number
 }
 
+interface AssistantProviderWatchdog {
+  dispose: () => void
+  normalizeError: (error: unknown) => unknown
+  onProviderEvent: (event: AssistantProviderProgressEvent) => void
+  signal: AbortSignal
+}
+
 export async function scanAssistantInboxOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
   inboxServices: InboxCliServices
@@ -588,6 +595,78 @@ async function executeAssistantAutoReply(input: {
   replyCaptureId: string
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
+  const watchdog = createAssistantProviderWatchdog(input)
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: input.vault,
+      conversation: conversationRefFromCapture(input.primaryCapture),
+      abortSignal: watchdog.signal,
+      enableFirstTurnOnboarding: true,
+      persistUserPromptOnFailure: false,
+      prompt: input.prompt,
+      deliverResponse: true,
+      turnTrigger: 'automation-auto-reply',
+      maxSessionAgeMs: input.maxSessionAgeMs,
+      onProviderEvent: watchdog.onProviderEvent,
+    })
+    return resolveAssistantAutoReplySendResult({
+      onEvent: input.onEvent,
+      replyCaptureId: input.replyCaptureId,
+      result,
+    })
+  } catch (error) {
+    throw watchdog.normalizeError(error)
+  } finally {
+    watchdog.dispose()
+  }
+}
+
+function createAssistantAutoReplyProgressEvent(
+  captureId: string,
+  event: AssistantProviderProgressEvent,
+): AssistantRunEvent | null {
+  if (event.kind === 'message') {
+    return null
+  }
+
+  return {
+    type: 'capture.reply-progress',
+    captureId,
+    details: event.text,
+    providerKind: event.kind,
+    providerState: event.state,
+  }
+}
+
+function bridgeUpstreamAbortSignal(
+  controller: AbortController,
+  signal?: AbortSignal,
+): () => void {
+  if (!signal) {
+    return () => {}
+  }
+
+  const abort = () => controller.abort()
+  if (signal.aborted) {
+    controller.abort()
+    return () => {}
+  }
+
+  signal.addEventListener('abort', abort, { once: true })
+  return () => {
+    signal.removeEventListener('abort', abort)
+  }
+}
+
+function createAssistantProviderWatchdog(input: {
+  onEvent?: (event: AssistantRunEvent) => void
+  providerHeartbeatMs?: number | null
+  providerLongRunningCommandStallTimeoutMs?: number | null
+  providerStallTimeoutMs?: number | null
+  replyCaptureId: string
+  signal?: AbortSignal
+}): AssistantProviderWatchdog {
   const abortController = new AbortController()
   const cleanupAbortBridge = bridgeUpstreamAbortSignal(
     abortController,
@@ -687,109 +766,66 @@ async function executeAssistantAutoReply(input: {
   }, heartbeatMs)
   resetStallTimer()
 
-  try {
-    const result = await sendAssistantMessage({
-      vault: input.vault,
-      conversation: conversationRefFromCapture(input.primaryCapture),
-      abortSignal: abortController.signal,
-      enableFirstTurnOnboarding: true,
-      persistUserPromptOnFailure: false,
-      prompt: input.prompt,
-      deliverResponse: true,
-      turnTrigger: 'automation-auto-reply',
-      maxSessionAgeMs: input.maxSessionAgeMs,
-      onProviderEvent: (event) => {
-        const eventReceivedAtMs = Date.now()
-        lastProgressAtMs = eventReceivedAtMs
-        activeLongRunningOperation = applyAssistantAutoReplyLongRunningOperationEvent(
-          activeLongRunningOperation,
-          event,
-          eventReceivedAtMs,
-        )
-        resetStallTimer()
-
-        const runEvent = createAssistantAutoReplyProgressEvent(
-          input.replyCaptureId,
-          event,
-        )
-        if (runEvent) {
-          input.onEvent?.(runEvent)
-        }
-      },
-    })
-
-    if (result.deliveryDeferred) {
-      input.onEvent?.({
-        type: 'capture.reply-progress',
-        captureId: input.replyCaptureId,
-        details: result.deliveryIntentId
-          ? `assistant queued outbound delivery for retry as ${result.deliveryIntentId}`
-          : 'assistant queued outbound delivery for retry',
-        providerKind: 'status',
-        providerState: 'completed',
-      })
-      return result
-    }
-
-    if (result.deliveryError || result.delivery === null) {
-      throw new Error(
-        result.deliveryError?.message ??
-          'assistant generated a response, but the outbound delivery channel did not confirm the send',
-      )
-    }
-
-    return result
-  } catch (error) {
-    if (stalled) {
-      markAssistantProviderStalled(error)
-    }
-    throw error
-  } finally {
-    clearTimers()
-    cleanupAbortBridge()
-  }
-}
-
-function createAssistantAutoReplyProgressEvent(
-  captureId: string,
-  event: AssistantProviderProgressEvent,
-): AssistantRunEvent | null {
-  if (event.kind === 'message') {
-    return null
-  }
-
   return {
-    type: 'capture.reply-progress',
-    captureId,
-    details: event.text,
-    providerKind: event.kind,
-    providerState: event.state,
+    signal: abortController.signal,
+    onProviderEvent: (event) => {
+      const eventReceivedAtMs = Date.now()
+      lastProgressAtMs = eventReceivedAtMs
+      activeLongRunningOperation = applyAssistantAutoReplyLongRunningOperationEvent(
+        activeLongRunningOperation,
+        event,
+        eventReceivedAtMs,
+      )
+      resetStallTimer()
+
+      const runEvent = createAssistantAutoReplyProgressEvent(
+        input.replyCaptureId,
+        event,
+      )
+      if (runEvent) {
+        input.onEvent?.(runEvent)
+      }
+    },
+    normalizeError: (error) =>
+      stalled ? markAssistantProviderStalled(error) : error,
+    dispose: () => {
+      clearTimers()
+      cleanupAbortBridge()
+    },
   }
 }
 
-function bridgeUpstreamAbortSignal(
-  controller: AbortController,
-  signal?: AbortSignal,
-): () => void {
-  if (!signal) {
-    return () => {}
+function resolveAssistantAutoReplySendResult(input: {
+  onEvent?: (event: AssistantRunEvent) => void
+  replyCaptureId: string
+  result: Awaited<ReturnType<typeof sendAssistantMessage>>
+}): Awaited<ReturnType<typeof sendAssistantMessage>> {
+  if (input.result.deliveryDeferred) {
+    input.onEvent?.({
+      type: 'capture.reply-progress',
+      captureId: input.replyCaptureId,
+      details: input.result.deliveryIntentId
+        ? `assistant queued outbound delivery for retry as ${input.result.deliveryIntentId}`
+        : 'assistant queued outbound delivery for retry',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+    return input.result
   }
 
-  const abort = () => controller.abort()
-  if (signal.aborted) {
-    controller.abort()
-    return () => {}
+  if (input.result.deliveryError || input.result.delivery === null) {
+    throw new Error(
+      input.result.deliveryError?.message ??
+        'assistant generated a response, but the outbound delivery channel did not confirm the send',
+    )
   }
 
-  signal.addEventListener('abort', abort, { once: true })
-  return () => {
-    signal.removeEventListener('abort', abort)
-  }
+  return input.result
 }
 
-function markAssistantProviderStalled(error: unknown): void {
+function markAssistantProviderStalled(error: unknown): unknown {
   if (!error || typeof error !== 'object') {
-    return
+    return error
   }
 
   const currentContext =
@@ -805,6 +841,7 @@ function markAssistantProviderStalled(error: unknown): void {
     providerStalled: true,
     retryable: true,
   }
+  return error
 }
 
 function formatAutoReplyDuration(durationMs: number): string {

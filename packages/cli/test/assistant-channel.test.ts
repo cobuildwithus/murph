@@ -1125,6 +1125,100 @@ test('sendTelegramMessage keeps retry budget available after Telegram reports a 
   ])
 })
 
+test('sendTelegramMessage retries transient failures after a migrated chat id without dropping topic routing', async () => {
+  const requests: Array<Record<string, unknown>> = []
+  let callCount = 0
+
+  await sendTelegramMessage(
+    {
+      message: 'Retry after migration and keep the topic.',
+      target: '-1001234567890:topic:42',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'token-123',
+      },
+      fetchImplementation: async (_url, init) => {
+        callCount += 1
+        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+        requests.push(body)
+
+        if (callCount === 1) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({
+              ok: false,
+              error_code: 500,
+              description: 'Internal Server Error',
+            }),
+          }
+        }
+
+        if (callCount === 2) {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({
+              ok: false,
+              error_code: 400,
+              description: 'Bad Request: group chat was upgraded to a supergroup chat',
+              parameters: {
+                migrate_to_chat_id: -1009876543210,
+              },
+            }),
+          }
+        }
+
+        if (callCount === 3) {
+          return {
+            ok: false,
+            status: 429,
+            json: async () => ({
+              ok: false,
+              error_code: 429,
+              description: 'Too Many Requests: retry later',
+              parameters: {
+                retry_after: 0.001,
+              },
+            }),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: { message_id: callCount } }),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 4)
+  assert.deepEqual(requests, [
+    {
+      chat_id: '-1001234567890',
+      message_thread_id: 42,
+      text: 'Retry after migration and keep the topic.',
+    },
+    {
+      chat_id: '-1001234567890',
+      message_thread_id: 42,
+      text: 'Retry after migration and keep the topic.',
+    },
+    {
+      chat_id: '-1009876543210',
+      message_thread_id: 42,
+      text: 'Retry after migration and keep the topic.',
+    },
+    {
+      chat_id: '-1009876543210',
+      message_thread_id: 42,
+      text: 'Retry after migration and keep the topic.',
+    },
+  ])
+})
+
 test('sendTelegramMessage requires a bot token before attempting delivery', async () => {
   await assert.rejects(
     () =>

@@ -64,6 +64,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const prisma = {
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({

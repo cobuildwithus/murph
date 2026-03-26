@@ -120,28 +120,74 @@ export interface AssistantChannelAdapter {
   >
 }
 
+type AssistantChannelName = AssistantChannelAdapter['channel']
+
+interface AssistantChannelAdapterSpec {
+  canAutoReply: AssistantChannelAdapter['canAutoReply']
+  channel: AssistantChannelName
+  inferBindingDelivery: AssistantChannelAdapter['inferBindingDelivery']
+  isReadyForSetup: AssistantChannelAdapter['isReadyForSetup']
+  sendMessage: (input: {
+    candidate: AssistantDeliveryCandidate
+    dependencies: AssistantChannelDependencies
+    identityId: string | null
+    message: string
+  }) => Promise<
+    | {
+        target?: string | null
+      }
+    | void
+  >
+  targetRequiredMessage: string
+}
+
+type TelegramParsedTarget = ReturnType<typeof parseTelegramSendTarget>
+
+type TelegramSendAttemptResult =
+  | {
+      failure: VaultCliError
+      kind: 'request-error'
+    }
+  | {
+      kind: 'response'
+      payload: unknown
+      response: FetchLikeResponse
+    }
+
+type TelegramSendAttemptOutcome =
+  | {
+      kind: 'delivered'
+    }
+  | {
+      failure: VaultCliError
+      kind: 'failed'
+    }
+  | {
+      kind: 'migrated'
+      target: TelegramParsedTarget
+      targetLabel: string
+    }
+  | {
+      failure: VaultCliError
+      kind: 'retry'
+      retryAfterSeconds: number | null
+    }
+
 export function getAssistantChannelAdapter(
   channel: string | null | undefined,
 ): AssistantChannelAdapter | null {
-  switch (channel) {
-    case 'imessage':
-      return IMESSAGE_CHANNEL_ADAPTER
-    case 'telegram':
-      return TELEGRAM_CHANNEL_ADAPTER
-    case 'linq':
-      return LINQ_CHANNEL_ADAPTER
-    case 'email':
-      return EMAIL_CHANNEL_ADAPTER
-    default:
-      return null
+  if (!channel) {
+    return null
   }
+
+  return ASSISTANT_CHANNEL_ADAPTERS[channel as AssistantChannelName] ?? null
 }
 
 export function resolveDeliveryCandidates(input: {
   bindingDelivery?: AssistantBindingDelivery | null
   explicitTarget?: string | null
 }): AssistantDeliveryCandidate[] {
-  const explicitTarget = input.explicitTarget?.trim() ? input.explicitTarget.trim() : null
+  const explicitTarget = normalizeOptionalText(input.explicitTarget)
   if (explicitTarget) {
     return [
       {
@@ -189,6 +235,7 @@ export function resolveImessageDeliveryCandidates(input: {
   bindingDelivery?: AssistantBindingDelivery | null
   explicitTarget?: string | null
 }): AssistantDeliveryCandidate[] {
+  // Compatibility wrapper for older outbound-channel call sites/tests.
   return resolveDeliveryCandidates(input)
 }
 
@@ -385,7 +432,7 @@ export async function sendEmailMessage(
   })
 }
 
-const IMESSAGE_CHANNEL_ADAPTER: AssistantChannelAdapter = {
+const IMESSAGE_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'imessage',
   canAutoReply() {
     return null
@@ -396,34 +443,18 @@ const IMESSAGE_CHANNEL_ADAPTER: AssistantChannelAdapter = {
   isReadyForSetup() {
     return true
   },
-  async send(input, dependencies) {
+  targetRequiredMessage:
+    'iMessage delivery requires an explicit target or a stored delivery binding.',
+  async sendMessage({ candidate, dependencies, message }) {
     const send = dependencies.sendImessage ?? sendImessageMessage
-    const candidates = resolveDeliveryCandidates(input)
-
-    if (candidates.length === 0) {
-      throw new VaultCliError(
-        'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-        'iMessage delivery requires an explicit target or a stored delivery binding.',
-      )
-    }
-
-    const candidate = candidates[0]!
     await send({
       target: candidate.target,
-      message: input.message,
-    })
-
-    return assistantChannelDeliverySchema.parse({
-      channel: 'imessage',
-      target: candidate.target,
-      targetKind: candidate.kind,
-      sentAt: new Date().toISOString(),
-      messageLength: input.message.length,
+      message,
     })
   },
-}
+})
 
-const TELEGRAM_CHANNEL_ADAPTER: AssistantChannelAdapter = {
+const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'telegram',
   canAutoReply(capture) {
     return capture.threadIsDirect === true
@@ -431,65 +462,28 @@ const TELEGRAM_CHANNEL_ADAPTER: AssistantChannelAdapter = {
       : 'Telegram auto-reply only runs for direct chats'
   },
   inferBindingDelivery(input) {
-    const explicitKind = input.deliveryKind ?? null
-    const explicitTarget = input.deliveryTarget?.trim()
-      ? input.deliveryTarget.trim()
-      : null
-    if (explicitKind && explicitTarget) {
-      return assistantBindingDeliverySchema.parse({
-        kind: explicitKind,
-        target: explicitTarget,
-      })
-    }
-
-    if (input.conversation.threadId) {
-      return assistantBindingDeliverySchema.parse({
-        kind: 'thread',
-        target: input.conversation.threadId,
-      })
-    }
-
-    if (input.conversation.participantId) {
-      return assistantBindingDeliverySchema.parse({
-        kind: 'participant',
-        target: input.conversation.participantId,
-      })
-    }
-
-    return null
+    return inferThreadFirstBindingDelivery(input, {
+      includeParticipant: true,
+    })
   },
   isReadyForSetup(env) {
     return resolveTelegramBotToken(env) !== null
   },
-  async send(input, dependencies) {
+  targetRequiredMessage:
+    'Telegram delivery requires an explicit target or a stored delivery binding.',
+  async sendMessage({ candidate, dependencies, message }) {
     const send = dependencies.sendTelegram ?? sendTelegramMessage
-    const candidates = resolveDeliveryCandidates(input)
-
-    if (candidates.length === 0) {
-      throw new VaultCliError(
-        'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-        'Telegram delivery requires an explicit target or a stored delivery binding.',
-      )
-    }
-
-    const candidate = candidates[0]!
     const delivered = await send({
       target: candidate.target,
-      message: input.message,
+      message,
     })
-    const deliveredTarget = delivered?.target ?? candidate.target
-
-    return assistantChannelDeliverySchema.parse({
-      channel: 'telegram',
-      target: deliveredTarget,
-      targetKind: candidate.kind,
-      sentAt: new Date().toISOString(),
-      messageLength: input.message.length,
-    })
+    return {
+      target: normalizeOptionalText(delivered?.target) ?? candidate.target,
+    }
   },
-}
+})
 
-const LINQ_CHANNEL_ADAPTER: AssistantChannelAdapter = {
+const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'linq',
   canAutoReply(capture) {
     return capture.threadIsDirect === true
@@ -497,55 +491,25 @@ const LINQ_CHANNEL_ADAPTER: AssistantChannelAdapter = {
       : 'Linq auto-reply only runs for direct chats'
   },
   inferBindingDelivery(input) {
-    const explicitKind = input.deliveryKind ?? null
-    const explicitTarget = input.deliveryTarget?.trim() ? input.deliveryTarget.trim() : null
-    if (explicitKind && explicitTarget) {
-      return assistantBindingDeliverySchema.parse({
-        kind: explicitKind,
-        target: explicitTarget,
-      })
-    }
-
-    if (input.conversation.threadId) {
-      return assistantBindingDeliverySchema.parse({
-        kind: 'thread',
-        target: input.conversation.threadId,
-      })
-    }
-
-    return null
+    return inferThreadFirstBindingDelivery(input, {
+      includeParticipant: false,
+    })
   },
   isReadyForSetup(env) {
     return resolveLinqApiToken(env) !== null
   },
-  async send(input, dependencies) {
+  targetRequiredMessage:
+    'Linq delivery requires an explicit chat id or a stored thread binding.',
+  async sendMessage({ candidate, dependencies, message }) {
     const send = dependencies.sendLinq ?? sendLinqMessage
-    const candidates = resolveDeliveryCandidates(input)
-
-    if (candidates.length === 0) {
-      throw new VaultCliError(
-        'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-        'Linq delivery requires an explicit chat id or a stored thread binding.',
-      )
-    }
-
-    const candidate = candidates[0]!
     await send({
       target: candidate.target,
-      message: input.message,
-    })
-
-    return assistantChannelDeliverySchema.parse({
-      channel: 'linq',
-      target: candidate.target,
-      targetKind: candidate.kind,
-      sentAt: new Date().toISOString(),
-      messageLength: input.message.length,
+      message,
     })
   },
-}
+})
 
-const EMAIL_CHANNEL_ADAPTER: AssistantChannelAdapter = {
+const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'email',
   canAutoReply(capture) {
     return capture.threadIsDirect === true
@@ -553,70 +517,40 @@ const EMAIL_CHANNEL_ADAPTER: AssistantChannelAdapter = {
       : 'Email auto-reply only runs for direct threads'
   },
   inferBindingDelivery(input) {
-    const explicitKind = input.deliveryKind ?? null
-    const explicitTarget = input.deliveryTarget?.trim()
-      ? input.deliveryTarget.trim()
-      : null
-    if (explicitKind && explicitTarget) {
-      return assistantBindingDeliverySchema.parse({
-        kind: explicitKind,
-        target: explicitTarget,
-      })
-    }
-
-    if (input.conversation.threadId) {
-      return assistantBindingDeliverySchema.parse({
-        kind: 'thread',
-        target: input.conversation.threadId,
-      })
-    }
-
-    if (input.conversation.participantId) {
-      return assistantBindingDeliverySchema.parse({
-        kind: 'participant',
-        target: input.conversation.participantId,
-      })
-    }
-
-    return null
+    return inferThreadFirstBindingDelivery(input, {
+      includeParticipant: true,
+    })
   },
   isReadyForSetup(env) {
     return resolveAgentmailApiKey(env) !== null
   },
-  async send(input, dependencies) {
+  targetRequiredMessage:
+    'Email delivery requires an explicit recipient or a stored delivery binding.',
+  async sendMessage({ candidate, dependencies, identityId, message }) {
     const send = dependencies.sendEmail ?? sendEmailMessage
-    const identityId = input.identityId?.trim() ? input.identityId.trim() : null
     if (!identityId) {
       throw new VaultCliError(
         'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
         'Email delivery requires an AgentMail inbox identity. Pass --identity or resume a session bound to an email inbox.',
       )
     }
-
-    const candidates = resolveDeliveryCandidates(input)
-    if (candidates.length === 0) {
-      throw new VaultCliError(
-        'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-        'Email delivery requires an explicit recipient or a stored delivery binding.',
-      )
-    }
-
-    const candidate = candidates[0]!
     await send({
       identityId,
       target: candidate.target,
       targetKind: candidate.kind,
-      message: input.message,
-    })
-
-    return assistantChannelDeliverySchema.parse({
-      channel: 'email',
-      target: candidate.target,
-      targetKind: candidate.kind,
-      sentAt: new Date().toISOString(),
-      messageLength: input.message.length,
+      message,
     })
   },
+})
+
+const ASSISTANT_CHANNEL_ADAPTERS: Record<
+  AssistantChannelName,
+  AssistantChannelAdapter
+> = {
+  imessage: IMESSAGE_CHANNEL_ADAPTER,
+  telegram: TELEGRAM_CHANNEL_ADAPTER,
+  linq: LINQ_CHANNEL_ADAPTER,
+  email: EMAIL_CHANNEL_ADAPTER,
 }
 
 function inferFallbackBindingDelivery(input: {
@@ -624,13 +558,9 @@ function inferFallbackBindingDelivery(input: {
   deliveryKind?: 'participant' | 'thread' | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
-  const explicitKind = input.deliveryKind ?? null
-  const explicitTarget = input.deliveryTarget?.trim() ? input.deliveryTarget.trim() : null
-  if (explicitKind && explicitTarget) {
-    return assistantBindingDeliverySchema.parse({
-      kind: explicitKind,
-      target: explicitTarget,
-    })
+  const explicitDelivery = resolveExplicitBindingDelivery(input)
+  if (explicitDelivery) {
+    return explicitDelivery
   }
 
   if (input.conversation.directness === 'group' && input.conversation.threadId) {
@@ -722,105 +652,54 @@ function mapImessageRuntimeError(error: unknown): VaultCliError {
 async function sendTelegramTextChunk(input: {
   baseUrl: string
   fetchImplementation: FetchLike
-  target: ReturnType<typeof parseTelegramSendTarget>
+  target: TelegramParsedTarget
   targetLabel: string
   text: string
   token: string
 }): Promise<{
-  target: ReturnType<typeof parseTelegramSendTarget>
+  target: TelegramParsedTarget
   targetLabel: string
 }> {
-  let lastFailure: VaultCliError | null = null
+  let retryCount = 0
   let target = input.target
   let targetLabel = input.targetLabel
 
-  for (let attempt = 0; attempt < TELEGRAM_MAX_DELIVERY_ATTEMPTS; attempt += 1) {
-    let response: FetchLikeResponse
-    let payload: unknown = null
-
-    try {
-      response = await sendTelegramBotApiRequest({
+  while (true) {
+    const outcome = resolveTelegramSendAttemptOutcome({
+      result: await sendTelegramTextChunkOnce({
         baseUrl: input.baseUrl,
         fetchImplementation: input.fetchImplementation,
-        payload: {
-          business_connection_id: target.businessConnectionId ?? undefined,
-          chat_id: target.chatId,
-          direct_messages_topic_id: target.directMessagesTopicId ?? undefined,
-          message_thread_id: target.messageThreadId ?? undefined,
-          text: input.text,
-        },
+        target,
+        targetLabel,
+        text: input.text,
         token: input.token,
-      })
-      payload = await readTelegramResponsePayload(response)
-    } catch (error) {
-      const failure = new VaultCliError(
-        'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
-        'Outbound Telegram delivery failed while calling the Bot API.',
-        {
-          error: describeUnknownError(error),
-          target: targetLabel,
-        },
-      )
-      if (attempt >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1) {
-        throw failure
-      }
+      }),
+      target,
+      targetLabel,
+    })
 
-      lastFailure = failure
-      await waitForTelegramRetryDelay(attempt, null)
-      continue
-    }
-
-    if (response.ok && isTelegramSuccessResponse(payload)) {
+    if (outcome.kind === 'delivered') {
       return {
         target,
         targetLabel,
       }
     }
 
-    const errorContext = extractTelegramErrorContext(payload)
-    if (
-      errorContext.migrateToChatId &&
-      errorContext.migrateToChatId !== target.chatId
-    ) {
-      target = {
-        ...target,
-        chatId: errorContext.migrateToChatId,
-      }
-      targetLabel = formatTelegramSendTarget(target)
-      attempt -= 1
+    if (outcome.kind === 'migrated') {
+      target = outcome.target
+      targetLabel = outcome.targetLabel
       continue
     }
 
-    const failure = new VaultCliError(
-      'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
-      errorContext.description ??
-        `Telegram Bot API sendMessage failed with HTTP ${response.status}.`,
-      {
-        errorCode: errorContext.errorCode,
-        migrateToChatId: errorContext.migrateToChatId,
-        status: response.status,
-        target: targetLabel,
-      },
-    )
-
     if (
-      attempt >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1 ||
-      !shouldRetryTelegramSend(response.status, errorContext.errorCode)
+      outcome.kind === 'failed' ||
+      retryCount >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1
     ) {
-      throw failure
+      throw outcome.failure
     }
 
-    lastFailure = failure
-    await waitForTelegramRetryDelay(attempt, errorContext.retryAfterSeconds)
-  }
-
-  if (lastFailure) {
-    throw lastFailure
-  }
-
-  return {
-    target,
-    targetLabel,
+    await waitForTelegramRetryDelay(retryCount, outcome.retryAfterSeconds)
+    retryCount += 1
   }
 }
 
@@ -998,4 +877,221 @@ function describeUnknownError(error: unknown): string {
   }
 
   return String(error)
+}
+
+function createAssistantChannelAdapter(
+  spec: AssistantChannelAdapterSpec,
+): AssistantChannelAdapter {
+  return {
+    channel: spec.channel,
+    canAutoReply: spec.canAutoReply,
+    inferBindingDelivery: spec.inferBindingDelivery,
+    isReadyForSetup: spec.isReadyForSetup,
+    async send(input, dependencies) {
+      const candidate = resolveRequiredDeliveryCandidate(
+        input,
+        spec.targetRequiredMessage,
+      )
+      const delivered = await spec.sendMessage({
+        candidate,
+        dependencies,
+        identityId: normalizeOptionalText(input.identityId),
+        message: input.message,
+      })
+
+      return assistantChannelDeliverySchema.parse({
+        channel: spec.channel,
+        target: normalizeOptionalText(delivered?.target) ?? candidate.target,
+        targetKind: candidate.kind,
+        sentAt: new Date().toISOString(),
+        messageLength: input.message.length,
+      })
+    },
+  }
+}
+
+function resolveRequiredDeliveryCandidate(
+  input: {
+    bindingDelivery: AssistantBindingDelivery | null
+    explicitTarget: string | null
+  },
+  message: string,
+): AssistantDeliveryCandidate {
+  const candidate = resolveDeliveryCandidates(input)[0] ?? null
+  if (candidate) {
+    return candidate
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+    message,
+  )
+}
+
+function createAssistantBindingDelivery(
+  kind: AssistantBindingDelivery['kind'],
+  target: string,
+): AssistantBindingDelivery {
+  return assistantBindingDeliverySchema.parse({
+    kind,
+    target,
+  })
+}
+
+function resolveExplicitBindingDelivery(input: {
+  deliveryKind?: 'participant' | 'thread' | null
+  deliveryTarget?: string | null
+}): AssistantBindingDelivery | null {
+  const explicitKind = input.deliveryKind ?? null
+  const explicitTarget = normalizeOptionalText(input.deliveryTarget)
+  if (!explicitKind || !explicitTarget) {
+    return null
+  }
+
+  return createAssistantBindingDelivery(explicitKind, explicitTarget)
+}
+
+function inferThreadFirstBindingDelivery(
+  input: {
+    conversation: ConversationRef
+    deliveryKind?: 'participant' | 'thread' | null
+    deliveryTarget?: string | null
+  },
+  options: {
+    includeParticipant: boolean
+  },
+): AssistantBindingDelivery | null {
+  const explicitDelivery = resolveExplicitBindingDelivery(input)
+  if (explicitDelivery) {
+    return explicitDelivery
+  }
+
+  if (input.conversation.threadId) {
+    return createAssistantBindingDelivery('thread', input.conversation.threadId)
+  }
+
+  if (options.includeParticipant && input.conversation.participantId) {
+    return createAssistantBindingDelivery(
+      'participant',
+      input.conversation.participantId,
+    )
+  }
+
+  return null
+}
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  return value?.trim() ? value.trim() : null
+}
+
+async function sendTelegramTextChunkOnce(input: {
+  baseUrl: string
+  fetchImplementation: FetchLike
+  target: TelegramParsedTarget
+  targetLabel: string
+  text: string
+  token: string
+}): Promise<TelegramSendAttemptResult> {
+  try {
+    const response = await sendTelegramBotApiRequest({
+      baseUrl: input.baseUrl,
+      fetchImplementation: input.fetchImplementation,
+      payload: {
+        business_connection_id: input.target.businessConnectionId ?? undefined,
+        chat_id: input.target.chatId,
+        direct_messages_topic_id: input.target.directMessagesTopicId ?? undefined,
+        message_thread_id: input.target.messageThreadId ?? undefined,
+        text: input.text,
+      },
+      token: input.token,
+    })
+
+    return {
+      kind: 'response',
+      payload: await readTelegramResponsePayload(response),
+      response,
+    }
+  } catch (error) {
+    return {
+      kind: 'request-error',
+      failure: new VaultCliError(
+        'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+        'Outbound Telegram delivery failed while calling the Bot API.',
+        {
+          error: describeUnknownError(error),
+          target: input.targetLabel,
+        },
+      ),
+    }
+  }
+}
+
+function resolveTelegramSendAttemptOutcome(input: {
+  result: TelegramSendAttemptResult
+  target: TelegramParsedTarget
+  targetLabel: string
+}): TelegramSendAttemptOutcome {
+  if (input.result.kind === 'request-error') {
+    return {
+      kind: 'retry',
+      failure: input.result.failure,
+      retryAfterSeconds: null,
+    }
+  }
+
+  if (
+    input.result.response.ok &&
+    isTelegramSuccessResponse(input.result.payload)
+  ) {
+    return {
+      kind: 'delivered',
+    }
+  }
+
+  const errorContext = extractTelegramErrorContext(input.result.payload)
+  if (
+    errorContext.migrateToChatId &&
+    errorContext.migrateToChatId !== input.target.chatId
+  ) {
+    const migratedTarget = {
+      ...input.target,
+      chatId: errorContext.migrateToChatId,
+    }
+
+    return {
+      kind: 'migrated',
+      target: migratedTarget,
+      targetLabel: formatTelegramSendTarget(migratedTarget),
+    }
+  }
+
+  const failure = new VaultCliError(
+    'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+    errorContext.description ??
+      `Telegram Bot API sendMessage failed with HTTP ${input.result.response.status}.`,
+    {
+      errorCode: errorContext.errorCode,
+      migrateToChatId: errorContext.migrateToChatId,
+      status: input.result.response.status,
+      target: input.targetLabel,
+    },
+  )
+
+  if (
+    shouldRetryTelegramSend(
+      input.result.response.status,
+      errorContext.errorCode,
+    )
+  ) {
+    return {
+      kind: 'retry',
+      failure,
+      retryAfterSeconds: errorContext.retryAfterSeconds,
+    }
+  }
+
+  return {
+    kind: 'failed',
+    failure,
+  }
 }

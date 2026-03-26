@@ -89,13 +89,7 @@ describe("hosted onboarding webhook retry safety", () => {
         findUnique: vi.fn()
           .mockResolvedValueOnce({
             payloadJson: {
-              eventType: "message.received",
-              receiptAttemptCount: 1,
-              receiptStatus: "processing",
-            },
-          })
-          .mockResolvedValueOnce({
-            payloadJson: {
+              receiptAttemptId: "attempt-1",
               eventType: "message.received",
               receiptAttemptCount: 1,
               receiptLastError: {
@@ -103,13 +97,6 @@ describe("hosted onboarding webhook retry safety", () => {
                 name: "HostedOnboardingError",
               },
               receiptStatus: "failed",
-            },
-          })
-          .mockResolvedValueOnce({
-            payloadJson: {
-              eventType: "message.received",
-              receiptAttemptCount: 2,
-              receiptStatus: "processing",
             },
           }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -160,8 +147,17 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        where: expect.objectContaining({
+          payloadJson: {
+            equals: expect.objectContaining({
+              receiptAttemptId: "attempt-1",
+              receiptStatus: "failed",
+            }),
+          },
+        }),
         data: expect.objectContaining({
           payloadJson: expect.objectContaining({
+            receiptAttemptId: expect.any(String),
             receiptAttemptCount: 2,
             receiptStatus: "processing",
           }),
@@ -171,8 +167,17 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
+        where: expect.objectContaining({
+          payloadJson: {
+            equals: expect.objectContaining({
+              receiptAttemptCount: 2,
+              receiptStatus: "processing",
+            }),
+          },
+        }),
         data: expect.objectContaining({
           payloadJson: expect.objectContaining({
+            receiptAttemptCount: 2,
             receiptCompletedAt: expect.any(String),
             receiptLastError: null,
             receiptStatus: "completed",
@@ -210,26 +215,13 @@ describe("hosted onboarding webhook retry safety", () => {
         findUnique: vi.fn()
           .mockResolvedValueOnce({
             payloadJson: {
-              receiptAttemptCount: 1,
-              receiptStatus: "processing",
-              type: "invoice.paid",
-            },
-          })
-          .mockResolvedValueOnce({
-            payloadJson: {
+              receiptAttemptId: "attempt-1",
               receiptAttemptCount: 1,
               receiptLastError: {
                 message: "Hosted execution dispatch failed and the webhook should be retried.",
                 name: "HostedOnboardingError",
               },
               receiptStatus: "failed",
-              type: "invoice.paid",
-            },
-          })
-          .mockResolvedValueOnce({
-            payloadJson: {
-              receiptAttemptCount: 2,
-              receiptStatus: "processing",
               type: "invoice.paid",
             },
           }),
@@ -287,8 +279,17 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        where: expect.objectContaining({
+          payloadJson: {
+            equals: expect.objectContaining({
+              receiptAttemptId: "attempt-1",
+              receiptStatus: "failed",
+            }),
+          },
+        }),
         data: expect.objectContaining({
           payloadJson: expect.objectContaining({
+            receiptAttemptId: expect.any(String),
             receiptAttemptCount: 2,
             receiptStatus: "processing",
           }),
@@ -298,8 +299,17 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
+        where: expect.objectContaining({
+          payloadJson: {
+            equals: expect.objectContaining({
+              receiptAttemptCount: 2,
+              receiptStatus: "processing",
+            }),
+          },
+        }),
         data: expect.objectContaining({
           payloadJson: expect.objectContaining({
+            receiptAttemptCount: 2,
             receiptCompletedAt: expect.any(String),
             receiptLastError: null,
             receiptStatus: "completed",
@@ -320,6 +330,43 @@ describe("hosted onboarding webhook retry safety", () => {
             receiptAttemptCount: 1,
             receiptCompletedAt: "2026-03-26T12:00:00.000Z",
             receiptStatus: "completed",
+          },
+        }),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      duplicate: true,
+      ok: true,
+    });
+
+    expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("treats in-flight processing Linq receipts as duplicates without redispatching the event", async () => {
+    const prisma: any = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptId: "attempt-processing",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
           },
         }),
         updateMany: vi.fn(),

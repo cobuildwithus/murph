@@ -147,13 +147,21 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     },
   });
 
-  assert.match(result.importId, /^xfm_[0-9A-HJKMNP-TV-Z]{26}$/);
+  assert.equal(result.importId, "xfm_GZPCHDEK8TZAANCWR96F9ESMDS");
   assert.equal(result.events.length, 2);
   assert.equal(result.samples.length, 1);
   assert.equal(result.rawArtifacts.length, 2);
   assert.equal(result.provider, "whoop");
   assert.equal(result.accountId, "whoop-user-1");
-  assert.match(result.rawArtifacts[0]?.relativePath ?? "", /^raw\/integrations\/whoop\/\d{4}\/\d{2}\/xfm_/);
+  assert.deepEqual(
+    result.events.map((record) => record.id),
+    ["evt_3AQ5R2750CPRC0DA9NBTENXG34", "evt_MDTG8REWHQ7SK31CZBZ5BT5YKY"],
+  );
+  assert.deepEqual(result.samples.map((record) => record.id), ["smp_XDGGHZJ94CC7TVYS1EXR2WMRPD"]);
+  assert.equal(
+    result.rawArtifacts[0]?.relativePath,
+    "raw/integrations/whoop/2026/03/xfm_GZPCHDEK8TZAANCWR96F9ESMDS/01-sleep-sleep-1.json",
+  );
 
   const eventRecords = (await readJsonlRecords({
     vaultRoot,
@@ -169,15 +177,82 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   })) as AuditRecord[];
   const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
-  assert.equal(eventRecords.length, 2);
-  assert.equal(eventRecords[0]?.externalRef?.system, "whoop");
-  assert.ok(eventRecords[0]?.rawRefs?.[0]?.startsWith("raw/integrations/whoop/"));
-  assert.equal(sampleRecords.length, 1);
-  assert.equal(sampleRecords[0]?.externalRef?.facet, "hrv");
+  assert.deepEqual(eventRecords, [
+    {
+      schemaVersion: "hb.event.v1",
+      id: "evt_3AQ5R2750CPRC0DA9NBTENXG34",
+      kind: "sleep_session",
+      occurredAt: "2026-03-15T22:00:00.000Z",
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      dayKey: "2026-03-15",
+      source: "device",
+      title: "WHOOP sleep",
+      rawRefs: [
+        "raw/integrations/whoop/2026/03/xfm_GZPCHDEK8TZAANCWR96F9ESMDS/01-sleep-sleep-1.json",
+      ],
+      externalRef: {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "sleep-1",
+        version: "2026-03-16T07:30:00.000Z",
+      },
+      startAt: "2026-03-15T22:00:00.000Z",
+      endAt: "2026-03-16T07:00:00.000Z",
+      durationMinutes: 540,
+    },
+    {
+      schemaVersion: "hb.event.v1",
+      id: "evt_MDTG8REWHQ7SK31CZBZ5BT5YKY",
+      kind: "observation",
+      occurredAt: "2026-03-16T07:30:00.000Z",
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      dayKey: "2026-03-16",
+      source: "device",
+      title: "WHOOP recovery score",
+      rawRefs: [
+        "raw/integrations/whoop/2026/03/xfm_GZPCHDEK8TZAANCWR96F9ESMDS/02-recovery-sleep-1.json",
+      ],
+      externalRef: {
+        system: "whoop",
+        resourceType: "recovery",
+        resourceId: "sleep-1",
+        version: "2026-03-16T07:30:00.000Z",
+        facet: "recovery-score",
+      },
+      metric: "recovery-score",
+      value: 67,
+      unit: "%",
+    },
+  ]);
+  assert.deepEqual(sampleRecords, [
+    {
+      schemaVersion: "hb.sample.v1",
+      id: "smp_XDGGHZJ94CC7TVYS1EXR2WMRPD",
+      dayKey: "2026-03-16",
+      stream: "hrv",
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      source: "device",
+      quality: "normalized",
+      externalRef: {
+        system: "whoop",
+        resourceType: "recovery",
+        resourceId: "sleep-1",
+        version: "2026-03-16T07:30:00.000Z",
+        facet: "hrv",
+      },
+      value: 42.5,
+      unit: "ms",
+    },
+  ]);
   assert.equal(auditRecords.at(-1)?.action, "device_import");
   assert.equal(manifest.importKind, "device_batch");
   assert.equal(manifest.artifacts.length, 2);
   assert.equal(path.posix.dirname(manifest.artifacts[0]?.relativePath ?? ""), manifest.rawDirectory);
+  assert.deepEqual(manifest.provenance.eventIds, [
+    "evt_3AQ5R2750CPRC0DA9NBTENXG34",
+    "evt_MDTG8REWHQ7SK31CZBZ5BT5YKY",
+  ]);
+  assert.deepEqual(manifest.provenance.sampleIds, ["smp_XDGGHZJ94CC7TVYS1EXR2WMRPD"]);
   assert.deepEqual(manifest.provenance.operatorMetadata, {
     syncMode: "test",
   });
@@ -353,6 +428,9 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
   assert.equal(first.importId, second.importId);
   assert.equal(first.events[0]?.id, second.events[0]?.id);
   assert.equal(first.samples[0]?.id, second.samples[0]?.id);
+  assert.equal(first.importId, "xfm_9HED690JJYB3N1SWJ8VHVF451B");
+  assert.equal(first.events[0]?.id, "evt_5EQYZG1HWJREHNHWSQD6ARD4S3");
+  assert.equal(first.samples[0]?.id, "smp_XDGGHZJ94CC7TVYS1EXR2WMRPD");
   assert.equal(eventRecords.length, 1);
   assert.equal(sampleRecords.length, 1);
 });
@@ -368,6 +446,8 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
     events: [
       {
         kind: "note",
+        occurredAt: "2026-03-16T09:30:00.000Z",
+        recordedAt: "2026-03-16T09:30:00.000Z",
         note: "single raw fallback",
       },
     ],
@@ -386,8 +466,24 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
   })) as EventRecord[];
   const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
+  assert.equal(result.importId, "xfm_DXBEVA7EW5DFJAJ4SK0HQ9QT5J");
+  assert.equal(result.events[0]?.id, "evt_TM9DGPYBVDN70AC36SVY596KGP");
   assert.equal(eventRecords[0]?.kind, "note");
   assert.deepEqual(eventRecords[0]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
+  assert.deepEqual(eventRecords, [
+    {
+      schemaVersion: "hb.event.v1",
+      id: "evt_TM9DGPYBVDN70AC36SVY596KGP",
+      kind: "note",
+      occurredAt: "2026-03-16T09:30:00.000Z",
+      recordedAt: "2026-03-16T09:30:00.000Z",
+      dayKey: "2026-03-16",
+      source: "device",
+      title: "note",
+      note: "single raw fallback",
+      rawRefs: ["raw/integrations/whoop/2026/03/xfm_DXBEVA7EW5DFJAJ4SK0HQ9QT5J/01-whoop-01.json"],
+    },
+  ]);
   assert.equal(manifest.artifacts[0]?.role, "artifact-1");
   assert.equal(manifest.artifacts[0]?.originalFileName, "whoop-01.json");
 });
@@ -399,6 +495,7 @@ test("importDeviceBatch supports sample-only batches without raw artifacts", asy
   const result = await importDeviceBatch({
     vaultRoot,
     provider: "whoop",
+    importedAt: "2026-03-16T09:30:00.000Z",
     samples: [
       {
         stream: "respiratory_rate",
@@ -416,10 +513,23 @@ test("importDeviceBatch supports sample-only batches without raw artifacts", asy
     relativePath: result.sampleShardPaths[0] as string,
   })) as SampleRecord[];
 
+  assert.equal(result.importId, "xfm_082BTGD7SW8VX2GTQYVFD325B9");
+  assert.equal(result.samples[0]?.id, "smp_R0VG997F9XWSH6WSV7AZWD63TA");
   assert.equal(result.manifestPath, "");
   assert.equal(result.rawArtifacts.length, 0);
-  assert.equal(sampleRecords.length, 1);
-  assert.equal(sampleRecords[0]?.stream, "respiratory_rate");
+  assert.deepEqual(sampleRecords, [
+    {
+      schemaVersion: "hb.sample.v1",
+      id: "smp_R0VG997F9XWSH6WSV7AZWD63TA",
+      dayKey: "2026-03-16",
+      stream: "respiratory_rate",
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      source: "device",
+      quality: "normalized",
+      value: 14.8,
+      unit: "breaths_per_minute",
+    },
+  ]);
 });
 
 test("importDeviceBatch rejects empty batches", async () => {
@@ -511,6 +621,57 @@ test("importDeviceBatch rejects unsupported sample streams and missing sample pa
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_INVALID_SAMPLE",
+  );
+});
+
+test("importDeviceBatch validates canonical payloads before raw artifact errors", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-import-validation-order");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  await assert.rejects(
+    () =>
+      importDeviceBatch({
+        vaultRoot,
+        provider: "whoop",
+        events: [
+          {
+            kind: "note",
+            occurredAt: "2026-03-16T07:30:00.000Z",
+            rawArtifactRoles: ["missing"],
+          },
+        ],
+        rawArtifacts: [
+          { role: "other", content: { payload: true } },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "HB_EVENT_INVALID",
+  );
+
+  await assert.rejects(
+    () =>
+      importDeviceBatch({
+        vaultRoot,
+        provider: "whoop",
+        samples: [
+          {
+            stream: "heart_rate",
+            unit: "bpm",
+            sample: {
+              recordedAt: "2026-03-16T07:30:00.000Z",
+              value: 72.5,
+            },
+          },
+        ],
+        rawArtifacts: [
+          {
+            content: { payload: true },
+            metadata: "bad" as unknown as Record<string, unknown>,
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "HB_SAMPLE_INVALID",
   );
 });
 
