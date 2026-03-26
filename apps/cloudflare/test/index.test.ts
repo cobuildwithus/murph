@@ -119,6 +119,80 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(stubFetch).toHaveBeenCalledTimes(1);
   });
+
+  it("forwards operator env config updates to the durable object", async () => {
+    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/env", {
+        body: JSON.stringify({
+          env: {
+            OPENAI_API_KEY: "sk-user",
+            TELEGRAM_BOT_TOKEN: "bot-token",
+          },
+          mode: "replace",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      createWorkerEnv(stubFetch, {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(stubFetch).toHaveBeenCalledTimes(1);
+    const request = stubFetch.mock.calls[0]?.[0] as Request;
+    expect(request.url).toBe("https://runner.internal/env?userId=member_123");
+    await expect(request.text()).resolves.toContain("\"OPENAI_API_KEY\":\"sk-user\"");
+  });
+
+  it("forwards operator env status reads to the durable object", async () => {
+    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/env", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      createWorkerEnv(stubFetch, {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(stubFetch).toHaveBeenCalledTimes(1);
+    const request = stubFetch.mock.calls[0]?.[0] as Request;
+    expect(request.url).toBe("https://runner.internal/env?userId=member_123");
+    expect(request.method).toBe("GET");
+  });
+
+  it("forwards operator env clears to the durable object", async () => {
+    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/env", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "DELETE",
+      }),
+      createWorkerEnv(stubFetch, {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(stubFetch).toHaveBeenCalledTimes(1);
+    const request = stubFetch.mock.calls[0]?.[0] as Request;
+    expect(request.url).toBe("https://runner.internal/env?userId=member_123");
+    expect(request.method).toBe("DELETE");
+  });
 });
 
 function createWorkerEnv(

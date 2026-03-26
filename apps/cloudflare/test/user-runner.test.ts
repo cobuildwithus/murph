@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { writeHostedBundleTextFile } from "@healthybob/runtime-state";
+
 import { HostedUserRunner } from "../src/user-runner.js";
 
 describe("HostedUserRunner", () => {
   const bucket = createBucket();
   const storage = createStorage();
   const environment = {
+    allowedUserEnvKeys: null,
+    allowedUserEnvPrefixes: null,
     bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
     bundleEncryptionKeyId: "v1",
     controlToken: null,
@@ -164,6 +168,112 @@ describe("HostedUserRunner", () => {
     expect(final.poisonedEventIds).toEqual(["evt_retry_1"]);
     expect(final.retryingEventId).toBeNull();
     expect(final.lastError).toContain("HTTP 503");
+  });
+
+  it("stores encrypted per-user env config inside the agent-state bundle", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const saved = await runner.updateUserEnv("member_123", {
+      env: {
+        OPENAI_API_KEY: "sk-user",
+        TELEGRAM_BOT_TOKEN: "bot-token",
+      },
+      mode: "replace",
+    });
+
+    expect(saved.configuredUserEnvKeys).toEqual([
+      "OPENAI_API_KEY",
+      "TELEGRAM_BOT_TOKEN",
+    ]);
+    expect(bucket.keys()).toEqual(["users/member_123/agent-state.bundle.json"]);
+    await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN"],
+      userId: "member_123",
+    });
+  });
+
+  it("clears per-user env config without dropping unrelated agent-state bundle data", async () => {
+    const initialAgentState = writeHostedBundleTextFile({
+      bytes: null,
+      kind: "agent-state",
+      path: "automation.json",
+      root: "assistant-state",
+      text: "{\"autoReplyChannels\":[\"linq\"]}\n",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            bundles: {
+              agentState: Buffer.from(initialAgentState).toString("base64"),
+              vault: Buffer.from("vault").toString("base64"),
+            },
+            result: {
+              eventsHandled: 1,
+              summary: "ok",
+            },
+          }),
+          {
+            status: 200,
+          },
+        ),
+      ),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        linqChatId: "chat_123",
+        normalizedPhoneNumber: "+15551234567",
+        userId: "member_123",
+      },
+      eventId: "evt_bootstrap",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+    const writesAfterBootstrap = bucket.putCount();
+
+    await runner.updateUserEnv("member_123", {
+      env: {
+        OPENAI_API_KEY: "sk-user",
+      },
+      mode: "replace",
+    });
+    expect(bucket.putCount()).toBeGreaterThan(writesAfterBootstrap);
+
+    const cleared = await runner.clearUserEnv("member_123");
+
+    expect(cleared.configuredUserEnvKeys).toEqual([]);
+    expect(bucket.keys()).toEqual([
+      "users/member_123/agent-state.bundle.json",
+      "users/member_123/vault.bundle.json",
+    ]);
+  });
+
+  it("supports extension-only keys across update and status reads", async () => {
+    const runner = new HostedUserRunner(
+      storage.state,
+      {
+        ...environment,
+        allowedUserEnvKeys: "CUSTOM_API_KEY",
+      },
+      bucket.api,
+    );
+
+    await expect(runner.updateUserEnv("member_123", {
+      env: {
+        CUSTOM_API_KEY: "custom-secret",
+      },
+      mode: "replace",
+    })).resolves.toEqual({
+      configuredUserEnvKeys: ["CUSTOM_API_KEY"],
+      userId: "member_123",
+    });
+    await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
+      configuredUserEnvKeys: ["CUSTOM_API_KEY"],
+      userId: "member_123",
+    });
   });
 
   it("clears the durable-object alarm when no next wake remains", async () => {

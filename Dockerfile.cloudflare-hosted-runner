@@ -1,7 +1,15 @@
 FROM node:22-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PORT=8080
+    HOME=/root \
+    PORT=8080 \
+    XDG_CACHE_HOME=/root/.cache \
+    HB_HOSTED_HOME=/root/.healthybob \
+    HB_HOSTED_MODELS_ROOT=/root/.healthybob/models \
+    WHISPER_MODEL_DIR=/root/.healthybob/models/whisper \
+    PADDLEOCR_MODEL_DIR=/root/.healthybob/models/paddleocr \
+    PARSER_FFMPEG_PATH=/usr/bin/ffmpeg \
+    HF_HOME=/root/.cache/huggingface
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -13,11 +21,16 @@ RUN apt-get update \
     python3 \
     python3-pip \
     python3-venv \
+  && mkdir -p \
+    /root/.cache/huggingface \
+    /root/.healthybob/hosted \
+    /root/.healthybob/models/paddleocr \
+    /root/.healthybob/models/whisper \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig*.json AGENTS.md ARCHITECTURE.md README.md ./
+COPY package.json pnpm-workspace.yaml tsconfig*.json AGENTS.md ARCHITECTURE.md README.md ./
 COPY scripts ./scripts
 COPY agent-docs ./agent-docs
 COPY docs ./docs
@@ -28,11 +41,11 @@ COPY e2e ./e2e
 
 RUN corepack enable \
   && corepack prepare pnpm@9.15.9 --activate \
-  && pnpm install --frozen-lockfile
+  && pnpm install --no-frozen-lockfile
 
 EXPOSE 8080
 
 # This image intentionally keeps the current source-based runner startup path.
 # Provider credentials, parser-toolchain paths, and model directories are supplied
-# at runtime through environment variables or mounted under /root/.healthybob.
+# through environment variables or pre-baked under /root/.healthybob.
 CMD ["bash", "-lc", "corepack pnpm --dir apps/cloudflare runner:local"]

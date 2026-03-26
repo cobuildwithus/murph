@@ -60,18 +60,11 @@ export async function snapshotHostedBundleRoots(input: {
     return null;
   }
 
-  return Uint8Array.from(
-    gzipSync(
-      Buffer.from(
-        JSON.stringify({
-          files,
-          kind: input.kind,
-          schema: HOSTED_BUNDLE_SCHEMA,
-        } satisfies HostedBundleArchive),
-        "utf8",
-      ),
-    ),
-  );
+  return serializeHostedBundleArchive({
+    files,
+    kind: input.kind,
+    schema: HOSTED_BUNDLE_SCHEMA,
+  });
 }
 
 export async function restoreHostedBundleRoots(input: {
@@ -98,6 +91,75 @@ export async function restoreHostedBundleRoots(input: {
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, Buffer.from(file.contentsBase64, "base64"));
   }
+}
+
+export function readHostedBundleTextFile(input: {
+  bytes: Uint8Array | ArrayBuffer | null;
+  expectedKind: HostedExecutionBundleKind;
+  path: string;
+  root: string;
+}): string | null {
+  if (!input.bytes) {
+    return null;
+  }
+
+  const archive = parseHostedBundleArchive(input.bytes);
+
+  if (archive.kind !== input.expectedKind) {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected ${input.expectedKind}, got ${archive.kind}.`,
+    );
+  }
+
+  const normalizedPath = normalizeBundlePath(input.path);
+  const file = archive.files.find((entry) => (
+    entry.root === input.root
+    && entry.path === normalizedPath
+  ));
+
+  if (!file) {
+    return null;
+  }
+
+  return Buffer.from(file.contentsBase64, "base64").toString("utf8");
+}
+
+export function writeHostedBundleTextFile(input: {
+  bytes: Uint8Array | ArrayBuffer | null;
+  kind: HostedExecutionBundleKind;
+  path: string;
+  root: string;
+  text: string | null;
+}): Uint8Array {
+  const normalizedPath = normalizeBundlePath(input.path);
+  const archive = input.bytes
+    ? parseHostedBundleArchive(input.bytes)
+    : {
+        files: [],
+        kind: input.kind,
+        schema: HOSTED_BUNDLE_SCHEMA,
+      } satisfies HostedBundleArchive;
+
+  if (archive.kind !== input.kind) {
+    throw new Error(`Hosted bundle kind mismatch: expected ${input.kind}, got ${archive.kind}.`);
+  }
+
+  const nextFiles = archive.files.filter((entry) => (
+    entry.root !== input.root || entry.path !== normalizedPath
+  ));
+
+  if (input.text !== null) {
+    nextFiles.push({
+      contentsBase64: Buffer.from(input.text, "utf8").toString("base64"),
+      path: normalizedPath,
+      root: input.root,
+    });
+  }
+
+  return serializeHostedBundleArchive({
+    ...archive,
+    files: sortHostedBundleFiles(nextFiles),
+  });
 }
 
 export function encodeHostedBundleBase64(value: Uint8Array | ArrayBuffer | null): string | null {
@@ -131,7 +193,7 @@ function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundle
   }
 
   return {
-    files: parsed.files.map((file) => {
+    files: sortHostedBundleFiles(parsed.files.map((file) => {
       if (
         !file
         || typeof file.path !== "string"
@@ -146,10 +208,24 @@ function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundle
         path: normalizeBundlePath(file.path),
         root: file.root,
       };
-    }),
+    })),
     kind: parsed.kind,
     schema: HOSTED_BUNDLE_SCHEMA,
   };
+}
+
+function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint8Array {
+  return Uint8Array.from(
+    gzipSync(
+      Buffer.from(
+        JSON.stringify({
+          ...archive,
+          files: sortHostedBundleFiles(archive.files),
+        }),
+        "utf8",
+      ),
+    ),
+  );
 }
 
 async function collectBundleFiles(input: {
@@ -211,6 +287,16 @@ function normalizeBundlePath(value: string): string {
   }
 
   return normalized;
+}
+
+function sortHostedBundleFiles(files: readonly HostedBundleArchiveFile[]): HostedBundleArchiveFile[] {
+  return [...files].sort((left, right) => {
+    if (left.root !== right.root) {
+      return left.root.localeCompare(right.root);
+    }
+
+    return left.path.localeCompare(right.path);
+  });
 }
 
 async function directoryExists(directoryPath: string): Promise<boolean> {

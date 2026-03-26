@@ -3,10 +3,10 @@ import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.js";
 import { readHostedExecutionEnvironment } from "./env.js";
 import { json, readJsonObject } from "./json.js";
+import { parseHostedUserEnvUpdate } from "./user-env.js";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
-  type DurableObjectStorageLike,
 } from "./user-runner.js";
 
 interface DurableObjectStubLike {
@@ -20,6 +20,8 @@ interface DurableObjectNamespaceLike {
 interface WorkerEnvironmentSource {
   BUNDLES: import("./bundle-store.js").R2BucketLike;
   HB_HOSTED_BUNDLE_KEY?: string;
+  HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
+  HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
   HOSTED_EXECUTION_CONTROL_TOKEN?: string;
@@ -85,7 +87,7 @@ export default {
         return response;
       }
 
-      const match = url.pathname.match(/^\/internal\/users\/([^/]+)\/(run|status)$/u);
+      const match = url.pathname.match(/^\/internal\/users\/([^/]+)\/(run|status|env)$/u);
 
       if (match) {
         if (environment.controlToken) {
@@ -98,24 +100,17 @@ export default {
 
         const [, userId, action] = match;
         const decodedUserId = decodeURIComponent(userId);
-        const body = action === "run"
-          ? {
-              ...(await readOptionalJsonObject(request)),
-              userId: decodedUserId,
-            }
-          : null;
+        const forwarded = await buildDurableObjectControlRequest({
+          action,
+          request,
+          userId: decodedUserId,
+        });
 
-        return env.USER_RUNNER
-          .getByName(decodedUserId)
-          .fetch(new Request(
-            action === "status"
-              ? `https://runner.internal/status?userId=${encodeURIComponent(decodedUserId)}`
-              : "https://runner.internal/run",
-            {
-              body: body ? JSON.stringify(body) : null,
-              method: request.method,
-            },
-          ));
+        if (forwarded instanceof Response) {
+          return forwarded;
+        }
+
+        return env.USER_RUNNER.getByName(decodedUserId).fetch(forwarded);
       }
 
       return json({ ok: true, service: "cloudflare-hosted-runner" });
@@ -176,11 +171,88 @@ export class UserRunnerDurableObject {
       return json(await this.runner.status(userId));
     }
 
+    if (url.pathname === "/env") {
+      const userId = url.searchParams.get("userId");
+
+      if (!userId) {
+        return json({ error: "userId is required." }, 400);
+      }
+
+      if (request.method === "GET") {
+        return json(await this.runner.getUserEnvStatus(userId));
+      }
+
+      if (request.method === "PUT") {
+        return json(
+          await this.runner.updateUserEnv(
+            userId,
+            parseHostedUserEnvUpdate(await readJsonObject(request)),
+          ),
+        );
+      }
+
+      if (request.method === "DELETE") {
+        return json(await this.runner.clearUserEnv(userId));
+      }
+    }
+
     return json({ error: "Not found" }, 404);
   }
 
   async alarm(): Promise<void> {
     await this.runner.alarm();
+  }
+}
+
+async function buildDurableObjectControlRequest(input: {
+  action: string;
+  request: Request;
+  userId: string;
+}): Promise<Request | Response> {
+  switch (input.action) {
+    case "status":
+      if (input.request.method !== "GET") {
+        return json({ error: "Method not allowed." }, 405);
+      }
+
+      return new Request(`https://runner.internal/status?userId=${encodeURIComponent(input.userId)}`, {
+        method: "GET",
+      });
+    case "run": {
+      if (input.request.method !== "POST") {
+        return json({ error: "Method not allowed." }, 405);
+      }
+
+      const body = {
+        ...(await readOptionalJsonObject(input.request)),
+        userId: input.userId,
+      };
+
+      return new Request("https://runner.internal/run", {
+        body: JSON.stringify(body),
+        method: "POST",
+      });
+    }
+    case "env": {
+      const url = `https://runner.internal/env?userId=${encodeURIComponent(input.userId)}`;
+
+      if (input.request.method === "GET" || input.request.method === "DELETE") {
+        return new Request(url, {
+          method: input.request.method,
+        });
+      }
+
+      if (input.request.method !== "PUT") {
+        return json({ error: "Method not allowed." }, 405);
+      }
+
+      return new Request(url, {
+        body: JSON.stringify(await readOptionalJsonObject(input.request)),
+        method: "PUT",
+      });
+    }
+    default:
+      return json({ error: "Not found" }, 404);
   }
 }
 

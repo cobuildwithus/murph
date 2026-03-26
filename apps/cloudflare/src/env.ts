@@ -1,6 +1,8 @@
 import { decodeBase64Key } from "./base64.js";
 
 export interface HostedExecutionEnvironment {
+  allowedUserEnvKeys: string | null;
+  allowedUserEnvPrefixes: string | null;
   bundleEncryptionKey: Uint8Array;
   bundleEncryptionKeyId: string;
   controlToken: string | null;
@@ -29,6 +31,8 @@ export function readHostedExecutionEnvironment(
   );
 
   return {
+    allowedUserEnvKeys: normalizeString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
+    allowedUserEnvPrefixes: normalizeString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
     bundleEncryptionKey: decodeBase64Key(bundleEncryptionKey),
     bundleEncryptionKeyId: normalizeString(source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID) ?? "v1",
     controlToken: normalizeString(source.HOSTED_EXECUTION_CONTROL_TOKEN),

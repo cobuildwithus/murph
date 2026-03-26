@@ -13,7 +13,7 @@ This app is intentionally separate from `apps/web`:
 - coordinate per-user runs through a `USER_RUNNER` Durable Object
 - store encrypted hosted vault and broader `agent-state` bundle snapshots in the `BUNDLES` R2 bucket
 - restore a temporary execution context for one-shot runs
-- run the existing Healthy Bob inbox, parser, assistant, and device-sync seams for member activation, direct Linq messages, hosted device-sync wake events, and periodic assistant ticks
+- run the existing Healthy Bob inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks
 
 ## Non-goals
 
@@ -34,6 +34,8 @@ Current worker env/config names read directly by `src/env.ts`:
 
 - required secret: `HOSTED_EXECUTION_SIGNING_SECRET` (the worker also accepts the historical alias `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`)
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` (the worker also accepts the historical alias `HB_HOSTED_BUNDLE_KEY`)
+- optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the per-user encrypted env key allowlist in both the worker and runner
+- optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` extends the per-user encrypted env prefix allowlist in both the worker and runner
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
 - optional secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `900000`
@@ -47,10 +49,13 @@ Current worker routes:
 
 - `GET /health` returns a lightweight health payload and does not require the runtime secrets to be present
 - `GET /` returns the service banner payload
-- `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web`
+- `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web` for member activation, hosted share acceptance, Linq message fan-in, and later scheduled work
 - `POST /internal/events` is an alias for the same signed internal dispatch contract
 - `GET /internal/users/:userId/status` is an operator/internal status route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN` when that token is configured
 - `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN` when that token is configured
+- `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
+- `PUT /internal/users/:userId/env` merges or replaces encrypted per-user runner env overrides inside the user's `agent-state` bundle
+- `DELETE /internal/users/:userId/env` clears the encrypted per-user runner env override file while preserving other `agent-state` contents
 
 `apps/cloudflare/wrangler.jsonc` is the current manual scaffold for those bindings and env names. It intentionally leaves bucket names, service names, and secrets as explicit placeholders until a real Cloudflare account target exists.
 
@@ -68,7 +73,9 @@ Current expectations for that runner container:
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - `PORT` to choose the listen port, defaulting to `8080`
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` when the internal runner endpoint should require bearer auth
-- optional provider/runtime env such as `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET`, `DEVICE_SYNC_PUBLIC_BASE_URL`, `DEVICE_SYNC_SECRET`, `LINQ_API_BASE_URL`, and `LINQ_API_TOKEN` when the one-shot runner should execute hosted device-sync work and assistant replies instead of skipping them
+- optional provider/runtime env such as `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET`, `DEVICE_SYNC_PUBLIC_BASE_URL`, `DEVICE_SYNC_SECRET`, `LINQ_API_BASE_URL`, `LINQ_API_TOKEN`, `AGENTMAIL_API_KEY`, `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, and related model-provider keys when the one-shot runner should execute hosted device-sync work and assistant replies instead of skipping them
+- optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when encrypted per-user env overrides need to cover additional key names
+- encrypted per-user overrides are loaded from `.healthybob/hosted/user-env.json` inside the user's `agent-state` bundle, applied only for the duration of that user's one-shot run, and then removed from process env again before the worker goes idle
 - any additional operator/provider env needed by the reused Healthy Bob CLI and inbox runtime seams remains operator-supplied and is intentionally not hard-coded here
 
 `Dockerfile.cloudflare-hosted-runner` is the current manual scaffold for that container. It installs the repo workspace plus common Linux parser dependencies (`ffmpeg`, `poppler-utils`, Python tooling) so the runtime does not reinstall those packages on each wake. Large model weights and any custom toolchain artifacts are still expected to be mounted or baked in separately under `/root/.healthybob`.
@@ -107,11 +114,12 @@ Still intentionally placeholder:
    - `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL`
    - `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`
 8. Confirm the Cloudflare worker answers `GET /health` and the runner container answers `GET /health`, then trigger `POST /internal/users/:userId/run` with the operator token for a smoke run.
+9. When a hosted user needs their own Telegram bot/model-provider/AgentMail credentials, call `PUT /internal/users/:userId/env` with a body like `{ "mode": "merge", "env": { "TELEGRAM_BOT_TOKEN": "...", "OPENAI_API_KEY": "..." } }`. Those values are stored only inside the encrypted `agent-state` bundle and are reapplied automatically on future cron/webhook runs.
 
 ## Operational notes
 
 - The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references.
-- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` now includes sibling `assistant-state`, hosted `.runtime/**`, and the minimal operator-home config needed for bootstrap.
+- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` now includes sibling `assistant-state`, hosted `.runtime/**`, the minimal operator-home config needed for bootstrap, and the encrypted per-user runner env file when one is configured.
 - Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.
 - The operator control routes are internal surfaces only. Put them behind service-to-service auth and keep `HOSTED_EXECUTION_CONTROL_TOKEN` set outside source control.
 

@@ -62,6 +62,8 @@ export async function snapshotHostedExecutionContext(input: {
                   return (
                     relativePath === ".healthybob"
                     || relativePath === ".healthybob/config.json"
+                    || relativePath === ".healthybob/hosted"
+                    || relativePath.startsWith(".healthybob/hosted/")
                   );
                 },
               },

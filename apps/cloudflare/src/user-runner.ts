@@ -12,6 +12,13 @@ import {
 
 import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
+import {
+  applyHostedUserEnvUpdate,
+  listHostedUserEnvKeys,
+  readHostedUserEnvFromAgentStateBundle,
+  type HostedUserEnvUpdate,
+  writeHostedUserEnvToAgentStateBundle,
+} from "./user-env.js";
 
 export interface DurableObjectStorageLike {
   deleteAlarm?(): Promise<void>;
@@ -115,6 +122,74 @@ export class HostedUserRunner {
     return toUserStatus(await this.readState(userId));
   }
 
+  async getUserEnvStatus(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return {
+      configuredUserEnvKeys: listHostedUserEnvKeys(await this.readUserEnv(userId)),
+      userId,
+    };
+  }
+
+  async updateUserEnv(
+    userId: string,
+    update: HostedUserEnvUpdate,
+  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    let record = await this.readState(userId);
+    const store = this.createBundleStore();
+    const currentBundle = await store.readBundle(userId, "agent-state");
+    const currentUserEnv = readHostedUserEnvFromAgentStateBundle(currentBundle, this.readUserEnvSource());
+    const nextUserEnv = applyHostedUserEnvUpdate({
+      current: currentUserEnv,
+      source: this.readUserEnvSource(),
+      update,
+    });
+
+    if (currentBundle === null && Object.keys(nextUserEnv).length === 0) {
+      return {
+        configuredUserEnvKeys: [],
+        userId,
+      };
+    }
+
+    const nextBundle = writeHostedUserEnvToAgentStateBundle({
+      agentStateBundle: currentBundle,
+      env: nextUserEnv,
+    });
+    const bundleChanged = currentBundle === null
+      || currentBundle.byteLength !== nextBundle.byteLength
+      || sha256HostedBundleHex(currentBundle) !== sha256HostedBundleHex(nextBundle);
+
+    if (bundleChanged || record.bundleRefs.agentState === null) {
+      const agentStateRef = await this.writeBundleBytes(
+        userId,
+        "agent-state",
+        nextBundle,
+        record.bundleRefs.agentState,
+      );
+
+      record = {
+        ...record,
+        bundleRefs: {
+          ...record.bundleRefs,
+          agentState: agentStateRef,
+        },
+        userId,
+      };
+      await this.writeState(record);
+    }
+
+    return {
+      configuredUserEnvKeys: listHostedUserEnvKeys(nextUserEnv),
+      userId,
+    };
+  }
+
+  async clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.updateUserEnv(userId, {
+      env: {},
+      mode: "replace",
+    });
+  }
+
   private async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
     let record = await this.readState(userId);
 
@@ -207,11 +282,7 @@ export class HostedUserRunner {
       throw new Error("HOSTED_EXECUTION_RUNNER_BASE_URL is not configured.");
     }
 
-    const store = createHostedBundleStore({
-      bucket: this.bucket,
-      key: this.env.bundleEncryptionKey,
-      keyId: this.env.bundleEncryptionKeyId,
-    });
+    const store = this.createBundleStore();
     const requestBody: HostedExecutionRunnerRequest = {
       bundles: {
         agentState: encodeHostedBundleBase64(await store.readBundle(record.userId, "agent-state")),
@@ -240,25 +311,40 @@ export class HostedUserRunner {
     return (await response.json()) as HostedExecutionRunnerResult;
   }
 
+  private async readUserEnv(userId: string): Promise<Record<string, string>> {
+    return readHostedUserEnvFromAgentStateBundle(
+      await this.createBundleStore().readBundle(userId, "agent-state"),
+      this.readUserEnvSource(),
+    );
+  }
+
   private async writeBundle(
     userId: string,
     kind: HostedExecutionBundleKind,
     value: string,
     currentRef: HostedExecutionBundleRef | null,
   ): Promise<HostedExecutionBundleRef> {
-    const store = createHostedBundleStore({
-      bucket: this.bucket,
-      key: this.env.bundleEncryptionKey,
-      keyId: this.env.bundleEncryptionKeyId,
-    });
-    const plaintext = decodeHostedBundleBase64(value) ?? new Uint8Array();
+    return this.writeBundleBytes(
+      userId,
+      kind,
+      decodeHostedBundleBase64(value) ?? new Uint8Array(),
+      currentRef,
+    );
+  }
+
+  private async writeBundleBytes(
+    userId: string,
+    kind: HostedExecutionBundleKind,
+    plaintext: Uint8Array,
+    currentRef: HostedExecutionBundleRef | null,
+  ): Promise<HostedExecutionBundleRef> {
     const hash = sha256HostedBundleHex(plaintext);
 
     if (currentRef && currentRef.hash === hash && currentRef.size === plaintext.byteLength) {
       return currentRef;
     }
 
-    const ref = await store.writeBundle(userId, kind, plaintext);
+    const ref = await this.createBundleStore().writeBundle(userId, kind, plaintext);
 
     return {
       ...ref,
@@ -314,6 +400,21 @@ export class HostedUserRunner {
 
   private async writeState(record: UserRunnerRecord): Promise<void> {
     await this.state.storage.put(STORAGE_KEY, record);
+  }
+
+  private createBundleStore() {
+    return createHostedBundleStore({
+      bucket: this.bucket,
+      key: this.env.bundleEncryptionKey,
+      keyId: this.env.bundleEncryptionKeyId,
+    });
+  }
+
+  private readUserEnvSource(): Readonly<Record<string, string | undefined>> {
+    return {
+      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: this.env.allowedUserEnvKeys ?? undefined,
+      HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES: this.env.allowedUserEnvPrefixes ?? undefined,
+    };
   }
 }
 

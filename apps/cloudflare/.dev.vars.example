@@ -10,3 +10,8 @@ HOSTED_EXECUTION_RETRY_DELAY_MS=30000
 HOSTED_EXECUTION_RUNNER_BASE_URL=https://replace-me-hosted-runner.example.com
 HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=replace-me-with-a-runner-token
 HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
+
+# Optional allowlist extensions for encrypted per-user runner env overrides.
+# Keep these in sync with the runner container when you extend the allowlist.
+# HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS=OPENAI_API_KEY,AGENTMAIL_API_KEY,TELEGRAM_BOT_TOKEN
+# HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES=HB_USER_,OPENAI_,AGENTMAIL_,TELEGRAM_

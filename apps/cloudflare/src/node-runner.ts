@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { importSharePackIntoVault } from "@healthybob/core";
+
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
@@ -18,6 +20,7 @@ import {
   createHostedInboxdRuntime,
   createHostedParsersRuntime,
 } from "./runtime-adapter.js";
+import { loadHostedUserEnvForRunner } from "./user-env.js";
 
 const HOSTED_MAX_PARSER_JOBS = 50;
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
@@ -35,14 +38,18 @@ export async function runHostedExecutionJob(
       workspaceRoot,
     });
     const requestId = input.dispatch.eventId;
+    const userEnvOverrides = await loadHostedUserEnvForRunner(restored.operatorHomeRoot, process.env);
 
     return await withHostedProcessEnvironment(
       {
+        envOverrides: userEnvOverrides,
+        hostedMemberId: input.dispatch.event.userId,
         operatorHomeRoot: restored.operatorHomeRoot,
         vaultRoot: restored.vaultRoot,
       },
       async () => {
         await ensureHostedBootstrap(restored.vaultRoot, input.dispatch, cli);
+        let shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null = null;
 
         switch (input.dispatch.event.kind) {
           case "member.activated":
@@ -55,6 +62,12 @@ export async function runHostedExecutionJob(
             break;
           case "assistant.cron.tick":
           case "device-sync.wake":
+            break;
+          case "vault.share.accepted":
+            shareImportResult = await importSharePackIntoVault({
+              vaultRoot: restored.vaultRoot,
+              pack: input.dispatch.event.pack,
+            });
             break;
           default:
             assertNever(input.dispatch.event);
@@ -79,6 +92,7 @@ export async function runHostedExecutionJob(
               deviceSyncProcessed: deviceSyncResult.processedJobs,
               deviceSyncSkipped: deviceSyncResult.skipped,
               parserProcessed: parserResult.processedJobs,
+              shareImportResult,
             }),
           },
         };
@@ -250,6 +264,7 @@ function summarizeDispatch(
     deviceSyncProcessed: number;
     deviceSyncSkipped: boolean;
     parserProcessed: number;
+    shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null;
   },
 ): string {
   const suffix = ` Parser jobs: ${metrics.parserProcessed}. Device sync jobs: ${metrics.deviceSyncProcessed}${metrics.deviceSyncSkipped ? " (skipped: providers not configured)." : "."}`;
@@ -263,6 +278,13 @@ function summarizeDispatch(
       return `Processed assistant cron tick (${dispatch.event.reason}) and ran the hosted maintenance loop.${suffix}`;
     case "device-sync.wake":
       return `Processed device-sync wake (${dispatch.event.reason}) and ran the hosted maintenance loop.${suffix}`;
+    case "vault.share.accepted": {
+      const importedFoods = metrics.shareImportResult?.foods.length ?? 0;
+      const importedProtocols = metrics.shareImportResult?.protocols.length ?? 0;
+      const importedRecipes = metrics.shareImportResult?.recipes.length ?? 0;
+      const loggedMeal = metrics.shareImportResult?.meal ? " Logged one meal entry from the shared food." : "";
+      return `Imported share pack "${dispatch.event.pack.title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
+    }
     default:
       return assertNever(dispatch.event);
   }
@@ -270,30 +292,35 @@ function summarizeDispatch(
 
 async function withHostedProcessEnvironment<T>(
   input: {
+    envOverrides: Record<string, string>;
+    hostedMemberId: string;
     operatorHomeRoot: string;
     vaultRoot: string;
   },
   run: () => Promise<T>,
 ): Promise<T> {
-  const previousHome = process.env.HOME;
-  const previousVault = process.env.VAULT;
+  const previousValues = new Map<string, string | undefined>();
+  const nextValues: Record<string, string> = {
+    ...input.envOverrides,
+    HEALTHYBOB_HOSTED_MEMBER_ID: input.hostedMemberId,
+    HOME: input.operatorHomeRoot,
+    VAULT: input.vaultRoot,
+  };
 
-  process.env.HOME = input.operatorHomeRoot;
-  process.env.VAULT = input.vaultRoot;
+  for (const [key, value] of Object.entries(nextValues)) {
+    previousValues.set(key, process.env[key]);
+    process.env[key] = value;
+  }
 
   try {
     return await run();
   } finally {
-    if (previousHome === undefined) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = previousHome;
-    }
-
-    if (previousVault === undefined) {
-      delete process.env.VAULT;
-    } else {
-      process.env.VAULT = previousVault;
+    for (const [key, previousValue] of previousValues) {
+      if (previousValue === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = previousValue;
+      }
     }
   }
 }

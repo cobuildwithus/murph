@@ -7,12 +7,14 @@ import { test } from "vitest";
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
+  readHostedBundleTextFile,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
+  writeHostedBundleTextFile,
 } from "../src/index.ts";
 
 test("hosted bundle helpers round-trip multi-root archives and base64 helpers", async () => {
@@ -83,13 +85,17 @@ test("hosted execution bundles keep vault runtime and operator config inside age
     await mkdir(path.join(vaultRoot, ".runtime"), { recursive: true });
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
     await mkdir(assistantStateRoot, { recursive: true });
-    await mkdir(path.join(operatorHomeRoot, ".healthybob"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".healthybob", "hosted"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "device-sync.db"), "runtime-state\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
     await writeFile(path.join(assistantStateRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
     await writeFile(path.join(operatorHomeRoot, ".healthybob", "config.json"), "{\"schema\":\"cfg\"}\n");
+    await writeFile(
+      path.join(operatorHomeRoot, ".healthybob", "hosted", "user-env.json"),
+      "{\"schema\":\"healthybob.hosted-user-env.v1\",\"updatedAt\":\"2026-03-26T12:00:00.000Z\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
+    );
 
     const bundles = await snapshotHostedExecutionContext({
       operatorHomeRoot,
@@ -120,10 +126,70 @@ test("hosted execution bundles keep vault runtime and operator config inside age
       await readFile(path.join(restored.operatorHomeRoot, ".healthybob", "config.json"), "utf8"),
       "{\"schema\":\"cfg\"}\n",
     );
+    assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+      "{\"schema\":\"healthybob.hosted-user-env.v1\",\"updatedAt\":\"2026-03-26T12:00:00.000Z\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
+    );
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".env.local"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, "exports", "packs", "bundle.zip"), "utf8"));
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });
   }
+});
+
+test("hosted bundle text helpers patch and remove individual files deterministically", async () => {
+  let bundle = writeHostedBundleTextFile({
+    bytes: null,
+    kind: "agent-state",
+    path: ".healthybob/hosted/user-env.json",
+    root: "operator-home",
+    text: "{\"ok\":true}\n",
+  });
+
+  assert.equal(
+    readHostedBundleTextFile({
+      bytes: bundle,
+      expectedKind: "agent-state",
+      path: ".healthybob/hosted/user-env.json",
+      root: "operator-home",
+    }),
+    "{\"ok\":true}\n",
+  );
+
+  bundle = writeHostedBundleTextFile({
+    bytes: bundle,
+    kind: "agent-state",
+    path: ".healthybob/hosted/user-env.json",
+    root: "operator-home",
+    text: "{\"ok\":false}\n",
+  });
+
+  assert.equal(
+    readHostedBundleTextFile({
+      bytes: bundle,
+      expectedKind: "agent-state",
+      path: ".healthybob/hosted/user-env.json",
+      root: "operator-home",
+    }),
+    "{\"ok\":false}\n",
+  );
+
+  bundle = writeHostedBundleTextFile({
+    bytes: bundle,
+    kind: "agent-state",
+    path: ".healthybob/hosted/user-env.json",
+    root: "operator-home",
+    text: null,
+  });
+
+  assert.equal(
+    readHostedBundleTextFile({
+      bytes: bundle,
+      expectedKind: "agent-state",
+      path: ".healthybob/hosted/user-env.json",
+      root: "operator-home",
+    }),
+    null,
+  );
 });

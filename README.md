@@ -96,7 +96,7 @@ The current repo implements:
 - a typed `vault-cli` command surface in `packages/cli`, including provider-backed assistant chat/session commands plus an always-on inbox triage loop
 - deterministic fixtures and smoke manifests under `fixtures/` and `e2e/`
 
-The hosted apps define an initial deployment shape, but deployment automation is still repo-local and manual. `apps/cloudflare/wrangler.jsonc`, `apps/cloudflare/.dev.vars.example`, `apps/cloudflare/.runner.env.example`, and `Dockerfile.cloudflare-hosted-runner` now document the current worker binding/env contract, retry knobs, health/internal route shape, the separate runner-container expectation, and the minimum local setup steps, but account-specific names, secrets wiring, container orchestration, and CI deploy automation remain explicit placeholders. Verification remains package/runtime-truthful and fixture-based rather than a live hosted environment proof.
+The hosted apps define an initial deployment shape, but deployment automation is still repo-local and manual. `apps/cloudflare/wrangler.jsonc`, `apps/cloudflare/.dev.vars.example`, `apps/cloudflare/.runner.env.example`, and `Dockerfile.cloudflare-hosted-runner` now document the current worker binding/env contract, retry knobs, health/internal route shape, encrypted per-user runner-env override support, the separate runner-container expectation, and the minimum local setup steps, but account-specific names, secrets wiring, container orchestration, and CI deploy automation remain explicit placeholders. Verification remains package/runtime-truthful and fixture-based rather than a live hosted environment proof.
 
 ## Mental Model
 
