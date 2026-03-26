@@ -94,6 +94,7 @@ import {
   formatAssistantTerminalHyperlink,
   formatQueuedFollowUpPreview,
   mergeComposerDraftWithQueuedPrompts,
+  normalizeAssistantInkArrowKey,
   normalizeComposerInsertedText,
   partitionChatTranscriptEntries,
   renderChatTranscriptFeed,
@@ -4895,6 +4896,38 @@ test('assistant Ink composer terminal actions treat tab as a queue submit', () =
   })
 })
 
+test('assistant Ink normalizes raw arrow escape sequences into arrow key flags', () => {
+  assert.deepEqual(
+    normalizeAssistantInkArrowKey('\u001b[A', createComposerKey()),
+    createComposerKey({
+      upArrow: true,
+    }),
+  )
+
+  assert.deepEqual(
+    normalizeAssistantInkArrowKey('\u001bOB', createComposerKey()),
+    createComposerKey({
+      downArrow: true,
+    }),
+  )
+
+  assert.deepEqual(
+    normalizeAssistantInkArrowKey('\u001b[1;3A', createComposerKey()),
+    createComposerKey({
+      meta: true,
+      upArrow: true,
+    }),
+  )
+})
+
+test('assistant Ink composer terminal actions treat raw arrow escape sequences as arrow navigation', () => {
+  const action = resolveComposerTerminalAction('\u001b[A', createComposerKey())
+
+  assert.equal(action.kind, 'edit')
+  assert.equal(action.key.upArrow, true)
+  assert.equal(action.key.downArrow, false)
+})
+
 test('assistant Ink composer terminal actions treat option+up as editing the last queued follow-up', () => {
   const action = resolveComposerTerminalAction(
     '',
@@ -4903,6 +4936,14 @@ test('assistant Ink composer terminal actions treat option+up as editing the las
       upArrow: true,
     }),
   )
+
+  assert.deepEqual(action, {
+    kind: 'edit-last-queued',
+  })
+})
+
+test('assistant Ink composer terminal actions treat raw option+up escape sequences as editing the last queued follow-up', () => {
+  const action = resolveComposerTerminalAction('\u001b[1;3A', createComposerKey())
 
   assert.deepEqual(action, {
     kind: 'edit-last-queued',

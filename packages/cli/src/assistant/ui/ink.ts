@@ -197,6 +197,7 @@ type ComposerTerminalAction =
 
 const COMPOSER_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\\\|;:'\\\",.<>/?"
 const MODIFIED_RETURN_SEQUENCE = /^\u001b?\[27;(\d+);13~$/u
+const RAW_ARROW_SEQUENCE = /^\u001b?(?:\[(?:(\d+;)?(\d+))?([ABCD])|O([ABCD]))$/u
 const QUEUED_FOLLOW_UP_SHORTCUT_HINT = '⌥ + ↑ edit last queued message'
 const MAX_QUEUED_FOLLOW_UP_PREVIEW_LENGTH = 88
 const ASSISTANT_INK_THEME_REFRESH_INTERVAL_MS = 2_000
@@ -762,6 +763,32 @@ function resolveComposerModifiedReturnAction(
   }
 }
 
+export function normalizeAssistantInkArrowKey(input: string, key: Key): Key {
+  if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+    return key
+  }
+
+  const match = RAW_ARROW_SEQUENCE.exec(input)
+  const direction = match?.[3] ?? match?.[4]
+
+  if (!direction) {
+    return key
+  }
+
+  const modifier = Math.max(0, Number.parseInt(match?.[2] ?? '1', 10) - 1)
+
+  return {
+    ...key,
+    ctrl: key.ctrl || (modifier & 4) === 4,
+    downArrow: direction === 'B',
+    leftArrow: direction === 'D',
+    meta: key.meta || (modifier & 2) === 2,
+    rightArrow: direction === 'C',
+    shift: key.shift || (modifier & 1) === 1,
+    upArrow: direction === 'A',
+  }
+}
+
 export function mergeComposerDraftWithQueuedPrompts(
   draft: string,
   queuedPrompts: readonly string[],
@@ -775,45 +802,46 @@ export function resolveComposerTerminalAction(
   input: string,
   key: Key,
 ): ComposerTerminalAction {
-  const modifiedReturnAction = resolveComposerModifiedReturnAction(input, key)
+  const normalizedKey = normalizeAssistantInkArrowKey(input, key)
+  const modifiedReturnAction = resolveComposerModifiedReturnAction(input, normalizedKey)
   if (modifiedReturnAction) {
     return modifiedReturnAction
   }
 
   if (
     (input === '\u007f' || input === '\b') &&
-    !key.ctrl &&
-    !key.meta &&
-    !key.shift &&
-    !key.super &&
-    !key.hyper
+    !normalizedKey.ctrl &&
+    !normalizedKey.meta &&
+    !normalizedKey.shift &&
+    !normalizedKey.super &&
+    !normalizedKey.hyper
   ) {
     return {
       kind: 'edit',
       input: '',
       key: {
-        ...key,
+        ...normalizedKey,
         backspace: true,
         delete: false,
       },
     }
   }
 
-  if (key.meta && key.upArrow) {
+  if (normalizedKey.meta && normalizedKey.upArrow) {
     return {
       kind: 'edit-last-queued',
     }
   }
 
-  if (key.tab && !key.shift) {
+  if (normalizedKey.tab && !normalizedKey.shift) {
     return {
       kind: 'submit',
       mode: 'tab',
     }
   }
 
-  if (key.return) {
-    if (!key.shift) {
+  if (normalizedKey.return) {
+    if (!normalizedKey.shift) {
       return {
         kind: 'submit',
         mode: 'enter',
@@ -824,20 +852,20 @@ export function resolveComposerTerminalAction(
       kind: 'edit',
       input: '\n',
       key: {
-        ...key,
+        ...normalizedKey,
         return: false,
       },
     }
   }
 
-  if (key.delete) {
+  if (normalizedKey.delete) {
     // Many terminals report the primary delete/backspace key as `delete`.
     // Preserve an actual forward-delete path via Ctrl+D inside the editor helpers.
     return {
       kind: 'edit',
       input,
       key: {
-        ...key,
+        ...normalizedKey,
         backspace: true,
         delete: false,
       },
@@ -847,7 +875,7 @@ export function resolveComposerTerminalAction(
   return {
     kind: 'edit',
     input,
-    key,
+    key: normalizedKey,
   }
 }
 
@@ -2284,22 +2312,24 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
   onMoveRef.current = props.onMove
 
   const handleModelSwitcherInput = React.useCallback((input: string, key: Key) => {
-    if (key.escape) {
+    const normalizedKey = normalizeAssistantInkArrowKey(input, key)
+
+    if (normalizedKey.escape) {
       onCancelRef.current()
       return
     }
 
-    if (key.upArrow || input === 'k') {
+    if (normalizedKey.upArrow || input === 'k') {
       onMoveRef.current(-1)
       return
     }
 
-    if (key.downArrow || input === 'j') {
+    if (normalizedKey.downArrow || input === 'j') {
       onMoveRef.current(1)
       return
     }
 
-    if (key.return) {
+    if (normalizedKey.return) {
       onConfirmRef.current()
     }
   }, [])
