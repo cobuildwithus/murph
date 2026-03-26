@@ -42,6 +42,7 @@ test('root help lists the simple health CRUD command groups', async () => {
     'goal',
     'condition',
     'allergy',
+    'food',
     'recipe',
     'supplement',
     'regimen',

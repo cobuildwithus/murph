@@ -97,6 +97,7 @@ export type CommandCapabilityBundleId = keyof typeof commandCapabilityBundles;
 
 export type CommandSurfaceNoun =
   | HealthEntityKind
+  | "food"
   | "provider"
   | "recipe"
   | "event"
@@ -155,6 +156,10 @@ const checkedCommandNounCapabilities = [
   {
     bundles: ["payloadCrud"],
     noun: "genetics",
+  },
+  {
+    bundles: ["payloadCrud"],
+    noun: "food",
   },
   {
     bundles: ["payloadCrud"],

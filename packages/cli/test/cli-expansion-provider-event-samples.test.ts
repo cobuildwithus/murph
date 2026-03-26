@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerEventCommands } from '../src/commands/event.js'
+import { registerFoodCommands } from '../src/commands/food.js'
 import { registerProviderCommands } from '../src/commands/provider.js'
 import { registerRecipeCommands } from '../src/commands/recipe.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
@@ -15,13 +16,14 @@ import { requireData } from './cli-test-helpers.js'
 
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
-    description: 'provider/recipe/event/samples slice test cli',
+    description: 'provider/food/recipe/event/samples slice test cli',
     version: '0.0.0-test',
   })
   const services = createIntegratedVaultCliServices()
 
   registerVaultCommands(cli, services)
   registerProviderCommands(cli, services)
+  registerFoodCommands(cli, services)
   registerRecipeCommands(cli, services)
   registerEventCommands(cli, services)
   registerSamplesCommands(cli, services)
@@ -59,9 +61,16 @@ async function runSliceCliRaw(args: string[]) {
   return output.join('').trim()
 }
 
-test('provider, recipe, event, and samples schemas expose the new noun entrypoints', async () => {
+test('provider, food, recipe, event, and samples schemas expose the new noun entrypoints', async () => {
   const providerSchema = JSON.parse(
     await runSliceCliRaw(['provider', 'upsert', '--schema']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+    }
+  }
+  const foodSchema = JSON.parse(
+    await runSliceCliRaw(['food', 'upsert', '--schema']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -91,20 +100,23 @@ test('provider, recipe, event, and samples schemas expose the new noun entrypoin
   }
 
   assert.equal('input' in providerSchema.options.properties, true)
+  assert.equal('input' in foodSchema.options.properties, true)
   assert.equal('input' in recipeSchema.options.properties, true)
   assert.equal('kind' in eventSchema.options.properties, true)
   assert.deepEqual(eventSchema.options.required, ['vault', 'kind'])
   assert.equal('input' in samplesSchema.options.properties, true)
 })
 
-test('provider/recipe/event/samples help uses generic id selectors for read commands', async () => {
+test('provider/food/recipe/event/samples help uses generic id selectors for read commands', async () => {
   const providerHelp = await runSliceCliRaw(['provider', 'show', '--help'])
+  const foodHelp = await runSliceCliRaw(['food', 'show', '--help'])
   const recipeHelp = await runSliceCliRaw(['recipe', 'show', '--help'])
   const eventHelp = await runSliceCliRaw(['event', 'show', '--help'])
   const sampleHelp = await runSliceCliRaw(['samples', 'show', '--help'])
   const batchHelp = await runSliceCliRaw(['samples', 'batch', 'show', '--help'])
 
   assert.match(providerHelp, /Usage: vault-cli provider show <id> \[options\]/u)
+  assert.match(foodHelp, /Usage: vault-cli food show <id> \[options\]/u)
   assert.match(recipeHelp, /Usage: vault-cli recipe show <id> \[options\]/u)
   assert.match(eventHelp, /Usage: vault-cli event show <id> \[options\]/u)
   assert.match(sampleHelp, /Usage: vault-cli samples show <id> \[options\]/u)
@@ -256,6 +268,152 @@ test.sequential(
       assert.match(recipeMarkdown, /recipeId:/u)
       assert.match(recipeMarkdown, /## Ingredients/u)
       assert.match(recipeMarkdown, /## Steps/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'food scaffold/upsert/show/list work through the slice commands',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-'))
+    const foodPayloadPath = path.join(vaultRoot, 'food.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const foodScaffold = await runSliceCli<{
+        noun: string
+        payload: {
+          title?: string
+          aliases?: string[]
+        }
+      }>(['food', 'scaffold', '--vault', vaultRoot])
+
+      assert.equal(foodScaffold.ok, true)
+      assert.equal(requireData(foodScaffold).noun, 'food')
+      assert.equal(requireData(foodScaffold).payload.title, 'Regular Acai Bowl')
+      assert.deepEqual(requireData(foodScaffold).payload.aliases, [
+        'regular acai bowl',
+        'usual acai bowl',
+      ])
+
+      await writeFile(
+        foodPayloadPath,
+        JSON.stringify({
+          title: 'Regular Acai Bowl',
+          slug: 'regular-acai-bowl',
+          status: 'active',
+          summary: 'The usual acai bowl order from the neighborhood spot with repeat toppings.',
+          kind: 'acai bowl',
+          vendor: 'Neighborhood Acai Bar',
+          location: 'Brooklyn, NY',
+          serving: '1 bowl',
+          aliases: ['regular acai bowl', 'usual acai bowl'],
+          ingredients: ['acai base', 'banana', 'strawberries', 'granola'],
+          tags: ['breakfast', 'favorite'],
+          note: 'Typical order includes extra granola and no honey.',
+        }),
+        'utf8',
+      )
+
+      const foodUpsert = await runSliceCli<{
+        foodId: string
+        path: string
+        created: boolean
+      }>([
+        'food',
+        'upsert',
+        '--input',
+        `@${foodPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(foodUpsert.ok, true, JSON.stringify(foodUpsert))
+      assert.equal(foodUpsert.meta?.command, 'food upsert')
+      assert.match(requireData(foodUpsert).foodId, /^food_/u)
+      assert.equal(requireData(foodUpsert).path, 'bank/foods/regular-acai-bowl.md')
+      assert.equal(requireData(foodUpsert).created, true)
+      await access(path.join(vaultRoot, requireData(foodUpsert).path))
+
+      const foodShow = await runSliceCli<{
+        entity: {
+          id: string
+          kind: string
+          title: string | null
+          data: {
+            vendor?: string
+            ingredients?: string[]
+          }
+        }
+      }>([
+        'food',
+        'show',
+        requireData(foodUpsert).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const foodShowBySlug = await runSliceCli<{
+        entity: {
+          id: string
+        }
+      }>([
+        'food',
+        'show',
+        'regular-acai-bowl',
+        '--vault',
+        vaultRoot,
+      ])
+      const foodList = await runSliceCli<{
+        filters: {
+          status: string | null
+          limit: number
+        }
+        count: number
+        items: Array<{
+          id: string
+          kind: string
+          data: Record<string, unknown>
+        }>
+      }>([
+        'food',
+        'list',
+        '--status',
+        'active',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(foodShow.ok, true)
+      assert.equal(requireData(foodShow).entity.id, requireData(foodUpsert).foodId)
+      assert.equal(requireData(foodShow).entity.kind, 'food')
+      assert.equal(requireData(foodShow).entity.title, 'Regular Acai Bowl')
+      assert.equal(requireData(foodShow).entity.data.vendor, 'Neighborhood Acai Bar')
+      assert.deepEqual(requireData(foodShow).entity.data.ingredients, [
+        'acai base',
+        'banana',
+        'strawberries',
+        'granola',
+      ])
+      assert.equal(foodShowBySlug.ok, true)
+      assert.equal(requireData(foodShowBySlug).entity.id, requireData(foodUpsert).foodId)
+
+      assert.equal(foodList.ok, true)
+      assert.equal(requireData(foodList).filters.status, 'active')
+      assert.equal(requireData(foodList).count, 1)
+      assert.equal(requireData(foodList).items.length, 1)
+      assert.equal(requireData(foodList).items[0]?.kind, 'food')
+      assert.equal(requireData(foodList).items[0]?.data.kind, 'acai bowl')
+
+      const foodMarkdown = await readFile(
+        path.join(vaultRoot, requireData(foodUpsert).path),
+        'utf8',
+      )
+      assert.match(foodMarkdown, /foodId:/u)
+      assert.match(foodMarkdown, /## Aliases/u)
+      assert.match(foodMarkdown, /## Ingredients/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

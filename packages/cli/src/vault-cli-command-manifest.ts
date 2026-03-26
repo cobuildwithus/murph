@@ -28,6 +28,7 @@ import { registerMealCommands } from './commands/meal.js'
 import { registerProfileCommands } from './commands/profile.js'
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
+import { registerFoodCommands } from './commands/food.js'
 import { registerResearchCommands } from './commands/research.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
 import { registerReadCommands } from './commands/read.js'
@@ -337,6 +338,18 @@ export const vaultCliCommandDescriptors = [
     },
     register({ cli, services }) {
       registerRecipeCommands(cli, services)
+    },
+  },
+  {
+    id: 'food',
+    bindingMode: 'direct',
+    rootCommandNames: ['food'],
+    directVaultServiceBindings: {
+      core: ['scaffoldFood', 'upsertFood'],
+      query: ['showFood', 'listFoods'],
+    },
+    register({ cli, services }) {
+      registerFoodCommands(cli, services)
     },
   },
   {

@@ -7,6 +7,7 @@ import {
   allergyFrontmatterSchema,
   assessmentResponseSchema,
   auditRecordSchema,
+  commandNounCapabilityByNoun,
   conditionFrontmatterSchema,
   coreFrontmatterSchema,
   type ContractSchema,
@@ -19,6 +20,7 @@ import {
   eventRecordSchema,
   experimentFrontmatterSchema,
   familyMemberFrontmatterSchema,
+  foodFrontmatterSchema,
   geneticVariantFrontmatterSchema,
   goalFrontmatterSchema,
   journalDayFrontmatterSchema,
@@ -122,6 +124,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-core",
   "frontmatter-experiment",
   "frontmatter-family-member",
+  "frontmatter-food",
   "frontmatter-genetic-variant",
   "frontmatter-goal",
   "frontmatter-journal-day",
@@ -135,6 +138,8 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
 ]);
 assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 16);
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 7);
+assert.deepEqual(commandNounCapabilityByNoun.get("food")?.bundles, ["payloadCrud"]);
+assert.deepEqual(commandNounCapabilityByNoun.get("food")?.additionalCapabilities ?? [], []);
 assert.equal(
   (schemaCatalog["frontmatter-core"] as { additionalProperties?: unknown }).additionalProperties,
   false,
@@ -191,6 +196,7 @@ exampleAuditRecords.forEach((record, index) => assertNoErrors(`audit example ${i
 assertNoErrors("core frontmatter object", exampleFrontmatterObjects.core, coreFrontmatterSchema);
 assertNoErrors("journal day frontmatter object", exampleFrontmatterObjects.journalDay, journalDayFrontmatterSchema);
 assertNoErrors("experiment frontmatter object", exampleFrontmatterObjects.experiment, experimentFrontmatterSchema);
+assertNoErrors("food frontmatter object", exampleFrontmatterObjects.food, foodFrontmatterSchema);
 assertNoErrors("provider frontmatter object", exampleFrontmatterObjects.provider, providerFrontmatterSchema);
 assertNoErrors("recipe frontmatter object", exampleFrontmatterObjects.recipe, recipeFrontmatterSchema);
 assertNoErrors("profile current frontmatter object", exampleHealthFrontmatterObjects.profileCurrent, profileCurrentFrontmatterSchema);
@@ -222,6 +228,7 @@ assertHasErrors(
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.core), exampleFrontmatterObjects.core);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.journalDay), exampleFrontmatterObjects.journalDay);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.experiment), exampleFrontmatterObjects.experiment);
+assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.food), exampleFrontmatterObjects.food);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.provider), exampleFrontmatterObjects.provider);
 assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.recipe), {
   ...exampleFrontmatterObjects.recipe,

@@ -256,6 +256,10 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       true,
     )
     assert.equal(
+      result.bundle.tools.some((tool) => tool.name === 'vault.food.upsert'),
+      true,
+    )
+    assert.equal(
       result.bundle.tools.some((tool) => tool.name === 'vault.show'),
       false,
     )
@@ -769,7 +773,7 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
   }
 })
 
-test('createDefaultAssistantToolCatalog exposes recipe query and write tools', () => {
+test('createDefaultAssistantToolCatalog exposes recipe and food query and write tools', () => {
   const catalog = createDefaultAssistantToolCatalog({
     vault: '/tmp/healthybob-vault',
     vaultServices: createStubVaultServices(),
@@ -778,6 +782,9 @@ test('createDefaultAssistantToolCatalog exposes recipe query and write tools', (
   assert.equal(catalog.hasTool('vault.recipe.show'), true)
   assert.equal(catalog.hasTool('vault.recipe.list'), true)
   assert.equal(catalog.hasTool('vault.recipe.upsert'), true)
+  assert.equal(catalog.hasTool('vault.food.show'), true)
+  assert.equal(catalog.hasTool('vault.food.list'), true)
+  assert.equal(catalog.hasTool('vault.food.upsert'), true)
 })
 
 test('createDefaultAssistantToolCatalog recipe upsert writes payload files and calls the recipe service with inputFile', async () => {
@@ -849,6 +856,81 @@ test('createDefaultAssistantToolCatalog recipe upsert writes payload files and c
       title: 'Sheet Pan Salmon Bowls',
       status: 'saved',
       ingredients: ['2 salmon fillets', '2 cups cooked rice'],
+    })
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('createDefaultAssistantToolCatalog food upsert writes payload files and calls the food service with inputFile', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-food-tools-'))
+  let recordedCall:
+    | {
+        inputFile: string
+        requestId: string | null
+        vault: string
+      }
+    | undefined
+
+  const vaultServices = createStubVaultServices({
+    core: {
+      upsertFood: async (input) => {
+        recordedCall = input
+        return {
+          vault: input.vault,
+          lookupId: 'food_1',
+          foodId: 'food_1',
+          created: true,
+          path: 'bank/foods/regular-acai-bowl.md',
+        }
+      },
+    } as VaultCliServices['core'],
+  })
+
+  try {
+    const catalog = createDefaultAssistantToolCatalog(
+      {
+        requestId: 'req_food',
+        vault: vaultRoot,
+        vaultServices,
+      },
+      { includeQueryTools: false },
+    )
+
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.food.upsert',
+          input: {
+            payload: {
+              title: 'Regular Acai Bowl',
+              status: 'active',
+              vendor: 'Neighborhood Acai Bar',
+            },
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'succeeded')
+    assert.ok(recordedCall)
+    assert.equal(recordedCall?.vault, vaultRoot)
+    assert.equal(recordedCall?.requestId, 'req_food')
+    assert.match(recordedCall?.inputFile ?? '', /derived\/assistant\/payloads/u)
+
+    const persistedPayload = JSON.parse(
+      await readFile(recordedCall!.inputFile, 'utf8'),
+    ) as {
+      title: string
+      status: string
+      vendor: string
+    }
+
+    assert.deepEqual(persistedPayload, {
+      title: 'Regular Acai Bowl',
+      status: 'active',
+      vendor: 'Neighborhood Acai Bar',
     })
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

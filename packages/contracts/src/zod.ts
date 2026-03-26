@@ -21,6 +21,7 @@ import {
   EXPERIMENT_PHASES,
   EXPERIMENT_STATUSES,
   FILE_CHANGE_OPERATIONS,
+  FOOD_STATUSES,
   FRONTMATTER_DOC_TYPES,
   GOAL_HORIZONS,
   GOAL_STATUSES,
@@ -54,6 +55,7 @@ export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
 export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type ProfileSnapshotSource = (typeof PROFILE_SNAPSHOT_SOURCES)[number];
+export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
 export type RegimenKind = (typeof REGIMEN_KINDS)[number];
 export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
@@ -382,6 +384,7 @@ export const vaultMetadataSchema = withContractMetadata(
               event: z.literal(ID_PREFIXES.event),
               experiment: z.literal(ID_PREFIXES.experiment),
               family: z.literal(ID_PREFIXES.family),
+              food: z.literal(ID_PREFIXES.food),
               goal: z.literal(ID_PREFIXES.goal),
               meal: z.literal(ID_PREFIXES.meal),
               pack: z.literal(ID_PREFIXES.pack),
@@ -404,6 +407,7 @@ export const vaultMetadataSchema = withContractMetadata(
           conditionsRoot: z.literal("bank/conditions"),
           coreDocument: z.literal("CORE.md"),
           familyRoot: z.literal("bank/family"),
+          foodsRoot: z.literal("bank/foods"),
           geneticsRoot: z.literal("bank/genetics"),
           goalsRoot: z.literal("bank/goals"),
           journalRoot: z.literal("journal"),
@@ -670,6 +674,31 @@ export const providerFrontmatterSchema = withContractMetadata(
     .strict(),
   "@healthybob/contracts/frontmatter-provider.schema.json",
   "Healthy Bob Provider Frontmatter",
+);
+
+export const foodFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.foodFrontmatter),
+      docType: z.literal(FRONTMATTER_DOC_TYPES.food),
+      foodId: idSchema(ID_PREFIXES.food),
+      slug: patternedString(SLUG_PATTERN),
+      title: boundedString(1, 160),
+      status: z.enum(FOOD_STATUSES),
+      summary: boundedString(1, 4000).optional(),
+      kind: boundedString(1, 160).optional(),
+      brand: boundedString(1, 160).optional(),
+      vendor: boundedString(1, 160).optional(),
+      location: boundedString(1, 160).optional(),
+      serving: boundedString(1, 160).optional(),
+      aliases: uniqueArray(boundedString(1, 160), { uniqueItems: true }).optional(),
+      ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
+      tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+      note: boundedString(1, 4000).optional(),
+    })
+    .strict(),
+  "@healthybob/contracts/frontmatter-food.schema.json",
+  "Healthy Bob Food Frontmatter",
 );
 
 export const recipeFrontmatterSchema = withContractMetadata(
@@ -961,6 +990,7 @@ export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;
 export type ProviderFrontmatter = z.infer<typeof providerFrontmatterSchema>;
+export type FoodFrontmatter = z.infer<typeof foodFrontmatterSchema>;
 export type RecipeFrontmatter = z.infer<typeof recipeFrontmatterSchema>;
 export type AssessmentResponseRecord = z.infer<typeof assessmentResponseSchema>;
 export type RawImportManifestArtifact = z.infer<typeof rawImportManifestArtifactSchema>;

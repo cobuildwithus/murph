@@ -50,6 +50,7 @@ export {
   updateExperiment,
   updateVaultSummary,
   upsertEvent,
+  upsertFood,
   upsertProvider,
   upsertAllergy,
   upsertCondition,

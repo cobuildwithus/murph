@@ -114,6 +114,7 @@ test("core constants stay aligned with canonical contracts constants", () => {
     core: CONTRACT_SCHEMA_VERSION.coreFrontmatter,
     experiment: CONTRACT_SCHEMA_VERSION.experimentFrontmatter,
     familyMember: CONTRACT_SCHEMA_VERSION.familyMemberFrontmatter,
+    food: CONTRACT_SCHEMA_VERSION.foodFrontmatter,
     geneticVariant: CONTRACT_SCHEMA_VERSION.geneticVariantFrontmatter,
     goal: CONTRACT_SCHEMA_VERSION.goalFrontmatter,
     journalDay: CONTRACT_SCHEMA_VERSION.journalDayFrontmatter,
@@ -220,16 +221,23 @@ test("loadVault backfills additive metadata defaults in memory and repairVault p
     paths: Record<string, string>;
   };
   delete staleMetadata.idPolicy.prefixes.recipe;
+  delete staleMetadata.idPolicy.prefixes.food;
   delete staleMetadata.paths.recipesRoot;
+  delete staleMetadata.paths.foodsRoot;
   await fs.writeFile(metadataPath, `${JSON.stringify(staleMetadata, null, 2)}\n`, "utf8");
   await fs.rm(path.join(vaultRoot, "bank/recipes"), { recursive: true, force: true });
+  await fs.rm(path.join(vaultRoot, "bank/foods"), { recursive: true, force: true });
 
   const loaded = await loadVault({ vaultRoot });
 
   assert.equal(loaded.metadata.idPolicy.prefixes.recipe, "rcp");
+  assert.equal(loaded.metadata.idPolicy.prefixes.food, "food");
   assert.equal(loaded.metadata.paths.recipesRoot, "bank/recipes");
+  assert.equal(loaded.metadata.paths.foodsRoot, "bank/foods");
   assert.deepEqual(loaded.compatibilityRepairs.sort(), [
+    "idPolicy.prefixes.food",
     "idPolicy.prefixes.recipe",
+    "paths.foodsRoot",
     "paths.recipesRoot",
   ]);
 
@@ -243,10 +251,16 @@ test("loadVault backfills additive metadata defaults in memory and repairVault p
     [
       "VAULT_METADATA_REPAIR_RECOMMENDED",
       "VAULT_METADATA_REPAIR_RECOMMENDED",
+      "VAULT_METADATA_REPAIR_RECOMMENDED",
+      "VAULT_METADATA_REPAIR_RECOMMENDED",
     ],
   );
   assert.equal(
     validationBeforeRepair.issues.some((issue) => issue.path === "bank/recipes"),
+    true,
+  );
+  assert.equal(
+    validationBeforeRepair.issues.some((issue) => issue.path === "bank/foods"),
     true,
   );
 
@@ -258,18 +272,24 @@ test("loadVault backfills additive metadata defaults in memory and repairVault p
     paths: Record<string, string>;
   };
   const repairedRecipesDirectory = await fs.stat(path.join(vaultRoot, "bank/recipes"));
+  const repairedFoodsDirectory = await fs.stat(path.join(vaultRoot, "bank/foods"));
 
   assert.equal(repaired.updated, true);
   assert.equal(repaired.metadataFile, "vault.json");
   assert.deepEqual(repaired.repairedFields.sort(), [
+    "idPolicy.prefixes.food",
     "idPolicy.prefixes.recipe",
+    "paths.foodsRoot",
     "paths.recipesRoot",
   ]);
-  assert.deepEqual(repaired.createdDirectories, ["bank/recipes"]);
+  assert.deepEqual(repaired.createdDirectories.sort(), ["bank/foods", "bank/recipes"]);
   assert.equal(typeof repaired.auditPath, "string");
   assert.equal(persistedMetadata.idPolicy.prefixes.recipe, "rcp");
+  assert.equal(persistedMetadata.idPolicy.prefixes.food, "food");
   assert.equal(persistedMetadata.paths.recipesRoot, "bank/recipes");
+  assert.equal(persistedMetadata.paths.foodsRoot, "bank/foods");
   assert.equal(repairedRecipesDirectory.isDirectory(), true);
+  assert.equal(repairedFoodsDirectory.isDirectory(), true);
 
   const validationAfterRepair = await validateVault({ vaultRoot });
   assert.equal(validationAfterRepair.valid, true);

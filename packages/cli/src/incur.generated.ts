@@ -139,6 +139,10 @@ declare module 'incur' {
       'provider scaffold': { args: {}; options: { vault: string; requestId: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId: string } }
       'provider upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'food list': { args: {}; options: { vault: string; requestId: string; status: "active" | "archived"; limit: number } }
+      'food scaffold': { args: {}; options: { vault: string; requestId: string } }
+      'food show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'food upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'recipe list': { args: {}; options: { vault: string; requestId: string; status: "draft" | "saved" | "archived"; limit: number } }
       'recipe scaffold': { args: {}; options: { vault: string; requestId: string } }
       'recipe show': { args: { id: string }; options: { vault: string; requestId: string } }

@@ -69,6 +69,12 @@ import {
   upsertProviderRecordFromInput,
 } from "./provider-event.js"
 import {
+  listFoodRecords,
+  scaffoldFoodPayload,
+  showFoodRecord,
+  upsertFoodRecordFromInput,
+} from "./food.js"
+import {
   listRecipeRecords,
   scaffoldRecipePayload,
   showRecipeRecord,
@@ -313,6 +319,18 @@ function createIntegratedCoreServices(): CoreWriteServices {
       inputFile: string
     }) {
       return upsertRecipeRecordFromInput(input)
+    },
+    async scaffoldFood(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: 'food' as const,
+        payload: scaffoldFoodPayload(),
+      }
+    },
+    async upsertFood(input: CommandContext & {
+      inputFile: string
+    }) {
+      return upsertFoodRecordFromInput(input)
     },
     async scaffoldEvent(input: CommandContext & {
       kind: string
@@ -630,6 +648,17 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       return listRecipeRecords(input)
+    },
+    async showFood(input: CommandContext & {
+      lookup: string
+    }) {
+      return showFoodRecord(input.vault, input.lookup)
+    },
+    async listFoods(input: CommandContext & {
+      status?: string
+      limit: number
+    }) {
+      return listFoodRecords(input)
     },
     async showEvent(input: CommandContext & {
       eventId: string

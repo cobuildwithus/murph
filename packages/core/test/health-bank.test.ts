@@ -9,12 +9,14 @@ import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../sr
 import {
   listAllergies,
   listConditions,
+  listFoods,
   listGoals,
   listProviders,
   listRecipes,
   listRegimenItems,
   readAllergy,
   readCondition,
+  readFood,
   readGoal,
   readProvider,
   readRecipe,
@@ -22,6 +24,7 @@ import {
   stopRegimenItem,
   upsertAllergy,
   upsertCondition,
+  upsertFood,
   upsertGoal,
   upsertProvider,
   upsertRecipe,
@@ -279,6 +282,97 @@ test("providers and recipes use first-class markdown registry reads without chan
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "HB_PROVIDER_CONFLICT",
+  );
+});
+
+test("foods use first-class markdown registry reads for regular meals and staples", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-food-registry");
+  await initializeVault({ vaultRoot });
+
+  const createdFood = await upsertFood({
+    vaultRoot,
+    title: "Regular Acai Bowl",
+    slug: "regular-acai-bowl",
+    status: "active",
+    kind: "acai bowl",
+    vendor: "Neighborhood Acai Bar",
+    aliases: ["regular acai bowl", "usual acai bowl"],
+    ingredients: ["acai base", "banana", "granola"],
+    tags: ["breakfast", "favorite"],
+    note: "Typical order includes extra granola.",
+  });
+  const renamedFood = await upsertFood({
+    vaultRoot,
+    foodId: createdFood.record.foodId,
+    slug: "usual-acai-bowl",
+    title: "Usual Acai Bowl",
+    status: "active",
+    kind: "acai bowl",
+    vendor: "Neighborhood Acai Bar",
+    aliases: ["regular acai bowl", "usual acai bowl"],
+    ingredients: ["acai base", "banana", "granola"],
+    tags: ["breakfast", "favorite"],
+    note: "Typical order includes extra granola.",
+  });
+  const secondFood = await upsertFood({
+    vaultRoot,
+    title: "Purely Elizabeth Granola",
+    slug: "purely-elizabeth-granola",
+    status: "archived",
+    kind: "granola",
+    brand: "Purely Elizabeth",
+  });
+
+  const listedFoods = await listFoods(vaultRoot);
+  const readFoodById = await readFood({
+    vaultRoot,
+    foodId: createdFood.record.foodId,
+  });
+  const readFoodBySlug = await readFood({
+    vaultRoot,
+    slug: createdFood.record.slug,
+  });
+  const foodMarkdown = await fs.readFile(
+    path.join(vaultRoot, renamedFood.record.relativePath),
+    "utf8",
+  );
+
+  assert.equal(createdFood.created, true);
+  assert.equal(renamedFood.created, false);
+  assert.equal(renamedFood.record.relativePath, createdFood.record.relativePath);
+  assert.equal(renamedFood.record.slug, createdFood.record.slug);
+  assert.equal(listedFoods.length, 2);
+  assert.equal(readFoodById.foodId, createdFood.record.foodId);
+  assert.equal(readFoodById.slug, createdFood.record.slug);
+  assert.equal(readFoodBySlug.foodId, createdFood.record.foodId);
+  assert.equal(readFoodBySlug.title, "Usual Acai Bowl");
+  assert.equal(listedFoods[0]?.foodId, secondFood.record.foodId);
+  assert.equal(listedFoods[1]?.foodId, createdFood.record.foodId);
+  assert.match(foodMarkdown, /foodId:/u);
+  assert.match(foodMarkdown, /## Aliases/u);
+  assert.match(foodMarkdown, /## Ingredients/u);
+
+  await assert.rejects(
+    () =>
+      upsertFood({
+        vaultRoot,
+        foodId: createdFood.record.foodId,
+        slug: secondFood.record.relativePath.replace("bank/foods/", "").replace(".md", ""),
+        title: "Usual Acai Bowl",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FOOD_CONFLICT",
+  );
+
+  await assert.rejects(
+    () =>
+      readFood({
+        vaultRoot,
+        slug: "missing-food",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_FOOD_MISSING" &&
+      error.message === "Food was not found.",
   );
 });
 

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "hb.frontmatter.food.v1"
+    },
+    "docType": {
+      "type": "string",
+      "const": "food"
+    },
+    "foodId": {
+      "type": "string",
+      "pattern": "^food_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "kind": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "brand": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "vendor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "location": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "serving": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "uniqueItems": true
+    },
+    "ingredients": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "uniqueItems": true
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "docType",
+    "foodId",
+    "slug",
+    "title",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$id": "@healthybob/contracts/frontmatter-food.schema.json",
+  "title": "Healthy Bob Food Frontmatter"
+}

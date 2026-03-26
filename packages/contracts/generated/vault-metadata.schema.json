@@ -66,6 +66,10 @@
               "type": "string",
               "const": "fam"
             },
+            "food": {
+              "type": "string",
+              "const": "food"
+            },
             "goal": {
               "type": "string",
               "const": "goal"
@@ -120,6 +124,7 @@
             "event",
             "experiment",
             "family",
+            "food",
             "goal",
             "meal",
             "pack",
@@ -163,6 +168,10 @@
         "familyRoot": {
           "type": "string",
           "const": "bank/family"
+        },
+        "foodsRoot": {
+          "type": "string",
+          "const": "bank/foods"
         },
         "geneticsRoot": {
           "type": "string",
@@ -235,6 +244,7 @@
         "conditionsRoot",
         "coreDocument",
         "familyRoot",
+        "foodsRoot",
         "geneticsRoot",
         "goalsRoot",
         "journalRoot",

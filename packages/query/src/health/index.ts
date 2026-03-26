@@ -8,6 +8,7 @@ export {
 export { listGoals, readGoal, showGoal } from "./goals.js";
 export { listConditions, readCondition, showCondition } from "./conditions.js";
 export { listAllergies, readAllergy, showAllergy } from "./allergies.js";
+export { listFoods, readFood, showFood } from "./foods.js";
 export { listRegimens, readRegimen, showRegimen } from "./regimens.js";
 export {
   listSupplementCompounds,
@@ -53,6 +54,7 @@ export type {
   RegimenQueryRecord,
   SupplementIngredientQueryRecord,
 } from "./registries.js";
+export type { FoodQueryRecord } from "./foods.js";
 export type {
   BloodTestListOptions,
   BloodTestQueryRecord,

@@ -18,6 +18,7 @@ import { copyRawArtifact as copyRawArtifactInternal } from "./raw.js";
 import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.js";
 import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.js";
 import { upsertCondition as upsertConditionInternal } from "./bank/conditions.js";
+import { upsertFood as upsertFoodInternal } from "./bank/foods.js";
 import { upsertGoal as upsertGoalInternal } from "./bank/goals.js";
 import { upsertProvider as upsertProviderInternal } from "./bank/providers.js";
 import { upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
@@ -402,6 +403,12 @@ export async function upsertRecipe(
   input: Parameters<typeof upsertRecipeInternal>[0],
 ): ReturnType<typeof upsertRecipeInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => upsertRecipeInternal(input));
+}
+
+export async function upsertFood(
+  input: Parameters<typeof upsertFoodInternal>[0],
+): ReturnType<typeof upsertFoodInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => upsertFoodInternal(input));
 }
 
 export async function upsertRegimenItem(

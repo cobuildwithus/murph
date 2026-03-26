@@ -30,9 +30,14 @@ export const RECIPE_SCHEMA_VERSION = "hb.frontmatter.recipe.v1";
 export const RECIPE_DOC_TYPE = "recipe";
 export const RECIPE_STATUSES = ["draft", "saved", "archived"] as const;
 
+export const FOOD_SCHEMA_VERSION = "hb.frontmatter.food.v1";
+export const FOOD_DOC_TYPE = "food";
+export const FOOD_STATUSES = ["active", "archived"] as const;
+
 export const GOALS_DIRECTORY = "bank/goals";
 export const CONDITIONS_DIRECTORY = "bank/conditions";
 export const ALLERGIES_DIRECTORY = "bank/allergies";
+export const FOODS_DIRECTORY = "bank/foods";
 export const RECIPES_DIRECTORY = "bank/recipes";
 export const REGIMENS_DIRECTORY = "bank/regimens";
 
@@ -43,9 +48,61 @@ export type ConditionVerificationStatus = (typeof CONDITION_VERIFICATION_STATUSE
 export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
 export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
+export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
 export type RegimenKind = (typeof REGIMEN_KINDS)[number];
 export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
+
+export interface FoodRecord {
+  schemaVersion: typeof FOOD_SCHEMA_VERSION;
+  docType: typeof FOOD_DOC_TYPE;
+  foodId: string;
+  slug: string;
+  title: string;
+  status: FoodStatus;
+  summary?: string;
+  kind?: string;
+  brand?: string;
+  vendor?: string;
+  location?: string;
+  serving?: string;
+  aliases?: string[];
+  ingredients?: string[];
+  tags?: string[];
+  note?: string;
+  relativePath: string;
+  markdown: string;
+}
+
+export interface UpsertFoodInput {
+  vaultRoot: string;
+  foodId?: string;
+  slug?: string;
+  title?: string;
+  status?: FoodStatus;
+  summary?: string;
+  kind?: string;
+  brand?: string;
+  vendor?: string;
+  location?: string;
+  serving?: string;
+  aliases?: string[];
+  ingredients?: string[];
+  tags?: string[];
+  note?: string;
+}
+
+export interface UpsertFoodResult {
+  created: boolean;
+  auditPath: string;
+  record: FoodRecord;
+}
+
+export interface ReadFoodInput {
+  vaultRoot: string;
+  foodId?: string;
+  slug?: string;
+}
 
 export interface SupplementIngredientRecord {
   compound: string;

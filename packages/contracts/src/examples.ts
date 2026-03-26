@@ -7,6 +7,7 @@ import type {
   EventRecord,
   ExperimentFrontmatter,
   FamilyMemberFrontmatter,
+  FoodFrontmatter,
   GeneticVariantFrontmatter,
   GoalFrontmatter,
   JournalDayFrontmatter,
@@ -23,6 +24,7 @@ type FrontmatterExamples = {
   core: CoreFrontmatter;
   journalDay: JournalDayFrontmatter;
   experiment: ExperimentFrontmatter;
+  food: FoodFrontmatter;
   provider: ProviderFrontmatter;
   recipe: RecipeFrontmatter;
 };
@@ -54,6 +56,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
       event: "evt",
       experiment: "exp",
       family: "fam",
+      food: "food",
       goal: "goal",
       meal: "meal",
       pack: "pack",
@@ -73,6 +76,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
     conditionsRoot: "bank/conditions",
     coreDocument: "CORE.md",
     familyRoot: "bank/family",
+    foodsRoot: "bank/foods",
     geneticsRoot: "bank/genetics",
     goalsRoot: "bank/goals",
     journalRoot: "journal",
@@ -543,6 +547,29 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     hypothesis: "Evening magnesium reduces time to fall asleep.",
     tags: ["sleep", "supplement"],
   },
+  food: {
+    schemaVersion: "hb.frontmatter.food.v1",
+    docType: "food",
+    foodId: "food_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    slug: "regular-acai-bowl",
+    title: "Regular Acai Bowl",
+    status: "active",
+    summary: "The usual acai bowl order from the neighborhood spot with repeat toppings.",
+    kind: "acai bowl",
+    vendor: "Neighborhood Acai Bar",
+    location: "Brooklyn, NY",
+    serving: "1 bowl",
+    aliases: ["regular acai bowl", "usual acai bowl"],
+    ingredients: [
+      "acai base",
+      "banana",
+      "strawberries",
+      "granola",
+      "almond butter",
+    ],
+    tags: ["breakfast", "favorite"],
+    note: "Typical order includes extra granola and no honey.",
+  },
   provider: {
     schemaVersion: "hb.frontmatter.provider.v1",
     docType: "provider",
@@ -753,6 +780,35 @@ tags:
 ---
 
 # Magnesium For Sleep Onset
+`,
+  food: `---
+schemaVersion: hb.frontmatter.food.v1
+docType: food
+foodId: food_01JNV422Y2M5ZBV64ZP4N1DRB1
+slug: regular-acai-bowl
+title: Regular Acai Bowl
+status: active
+summary: The usual acai bowl order from the neighborhood spot with repeat toppings.
+kind: acai bowl
+vendor: Neighborhood Acai Bar
+location: Brooklyn, NY
+serving: 1 bowl
+aliases:
+  - regular acai bowl
+  - usual acai bowl
+ingredients:
+  - acai base
+  - banana
+  - strawberries
+  - granola
+  - almond butter
+tags:
+  - breakfast
+  - favorite
+note: Typical order includes extra granola and no honey.
+---
+
+# Regular Acai Bowl
 `,
   provider: `---
 schemaVersion: hb.frontmatter.provider.v1

@@ -11,6 +11,7 @@ import {
   eventRecordSchema,
   experimentFrontmatterSchema,
   familyMemberFrontmatterSchema,
+  foodFrontmatterSchema,
   geneticVariantFrontmatterSchema,
   goalFrontmatterSchema,
   journalDayFrontmatterSchema,
@@ -910,6 +911,14 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.regimensDirectory,
       schema: regimenFrontmatterSchema,
+      code: "HB_FRONTMATTER_INVALID",
+    })),
+  );
+  issues.push(
+    ...(await validateFrontmatterDirectory({
+      vaultRoot: absoluteRoot,
+      relativeDirectory: VAULT_LAYOUT.foodsDirectory,
+      schema: foodFrontmatterSchema,
       code: "HB_FRONTMATTER_INVALID",
     })),
   );

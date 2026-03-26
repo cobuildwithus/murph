@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { RECIPE_STATUSES } from '@healthybob/contracts'
+import { FOOD_STATUSES, RECIPE_STATUSES } from '@healthybob/contracts'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -222,6 +222,43 @@ function createVaultQueryToolDefinitions(
           limit: limit ?? 10,
         }),
     }),
+    defineAssistantTool({
+      name: 'vault.food.show',
+      description:
+        'Show one remembered food by canonical food id or slug.',
+      inputSchema: z.object({
+        id: z.string().min(1),
+      }),
+      inputExample: {
+        id: 'regular-acai-bowl',
+      },
+      execute: ({ id }) =>
+        input.vaultServices!.query.showFood({
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          lookup: id,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'vault.food.list',
+      description:
+        'List remembered regular foods with an optional status filter.',
+      inputSchema: z.object({
+        status: z.enum(FOOD_STATUSES).optional(),
+        limit: z.number().int().positive().max(200).optional(),
+      }),
+      inputExample: {
+        status: 'active',
+        limit: 10,
+      },
+      execute: ({ status, limit }) =>
+        input.vaultServices!.query.listFoods({
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          status,
+          limit: limit ?? 10,
+        }),
+    }),
   ]
 }
 
@@ -389,6 +426,30 @@ function createVaultWriteToolDefinitions(
       execute: async ({ payload }) => {
         const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.recipe.upsert', payload)
         return input.vaultServices!.core.upsertRecipe({
+          vault: input.vault,
+          requestId: input.requestId ?? null,
+          inputFile,
+        })
+      },
+    }),
+    defineAssistantTool({
+      name: 'vault.food.upsert',
+      description:
+        'Upsert one regular food record from a JSON payload object so the vault can remember recurring meals, snacks, bowls, smoothies, and grocery staples.',
+      inputSchema: z.object({
+        payload: jsonObjectSchema,
+      }),
+      inputExample: {
+        payload: {
+          title: 'Regular Acai Bowl',
+          status: 'active',
+          vendor: 'Neighborhood Acai Bar',
+          ingredients: ['acai base', 'banana', 'granola'],
+        },
+      },
+      execute: async ({ payload }) => {
+        const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.food.upsert', payload)
+        return input.vaultServices!.core.upsertFood({
           vault: input.vault,
           requestId: input.requestId ?? null,
           inputFile,

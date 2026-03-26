@@ -5,6 +5,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   allergyFrontmatter: "hb.frontmatter.allergy.v1",
   conditionFrontmatter: "hb.frontmatter.condition.v1",
   experimentFrontmatter: "hb.frontmatter.experiment.v1",
+  foodFrontmatter: "hb.frontmatter.food.v1",
   familyMemberFrontmatter: "hb.frontmatter.family-member.v1",
   geneticVariantFrontmatter: "hb.frontmatter.genetic-variant.v1",
   goalFrontmatter: "hb.frontmatter.goal.v1",
@@ -31,6 +32,7 @@ export const ID_PREFIXES = Object.freeze({
   event: "evt",
   experiment: "exp",
   family: "fam",
+  food: "food",
   goal: "goal",
   meal: "meal",
   pack: "pack",
@@ -115,6 +117,8 @@ export const REGIMEN_KINDS = Object.freeze(["medication", "supplement", "therapy
 
 export const REGIMEN_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
 
+export const FOOD_STATUSES = Object.freeze(["active", "archived"] as const);
+
 export const RECIPE_STATUSES = Object.freeze(["draft", "saved", "archived"] as const);
 
 export const TEST_RESULT_STATUSES = Object.freeze(["pending", "normal", "abnormal", "mixed", "unknown"] as const);
@@ -151,6 +155,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "list",
   "meal_add",
   "export_pack",
+  "food_upsert",
   "profile_current_rebuild",
   "profile_snapshot_add",
   "recipe_upsert",
@@ -172,6 +177,7 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   core: "core",
   condition: "condition",
   experiment: "experiment",
+  food: "food",
   familyMember: "family_member",
   geneticVariant: "genetic_variant",
   goal: "goal",

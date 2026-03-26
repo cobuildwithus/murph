@@ -9,6 +9,7 @@ import {
   eventRecordSchema as eventRecordContract,
   experimentFrontmatterSchema as experimentFrontmatterContract,
   familyMemberFrontmatterSchema as familyMemberFrontmatterContract,
+  foodFrontmatterSchema as foodFrontmatterContract,
   geneticVariantFrontmatterSchema as geneticVariantFrontmatterContract,
   goalFrontmatterSchema as goalFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
@@ -36,6 +37,7 @@ export const auditRecordSchema = toJsonSchema(auditRecordContract);
 export const coreFrontmatterSchema = toJsonSchema(coreFrontmatterContract);
 export const journalDayFrontmatterSchema = toJsonSchema(journalDayFrontmatterContract);
 export const experimentFrontmatterSchema = toJsonSchema(experimentFrontmatterContract);
+export const foodFrontmatterSchema = toJsonSchema(foodFrontmatterContract);
 export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract);
 export const profileSnapshotSchema = toJsonSchema(profileSnapshotContract);
 export const profileCurrentFrontmatterSchema = toJsonSchema(profileCurrentFrontmatterContract);
@@ -57,6 +59,7 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-core": coreFrontmatterSchema,
   "frontmatter-experiment": experimentFrontmatterSchema,
   "frontmatter-family-member": familyMemberFrontmatterSchema,
+  "frontmatter-food": foodFrontmatterSchema,
   "frontmatter-genetic-variant": geneticVariantFrontmatterSchema,
   "frontmatter-goal": goalFrontmatterSchema,
   "frontmatter-journal-day": journalDayFrontmatterSchema,
