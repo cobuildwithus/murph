@@ -15,9 +15,11 @@ Preflight (required):
 Approach:
 - Delete dead code, stale branches, and no-op abstractions first.
 - Reduce duplication only when reuse is immediate and real.
+- Search for existing helpers, types, or patterns in the touched area before accepting a new parallel abstraction.
 - Flatten control flow with early returns and clearer boundaries.
 - Prefer derived state over stored state when equivalent.
 - Tighten naming/types so trust boundaries are explicit.
+- Flag scope/shape drift: if the solution feels larger, more generic, or more architectural than the task warrants, recommend cutting it back.
 
 Constraints:
 - Preserve behavior unless explicitly instructed otherwise.

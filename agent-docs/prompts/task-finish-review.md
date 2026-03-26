@@ -16,12 +16,15 @@ Review for:
 - security and correctness risks
 - unexpected interface or state-transition changes
 - test gaps for newly introduced risk
+- unnecessary complexity, speculative abstractions, or diff size that is disproportionate to the task
+- missed reuse or duplicated logic that likely came from incomplete codebase recall
+- verification gaps where passing checks still do not prove the changed behavior at a real boundary
 
 Output requirements:
 - Return findings ordered by severity (`high`, `medium`, `low`).
 - For each finding include: `severity`, `file:line`, `issue`, `impact`, `recommended fix`.
 - Include `Open questions / assumptions` when uncertainty remains.
-- If no findings exist, state that explicitly and list residual risk areas.
+- If no findings exist, state that explicitly and list residual risk areas, including any direct-scenario verification still left to human checking.
 
 
 Parallel-agent output:

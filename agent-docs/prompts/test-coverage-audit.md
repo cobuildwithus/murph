@@ -17,18 +17,22 @@ Audit for:
 - edge cases and failure-mode handling gaps
 - invariant gaps around trust boundaries, validation, state consistency, and user-visible behavior
 - brittle assertions that miss important guarantees
+- proof gaps where all verification stays inside helpers, mocks, or snapshots and never exercises the highest stable behavior boundary available
 
 Execution requirements:
 - Use full diff/context and inspect both modified production files and nearby tests.
 - Prioritize impact: implement the smallest test set that materially reduces regression risk.
+- Prefer at least one assertion path through the highest stable public boundary available for the change; use helper-level tests to complement that boundary, not replace it.
 - Do not change production behavior in this pass unless explicitly instructed.
 - If the repo still has no real test harness for the touched code, report that gap explicitly instead of inventing fake tests.
+- If meaningful proof still requires a manual or higher-level scenario outside the harness, call that out explicitly instead of pretending the automated suite is sufficient.
 - After implementing tests, run the narrowest relevant verification command first (or `pnpm test` when scope is broad), then report outcomes.
 
 Output requirements:
 - Summarize implemented tests and why each is high impact.
 - Include exact verification commands run and pass/fail outcomes.
 - List remaining recommended tests (if any) ordered by priority (`high`, `medium`, `low`).
+- List any remaining direct-scenario verification gaps if automated coverage cannot prove the changed behavior end to end.
 - Include `Open questions / assumptions` only when required.
 
 
