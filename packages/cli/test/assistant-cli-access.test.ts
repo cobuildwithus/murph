@@ -40,6 +40,7 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /healthybob run/u)
   assert.match(guidance, /meal photo, audio note, or a text-only description/u)
   assert.match(guidance, /vault-cli meal add/u)
+  assert.match(guidance, /Log the meal without asking whether they want it logged first/u)
   assert.match(guidance, /no longer requires a photo/u)
   assert.match(guidance, /meals, snacks, and drinks/u)
   assert.match(guidance, /same detailed meal more than once/u)
