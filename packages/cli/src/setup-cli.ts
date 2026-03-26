@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { Cli, z } from 'incur'
-import { assistantAutomationStateSchema } from './assistant-cli-contracts.js'
+import { normalizeAssistantAutomationState } from './assistant-cli-contracts.js'
 import { resolveAssistantStatePaths } from './assistant/store/paths.js'
 import {
   type SetupAssistantPreset,
@@ -293,7 +293,7 @@ export async function resolveInitialSetupWizardChannels(
 
   try {
     const raw = await readFile(automationPath, 'utf8')
-    const state = assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    const state = normalizeAssistantAutomationState(JSON.parse(raw) as unknown)
     const preferredChannels = setupChannelValues.filter((channel) =>
       state.preferredChannels.includes(channel),
     )

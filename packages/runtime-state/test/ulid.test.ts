@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "vitest";
 
+import {
+  appendAssistantAutomationEvent,
+  createAssistantAutomationEventId,
+  listAssistantAutomationEvents,
+} from "../src/assistant-events.ts";
+import { resolveAssistantStatePaths } from "../src/assistant-state.ts";
 import {
   assertLocalDeviceSyncControlPlaneBaseUrl,
   isDeviceSyncLocalControlPlaneError,
@@ -96,4 +105,94 @@ test("resolveDeviceSyncControlToken prefers DEVICE_SYNC_CONTROL_TOKEN over DEVIC
 
 test("resolveDeviceSyncControlToken returns null when no env is set", () => {
   assert.equal(resolveDeviceSyncControlToken(), null);
+});
+
+test("assistant state paths expose event queue and transcript maintenance scaffolding", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "healthybob-runtime-state-"));
+  const vaultRoot = path.join(parent, "vault");
+  await mkdir(vaultRoot, { recursive: true });
+
+  try {
+    const paths = resolveAssistantStatePaths(vaultRoot);
+
+    assert.equal(paths.eventQueuePath, path.join(paths.assistantStateRoot, "automation-events.jsonl"));
+    assert.equal(
+      paths.eventDeadLetterPath,
+      path.join(paths.assistantStateRoot, "automation-events.dead-letter.jsonl"),
+    );
+    assert.equal(
+      paths.transcriptMaintenanceDirectory,
+      path.join(paths.assistantStateRoot, "transcript-maintenance"),
+    );
+    assert.equal(
+      paths.transcriptArchivesDirectory,
+      path.join(paths.assistantStateRoot, "transcript-archives"),
+    );
+    assert.equal(
+      paths.transcriptContinuationsDirectory,
+      path.join(paths.assistantStateRoot, "transcript-continuations"),
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("assistant event queue appends and lists events after a cursor", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "healthybob-runtime-events-"));
+  const vaultRoot = path.join(parent, "vault");
+  await mkdir(vaultRoot, { recursive: true });
+
+  try {
+    const paths = resolveAssistantStatePaths(vaultRoot);
+    const first = await appendAssistantAutomationEvent(paths, {
+      schema: "healthybob.assistant-automation-event.v1",
+      eventId: createAssistantAutomationEventId("2026-03-26T00:00:00.000Z"),
+      type: "parser-completed",
+      occurredAt: "2026-03-26T00:00:00.000Z",
+      target: {
+        accountId: null,
+        attachmentId: "attach_1",
+        captureId: "cap_1",
+        channel: "email",
+        jobId: null,
+        sessionId: null,
+      },
+      dedupeKey: null,
+      payload: {
+        parser: "default",
+      },
+    });
+    const second = await appendAssistantAutomationEvent(paths, {
+      schema: "healthybob.assistant-automation-event.v1",
+      eventId: createAssistantAutomationEventId("2026-03-26T00:01:00.000Z"),
+      type: "assistant-retry-ready",
+      occurredAt: "2026-03-26T00:01:00.000Z",
+      target: {
+        accountId: null,
+        attachmentId: null,
+        captureId: null,
+        channel: "email",
+        jobId: "cron_1",
+        sessionId: "asst_1",
+      },
+      dedupeKey: "retry:cron_1",
+      payload: {},
+    });
+
+    const all = await listAssistantAutomationEvents(paths);
+    const afterFirst = await listAssistantAutomationEvents(paths, {
+      after: {
+        eventId: first.eventId,
+        occurredAt: first.occurredAt,
+      },
+    });
+
+    assert.deepEqual(
+      all.map((event) => event.eventId),
+      [first.eventId, second.eventId],
+    );
+    assert.deepEqual(afterFirst.map((event) => event.eventId), [second.eventId]);
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
 });

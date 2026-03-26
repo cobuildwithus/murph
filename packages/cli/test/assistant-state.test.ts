@@ -82,6 +82,26 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(statePaths.cronDirectory, path.join(statePaths.assistantStateRoot, 'cron'))
   assert.equal(statePaths.cronJobsPath, path.join(statePaths.cronDirectory, 'jobs.json'))
   assert.equal(statePaths.cronRunsDirectory, path.join(statePaths.cronDirectory, 'runs'))
+  assert.equal(
+    statePaths.eventQueuePath,
+    path.join(statePaths.assistantStateRoot, 'automation-events.jsonl'),
+  )
+  assert.equal(
+    statePaths.eventDeadLetterPath,
+    path.join(statePaths.assistantStateRoot, 'automation-events.dead-letter.jsonl'),
+  )
+  assert.equal(
+    statePaths.transcriptMaintenanceDirectory,
+    path.join(statePaths.assistantStateRoot, 'transcript-maintenance'),
+  )
+  assert.equal(
+    statePaths.transcriptArchivesDirectory,
+    path.join(statePaths.assistantStateRoot, 'transcript-archives'),
+  )
+  assert.equal(
+    statePaths.transcriptContinuationsDirectory,
+    path.join(statePaths.assistantStateRoot, 'transcript-continuations'),
+  )
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,
@@ -608,6 +628,51 @@ test('readAssistantAutomationState rejects legacy automation v1 payloads', async
   )
 
   await assert.rejects(() => readAssistantAutomationState(vaultRoot))
+})
+
+test('readAssistantAutomationState migrates legacy automation v2 payloads to v3 and persists the normalized shape', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-automation-migrate-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.sessionsDirectory, {
+    recursive: true,
+  })
+  await writeFile(
+    statePaths.automationPath,
+    `${JSON.stringify(
+      {
+        version: 2,
+        inboxScanCursor: null,
+        autoReplyScanCursor: {
+          occurredAt: '2026-03-18T10:00:00.000Z',
+          captureId: 'capture_1',
+        },
+        autoReplyChannels: ['telegram'],
+        preferredChannels: ['telegram'],
+        autoReplyBacklogChannels: [],
+        autoReplyPrimed: false,
+        updatedAt: '2026-03-18T10:00:00.000Z',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  const state = await readAssistantAutomationState(vaultRoot)
+  const persisted = JSON.parse(await readFile(statePaths.automationPath, 'utf8')) as Record<
+    string,
+    unknown
+  >
+
+  assert.equal(state.version, 3)
+  assert.equal(state.eventCursor, null)
+  assert.deepEqual(state.autoReplyChannels, ['telegram'])
+  assert.equal(persisted.version, 3)
+  assert.equal(persisted.eventCursor, null)
 })
 
 test('redactAssistantDisplayPath hides HOME-prefixed paths and leaves external paths untouched', async () => {

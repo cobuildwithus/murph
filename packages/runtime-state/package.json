@@ -27,6 +27,9 @@
     "build": "rimraf dist && tsc -b tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
+  "dependencies": {
+    "@healthybob/contracts": "workspace:*"
+  },
   "engines": {
     "node": ">=22.16.0"
   }
