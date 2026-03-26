@@ -11,17 +11,27 @@ import {
   sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  type AssistantDeliveryCandidate,
   type AssistantChannelDependencies,
 } from './assistant/channel-adapters.js'
 import {
   createAssistantBinding,
   mergeAssistantBinding,
 } from './assistant/bindings.js'
+import {
+  classifyAssistantDeliveryFailure,
+  type AssistantFallbackDecision,
+} from './assistant/fallback-policy.js'
 import type { ConversationRef } from './assistant/conversation-ref.js'
 import {
   mergeConversationRefs,
   normalizeConversationRef,
 } from './assistant/conversation-ref.js'
+import {
+  emitAssistantLifecycleEvent,
+  runAssistantLifecycleMiddleware,
+  type AssistantLifecycleHooks,
+} from './assistant/hooks.js'
 import {
   redactAssistantDisplayPath,
   resolveAssistantSession,
@@ -43,6 +53,7 @@ export interface DeliverAssistantMessageInput {
   alias?: string | null
   channel?: string | null
   conversation?: ConversationRef | null
+  hooks?: AssistantLifecycleHooks
   identityId?: string | null
   message: string
   participantId?: string | null
@@ -52,6 +63,7 @@ export interface DeliverAssistantMessageInput {
   threadId?: string | null
   threadIsDirect?: boolean | null
   vault: string
+  onFallbackDecision?: ((decision: AssistantFallbackDecision) => void) | null
 }
 
 export interface DeliverAssistantMessageOverBindingResult {
@@ -98,6 +110,8 @@ export async function deliverAssistantMessage(
       message: normalizedMessage,
       session: resolved.session,
       target: explicitTarget,
+      onFallbackDecision: input.onFallbackDecision ?? null,
+      hooks: input.hooks,
     },
     dependencies,
   )
@@ -169,11 +183,14 @@ export async function deliverAssistantMessageOverBinding(
   input: {
     actorId?: string | null
     channel?: string | null
+    hooks?: AssistantLifecycleHooks
     identityId?: string | null
     message: string
+    onFallbackDecision?: ((decision: AssistantFallbackDecision) => void) | null
     sessionId?: string | null
     session?: Pick<AssistantSession, 'binding'>
     target?: string | null
+    targetKind?: AssistantDeliveryCandidate['kind'] | null
     threadId?: string | null
     threadIsDirect?: boolean | null
     vault?: string
@@ -189,7 +206,18 @@ export async function deliverAssistantMessageOverBinding(
       threadId: input.threadId,
       threadIsDirect: input.threadIsDirect,
     })
-  const channel = binding.channel?.trim() || null
+  const beforeOutboundDelivery = await runAssistantLifecycleMiddleware(
+    input.hooks,
+    'beforeOutboundDelivery',
+    {
+      binding,
+      explicitTarget: input.target?.trim() ? input.target.trim() : null,
+      message: input.message,
+      sessionId: input.sessionId ?? null,
+      vault: input.vault ?? null,
+    },
+  )
+  const channel = beforeOutboundDelivery.binding.channel?.trim() || null
   if (!channel) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_REQUIRED',
@@ -205,17 +233,115 @@ export async function deliverAssistantMessageOverBinding(
     )
   }
 
-  const delivery = await adapter.send(
-    {
-      bindingDelivery: binding.delivery,
-      explicitTarget: input.target?.trim() ? input.target.trim() : null,
-      identityId: binding.identityId,
-      message: input.message,
-    },
-    dependencies,
-  )
+  await emitAssistantLifecycleEvent(input.hooks, {
+    type: 'delivery.started',
+    channel,
+    explicitTarget: beforeOutboundDelivery.explicitTarget,
+    message: beforeOutboundDelivery.message,
+    occurredAt: new Date().toISOString(),
+    sessionId: beforeOutboundDelivery.sessionId,
+    vault: beforeOutboundDelivery.vault,
+  })
 
+  try {
+    const delivery = await sendAssistantDeliveryWithFallback({
+      adapter,
+      binding: beforeOutboundDelivery.binding,
+      dependencies,
+      message: beforeOutboundDelivery.message,
+      onFallbackDecision: input.onFallbackDecision ?? null,
+      target: beforeOutboundDelivery.explicitTarget,
+      targetKind: input.targetKind ?? null,
+    })
+
+    await emitAssistantLifecycleEvent(input.hooks, {
+      type: 'delivery.completed',
+      delivery,
+      occurredAt: new Date().toISOString(),
+      sessionId: beforeOutboundDelivery.sessionId,
+      vault: beforeOutboundDelivery.vault,
+    })
+
+    return {
+      delivery,
+    }
+  } catch (error) {
+    await emitAssistantLifecycleEvent(input.hooks, {
+      type: 'delivery.failed',
+      channel,
+      error: normalizeOutboundDeliveryError(error),
+      explicitTarget: beforeOutboundDelivery.explicitTarget,
+      message: beforeOutboundDelivery.message,
+      occurredAt: new Date().toISOString(),
+      sessionId: beforeOutboundDelivery.sessionId,
+      vault: beforeOutboundDelivery.vault,
+    })
+    throw error
+  }
+}
+
+function normalizeOutboundDeliveryError(error: unknown) {
   return {
-    delivery,
+    code:
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : null,
+    message:
+      error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : String(error),
+  }
+}
+
+async function sendAssistantDeliveryWithFallback(input: {
+  adapter: NonNullable<ReturnType<typeof getAssistantChannelAdapter>>
+  binding: AssistantSession['binding']
+  dependencies: AssistantChannelDependencies
+  message: string
+  onFallbackDecision?: ((decision: AssistantFallbackDecision) => void) | null
+  target: string | null
+  targetKind: AssistantDeliveryCandidate['kind'] | null
+}): Promise<AssistantChannelDelivery> {
+  try {
+    return await input.adapter.send(
+      {
+        bindingDelivery: input.binding.delivery,
+        explicitTarget: input.target,
+        explicitTargetKind: input.targetKind,
+        identityId: input.binding.identityId,
+        message: input.message,
+      },
+      input.dependencies,
+    )
+  } catch (error) {
+    const attemptedTarget =
+      input.target ??
+      (input.binding.delivery?.target ?? input.binding.threadId ?? null)
+    const decision = classifyAssistantDeliveryFailure({
+      binding: input.binding,
+      channel: input.binding.channel,
+      degradedDeliveryRetryUsed: input.targetKind === 'participant',
+      error,
+      explicitTarget: input.target,
+      attemptedTarget,
+    })
+    if (decision.action !== 'retry-delivery-target') {
+      throw error
+    }
+
+    input.onFallbackDecision?.(decision)
+    return input.adapter.send(
+      {
+        bindingDelivery: input.binding.delivery,
+        explicitTarget: decision.target.target,
+        explicitTargetKind: decision.target.kind,
+        identityId: input.binding.identityId,
+        message: input.message,
+      },
+      input.dependencies,
+    )
   }
 }

@@ -20,6 +20,10 @@ import {
   type AssistantCronPresetDefinition,
 } from './cron/presets.js'
 import {
+  emitAssistantLifecycleEvent,
+  type AssistantLifecycleHooks,
+} from './hooks.js'
+import {
   appendAssistantCronRun,
   assertAssistantCronJobNameIsAvailable,
   buildAssistantCronTarget,
@@ -38,6 +42,7 @@ import {
   writeAssistantCronStore,
 } from './cron/store.js'
 import { sendAssistantMessage } from './service.js'
+import { classifyAssistantCronFailure } from './fallback-policy.js'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -79,6 +84,7 @@ export interface AssistantCronProcessDueResult {
 }
 
 export interface RunAssistantCronJobInput {
+  hooks?: AssistantLifecycleHooks
   job: string
   signal?: AbortSignal
   trigger?: AssistantCronTrigger
@@ -86,6 +92,7 @@ export interface RunAssistantCronJobInput {
 }
 
 export interface ProcessDueAssistantCronJobsInput {
+  hooks?: AssistantLifecycleHooks
   limit?: number
   signal?: AbortSignal
   vault: string
@@ -361,6 +368,7 @@ export async function runAssistantCronJobNow(
   })
 
   return executeClaimedAssistantCronJob({
+    hooks: input.hooks,
     paths,
     signal: input.signal,
     trigger: input.trigger ?? 'manual',
@@ -392,6 +400,7 @@ export async function processDueAssistantCronJobs(
     }
 
     const result = await executeClaimedAssistantCronJob({
+      hooks: input.hooks,
       paths,
       signal: input.signal,
       trigger: 'scheduled',
@@ -447,6 +456,7 @@ async function claimNextDueAssistantCronJob(
 }
 
 async function executeClaimedAssistantCronJob(input: {
+  hooks?: AssistantLifecycleHooks
   job: AssistantCronJob
   paths: AssistantStatePaths
   signal?: AbortSignal
@@ -468,6 +478,17 @@ async function executeClaimedAssistantCronJob(input: {
       )
     }
 
+    await emitAssistantLifecycleEvent(input.hooks, {
+      type: 'cron.run.started',
+      job: {
+        jobId: input.job.jobId,
+        name: input.job.name,
+      },
+      occurredAt: new Date().toISOString(),
+      trigger: input.trigger,
+      vault: input.vault,
+    })
+
     const result = await sendAssistantMessage({
       vault: input.vault,
       prompt: input.job.prompt,
@@ -479,6 +500,7 @@ async function executeClaimedAssistantCronJob(input: {
       sourceThreadId: input.job.target.sourceThreadId ?? undefined,
       deliverResponse: input.job.target.deliverResponse,
       deliveryTarget: input.job.target.deliveryTarget ?? undefined,
+      hooks: input.hooks,
       workingDirectory: input.vault,
     })
 
@@ -486,7 +508,8 @@ async function executeClaimedAssistantCronJob(input: {
     sessionId = result.session.sessionId
     status = 'succeeded'
   } catch (error) {
-    errorText = errorMessage(error)
+    const decision = classifyAssistantCronFailure(error)
+    errorText = decision.detail
     status = 'failed'
   } finally {
     finishedAt = new Date().toISOString()
@@ -541,6 +564,18 @@ async function executeClaimedAssistantCronJob(input: {
       job: finalizedJob,
       removedAfterRun,
     }
+  })
+
+  await emitAssistantLifecycleEvent(input.hooks, {
+    type: 'cron.run.completed',
+    job: {
+      jobId: input.job.jobId,
+      name: input.job.name,
+    },
+    occurredAt: new Date().toISOString(),
+    run,
+    trigger: input.trigger,
+    vault: input.vault,
   })
 
   return {

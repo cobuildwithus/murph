@@ -65,6 +65,10 @@ import {
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '../src/assistant-runtime.js'
+import {
+  addAssistantLifecycleObserver,
+  createAssistantLifecycleHooks,
+} from '../src/assistant/hooks.js'
 import { bridgeAbortSignals } from '../src/assistant/automation/shared.js'
 import {
   CHAT_BANNER,
@@ -75,6 +79,7 @@ import {
   CHAT_STARTER_SUGGESTIONS,
   applyInkChatTraceUpdates,
   applyProviderProgressEventToEntries,
+  buildTranscriptContinuationBanner,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
   formatBusyStatus,
@@ -936,6 +941,93 @@ test('scanAssistantInboxOnce bypasses parser waits for supported pending meal ph
   assert.equal(
     runtimeMocks.routeInboxCaptureWithModel.mock.calls[0]?.[0]?.captureId,
     'cap-photo',
+  )
+})
+
+test('scanAssistantInboxOnce emits fallback events when routing degrades to text-only mode', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-routing-fallback-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.routeInboxCaptureWithModel.mockImplementation(
+    async ({ onFallbackDecision }: { onFallbackDecision?: (decision: unknown) => void }) => {
+      onFallbackDecision?.({
+        action: 'retry-context',
+        category: 'routing',
+        reason: 'multimodal-unavailable',
+        mode: 'text-only-routing',
+        detail: 'Routing model rejected multimodal evidence; retrying once in text-only mode.',
+      })
+
+      return {
+        plan: {
+          actions: [
+            {
+              tool: 'meal.add',
+            },
+          ],
+        },
+      }
+    },
+  )
+
+  const events: Array<{ type: string; details?: string }> = []
+  const inboxServices = {
+    list: async () => ({
+      items: [
+        {
+          captureId: 'cap-routing-fallback',
+          occurredAt: '2026-03-16T16:10:30Z',
+          promotions: [],
+        },
+      ],
+    }),
+    show: async () => ({
+      capture: {
+        attachments: [
+          {
+            kind: 'image',
+            fileName: 'meal.jpg',
+            mediaType: 'image/jpeg',
+            storedPath: 'attachments/2026/03/16/meal.jpg',
+            parseState: 'succeeded',
+          },
+        ],
+      },
+    }),
+  } as any
+
+  const result = await scanAssistantInboxOnce({
+    inboxServices,
+    vault: vaultRoot,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+    },
+    onEvent(event) {
+      events.push({
+        type: event.type,
+        details: event.details,
+      })
+    },
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    noAction: 0,
+    routed: 1,
+    skipped: 0,
+  })
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.fallback' &&
+        event.details ===
+          'Routing model rejected multimodal evidence; retrying once in text-only mode.',
+    ),
+    true,
   )
 })
 
@@ -3393,6 +3485,79 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   )
 })
 
+test('runAssistantAutomation emits ordered automation scan lifecycle events', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-automation-hooks-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const hookEvents: Array<{
+    considered?: number
+    processed?: number
+    scanKind?: string
+    type: string
+  }> = []
+  const hooks = createAssistantLifecycleHooks()
+  addAssistantLifecycleObserver(hooks, (event) => {
+    if (
+      event.type !== 'automation.scan.started' &&
+      event.type !== 'automation.scan.completed'
+    ) {
+      return
+    }
+
+    hookEvents.push({
+      type: event.type,
+      scanKind: event.scanKind,
+      processed: 'processed' in event ? event.processed : undefined,
+      considered: 'considered' in event ? event.considered : undefined,
+    })
+  }, 'collector')
+
+  const result = await runAssistantAutomation({
+    vault: vaultRoot,
+    once: true,
+    startDaemon: false,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+    },
+    hooks,
+    inboxServices: {
+      list: async () => ({
+        items: [],
+      }),
+    } as any,
+  })
+
+  assert.equal(result.reason, 'completed')
+  assert.deepEqual(hookEvents, [
+    {
+      type: 'automation.scan.started',
+      scanKind: 'cron',
+      processed: undefined,
+      considered: undefined,
+    },
+    {
+      type: 'automation.scan.completed',
+      scanKind: 'cron',
+      processed: 0,
+      considered: undefined,
+    },
+    {
+      type: 'automation.scan.started',
+      scanKind: 'inbox',
+      processed: undefined,
+      considered: undefined,
+    },
+    {
+      type: 'automation.scan.completed',
+      scanKind: 'inbox',
+      processed: undefined,
+      considered: 0,
+    },
+  ])
+})
+
 test('bridgeAbortSignals forces process exit after local SIGINT grace when teardown hangs', async () => {
   vi.useFakeTimers()
   const controller = new AbortController()
@@ -4549,6 +4714,7 @@ test('assistant Ink transcript feed renders the header and committed rows via In
   const rendered = renderChatTranscriptFeed({
     bindingSummary: 'imessage · assistant:primary · chat-123',
     busy: true,
+    continuationBanner: null,
     entries: [
       {
         kind: 'user',
@@ -4609,6 +4775,7 @@ test('assistant Ink transcript feed header omits the session id label', () => {
   const rendered = renderChatTranscriptFeed({
     bindingSummary: 'imessage · assistant:primary · chat-123',
     busy: false,
+    continuationBanner: null,
     entries: [],
     sessionId: 'asst_test_session',
   })
@@ -4639,15 +4806,43 @@ test('assistant Ink transcript feed header omits the session id label', () => {
     throw new Error('Expected transcript feed header to be a valid React element.')
   }
 
-  assert.deepEqual(Object.keys(header.props as Record<string, unknown>), ['bindingSummary'])
+  assert.deepEqual(
+    Object.keys(header.props as Record<string, unknown>).sort(),
+    ['bindingSummary', 'continuationBanner'],
+  )
   assert.equal((header.props as { bindingSummary?: string | null }).bindingSummary, 'imessage · assistant:primary · chat-123')
   assert.doesNotMatch(JSON.stringify(header.props), /asst_test_session/u)
+})
+
+test('assistant transcript continuation banner summarizes compacted history for Ink chat', () => {
+  const banner = buildTranscriptContinuationBanner({
+    schema: 'healthybob.assistant-transcript-continuation.v1',
+    sessionId: 'asst_compacted',
+    updatedAt: '2026-03-26T00:00:00.000Z',
+    sourceEntryCount: 66,
+    sourceStartAt: '2026-03-26T00:00:00.000Z',
+    sourceEndAt: '2026-03-26T01:00:00.000Z',
+    notice: 'Assistant transcript continuations are non-canonical working memory only.',
+    summaryBullets: ['User asked "question 1".'],
+    openLoops: ['A prior user request may still matter: "question 9".'],
+    representativeExcerpts: [
+      {
+        createdAt: '2026-03-26T00:00:00.000Z',
+        kind: 'user',
+        text: 'question 1',
+      },
+    ],
+  })
+
+  assert.match(banner ?? '', /66 earlier transcript entries/u)
+  assert.match(banner ?? '', /1 archived open loop noted/u)
 })
 
 test('assistant Ink transcript feed keeps the empty chat state free of an intro banner', () => {
   const rendered = renderChatTranscriptFeed({
     bindingSummary: null,
     busy: false,
+    continuationBanner: null,
     entries: [],
     sessionId: 'asst_empty_session',
   })

@@ -1,11 +1,15 @@
+import { readFile } from 'node:fs/promises'
+import { resolveAssistantTranscriptContinuationPath } from '@healthybob/runtime-state'
 import {
   assistantAskResultSchema,
+  assistantTranscriptContinuationSchema,
   type AssistantSession,
   type AssistantApprovalPolicy,
   type AssistantAskResult,
   type AssistantChatProvider,
   type AssistantDeliveryError,
   type AssistantSandbox,
+  type AssistantTranscriptContinuation,
 } from '../assistant-cli-contracts.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
@@ -22,14 +26,21 @@ import {
 } from '../chat-provider.js'
 import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
 import {
+  emitAssistantLifecycleEvent,
+  isAssistantLifecycleMiddlewareFailure,
+  runAssistantLifecycleMiddleware,
+  type AssistantLifecycleHooks,
+} from './hooks.js'
+import {
   resolveAssistantOperatorDefaults,
   type AssistantOperatorDefaults,
 } from '../operator-config.js'
 import {
   appendAssistantTranscriptEntries,
   isAssistantSessionNotFoundError,
-  listAssistantTranscriptEntries,
+  loadAssistantTranscriptReplayContext,
   redactAssistantDisplayPath,
+  resolveAssistantStatePaths,
   resolveAssistantSession,
   saveAssistantSession,
   type ResolveAssistantSessionInput,
@@ -45,9 +56,15 @@ import {
 } from './onboarding.js'
 import type { ConversationRef } from './conversation-ref.js'
 import {
+  classifyAssistantProviderFailure,
+  classifyAssistantTranscriptContinuationFailure,
+  type AssistantFallbackDecision,
+} from './fallback-policy.js'
+import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
+import { errorMessage } from './shared.js'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -80,7 +97,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliverResponse?: boolean
   deliveryTarget?: string | null
   enableFirstTurnOnboarding?: boolean
+  hooks?: AssistantLifecycleHooks
   maxSessionAgeMs?: number | null
+  onFallbackDecision?: ((decision: AssistantFallbackDecision) => void) | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   persistUserPromptOnFailure?: boolean
@@ -103,6 +122,7 @@ interface AssistantTurnPlan {
     content: string
     role: 'assistant' | 'user'
   }>
+  contextMode: AssistantProviderContextMode
   persistUserPromptOnFailure: boolean
   provider: AssistantChatProvider
   providerOptions: ReturnType<typeof resolveAssistantProviderOptions>
@@ -117,6 +137,13 @@ interface AssistantTurnPlan {
 interface PersistedUserTurn {
   turnCreatedAt: string
 }
+
+interface AssistantProviderExecution {
+  plan: AssistantTurnPlan
+  providerResult: AssistantProviderTurnResult
+}
+
+type AssistantProviderContextMode = 'full' | 'reduced'
 
 type AssistantDeliveryOutcome =
   | {
@@ -204,33 +231,88 @@ export async function sendAssistantMessage(
 ): Promise<AssistantAskResult> {
   const defaults = await resolveAssistantOperatorDefaults()
   const resolved = await resolveAssistantSessionForMessage(input, defaults)
-  const plan = await resolveAssistantTurnPlan(input, defaults, resolved)
-  const userTurn = await persistUserTurn(input, resolved, plan)
-  const providerResult = await executeProviderTurnWithRecovery({
+  const beforeContextBuild = await runAssistantLifecycleMiddleware(
+    input.hooks,
+    'beforeContextBuild',
+    {
+      prompt: input.prompt,
+      session: resolved.session,
+      sessionCreated: resolved.created,
+      vault: input.vault,
+      workingDirectory: input.workingDirectory ?? input.vault,
+    },
+  )
+  const turnInput =
+    beforeContextBuild.prompt === input.prompt &&
+    beforeContextBuild.workingDirectory === (input.workingDirectory ?? input.vault)
+      ? input
+      : {
+          ...input,
+          prompt: beforeContextBuild.prompt,
+          workingDirectory: beforeContextBuild.workingDirectory,
+        }
+
+  await emitAssistantLifecycleEvent(turnInput.hooks, {
+    type: 'turn.started',
+    alias: resolved.session.alias,
+    channel: resolved.session.binding.channel,
+    occurredAt: new Date().toISOString(),
+    prompt: turnInput.prompt,
+    sessionCreated: resolved.created,
+    sessionId: resolved.session.sessionId,
+    turnCount: resolved.session.turnCount,
+    vault: turnInput.vault,
+  })
+
+  const preparedPlan = await prepareAssistantProviderPlanWithLifecycle({
+    contextMode: 'full',
     defaults,
-    input,
-    plan,
+    input: turnInput,
+    resolved,
+  })
+
+  const userTurn = await persistUserTurn({
+    input: turnInput,
+    persistUserPromptOnFailure: preparedPlan.persistUserPromptOnFailure,
+    resolved,
+  })
+  const execution = await executeProviderTurnWithLifecycle({
+    defaults,
+    input: turnInput,
+    initialPlan: preparedPlan,
     resolved,
     turnCreatedAt: userTurn.turnCreatedAt,
   })
   const session = await persistAssistantTurnAndSession({
-    input,
-    plan,
-    providerResult,
+    input: turnInput,
+    plan: execution.plan,
+    providerResult: execution.providerResult,
     resolved,
     turnCreatedAt: userTurn.turnCreatedAt,
   })
   const deliveryOutcome = await deliverAssistantReply({
-    input,
-    response: providerResult.response,
+    input: turnInput,
+    response: execution.providerResult.response,
     session,
+  })
+  const completedSession =
+    deliveryOutcome.kind === 'sent' ? deliveryOutcome.session : session
+
+  await emitAssistantLifecycleEvent(turnInput.hooks, {
+    type: 'turn.completed',
+    deliveryStatus: deliveryOutcome.kind,
+    occurredAt: new Date().toISOString(),
+    provider: execution.providerResult.provider,
+    response: execution.providerResult.response,
+    sessionId: completedSession.sessionId,
+    vault: turnInput.vault,
   })
 
   return assistantAskResultSchema.parse({
-    vault: redactAssistantDisplayPath(input.vault),
-    prompt: input.prompt,
-    response: providerResult.response,
-    session: deliveryOutcome.kind === 'sent' ? deliveryOutcome.session : session,
+    vault: redactAssistantDisplayPath(turnInput.vault),
+    prompt: turnInput.prompt,
+    response: execution.providerResult.response,
+    session: completedSession,
     delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
     deliveryError:
       deliveryOutcome.kind === 'failed' ? deliveryOutcome.error : null,
@@ -264,6 +346,7 @@ async function resolveAssistantTurnPlan(
   input: AssistantMessageInput,
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
+  contextMode: AssistantProviderContextMode,
 ): Promise<AssistantTurnPlan> {
   const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
   const providerOptions = resolveAssistantProviderOptions({
@@ -310,13 +393,6 @@ async function resolveAssistantTurnPlan(
   const shouldInjectFirstTurnOnboarding =
     input.enableFirstTurnOnboarding === true &&
     (resolved.created || resolved.session.turnCount === 0)
-  const conversationMessages = shouldUseLocalTranscriptContext(provider)
-    ? await loadAssistantConversationMessages({
-        limit: 20,
-        sessionId: resolved.session.sessionId,
-        vault: input.vault,
-      })
-    : undefined
   const onboardingSummary =
     input.enableFirstTurnOnboarding === true
       ? await updateAssistantOnboardingSummary({
@@ -333,6 +409,23 @@ async function resolveAssistantTurnPlan(
         vault: input.vault,
       })
     : null
+  const transcriptContinuation =
+    shouldInjectBootstrapContext && contextMode === 'full'
+      ? await loadAssistantTranscriptContinuationContext({
+          onFallbackDecision: input.onFallbackDecision ?? null,
+          sessionId: resolved.session.sessionId,
+          vault: input.vault,
+        })
+      : null
+  const conversationMessages =
+    contextMode === 'full' && shouldUseLocalTranscriptContext(provider)
+      ? await loadAssistantConversationMessages({
+          currentPrompt: input.prompt,
+          limit: 20,
+          sessionId: resolved.session.sessionId,
+          vault: input.vault,
+        })
+      : undefined
   const cliAccess = resolveAssistantCliAccessContext()
   const workingDirectory = input.workingDirectory ?? input.vault
   const memoryMcpConfig = buildAssistantMemoryMcpConfig(workingDirectory)
@@ -347,6 +440,7 @@ async function resolveAssistantTurnPlan(
     cliEnv: cliAccess.env,
     configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
     conversationMessages,
+    contextMode,
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     provider,
     providerOptions,
@@ -368,26 +462,27 @@ async function resolveAssistantTurnPlan(
             shouldInjectFirstTurnOnboarding && onboardingSummary
               ? onboardingSummary
               : null,
+          transcriptContinuation,
         })
       : null,
     workingDirectory,
   }
 }
 
-async function persistUserTurn(
-  input: AssistantMessageInput,
-  resolved: ResolvedAssistantSession,
-  plan: AssistantTurnPlan,
-): Promise<PersistedUserTurn> {
+async function persistUserTurn(input: {
+  input: AssistantMessageInput
+  persistUserPromptOnFailure: boolean
+  resolved: ResolvedAssistantSession
+}): Promise<PersistedUserTurn> {
   let turnCreatedAt = new Date().toISOString()
-  if (plan.persistUserPromptOnFailure) {
+  if (input.persistUserPromptOnFailure) {
     const userEntries = await appendAssistantTranscriptEntries(
-      input.vault,
-      resolved.session.sessionId,
+      input.input.vault,
+      input.resolved.session.sessionId,
       [
         {
           kind: 'user',
-          text: input.prompt,
+          text: input.input.prompt,
         },
       ],
     )
@@ -396,6 +491,136 @@ async function persistUserTurn(
 
   return {
     turnCreatedAt,
+  }
+}
+
+async function prepareAssistantProviderPlanWithLifecycle(input: {
+  contextMode: AssistantProviderContextMode
+  defaults: AssistantOperatorDefaults | null
+  input: AssistantMessageInput
+  resolved: ResolvedAssistantSession
+}): Promise<AssistantTurnPlan> {
+  const plan = await resolveAssistantTurnPlan(
+    input.input,
+    input.defaults,
+    input.resolved,
+    input.contextMode,
+  )
+  const afterContextBuild = await runAssistantLifecycleMiddleware(
+    input.input.hooks,
+    'afterContextBuild',
+    {
+      allowSensitiveHealthContext: plan.allowSensitiveHealthContext,
+      configOverrides: plan.configOverrides,
+      conversationMessages: plan.conversationMessages,
+      persistUserPromptOnFailure: plan.persistUserPromptOnFailure,
+      provider: plan.provider,
+      providerOptions: plan.providerOptions,
+      resumeProviderSessionId: plan.resumeProviderSessionId,
+      session: input.resolved.session,
+      sessionContext: plan.sessionContext,
+      systemPrompt: plan.systemPrompt,
+      vault: input.input.vault,
+      workingDirectory: plan.workingDirectory,
+    },
+  )
+  const hookedPlan: AssistantTurnPlan = {
+    allowSensitiveHealthContext: afterContextBuild.allowSensitiveHealthContext,
+    cliEnv: plan.cliEnv,
+    configOverrides: afterContextBuild.configOverrides,
+    conversationMessages: afterContextBuild.conversationMessages,
+    contextMode: plan.contextMode,
+    persistUserPromptOnFailure: afterContextBuild.persistUserPromptOnFailure,
+    provider: afterContextBuild.provider,
+    providerOptions: {
+      approvalPolicy:
+        afterContextBuild.providerOptions.approvalPolicy ??
+        plan.providerOptions.approvalPolicy,
+      apiKeyEnv:
+        afterContextBuild.providerOptions.apiKeyEnv ??
+        plan.providerOptions.apiKeyEnv,
+      baseUrl:
+        afterContextBuild.providerOptions.baseUrl ??
+        plan.providerOptions.baseUrl,
+      model:
+        afterContextBuild.providerOptions.model ??
+        plan.providerOptions.model,
+      oss:
+        afterContextBuild.providerOptions.oss ??
+        plan.providerOptions.oss,
+      profile:
+        afterContextBuild.providerOptions.profile ??
+        plan.providerOptions.profile,
+      providerName:
+        afterContextBuild.providerOptions.providerName ??
+        plan.providerOptions.providerName,
+      reasoningEffort:
+        afterContextBuild.providerOptions.reasoningEffort ??
+        plan.providerOptions.reasoningEffort,
+      sandbox:
+        afterContextBuild.providerOptions.sandbox ??
+        plan.providerOptions.sandbox,
+    },
+    resumeProviderSessionId: afterContextBuild.resumeProviderSessionId,
+    sessionContext: afterContextBuild.sessionContext,
+    systemPrompt: afterContextBuild.systemPrompt,
+    workingDirectory: afterContextBuild.workingDirectory,
+  }
+
+  await emitAssistantLifecycleEvent(input.input.hooks, {
+    type: 'context.built',
+    hasConversationMessages:
+      (hookedPlan.conversationMessages?.length ?? 0) > 0,
+    hasSystemPrompt: hookedPlan.systemPrompt !== null,
+    occurredAt: new Date().toISOString(),
+    provider: hookedPlan.provider,
+    sessionId: input.resolved.session.sessionId,
+    vault: input.input.vault,
+    workingDirectory: hookedPlan.workingDirectory,
+  })
+
+  return hookedPlan
+}
+
+async function executeProviderTurnWithLifecycle(input: {
+  defaults: AssistantOperatorDefaults | null
+  initialPlan: AssistantTurnPlan
+  input: AssistantMessageInput
+  resolved: ResolvedAssistantSession
+  turnCreatedAt: string
+}): Promise<AssistantProviderExecution> {
+  let plan = input.initialPlan
+
+  while (true) {
+    try {
+      const providerResult = await executeProviderTurnWithRecovery({
+        defaults: input.defaults,
+        input: input.input,
+        plan,
+        resolved: input.resolved,
+        turnCreatedAt: input.turnCreatedAt,
+      })
+      return {
+        plan,
+        providerResult,
+      }
+    } catch (error) {
+      const decision = classifyAssistantProviderFailure({
+        degradedContextRetryUsed: plan.contextMode === 'reduced',
+        error,
+      })
+      if (decision.action !== 'retry-context') {
+        throw error
+      }
+
+      input.input.onFallbackDecision?.(decision)
+      plan = await prepareAssistantProviderPlanWithLifecycle({
+        contextMode: 'reduced',
+        defaults: input.defaults,
+        input: input.input,
+        resolved: input.resolved,
+      })
+    }
   }
 }
 
@@ -413,42 +638,140 @@ async function executeProviderTurnWithRecovery(input: {
     turnId: `${input.resolved.session.sessionId}:${input.turnCreatedAt}`,
     vault: input.input.vault,
   })
-
-  try {
-    return await executeAssistantProviderTurn({
+  const beforeModelSend = await runAssistantLifecycleMiddleware(
+    input.input.hooks,
+    'beforeModelSend',
+    {
       abortSignal: input.input.abortSignal,
-      provider: input.plan.provider,
-      workingDirectory: input.plan.workingDirectory,
+      approvalPolicy: input.plan.providerOptions.approvalPolicy,
+      apiKeyEnv: input.plan.providerOptions.apiKeyEnv,
+      baseUrl: input.plan.providerOptions.baseUrl,
+      codexCommand:
+        input.input.codexCommand ?? input.defaults?.codexCommand ?? undefined,
       configOverrides: input.plan.configOverrides,
+      conversationMessages: input.plan.conversationMessages,
       env: {
         ...input.plan.cliEnv,
         ...memoryTurnEnv,
       },
-      userPrompt: input.input.prompt,
-      systemPrompt: input.plan.systemPrompt,
-      sessionContext: input.plan.sessionContext,
-      resumeProviderSessionId: input.plan.resumeProviderSessionId,
-      codexCommand:
-        input.input.codexCommand ?? input.defaults?.codexCommand ?? undefined,
       model: input.plan.providerOptions.model,
-      reasoningEffort: input.plan.providerOptions.reasoningEffort,
-      sandbox: input.plan.providerOptions.sandbox,
-      approvalPolicy: input.plan.providerOptions.approvalPolicy,
-      baseUrl: input.plan.providerOptions.baseUrl,
-      apiKeyEnv: input.plan.providerOptions.apiKeyEnv,
-      providerName: input.plan.providerOptions.providerName,
-      conversationMessages: input.plan.conversationMessages,
-      onEvent: input.input.onProviderEvent ?? undefined,
-      profile: input.plan.providerOptions.profile,
       oss: input.plan.providerOptions.oss,
-      onTraceEvent: input.input.onTraceEvent,
+      profile: input.plan.providerOptions.profile,
+      provider: input.plan.provider,
+      providerName: input.plan.providerOptions.providerName,
+      reasoningEffort: input.plan.providerOptions.reasoningEffort,
+      resumeProviderSessionId: input.plan.resumeProviderSessionId,
+      sandbox: input.plan.providerOptions.sandbox,
+      session: input.resolved.session,
+      sessionContext: input.plan.sessionContext,
       showThinkingTraces: input.input.showThinkingTraces ?? false,
+      systemPrompt: input.plan.systemPrompt,
+      userPrompt: input.input.prompt,
+      vault: input.input.vault,
+      workingDirectory: input.plan.workingDirectory,
+    },
+  )
+
+  await emitAssistantLifecycleEvent(input.input.hooks, {
+    type: 'provider.started',
+    model: beforeModelSend.model ?? null,
+    occurredAt: new Date().toISOString(),
+    provider: beforeModelSend.provider,
+    sessionId: input.resolved.session.sessionId,
+    userPrompt: beforeModelSend.userPrompt,
+    vault: input.input.vault,
+    workingDirectory: beforeModelSend.workingDirectory,
+  })
+
+  try {
+    const providerResult = await executeAssistantProviderTurn({
+      abortSignal: beforeModelSend.abortSignal,
+      provider: beforeModelSend.provider,
+      workingDirectory: beforeModelSend.workingDirectory,
+      configOverrides: beforeModelSend.configOverrides,
+      env: beforeModelSend.env,
+      userPrompt: beforeModelSend.userPrompt,
+      systemPrompt: beforeModelSend.systemPrompt,
+      sessionContext: beforeModelSend.sessionContext,
+      resumeProviderSessionId: beforeModelSend.resumeProviderSessionId,
+      codexCommand: beforeModelSend.codexCommand,
+      model: beforeModelSend.model,
+      reasoningEffort: beforeModelSend.reasoningEffort,
+      sandbox: beforeModelSend.sandbox,
+      approvalPolicy: beforeModelSend.approvalPolicy,
+      baseUrl: beforeModelSend.baseUrl,
+      apiKeyEnv: beforeModelSend.apiKeyEnv,
+      providerName: beforeModelSend.providerName,
+      conversationMessages: beforeModelSend.conversationMessages,
+      onEvent: input.input.hooks
+        ? (event) => {
+            input.input.onProviderEvent?.(event)
+            void emitAssistantLifecycleEvent(input.input.hooks, {
+              type: 'provider.event',
+              event,
+              occurredAt: new Date().toISOString(),
+              provider: beforeModelSend.provider,
+              sessionId: input.resolved.session.sessionId,
+              vault: input.input.vault,
+            })
+          }
+        : input.input.onProviderEvent ?? undefined,
+      profile: beforeModelSend.profile,
+      oss: beforeModelSend.oss,
+      onTraceEvent: input.input.onTraceEvent,
+      showThinkingTraces: beforeModelSend.showThinkingTraces,
     })
+    const afterModelReceive = await runAssistantLifecycleMiddleware(
+      input.input.hooks,
+      'afterModelReceive',
+      {
+        providerResult,
+        session: input.resolved.session,
+        turnCreatedAt: input.turnCreatedAt,
+        vault: input.input.vault,
+      },
+    )
+
+    await emitAssistantLifecycleEvent(input.input.hooks, {
+      type: 'provider.completed',
+      occurredAt: new Date().toISOString(),
+      provider: afterModelReceive.providerResult.provider,
+      providerSessionId: afterModelReceive.providerResult.providerSessionId,
+      response: afterModelReceive.providerResult.response,
+      sessionId: input.resolved.session.sessionId,
+      vault: input.input.vault,
+    })
+
+    return afterModelReceive.providerResult
   } catch (error) {
+    if (isAssistantLifecycleMiddlewareFailure(error)) {
+      throw error
+    }
+
+    await emitAssistantLifecycleEvent(input.input.hooks, {
+      type: 'provider.failed',
+      code: resolveLifecycleErrorCode(error),
+      message: errorMessage(error),
+      occurredAt: new Date().toISOString(),
+      provider: beforeModelSend.provider,
+      sessionId: input.resolved.session.sessionId,
+      vault: input.input.vault,
+    })
+
     const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
       error,
-      provider: input.plan.provider,
-      providerOptions: input.plan.providerOptions,
+      provider: beforeModelSend.provider,
+      providerOptions: {
+        approvalPolicy: beforeModelSend.approvalPolicy ?? null,
+        apiKeyEnv: beforeModelSend.apiKeyEnv ?? null,
+        baseUrl: beforeModelSend.baseUrl ?? null,
+        model: beforeModelSend.model ?? null,
+        oss: beforeModelSend.oss ?? false,
+        profile: beforeModelSend.profile ?? null,
+        providerName: beforeModelSend.providerName ?? undefined,
+        reasoningEffort: beforeModelSend.reasoningEffort ?? null,
+        sandbox: beforeModelSend.sandbox ?? null,
+      },
       session: input.resolved.session,
       vault: input.input.vault,
     })
@@ -524,8 +847,10 @@ async function deliverAssistantReply(input: {
         input.session.binding.channel,
       ),
       channel: input.session.binding.channel,
+      hooks: input.input.hooks,
       identityId: input.session.binding.identityId,
       actorId: input.session.binding.actorId,
+      onFallbackDecision: input.input.onFallbackDecision ?? null,
       threadId: input.session.binding.threadId,
       threadIsDirect: input.session.binding.threadIsDirect,
       sessionId: input.session.sessionId,
@@ -545,6 +870,10 @@ async function deliverAssistantReply(input: {
         }),
     }
   } catch (error) {
+    if (isAssistantLifecycleMiddlewareFailure(error)) {
+      throw error
+    }
+
     return {
       kind: 'failed',
       error: normalizeAssistantDeliveryError(error),
@@ -587,6 +916,17 @@ function normalizeAssistantDeliveryError(
   }
 }
 
+function resolveLifecycleErrorCode(error: unknown): string | null {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+  )
+    ? (error as { code: string }).code
+    : null
+}
+
 function shouldUseLocalTranscriptContext(
   provider: AssistantChatProvider,
 ): boolean {
@@ -594,6 +934,7 @@ function shouldUseLocalTranscriptContext(
 }
 
 async function loadAssistantConversationMessages(input: {
+  currentPrompt: string
   limit: number
   sessionId: string
   vault: string
@@ -601,31 +942,94 @@ async function loadAssistantConversationMessages(input: {
   content: string
   role: 'assistant' | 'user'
 }>> {
-  const transcript = await listAssistantTranscriptEntries(
-    input.vault,
+  const transcript = await loadAssistantTranscriptReplayContext({
+    limit: input.limit + 1,
+    sessionId: input.sessionId,
+    vault: input.vault,
+  })
+
+  const continuationMessage = transcript.continuation
+    ? transcript.conversationMessages[0] ?? null
+    : null
+  let hotMessages = transcript.continuation
+    ? transcript.conversationMessages.slice(1)
+    : [...transcript.conversationMessages]
+
+  if (
+    hotMessages.length > 0 &&
+    hotMessages[hotMessages.length - 1]?.role === 'user' &&
+    hotMessages[hotMessages.length - 1]?.content === input.currentPrompt
+  ) {
+    hotMessages = hotMessages.slice(0, -1)
+  }
+
+  const limitedHotMessages = hotMessages.slice(-input.limit)
+  return continuationMessage
+    ? [continuationMessage, ...limitedHotMessages]
+    : limitedHotMessages
+}
+
+async function loadAssistantTranscriptContinuationContext(input: {
+  onFallbackDecision?: ((decision: AssistantFallbackDecision) => void) | null
+  sessionId: string
+  vault: string
+}): Promise<string | null> {
+  const continuationPath = resolveAssistantTranscriptContinuationPath(
+    resolveAssistantStatePaths(input.vault),
     input.sessionId,
   )
 
-  return transcript
-    .slice(-input.limit)
-    .flatMap((entry) =>
-      isAssistantConversationTranscriptEntry(entry)
-        ? [{
-            role: entry.kind,
-            content: entry.text,
-          }]
-        : [],
+  try {
+    const raw = await readFile(continuationPath, 'utf8')
+    const continuation = assistantTranscriptContinuationSchema.parse(
+      JSON.parse(raw) as unknown,
     )
+    return formatAssistantTranscriptContinuation(continuation)
+  } catch (error) {
+    if (isMissingAssistantContinuation(error)) {
+      return null
+    }
+
+    input.onFallbackDecision?.(classifyAssistantTranscriptContinuationFailure())
+    return null
+  }
 }
 
-function isAssistantConversationTranscriptEntry(entry: {
-  kind: string
-  text: string
-}): entry is {
-  kind: 'assistant' | 'user'
-  text: string
-} {
-  return entry.kind === 'assistant' || entry.kind === 'user'
+function formatAssistantTranscriptContinuation(
+  continuation: AssistantTranscriptContinuation,
+): string | null {
+  const sections = [
+    continuation.summaryBullets.length > 0
+      ? `Summary:\n${continuation.summaryBullets.map((bullet) => `- ${bullet}`).join('\n')}`
+      : null,
+    continuation.openLoops.length > 0
+      ? `Open loops:\n${continuation.openLoops.map((item) => `- ${item}`).join('\n')}`
+      : null,
+    continuation.representativeExcerpts.length > 0
+      ? `Representative excerpts:\n${continuation.representativeExcerpts
+          .map((excerpt) => `- ${excerpt.kind} @ ${excerpt.createdAt}: ${excerpt.text}`)
+          .join('\n')}`
+      : null,
+  ].filter((value): value is string => value !== null)
+
+  if (sections.length === 0) {
+    return null
+  }
+
+  return [
+    continuation.notice,
+    'Transcript continuation summary:',
+    ...sections,
+  ].join('\n\n')
+}
+
+function isMissingAssistantContinuation(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'ENOENT',
+  )
 }
 
 function resolveNextProviderSessionId(input: {
@@ -701,6 +1105,7 @@ function buildAssistantSystemPrompt(input: {
   assistantMemoryPrompt: string | null
   channel: string | null
   onboardingSummary: AssistantOnboardingSummary | null
+  transcriptContinuation: string | null
 }): string {
   return [
     'You are Healthy Bob, a local-first health assistant operating over the current working directory as a file-native health vault.',
@@ -712,6 +1117,7 @@ function buildAssistantSystemPrompt(input: {
     buildAssistantVaultEvidenceFormattingGuidance(input.channel),
     buildOutboundReplyFormattingGuidance(input.channel),
     buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
+    input.transcriptContinuation,
     input.assistantMemoryPrompt,
     buildAssistantMemoryGuidanceText(input.cliAccess),
     buildAssistantCronGuidanceText(input.cliAccess),
@@ -815,7 +1221,7 @@ function buildAssistantCronGuidanceText(
     'Scheduled assistant automation is available as native Codex MCP tools from the Healthy Bob CLI subtree. Prefer those `assistant cron ...` tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
     'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
     'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
-    'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
+    'Use `assistant cron add` for one-shot reminders with `--at`, recurring jobs with `--every` or `--cron`, and event-triggered jobs with repeated `--event` flags plus optional debounce/cooldown.',
     'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
     'Cron schedules execute while `assistant run` is active for the vault.',
     'When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.',

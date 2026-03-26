@@ -113,6 +113,7 @@ export interface AssistantChannelAdapter {
   send: (input: {
     bindingDelivery: AssistantBindingDelivery | null
     explicitTarget: string | null
+    explicitTargetKind?: AssistantDeliveryCandidate['kind'] | null
     identityId: string | null
     message: string
   }, dependencies: AssistantChannelDependencies) => Promise<
@@ -140,12 +141,13 @@ export function getAssistantChannelAdapter(
 export function resolveDeliveryCandidates(input: {
   bindingDelivery?: AssistantBindingDelivery | null
   explicitTarget?: string | null
+  explicitTargetKind?: AssistantDeliveryCandidate['kind'] | null
 }): AssistantDeliveryCandidate[] {
   const explicitTarget = input.explicitTarget?.trim() ? input.explicitTarget.trim() : null
   if (explicitTarget) {
     return [
       {
-        kind: 'explicit',
+        kind: input.explicitTargetKind ?? 'explicit',
         target: explicitTarget,
       },
     ]

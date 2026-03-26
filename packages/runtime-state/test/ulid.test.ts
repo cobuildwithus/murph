@@ -178,6 +178,24 @@ test("assistant event queue appends and lists events after a cursor", async () =
       dedupeKey: "retry:cron_1",
       payload: {},
     });
+    const third = await appendAssistantAutomationEvent(paths, {
+      schema: "healthybob.assistant-automation-event.v1",
+      eventId: createAssistantAutomationEventId("2026-03-26T00:00:30.000Z"),
+      type: "cron-completed",
+      occurredAt: "2026-03-26T00:00:30.000Z",
+      target: {
+        accountId: null,
+        attachmentId: null,
+        captureId: null,
+        channel: null,
+        jobId: "cron_1",
+        sessionId: "asst_1",
+      },
+      dedupeKey: "cron:cron_1:evt",
+      payload: {
+        status: "succeeded",
+      },
+    });
 
     const all = await listAssistantAutomationEvents(paths);
     const afterFirst = await listAssistantAutomationEvents(paths, {
@@ -189,9 +207,9 @@ test("assistant event queue appends and lists events after a cursor", async () =
 
     assert.deepEqual(
       all.map((event) => event.eventId),
-      [first.eventId, second.eventId],
+      [first.eventId, third.eventId, second.eventId],
     );
-    assert.deepEqual(afterFirst.map((event) => event.eventId), [second.eventId]);
+    assert.deepEqual(afterFirst.map((event) => event.eventId), [third.eventId, second.eventId]);
   } finally {
     await rm(parent, { recursive: true, force: true });
   }

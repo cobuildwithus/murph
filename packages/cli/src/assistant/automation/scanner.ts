@@ -1,3 +1,4 @@
+import { appendAssistantAutomationEventForVault } from '@healthybob/runtime-state'
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
 import type { InboxShowResult } from '../../inbox-cli-contracts.js'
 import type { InboxCliServices } from '../../inbox-services.js'
@@ -10,16 +11,18 @@ import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
   conversationRefFromCapture,
 } from '../conversation-ref.js'
+import {
+  classifyAssistantProviderFailure,
+  createAssistantParserPendingDecision,
+  type AssistantFallbackDecision,
+} from '../fallback-policy.js'
+import type { AssistantLifecycleHooks } from '../hooks.js'
 import { sendAssistantMessage } from '../service.js'
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
 } from '../store.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
-import {
-  isAssistantProviderConnectionLostError,
-  isAssistantProviderStalledError,
-} from '../provider-turn-recovery.js'
 import {
   assistantChatReplyArtifactExists,
   assistantResultArtifactExists,
@@ -50,8 +53,7 @@ export const AUTO_REPLY_PROVIDER_HEARTBEAT_MS = 2 * 60 * 1000
 export const AUTO_REPLY_PROVIDER_STALL_TIMEOUT_MS = 10 * 60 * 1000
 export const AUTO_REPLY_PROVIDER_LONG_RUNNING_COMMAND_STALL_TIMEOUT_MS =
   150 * 60 * 1000
-const AUTO_REPLY_PROVIDER_STALLED_DETAIL =
-  'assistant provider stalled without progress; will retry this capture.'
+const AUTO_REPLY_RETRY_READY_DELAY_MS = 30 * 1000
 
 interface AssistantAutoReplyGroupContext {
   captureCount: number
@@ -72,6 +74,7 @@ interface AssistantAutoReplySkipDecision {
   kind: 'skip'
   advanceCursor: boolean
   reason: string
+  retryReadyAt?: string | null
   stopScanning: boolean
 }
 
@@ -185,6 +188,11 @@ export async function scanAssistantInboxOnce(input: {
         return !shouldBypassParserWaitForRouting(attachment)
       })
       if (waitingForParser) {
+        emitAssistantFallbackEvent({
+          captureId: capture.captureId,
+          decision: createAssistantParserPendingDecision(),
+          onEvent: input.onEvent,
+        })
         summary.skipped += 1
         input.onEvent?.({
           type: 'capture.skipped',
@@ -202,6 +210,13 @@ export async function scanAssistantInboxOnce(input: {
         vaultServices: input.vaultServices,
         apply: true,
         modelSpec: input.modelSpec,
+        onFallbackDecision: (decision) => {
+          emitAssistantFallbackEvent({
+            captureId: capture.captureId,
+            decision,
+            onEvent: input.onEvent,
+          })
+        },
       })
 
       if (result.plan.actions.length === 0) {
@@ -248,6 +263,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   autoReplyPrimed?: boolean
   backlogChannels?: readonly string[]
   enabledChannels: readonly string[]
+  hooks?: AssistantLifecycleHooks
   inboxServices: InboxCliServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -258,6 +274,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   requestId?: string | null
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
+  sourceId?: string | null
   vault: string
 }): Promise<AssistantAutoReplyScanResult> {
   const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
@@ -272,7 +289,7 @@ export async function scanAssistantAutoReplyOnce(input: {
       vault: input.vault,
       requestId: input.requestId ?? null,
       limit: 1,
-      sourceId: null,
+      sourceId: input.sourceId ?? null,
       afterOccurredAt: null,
       afterCaptureId: null,
       oldestFirst: false,
@@ -315,7 +332,7 @@ export async function scanAssistantAutoReplyOnce(input: {
     vault: input.vault,
     requestId: input.requestId ?? null,
     limit: normalizeScanLimit(input.maxPerScan),
-    sourceId: null,
+    sourceId: input.sourceId ?? null,
     afterOccurredAt: input.afterCursor?.occurredAt ?? null,
     afterCaptureId: input.afterCursor?.captureId ?? null,
     oldestFirst: true,
@@ -375,13 +392,15 @@ export async function scanAssistantAutoReplyOnce(input: {
         continue
       }
       if (decision.kind === 'skip') {
-        applySkippedGroup({
+        await applySkippedGroup({
           context,
           onEvent: input.onEvent,
           reason: decision.reason,
+          retryReadyAt: decision.retryReadyAt ?? null,
           scanState,
           summary,
           advanceCursor: decision.advanceCursor,
+          vault: input.vault,
         })
         if (decision.stopScanning) {
           break
@@ -395,6 +414,7 @@ export async function scanAssistantAutoReplyOnce(input: {
         details: 'assistant provider turn started',
       })
       const result = await executeAssistantAutoReply({
+        hooks: input.hooks,
         providerHeartbeatMs: input.providerHeartbeatMs,
         providerLongRunningCommandStallTimeoutMs:
           input.providerLongRunningCommandStallTimeoutMs,
@@ -418,13 +438,15 @@ export async function scanAssistantAutoReplyOnce(input: {
     } catch (error) {
       const failureDecision = classifyAssistantAutoReplyFailure(error)
       if (failureDecision.kind === 'skip') {
-        applySkippedGroup({
+        await applySkippedGroup({
           context,
           onEvent: input.onEvent,
           reason: failureDecision.reason,
+          retryReadyAt: failureDecision.retryReadyAt ?? null,
           scanState,
           summary,
           advanceCursor: failureDecision.advanceCursor,
+          vault: input.vault,
         })
         if (failureDecision.stopScanning) {
           break
@@ -565,6 +587,7 @@ async function loadAssistantAutoReplyCaptures(input: {
 }
 
 async function executeAssistantAutoReply(input: {
+  hooks?: AssistantLifecycleHooks
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -682,8 +705,16 @@ async function executeAssistantAutoReply(input: {
       abortSignal: abortController.signal,
       enableFirstTurnOnboarding: true,
       persistUserPromptOnFailure: false,
+      onFallbackDecision: (decision) => {
+        emitAssistantFallbackEvent({
+          captureId: input.replyCaptureId,
+          decision,
+          onEvent: input.onEvent,
+        })
+      },
       prompt: input.prompt,
       deliverResponse: true,
+      hooks: input.hooks,
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: (event) => {
         const eventReceivedAtMs = Date.now()
@@ -739,6 +770,22 @@ function createAssistantAutoReplyProgressEvent(
     providerKind: event.kind,
     providerState: event.state,
   }
+}
+
+function emitAssistantFallbackEvent(input: {
+  captureId: string
+  decision: AssistantFallbackDecision
+  onEvent?: (event: AssistantRunEvent) => void
+}): void {
+  if (input.decision.action === 'defer') {
+    return
+  }
+
+  input.onEvent?.({
+    type: 'capture.fallback',
+    captureId: input.captureId,
+    details: input.decision.detail,
+  })
 }
 
 function bridgeUpstreamAbortSignal(
@@ -933,20 +980,23 @@ function matchAssistantAutoReplyLongRunningTool(
 function classifyAssistantAutoReplyFailure(
   error: unknown,
 ): AssistantAutoReplyFailureDecision {
-  if (isAssistantProviderStalledError(error)) {
-    return createDeferredSkipDecision(AUTO_REPLY_PROVIDER_STALLED_DETAIL)
-  }
-
-  const detail = errorMessage(error)
-  if (isAssistantProviderConnectionLostError(error)) {
-    return createDeferredSkipDecision(
-      `${detail} Will retry this capture after the provider reconnects.`,
-    )
+  const decision = classifyAssistantProviderFailure({
+    degradedContextRetryUsed: true,
+    error,
+  })
+  if (decision.action === 'defer') {
+    return createDeferredSkipDecision(decision.detail, {
+      retryDelayMs:
+        decision.reason === 'provider-stalled' ||
+        decision.reason === 'provider-connection-lost'
+          ? AUTO_REPLY_RETRY_READY_DELAY_MS
+          : null,
+    })
   }
 
   return {
     advanceCursor: true,
-    detail,
+    detail: errorMessage(error),
     kind: 'failure',
   }
 }
@@ -966,23 +1016,34 @@ function createAdvancingSkipDecision(
 // capture can be retried after parser/provider state recovers.
 function createDeferredSkipDecision(
   reason: string,
+  options?: {
+    retryDelayMs?: number | null
+  },
 ): AssistantAutoReplySkipDecision {
+  const retryReadyAt =
+    typeof options?.retryDelayMs === 'number' && options.retryDelayMs > 0
+      ? new Date(Date.now() + options.retryDelayMs).toISOString()
+      : null
+
   return {
     advanceCursor: false,
     kind: 'skip',
     reason,
+    retryReadyAt,
     stopScanning: true,
   }
 }
 
-function applySkippedGroup(input: {
+async function applySkippedGroup(input: {
   advanceCursor: boolean
   context: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
   reason: string
+  retryReadyAt: string | null
   scanState: AssistantAutoReplyScanState
   summary: AssistantAutoReplyScanResult
-}): void {
+  vault: string
+}): Promise<void> {
   input.summary.skipped += input.context.captureCount
   if (input.advanceCursor) {
     input.scanState.cursor = input.context.lastCursor
@@ -991,6 +1052,37 @@ function applySkippedGroup(input: {
     type: 'capture.reply-skipped',
     captureId: input.context.firstCaptureId,
     details: input.reason,
+  })
+
+  if (input.retryReadyAt === null) {
+    return
+  }
+
+  await appendAssistantAutomationEventForVault(input.vault, {
+    type: 'assistant-deferred',
+    dedupeKey: `assistant-deferred:${input.context.firstCaptureId}:${input.retryReadyAt}`,
+    target: {
+      captureId: input.context.firstCaptureId,
+      channel: input.context.firstItem.summary.source,
+    },
+    payload: {
+      captureIds: input.context.captureIds,
+      reason: input.reason,
+      retryReadyAt: input.retryReadyAt,
+    },
+  })
+  await appendAssistantAutomationEventForVault(input.vault, {
+    type: 'assistant-retry-ready',
+    occurredAt: input.retryReadyAt,
+    dedupeKey: `assistant-retry-ready:${input.context.firstCaptureId}:${input.retryReadyAt}`,
+    target: {
+      captureId: input.context.firstCaptureId,
+      channel: input.context.firstItem.summary.source,
+    },
+    payload: {
+      captureIds: input.context.captureIds,
+      reason: input.reason,
+    },
   })
 }
 

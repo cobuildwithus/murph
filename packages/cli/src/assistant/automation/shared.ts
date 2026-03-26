@@ -18,6 +18,7 @@ export interface AssistantRunEvent {
   tools?: string[]
   type:
     | 'capture.failed'
+    | 'capture.fallback'
     | 'capture.noop'
     | 'capture.reply-progress'
     | 'capture.reply-started'

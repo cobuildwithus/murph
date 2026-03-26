@@ -34,6 +34,10 @@ import {
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.js'
+import {
+  addAssistantLifecycleObserver,
+  createAssistantLifecycleHooks,
+} from '../src/assistant/hooks.js'
 
 const cleanupPaths: string[] = []
 
@@ -293,6 +297,90 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   assert.equal(history.jobId, job.jobId)
   assert.equal(history.runs.length, 1)
   assert.equal(history.runs[0]?.status, 'succeeded')
+})
+
+test('assistant cron emits ordered lifecycle observer events and threads hooks into the assistant turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-hooks-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const hookEvents: Array<{ status?: string; type: string }> = []
+  const hooks = createAssistantLifecycleHooks()
+  addAssistantLifecycleObserver(hooks, (event) => {
+    hookEvents.push({
+      type: event.type,
+      status: event.type === 'cron.run.completed' ? event.run.status : undefined,
+    })
+  }, 'collector')
+
+  cronServiceMocks.sendAssistantMessage.mockImplementation(async (input: any) => {
+    assert.equal(input.hooks, hooks)
+
+    return {
+      vault: vaultRoot,
+      prompt: input.prompt,
+      response: 'Hook-aware cron reply.',
+      session: {
+        schema: 'healthybob.assistant-session.v2',
+        sessionId: 'asst_cron_hooks',
+        provider: 'codex-cli',
+        providerSessionId: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+        },
+        alias: null,
+        binding: {
+          conversationKey: null,
+          channel: null,
+          identityId: null,
+          actorId: null,
+          threadId: null,
+          threadIsDirect: null,
+          delivery: null,
+        },
+        createdAt: '2026-03-22T00:00:00.000Z',
+        updatedAt: '2026-03-22T00:00:00.000Z',
+        lastTurnAt: '2026-03-22T00:00:00.000Z',
+        turnCount: 1,
+      },
+      delivery: null,
+      deliveryError: null,
+    }
+  })
+
+  const job = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'hook-aware-cron',
+    prompt: 'Run the hook-aware cron prompt.',
+    schedule: buildAssistantCronSchedule({
+      at: new Date(Date.now() + 60_000).toISOString(),
+    }),
+  })
+
+  const result = await runAssistantCronJobNow({
+    vault: vaultRoot,
+    job: job.jobId,
+    hooks,
+  })
+
+  assert.equal(result.run.status, 'succeeded')
+  assert.deepEqual(hookEvents, [
+    {
+      type: 'cron.run.started',
+      status: undefined,
+    },
+    {
+      type: 'cron.run.completed',
+      status: 'succeeded',
+    },
+  ])
 })
 
 test('assistant cron scheduler processes due jobs and backs off failed runs', async () => {

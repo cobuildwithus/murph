@@ -40,8 +40,8 @@ import {
 } from '../provider-turn-recovery.js'
 import {
   appendAssistantTranscriptEntries,
+  getAssistantTranscriptState,
   isAssistantSessionNotFoundError,
-  listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
 } from '../store.js'
 import { normalizeNullableString } from '../shared.js'
@@ -52,6 +52,7 @@ import {
   CHAT_SLASH_COMMANDS,
   CHAT_STARTER_SUGGESTIONS,
   applyProviderProgressEventToEntries,
+  buildTranscriptContinuationBanner,
   finalizePendingInkChatTraces,
   findAssistantModelOptionIndex,
   findAssistantReasoningOptionIndex,
@@ -109,6 +110,7 @@ type ComposerSubmitDisposition = 'clear' | 'keep'
 
 interface ChatHeaderProps {
   bindingSummary: string | null
+  continuationBanner: string | null
 }
 
 interface ChatEntryRowProps {
@@ -118,6 +120,7 @@ interface ChatEntryRowProps {
 interface StaticTranscriptRowHeader {
   kind: 'header'
   bindingSummary: string | null
+  continuationBanner: string | null
   sessionId: string
 }
 
@@ -1091,6 +1094,17 @@ const ChatHeader = React.memo(function ChatHeader(
         createElement(Text, { color: theme.accentColor }, '↳'),
         ` ${props.bindingSummary ?? 'local transcript-backed session'}`,
       ),
+      props.continuationBanner
+        ? createElement(
+            Text,
+            {
+              color: theme.mutedColor,
+              wrap: 'wrap',
+            },
+            createElement(Text, { color: theme.accentColor }, '↺'),
+            ` ${props.continuationBanner}`,
+          )
+        : null,
     ),
   )
 })
@@ -1239,6 +1253,7 @@ const AssistantMessageText = React.memo(function AssistantMessageText(
 export function renderChatTranscriptFeed(input: {
   bindingSummary: string | null
   busy: boolean
+  continuationBanner: string | null
   entries: readonly InkChatEntry[]
   sessionId: string
 }): React.ReactElement {
@@ -1251,6 +1266,7 @@ export function renderChatTranscriptFeed(input: {
     {
       kind: 'header',
       bindingSummary: input.bindingSummary,
+      continuationBanner: input.continuationBanner,
       sessionId: input.sessionId,
     },
     ...staticEntries.map((entry) => ({
@@ -1369,6 +1385,7 @@ function renderStaticTranscriptRow(
     return createElement(ChatHeader, {
       key: `static-header:${item.sessionId}`,
       bindingSummary: item.bindingSummary,
+      continuationBanner: item.continuationBanner,
     })
   }
 
@@ -1381,6 +1398,7 @@ function renderStaticTranscriptRow(
 const ChatTranscriptFeed = React.memo(function ChatTranscriptFeed(input: {
   bindingSummary: string | null
   busy: boolean
+  continuationBanner: string | null
   entries: readonly InkChatEntry[]
   sessionId: string
 }): React.ReactElement {
@@ -2553,9 +2571,13 @@ export async function runAssistantChatWithInk(
   const defaults = await resolveAssistantOperatorDefaults()
   const themeBaseline = captureAssistantInkThemeBaseline()
   const resolved = await openAssistantConversation(input)
-  const transcriptEntries = await listAssistantTranscriptEntries(
+  const transcriptState = await getAssistantTranscriptState(
     input.vault,
     resolved.session.sessionId,
+  )
+  const transcriptEntries = transcriptState.entries
+  const continuationBanner = buildTranscriptContinuationBanner(
+    transcriptState.continuation,
   )
   const redactedVault = redactAssistantDisplayPath(input.vault)
   const codexDisplay = await resolveCodexDisplayOptions({
@@ -3178,6 +3200,7 @@ export async function runAssistantChatWithInk(
           createElement(ChatTranscriptFeed, {
             bindingSummary,
             busy,
+            continuationBanner,
             entries,
             sessionId: session.sessionId,
           }),

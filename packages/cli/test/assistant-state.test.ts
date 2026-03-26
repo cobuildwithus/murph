@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
 import {
   appendAssistantTranscriptEntries,
   getAssistantSession,
+  getAssistantTranscriptState,
   listAssistantTranscriptEntries,
   listAssistantSessions,
+  loadAssistantTranscriptReplayContext,
   readAssistantAutomationState,
   redactAssistantDisplayPath,
   resolveAssistantAliasKey,
@@ -426,6 +428,227 @@ test('assistant transcripts are stored separately from session metadata', async 
   ) as Record<string, unknown>
   assert.equal('lastUserMessage' in persistedSession, false)
   assert.equal('lastAssistantMessage' in persistedSession, false)
+})
+
+test('assistant transcript reads repair malformed middle lines and archive the raw snapshot', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-transcript-repair-middle-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.transcriptsDirectory, {
+    recursive: true,
+  })
+
+  const sessionId = 'asst_repair_middle'
+  const transcriptPath = path.join(statePaths.transcriptsDirectory, `${sessionId}.jsonl`)
+  const firstLine = JSON.stringify({
+    schema: 'healthybob.assistant-transcript-entry.v1',
+    kind: 'user',
+    text: 'hello',
+    createdAt: '2026-03-26T00:00:00.000Z',
+  })
+  const secondLine = 'not-json'
+  const thirdLine = JSON.stringify({
+    schema: 'healthybob.assistant-transcript-entry.v1',
+    kind: 'assistant',
+    text: 'still here',
+    createdAt: '2026-03-26T00:00:01.000Z',
+  })
+  const originalRaw = `${firstLine}\n${secondLine}\n${thirdLine}\n`
+
+  await writeFile(transcriptPath, originalRaw, 'utf8')
+
+  const transcript = await listAssistantTranscriptEntries(vaultRoot, sessionId)
+  assert.deepEqual(
+    transcript.map((entry) => ({
+      kind: entry.kind,
+      text: entry.text,
+    })),
+    [
+      {
+        kind: 'user',
+        text: 'hello',
+      },
+      {
+        kind: 'assistant',
+        text: 'still here',
+      },
+    ],
+  )
+
+  assert.equal(
+    await readFile(transcriptPath, 'utf8'),
+    `${firstLine}\n${thirdLine}\n`,
+  )
+
+  const archiveDirectory = path.join(statePaths.transcriptArchivesDirectory, sessionId)
+  const archivedFiles = await readdir(archiveDirectory)
+  assert.deepEqual(archivedFiles, ['repair_000001.jsonl'])
+  assert.equal(
+    await readFile(path.join(archiveDirectory, 'repair_000001.jsonl'), 'utf8'),
+    originalRaw,
+  )
+
+  const maintenance = JSON.parse(
+    await readFile(
+      path.join(statePaths.transcriptMaintenanceDirectory, `${sessionId}.json`),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
+  assert.equal(maintenance.hotEntryCount, 2)
+  assert.equal(maintenance.archivedEntryCount, 0)
+  assert.equal(maintenance.archiveSegmentCount, 0)
+  assert.equal(maintenance.repairCount, 1)
+  assert.equal(typeof maintenance.lastRepairedAt, 'string')
+})
+
+test('assistant transcript reads repair truncated tails without keeping the broken line hot', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-transcript-repair-tail-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.transcriptsDirectory, {
+    recursive: true,
+  })
+
+  const sessionId = 'asst_repair_tail'
+  const transcriptPath = path.join(statePaths.transcriptsDirectory, `${sessionId}.jsonl`)
+  const firstLine = JSON.stringify({
+    schema: 'healthybob.assistant-transcript-entry.v1',
+    kind: 'user',
+    text: 'keep this',
+    createdAt: '2026-03-26T00:00:00.000Z',
+  })
+  const brokenTail =
+    '{"schema":"healthybob.assistant-transcript-entry.v1","kind":"assistant","text":"oops"'
+  const originalRaw = `${firstLine}\n${brokenTail}`
+
+  await writeFile(transcriptPath, originalRaw, 'utf8')
+
+  const transcriptState = await getAssistantTranscriptState(vaultRoot, sessionId)
+  assert.deepEqual(
+    transcriptState.entries.map((entry) => ({
+      kind: entry.kind,
+      text: entry.text,
+    })),
+    [
+      {
+        kind: 'user',
+        text: 'keep this',
+      },
+    ],
+  )
+  assert.equal(transcriptState.continuation, null)
+  assert.equal(transcriptState.maintenance.repairCount, 1)
+  assert.equal(transcriptState.maintenance.hotEntryCount, 1)
+  assert.equal(
+    await readFile(transcriptPath, 'utf8'),
+    `${firstLine}\n`,
+  )
+
+  const archiveDirectory = path.join(statePaths.transcriptArchivesDirectory, sessionId)
+  assert.equal(
+    await readFile(path.join(archiveDirectory, 'repair_000001.jsonl'), 'utf8'),
+    originalRaw,
+  )
+})
+
+test('assistant transcript compaction writes archive segments, continuation sidecars, and prepared replay context', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-transcript-compact-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:compact',
+  })
+  const sessionId = resolved.session.sessionId
+
+  await appendAssistantTranscriptEntries(
+    vaultRoot,
+    sessionId,
+    Array.from({
+      length: 45,
+    }).flatMap((_, index) => [
+      {
+        kind: 'user' as const,
+        text: `question ${index + 1}`,
+      },
+      {
+        kind: 'assistant' as const,
+        text: `answer ${index + 1}`,
+      },
+    ]),
+  )
+
+  const transcriptState = await getAssistantTranscriptState(vaultRoot, sessionId)
+  assert.equal(transcriptState.entries.length, 24)
+  assert.equal(transcriptState.maintenance.hotEntryCount, 24)
+  assert.equal(transcriptState.maintenance.archivedEntryCount, 66)
+  assert.equal(transcriptState.maintenance.archiveSegmentCount, 1)
+  assert.equal(typeof transcriptState.maintenance.lastCompactedAt, 'string')
+  assert.equal(
+    transcriptState.continuation?.notice,
+    'Assistant transcript continuations are non-canonical working memory only.',
+  )
+  assert.equal(transcriptState.continuation?.sourceEntryCount, 66)
+  assert.equal(
+    transcriptState.continuation?.summaryBullets.some((bullet) =>
+      bullet.includes('question 1'),
+    ),
+    true,
+  )
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const archiveDirectory = path.join(statePaths.transcriptArchivesDirectory, sessionId)
+  const archivedFiles = await readdir(archiveDirectory)
+  assert.deepEqual(archivedFiles, ['seg_000001.jsonl'])
+
+  const continuation = JSON.parse(
+    await readFile(
+      path.join(statePaths.transcriptContinuationsDirectory, `${sessionId}.json`),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
+  assert.equal(continuation.sourceEntryCount, 66)
+
+  const replay = await loadAssistantTranscriptReplayContext({
+    vault: vaultRoot,
+    sessionId,
+    limit: 20,
+  })
+  assert.equal(replay.hotEntries.length, 24)
+  assert.equal(replay.maintenance.archivedEntryCount, 66)
+  assert.equal(replay.conversationMessages.length, 21)
+  assert.match(
+    replay.conversationMessages[0]?.content ?? '',
+    /non-canonical working memory only/u,
+  )
+  assert.deepEqual(
+    replay.conversationMessages[1],
+    {
+      role: 'user',
+      content: 'question 36',
+    },
+  )
+  assert.deepEqual(
+    replay.conversationMessages.slice(-2),
+    [
+      {
+        role: 'user',
+        content: 'question 45',
+      },
+      {
+        role: 'assistant',
+        content: 'answer 45',
+      },
+    ],
+  )
 })
 
 function createDeferred<T>() {

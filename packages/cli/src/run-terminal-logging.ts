@@ -63,6 +63,14 @@ export function formatAssistantRunEventForTerminal(
     return `routed ${event.captureId ?? 'capture'}${tools ? `: ${tools}` : ''}`
   }
 
+  if (event.type === 'capture.fallback') {
+    return formatAssistantEventLine(
+      'fallback',
+      event.captureId,
+      options.unsafeDetails ? event.details : 'assistant applied a deterministic fallback',
+    )
+  }
+
   if (event.type === 'capture.reply-started') {
     return formatAssistantEventLine(
       'reply-started',

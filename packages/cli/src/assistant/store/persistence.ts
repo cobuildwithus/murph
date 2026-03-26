@@ -4,7 +4,6 @@ import {
   assistantAliasStoreSchema,
   normalizeAssistantAutomationState,
   assistantSessionSchema,
-  assistantTranscriptEntrySchema,
   type AssistantAliasStore,
   type AssistantAutomationState,
   type AssistantSession,
@@ -15,6 +14,12 @@ import {
   mergeAssistantBinding,
   type AssistantBindingPatch,
 } from '../bindings.js'
+import {
+  loadAssistantPreparedTranscriptReplayContext,
+  loadAssistantTranscriptState,
+  type AssistantPreparedTranscriptReplayContext,
+  type AssistantTranscriptState,
+} from '../transcripts/maintenance.js'
 import {
   isMissingFileError,
   normalizeNullableString,
@@ -79,22 +84,31 @@ export async function readAssistantTranscriptEntries(
   paths: AssistantStatePaths,
   sessionId: string,
 ): Promise<AssistantTranscriptEntry[]> {
-  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+  return (await readAssistantTranscriptState(paths, sessionId)).entries
+}
 
-  try {
-    const raw = await readFile(transcriptPath, 'utf8')
-    return raw
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => assistantTranscriptEntrySchema.parse(JSON.parse(line) as unknown))
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return []
-    }
+export async function readAssistantTranscriptState(
+  paths: AssistantStatePaths,
+  sessionId: string,
+): Promise<AssistantTranscriptState> {
+  return loadAssistantTranscriptState({
+    paths,
+    sessionId,
+  })
+}
 
-    throw error
-  }
+export async function readAssistantPreparedTranscriptReplayContext(
+  paths: AssistantStatePaths,
+  input: {
+    limit: number
+    sessionId: string
+  },
+): Promise<AssistantPreparedTranscriptReplayContext> {
+  return loadAssistantPreparedTranscriptReplayContext({
+    limit: input.limit,
+    paths,
+    sessionId: input.sessionId,
+  })
 }
 
 export function resolveAssistantTranscriptPath(
@@ -150,7 +164,9 @@ export async function appendTranscriptEntries(
   await mkdir(path.dirname(transcriptPath), {
     recursive: true,
   })
+  await readAssistantTranscriptState(paths, sessionId)
   await appendFile(transcriptPath, serialized, 'utf8')
+  await readAssistantTranscriptState(paths, sessionId)
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

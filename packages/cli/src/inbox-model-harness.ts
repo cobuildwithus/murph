@@ -9,6 +9,10 @@ import {
   createInboxRoutingAssistantToolCatalog,
 } from './assistant-cli-tools.js'
 import {
+  classifyAssistantRoutingFailure,
+  type AssistantFallbackDecision,
+} from './assistant/fallback-policy.js'
+import {
   generateAssistantObject,
   resolveAssistantLanguageModel,
   type AssistantModelMessage,
@@ -74,6 +78,7 @@ export interface RouteInboxCaptureWithModelInput
   extends BuildInboxModelBundleInput {
   apply?: boolean
   modelSpec: AssistantModelSpec
+  onFallbackDecision?: ((decision: AssistantFallbackDecision) => void) | null
 }
 
 export async function buildInboxModelBundle(
@@ -126,7 +131,13 @@ export async function routeInboxCaptureWithModel(
       buildInboxPlacementGenerationInput(model, preparedInput),
     )
   } catch (error) {
-    if (inputMode === 'multimodal' && shouldRetryMultimodalAsTextOnly(error)) {
+    const decision = classifyAssistantRoutingFailure({
+      degradedContextRetryUsed: false,
+      error,
+      inputMode,
+    })
+    if (decision.action === 'retry-context') {
+      input.onFallbackDecision?.(decision)
       inputMode = 'text-only'
       fallbackError = errorMessage(error)
       rawPlan = await generateAssistantObject({
@@ -666,30 +677,6 @@ function inferPreparedInputMode(
   return attachments.some((attachment) => attachment.routingImage.eligible)
     ? 'multimodal'
     : 'text-only'
-}
-
-function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
-  const message = errorMessage(error).toLowerCase()
-  const mentionsImageInput = [
-    'image',
-    'vision',
-    'multimodal',
-    'multi-modal',
-    'media type',
-    'mime type',
-    'input_image',
-    'image_url',
-  ].some((token) => message.includes(token))
-  const signalsUnsupported = [
-    'unsupported',
-    'not support',
-    'does not support',
-    'invalid',
-    'reject',
-    'unknown',
-  ].some((token) => message.includes(token))
-
-  return mentionsImageInput && signalsUnsupported
 }
 
 async function writeAssistantArtifact(

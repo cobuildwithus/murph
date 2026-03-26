@@ -1,5 +1,6 @@
 import type {
   AssistantSession,
+  AssistantTranscriptContinuation,
   AssistantTranscriptEntry,
 } from '../../assistant-cli-contracts.js'
 import { normalizeNullableString } from '../shared.js'
@@ -99,6 +100,21 @@ export const CHAT_STARTER_SUGGESTIONS = [
   'Review meal and workout patterns',
   'Find recent health anomalies',
 ] as const
+
+export function buildTranscriptContinuationBanner(
+  continuation: AssistantTranscriptContinuation | null,
+): string | null {
+  if (!continuation || continuation.sourceEntryCount === 0) {
+    return null
+  }
+
+  const openLoopSuffix =
+    continuation.openLoops.length > 0
+      ? ` ${continuation.openLoops.length} archived open loop${continuation.openLoops.length === 1 ? '' : 's'} noted.`
+      : ''
+
+  return `Continuation available: ${continuation.sourceEntryCount} earlier transcript entries were compacted into non-canonical working memory.${openLoopSuffix}`
+}
 
 export function shouldShowChatComposerGuidance(entryCount: number): boolean {
   return entryCount === 0

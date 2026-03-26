@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, test, vi } from 'vitest'
@@ -37,6 +37,12 @@ import {
   sendAssistantMessage,
 } from '../src/assistant/service.js'
 import {
+  addAssistantLifecycleMiddleware,
+  addAssistantLifecycleObserver,
+  createAssistantLifecycleHooks,
+  isAssistantLifecycleMiddlewareFailure,
+} from '../src/assistant/hooks.js'
+import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
@@ -45,6 +51,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
 } from '../src/operator-config.js'
 import {
+  appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
@@ -159,6 +166,205 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       reasoningEffort: 'low',
     },
   )
+})
+
+test('sendAssistantMessage composes lifecycle middleware and emits ordered turn/provider observer events', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-hooks-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const diagnostics: string[] = []
+  const middlewareOrder: string[] = []
+  const observerTypes: string[] = []
+  const hooks = createAssistantLifecycleHooks({
+    onObserverDiagnostic(diagnostic) {
+      diagnostics.push(`${diagnostic.eventType}:${diagnostic.message}`)
+    },
+  })
+
+  addAssistantLifecycleMiddleware(hooks, 'beforeContextBuild', async (state) => {
+    middlewareOrder.push('beforeContextBuild:1')
+    return {
+      ...state,
+      prompt: `${state.prompt} [ctx-1]`,
+    }
+  })
+  addAssistantLifecycleMiddleware(hooks, 'beforeContextBuild', (state) => {
+    middlewareOrder.push('beforeContextBuild:2')
+    return {
+      ...state,
+      prompt: `${state.prompt} [ctx-2]`,
+    }
+  })
+  addAssistantLifecycleMiddleware(hooks, 'afterContextBuild', (state) => {
+    middlewareOrder.push('afterContextBuild:1')
+    return {
+      ...state,
+      systemPrompt: `${state.systemPrompt ?? ''}\nHook alpha`.trim(),
+    }
+  })
+  addAssistantLifecycleMiddleware(hooks, 'afterContextBuild', (state) => {
+    middlewareOrder.push('afterContextBuild:2')
+    return {
+      ...state,
+      systemPrompt: `${state.systemPrompt ?? ''}\nHook beta`.trim(),
+    }
+  })
+  addAssistantLifecycleMiddleware(hooks, 'beforeModelSend', (state) => {
+    middlewareOrder.push('beforeModelSend:1')
+    return {
+      ...state,
+      configOverrides: [...(state.configOverrides ?? []), 'hook.first=true'],
+      userPrompt: `${state.userPrompt} [send-1]`,
+    }
+  })
+  addAssistantLifecycleMiddleware(hooks, 'beforeModelSend', (state) => {
+    middlewareOrder.push('beforeModelSend:2')
+    return {
+      ...state,
+      configOverrides: [...(state.configOverrides ?? []), 'hook.second=true'],
+      userPrompt: `${state.userPrompt} [send-2]`,
+    }
+  })
+  addAssistantLifecycleMiddleware(hooks, 'afterModelReceive', (state) => {
+    middlewareOrder.push('afterModelReceive:1')
+    return {
+      ...state,
+      providerResult: {
+        ...state.providerResult,
+        response: `${state.providerResult.response} [recv-1]`,
+      },
+    }
+  })
+  addAssistantLifecycleMiddleware(hooks, 'afterModelReceive', (state) => {
+    middlewareOrder.push('afterModelReceive:2')
+    return {
+      ...state,
+      providerResult: {
+        ...state.providerResult,
+        response: `${state.providerResult.response} [recv-2]`,
+      },
+    }
+  })
+
+  addAssistantLifecycleObserver(hooks, (event) => {
+    observerTypes.push(event.type)
+  }, 'collector')
+  addAssistantLifecycleObserver(hooks, (event) => {
+    if (event.type === 'provider.event') {
+      throw new Error('observer boom')
+    }
+  }, 'broken')
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async (providerInput: any) => {
+    providerInput.onEvent?.({
+      kind: 'status',
+      state: 'running',
+      text: 'starting provider',
+    })
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-hooked',
+      response: 'raw reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:hooked',
+    prompt: 'Need a hook-aware reply.',
+    hooks,
+  })
+
+  const providerCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const transcript = await listAssistantTranscriptEntries(vaultRoot, result.session.sessionId)
+
+  assert.equal(result.prompt, 'Need a hook-aware reply. [ctx-1] [ctx-2]')
+  assert.equal(result.response, 'raw reply [recv-1] [recv-2]')
+  assert.equal(
+    providerCall?.userPrompt,
+    'Need a hook-aware reply. [ctx-1] [ctx-2] [send-1] [send-2]',
+  )
+  assert.equal(
+    providerCall?.configOverrides?.includes('hook.first=true'),
+    true,
+  )
+  assert.equal(
+    providerCall?.configOverrides?.includes('hook.second=true'),
+    true,
+  )
+  assert.match(providerCall?.systemPrompt ?? '', /Hook alpha/u)
+  assert.match(providerCall?.systemPrompt ?? '', /Hook beta/u)
+  assert.deepEqual(
+    transcript.map((entry) => ({
+      kind: entry.kind,
+      text: entry.text,
+    })),
+    [
+      {
+        kind: 'user',
+        text: 'Need a hook-aware reply. [ctx-1] [ctx-2]',
+      },
+      {
+        kind: 'assistant',
+        text: 'raw reply [recv-1] [recv-2]',
+      },
+    ],
+  )
+  assert.deepEqual(middlewareOrder, [
+    'beforeContextBuild:1',
+    'beforeContextBuild:2',
+    'afterContextBuild:1',
+    'afterContextBuild:2',
+    'beforeModelSend:1',
+    'beforeModelSend:2',
+    'afterModelReceive:1',
+    'afterModelReceive:2',
+  ])
+  assert.deepEqual(observerTypes, [
+    'turn.started',
+    'context.built',
+    'provider.started',
+    'provider.event',
+    'provider.completed',
+    'turn.completed',
+  ])
+  assert.deepEqual(diagnostics, ['provider.event:observer boom'])
+})
+
+test('sendAssistantMessage treats lifecycle middleware failures as fatal', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-hook-failure-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const hooks = createAssistantLifecycleHooks()
+  addAssistantLifecycleMiddleware(hooks, 'beforeContextBuild', () => {
+    throw new Error('hook blocked')
+  }, 'blocking-hook')
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessage({
+        vault: vaultRoot,
+        prompt: 'This should fail.',
+        hooks,
+      }),
+    (error: any) => {
+      assert.equal(isAssistantLifecycleMiddlewareFailure(error), true)
+      assert.equal(error.message, 'hook blocked')
+      return true
+    },
+  )
+
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
 })
 
 test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and MCP-backed memory tools', async () => {
@@ -466,6 +672,82 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
+})
+
+test('sendAssistantMessage replays transcript continuations plus the hot tail for compacted OpenAI-compatible sessions', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-compacted-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot, {
+    recursive: true,
+  })
+  cleanupPaths.push(parent)
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'fresh reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:compacted',
+    provider: 'openai-compatible',
+    model: 'gpt-oss:20b',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+  })
+
+  await appendAssistantTranscriptEntries(
+    vaultRoot,
+    resolved.session.sessionId,
+    Array.from({
+      length: 45,
+    }).flatMap((_, index) => [
+      {
+        kind: 'user' as const,
+        text: `question ${index + 1}`,
+      },
+      {
+        kind: 'assistant' as const,
+        text: `answer ${index + 1}`,
+      },
+    ]),
+  )
+
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    sessionId: resolved.session.sessionId,
+    provider: 'openai-compatible',
+    model: 'gpt-oss:20b',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    prompt: 'new question',
+  })
+
+  const providerCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(providerCall?.conversationMessages?.length, 21)
+  assert.match(
+    providerCall?.conversationMessages?.[0]?.content ?? '',
+    /non-canonical working memory only/u,
+  )
+  assert.deepEqual(providerCall?.conversationMessages?.[1], {
+    role: 'user',
+    content: 'question 36',
+  })
+  assert.deepEqual(
+    providerCall?.conversationMessages?.slice(-2),
+    [
+      {
+        role: 'user',
+        content: 'question 45',
+      },
+      {
+        role: 'assistant',
+        content: 'answer 45',
+      },
+    ],
+  )
 })
 
 test('sendAssistantMessage onboarding persists answered slots and asks only for missing items in later new sessions', async () => {
@@ -1208,6 +1490,177 @@ test('sendAssistantMessage preserves a recovered provider session id after a res
 
   assert.equal(resolved.session.providerSessionId, 'thread-resume-1')
   assert.equal(resolved.session.turnCount, 0)
+})
+
+test('sendAssistantMessage ignores malformed continuation sidecars and still completes the turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-bad-continuation-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:continuation-bad',
+    provider: 'openai-compatible',
+    model: 'gpt-4.1-mini',
+    baseUrl: 'https://gateway.example.test/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+  })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await writeFile(
+    path.join(paths.transcriptContinuationsDirectory, `${created.session.sessionId}.json`),
+    '{"schema":"broken"',
+    'utf8',
+  )
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'Recovered without the bad sidecar.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const decisions: Array<{ action: string; reason: string }> = []
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    provider: 'openai-compatible',
+    model: 'gpt-4.1-mini',
+    baseUrl: 'https://gateway.example.test/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    prompt: 'Keep going.',
+    onFallbackDecision(decision) {
+      decisions.push({
+        action: decision.action,
+        reason: decision.reason,
+      })
+    },
+  })
+
+  assert.equal(result.response, 'Recovered without the bad sidecar.')
+  assert.deepEqual(decisions, [
+    {
+      action: 'skip',
+      reason: 'malformed-continuation',
+    },
+  ])
+  const providerCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.doesNotMatch(providerCall?.systemPrompt ?? '', /Transcript continuation summary:/u)
+})
+
+test('sendAssistantMessage retries once with reduced context after an oversized-context provider failure', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-oversized-context-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:oversized-context',
+    provider: 'openai-compatible',
+    model: 'gpt-4.1-mini',
+    baseUrl: 'https://gateway.example.test/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+  })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await writeFile(
+    path.join(paths.transcriptsDirectory, `${created.session.sessionId}.jsonl`),
+    [
+      JSON.stringify({
+        schema: 'healthybob.assistant-transcript-entry.v1',
+        kind: 'user',
+        text: 'Earlier question',
+        createdAt: '2026-03-20T10:00:00.000Z',
+      }),
+      JSON.stringify({
+        schema: 'healthybob.assistant-transcript-entry.v1',
+        kind: 'assistant',
+        text: 'Earlier answer',
+        createdAt: '2026-03-20T10:00:01.000Z',
+      }),
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  await writeFile(
+    path.join(paths.transcriptContinuationsDirectory, `${created.session.sessionId}.json`),
+    `${JSON.stringify(
+      {
+        schema: 'healthybob.assistant-transcript-continuation.v1',
+        sessionId: created.session.sessionId,
+        updatedAt: '2026-03-20T10:01:00.000Z',
+        sourceEntryCount: 20,
+        sourceStartAt: '2026-03-20T08:00:00.000Z',
+        sourceEndAt: '2026-03-20T10:00:01.000Z',
+        notice: 'Assistant transcript continuations are non-canonical working memory only.',
+        summaryBullets: ['Earlier summary bullet'],
+        openLoops: ['Follow up on breakfast timing'],
+        representativeExcerpts: [
+          {
+            createdAt: '2026-03-20T09:59:00.000Z',
+            kind: 'assistant',
+            text: 'Representative earlier note.',
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_CONTEXT_TOO_LARGE',
+        'Maximum context length exceeded for this provider request.',
+      ),
+    )
+    .mockResolvedValueOnce({
+      provider: 'openai-compatible',
+      providerSessionId: null,
+      response: 'Recovered after reducing the context.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  const decisions: Array<{ action: string; reason: string }> = []
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    provider: 'openai-compatible',
+    model: 'gpt-4.1-mini',
+    baseUrl: 'https://gateway.example.test/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    prompt: 'Summarize where we left off.',
+    onFallbackDecision(decision) {
+      decisions.push({
+        action: decision.action,
+        reason: decision.reason,
+      })
+    },
+  })
+
+  assert.equal(result.response, 'Recovered after reducing the context.')
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.deepEqual(decisions, [
+    {
+      action: 'retry-context',
+      reason: 'oversized-context',
+    },
+  ])
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+  assert.equal(firstCall?.conversationMessages?.length, 2)
+  assert.match(firstCall?.systemPrompt ?? '', /Transcript continuation summary:/u)
+  assert.equal(secondCall?.conversationMessages, undefined)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Transcript continuation summary:/u)
 })
 
 test('sendAssistantMessage does not persist a recovered provider session id for non-retryable provider failures', async () => {

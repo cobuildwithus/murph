@@ -9,6 +9,10 @@ import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultCliServices } from '../../vault-cli-services.js'
 import { processDueAssistantCronJobs } from '../cron.js'
 import {
+  emitAssistantLifecycleEvent,
+  type AssistantLifecycleHooks,
+} from '../hooks.js'
+import {
   readAssistantAutomationState,
   redactAssistantDisplayPath,
   saveAssistantAutomationState,
@@ -29,6 +33,7 @@ import {
 
 export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
+  hooks?: AssistantLifecycleHooks
   inboxServices: InboxCliServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
@@ -83,14 +88,39 @@ export async function runAssistantAutomation(
   try {
     while (!controller.signal.aborted) {
       scans += 1
-      await processDueAssistantCronJobs({
+      await emitAssistantLifecycleEvent(input.hooks, {
+        type: 'automation.scan.started',
+        occurredAt: new Date().toISOString(),
+        scanIndex: scans,
+        scanKind: 'cron',
+        vault: input.vault,
+      })
+      const cronResult = await processDueAssistantCronJobs({
+        hooks: input.hooks,
         vault: input.vault,
         signal: controller.signal,
         limit: input.maxPerScan,
       })
+      await emitAssistantLifecycleEvent(input.hooks, {
+        type: 'automation.scan.completed',
+        failed: cronResult.failed,
+        occurredAt: new Date().toISOString(),
+        processed: cronResult.processed,
+        scanIndex: scans,
+        scanKind: 'cron',
+        succeeded: cronResult.succeeded,
+        vault: input.vault,
+      })
       let state = await readAssistantAutomationState(input.vault)
 
       if (input.modelSpec?.model) {
+        await emitAssistantLifecycleEvent(input.hooks, {
+          type: 'automation.scan.started',
+          occurredAt: new Date().toISOString(),
+          scanIndex: scans,
+          scanKind: 'inbox',
+          vault: input.vault,
+        })
         const scanResult = await scanAssistantInboxOnce({
           inboxServices: input.inboxServices,
           requestId: input.requestId,
@@ -110,6 +140,18 @@ export async function runAssistantAutomation(
             })
           },
         })
+        await emitAssistantLifecycleEvent(input.hooks, {
+          type: 'automation.scan.completed',
+          considered: scanResult.considered,
+          failed: scanResult.failed,
+          noAction: scanResult.noAction,
+          occurredAt: new Date().toISOString(),
+          routed: scanResult.routed,
+          scanIndex: scans,
+          scanKind: 'inbox',
+          skipped: scanResult.skipped,
+          vault: input.vault,
+        })
         aggregateRouting.considered += scanResult.considered
         aggregateRouting.failed += scanResult.failed
         aggregateRouting.noAction += scanResult.noAction
@@ -120,11 +162,19 @@ export async function runAssistantAutomation(
       if (state.autoReplyChannels.length > 0) {
         const backlogWasActive = state.autoReplyBacklogChannels.length > 0
         if (backlogWasActive) {
+          await emitAssistantLifecycleEvent(input.hooks, {
+            type: 'automation.scan.started',
+            occurredAt: new Date().toISOString(),
+            scanIndex: scans,
+            scanKind: 'auto-reply-backlog',
+            vault: input.vault,
+          })
           const backlogResult = await scanAssistantAutoReplyOnce({
             afterCursor: state.autoReplyScanCursor,
             autoReplyPrimed: true,
             backlogChannels: state.autoReplyBacklogChannels,
             enabledChannels: state.autoReplyBacklogChannels,
+            hooks: input.hooks,
             inboxServices: input.inboxServices,
             maxPerScan: input.maxPerScan,
             onEvent: input.onEvent,
@@ -146,6 +196,17 @@ export async function runAssistantAutomation(
               })
             },
           })
+          await emitAssistantLifecycleEvent(input.hooks, {
+            type: 'automation.scan.completed',
+            considered: backlogResult.considered,
+            failed: backlogResult.failed,
+            occurredAt: new Date().toISOString(),
+            replied: backlogResult.replied,
+            scanIndex: scans,
+            scanKind: 'auto-reply-backlog',
+            skipped: backlogResult.skipped,
+            vault: input.vault,
+          })
           aggregateReplies.considered += backlogResult.considered
           aggregateReplies.failed += backlogResult.failed
           aggregateReplies.replied += backlogResult.replied
@@ -162,10 +223,18 @@ export async function runAssistantAutomation(
           continue
         }
 
+        await emitAssistantLifecycleEvent(input.hooks, {
+          type: 'automation.scan.started',
+          occurredAt: new Date().toISOString(),
+          scanIndex: scans,
+          scanKind: 'auto-reply',
+          vault: input.vault,
+        })
         const replyResult = await scanAssistantAutoReplyOnce({
           afterCursor: state.autoReplyScanCursor,
           autoReplyPrimed: state.autoReplyPrimed,
           enabledChannels: state.autoReplyChannels,
+          hooks: input.hooks,
           inboxServices: input.inboxServices,
           maxPerScan: input.maxPerScan,
           onEvent: input.onEvent,
@@ -186,6 +255,17 @@ export async function runAssistantAutomation(
               updatedAt: new Date().toISOString(),
             })
           },
+        })
+        await emitAssistantLifecycleEvent(input.hooks, {
+          type: 'automation.scan.completed',
+          considered: replyResult.considered,
+          failed: replyResult.failed,
+          occurredAt: new Date().toISOString(),
+          replied: replyResult.replied,
+          scanIndex: scans,
+          scanKind: 'auto-reply',
+          skipped: replyResult.skipped,
+          vault: input.vault,
         })
         aggregateReplies.considered += replyResult.considered
         aggregateReplies.failed += replyResult.failed

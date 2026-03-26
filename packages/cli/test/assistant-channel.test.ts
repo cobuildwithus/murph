@@ -11,6 +11,11 @@ import {
   sendLinqMessage,
   sendTelegramMessage,
 } from '../src/outbound-channel.js'
+import {
+  addAssistantLifecycleMiddleware,
+  addAssistantLifecycleObserver,
+  createAssistantLifecycleHooks,
+} from '../src/assistant/hooks.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
@@ -132,6 +137,69 @@ test('deliverAssistantMessage uses one-off targets only for the current send and
   assert.equal(result.delivery.targetKind, 'explicit')
   assert.equal(result.session.binding.delivery?.kind, 'participant')
   assert.equal(result.session.binding.delivery?.target, '+15551234567')
+})
+
+test('deliverAssistantMessage composes outbound lifecycle middleware and keeps observer failures non-fatal', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-hooks-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const diagnostics: string[] = []
+  const observerTypes: string[] = []
+  const sent: Array<{ message: string; target: string }> = []
+  const hooks = createAssistantLifecycleHooks({
+    onObserverDiagnostic(diagnostic) {
+      diagnostics.push(`${diagnostic.eventType}:${diagnostic.message}`)
+    },
+  })
+
+  addAssistantLifecycleMiddleware(hooks, 'beforeOutboundDelivery', (state) => ({
+    ...state,
+    explicitTarget: 'chat-hook',
+    message: `${state.message} [out-1]`,
+  }))
+  addAssistantLifecycleMiddleware(hooks, 'beforeOutboundDelivery', (state) => ({
+    ...state,
+    explicitTarget: `${state.explicitTarget}:final`,
+    message: `${state.message} [out-2]`,
+  }))
+  addAssistantLifecycleObserver(hooks, (event) => {
+    observerTypes.push(event.type)
+  }, 'collector')
+  addAssistantLifecycleObserver(hooks, (event) => {
+    if (event.type === 'delivery.started') {
+      throw new Error('observer boom')
+    }
+  }, 'broken')
+
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'imessage',
+      participantId: '+15551234567',
+      message: 'Hooked send.',
+      hooks,
+    },
+    {
+      sendImessage: async (input: { message: string; target: string }) => {
+        sent.push(input)
+      },
+    },
+  )
+
+  assert.deepEqual(sent, [
+    {
+      target: 'chat-hook:final',
+      message: 'Hooked send. [out-1] [out-2]',
+    },
+  ])
+  assert.equal(result.delivery.target, 'chat-hook:final')
+  assert.equal(result.delivery.targetKind, 'explicit')
+  assert.equal(result.session.binding.delivery?.kind, 'participant')
+  assert.equal(result.session.binding.delivery?.target, '+15551234567')
+  assert.deepEqual(observerTypes, ['delivery.started', 'delivery.completed'])
+  assert.deepEqual(diagnostics, ['delivery.started:observer boom'])
 })
 
 
@@ -297,6 +365,64 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
   assert.equal(result.session.binding.channel, 'email')
   assert.equal(result.session.binding.identityId, 'inbox_123')
   assert.equal(result.session.binding.threadId, 'thread_123')
+  assert.equal(result.session.binding.delivery?.kind, 'thread')
+  assert.equal(result.session.binding.delivery?.target, 'thread_123')
+})
+
+test('deliverAssistantMessage falls back from an unavailable email thread reply to the known-safe participant address', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-email-fallback-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sent: Array<{
+    identityId: string
+    message: string
+    target: string
+    targetKind: 'explicit' | 'participant' | 'thread'
+  }> = []
+
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'email',
+      identityId: 'inbox_123',
+      participantId: 'user@example.com',
+      sourceThreadId: 'thread_123',
+      threadIsDirect: true,
+      message: 'Fallback to direct email if the thread binding is stale.',
+    },
+    {
+      sendEmail: async (input) => {
+        sent.push(input)
+        if (sent.length === 1) {
+          throw new VaultCliError(
+            'ASSISTANT_EMAIL_THREAD_REPLY_UNAVAILABLE',
+            'Email thread delivery requires a resolvable parent AgentMail message.',
+            { threadId: 'thread_123' },
+          )
+        }
+      },
+    },
+  )
+
+  assert.deepEqual(sent, [
+    {
+      identityId: 'inbox_123',
+      target: 'thread_123',
+      targetKind: 'thread',
+      message: 'Fallback to direct email if the thread binding is stale.',
+    },
+    {
+      identityId: 'inbox_123',
+      target: 'user@example.com',
+      targetKind: 'participant',
+      message: 'Fallback to direct email if the thread binding is stale.',
+    },
+  ])
+  assert.equal(result.delivery.channel, 'email')
+  assert.equal(result.delivery.target, 'user@example.com')
+  assert.equal(result.delivery.targetKind, 'participant')
   assert.equal(result.session.binding.delivery?.kind, 'thread')
   assert.equal(result.session.binding.delivery?.target, 'thread_123')
 })

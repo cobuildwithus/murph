@@ -27,9 +27,11 @@ import {
   appendTranscriptEntries,
   inspectAssistantSessionStorage,
   loadAndPersistResolvedSession,
+  readAssistantPreparedTranscriptReplayContext,
   readAssistantIndexStore,
   readAssistantSession,
   readAssistantTranscriptEntries,
+  readAssistantTranscriptState,
   readAutomationState,
   synchronizeAssistantIndexes,
   writeAssistantSession,
@@ -58,6 +60,10 @@ export type {
   ResolvedAssistantSession,
   AssistantTranscriptEntryInput,
 } from './store/types.js'
+export type {
+  AssistantPreparedTranscriptReplayContext,
+  AssistantTranscriptState,
+} from './transcripts/maintenance.js'
 import type {
   AssistantSessionLocator,
   ResolveAssistantSessionInput,
@@ -258,6 +264,28 @@ export async function listAssistantTranscriptEntries(
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   return readAssistantTranscriptEntries(paths, sessionId)
+}
+
+export async function getAssistantTranscriptState(
+  vault: string,
+  sessionId: string,
+) {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+  return readAssistantTranscriptState(paths, sessionId)
+}
+
+export async function loadAssistantTranscriptReplayContext(input: {
+  limit: number
+  sessionId: string
+  vault: string
+}) {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantState(paths)
+  return readAssistantPreparedTranscriptReplayContext(paths, {
+    limit: input.limit,
+    sessionId: input.sessionId,
+  })
 }
 
 export async function appendAssistantTranscriptEntries(

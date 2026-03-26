@@ -7,9 +7,13 @@ import {
   toAssistantAutomationEventCursor,
   type AssistantAutomationEvent,
   type AssistantAutomationEventCursor,
+  type AssistantAutomationEventTarget,
 } from "@healthybob/contracts";
 
-import type { AssistantStatePaths } from "./assistant-state.js";
+import {
+  resolveAssistantStatePaths,
+  type AssistantStatePaths,
+} from "./assistant-state.js";
 import { acquireDirectoryLock } from "./locks.js";
 import { buildProcessCommand, isProcessRunning } from "./shared.js";
 import { generateUlid } from "./ulid.js";
@@ -28,6 +32,15 @@ export interface ListAssistantAutomationEventsOptions {
   limit?: number;
 }
 
+export interface AssistantAutomationEventInput {
+  dedupeKey?: string | null;
+  eventId?: string | null;
+  occurredAt?: Date | number | string;
+  payload?: Record<string, unknown>;
+  target?: Partial<AssistantAutomationEventTarget> | null;
+  type: AssistantAutomationEvent["type"];
+}
+
 export function createAssistantAutomationEventId(at: Date | number | string = Date.now()): string {
   const timestamp =
     at instanceof Date
@@ -43,12 +56,44 @@ export function createAssistantAutomationEventId(at: Date | number | string = Da
   return generateUlid(timestamp);
 }
 
+export function createAssistantAutomationEvent(
+  input: AssistantAutomationEventInput,
+): AssistantAutomationEvent {
+  const occurredAt = resolveAssistantAutomationEventOccurredAt(input.occurredAt);
+
+  return assistantAutomationEventSchema.parse({
+    schema: "healthybob.assistant-automation-event.v1",
+    eventId: input.eventId ?? createAssistantAutomationEventId(occurredAt),
+    type: input.type,
+    occurredAt,
+    target: {
+      accountId: normalizeNullableAssistantEventTargetValue(input.target?.accountId),
+      attachmentId: normalizeNullableAssistantEventTargetValue(input.target?.attachmentId),
+      captureId: normalizeNullableAssistantEventTargetValue(input.target?.captureId),
+      channel: normalizeNullableAssistantEventTargetValue(input.target?.channel),
+      jobId: normalizeNullableAssistantEventTargetValue(input.target?.jobId),
+      sessionId: normalizeNullableAssistantEventTargetValue(input.target?.sessionId),
+    },
+    dedupeKey: normalizeNullableAssistantEventTargetValue(input.dedupeKey),
+    payload: input.payload ?? {},
+  });
+}
+
 export async function appendAssistantAutomationEvent(
   paths: AssistantStatePaths,
   event: AssistantAutomationEvent,
 ): Promise<AssistantAutomationEvent> {
   const [parsed] = await appendAssistantAutomationEvents(paths, [event]);
   return parsed as AssistantAutomationEvent;
+}
+
+export async function appendAssistantAutomationEventForVault(
+  vaultRoot: string,
+  event: AssistantAutomationEvent | AssistantAutomationEventInput,
+): Promise<AssistantAutomationEvent> {
+  const paths = resolveAssistantStatePaths(vaultRoot);
+  const normalized = normalizeAssistantAutomationEvent(event);
+  return appendAssistantAutomationEvent(paths, normalized);
 }
 
 export async function appendAssistantAutomationEvents(
@@ -105,7 +150,8 @@ export async function listAssistantAutomationEvents(
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .map((line) => assistantAutomationEventSchema.parse(JSON.parse(line) as unknown))
-    .filter((event) => after === null || compareAssistantAutomationEventCursor(event, after) > 0);
+    .filter((event) => after === null || compareAssistantAutomationEventCursor(event, after) > 0)
+    .sort(compareAssistantAutomationEventsByCursor);
 
   return limit === null ? events : events.slice(0, limit);
 }
@@ -182,4 +228,48 @@ function isMissingFileError(error: unknown): boolean {
       "code" in error &&
       (error as { code?: unknown }).code === "ENOENT",
   );
+}
+
+function normalizeAssistantAutomationEvent(
+  event: AssistantAutomationEvent | AssistantAutomationEventInput,
+): AssistantAutomationEvent {
+  return "schema" in event ? assistantAutomationEventSchema.parse(event) : createAssistantAutomationEvent(event);
+}
+
+function resolveAssistantAutomationEventOccurredAt(
+  input: Date | number | string | undefined,
+): string {
+  if (input === undefined) {
+    return new Date().toISOString();
+  }
+
+  if (input instanceof Date) {
+    return input.toISOString();
+  }
+
+  if (typeof input === "number") {
+    if (!Number.isFinite(input)) {
+      throw new TypeError("Assistant automation events require a finite occurredAt timestamp.");
+    }
+
+    return new Date(input).toISOString();
+  }
+
+  const timestamp = Date.parse(input);
+  if (!Number.isFinite(timestamp)) {
+    throw new TypeError("Assistant automation events require a valid occurredAt timestamp.");
+  }
+
+  return new Date(timestamp).toISOString();
+}
+
+function normalizeNullableAssistantEventTargetValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function compareAssistantAutomationEventsByCursor(
+  left: AssistantAutomationEvent,
+  right: AssistantAutomationEvent,
+): number {
+  return compareAssistantAutomationEventCursor(left, right);
 }
