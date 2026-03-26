@@ -1,16 +1,10 @@
-import {
-  generateAuthenticationOptions,
-  generateRegistrationOptions,
-  verifyAuthenticationResponse,
-  verifyRegistrationResponse,
-} from "@simplewebauthn/server";
-import { isoUint8Array } from "@simplewebauthn/server/helpers";
+import { Authentication, Registration } from "webauthx/server";
 
 export interface HostedPasskeyDescriptor {
-  counter: number;
+  counter?: number;
   credentialId: string;
   publicKey: Uint8Array | Buffer;
-  transports: string[];
+  transports?: string[];
 }
 
 export function createHostedRegistrationOptions(input: {
@@ -21,24 +15,27 @@ export function createHostedRegistrationOptions(input: {
   rpName: string;
   userId: string;
 }) {
-  return generateRegistrationOptions({
-    attestationType: "none",
-    challenge: input.challenge,
-    excludeCredentials: input.passkeys.map((passkey) => ({
-      id: passkey.credentialId,
-      transports: passkey.transports as never,
-    })),
+  const { options } = Registration.getOptions({
+    attestation: "none",
     authenticatorSelection: {
       residentKey: "required",
-      userVerification: "preferred",
+      userVerification: "required",
     },
-    rpID: input.rpId,
-    rpName: input.rpName,
+    challenge: normalizeChallenge(input.challenge),
+    excludeCredentialIds: input.passkeys.map((passkey) => passkey.credentialId),
+    rp: {
+      id: input.rpId,
+      name: input.rpName,
+    },
     timeout: 60_000,
-    userDisplayName: input.memberLabel,
-    userID: isoUint8Array.fromUTF8String(input.userId),
-    userName: input.memberLabel,
+    user: {
+      displayName: input.memberLabel,
+      id: new TextEncoder().encode(input.userId),
+      name: input.memberLabel,
+    },
   });
+
+  return options;
 }
 
 export function createHostedAuthenticationOptions(input: {
@@ -46,51 +43,57 @@ export function createHostedAuthenticationOptions(input: {
   passkeys: HostedPasskeyDescriptor[];
   rpId: string;
 }) {
-  return generateAuthenticationOptions({
-    allowCredentials: input.passkeys.map((passkey) => ({
-      id: passkey.credentialId,
-      transports: passkey.transports as never,
-    })),
-    challenge: input.challenge,
-    rpID: input.rpId,
-    timeout: 60_000,
-    userVerification: "preferred",
+  const { options } = Authentication.getOptions({
+    challenge: normalizeChallenge(input.challenge),
+    credentialId: input.passkeys.map((passkey) => passkey.credentialId),
+    rpId: input.rpId,
+    userVerification: "required",
   });
+
+  return options;
 }
 
-export async function verifyHostedRegistration(input: {
+export function verifyHostedRegistration(input: {
+  credential: unknown;
   expectedChallenge: string;
   expectedOrigin: string;
   expectedRpId: string;
-  response: unknown;
 }) {
-  return verifyRegistrationResponse({
-    expectedChallenge: input.expectedChallenge,
-    expectedOrigin: input.expectedOrigin,
-    expectedRPID: input.expectedRpId,
-    requireUserVerification: true,
-    response: input.response as never,
+  return Registration.verify(input.credential as Registration.Credential, {
+    challenge: normalizeChallenge(input.expectedChallenge),
+    origin: input.expectedOrigin,
+    rpId: input.expectedRpId,
+    userVerification: "required",
   });
 }
 
-export async function verifyHostedAuthentication(input: {
+export function verifyHostedAuthentication(input: {
   expectedChallenge: string;
   expectedOrigin: string;
   expectedRpId: string;
   passkey: HostedPasskeyDescriptor;
   response: unknown;
 }) {
-  return verifyAuthenticationResponse({
-    credential: {
-      id: input.passkey.credentialId,
-      publicKey: new Uint8Array(input.passkey.publicKey),
-      counter: input.passkey.counter,
-      transports: input.passkey.transports as never,
-    },
-    expectedChallenge: input.expectedChallenge,
-    expectedOrigin: input.expectedOrigin,
-    expectedRPID: input.expectedRpId,
-    requireUserVerification: true,
-    response: input.response as never,
+  return Authentication.verify(input.response as Authentication.Response, {
+    challenge: normalizeChallenge(input.expectedChallenge),
+    origin: input.expectedOrigin,
+    publicKey: encodeHostedPasskeyPublicKey(input.passkey.publicKey),
+    rpId: input.expectedRpId,
   });
+}
+
+export function decodeHostedPasskeyPublicKey(publicKey: string): Uint8Array<ArrayBuffer> {
+  const normalized = publicKey.startsWith("0x") ? publicKey.slice(2) : publicKey;
+  return new Uint8Array(Array.from(Buffer.from(normalized, "hex"))) as Uint8Array<ArrayBuffer>;
+}
+
+function encodeHostedPasskeyPublicKey(publicKey: Uint8Array | Buffer): `0x${string}` {
+  const bytes = Buffer.isBuffer(publicKey) ? publicKey : Buffer.from(publicKey);
+  return `0x${bytes.toString("hex")}`;
+}
+
+function normalizeChallenge(challenge: string): `0x${string}` {
+  return challenge.startsWith("0x")
+    ? challenge as `0x${string}`
+    : `0x${challenge}`;
 }

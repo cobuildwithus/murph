@@ -24,6 +24,7 @@ import {
 import {
   createHostedAuthenticationOptions,
   createHostedRegistrationOptions,
+  decodeHostedPasskeyPublicKey,
   verifyHostedAuthentication,
   verifyHostedRegistration,
 } from "./passkeys";
@@ -349,21 +350,12 @@ export async function finishHostedPasskeyRegistration(input: {
     type: HostedPasskeyChallengeType.registration,
   });
   const verification = await verifyHostedRegistration({
+    credential: input.response,
     expectedChallenge: challenge.challenge,
     expectedOrigin: passkeyConfig.expectedOrigin,
     expectedRpId: passkeyConfig.rpId,
-    response: input.response,
   });
-
-  if (!verification.verified || !verification.registrationInfo) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_REGISTRATION_FAILED",
-      message: "Passkey registration could not be verified.",
-      httpStatus: 400,
-    });
-  }
-
-  const credential = verification.registrationInfo.credential;
+  const credential = verification.credential;
   const existingPasskey = await prisma.hostedPasskey.findUnique({
     where: {
       credentialId: credential.id,
@@ -384,11 +376,7 @@ export async function finishHostedPasskeyRegistration(input: {
         id: existingPasskey.id,
       },
       data: {
-        backedUp: verification.registrationInfo.credentialBackedUp,
-        counter: credential.counter,
-        deviceType: verification.registrationInfo.credentialDeviceType,
-        publicKey: Buffer.from(credential.publicKey),
-        transports: credential.transports ?? [],
+        publicKey: decodeHostedPasskeyPublicKey(credential.publicKey),
       },
     });
   } else {
@@ -397,11 +385,7 @@ export async function finishHostedPasskeyRegistration(input: {
         id: generateHostedPasskeyId(),
         memberId: invite.memberId,
         credentialId: credential.id,
-        publicKey: Buffer.from(credential.publicKey),
-        counter: credential.counter,
-        transports: credential.transports ?? [],
-        deviceType: verification.registrationInfo.credentialDeviceType,
-        backedUp: verification.registrationInfo.credentialBackedUp,
+        publicKey: decodeHostedPasskeyPublicKey(credential.publicKey),
       },
     });
   }
@@ -553,15 +537,13 @@ export async function finishHostedPasskeyAuthentication(input: {
     expectedOrigin: passkeyConfig.expectedOrigin,
     expectedRpId: passkeyConfig.rpId,
     passkey: {
-      counter: passkey.counter,
       credentialId: passkey.credentialId,
       publicKey: passkey.publicKey,
-      transports: passkey.transports,
     },
     response: input.response,
   });
 
-  if (!verification.verified) {
+  if (!verification) {
     throw hostedOnboardingError({
       code: "PASSKEY_AUTH_FAILED",
       message: "Passkey authentication could not be verified.",
@@ -574,7 +556,6 @@ export async function finishHostedPasskeyAuthentication(input: {
       id: passkey.id,
     },
     data: {
-      counter: verification.authenticationInfo.newCounter,
       lastUsedAt: now,
     },
   });
@@ -1016,7 +997,7 @@ async function requireHostedPasskeyChallenge(input: {
 }
 
 function createRandomChallenge(): string {
-  return randomBytes(32).toString("base64url");
+  return `0x${randomBytes(32).toString("hex")}`;
 }
 
 async function ensureHostedStripeCustomer(input: {

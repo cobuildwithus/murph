@@ -1,7 +1,7 @@
 "use client";
 
-import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { type CSSProperties, useMemo, useState } from "react";
+import { Authentication, Registration } from "webauthx/client";
 
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
@@ -80,8 +80,8 @@ export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClient
         "/api/hosted-onboarding/passkeys/register/options",
         { inviteCode },
       );
-      const registrationResponse = await startRegistration({
-        optionsJSON: optionsPayload.options as never,
+      const registrationResponse = await Registration.create({
+        options: optionsPayload.options as never,
       });
       await postJson<{ ok: true; stage: HostedInviteStatusPayload["stage"] }>(
         "/api/hosted-onboarding/passkeys/register/verify",
@@ -111,8 +111,8 @@ export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClient
         "/api/hosted-onboarding/passkeys/authenticate/options",
         { inviteCode },
       );
-      const authenticationResponse = await startAuthentication({
-        optionsJSON: optionsPayload.options as never,
+      const authenticationResponse = await Authentication.sign({
+        options: optionsPayload.options as never,
       });
       await postJson<{ ok: true; stage: HostedInviteStatusPayload["stage"] }>(
         "/api/hosted-onboarding/passkeys/authenticate/verify",

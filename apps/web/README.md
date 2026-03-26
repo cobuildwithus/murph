@@ -163,6 +163,6 @@ The onboarding lane is intentionally thin:
 
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the invite page binds the phone number to a hosted member row in Postgres
-- passkeys create/authenticate that hosted member without reusing the local-first browser auth model
+- passkeys create/authenticate that hosted member through a `webauthx`-backed server/client ceremony wrapper with short-lived single-use challenges stored server-side
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
