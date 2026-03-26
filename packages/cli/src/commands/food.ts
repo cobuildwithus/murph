@@ -51,6 +51,52 @@ const foodListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
+function createFoodScheduleCommandConfig(services: VaultCliServices) {
+  return {
+    args: z.object({
+      title: z.string().min(1).max(160).describe('Remembered food title.'),
+    }),
+    description: 'Schedule one remembered food for daily auto-log meal creation.',
+    hint: 'This schedules recurring meal logging for a remembered food. The daily log fires while `vault-cli assistant run` is active for the same vault.',
+    options: withBaseOptions({
+      time: dailyFoodTimeSchema.describe('Daily local time in 24-hour HH:MM form.'),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional remembered food note that will be used in the auto-logged meal entry.'),
+      slug: z
+        .string()
+        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
+        .optional()
+        .describe('Optional stable slug override for the remembered food record.'),
+    }),
+    output: foodAddDailyResultSchema,
+    async run(context: {
+      args: {
+        title: string
+      }
+      options: {
+        vault: string
+        requestId?: string
+        time: string
+        note?: string
+        slug?: string
+      }
+    }) {
+      return services.core.addDailyFood({
+        title: context.args.title,
+        time: context.options.time,
+        note: context.options.note,
+        slug: context.options.slug,
+        requestId: requestIdFromOptions(context.options),
+        vault: context.options.vault,
+      })
+    },
+  }
+}
+
 export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
   const food = createRegistryDocEntityGroup({
     commandName: 'food',
@@ -106,37 +152,12 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
     },
   })
 
+  food.command('schedule', createFoodScheduleCommandConfig(services))
+
   food.command('add-daily', {
-    args: z.object({
-      title: z.string().min(1).max(160).describe('Remembered food title.'),
-    }),
-    description: 'Create one remembered food plus a daily auto-log rule that writes a note-only meal each day.',
-    hint: 'This creates a recurring food, not a raw cron workflow. The daily log fires while `vault-cli assistant run` is active for the same vault.',
-    options: withBaseOptions({
-      time: dailyFoodTimeSchema.describe('Daily local time in 24-hour HH:MM form.'),
-      note: z
-        .string()
-        .min(1)
-        .max(4000)
-        .optional()
-        .describe('Optional remembered food note that will be used in the auto-logged meal entry.'),
-      slug: z
-        .string()
-        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
-        .optional()
-        .describe('Optional stable slug override for the remembered food record.'),
-    }),
-    output: foodAddDailyResultSchema,
-    async run(context) {
-      return services.core.addDailyFood({
-        title: context.args.title,
-        time: context.options.time,
-        note: context.options.note,
-        slug: context.options.slug,
-        requestId: requestIdFromOptions(context.options),
-        vault: context.options.vault,
-      })
-    },
+    ...createFoodScheduleCommandConfig(services),
+    description: 'Legacy alias for `food schedule`.',
+    hint: 'Prefer `food schedule`. This compatibility alias still creates the same recurring meal auto-log rule.',
   })
 
   cli.command(food)

@@ -422,14 +422,14 @@ test.sequential(
 )
 
 test.sequential(
-  'food add-daily creates a remembered food plus a daily auto-log job',
+  'food schedule creates a remembered food plus a daily auto-log job while keeping add-daily as a compatibility alias',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-daily-'))
 
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
 
-      const foodAddDaily = await runSliceCli<{
+      const foodSchedule = await runSliceCli<{
         foodId: string
         path: string
         created: boolean
@@ -439,7 +439,7 @@ test.sequential(
         nextRunAt: string | null
       }>([
         'food',
-        'add-daily',
+        'schedule',
         'Morning Smoothie',
         '--time',
         '08:00',
@@ -461,23 +461,38 @@ test.sequential(
       }>([
         'food',
         'show',
-        requireData(foodAddDaily).foodId,
+        requireData(foodSchedule).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const legacyAlias = await runSliceCli<{
+        foodId: string
+        path: string
+        created: boolean
+        time: string
+        jobId: string
+      }>([
+        'food',
+        'add-daily',
+        'Second Smoothie',
+        '--time',
+        '09:00',
         '--vault',
         vaultRoot,
       ])
       const jobs = await listAssistantCronJobs(vaultRoot)
 
-      assert.equal(foodAddDaily.ok, true, JSON.stringify(foodAddDaily))
-      assert.equal(foodAddDaily.meta?.command, 'food add-daily')
-      assert.match(requireData(foodAddDaily).foodId, /^food_/u)
-      assert.equal(requireData(foodAddDaily).path, 'bank/foods/morning-smoothie.md')
-      assert.equal(requireData(foodAddDaily).created, true)
-      assert.equal(requireData(foodAddDaily).time, '08:00')
-      assert.equal(requireData(foodAddDaily).jobName, 'food-daily:morning-smoothie')
-      assert.equal(requireData(foodAddDaily).nextRunAt !== null, true)
+      assert.equal(foodSchedule.ok, true, JSON.stringify(foodSchedule))
+      assert.equal(foodSchedule.meta?.command, 'food schedule')
+      assert.match(requireData(foodSchedule).foodId, /^food_/u)
+      assert.equal(requireData(foodSchedule).path, 'bank/foods/morning-smoothie.md')
+      assert.equal(requireData(foodSchedule).created, true)
+      assert.equal(requireData(foodSchedule).time, '08:00')
+      assert.equal(requireData(foodSchedule).jobName, 'food-daily:morning-smoothie')
+      assert.equal(requireData(foodSchedule).nextRunAt !== null, true)
 
       assert.equal(foodShow.ok, true)
-      assert.equal(requireData(foodShow).entity.id, requireData(foodAddDaily).foodId)
+      assert.equal(requireData(foodShow).entity.id, requireData(foodSchedule).foodId)
       assert.deepEqual(requireData(foodShow).entity.data.autoLogDaily, {
         time: '08:00',
       })
@@ -486,17 +501,24 @@ test.sequential(
         'Bone broth protein, inulin, prebiotic GOS, creatine, and coconut water.',
       )
 
-      assert.equal(jobs.length, 1)
-      assert.equal(jobs[0]?.jobId, requireData(foodAddDaily).jobId)
+      assert.equal(legacyAlias.ok, true, JSON.stringify(legacyAlias))
+      assert.equal(legacyAlias.meta?.command, 'food add-daily')
+      assert.match(requireData(legacyAlias).foodId, /^food_/u)
+      assert.equal(requireData(legacyAlias).time, '09:00')
+
+      assert.equal(jobs.length, 2)
+      assert.equal(jobs[0]?.jobId, requireData(foodSchedule).jobId)
       assert.equal(jobs[0]?.name, 'food-daily:morning-smoothie')
       assert.equal(jobs[0]?.schedule.kind, 'cron')
       assert.equal(jobs[0]?.schedule.expression, '0 8 * * *')
       assert.deepEqual(jobs[0]?.foodAutoLog, {
-        foodId: requireData(foodAddDaily).foodId,
+        foodId: requireData(foodSchedule).foodId,
       })
+      assert.equal(jobs[1]?.jobId, requireData(legacyAlias).jobId)
+      assert.equal(jobs[1]?.name, 'food-daily:second-smoothie')
 
       const foodMarkdown = await readFile(
-        path.join(vaultRoot, requireData(foodAddDaily).path),
+        path.join(vaultRoot, requireData(foodSchedule).path),
         'utf8',
       )
       assert.match(foodMarkdown, /autoLogDaily:/u)

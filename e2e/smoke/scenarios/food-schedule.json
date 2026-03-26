@@ -1,10 +1,10 @@
 {
-  "id": "food-add-daily",
-  "command": "vault-cli food add-daily <title> --vault <path> --time <HH:MM> [--note <text>] [--slug <slug>] [--request-id <id>]",
+  "id": "food-schedule",
+  "command": "vault-cli food schedule <title> --vault <path> --time <HH:MM> [--note <text>] [--slug <slug>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
   ],
-  "goldenOutput": "fixtures/golden-outputs/food-add-daily",
+  "goldenOutput": "fixtures/golden-outputs/food-schedule",
   "purpose": "Documents the recurring-food helper that stores one remembered food plus its paired daily auto-log cron job."
 }

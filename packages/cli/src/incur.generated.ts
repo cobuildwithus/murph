@@ -145,6 +145,7 @@ declare module 'incur' {
       'provider upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'food add-daily': { args: { title: string }; options: { vault: string; requestId: string; time: string; note: string; slug: string } }
       'food list': { args: {}; options: { vault: string; requestId: string; status: "active" | "archived"; limit: number } }
+      'food schedule': { args: { title: string }; options: { vault: string; requestId: string; time: string; note: string; slug: string } }
       'food scaffold': { args: {}; options: { vault: string; requestId: string } }
       'food show': { args: { id: string }; options: { vault: string; requestId: string } }
       'food upsert': { args: {}; options: { vault: string; requestId: string; input: string } }

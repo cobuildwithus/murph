@@ -391,9 +391,9 @@ test('assistant cron preset install schema exposes preset variables, instruction
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('food add-daily schema exposes the recurring food options', async () => {
+test('food schedule schema exposes the recurring food options', async () => {
   const schema = JSON.parse(
-    await runRawCli(['food', 'add-daily', '--schema', '--format', 'json']),
+    await runRawCli(['food', 'schedule', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>

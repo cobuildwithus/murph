@@ -362,8 +362,12 @@ export const vaultCliCommandDescriptors = [
         description: 'Create or update one food Markdown record from a JSON payload file or stdin.',
       },
       {
+        path: ['food', 'schedule'],
+        description: 'Schedule one remembered food for daily auto-log meal creation.',
+      },
+      {
         path: ['food', 'add-daily'],
-        description: 'Create one remembered food plus a daily auto-log rule backed by the assistant runtime.',
+        description: 'Legacy alias for `food schedule`.',
       },
     ],
     directVaultServiceBindings: {

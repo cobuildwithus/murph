@@ -70,6 +70,7 @@ vault-cli provider show <id> --vault <path> [--request-id <id>]
 vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] [--request-id <id>]
 vault-cli food scaffold --vault <path> [--request-id <id>]
 vault-cli food upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli food schedule <title> --vault <path> --time <HH:MM> [--note <text>] [--slug <slug>] [--request-id <id>]
 vault-cli food add-daily <title> --vault <path> --time <HH:MM> [--note <text>] [--slug <slug>] [--request-id <id>]
 vault-cli food show <id> --vault <path> [--request-id <id>]
 vault-cli food list --vault <path> [--status active|archived] [--limit <n>] [--request-id <id>]
@@ -183,7 +184,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 ## Noun Composition
 
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, `food`, and `event` are payload-CRUD nouns.
-- `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food add-daily` adds the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant cron internals.
+- `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` adds the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant cron internals. `food add-daily` remains as a legacy alias.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
 - `profile` is primarily payload CRUD and also exposes `rebuild` for the derived current-profile view.
 - `protocol` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
@@ -675,7 +676,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `food upsert`, `food add-daily`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant cron state.
+- `provider upsert`, `food upsert`, `food schedule`, `food add-daily`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant cron state.
 - `show`, `list`, `search query`, `search index status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.
