@@ -950,7 +950,7 @@ async function updateAssistantChannelState(input: {
   }
 
   await saveAssistantAutomationState(input.vault, {
-    version: 2,
+    version: 3,
     inboxScanCursor: state.inboxScanCursor,
     autoReplyScanCursor:
       autoReplyChannels.length === 0
@@ -958,6 +958,7 @@ async function updateAssistantChannelState(input: {
         : autoReplyChanged
           ? null
           : state.autoReplyScanCursor,
+    eventCursor: state.eventCursor,
     autoReplyChannels,
     preferredChannels,
     autoReplyBacklogChannels: nextBacklogChannels,

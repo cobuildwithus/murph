@@ -140,6 +140,8 @@ export function computeAssistantCronNextRunAt(
       return new Date(after.getTime() + schedule.everyMs).toISOString()
     case 'cron':
       return findNextAssistantCronOccurrence(schedule.expression, after)
+    case 'event':
+      return null
   }
 }
 

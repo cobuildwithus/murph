@@ -1,3 +1,4 @@
+export * from "./assistant-events.js";
 export * from "./assistant-state.js";
 export * from "./atomic-write.js";
 export * from "./device-sync.js";

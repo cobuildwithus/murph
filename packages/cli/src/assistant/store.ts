@@ -1,9 +1,10 @@
 import { readdir } from 'node:fs/promises'
 import {
-  assistantAutomationStateSchema,
+  normalizeAssistantAutomationState,
   assistantSessionSchema,
   assistantTranscriptEntrySchema,
   type AssistantAutomationState,
+  type AssistantAutomationStateInput,
   type AssistantSession,
   type AssistantTranscriptEntry,
 } from '../assistant-cli-contracts.js'
@@ -321,11 +322,11 @@ export async function readAssistantAutomationState(
 
 export async function saveAssistantAutomationState(
   vault: string,
-  state: AssistantAutomationState,
+  state: AssistantAutomationStateInput,
 ): Promise<AssistantAutomationState> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
-  const parsed = assistantAutomationStateSchema.parse(state)
+  const parsed = normalizeAssistantAutomationState(state)
   await writeJsonFileAtomic(paths.automationPath, parsed)
   return parsed
 }

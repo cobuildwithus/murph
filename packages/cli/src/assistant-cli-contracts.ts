@@ -1,3 +1,4 @@
+import { assistantAutomationEventTypeValues } from '@healthybob/contracts'
 import { z } from 'incur'
 import { isoTimestampSchema, pathSchema } from './vault-cli-contracts.js'
 
@@ -66,6 +67,7 @@ export const assistantCronScheduleKindValues = [
   'at',
   'every',
   'cron',
+  'event',
 ] as const
 export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
 export const assistantCronRunStatusValues = [
@@ -132,6 +134,47 @@ export const assistantTranscriptEntrySchema = z.object({
   createdAt: isoTimestampSchema,
 })
 
+export const assistantTranscriptMaintenanceSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-transcript-maintenance.v1'),
+    sessionId: z.string().min(1),
+    updatedAt: isoTimestampSchema,
+    hotEntryCount: z.number().int().nonnegative(),
+    hotByteLength: z.number().int().nonnegative(),
+    archivedEntryCount: z.number().int().nonnegative(),
+    archiveSegmentCount: z.number().int().nonnegative(),
+    lastCompactedAt: isoTimestampSchema.nullable(),
+    lastRepairedAt: isoTimestampSchema.nullable(),
+    repairCount: z.number().int().nonnegative(),
+  })
+  .strict()
+
+export const assistantTranscriptContinuationExcerptSchema = z
+  .object({
+    createdAt: isoTimestampSchema,
+    kind: z.enum(assistantTranscriptEntryKindValues),
+    text: z.string().min(1),
+  })
+  .strict()
+
+export const assistantTranscriptContinuationNotice =
+  'Assistant transcript continuations are non-canonical working memory only.' as const
+
+export const assistantTranscriptContinuationSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-transcript-continuation.v1'),
+    sessionId: z.string().min(1),
+    updatedAt: isoTimestampSchema,
+    sourceEntryCount: z.number().int().nonnegative(),
+    sourceStartAt: isoTimestampSchema.nullable(),
+    sourceEndAt: isoTimestampSchema.nullable(),
+    notice: z.literal(assistantTranscriptContinuationNotice),
+    summaryBullets: z.array(z.string().min(1)),
+    openLoops: z.array(z.string().min(1)),
+    representativeExcerpts: z.array(assistantTranscriptContinuationExcerptSchema),
+  })
+  .strict()
+
 export const assistantChannelDeliverySchema = z.object({
   channel: z.string().min(1),
   target: z.string().min(1),
@@ -187,10 +230,20 @@ export const assistantCronExpressionScheduleSchema = z
   })
   .strict()
 
+export const assistantCronEventScheduleSchema = z
+  .object({
+    kind: z.literal('event'),
+    eventTypes: z.array(z.enum(assistantAutomationEventTypeValues)).min(1),
+    cooldownMs: z.number().int().nonnegative().default(0),
+    debounceMs: z.number().int().nonnegative().default(0),
+  })
+  .strict()
+
 export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
   assistantCronAtScheduleSchema,
   assistantCronEveryScheduleSchema,
   assistantCronExpressionScheduleSchema,
+  assistantCronEventScheduleSchema,
 ])
 
 export const assistantCronTargetSchema = z
@@ -444,7 +497,14 @@ export const assistantAutomationCursorSchema = z.object({
   captureId: z.string().min(1),
 })
 
-export const assistantAutomationStateSchema = z
+export const assistantAutomationEventCursorSchema = z
+  .object({
+    eventId: z.string().min(1),
+    occurredAt: isoTimestampSchema,
+  })
+  .strict()
+
+export const assistantAutomationStateV2Schema = z
   .object({
     version: z.literal(2),
     inboxScanCursor: assistantAutomationCursorSchema.nullable(),
@@ -457,6 +517,47 @@ export const assistantAutomationStateSchema = z
   })
   .strict()
 
+export const assistantAutomationStateSchema = z
+  .object({
+    version: z.literal(3),
+    inboxScanCursor: assistantAutomationCursorSchema.nullable(),
+    autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
+    eventCursor: assistantAutomationEventCursorSchema.nullable().default(null),
+    autoReplyChannels: z.array(z.string().min(1)),
+    preferredChannels: z.array(z.string().min(1)).default([]),
+    autoReplyBacklogChannels: z.array(z.string().min(1)).default([]),
+    autoReplyPrimed: z.boolean(),
+    updatedAt: isoTimestampSchema,
+  })
+  .strict()
+
+export const assistantAutomationStateInputSchema = z.union([
+  assistantAutomationStateSchema,
+  assistantAutomationStateV2Schema,
+])
+
+export function normalizeAssistantAutomationState(
+  input: unknown,
+): AssistantAutomationState {
+  const parsed = assistantAutomationStateInputSchema.parse(input)
+
+  if (parsed.version === 3) {
+    return parsed
+  }
+
+  return {
+    version: 3,
+    inboxScanCursor: parsed.inboxScanCursor,
+    autoReplyScanCursor: parsed.autoReplyScanCursor,
+    eventCursor: null,
+    autoReplyChannels: parsed.autoReplyChannels,
+    preferredChannels: parsed.preferredChannels,
+    autoReplyBacklogChannels: parsed.autoReplyBacklogChannels,
+    autoReplyPrimed: parsed.autoReplyPrimed,
+    updatedAt: parsed.updatedAt,
+  }
+}
+
 export type AssistantAliasStore = z.infer<typeof assistantAliasStoreSchema>
 export type AssistantBindingDelivery = z.infer<
   typeof assistantBindingDeliverySchema
@@ -467,6 +568,15 @@ export type AssistantSessionBinding = z.infer<
 export type AssistantSession = z.infer<typeof assistantSessionSchema>
 export type AssistantTranscriptEntry = z.infer<
   typeof assistantTranscriptEntrySchema
+>
+export type AssistantTranscriptMaintenance = z.infer<
+  typeof assistantTranscriptMaintenanceSchema
+>
+export type AssistantTranscriptContinuationExcerpt = z.infer<
+  typeof assistantTranscriptContinuationExcerptSchema
+>
+export type AssistantTranscriptContinuation = z.infer<
+  typeof assistantTranscriptContinuationSchema
 >
 export type AssistantChannelDelivery = z.infer<
   typeof assistantChannelDeliverySchema
@@ -547,8 +657,14 @@ export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema
 >
+export type AssistantAutomationEventCursor = z.infer<
+  typeof assistantAutomationEventCursorSchema
+>
 export type AssistantAutomationState = z.infer<
   typeof assistantAutomationStateSchema
+>
+export type AssistantAutomationStateInput = z.infer<
+  typeof assistantAutomationStateInputSchema
 >
 export type AssistantSandbox = (typeof assistantSandboxValues)[number]
 export type AssistantApprovalPolicy =

@@ -1,3 +1,4 @@
+export * from "./assistant-runtime.js";
 export * from "./command-capabilities.js";
 export * from "./constants.js";
 export * from "./examples.js";

@@ -2,7 +2,7 @@ import { access, appendFile, mkdir, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantAliasStoreSchema,
-  assistantAutomationStateSchema,
+  normalizeAssistantAutomationState,
   assistantSessionSchema,
   assistantTranscriptEntrySchema,
   type AssistantAliasStore,
@@ -26,13 +26,22 @@ import type {
 import type { ResolvedAssistantSession } from './types.js'
 
 export const ASSISTANT_INDEX_STORE_VERSION = 2
-export const ASSISTANT_AUTOMATION_STATE_VERSION = 2
+export const ASSISTANT_AUTOMATION_STATE_VERSION = 3
 
 export async function ensureAssistantState(
   paths: AssistantStatePaths,
 ): Promise<void> {
   await Promise.all([
     mkdir(paths.sessionsDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.transcriptArchivesDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.transcriptContinuationsDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.transcriptMaintenanceDirectory, {
       recursive: true,
     }),
     mkdir(paths.transcriptsDirectory, {
@@ -315,25 +324,39 @@ export async function synchronizeAssistantIndexes(
 export async function readAutomationState(
   paths: AssistantStatePaths,
 ): Promise<AssistantAutomationState> {
+  let state: AssistantAutomationState
+  let shouldPersist = false
+
   try {
     const raw = await readFile(paths.automationPath, 'utf8')
-    return assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    const parsed = JSON.parse(raw) as unknown
+    state = normalizeAssistantAutomationState(parsed)
+    shouldPersist =
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'version' in parsed &&
+      (parsed as { version?: unknown }).version === 2
   } catch (error) {
     if (!isMissingFileError(error)) {
       throw error
     }
+
+    state = normalizeAssistantAutomationState({
+      version: ASSISTANT_AUTOMATION_STATE_VERSION,
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      eventCursor: null,
+      autoReplyChannels: [],
+      preferredChannels: [],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: true,
+      updatedAt: new Date().toISOString(),
+    })
+    shouldPersist = true
   }
 
-  const initial = assistantAutomationStateSchema.parse({
-    version: ASSISTANT_AUTOMATION_STATE_VERSION,
-    inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    preferredChannels: [],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: true,
-    updatedAt: new Date().toISOString(),
-  })
-  await writeJsonFileAtomic(paths.automationPath, initial)
-  return initial
+  if (shouldPersist) {
+    await writeJsonFileAtomic(paths.automationPath, state)
+  }
+  return state
 }

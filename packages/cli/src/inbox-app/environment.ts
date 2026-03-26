@@ -220,9 +220,10 @@ export function createInboxAppEnvironment(
     }
 
     await saveAssistantAutomationState(vault, {
-      version: 2,
+      version: 3,
       inboxScanCursor: state.inboxScanCursor,
       autoReplyScanCursor: null,
+      eventCursor: state.eventCursor,
       autoReplyChannels: channels,
       preferredChannels,
       autoReplyBacklogChannels: backlogChannels,

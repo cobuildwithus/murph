@@ -227,7 +227,11 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
 
-  packages/runtime-state: {}
+  packages/runtime-state:
+    dependencies:
+      '@healthybob/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/web:
     dependencies:
