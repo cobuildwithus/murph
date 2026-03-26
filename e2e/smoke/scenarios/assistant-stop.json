@@ -1,0 +1,10 @@
+{
+  "id": "assistant-stop",
+  "command": "vault-cli assistant stop --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents the supported assistant automation recovery command for stopping a stuck run loop or clearing stale run-lock state."
+}

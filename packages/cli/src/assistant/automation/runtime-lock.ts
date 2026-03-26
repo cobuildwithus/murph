@@ -1,10 +1,13 @@
+import { rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   acquireDirectoryLock,
   buildProcessCommand,
   DirectoryLockHeldError,
+  inspectDirectoryLock,
   isProcessRunning,
 } from '@healthybob/runtime-state'
+import type { AssistantStatusRunLock } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 
@@ -24,11 +27,8 @@ export async function acquireAssistantAutomationRunLock(input: {
   release(): Promise<void>
 }> {
   const ownerKey = `assistant-automation:${input.paths.assistantStateRoot}`
-  const lockPath = path.join(input.paths.assistantStateRoot, '.automation-run.lock')
-  const metadataPath = path.join(
-    input.paths.assistantStateRoot,
-    '.automation-run-lock.json',
-  )
+  const lockPath = resolveAssistantAutomationRunLockPath(input.paths)
+  const metadataPath = resolveAssistantAutomationRunLockMetadataPath(input.paths)
 
   if (activeAutomationRoots.has(input.paths.assistantStateRoot)) {
     throw createAssistantAlreadyRunningError({
@@ -89,56 +89,113 @@ export async function acquireAssistantAutomationRunLock(input: {
   }
 }
 
+export async function inspectAssistantAutomationRunLock(
+  paths: AssistantStatePaths,
+): Promise<AssistantStatusRunLock> {
+  if (activeAutomationRoots.has(paths.assistantStateRoot)) {
+    return {
+      state: 'active',
+      pid: process.pid,
+      startedAt: null,
+      mode: null,
+      command: buildProcessCommand(),
+      reason: 'assistant automation already active in this process',
+    }
+  }
+
+  const inspection = await inspectDirectoryLock({
+    lockPath: resolveAssistantAutomationRunLockPath(paths),
+    metadataPath: resolveAssistantAutomationRunLockMetadataPath(paths),
+    parseMetadata(value) {
+      return isAssistantAutomationRunLockMetadata(value) ? value : null
+    },
+    invalidMetadataReason: 'Assistant automation run lock metadata is malformed.',
+    inspectStale(metadata) {
+      return isProcessRunning(metadata.pid)
+        ? null
+        : `Process ${metadata.pid} is no longer running.`
+    },
+  })
+
+  if (inspection.state === 'unlocked') {
+    return {
+      state: 'unlocked',
+      pid: null,
+      startedAt: null,
+      mode: null,
+      command: null,
+      reason: null,
+    }
+  }
+
+  return {
+    state: inspection.state,
+    pid: inspection.metadata?.pid ?? null,
+    startedAt: inspection.metadata?.startedAt ?? null,
+    mode: inspection.metadata?.mode ?? null,
+    command: inspection.metadata?.command ?? null,
+    reason: inspection.state === 'stale' ? inspection.reason : null,
+  }
+}
+
+export async function clearAssistantAutomationRunLock(
+  paths: AssistantStatePaths,
+): Promise<void> {
+  await Promise.all([
+    rm(resolveAssistantAutomationRunLockPath(paths), {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 10,
+    }),
+    rm(resolveAssistantAutomationRunLockMetadataPath(paths), {
+      force: true,
+      maxRetries: 3,
+      retryDelay: 10,
+    }),
+  ])
+}
+
 function createAssistantAlreadyRunningError(input: {
   metadata: AssistantAutomationRunLockMetadata | null
   sameProcess: boolean
 }): VaultCliError {
-  const metadata = input.metadata
-  const modeLabel =
-    metadata?.mode === 'once' ? 'one-shot scan' : 'continuous automation loop'
-  const details = metadata
-    ? `pid=${metadata.pid}, startedAt=${metadata.startedAt}, command=${metadata.command}, mode=${modeLabel}`
-    : null
-
+  const detail = input.metadata
+    ? `${input.metadata.command} (pid ${input.metadata.pid}) started ${input.metadata.startedAt}`
+    : 'another assistant automation process'
   return new VaultCliError(
-    'ASSISTANT_ALREADY_RUNNING',
-    [
-      'Assistant automation is already running for this vault.',
-      input.sameProcess
-        ? 'This process already owns the assistant automation loop.'
-        : 'Another process already owns the assistant automation loop.',
-      details ? `Existing owner: ${details}.` : null,
-      'If a prior foreground run was suspended with Ctrl+Z, resume it with `fg` and stop it with Ctrl+C before starting another assistant run.',
-    ]
-      .filter((value): value is string => value !== null)
-      .join(' '),
-    metadata
-      ? {
-          command: metadata.command,
-          mode: metadata.mode,
-          pid: metadata.pid,
-          startedAt: metadata.startedAt,
-        }
-      : undefined,
+    'ASSISTANT_AUTOMATION_ALREADY_RUNNING',
+    input.sameProcess
+      ? 'Assistant automation is already running for this vault in the current process.'
+      : `Assistant automation is already running for this vault: ${detail}. Use \`healthybob stop --vault <path>\` to recover or \`healthybob status --vault <path>\` to inspect it.`,
+    {
+      sameProcess: input.sameProcess,
+      ...input.metadata,
+    },
   )
+}
+
+function resolveAssistantAutomationRunLockPath(paths: AssistantStatePaths): string {
+  return path.join(paths.assistantStateRoot, '.automation-run.lock')
+}
+
+function resolveAssistantAutomationRunLockMetadataPath(paths: AssistantStatePaths): string {
+  return path.join(paths.assistantStateRoot, '.automation-run-lock.json')
 }
 
 function isAssistantAutomationRunLockMetadata(
   value: unknown,
 ): value is AssistantAutomationRunLockMetadata {
-  return Boolean(
-    value &&
-      typeof value === 'object' &&
-      'command' in value &&
-      typeof (value as { command?: unknown }).command === 'string' &&
-      'mode' in value &&
-      ((value as { mode?: unknown }).mode === 'continuous' ||
-        (value as { mode?: unknown }).mode === 'once') &&
-      'pid' in value &&
-      typeof (value as { pid?: unknown }).pid === 'number' &&
-      Number.isInteger((value as { pid: number }).pid) &&
-      (value as { pid: number }).pid > 0 &&
-      'startedAt' in value &&
-      typeof (value as { startedAt?: unknown }).startedAt === 'string',
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.command === 'string' &&
+    (record.mode === 'continuous' || record.mode === 'once') &&
+    typeof record.pid === 'number' &&
+    Number.isFinite(record.pid) &&
+    typeof record.startedAt === 'string'
   )
 }

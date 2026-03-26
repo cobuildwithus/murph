@@ -305,8 +305,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
     rawEvents: [],
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(
-    async (input: { message: string; sessionId: string; vault: string }) => ({
-      vault: path.resolve(input.vault),
+    async (input: { message: string; sessionId: string }) => ({
       message: input.message,
       session: {
         schema: 'healthybob.assistant-session.v2',
@@ -363,13 +362,12 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
   assert.equal(result.delivery?.target, '+15551234567')
   assert.equal(result.deliveryError, null)
   const deliveryCall = runtimeMocks.deliverAssistantMessageOverBinding.mock.calls[0]?.[0]
-  assert.equal(deliveryCall?.vault, vaultRoot)
   assert.equal(deliveryCall?.sessionId, result.session.sessionId)
-  assert.equal(deliveryCall?.channel, 'imessage')
-  assert.equal(deliveryCall?.identityId, null)
-  assert.equal(deliveryCall?.actorId, '+15551234567')
-  assert.equal(deliveryCall?.threadId, null)
-  assert.equal(deliveryCall?.threadIsDirect, null)
+  assert.equal(deliveryCall?.session?.binding.channel, 'imessage')
+  assert.equal(deliveryCall?.session?.binding.identityId, null)
+  assert.equal(deliveryCall?.session?.binding.actorId, '+15551234567')
+  assert.equal(deliveryCall?.session?.binding.threadId, null)
+  assert.equal(deliveryCall?.session?.binding.threadIsDirect, null)
   assert.equal(deliveryCall?.target, null)
   assert.equal(deliveryCall?.message, 'sent reply')
 })
@@ -1107,7 +1105,6 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
     }
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
-    vault: path.resolve(input.vault),
     message: input.message,
     session: {
       schema: 'healthybob.assistant-session.v2',
@@ -1498,7 +1495,6 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
     rawEvents: [],
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
-    vault: path.resolve(input.vault),
     message: input.message,
     session: {
       schema: 'healthybob.assistant-session.v2',
@@ -1708,7 +1704,6 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
       rawEvents: [],
     })
     runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
-      vault: path.resolve(input.vault),
       message: input.message,
       session: {
         schema: 'healthybob.assistant-session.v2',
@@ -2150,7 +2145,6 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
     rawEvents: [],
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
-    vault: path.resolve(input.vault),
     message: input.message,
     session: {
       schema: 'healthybob.assistant-session.v2',
@@ -2379,7 +2373,6 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
       rawEvents: [],
     })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
-    vault: path.resolve(input.vault),
     message: input.message,
     session: {
       schema: 'healthybob.assistant-session.v2',
@@ -2939,7 +2932,6 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
   runtimeMocks.deliverAssistantMessageOverBinding
     .mockRejectedValueOnce(new Error('Telegram delivery failed'))
     .mockImplementationOnce(async (input: any) => ({
-      vault: path.resolve(input.vault),
       message: input.message,
       session: {
         schema: 'healthybob.assistant-session.v2',
@@ -3164,7 +3156,6 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
     rawEvents: [],
   })
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
-    vault: path.resolve(input.vault),
     message: input.message,
     session: {
       schema: 'healthybob.assistant-session.v2',
@@ -3361,7 +3352,7 @@ test('runAssistantAutomation rejects concurrent runs for the same vault and rele
       }),
     (error) => {
       assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'ASSISTANT_ALREADY_RUNNING')
+      assert.equal(error.code, 'ASSISTANT_AUTOMATION_ALREADY_RUNNING')
       assert.equal(error.context?.pid, process.pid)
       return true
     },
@@ -3451,7 +3442,7 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   assert.equal(result.reason, 'error')
   assert.equal(result.daemonStarted, true)
   assert.equal(result.lastError, 'daemon exploded')
-  assert.equal(result.scans, 1)
+  assert.equal(result.scans, 0)
   assert.equal(result.replyConsidered, 0)
   assert.equal(result.replied, 0)
   assert.equal(result.replySkipped, 0)

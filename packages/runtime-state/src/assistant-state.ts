@@ -13,10 +13,18 @@ export interface AssistantStatePaths {
   cronJobsPath: string;
   cronRunsDirectory: string;
   dailyMemoryDirectory: string;
+  diagnosticsDirectory: string;
+  diagnosticEventsPath: string;
+  diagnosticSnapshotPath: string;
+  failoverStatePath: string;
   indexesPath: string;
   longTermMemoryPath: string;
+  outboxDirectory: string;
+  receiptsDirectory: string;
   sessionsDirectory: string;
+  statusPath: string;
   transcriptsDirectory: string;
+  turnsDirectory: string;
 }
 
 export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePaths {
@@ -25,6 +33,8 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     ASSISTANT_STATE_DIRECTORY_NAME,
   );
   const cronDirectory = path.join(rootPath, "cron");
+  const diagnosticsDirectory = path.join(rootPath, "diagnostics");
+  const receiptsDirectory = path.join(rootPath, "receipts");
 
   return {
     absoluteVaultRoot,
@@ -34,9 +44,19 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     cronJobsPath: path.join(cronDirectory, "jobs.json"),
     cronRunsDirectory: path.join(cronDirectory, "runs"),
     dailyMemoryDirectory: path.join(rootPath, "memory"),
+    diagnosticsDirectory,
+    diagnosticEventsPath: path.join(diagnosticsDirectory, "events.jsonl"),
+    diagnosticSnapshotPath: path.join(diagnosticsDirectory, "snapshot.json"),
+    failoverStatePath: path.join(rootPath, "failover.json"),
     indexesPath: path.join(rootPath, "indexes.json"),
     longTermMemoryPath: path.join(rootPath, "MEMORY.md"),
+    outboxDirectory: path.join(rootPath, "outbox"),
+    receiptsDirectory,
     sessionsDirectory: path.join(rootPath, "sessions"),
+    statusPath: path.join(rootPath, "status.json"),
     transcriptsDirectory: path.join(rootPath, "transcripts"),
+    // Keep the newer timeline-oriented helper name aligned with the existing
+    // receipts directory so in-flight receipt-based tooling stays compatible.
+    turnsDirectory: receiptsDirectory,
   };
 }

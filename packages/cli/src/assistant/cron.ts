@@ -479,6 +479,7 @@ async function executeClaimedAssistantCronJob(input: {
       sourceThreadId: input.job.target.sourceThreadId ?? undefined,
       deliverResponse: input.job.target.deliverResponse,
       deliveryTarget: input.job.target.deliveryTarget ?? undefined,
+      turnTrigger: 'automation-cron',
       workingDirectory: input.vault,
     })
 

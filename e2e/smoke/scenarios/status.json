@@ -1,0 +1,10 @@
+{
+  "id": "status",
+  "command": "vault-cli status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents the root alias for assistant-state inspection of recent sessions, receipts, and pending outbox work."
+}

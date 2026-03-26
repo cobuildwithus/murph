@@ -1,0 +1,10 @@
+{
+  "id": "assistant-status",
+  "command": "vault-cli assistant status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents read-only inspection of recent assistant sessions, turn receipts, and pending outbox state."
+}

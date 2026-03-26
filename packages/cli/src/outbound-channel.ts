@@ -6,6 +6,7 @@ import {
 } from './assistant-cli-contracts.js'
 import {
   getAssistantChannelAdapter,
+  resolveDeliveryCandidates,
   resolveImessageDeliveryCandidates,
   sendEmailMessage,
   sendImessageMessage,
@@ -22,6 +23,14 @@ import {
   mergeConversationRefs,
   normalizeConversationRef,
 } from './assistant/conversation-ref.js'
+import {
+  createAssistantOutboxIntent,
+  dispatchAssistantOutboxIntent,
+  normalizeAssistantDeliveryError,
+} from './assistant/outbox.js'
+import {
+  createAssistantTurnReceipt,
+} from './assistant/turns.js'
 import {
   redactAssistantDisplayPath,
   resolveAssistantSession,
@@ -56,6 +65,8 @@ export interface DeliverAssistantMessageInput {
 
 export interface DeliverAssistantMessageOverBindingResult {
   delivery: AssistantChannelDelivery
+  deliveryDeduplicated: boolean
+  outboxIntentId: string | null
   session?: AssistantSession
 }
 
@@ -92,36 +103,85 @@ export async function deliverAssistantMessage(
     threadIsDirect: input.threadIsDirect,
     conversation,
   })
-
-  const delivered = await deliverAssistantMessageOverBinding(
-    {
+  const receipt = await createAssistantTurnReceipt({
+    vault: input.vault,
+    sessionId: resolved.session.sessionId,
+    provider: resolved.session.provider,
+    providerModel: resolved.session.providerOptions.model ?? null,
+    prompt: normalizedMessage,
+    deliveryRequested: true,
+  })
+  try {
+    const intent = await createAssistantOutboxIntent({
+      vault: input.vault,
+      turnId: receipt.turnId,
+      sessionId: resolved.session.sessionId,
       message: normalizedMessage,
-      session: resolved.session,
-      target: explicitTarget,
-    },
-    dependencies,
-  )
-  const delivery = delivered.delivery
-
-  const updatedSession =
-    delivered.session ??
-    await saveAssistantSession(input.vault, {
-      ...resolved.session,
-      binding: resolvePersistedBinding(
-        resolved.session.binding,
-        delivery,
-        explicitTarget,
-      ),
-      updatedAt: delivery.sentAt,
-      lastTurnAt: delivery.sentAt,
+      channel: resolved.session.binding.channel,
+      identityId: resolved.session.binding.identityId,
+      actorId: resolved.session.binding.actorId,
+      threadId: resolved.session.binding.threadId,
+      threadIsDirect: resolved.session.binding.threadIsDirect,
+      bindingDelivery: resolved.session.binding.delivery,
+      explicitTarget,
     })
 
-  return assistantDeliverResultSchema.parse({
-    vault: redactAssistantDisplayPath(input.vault),
-    message: normalizedMessage,
-    session: updatedSession,
-    delivery,
-  })
+    const dispatched =
+      intent.status === 'sent' && intent.delivery
+        ? {
+            intent,
+            deliveryError: null,
+            session: null,
+          }
+        : await dispatchAssistantOutboxIntent({
+            vault: input.vault,
+            intentId: intent.intentId,
+            force: true,
+            dependencies,
+          })
+
+    if (dispatched.intent.status !== 'sent' || !dispatched.intent.delivery) {
+      throw attachAssistantOutboxIntentId(
+        dispatched.deliveryError ??
+          new VaultCliError(
+            'ASSISTANT_DELIVERY_FAILED',
+            'Assistant outbound delivery did not complete successfully.',
+          ),
+        dispatched.intent.intentId,
+      )
+    }
+
+    const delivery = dispatched.intent.delivery
+    const updatedSession =
+      dispatched.session ??
+      (intent.status === 'sent' && intent.delivery
+        ? resolved.session
+        : await saveAssistantSession(input.vault, {
+            ...resolved.session,
+            binding: resolvePersistedBinding(
+              resolved.session.binding,
+              delivery,
+              explicitTarget,
+            ),
+            updatedAt: delivery.sentAt,
+            lastTurnAt: delivery.sentAt,
+          }))
+
+    return assistantDeliverResultSchema.parse({
+      vault: redactAssistantDisplayPath(input.vault),
+      message: normalizedMessage,
+      session: updatedSession,
+      delivery,
+    })
+  } catch (error) {
+    const deliveryError = normalizeAssistantDeliveryError(error)
+    await dispatchAssistantFallbackReceiptFailure({
+      vault: input.vault,
+      turnId: receipt.turnId,
+      error: deliveryError,
+    })
+    throw error
+  }
 }
 
 function resolvePersistedBinding(
@@ -205,10 +265,16 @@ export async function deliverAssistantMessageOverBinding(
     )
   }
 
+  const explicitTarget = input.target?.trim() ? input.target.trim() : null
+  resolveDeliveryCandidates({
+    bindingDelivery: binding.delivery,
+    explicitTarget,
+  })[0]
+
   const delivery = await adapter.send(
     {
       bindingDelivery: binding.delivery,
-      explicitTarget: input.target?.trim() ? input.target.trim() : null,
+      explicitTarget,
       identityId: binding.identityId,
       message: input.message,
     },
@@ -217,5 +283,61 @@ export async function deliverAssistantMessageOverBinding(
 
   return {
     delivery,
+    deliveryDeduplicated: false,
+    outboxIntentId: null,
   }
+}
+
+async function dispatchAssistantFallbackReceiptFailure(input: {
+  error: ReturnType<typeof normalizeAssistantDeliveryError>
+  turnId: string
+  vault: string
+}): Promise<void> {
+  const { appendAssistantTurnReceiptEvent, updateAssistantTurnReceipt } = await import(
+    './assistant/turns.js'
+  )
+  const failedAt = new Date().toISOString()
+  await appendAssistantTurnReceiptEvent({
+    vault: input.vault,
+    turnId: input.turnId,
+    kind: 'delivery.failed',
+    detail: input.error.message,
+    metadata: {},
+    at: failedAt,
+  }).catch(() => undefined)
+  await updateAssistantTurnReceipt({
+    vault: input.vault,
+    turnId: input.turnId,
+    mutate(receipt) {
+      return {
+        ...receipt,
+        updatedAt: failedAt,
+        completedAt: failedAt,
+        status: 'failed',
+        deliveryDisposition: 'failed',
+        lastError: input.error,
+      }
+    },
+  }).catch(() => undefined)
+}
+
+function attachAssistantOutboxIntentId(error: unknown, outboxIntentId: string | null) {
+  if (
+    outboxIntentId === null ||
+    typeof error !== 'object' ||
+    error === null
+  ) {
+    return error
+  }
+
+  try {
+    Object.defineProperty(error, 'outboxIntentId', {
+      configurable: true,
+      enumerable: false,
+      value: outboxIntentId,
+      writable: true,
+    })
+  } catch {}
+
+  return error
 }

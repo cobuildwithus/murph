@@ -15,6 +15,7 @@ import {
   assistantCronShowResultSchema,
   assistantCronStatusResultSchema,
   assistantDeliverResultSchema,
+  assistantDoctorResultSchema,
   assistantMemoryForgetResultSchema,
   assistantMemoryGetResultSchema,
   assistantMemoryLongTermSectionValues,
@@ -27,6 +28,8 @@ import {
   assistantSandboxValues,
   assistantSessionListResultSchema,
   assistantSessionShowResultSchema,
+  assistantStopResultSchema,
+  assistantStatusResultSchema,
 } from '../assistant-cli-contracts.js'
 import { deliverAssistantMessage } from '../assistant-channel.js'
 import type { ConversationRef } from '../assistant/conversation-ref.js'
@@ -46,7 +49,10 @@ import {
   runAssistantCronJobNow,
   sendAssistantMessage,
   setAssistantCronJobEnabled,
+  stopAssistantAutomation,
 } from '../assistant-runtime.js'
+import { runAssistantDoctor } from '../assistant/doctor.js'
+import { getAssistantStatus } from '../assistant/status.js'
 import {
   assertAssistantMemoryTurnContextVault,
   forgetAssistantMemory,
@@ -274,6 +280,99 @@ type AssistantProviderCliOptions = {
 type AssistantDeliveryCliOptions = {
   deliverResponse?: boolean
   deliveryTarget?: string
+}
+
+function createAssistantStatusCommandDefinition(input?: {
+  description?: string
+  hint?: string
+}) {
+  return {
+    args: emptyArgsSchema,
+    description:
+      input?.description ??
+      'Show a compact assistant-state snapshot including recent turn receipts and the outbound outbox backlog.',
+    hint:
+      input?.hint ??
+      'Use this when the assistant feels stuck, duplicated a send, or you want the latest receipt timeline without opening files under assistant-state/.',
+    options: withBaseOptions({
+      session: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional assistant session id to scope the recent turn receipts.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .default(5)
+        .describe('Maximum number of recent sessions, turns, and pending outbox intents to return.'),
+    }),
+    output: assistantStatusResultSchema,
+    async run(context: {
+      options: {
+        limit: number
+        session?: string
+        vault: string
+      }
+    }) {
+      return getAssistantStatus({
+        vault: context.options.vault,
+        sessionId: context.options.session,
+        limit: context.options.limit,
+      })
+    },
+  }
+}
+
+function createAssistantDoctorCommandDefinition(input?: {
+  description?: string
+  hint?: string
+}) {
+  return {
+    args: emptyArgsSchema,
+    description:
+      input?.description ??
+      'Run lightweight assistant-state diagnostics for session files, receipts, transcripts, automation state, and the outbound outbox.',
+    hint:
+      input?.hint ??
+      'This is a read-only health check for local assistant-state and is safe to run before or after runtime changes.',
+    options: withBaseOptions(),
+    output: assistantDoctorResultSchema,
+    async run(context: {
+      options: {
+        vault: string
+      }
+    }) {
+      return runAssistantDoctor(context.options.vault)
+    },
+  }
+}
+
+function createAssistantStopCommandDefinition(input?: {
+  description?: string
+  hint?: string
+}) {
+  return {
+    args: emptyArgsSchema,
+    description:
+      input?.description ??
+      'Stop the assistant automation loop for this vault and clear stale run-lock state when the recorded process is already gone.',
+    hint:
+      input?.hint ??
+      'Use this to recover from a stuck `assistant run` / `healthybob run`. Healthy Bob sends SIGTERM first, waits briefly, and only force-kills the recorded PID if it refuses to exit.',
+    options: withBaseOptions(),
+    output: assistantStopResultSchema,
+    async run(context: {
+      options: {
+        vault: string
+      }
+    }) {
+      return stopAssistantAutomation({
+        vault: context.options.vault,
+      })
+    },
+  }
 }
 
 function buildAssistantVaultResultPath(vault: string) {
@@ -1386,6 +1485,12 @@ export function registerAssistantCommands(
     assistant.command(cron)
   }
 
+  const registerObservabilityCommands = () => {
+    assistant.command('status', createAssistantStatusCommandDefinition())
+    assistant.command('doctor', createAssistantDoctorCommandDefinition())
+    assistant.command('stop', createAssistantStopCommandDefinition())
+  }
+
   const registerSessionCommands = () => {
     const session = Cli.create('session', {
       description:
@@ -1447,11 +1552,39 @@ export function registerAssistantCommands(
           'Shorthand for `assistant run`. This starts the always-on automation loop, so it may watch inbox state, auto-reply over configured channels, and keep the terminal attached until you stop it.',
       }),
     )
+    cli.command(
+      'status',
+      createAssistantStatusCommandDefinition({
+        description:
+          'Show the same assistant-state snapshot as `assistant status` directly from the CLI root.',
+        hint:
+          'Shorthand for `assistant status`. Use this to inspect recent turn receipts, session freshness, and pending outbox work.',
+      }),
+    )
+    cli.command(
+      'doctor',
+      createAssistantDoctorCommandDefinition({
+        description:
+          'Run the same assistant-state diagnostics as `assistant doctor` directly from the CLI root.',
+        hint:
+          'Shorthand for `assistant doctor`. Use this when debugging transcript corruption, missing receipts, or stale outbox intents.',
+      }),
+    )
+    cli.command(
+      'stop',
+      createAssistantStopCommandDefinition({
+        description:
+          'Stop the same assistant automation loop as `assistant stop` directly from the CLI root.',
+        hint:
+          'Shorthand for `assistant stop`. Use this when `healthybob run` is already active for the same vault and you need a recovery command instead of manual lock cleanup.',
+      }),
+    )
   }
 
   registerConversationCommands()
   registerMemoryCommands()
   registerCronCommands()
+  registerObservabilityCommands()
   registerSessionCommands()
 
   cli.command(assistant)

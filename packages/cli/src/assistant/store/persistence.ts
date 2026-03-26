@@ -38,6 +38,15 @@ export async function ensureAssistantState(
     mkdir(paths.transcriptsDirectory, {
       recursive: true,
     }),
+    mkdir(paths.outboxDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.turnsDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.diagnosticsDirectory, {
+      recursive: true,
+    }),
   ])
 }
 

@@ -1,0 +1,10 @@
+{
+  "id": "doctor",
+  "command": "vault-cli doctor --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents the root alias for read-only assistant-state diagnostics and corruption-tolerant health checks."
+}

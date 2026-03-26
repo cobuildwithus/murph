@@ -1,0 +1,150 @@
+import { readFile } from 'node:fs/promises'
+import {
+  assistantStatusResultSchema,
+  type AssistantFailoverState,
+  type AssistantStatusResult,
+  type AssistantTurnReceipt,
+} from '../assistant-cli-contracts.js'
+import { buildAssistantOutboxSummary } from './outbox.js'
+import { readAssistantDiagnosticsSnapshot } from './diagnostics.js'
+import { readAssistantFailoverState } from './failover.js'
+import { inspectAssistantAutomationRunLock } from './automation/runtime-lock.js'
+import {
+  readAssistantAutomationState,
+  redactAssistantDisplayPath,
+  resolveAssistantStatePaths,
+} from './store.js'
+import { listRecentAssistantTurnReceipts } from './turns.js'
+import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
+
+export async function getAssistantStatus(
+  input:
+    | string
+    | {
+        limit?: number
+        sessionId?: string | null
+        vault: string
+      },
+): Promise<AssistantStatusResult> {
+  const vault = typeof input === 'string' ? input : input.vault
+  const paths = resolveAssistantStatePaths(vault)
+  const [automation, runLock, outbox, diagnostics, failover, recentTurns] =
+    await Promise.all([
+      readAssistantAutomationState(vault),
+      inspectAssistantAutomationRunLock(paths),
+      buildAssistantOutboxSummary(vault),
+      readAssistantDiagnosticsSnapshot(vault),
+      readAssistantFailoverState(vault),
+      resolveRecentTurns(vault, typeof input === 'string' ? undefined : input),
+    ])
+  const warnings = buildAssistantStatusWarnings({
+    diagnostics,
+    failover,
+    outbox,
+    runLock,
+  })
+
+  return assistantStatusResultSchema.parse({
+    vault: redactAssistantDisplayPath(paths.absoluteVaultRoot),
+    stateRoot: redactAssistantDisplayPath(paths.assistantStateRoot),
+    statusPath: redactAssistantDisplayPath(paths.statusPath),
+    outboxRoot: redactAssistantDisplayPath(paths.outboxDirectory),
+    diagnosticsPath: redactAssistantDisplayPath(paths.diagnosticSnapshotPath),
+    failoverStatePath: redactAssistantDisplayPath(paths.failoverStatePath),
+    turnsRoot: redactAssistantDisplayPath(paths.turnsDirectory),
+    generatedAt: new Date().toISOString(),
+    runLock,
+    automation: {
+      inboxScanCursor: automation.inboxScanCursor,
+      autoReplyScanCursor: automation.autoReplyScanCursor,
+      autoReplyChannels: automation.autoReplyChannels,
+      preferredChannels: automation.preferredChannels,
+      autoReplyBacklogChannels: automation.autoReplyBacklogChannels,
+      autoReplyPrimed: automation.autoReplyPrimed,
+      updatedAt: automation.updatedAt,
+    },
+    outbox,
+    diagnostics,
+    failover,
+    recentTurns,
+    warnings,
+  })
+}
+
+export async function refreshAssistantStatusSnapshot(
+  vault: string,
+): Promise<AssistantStatusResult> {
+  const status = await getAssistantStatus(vault)
+  const paths = resolveAssistantStatePaths(vault)
+  await writeJsonFileAtomic(paths.statusPath, status)
+  return status
+}
+
+export async function readAssistantStatusSnapshot(
+  vault: string,
+): Promise<AssistantStatusResult | null> {
+  const paths = resolveAssistantStatePaths(vault)
+  try {
+    const raw = await readFile(paths.statusPath, 'utf8')
+    return assistantStatusResultSchema.parse(JSON.parse(raw) as unknown)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
+  }
+}
+
+function buildAssistantStatusWarnings(input: {
+  diagnostics: AssistantStatusResult['diagnostics']
+  failover: AssistantFailoverState
+  outbox: AssistantStatusResult['outbox']
+  runLock: AssistantStatusResult['runLock']
+}): string[] {
+  const warnings = [...input.diagnostics.recentWarnings]
+
+  if (input.runLock.state === 'stale' && input.runLock.reason) {
+    warnings.push(`assistant automation lock is stale: ${input.runLock.reason}`)
+  }
+  if (input.outbox.failed > 0) {
+    warnings.push(`${input.outbox.failed} assistant outbox intent(s) failed permanently`)
+  }
+  if (input.outbox.retryable > 0) {
+    warnings.push(`${input.outbox.retryable} assistant outbox intent(s) are waiting for retry`)
+  }
+  const coolingDown = input.failover.routes.filter((route) => route.cooldownUntil)
+  if (coolingDown.length > 0) {
+    warnings.push(
+      `${coolingDown.length} provider failover route(s) are cooling down`,
+    )
+  }
+
+  return warnings.slice(-12)
+}
+
+async function resolveRecentTurns(
+  vault: string,
+  input:
+    | {
+        limit?: number
+        sessionId?: string | null
+        vault: string
+      }
+    | undefined,
+): Promise<AssistantTurnReceipt[]> {
+  const limit = normalizeTurnLimit(input?.limit)
+  const recentTurns = await listRecentAssistantTurnReceipts(vault, Math.max(limit, 50))
+  const filtered =
+    input?.sessionId && input.sessionId.trim().length > 0
+      ? recentTurns.filter((turn) => turn.sessionId === input.sessionId)
+      : recentTurns
+  return filtered.slice(0, limit)
+}
+
+function normalizeTurnLimit(value?: number): number {
+  if (!Number.isFinite(value) || typeof value !== 'number') {
+    return 10
+  }
+
+  return Math.min(Math.max(Math.trunc(value), 1), 50)
+}

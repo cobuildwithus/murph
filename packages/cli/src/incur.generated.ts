@@ -20,6 +20,7 @@ declare module 'incur' {
       'assistant cron show': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron status': { args: {}; options: { vault: string; requestId: string } }
       'assistant deliver': { args: { message: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; deliveryTarget: string } }
+      'assistant doctor': { args: {}; options: { vault: string; requestId: string } }
       'assistant memory forget': { args: { memoryId: string }; options: { vault: string; requestId: string } }
       'assistant memory get': { args: { memoryId: string }; options: { vault: string; requestId: string } }
       'assistant memory search': { args: {}; options: { vault: string; requestId: string; text: string; scope: "long-term" | "daily" | "all"; section: "Identity" | "Preferences" | "Standing instructions" | "Health context" | "Notes"; limit: number } }
@@ -27,6 +28,8 @@ declare module 'incur' {
       'assistant run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; allowSelfAuthored: boolean; sessionRolloverHours: number; once: boolean; skipDaemon: boolean } }
       'assistant session list': { args: {}; options: { vault: string; requestId: string } }
       'assistant session show': { args: { sessionId: string }; options: { vault: string; requestId: string } }
+      'assistant status': { args: {}; options: { vault: string; requestId: string; session: string; limit: number } }
+      'assistant stop': { args: {}; options: { vault: string; requestId: string } }
       'audit list': { args: {}; options: { vault: string; requestId: string; action: string; actor: string; status: string; from: string; to: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { vault: string; requestId: string } }
       'audit tail': { args: {}; options: { vault: string; requestId: string; limit: number } }
@@ -40,6 +43,7 @@ declare module 'incur' {
       'condition show': { args: { id: string }; options: { vault: string; requestId: string } }
       'condition upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'deepthink': { args: { prompt: string }; options: { vault: string; requestId: string; title: string; chat: string; browserPath: string; timeout: string; waitTimeout: string } }
+      'doctor': { args: {}; options: { vault: string; requestId: string } }
       'device account disconnect': { args: { accountId: string }; options: { vault: string; requestId: string; baseUrl: string } }
       'device account list': { args: {}; options: { vault: string; requestId: string; baseUrl: string; provider: string } }
       'device account reconcile': { args: { accountId: string }; options: { vault: string; requestId: string; baseUrl: string } }
@@ -164,6 +168,8 @@ declare module 'incur' {
       'search index status': { args: {}; options: { vault: string; requestId: string } }
       'search query': { args: {}; options: { vault: string; requestId: string; text: string; backend: "auto" | "scan" | "sqlite"; recordType: string[]; kind: string[]; stream: string[]; experiment: string; from: string; to: string; tag: string[]; limit: number } }
       'show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'status': { args: {}; options: { vault: string; requestId: string; session: string; limit: number } }
+      'stop': { args: {}; options: { vault: string; requestId: string } }
       'supplement compound list': { args: {}; options: { vault: string; requestId: string; limit: number; status: string } }
       'supplement compound show': { args: { compound: string }; options: { vault: string; requestId: string; status: string } }
       'supplement list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }

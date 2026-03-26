@@ -5,6 +5,7 @@ import { z } from 'zod'
 import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
+  assistantProviderFailoverRouteSchema,
   assistantSandboxValues,
 } from './assistant-cli-contracts.js'
 import {
@@ -35,6 +36,7 @@ const assistantOperatorDefaultsSchema = z.object({
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
+  failoverRoutes: z.array(assistantProviderFailoverRouteSchema).nullable().optional(),
   account: z
     .object({
       source: z.string().min(1),
@@ -91,6 +93,7 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'blood-test',
   'chat',
   'condition',
+  'doctor',
   'device',
   'document',
   'event',
@@ -116,6 +119,8 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'run',
   'samples',
   'search',
+  'status',
+  'stop',
   'supplement',
   'deepthink',
   'show',
@@ -377,6 +382,10 @@ function mergeAssistantOperatorDefaults(
       'apiKeyEnv' in patch ? patch.apiKeyEnv : existing?.apiKeyEnv ?? null,
     providerName:
       'providerName' in patch ? patch.providerName : existing?.providerName ?? null,
+    failoverRoutes:
+      'failoverRoutes' in patch
+        ? patch.failoverRoutes
+        : existing?.failoverRoutes ?? null,
     account: 'account' in patch ? patch.account : existing?.account ?? null,
   })
 }

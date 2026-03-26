@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test, vi } from 'vitest'
@@ -11,6 +11,7 @@ import {
   sendLinqMessage,
   sendTelegramMessage,
 } from '../src/outbound-channel.js'
+import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
@@ -107,6 +108,63 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps
   assert.equal(result.session.binding.delivery?.target, '+15551234567')
   assert.equal('lastAssistantMessage' in result.session, false)
   assert.equal(result.session.turnCount, 0)
+})
+
+
+test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbox intent', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-receipts-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'imessage',
+      participantId: '+15551234567',
+      message: 'Lunch is logged.',
+    },
+    {
+      sendImessage: async () => {},
+    },
+  )
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const receiptFiles = await readdir(statePaths.turnsDirectory)
+  assert.equal(receiptFiles.length, 1)
+  const receipt = JSON.parse(
+    await readFile(
+      path.join(statePaths.turnsDirectory, receiptFiles[0]!),
+      'utf8',
+    ),
+  ) as {
+    deliveryDisposition: string
+    deliveryIntentId: string | null
+    deliveryRequested: boolean
+    status: string
+    timeline: Array<{ kind: string }>
+  }
+  assert.equal(receipt.status, 'completed')
+  assert.equal(receipt.deliveryRequested, true)
+  assert.equal(receipt.deliveryDisposition, 'sent')
+  assert.equal(typeof receipt.deliveryIntentId, 'string')
+  assert.deepEqual(
+    receipt.timeline.map((event) => event.kind),
+    ['turn.started', 'delivery.queued', 'delivery.attempt.started', 'delivery.sent'],
+  )
+
+  const outboxFiles = await readdir(statePaths.outboxDirectory)
+  assert.equal(outboxFiles.length, 1)
+  const intent = JSON.parse(
+    await readFile(path.join(statePaths.outboxDirectory, outboxFiles[0]!), 'utf8'),
+  ) as {
+    delivery: { target: string } | null
+    intentId: string
+    status: string
+  }
+  assert.equal(intent.status, 'sent')
+  assert.equal(intent.delivery?.target, '+15551234567')
+  assert.equal(intent.intentId, receipt.deliveryIntentId)
 })
 
 test('deliverAssistantMessage uses one-off targets only for the current send and does not rewrite the stored binding', async () => {

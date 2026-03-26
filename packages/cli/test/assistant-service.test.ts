@@ -376,6 +376,80 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
   )
 })
 
+
+test('sendAssistantMessage writes a system receipt for provider and delivery milestones', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-receipts-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-receipt-1',
+    response: 'Assistant reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'imessage',
+      target: '+15551234567',
+      targetKind: 'participant',
+      sentAt: '2026-03-26T01:10:00.000Z',
+      messageLength: 'Assistant reply.'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: 'outbox_receipt_1',
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    channel: 'imessage',
+    participantId: '+15551234567',
+    prompt: 'Send a quick check-in.',
+    deliverResponse: true,
+  })
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const receiptFiles = await readdir(statePaths.turnsDirectory)
+  assert.equal(receiptFiles.length, 1)
+  const receipt = JSON.parse(
+    await readFile(
+      path.join(statePaths.turnsDirectory, receiptFiles[0]!),
+      'utf8',
+    ),
+  ) as {
+    deliveryDisposition: string
+    deliveryIntentId: string | null
+    responsePreview: string | null
+    status: string
+    timeline: Array<{ kind: string }>
+  }
+
+  assert.equal(receipt.status, 'completed')
+  assert.equal(receipt.deliveryDisposition, 'sent')
+  assert.equal(typeof receipt.deliveryIntentId, 'string')
+  assert.equal(receipt.responsePreview, 'Assistant reply.')
+  assert.equal(
+    receipt.timeline.some((event) => event.kind === 'provider.attempt.started'),
+    true,
+  )
+  assert.equal(
+    receipt.timeline.some((event) => event.kind === 'provider.attempt.succeeded'),
+    true,
+  )
+  assert.equal(
+    receipt.timeline.some((event) => event.kind === 'delivery.sent'),
+    true,
+  )
+  assert.equal(
+    receipt.timeline.some((event) => event.kind === 'turn.completed'),
+    true,
+  )
+})
+
 test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-openai-compatible-'))
   const homeRoot = path.join(parent, 'home')

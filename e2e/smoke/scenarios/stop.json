@@ -1,0 +1,10 @@
+{
+  "id": "stop",
+  "command": "vault-cli stop --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents the root alias for assistant automation recovery when a Healthy Bob run loop is already active for the same vault."
+}

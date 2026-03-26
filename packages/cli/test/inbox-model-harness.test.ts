@@ -121,9 +121,9 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
         approvalPolicy: null,
         profile: null,
         oss: false,
-        baseUrl: null,
-        apiKeyEnv: null,
-        providerName: null,
+        baseUrl: undefined,
+        apiKeyEnv: undefined,
+        providerName: undefined,
       },
       alias: null,
       binding: {
@@ -141,6 +141,8 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
       turnCount: 1,
     },
     delivery: null,
+    deliveryDeferred: false,
+    deliveryIntentId: null,
     deliveryError: null,
   }
 }

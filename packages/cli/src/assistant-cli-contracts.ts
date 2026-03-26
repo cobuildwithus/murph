@@ -34,6 +34,33 @@ export const assistantTranscriptEntryKindValues = [
   'assistant',
   'error',
 ] as const
+export const assistantTurnTriggerValues = [
+  'manual-ask',
+  'manual-deliver',
+  'automation-auto-reply',
+  'automation-cron',
+] as const
+export const assistantTurnActionClassValues = ['analysis', 'outbound'] as const
+export const assistantTurnStateValues = [
+  'running',
+  'awaiting-delivery',
+  'deferred',
+  'delivery-failed',
+  'failed',
+  'completed',
+] as const
+export const assistantTurnEventKindValues = [
+  'accepted',
+  'context-ready',
+  'provider-started',
+  'provider-completed',
+  'delivery-prepared',
+  'delivery-sent',
+  'delivery-deduplicated',
+  'deferred',
+  'failed',
+  'completed',
+] as const
 export const assistantMemoryRecordKindValues = [
   'long-term',
   'daily',
@@ -73,6 +100,73 @@ export const assistantCronRunStatusValues = [
   'failed',
   'skipped',
 ] as const
+export const assistantTurnReceiptStatusValues = [
+  'running',
+  'completed',
+  'deferred',
+  'failed',
+] as const
+export const assistantTurnTimelineEventKindValues = [
+  'turn.started',
+  'user.persisted',
+  'provider.attempt.started',
+  'provider.attempt.succeeded',
+  'provider.attempt.failed',
+  'provider.failover.applied',
+  'provider.cooldown.started',
+  'delivery.queued',
+  'delivery.attempt.started',
+  'delivery.sent',
+  'delivery.retry-scheduled',
+  'delivery.failed',
+  'turn.completed',
+  'turn.deferred',
+] as const
+export const assistantOutboxStatusValues = [
+  'pending',
+  'sending',
+  'retryable',
+  'sent',
+  'failed',
+  'abandoned',
+] as const
+export const assistantDiagnosticLevelValues = [
+  'info',
+  'warn',
+  'error',
+] as const
+export const assistantDiagnosticComponentValues = [
+  'assistant',
+  'provider',
+  'delivery',
+  'outbox',
+  'automation',
+  'status',
+] as const
+export const assistantStatusRunLockStateValues = [
+  'unlocked',
+  'active',
+  'stale',
+] as const
+
+export const assistantProviderFailoverRouteSchema = z
+  .object({
+    name: z.string().min(1).nullable().default(null),
+    provider: z.enum(assistantChatProviderValues),
+    codexCommand: z.string().min(1).nullable().default(null),
+    model: z.string().min(1).nullable().default(null),
+    reasoningEffort: z.string().min(1).nullable().default(null),
+    sandbox: z.enum(assistantSandboxValues).nullable().default(null),
+    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().default(null),
+    profile: z.string().min(1).nullable().default(null),
+    oss: z.boolean().default(false),
+    baseUrl: z.string().min(1).nullable().optional(),
+    apiKeyEnv: z.string().min(1).nullable().optional(),
+    providerName: z.string().min(1).nullable().optional(),
+    cooldownMs: z.number().int().positive().nullable().default(null),
+    maxAttempts: z.number().int().positive().nullable().default(null),
+  })
+  .strict()
 
 export const assistantProviderSessionOptionsSchema = z.object({
   model: z.string().min(1).nullable(),
@@ -144,6 +238,241 @@ export const assistantDeliveryErrorSchema = z.object({
   code: z.string().min(1).nullable(),
   message: z.string().min(1),
 })
+
+export const assistantTurnReceiptContextSchema = z
+  .object({
+    deliveryRequested: z.boolean(),
+    usedConversationTranscript: z.boolean(),
+    usedMemoryPrompt: z.boolean(),
+    usedSensitiveHealthContext: z.boolean(),
+  })
+  .strict()
+
+export const assistantTurnReceiptEventSchema = z
+  .object({
+    at: isoTimestampSchema,
+    kind: z.enum(assistantTurnEventKindValues),
+    message: z.string().min(1),
+    state: z.enum(assistantTurnStateValues).nullable(),
+  })
+  .strict()
+
+export const assistantTurnTimelineEventSchema = z
+  .object({
+    at: isoTimestampSchema,
+    kind: z.enum(assistantTurnTimelineEventKindValues),
+    detail: z.string().nullable().default(null),
+    metadata: z.record(z.string(), z.string()).default({}),
+  })
+  .strict()
+
+export const assistantTurnReceiptSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-turn-receipt.v1'),
+    turnId: z.string().min(1),
+    sessionId: z.string().min(1),
+    provider: z.enum(assistantChatProviderValues),
+    providerModel: z.string().min(1).nullable(),
+    promptPreview: z.string().nullable(),
+    responsePreview: z.string().nullable(),
+    status: z.enum(assistantTurnReceiptStatusValues),
+    deliveryRequested: z.boolean(),
+    deliveryDisposition: z.enum([
+      'not-requested',
+      'queued',
+      'sent',
+      'retryable',
+      'failed',
+    ]),
+    deliveryIntentId: z.string().min(1).nullable(),
+    startedAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    completedAt: isoTimestampSchema.nullable(),
+    lastError: assistantDeliveryErrorSchema.nullable(),
+    timeline: z.array(assistantTurnTimelineEventSchema),
+  })
+  .strict()
+
+export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
+
+export const assistantOutboxIntentSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-outbox-intent.v1'),
+    intentId: z.string().min(1),
+    sessionId: z.string().min(1),
+    turnId: z.string().min(1),
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    lastAttemptAt: isoTimestampSchema.nullable(),
+    nextAttemptAt: isoTimestampSchema.nullable(),
+    sentAt: isoTimestampSchema.nullable(),
+    attemptCount: z.number().int().nonnegative(),
+    status: z.enum(assistantOutboxIntentStatusValues),
+    message: z.string().min(1),
+    dedupeKey: z.string().min(1),
+    targetFingerprint: z.string().min(1),
+    channel: z.string().min(1).nullable(),
+    identityId: z.string().min(1).nullable(),
+    actorId: z.string().min(1).nullable(),
+    threadId: z.string().min(1).nullable(),
+    threadIsDirect: z.boolean().nullable(),
+    bindingDelivery: assistantBindingDeliverySchema.nullable(),
+    explicitTarget: z.string().min(1).nullable(),
+    delivery: assistantChannelDeliverySchema.nullable(),
+    lastError: assistantDeliveryErrorSchema.nullable(),
+  })
+  .strict()
+
+export const assistantDiagnosticEventSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-diagnostic-event.v1'),
+    at: isoTimestampSchema,
+    level: z.enum(assistantDiagnosticLevelValues),
+    component: z.enum(assistantDiagnosticComponentValues),
+    kind: z.string().min(1),
+    message: z.string().min(1),
+    code: z.string().min(1).nullable(),
+    sessionId: z.string().min(1).nullable(),
+    turnId: z.string().min(1).nullable(),
+    intentId: z.string().min(1).nullable(),
+    dataJson: z.string().nullable(),
+  })
+  .strict()
+
+export const assistantDiagnosticsCountersSchema = z
+  .object({
+    turnsStarted: z.number().int().nonnegative(),
+    turnsCompleted: z.number().int().nonnegative(),
+    turnsDeferred: z.number().int().nonnegative(),
+    turnsFailed: z.number().int().nonnegative(),
+    providerAttempts: z.number().int().nonnegative(),
+    providerFailures: z.number().int().nonnegative(),
+    providerFailovers: z.number().int().nonnegative(),
+    deliveriesQueued: z.number().int().nonnegative(),
+    deliveriesSent: z.number().int().nonnegative(),
+    deliveriesFailed: z.number().int().nonnegative(),
+    deliveriesRetryable: z.number().int().nonnegative(),
+    outboxDrains: z.number().int().nonnegative(),
+    outboxRetries: z.number().int().nonnegative(),
+    automationScans: z.number().int().nonnegative(),
+  })
+  .strict()
+
+export const assistantDiagnosticsSnapshotSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-diagnostics.v1'),
+    updatedAt: isoTimestampSchema,
+    lastEventAt: isoTimestampSchema.nullable(),
+    lastErrorAt: isoTimestampSchema.nullable(),
+    counters: assistantDiagnosticsCountersSchema,
+    recentWarnings: z.array(z.string()),
+  })
+  .strict()
+
+export const assistantProviderRouteStateSchema = z
+  .object({
+    routeId: z.string().min(1),
+    label: z.string().min(1),
+    provider: z.enum(assistantChatProviderValues),
+    model: z.string().min(1).nullable(),
+    failureCount: z.number().int().nonnegative(),
+    successCount: z.number().int().nonnegative(),
+    consecutiveFailures: z.number().int().nonnegative(),
+    lastFailureAt: isoTimestampSchema.nullable(),
+    lastErrorCode: z.string().min(1).nullable(),
+    lastErrorMessage: z.string().min(1).nullable(),
+    cooldownUntil: isoTimestampSchema.nullable(),
+  })
+  .strict()
+
+export const assistantFailoverStateSchema = z
+  .object({
+    schema: z.literal('healthybob.assistant-failover-state.v1'),
+    updatedAt: isoTimestampSchema,
+    routes: z.array(assistantProviderRouteStateSchema),
+  })
+  .strict()
+
+export const assistantStatusRunLockSchema = z
+  .object({
+    state: z.enum(assistantStatusRunLockStateValues),
+    pid: z.number().int().positive().nullable(),
+    startedAt: isoTimestampSchema.nullable(),
+    mode: z.enum(['continuous', 'once']).nullable(),
+    command: z.string().min(1).nullable(),
+    reason: z.string().nullable(),
+  })
+  .strict()
+
+export const assistantStatusAutomationSchema = z
+  .object({
+    inboxScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
+    autoReplyScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
+    autoReplyChannels: z.array(z.string().min(1)),
+    preferredChannels: z.array(z.string().min(1)),
+    autoReplyBacklogChannels: z.array(z.string().min(1)),
+    autoReplyPrimed: z.boolean(),
+    updatedAt: isoTimestampSchema.nullable(),
+  })
+  .strict()
+
+export const assistantStatusOutboxSummarySchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+    sending: z.number().int().nonnegative(),
+    retryable: z.number().int().nonnegative(),
+    sent: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    abandoned: z.number().int().nonnegative(),
+    oldestPendingAt: isoTimestampSchema.nullable(),
+    nextAttemptAt: isoTimestampSchema.nullable(),
+  })
+  .strict()
+
+export const assistantStatusResultSchema = z
+  .object({
+    vault: pathSchema,
+    stateRoot: pathSchema,
+    statusPath: pathSchema,
+    outboxRoot: pathSchema,
+    diagnosticsPath: pathSchema,
+    failoverStatePath: pathSchema,
+    turnsRoot: pathSchema,
+    generatedAt: isoTimestampSchema,
+    runLock: assistantStatusRunLockSchema,
+    automation: assistantStatusAutomationSchema,
+    outbox: assistantStatusOutboxSummarySchema,
+    diagnostics: assistantDiagnosticsSnapshotSchema,
+    failover: assistantFailoverStateSchema,
+    recentTurns: z.array(assistantTurnReceiptSchema),
+    warnings: z.array(z.string()),
+  })
+  .strict()
+
+export const assistantDoctorCheckStatusValues = ['pass', 'warn', 'fail'] as const
+
+export const assistantDoctorCheckSchema = z
+  .object({
+    name: z.string().min(1),
+    status: z.enum(assistantDoctorCheckStatusValues),
+    message: z.string().min(1),
+    details: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+
+export const assistantDoctorResultSchema = z
+  .object({
+    vault: pathSchema,
+    stateRoot: pathSchema,
+    ok: z.boolean(),
+    sessionCount: z.number().int().nonnegative(),
+    transcriptFileCount: z.number().int().nonnegative(),
+    receiptCount: z.number().int().nonnegative(),
+    outboxIntentCount: z.number().int().nonnegative(),
+    checks: z.array(assistantDoctorCheckSchema),
+  })
+  .strict()
 
 export const assistantMemoryRecordProvenanceSchema = z.object({
   writtenBy: z.enum(assistantMemoryWriteActorValues),
@@ -281,6 +610,8 @@ export const assistantAskResultSchema = z.object({
   response: z.string(),
   session: assistantSessionSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
+  deliveryDeferred: z.boolean().default(false),
+  deliveryIntentId: z.string().min(1).nullable().default(null),
   deliveryError: assistantDeliveryErrorSchema.nullable(),
 })
 
@@ -439,6 +770,18 @@ export const assistantRunResultSchema = z.object({
   lastError: z.string().nullable(),
 })
 
+export const assistantStopResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  stopped: z.boolean(),
+  stopMethod: z.enum(['signal', 'force-kill', 'stale-lock-cleanup']),
+  pid: z.number().int().positive().nullable(),
+  startedAt: isoTimestampSchema.nullable(),
+  stoppedAt: isoTimestampSchema,
+  command: z.string().min(1).nullable(),
+  message: z.string().min(1),
+})
+
 export const assistantAutomationCursorSchema = z.object({
   occurredAt: isoTimestampSchema,
   captureId: z.string().min(1),
@@ -473,6 +816,35 @@ export type AssistantChannelDelivery = z.infer<
 >
 export type AssistantDeliveryError = z.infer<
   typeof assistantDeliveryErrorSchema
+>
+export type AssistantTurnReceiptContext = z.infer<
+  typeof assistantTurnReceiptContextSchema
+>
+export type AssistantTurnReceiptEvent = z.infer<
+  typeof assistantTurnReceiptEventSchema
+>
+export type AssistantTurnTimelineEvent = z.infer<
+  typeof assistantTurnTimelineEventSchema
+>
+export type AssistantTurnReceipt = z.infer<typeof assistantTurnReceiptSchema>
+export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
+export type AssistantDiagnosticEvent = z.infer<
+  typeof assistantDiagnosticEventSchema
+>
+export type AssistantDiagnosticsCounters = z.infer<
+  typeof assistantDiagnosticsCountersSchema
+>
+export type AssistantDiagnosticsSnapshot = z.infer<
+  typeof assistantDiagnosticsSnapshotSchema
+>
+export type AssistantProviderFailoverRoute = z.infer<
+  typeof assistantProviderFailoverRouteSchema
+>
+export type AssistantProviderRouteState = z.infer<
+  typeof assistantProviderRouteStateSchema
+>
+export type AssistantFailoverState = z.infer<
+  typeof assistantFailoverStateSchema
 >
 export type AssistantAskResult = z.infer<typeof assistantAskResultSchema>
 export type AssistantChatResult = z.infer<typeof assistantChatResultSchema>
@@ -544,6 +916,23 @@ export type AssistantCronPresetInstallResult = z.infer<
   typeof assistantCronPresetInstallResultSchema
 >
 export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
+export type AssistantStopResult = z.infer<typeof assistantStopResultSchema>
+export type AssistantStatusRunLock = z.infer<
+  typeof assistantStatusRunLockSchema
+>
+export type AssistantStatusAutomation = z.infer<
+  typeof assistantStatusAutomationSchema
+>
+export type AssistantStatusOutboxSummary = z.infer<
+  typeof assistantStatusOutboxSummarySchema
+>
+export type AssistantStatusResult = z.infer<
+  typeof assistantStatusResultSchema
+>
+export type AssistantDoctorCheck = z.infer<typeof assistantDoctorCheckSchema>
+export type AssistantDoctorResult = z.infer<
+  typeof assistantDoctorResultSchema
+>
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema
 >
@@ -563,6 +952,15 @@ export type AssistantBindingDeliveryKind =
   (typeof assistantBindingDeliveryKindValues)[number]
 export type AssistantTranscriptEntryKind =
   (typeof assistantTranscriptEntryKindValues)[number]
+export type AssistantTurnTrigger =
+  (typeof assistantTurnTriggerValues)[number]
+export type AssistantTurnActionClass =
+  (typeof assistantTurnActionClassValues)[number]
+export type AssistantTurnState = (typeof assistantTurnStateValues)[number]
+export type AssistantTurnEventKind =
+  (typeof assistantTurnEventKindValues)[number]
+export type AssistantOutboxIntentStatus =
+  (typeof assistantOutboxIntentStatusValues)[number]
 export type AssistantMemoryRecordKind =
   (typeof assistantMemoryRecordKindValues)[number]
 export type AssistantMemoryQueryScope =
@@ -578,6 +976,20 @@ export type AssistantCronScheduleKind =
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
 export type AssistantCronRunStatus =
   (typeof assistantCronRunStatusValues)[number]
+export type AssistantTurnReceiptStatus =
+  (typeof assistantTurnReceiptStatusValues)[number]
+export type AssistantTurnTimelineEventKind =
+  (typeof assistantTurnTimelineEventKindValues)[number]
+export type AssistantOutboxStatus =
+  (typeof assistantOutboxStatusValues)[number]
+export type AssistantDiagnosticLevel =
+  (typeof assistantDiagnosticLevelValues)[number]
+export type AssistantDiagnosticComponent =
+  (typeof assistantDiagnosticComponentValues)[number]
+export type AssistantStatusRunLockState =
+  (typeof assistantStatusRunLockStateValues)[number]
+export type AssistantDoctorCheckStatus =
+  (typeof assistantDoctorCheckStatusValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >

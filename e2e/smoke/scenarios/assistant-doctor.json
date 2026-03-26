@@ -1,0 +1,10 @@
+{
+  "id": "assistant-doctor",
+  "command": "vault-cli assistant doctor --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents tolerant assistant-state diagnostics for transcripts, receipts, outbox intents, and automation metadata."
+}

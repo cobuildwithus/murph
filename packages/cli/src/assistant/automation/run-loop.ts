@@ -8,6 +8,10 @@ import type {
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultCliServices } from '../../vault-cli-services.js'
 import { processDueAssistantCronJobs } from '../cron.js'
+import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
+import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
+import { drainAssistantOutbox } from '../outbox.js'
+import { refreshAssistantStatusSnapshot } from '../status.js'
 import {
   readAssistantAutomationState,
   redactAssistantDisplayPath,
@@ -96,9 +100,29 @@ export async function runAssistantAutomation(
       })
   }
 
+  await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
+
   try {
     while (!controller.signal.aborted) {
       scans += 1
+      maybeThrowInjectedAssistantFault({
+        component: 'automation',
+        fault: 'automation',
+        message: 'Injected assistant automation failure.',
+      })
+      await recordAssistantDiagnosticEvent({
+        vault: input.vault,
+        component: 'automation',
+        kind: 'automation.scan.started',
+        message: `Assistant automation scan ${scans} started.`,
+        counterDeltas: {
+          automationScans: 1,
+        },
+      })
+      await drainAssistantOutbox({
+        vault: input.vault,
+        limit: input.maxPerScan,
+      })
       await processDueAssistantCronJobs({
         vault: input.vault,
         signal: controller.signal,
@@ -167,6 +191,8 @@ export async function runAssistantAutomation(
           aggregateReplies.replied += backlogResult.replied
           aggregateReplies.skipped += backlogResult.skipped
 
+          await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
+
           if (input.once) {
             break
           }
@@ -208,6 +234,8 @@ export async function runAssistantAutomation(
         aggregateReplies.replied += replyResult.replied
         aggregateReplies.skipped += replyResult.skipped
       }
+
+      await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
 
       if (input.once) {
         break
@@ -259,6 +287,7 @@ export async function runAssistantAutomation(
       }
     }
 
-    await runLock?.release()
+    await runLock?.release().catch(() => undefined)
+    await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
   }
 }

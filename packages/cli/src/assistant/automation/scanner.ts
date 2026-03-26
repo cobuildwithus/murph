@@ -684,6 +684,7 @@ async function executeAssistantAutoReply(input: {
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
       deliverResponse: true,
+      turnTrigger: 'automation-auto-reply',
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: (event) => {
         const eventReceivedAtMs = Date.now()
@@ -704,6 +705,19 @@ async function executeAssistantAutoReply(input: {
         }
       },
     })
+
+    if (result.deliveryDeferred) {
+      input.onEvent?.({
+        type: 'capture.reply-progress',
+        captureId: input.replyCaptureId,
+        details: result.deliveryIntentId
+          ? `assistant queued outbound delivery for retry as ${result.deliveryIntentId}`
+          : 'assistant queued outbound delivery for retry',
+        providerKind: 'status',
+        providerState: 'completed',
+      })
+      return result
+    }
 
     if (result.deliveryError || result.delivery === null) {
       throw new Error(

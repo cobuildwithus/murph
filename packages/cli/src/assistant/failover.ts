@@ -1,0 +1,413 @@
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import {
+  assistantFailoverStateSchema,
+  assistantProviderRouteStateSchema,
+  type AssistantChatProvider,
+  type AssistantFailoverState,
+  type AssistantProviderFailoverRoute,
+  type AssistantProviderRouteState,
+  type AssistantProviderSessionOptions,
+} from '../assistant-cli-contracts.js'
+import type { AssistantOperatorDefaults } from '../operator-config.js'
+import { ensureAssistantState } from './store/persistence.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
+import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
+
+const ASSISTANT_FAILOVER_STATE_SCHEMA = 'healthybob.assistant-failover-state.v1'
+const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000
+const RATE_LIMIT_FAILOVER_COOLDOWN_MS = 5 * 60_000
+
+export interface ResolvedAssistantFailoverRoute {
+  codexCommand: string | null
+  cooldownMs: number
+  label: string
+  maxAttempts: number | null
+  provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
+  routeId: string
+}
+
+export async function readAssistantFailoverState(
+  vault: string,
+): Promise<AssistantFailoverState> {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+
+  try {
+    const raw = await readFile(paths.failoverStatePath, 'utf8')
+    return assistantFailoverStateSchema.parse(JSON.parse(raw) as unknown)
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+  }
+
+  return assistantFailoverStateSchema.parse({
+    schema: ASSISTANT_FAILOVER_STATE_SCHEMA,
+    updatedAt: new Date(0).toISOString(),
+    routes: [],
+  })
+}
+
+export async function saveAssistantFailoverState(
+  vault: string,
+  state: AssistantFailoverState,
+): Promise<AssistantFailoverState> {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+  const parsed = assistantFailoverStateSchema.parse(state)
+  await writeJsonFileAtomic(paths.failoverStatePath, parsed)
+  return parsed
+}
+
+export function buildAssistantFailoverRoutes(input: {
+  backups?: readonly AssistantProviderFailoverRoute[] | null
+  codexCommand?: string | null
+  defaults?: AssistantOperatorDefaults | null
+  provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
+}): ResolvedAssistantFailoverRoute[] {
+  const primary = createResolvedAssistantFailoverRoute({
+    name: 'primary',
+    provider: input.provider,
+    codexCommand: input.codexCommand ?? input.defaults?.codexCommand ?? null,
+    providerOptions: input.providerOptions,
+    cooldownMs: null,
+    maxAttempts: null,
+  })
+  const backupRoutes = (input.backups ?? []).map((route) =>
+    createResolvedAssistantFailoverRoute({
+      name: route.name,
+      provider: route.provider,
+      codexCommand:
+        route.codexCommand ?? input.defaults?.codexCommand ?? input.codexCommand ?? null,
+      providerOptions: normalizeAssistantProviderSessionOptions({
+        approvalPolicy: route.approvalPolicy,
+        apiKeyEnv: route.apiKeyEnv,
+        baseUrl: route.baseUrl,
+        model: route.model,
+        oss: route.oss,
+        profile: route.profile,
+        providerName: route.providerName,
+        reasoningEffort: route.reasoningEffort,
+        sandbox: route.sandbox,
+      }),
+      cooldownMs: route.cooldownMs,
+      maxAttempts: route.maxAttempts,
+    }),
+  )
+
+  return dedupeAssistantFailoverRoutes([primary, ...backupRoutes])
+}
+
+export function isAssistantFailoverRouteCoolingDown(input: {
+  now?: Date
+  route: ResolvedAssistantFailoverRoute
+  state: AssistantFailoverState
+}): boolean {
+  const routeState = input.state.routes.find((entry) => entry.routeId === input.route.routeId)
+  if (!routeState?.cooldownUntil) {
+    return false
+  }
+
+  const cooldownUntilMs = Date.parse(routeState.cooldownUntil)
+  const nowMs = (input.now ?? new Date()).getTime()
+  return Number.isFinite(cooldownUntilMs) && cooldownUntilMs > nowMs
+}
+
+export function getAssistantFailoverCooldownUntil(input: {
+  route: ResolvedAssistantFailoverRoute
+  state: AssistantFailoverState
+}): string | null {
+  return (
+    input.state.routes.find((entry) => entry.routeId === input.route.routeId)?.cooldownUntil ??
+    null
+  )
+}
+
+export async function recordAssistantFailoverRouteSuccess(input: {
+  at?: string
+  route: ResolvedAssistantFailoverRoute
+  vault: string
+}): Promise<AssistantFailoverState> {
+  const at = input.at ?? new Date().toISOString()
+  const state = await readAssistantFailoverState(input.vault)
+  const routes = upsertAssistantProviderRouteState(
+    state.routes,
+    {
+      routeId: input.route.routeId,
+      label: input.route.label,
+      provider: input.route.provider,
+      model: input.route.providerOptions.model,
+      failureCount: 0,
+      successCount: 1,
+      consecutiveFailures: 0,
+      lastFailureAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      cooldownUntil: null,
+    },
+    'success',
+  )
+
+  return saveAssistantFailoverState(input.vault, {
+    ...state,
+    updatedAt: at,
+    routes,
+  })
+}
+
+export async function recordAssistantFailoverRouteFailure(input: {
+  at?: string
+  cooldownMs?: number | null
+  error: unknown
+  route: ResolvedAssistantFailoverRoute
+  vault: string
+}): Promise<AssistantFailoverState> {
+  const at = input.at ?? new Date().toISOString()
+  const state = await readAssistantFailoverState(input.vault)
+  const cooldownMs =
+    normalizePositiveInt(input.cooldownMs) ??
+    resolveAssistantFailoverCooldownMs(input.error) ??
+    input.route.cooldownMs
+  const cooldownUntil =
+    cooldownMs && cooldownMs > 0
+      ? new Date(Date.parse(at) + cooldownMs).toISOString()
+      : null
+  const routes = upsertAssistantProviderRouteState(
+    state.routes,
+    {
+      routeId: input.route.routeId,
+      label: input.route.label,
+      provider: input.route.provider,
+      model: input.route.providerOptions.model,
+      failureCount: 1,
+      successCount: 0,
+      consecutiveFailures: 1,
+      lastFailureAt: at,
+      lastErrorCode: readErrorCode(input.error),
+      lastErrorMessage: readErrorMessage(input.error),
+      cooldownUntil,
+    },
+    'failure',
+  )
+
+  return saveAssistantFailoverState(input.vault, {
+    ...state,
+    updatedAt: at,
+    routes,
+  })
+}
+
+export function shouldAttemptAssistantProviderFailover(input: {
+  abortSignal?: AbortSignal
+  error: unknown
+}): boolean {
+  if (input.abortSignal?.aborted) {
+    return false
+  }
+
+  const code = readErrorCode(input.error)
+  if (!code) {
+    return true
+  }
+
+  return !new Set(['ASSISTANT_PROMPT_REQUIRED', 'invalid_payload']).has(code)
+}
+
+function createResolvedAssistantFailoverRoute(input: {
+  codexCommand: string | null
+  cooldownMs: number | null | undefined
+  maxAttempts: number | null | undefined
+  name: string | null | undefined
+  provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
+}): ResolvedAssistantFailoverRoute {
+  const label = buildAssistantFailoverRouteLabel({
+    name: input.name,
+    provider: input.provider,
+    providerOptions: input.providerOptions,
+  })
+  const routeId = hashAssistantFailoverRoute({
+    label,
+    provider: input.provider,
+    providerOptions: input.providerOptions,
+    codexCommand: input.codexCommand,
+  })
+
+  return {
+    routeId,
+    label,
+    provider: input.provider,
+    providerOptions: input.providerOptions,
+    codexCommand: normalizeNullableString(input.codexCommand),
+    cooldownMs:
+      normalizePositiveInt(input.cooldownMs) ?? DEFAULT_FAILOVER_COOLDOWN_MS,
+    maxAttempts: normalizePositiveInt(input.maxAttempts),
+  }
+}
+
+function normalizeAssistantProviderSessionOptions(input: {
+  approvalPolicy?: AssistantProviderSessionOptions['approvalPolicy']
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
+  model?: string | null
+  oss?: boolean
+  profile?: string | null
+  providerName?: string | null
+  reasoningEffort?: string | null
+  sandbox?: AssistantProviderSessionOptions['sandbox']
+}): AssistantProviderSessionOptions {
+  return {
+    model: normalizeNullableString(input.model),
+    reasoningEffort: normalizeNullableString(input.reasoningEffort),
+    sandbox: input.sandbox ?? null,
+    approvalPolicy: input.approvalPolicy ?? null,
+    profile: normalizeNullableString(input.profile),
+    oss: input.oss ?? false,
+    baseUrl: normalizeNullableString(input.baseUrl) ?? null,
+    apiKeyEnv: normalizeNullableString(input.apiKeyEnv) ?? null,
+    providerName: normalizeNullableString(input.providerName) ?? null,
+  }
+}
+
+function dedupeAssistantFailoverRoutes(
+  routes: readonly ResolvedAssistantFailoverRoute[],
+): ResolvedAssistantFailoverRoute[] {
+  const deduped: ResolvedAssistantFailoverRoute[] = []
+  const seen = new Set<string>()
+
+  for (const route of routes) {
+    if (seen.has(route.routeId)) {
+      continue
+    }
+    seen.add(route.routeId)
+    deduped.push(route)
+  }
+
+  return deduped
+}
+
+function buildAssistantFailoverRouteLabel(input: {
+  name: string | null | undefined
+  provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
+}): string {
+  const explicitName = normalizeNullableString(input.name)
+  if (explicitName) {
+    return explicitName
+  }
+
+  const parts = [
+    input.provider,
+    normalizeNullableString(input.providerOptions.model),
+    normalizeNullableString(input.providerOptions.profile),
+    normalizeNullableString(input.providerOptions.providerName),
+  ].filter((value): value is string => value !== null)
+
+  return parts.join(':') || input.provider
+}
+
+function hashAssistantFailoverRoute(input: {
+  codexCommand: string | null
+  label: string
+  provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
+}): string {
+  return createHash('sha1')
+    .update(
+      JSON.stringify({
+        label: input.label,
+        provider: input.provider,
+        providerOptions: input.providerOptions,
+        codexCommand: input.codexCommand,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 16)
+}
+
+function resolveAssistantFailoverCooldownMs(error: unknown): number | null {
+  const code = readErrorCode(error)
+  const message = readErrorMessage(error)?.toLowerCase() ?? ''
+  if (
+    code?.includes('RATE') ||
+    code?.includes('LIMIT') ||
+    code?.includes('QUOTA') ||
+    message.includes('rate limit') ||
+    message.includes('too many requests') ||
+    message.includes('quota')
+  ) {
+    return RATE_LIMIT_FAILOVER_COOLDOWN_MS
+  }
+
+  return DEFAULT_FAILOVER_COOLDOWN_MS
+}
+
+function upsertAssistantProviderRouteState(
+  existingRoutes: readonly AssistantProviderRouteState[],
+  delta: AssistantProviderRouteState,
+  mode: 'failure' | 'success',
+): AssistantProviderRouteState[] {
+  const routes = [...existingRoutes]
+  const index = routes.findIndex((entry) => entry.routeId === delta.routeId)
+  if (index < 0) {
+    routes.push(
+      assistantProviderRouteStateSchema.parse({
+        ...delta,
+      }),
+    )
+    return routes
+  }
+
+  const current = routes[index]!
+  routes[index] = assistantProviderRouteStateSchema.parse({
+    ...current,
+    label: delta.label,
+    provider: delta.provider,
+    model: delta.model,
+    failureCount:
+      mode === 'failure'
+        ? current.failureCount + delta.failureCount
+        : current.failureCount,
+    successCount:
+      mode === 'success'
+        ? current.successCount + delta.successCount
+        : current.successCount,
+    consecutiveFailures:
+      mode === 'failure' ? current.consecutiveFailures + 1 : 0,
+    lastFailureAt: mode === 'failure' ? delta.lastFailureAt : current.lastFailureAt,
+    lastErrorCode: mode === 'failure' ? delta.lastErrorCode : null,
+    lastErrorMessage: mode === 'failure' ? delta.lastErrorMessage : null,
+    cooldownUntil: mode === 'failure' ? delta.cooldownUntil : null,
+  })
+  return routes
+}
+
+function readErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+
+  return typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : null
+}
+
+function readErrorMessage(error: unknown): string | null {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+
+  return typeof error === 'string' && error.trim().length > 0 ? error : null
+}
+
+function normalizePositiveInt(value: number | null | undefined): number | null {
+  if (!Number.isFinite(value) || typeof value !== 'number') {
+    return null
+  }
+
+  const normalized = Math.trunc(value)
+  return normalized > 0 ? normalized : null
+}

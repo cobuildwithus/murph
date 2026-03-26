@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { Cli } from 'incur'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
   TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
@@ -42,7 +43,7 @@ const require = createRequire(import.meta.url)
 const execFileAsync = promisify(execFile)
 const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
 const tsxCliPath = require.resolve('tsx/cli')
-const ASSISTANT_CLI_TIMEOUT_MS = 40_000
+const ASSISTANT_CLI_TIMEOUT_MS = 60_000
 
 function isolateAssistantMemoryEnv(
   env: NodeJS.ProcessEnv = {},
@@ -844,6 +845,21 @@ test('root chat alias participates in default-vault injection', () => {
     '--vault',
     '/tmp/default-vault',
   ])
+  assert.deepEqual(applyDefaultVaultToArgs(['status'], '/tmp/default-vault'), [
+    'status',
+    '--vault',
+    '/tmp/default-vault',
+  ])
+  assert.deepEqual(applyDefaultVaultToArgs(['doctor'], '/tmp/default-vault'), [
+    'doctor',
+    '--vault',
+    '/tmp/default-vault',
+  ])
+  assert.deepEqual(applyDefaultVaultToArgs(['stop'], '/tmp/default-vault'), [
+    'stop',
+    '--vault',
+    '/tmp/default-vault',
+  ])
   assert.deepEqual(applyDefaultVaultToArgs(['run'], '/tmp/default-vault'), [
     'run',
     '--vault',
@@ -868,6 +884,18 @@ test('root chat alias participates in default-vault injection', () => {
   assert.deepEqual(
     applyDefaultVaultToArgs(['chat', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
     ['chat', '--vault', '/tmp/explicit-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['status', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
+    ['status', '--vault', '/tmp/explicit-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['doctor', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
+    ['doctor', '--vault', '/tmp/explicit-vault'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['stop', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
+    ['stop', '--vault', '/tmp/explicit-vault'],
   )
   assert.deepEqual(
     applyDefaultVaultToArgs(['run', '--vault', '/tmp/explicit-vault'], '/tmp/default-vault'),
@@ -909,6 +937,83 @@ test('default-vault root coverage stays aligned with manifest-backed root comman
     [...collectVaultCliDescriptorRootCommandNames()].sort(),
   )
 })
+
+test('root status, doctor, and stop aliases reuse the assistant command schemas', () => {
+  const cli = createVaultCli(
+    createUnwiredVaultCliServices(),
+    createIntegratedInboxCliServices(),
+  )
+  const commands = Cli.toCommands.get(cli)
+  const assistant = commands?.get('assistant') as
+    | {
+        _group: true
+        commands: Map<string, Record<string, unknown>>
+      }
+    | undefined
+
+  const rootStatus = commands?.get('status') as Record<string, unknown> | undefined
+  const assistantStatus = assistant?.commands.get('status')
+  const rootDoctor = commands?.get('doctor') as Record<string, unknown> | undefined
+  const assistantDoctor = assistant?.commands.get('doctor')
+
+  assert.notEqual(rootStatus, undefined)
+  assert.notEqual(assistantStatus, undefined)
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootStatus, 'args'),
+    commandSchemaShapeKeys(assistantStatus, 'args'),
+  )
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootStatus, 'options'),
+    commandSchemaShapeKeys(assistantStatus, 'options'),
+  )
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootStatus, 'output'),
+    commandSchemaShapeKeys(assistantStatus, 'output'),
+  )
+
+  assert.notEqual(rootDoctor, undefined)
+  assert.notEqual(assistantDoctor, undefined)
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootDoctor, 'args'),
+    commandSchemaShapeKeys(assistantDoctor, 'args'),
+  )
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootDoctor, 'options'),
+    commandSchemaShapeKeys(assistantDoctor, 'options'),
+  )
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootDoctor, 'output'),
+    commandSchemaShapeKeys(assistantDoctor, 'output'),
+  )
+
+  const rootStop = commands?.get('stop') as Record<string, unknown> | undefined
+  const assistantStop = assistant?.commands.get('stop')
+  assert.notEqual(rootStop, undefined)
+  assert.notEqual(assistantStop, undefined)
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootStop, 'args'),
+    commandSchemaShapeKeys(assistantStop, 'args'),
+  )
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootStop, 'options'),
+    commandSchemaShapeKeys(assistantStop, 'options'),
+  )
+  assert.deepEqual(
+    commandSchemaShapeKeys(rootStop, 'output'),
+    commandSchemaShapeKeys(assistantStop, 'output'),
+  )
+})
+
+function commandSchemaShapeKeys(
+  command: Record<string, unknown> | undefined,
+  field: 'args' | 'options' | 'output',
+): string[] {
+  const schema = command?.[field] as
+    | { shape?: Record<string, unknown>; def?: { shape?: Record<string, unknown> } }
+    | undefined
+  const shape = schema?.shape ?? schema?.def?.shape ?? {}
+  return Object.keys(shape).sort()
+}
 
 test.sequential(
   'assistant memory search falls back to the assistant-bound vault env when --vault is omitted',

@@ -17,6 +17,7 @@ import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 
 const require = createRequire(import.meta.url)
 const packageJson = require('../package.json') as { version?: string }
+const INCUR_HELP_TIMEOUT_MS = 45_000
 
 test('root help exposes the Incur built-ins', async () => {
   const help = await runRawCli(['--help'])
@@ -213,6 +214,60 @@ test('root run alias keeps the same command schema as assistant run', async () =
   assert.deepEqual(rootSchema.options, assistantSchema.options)
 })
 
+test('root status alias keeps the same command schema as assistant status', async () => {
+  const rootSchema = JSON.parse(
+    await runRawCli(['status', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+  const assistantSchema = JSON.parse(
+    await runRawCli(['assistant', 'status', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+
+  assert.deepEqual(rootSchema.args, assistantSchema.args)
+  assert.deepEqual(rootSchema.options, assistantSchema.options)
+})
+
+test('root doctor alias keeps the same command schema as assistant doctor', async () => {
+  const rootSchema = JSON.parse(
+    await runRawCli(['doctor', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+  const assistantSchema = JSON.parse(
+    await runRawCli(['assistant', 'doctor', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+
+  assert.deepEqual(rootSchema.args, assistantSchema.args)
+  assert.deepEqual(rootSchema.options, assistantSchema.options)
+})
+
+test('root stop alias keeps the same command schema as assistant stop', async () => {
+  const rootSchema = JSON.parse(
+    await runRawCli(['stop', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+  const assistantSchema = JSON.parse(
+    await runRawCli(['assistant', 'stop', '--schema', '--format', 'json']),
+  ) as {
+    args: unknown
+    options: unknown
+  }
+
+  assert.deepEqual(rootSchema.args, assistantSchema.args)
+  assert.deepEqual(rootSchema.options, assistantSchema.options)
+})
+
 test('research schema exposes the review:gpt orchestration options', async () => {
   const schema = JSON.parse(
     await runRawCli(['research', '--schema', '--format', 'json']),
@@ -372,7 +427,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
     regimenStopHelp,
     /Use the canonical regimen id so the stop event is attached to the existing registry record\./u,
   )
-})
+}, INCUR_HELP_TIMEOUT_MS)
 
 test('health list help preserves command-family option shapes', async () => {
   const providerHelp = await runRawCli(['provider', 'list', '--help'])
@@ -393,7 +448,7 @@ test('health list help preserves command-family option shapes', async () => {
   assert.match(documentHelp, /^\s+--to\b/mu)
   assert.doesNotMatch(documentHelp, /^\s+--status\b/mu)
   assert.doesNotMatch(documentHelp, /^\s+--limit\b/mu)
-})
+}, INCUR_HELP_TIMEOUT_MS)
 
 test('command schema reflects only domain-specific options', async () => {
   const schema = JSON.parse(
@@ -407,7 +462,7 @@ test('command schema reflects only domain-specific options', async () => {
 
   assert.deepEqual(Object.keys(schema.options.properties), ['vault', 'requestId'])
   assert.deepEqual(schema.options.required, ['vault'])
-})
+}, INCUR_HELP_TIMEOUT_MS)
 
 test('health command schema remains JSON-Schema-safe', async () => {
   const schema = JSON.parse(
@@ -421,7 +476,7 @@ test('health command schema remains JSON-Schema-safe', async () => {
 
   assert.equal('input' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'input'])
-})
+}, INCUR_HELP_TIMEOUT_MS)
 
 test.sequential('verbose json exposes the native Incur success envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-incur-'))

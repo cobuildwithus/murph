@@ -55,6 +55,8 @@ readonly cli_verify_test_files=(
   "packages/cli/test/health-tail.test.ts"
   "packages/cli/test/assistant-harness.test.ts"
   "packages/cli/test/assistant-cron.test.ts"
+  "packages/cli/test/assistant-observability.test.ts"
+  "packages/cli/test/assistant-robustness.test.ts"
   "packages/cli/test/incur-smoke.test.ts"
   "packages/cli/test/inbox-cli.test.ts"
   "packages/cli/test/inbox-incur-smoke.test.ts"
@@ -98,7 +100,7 @@ run_test_packages_common() {
 seed_coverage_placeholders() {
   rimraf "coverage"
   mkdir -p "coverage/.tmp"
-  node --input-type=module -e "import { writeFileSync } from 'node:fs'; for (let index = 0; index < 16; index += 1) { writeFileSync('coverage/.tmp/coverage-' + index + '.json', '{\"result\":[]}'); }"
+  node --input-type=module -e "import { writeFileSync } from 'node:fs'; for (let index = 0; index < 64; index += 1) { writeFileSync('coverage/.tmp/coverage-' + index + '.json', '{\"result\":[]}'); }"
 }
 
 run_typecheck() {
@@ -106,6 +108,7 @@ run_typecheck() {
   check_node_syntax
   run_workspace_boundary_check
   tsc -p "tsconfig.tools.json" --pretty false
+  pnpm --dir "packages/contracts" build
   pnpm build
   run_typecheck_packages
 }

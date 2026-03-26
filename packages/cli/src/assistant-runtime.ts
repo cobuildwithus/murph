@@ -35,6 +35,14 @@ export {
   sendAssistantMessage,
   updateAssistantSessionOptions,
 } from './assistant/service.js'
+export {
+  getAssistantStatus,
+  readAssistantStatusSnapshot,
+  refreshAssistantStatusSnapshot,
+} from './assistant/status.js'
+export {
+  stopAssistantAutomation,
+} from './assistant/stop.js'
 export type {
   AssistantMemoryForgetInput,
   AssistantMemoryGetInput,
@@ -74,3 +82,7 @@ export async function runAssistantChat(
   const { runAssistantChatWithInk } = await import('./assistant-chat-ink.js')
   return runAssistantChatWithInk(input)
 }
+
+export {
+  runAssistantDoctor,
+} from './assistant/doctor.js'
