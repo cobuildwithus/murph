@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.14
         version: 0.1.14
       '@cobuild/review-gpt':
-        specifier: ^0.4.3
-        version: 0.4.3
+        specifier: ^0.4.4
+        version: 0.4.4
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -349,8 +349,8 @@ packages:
     resolution: {integrity: sha512-/DKNFA3n1Y1pMKnbSiIctY57pZNdnVCNcB9ukKqAwQQRjt7sc9NoYuWBmb9H407Of9GvBNGg2BCMmQemKLtN6w==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.4.3':
-    resolution: {integrity: sha512-3kFYq4ZCj3lDVDcFjHmkNaUTiSjVgv2m32buJz3Heavl/XuHE800e2zC3016SbBEBaxjk3DBzajV6P92VncHZQ==}
+  '@cobuild/review-gpt@0.4.4':
+    resolution: {integrity: sha512-h9LY1mXpGX3LttVb1U6rEwMJwZWlJtssVmVn1xAwE3TDos6T5PfULQsnYTvmPhHLGUA6IIwU9nBLxZOPwR7m2g==}
     hasBin: true
 
   '@electric-sql/pglite-socket@0.0.20':
@@ -2794,7 +2794,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.14': {}
 
-  '@cobuild/review-gpt@0.4.3': {}
+  '@cobuild/review-gpt@0.4.4': {}
 
   '@electric-sql/pglite-socket@0.0.20(@electric-sql/pglite@0.3.15)':
     dependencies:

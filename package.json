@@ -50,17 +50,12 @@
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.14",
-    "@cobuild/review-gpt": "^0.4.2",
+    "@cobuild/review-gpt": "^0.4.4",
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.0.18",
     "rimraf": "^6.0.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "@cobuild/review-gpt@0.4.2": "patches/@cobuild__review-gpt@0.4.2.patch"
-    }
   }
 }
