@@ -44,6 +44,7 @@ const cleanupPaths: string[] = []
 const require = createRequire(import.meta.url)
 const execFileAsync = promisify(execFile)
 const sourceBinPath = path.join(repoRoot, 'packages/cli/src/bin.ts')
+const sourceTsconfigPath = path.join(repoRoot, 'packages/cli/tsconfig.typecheck.json')
 const tsxCliPath = require.resolve('tsx/cli')
 const ASSISTANT_CLI_TIMEOUT_MS = 60_000
 
@@ -1429,7 +1430,7 @@ async function runSourceCli<TData = Record<string, unknown>>(
   try {
     const { stdout } = await execFileAsync(
       process.execPath,
-      [tsxCliPath, sourceBinPath, ...withMachineOutput(args)],
+      [tsxCliPath, '--tsconfig', sourceTsconfigPath, sourceBinPath, ...withMachineOutput(args)],
       {
         cwd: repoRoot,
         env: withoutNodeV8Coverage({

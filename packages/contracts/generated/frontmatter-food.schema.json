@@ -91,6 +91,15 @@
       "minLength": 1,
       "maxLength": 4000
     },
+    "attachedProtocolIds": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
+      },
+      "uniqueItems": true
+    },
     "autoLogDaily": {
       "type": "object",
       "properties": {

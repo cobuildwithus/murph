@@ -31,6 +31,7 @@ import {
   RECIPE_STATUSES,
   PROTOCOL_KINDS,
   PROTOCOL_STATUSES,
+  WORKOUT_FORMAT_STATUSES,
   SAMPLE_QUALITIES,
   SAMPLE_SOURCES,
   SAMPLE_STREAMS,
@@ -397,6 +398,7 @@ export const vaultMetadataSchema = withContractMetadata(
               transform: z.literal(ID_PREFIXES.transform),
               variant: z.literal(ID_PREFIXES.variant),
               vault: z.literal(ID_PREFIXES.vault),
+              workoutFormat: z.literal(ID_PREFIXES.workoutFormat),
             })
             .strict(),
         })
@@ -696,6 +698,10 @@ export const foodFrontmatterSchema = withContractMetadata(
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
+      attachedProtocolIds: uniqueArray(idSchema(ID_PREFIXES.protocol), {
+        maxItems: 32,
+        uniqueItems: true,
+      }).optional(),
       autoLogDaily: z
         .object({
           time: patternedString(DAILY_TIME_PATTERN),
@@ -734,6 +740,28 @@ export const recipeFrontmatterSchema = withContractMetadata(
     .strict(),
   "@healthybob/contracts/frontmatter-recipe.schema.json",
   "Healthy Bob Recipe Frontmatter",
+);
+
+export const workoutFormatFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter),
+      docType: z.literal(FRONTMATTER_DOC_TYPES.workoutFormat),
+      workoutFormatId: idSchema(ID_PREFIXES.workoutFormat),
+      slug: patternedString(SLUG_PATTERN),
+      title: boundedString(1, 160),
+      status: z.enum(WORKOUT_FORMAT_STATUSES),
+      summary: boundedString(1, 4000).optional(),
+      activityType: patternedString(SLUG_PATTERN),
+      durationMinutes: integerSchema(1, 24 * 60).optional(),
+      distanceKm: numberSchema(0, 1_000).optional(),
+      strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
+      tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+      note: boundedString(1, 4000).optional(),
+    })
+    .strict(),
+  "@healthybob/contracts/frontmatter-workout-format.schema.json",
+  "Healthy Bob Workout Format Frontmatter",
 );
 
 export const assessmentResponseSchema = withContractMetadata(
@@ -999,6 +1027,7 @@ export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;
 export type ProviderFrontmatter = z.infer<typeof providerFrontmatterSchema>;
 export type FoodFrontmatter = z.infer<typeof foodFrontmatterSchema>;
 export type RecipeFrontmatter = z.infer<typeof recipeFrontmatterSchema>;
+export type WorkoutFormatFrontmatter = z.infer<typeof workoutFormatFrontmatterSchema>;
 export type AssessmentResponseRecord = z.infer<typeof assessmentResponseSchema>;
 export type RawImportManifestArtifact = z.infer<typeof rawImportManifestArtifactSchema>;
 export type RawImportManifest = z.infer<typeof rawImportManifestSchema>;

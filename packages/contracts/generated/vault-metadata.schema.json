@@ -113,6 +113,10 @@
             "vault": {
               "type": "string",
               "const": "vault"
+            },
+            "workoutFormat": {
+              "type": "string",
+              "const": "wfmt"
             }
           },
           "required": [
@@ -135,7 +139,8 @@
             "sample",
             "transform",
             "variant",
-            "vault"
+            "vault",
+            "workoutFormat"
           ],
           "additionalProperties": false
         }

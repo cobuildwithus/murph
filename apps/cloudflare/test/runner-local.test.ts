@@ -7,6 +7,22 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = process.cwd();
 const runnerStartupTimeoutMs = 20_000;
 
+function sanitizeChildProcessEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const nextEnv = { ...env };
+  delete nextEnv.NODE_V8_COVERAGE;
+  delete nextEnv.NODE_OPTIONS;
+
+  for (const key of Object.keys(nextEnv)) {
+    if (key === "VITEST" || key.startsWith("VITEST_") || key.startsWith("C8_") || key.startsWith("NYC_")) {
+      delete nextEnv[key];
+    }
+  }
+
+  return nextEnv;
+}
+
 describe("runner:local", () => {
   const children: ReturnType<typeof spawn>[] = [];
 
@@ -18,10 +34,10 @@ describe("runner:local", () => {
     const port = await reservePort();
     const child = spawn("pnpm", ["--dir", "apps/cloudflare", "runner:local"], {
       cwd: repoRoot,
-      env: {
+      env: sanitizeChildProcessEnv({
         ...process.env,
         PORT: String(port),
-      },
+      }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     children.push(child);

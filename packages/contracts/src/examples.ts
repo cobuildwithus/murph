@@ -68,6 +68,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
       transform: "xfm",
       variant: "var",
       vault: "vault",
+      workoutFormat: "wfmt",
     },
   },
   paths: {

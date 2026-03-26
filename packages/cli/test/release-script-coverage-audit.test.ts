@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
+import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(packageDir, '..', '..')
@@ -28,6 +29,7 @@ function runNodeScript(...args: string[]) {
   return spawnSync('node', args, {
     cwd: repoRoot,
     encoding: 'utf8',
+    env: withoutNodeV8Coverage(),
   })
 }
 
@@ -71,6 +73,7 @@ describe('monorepo release flow coverage audit', () => {
       execFileSync('node', ['scripts/verify-release-target.mjs', '--json'], {
         cwd: repoRoot,
         encoding: 'utf8',
+        env: withoutNodeV8Coverage(),
       }),
     ) as {
       packages: Array<{ name: string }>
@@ -256,6 +259,7 @@ describe('monorepo release flow coverage audit', () => {
         {
           cwd: repoRoot,
           encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
         },
       )
 
@@ -271,6 +275,7 @@ describe('monorepo release flow coverage audit', () => {
       const entries = execFileSync('unzip', ['-Z1', zipPath], {
         cwd: repoRoot,
         encoding: 'utf8',
+        env: withoutNodeV8Coverage(),
       })
         .trim()
         .split('\n')

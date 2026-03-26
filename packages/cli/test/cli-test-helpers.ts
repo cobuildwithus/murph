@@ -50,6 +50,23 @@ const cliIndexPath = path.join(packageDir, 'dist/index.js')
 const CLI_MAX_OUTPUT_BUFFER_BYTES = 8 * 1024 * 1024
 const CLI_RUNTIME_ARTIFACT_WAIT_TIMEOUT_MS = 15_000
 const CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS = 100
+const forwardedCliEnvKeys = [
+  'CI',
+  'COLORTERM',
+  'FORCE_COLOR',
+  'HOME',
+  'LANG',
+  'NODE_ENV',
+  'NO_COLOR',
+  'PATH',
+  'SHELL',
+  'SYSTEMROOT',
+  'TERM',
+  'TMP',
+  'TMPDIR',
+  'TZ',
+  'VAULT',
+] as const
 const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
   path.join(repoRoot, 'packages/contracts/dist/index.d.ts'),
@@ -103,6 +120,27 @@ export function withoutNodeV8Coverage(
 ): NodeJS.ProcessEnv {
   const nextEnv = withoutVitestRuntimeEnv(env)
   delete nextEnv.NODE_V8_COVERAGE
+
+  return nextEnv
+}
+
+function selectCliBaseEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const nextEnv: NodeJS.ProcessEnv = {}
+
+  for (const key of forwardedCliEnvKeys) {
+    const value = env[key]
+    if (value !== undefined) {
+      nextEnv[key] = value
+    }
+  }
+
+  for (const [key, value] of Object.entries(env)) {
+    if (key.startsWith('LC_') && value !== undefined) {
+      nextEnv[key] = value
+    }
+  }
 
   return nextEnv
 }
@@ -277,7 +315,7 @@ async function execCliProcess(
         cwd: repoRoot,
         encoding: 'utf8',
         env: withoutNodeV8Coverage({
-          ...process.env,
+          ...selectCliBaseEnv(),
           ...options?.env,
         }),
         maxBuffer: CLI_MAX_OUTPUT_BUFFER_BYTES,
