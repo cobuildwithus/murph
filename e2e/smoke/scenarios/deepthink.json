@@ -1,0 +1,10 @@
+{
+  "id": "deepthink",
+  "command": "vault-cli deepthink <prompt> --vault <path> [--title <title>] [--chat <url-or-id>] [--browserPath <path>] [--timeout <duration>] [--waitTimeout <duration>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents the longer-running research variant so the command stays represented in smoke coverage without pretending the external ChatGPT/browser work is locally replayed."
+}

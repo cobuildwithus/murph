@@ -4,6 +4,7 @@ Current smoke expectation:
 
 - `chat` and `assistant chat` expose the same provider-backed terminal chat surface
 - `ask`, `chat`, and `deliver` reuse provider-backed sessions while Healthy Bob persists only minimal metadata under `assistant-state/`
+- `research` and `deepthink` reuse the same provider/browser bridge for long-running chat-backed work without turning those external transcripts into canonical vault data
 - `ask --deliverResponse` can send a generated reply back out over a mapped delivery target such as iMessage
 - `cron add|status|list|show|enable|disable|remove|run|runs` manages scheduled assistant prompts and run history under `assistant-state/cron/`
 - `session list|show` inspects local assistant session metadata without treating provider transcripts as canonical vault data

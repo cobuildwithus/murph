@@ -1,0 +1,11 @@
+{
+  "id": "vault-repair",
+  "command": "vault-cli vault repair --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/validate",
+  "purpose": "Documents the explicit metadata-and-layout repair path so operators can persist additive scaffold fixes without reinitializing the vault."
+}

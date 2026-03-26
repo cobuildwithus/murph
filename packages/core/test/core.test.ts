@@ -191,6 +191,23 @@ test("initializeVault rejects roots that already contain a vault", async () => {
   );
 });
 
+test("initializeVault rejects invalid generated metadata before writing canonical files", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+
+  await assert.rejects(
+    () =>
+      initializeVault({
+        vaultRoot,
+        title: "",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_METADATA",
+  );
+
+  await assert.rejects(() => fs.access(path.join(vaultRoot, "vault.json")));
+  await assert.rejects(() => fs.access(path.join(vaultRoot, "CORE.md")));
+});
+
 test("loadVault backfills additive metadata defaults in memory and repairVault persists them", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });
@@ -257,6 +274,21 @@ test("loadVault backfills additive metadata defaults in memory and repairVault p
   const validationAfterRepair = await validateVault({ vaultRoot });
   assert.equal(validationAfterRepair.valid, true);
   assert.deepEqual(validationAfterRepair.issues, []);
+});
+
+test("repairVault returns a no-op result when metadata and directories are already current", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  const operationPathsBeforeRepair = await listWriteOperationMetadataPaths(vaultRoot);
+  const repaired = await repairVault({ vaultRoot });
+  const operationPathsAfterRepair = await listWriteOperationMetadataPaths(vaultRoot);
+
+  assert.equal(repaired.updated, false);
+  assert.deepEqual(repaired.repairedFields, []);
+  assert.deepEqual(repaired.createdDirectories, []);
+  assert.equal(repaired.auditPath, null);
+  assert.deepEqual(operationPathsAfterRepair, operationPathsBeforeRepair);
 });
 
 test("copyRawArtifact enforces raw immutability and importDocument appends contract-shaped events", async () => {
@@ -897,6 +929,21 @@ test("validateVault reports invalid metadata before deeper validation", async ()
   assert.equal(validation.issues.length, 1);
   assert.equal(validation.issues[0]?.path, "vault.json");
   assert.equal(validation.issues[0]?.code, "VAULT_INVALID_METADATA");
+});
+
+test("validateVault reports malformed metadata files as load failures", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+
+  await fs.writeFile(path.join(vaultRoot, "vault.json"), "{not-json", "utf8");
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.equal(validation.metadata, null);
+  assert.equal(validation.issues.length, 1);
+  assert.equal(validation.issues[0]?.path, "vault.json");
+  assert.equal(validation.issues[0]?.code, "VAULT_INVALID_JSON");
 });
 
 test("validateVault reports missing metadata files before walking the vault", async () => {
@@ -1941,6 +1988,74 @@ test("validateVault reports unresolved and malformed write operation metadata", 
       (issue) =>
         issue.code === "HB_OPERATION_INVALID" &&
         issue.path === ".runtime/operations/op-invalid.json",
+    ),
+  );
+});
+
+test("validateVault preserves unresolved write-operation error messages and vault errors", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, ".runtime/operations"), { recursive: true });
+
+  await fs.writeFile(
+    path.join(vaultRoot, ".runtime/operations/op-error.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: WRITE_OPERATION_SCHEMA_VERSION,
+        operationId: "op_error",
+        operationType: "document_import",
+        summary: "Unresolved operation with error",
+        status: "committing",
+        createdAt: "2026-03-13T10:00:00.000Z",
+        updatedAt: "2026-03-13T10:00:01.000Z",
+        occurredAt: "2026-03-13T10:00:00.000Z",
+        actions: [],
+        error: {
+          message: "Network timeout",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(vaultRoot, ".runtime/operations/op-invalid-shape.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: WRITE_OPERATION_SCHEMA_VERSION,
+        operationId: "op_invalid_shape",
+        operationType: "document_import",
+        summary: "Invalid operation shape",
+        status: "committing",
+        createdAt: "2026-03-13T10:00:00.000Z",
+        updatedAt: "2026-03-13T10:00:01.000Z",
+        occurredAt: "2026-03-13T10:00:00.000Z",
+        actions: [{}],
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const validation = await validateVault({ vaultRoot });
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_OPERATION_UNRESOLVED" &&
+        issue.path === ".runtime/operations/op-error.json" &&
+        issue.message.includes("Last error: Network timeout"),
+    ),
+  );
+  assert.ok(
+    validation.issues.some(
+      (issue) =>
+        issue.code === "HB_OPERATION_INVALID" &&
+        issue.path === ".runtime/operations/op-invalid-shape.json" &&
+        issue.message === "Write operation metadata has an unexpected shape.",
     ),
   );
 });
