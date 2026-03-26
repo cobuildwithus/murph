@@ -525,6 +525,44 @@ const WrappedTextBlock = React.memo(function WrappedTextBlock(input: {
   return renderWrappedTextBlock(input)
 })
 
+export function renderWrappedPlainTextBlock(input: {
+  columns: number
+  color?: string
+  dimColor?: boolean
+  text: string
+}): React.ReactElement {
+  const createElement = React.createElement
+  const lines = wrapAssistantPlainText(input.text, input.columns).split('\n')
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      width: '100%',
+    },
+    ...lines.map((line, index) =>
+      createElement(
+        Text,
+        {
+          color: input.color,
+          dimColor: input.dimColor,
+          key: `wrapped-plain-text:${index}`,
+        },
+        line.length > 0 ? line : ' ',
+      ),
+    ),
+  )
+}
+
+const WrappedPlainTextBlock = React.memo(function WrappedPlainTextBlock(input: {
+  columns: number
+  color?: string
+  dimColor?: boolean
+  text: string
+}): React.ReactElement {
+  return renderWrappedPlainTextBlock(input)
+})
+
 const FooterBadge = React.memo(function FooterBadge(input: {
   badge: ChatMetadataBadge
 }): React.ReactElement {
@@ -1169,14 +1207,11 @@ const ChatEntryRow = React.memo(function ChatEntryRow(
         paddingLeft: 2,
         width: rowWidth,
       },
-      createElement(
-        Text,
-        {
-          dimColor: true,
-          wrap: 'wrap',
-        },
-        `${props.entry.pending ? '· ' : '  '}${props.entry.text}`,
-      ),
+      createElement(WrappedPlainTextBlock, {
+        columns: Math.max(1, rowWidth - 2),
+        dimColor: true,
+        text: `${props.entry.pending ? '· ' : '  '}${props.entry.text}`,
+      }),
     )
   }
 
@@ -1631,12 +1666,14 @@ const QueuedFollowUpStatus = React.memo(function QueuedFollowUpStatus(
 ): React.ReactElement | null {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const { stdout } = useStdout()
 
   if (props.queuedPromptCount === 0 || !props.latestPrompt) {
     return null
   }
 
   const extraQueuedCount = props.queuedPromptCount - 1
+  const wrapColumns = resolveAssistantPlainTextWrapColumns(stdout?.columns)
 
   return createElement(
     Box,
@@ -1648,44 +1685,28 @@ const QueuedFollowUpStatus = React.memo(function QueuedFollowUpStatus(
     createElement(
       Text,
       {
+        color: theme.composerTextColor,
         wrap: 'wrap',
       },
-      createElement(Text, { color: theme.composerTextColor }, '• '),
-      'Queued follow-up messages',
+      '• Queued follow-up messages',
     ),
-    createElement(
-      Text,
-      {
-        color: theme.mutedColor,
-        wrap: 'wrap',
-      },
-      '  ↳ ',
-      createElement(
-        Text,
-        {
-          color: theme.composerTextColor,
-        },
-        formatQueuedFollowUpPreview(props.latestPrompt),
-      ),
-    ),
+    createElement(WrappedPlainTextBlock, {
+      color: theme.composerTextColor,
+      columns: wrapColumns,
+      text: `  ↳ ${formatQueuedFollowUpPreview(props.latestPrompt)}`,
+    }),
     extraQueuedCount > 0
-      ? createElement(
-          Text,
-          {
-            color: theme.mutedColor,
-            wrap: 'wrap',
-          },
-          `    +${extraQueuedCount} more queued`,
-        )
+      ? createElement(WrappedPlainTextBlock, {
+          color: theme.mutedColor,
+          columns: wrapColumns,
+          text: `    +${extraQueuedCount} more queued`,
+        })
       : null,
-    createElement(
-      Text,
-      {
-        color: theme.mutedColor,
-        wrap: 'wrap',
-      },
-      `    ${QUEUED_FOLLOW_UP_SHORTCUT_HINT}`,
-    ),
+    createElement(WrappedPlainTextBlock, {
+      color: theme.mutedColor,
+      columns: wrapColumns,
+      text: `    ${QUEUED_FOLLOW_UP_SHORTCUT_HINT}`,
+    }),
   )
 })
 

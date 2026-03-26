@@ -99,6 +99,7 @@ import {
   partitionChatTranscriptEntries,
   renderChatTranscriptFeed,
   renderComposerValue,
+  renderWrappedPlainTextBlock,
   renderWrappedTextBlock,
   resolveAssistantChatViewportWidth,
   resolveAssistantInkInputAdapter,
@@ -4762,6 +4763,41 @@ test('assistant Ink wrapped text block keeps assistant replies in a single full-
 
   assert.equal(textProps.wrap, 'wrap')
   assert.equal(textProps.children, text)
+})
+
+test('assistant Ink wrapped plain-text block renders one styled Text node per wrapped line', () => {
+  const rendered = renderWrappedPlainTextBlock({
+    color: LIGHT_ASSISTANT_INK_THEME.mutedColor,
+    columns: 18,
+    text: '  ↳ name should be optional and only asked once',
+  })
+
+  assert.equal(rendered.type, Box)
+
+  const wrapperProps = rendered.props as {
+    children?: React.ReactNode
+    flexDirection?: string
+    width?: string
+  }
+  const children = React.Children.toArray(wrapperProps.children)
+
+  assert.equal(wrapperProps.flexDirection, 'column')
+  assert.equal(wrapperProps.width, '100%')
+  assert.ok(children.length > 1)
+
+  for (const child of children) {
+    assert.equal(React.isValidElement(child), true)
+    if (!React.isValidElement(child)) {
+      throw new Error('Expected wrapped plain-text lines to render as Text elements.')
+    }
+
+    const textProps = child.props as {
+      children?: React.ReactNode
+      color?: string
+    }
+
+    assert.equal(textProps.color, LIGHT_ASSISTANT_INK_THEME.mutedColor)
+  }
 })
 
 test('assistant Ink plain-text wrapping keeps words intact on narrow widths', () => {
