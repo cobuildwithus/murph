@@ -1,0 +1,11 @@
+{
+  "id": "food-scaffold",
+  "command": "vault-cli food scaffold --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/food-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents food payload scaffolding before operators or agents upsert a canonical bank/foods record."
+}

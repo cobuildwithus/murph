@@ -1,22 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "baseUrl": "../..",
+    "baseUrl": ".",
     "noEmit": false,
     "rootDir": "scripts",
     "outDir": "dist/scripts",
     "composite": false,
     "incremental": false,
     "declaration": false,
-    "declarationMap": false,
-    "paths": {
-      "@healthybob/contracts": [
-        "packages/contracts/dist/index.d.ts"
-      ],
-      "@healthybob/contracts/*": [
-        "packages/contracts/dist/*"
-      ]
-    }
+    "declarationMap": false
   },
   "include": [
     "scripts/**/*.ts"

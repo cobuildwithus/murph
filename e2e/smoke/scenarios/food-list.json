@@ -1,0 +1,11 @@
+{
+  "id": "food-list",
+  "command": "vault-cli food list --vault <path> [--status active|archived] [--limit <n>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/food-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/list",
+  "purpose": "Documents food registry listing with optional status filtering."
+}

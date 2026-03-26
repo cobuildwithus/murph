@@ -1,0 +1,25 @@
+{
+  "title": "Regular Acai Bowl",
+  "slug": "regular-acai-bowl",
+  "status": "active",
+  "summary": "The usual acai bowl order from the neighborhood spot with repeat toppings.",
+  "kind": "acai bowl",
+  "vendor": "Neighborhood Acai Bar",
+  "location": "Brooklyn, NY",
+  "serving": "1 bowl",
+  "aliases": [
+    "regular acai bowl",
+    "usual acai bowl"
+  ],
+  "ingredients": [
+    "acai base",
+    "banana",
+    "strawberries",
+    "granola"
+  ],
+  "tags": [
+    "breakfast",
+    "favorite"
+  ],
+  "note": "Typical order includes extra granola and no honey."
+}

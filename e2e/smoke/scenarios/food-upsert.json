@@ -1,0 +1,11 @@
+{
+  "id": "food-upsert",
+  "command": "vault-cli food upsert --vault <path> --input @file.json [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/food-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/experiment-create",
+  "purpose": "Documents food creation and updates through the first-class food noun with stable food_* ids."
+}

@@ -339,7 +339,7 @@ async function execCliProcess(
       {
         cwd: repoRoot,
         encoding: 'utf8',
-        env: withoutVitestRuntimeEnv({
+        env: withoutNodeV8Coverage({
           ...process.env,
           ...options?.env,
         }),

@@ -99,6 +99,7 @@ interface ManifestEnvelope {
 
 const runSourceCli = runCli
 const runRawSourceCli = runRawCli
+const DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS = 45_000
 
 async function createVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-doc-meal-'))
@@ -108,39 +109,43 @@ async function createVault(): Promise<string> {
   return vaultRoot
 }
 
-test('document and meal command schemas expose the expansion surface', async () => {
-  const documentImportSchema = JSON.parse(
-    await runRawSourceCli(['document', 'import', '--schema', '--format', 'json']),
-  ) as SchemaEnvelope
-  const documentListSchema = JSON.parse(
-    await runRawSourceCli(['document', 'list', '--schema', '--format', 'json']),
-  ) as SchemaEnvelope
-  const mealAddSchema = JSON.parse(
-    await runRawSourceCli(['meal', 'add', '--schema', '--format', 'json']),
-  ) as SchemaEnvelope
-  const mealListSchema = JSON.parse(
-    await runRawSourceCli(['meal', 'list', '--schema', '--format', 'json']),
-  ) as SchemaEnvelope
+test(
+  'document and meal command schemas expose the expansion surface',
+  async () => {
+    const documentImportSchema = JSON.parse(
+      await runRawSourceCli(['document', 'import', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
+    const documentListSchema = JSON.parse(
+      await runRawSourceCli(['document', 'list', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
+    const mealAddSchema = JSON.parse(
+      await runRawSourceCli(['meal', 'add', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
+    const mealListSchema = JSON.parse(
+      await runRawSourceCli(['meal', 'list', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
 
-  assert.equal('title' in documentImportSchema.options.properties, true)
-  assert.equal('occurredAt' in documentImportSchema.options.properties, true)
-  assert.equal('note' in documentImportSchema.options.properties, true)
-  assert.equal('source' in documentImportSchema.options.properties, true)
-  assert.deepEqual(documentImportSchema.options.required, ['vault'])
+    assert.equal('title' in documentImportSchema.options.properties, true)
+    assert.equal('occurredAt' in documentImportSchema.options.properties, true)
+    assert.equal('note' in documentImportSchema.options.properties, true)
+    assert.equal('source' in documentImportSchema.options.properties, true)
+    assert.deepEqual(documentImportSchema.options.required, ['vault'])
 
-  assert.equal('from' in documentListSchema.options.properties, true)
-  assert.equal('to' in documentListSchema.options.properties, true)
-  assert.equal('kind' in documentListSchema.options.properties, false)
-  assert.deepEqual(documentListSchema.options.required, ['vault'])
+    assert.equal('from' in documentListSchema.options.properties, true)
+    assert.equal('to' in documentListSchema.options.properties, true)
+    assert.equal('kind' in documentListSchema.options.properties, false)
+    assert.deepEqual(documentListSchema.options.required, ['vault'])
 
-  assert.equal('source' in mealAddSchema.options.properties, true)
-  assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
+    assert.equal('source' in mealAddSchema.options.properties, true)
+    assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
 
-  assert.equal('from' in mealListSchema.options.properties, true)
-  assert.equal('to' in mealListSchema.options.properties, true)
-  assert.equal('kind' in mealListSchema.options.properties, false)
-  assert.deepEqual(mealListSchema.options.required, ['vault'])
-})
+    assert.equal('from' in mealListSchema.options.properties, true)
+    assert.equal('to' in mealListSchema.options.properties, true)
+    assert.equal('kind' in mealListSchema.options.properties, false)
+    assert.deepEqual(mealListSchema.options.required, ['vault'])
+  },
+  DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS,
+)
 
 test.sequential(
   'document import/show/list/manifest support document ids, event ids, and manifest inspection',

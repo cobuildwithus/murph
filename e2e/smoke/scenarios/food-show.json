@@ -1,0 +1,11 @@
+{
+  "id": "food-show",
+  "command": "vault-cli food show <id> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/food-upsert.json",
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents direct food follow-up reads by canonical food_* id or food slug."
+}
