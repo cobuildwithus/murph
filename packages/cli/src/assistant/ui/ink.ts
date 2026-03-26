@@ -1455,6 +1455,8 @@ const ChatStatus = React.memo(function ChatStatus(
 ): React.ReactElement | null {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const { stdout } = useStdout()
+  const wrapColumns = resolveAssistantPlainTextWrapColumns(stdout?.columns)
 
   if (props.busy) {
     const busyColor =
@@ -1491,25 +1493,17 @@ const ChatStatus = React.memo(function ChatStatus(
           createElement(
             Text,
             {
-              wrap: 'wrap',
+              color: busyColor,
             },
-            createElement(
-              Text,
-              {
-                color: busyColor,
-              },
-              busyLabel,
-            ),
-            busyDetail
-              ? createElement(
-                  Text,
-                  {
-                    color: theme.mutedColor,
-                  },
-                  ` · ${busyDetail}`,
-                )
-              : null,
+            busyLabel,
           ),
+          busyDetail
+            ? createElement(WrappedPlainTextBlock, {
+                color: theme.mutedColor,
+                columns: wrapColumns,
+                text: busyDetail,
+              })
+            : null,
         ),
       ),
     )
@@ -1539,21 +1533,27 @@ const ChatStatus = React.memo(function ChatStatus(
       marginBottom: 1,
     },
     createElement(
-      Text,
+      Box,
       {
-        wrap: 'wrap',
+        flexDirection: 'row',
+        width: '100%',
       },
-      createElement(Text, { color: statusColor }, statusIcon),
-      ' ',
+      createElement(Text, { color: statusColor }, `${statusIcon} `),
       createElement(
-        Text,
+        Box,
         {
+          flexDirection: 'column',
+          flexGrow: 1,
+          flexShrink: 1,
+        },
+        createElement(WrappedPlainTextBlock, {
           color:
             props.status.kind === 'info'
               ? theme.composerTextColor
               : statusColor,
-        },
-        props.status.text,
+          columns: Math.max(1, wrapColumns - 2),
+          text: props.status.text,
+        }),
       ),
     ),
   )
@@ -1564,6 +1564,7 @@ const ChatComposer = React.memo(function ChatComposer(
 ): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const { stdout } = useStdout()
   const slashSuggestions = props.modelSwitcherActive
     ? []
     : getMatchingSlashCommands(props.value)
@@ -1572,6 +1573,7 @@ const ChatComposer = React.memo(function ChatComposer(
     showComposerGuidance &&
     !props.modelSwitcherActive &&
     props.value.trim().length === 0
+  const wrapColumns = resolveAssistantPlainTextWrapColumns(stdout?.columns)
 
   return createElement(
     React.Fragment,
@@ -1624,34 +1626,14 @@ const ChatComposer = React.memo(function ChatComposer(
             Box,
             {
               marginTop: 1,
+              width: '100%',
             },
-            createElement(
-              Text,
-              {
-                color: theme.accentColor,
-                wrap: 'wrap',
-              },
-              createElement(Text, { color: theme.mutedColor }, 'try: '),
-              ...CHAT_STARTER_SUGGESTIONS.flatMap((suggestion, index) => [
-                index > 0
-                  ? createElement(
-                      Text,
-                      {
-                        color: theme.mutedColor,
-                        key: `starter-separator:${index}`,
-                      },
-                      ' · ',
-                    )
-                  : null,
-                createElement(
-                  Text,
-                  {
-                    key: `starter:${suggestion}`,
-                  },
-                  suggestion,
-                ),
-              ]),
-            ),
+            createElement(Text, { color: theme.mutedColor }, 'try:'),
+            createElement(WrappedPlainTextBlock, {
+              color: theme.accentColor,
+              columns: Math.max(1, wrapColumns - 2),
+              text: `  ${CHAT_STARTER_SUGGESTIONS.join(' · ')}`,
+            }),
           )
         : null,
     ),
@@ -2456,12 +2438,14 @@ function SlashCommandSuggestions(input: {
   commands: readonly (typeof CHAT_SLASH_COMMANDS)[number][]
 }): React.ReactElement | null {
   const theme = useAssistantInkTheme()
+  const { stdout } = useStdout()
 
   if (input.commands.length === 0) {
     return null
   }
 
   const createElement = React.createElement
+  const wrapColumns = resolveAssistantPlainTextWrapColumns(stdout?.columns)
 
   return createElement(
     ChromePanel,
@@ -2479,24 +2463,25 @@ function SlashCommandSuggestions(input: {
     ),
     ...input.commands.map((command) =>
       createElement(
-        Text,
+        Box,
         {
+          flexDirection: 'row',
           key: command.command,
-          wrap: 'wrap',
+          width: '100%',
         },
+        createElement(Text, { color: theme.accentColor }, command.command),
         createElement(
-          Text,
+          Box,
           {
-            color: theme.accentColor,
+            flexDirection: 'column',
+            flexGrow: 1,
+            flexShrink: 1,
           },
-          command.command,
-        ),
-        createElement(
-          Text,
-          {
+          createElement(WrappedPlainTextBlock, {
             color: theme.mutedColor,
-          },
-          `  ${command.description}`,
+            columns: Math.max(1, wrapColumns - command.command.length - 2),
+            text: `  ${command.description}`,
+          }),
         ),
       ),
     ),
