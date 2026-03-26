@@ -49,6 +49,11 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /add it as a food for future reuse/u)
   assert.match(guidance, /two separate logs like "I ate steak" are not enough/u)
   assert.match(guidance, /Do not silently create the food record unless the user clearly asks/u)
+  assert.match(guidance, /specific branded or packaged item as a reusable food/u)
+  assert.match(guidance, /look up the ingredients on the web before creating the food record/u)
+  assert.match(guidance, /Prefer the official product page when possible/u)
+  assert.match(guidance, /reputable retailer or product listing/u)
+  assert.match(guidance, /If you cannot verify the ingredients online/u)
   assert.match(guidance, /Older food logs may still live/u)
   assert.match(
     guidance,
