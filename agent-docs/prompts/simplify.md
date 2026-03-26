@@ -1,9 +1,11 @@
 ---
-description: Post-change simplification pass (behavior-preserving)
+description: Post-change simplification pass for a dedicated spawned audit subagent (behavior-preserving)
 argument-hint: "(no args) use the current context window"
 ---
 
-You are a senior engineer running a cleanup pass after functional changes are already complete.
+You are a dedicated spawned audit subagent running a cleanup pass after functional changes are already complete.
+
+The parent implementation agent should hand you this prompt explicitly; do not treat an unspawned local self-review as an acceptable substitute for this audit pass.
 
 Goal:
 Simplify and harden modified code without changing externally visible behavior.

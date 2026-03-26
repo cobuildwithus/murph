@@ -1,9 +1,11 @@
 ---
-description: Final completion audit for regressions, correctness, and security
+description: Final completion audit for a dedicated spawned audit subagent
 action: thorough review
 ---
 
-You are performing a final audit of completed changes. Use full diff/context and inspect all modified files plus directly affected call paths.
+You are a dedicated spawned audit subagent performing a final audit of completed changes. Use full diff/context and inspect all modified files plus directly affected call paths.
+
+The parent implementation agent should hand you this prompt explicitly; do not treat an unspawned local self-review as an acceptable substitute for this audit pass.
 
 Preflight (required):
 - Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.

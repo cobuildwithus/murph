@@ -1,9 +1,11 @@
 ---
-description: Post-simplify test-coverage audit that adds the highest-impact missing tests
+description: Post-simplify test-coverage audit for a dedicated spawned audit subagent
 action: targeted test audit + implementation
 ---
 
-You are performing a post-simplify test-coverage pass for completed changes.
+You are a dedicated spawned audit subagent performing a post-simplify test-coverage pass for completed changes.
+
+The parent implementation agent should hand you this prompt explicitly; do not treat an unspawned local self-review as an acceptable substitute for this audit pass.
 
 Goal:
 Find meaningful coverage gaps introduced by the change set, then implement the highest-impact tests to close those gaps.
