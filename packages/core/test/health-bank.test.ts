@@ -13,22 +13,22 @@ import {
   listGoals,
   listProviders,
   listRecipes,
-  listRegimenItems,
+  listProtocolItems,
   readAllergy,
   readCondition,
   readFood,
   readGoal,
   readProvider,
   readRecipe,
-  readRegimenItem,
-  stopRegimenItem,
+  readProtocolItem,
+  stopProtocolItem,
   upsertAllergy,
   upsertCondition,
   upsertFood,
   upsertGoal,
   upsertProvider,
   upsertRecipe,
-  upsertRegimenItem,
+  upsertProtocolItem,
 } from "../src/bank/index.js";
 
 type AuditLikeRecord = {
@@ -300,6 +300,9 @@ test("foods use first-class markdown registry reads for regular meals and staple
     ingredients: ["acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola.",
+    autoLogDaily: {
+      time: "08:00",
+    },
   });
   const renamedFood = await upsertFood({
     vaultRoot,
@@ -313,6 +316,9 @@ test("foods use first-class markdown registry reads for regular meals and staple
     ingredients: ["acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola.",
+    autoLogDaily: {
+      time: "08:00",
+    },
   });
   const secondFood = await upsertFood({
     vaultRoot,
@@ -344,13 +350,21 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.equal(listedFoods.length, 2);
   assert.equal(readFoodById.foodId, createdFood.record.foodId);
   assert.equal(readFoodById.slug, createdFood.record.slug);
+  assert.deepEqual(readFoodById.autoLogDaily, {
+    time: "08:00",
+  });
   assert.equal(readFoodBySlug.foodId, createdFood.record.foodId);
   assert.equal(readFoodBySlug.title, "Usual Acai Bowl");
+  assert.deepEqual(readFoodBySlug.autoLogDaily, {
+    time: "08:00",
+  });
   assert.equal(listedFoods[0]?.foodId, secondFood.record.foodId);
   assert.equal(listedFoods[1]?.foodId, createdFood.record.foodId);
   assert.match(foodMarkdown, /foodId:/u);
+  assert.match(foodMarkdown, /autoLogDaily:/u);
   assert.match(foodMarkdown, /## Aliases/u);
   assert.match(foodMarkdown, /## Ingredients/u);
+  assert.match(foodMarkdown, /Auto-log daily/u);
 
   await assert.rejects(
     () =>
@@ -387,7 +401,7 @@ test("conditions and allergies are stored as deterministic markdown registry pag
       startAt: "2026-03-01",
     },
   });
-  const regimen = await upsertRegimenItem({
+  const protocol = await upsertProtocolItem({
     vaultRoot,
     title: "Magnesium glycinate",
     kind: "supplement",
@@ -405,7 +419,7 @@ test("conditions and allergies are stored as deterministic markdown registry pag
     assertedOn: "2024-05-01",
     bodySites: ["head"],
     relatedGoalIds: [goal.record.goalId],
-    relatedRegimenIds: [regimen.record.regimenId],
+    relatedProtocolIds: [protocol.record.protocolId],
     note: "Likely worsened by sleep disruption.",
   });
   const allergy = await upsertAllergy({
@@ -453,10 +467,10 @@ test("conditions and allergies are stored as deterministic markdown registry pag
   assert.equal(patchedAllergy.record.title, allergy.record.title);
   assert.deepEqual(readConditionRecord.relatedGoalIds, [goal.record.goalId]);
   assert.deepEqual(readAllergyRecord.relatedConditionIds, [condition.record.conditionId]);
-  assert.match(readConditionRecord.markdown, /## Related Regimens/);
+  assert.match(readConditionRecord.markdown, /## Related Protocols/);
   assert.match(readAllergyRecord.markdown, /## Related Conditions/);
   assert.deepEqual(patchedCondition.record.relatedGoalIds, [goal.record.goalId]);
-  assert.deepEqual(patchedCondition.record.relatedRegimenIds, [regimen.record.regimenId]);
+  assert.deepEqual(patchedCondition.record.relatedProtocolIds, [protocol.record.protocolId]);
   assert.equal(patchedCondition.record.note, "Likely worsened by sleep disruption.");
   assert.deepEqual(patchedAllergy.record.relatedConditionIds, [condition.record.conditionId]);
   assert.equal(patchedAllergy.record.substance, "penicillin");
@@ -574,11 +588,11 @@ test("condition and allergy id-or-slug resolution preserves conflict, missing, a
   );
 });
 
-test("regimens support medication and supplement groups plus stop handling", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-regimens");
+test("protocols support medication and supplement groups plus stop handling", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-protocols");
   await initializeVault({ vaultRoot });
 
-  const medication = await upsertRegimenItem({
+  const medication = await upsertProtocolItem({
     vaultRoot,
     title: "Metformin XR",
     kind: "medication",
@@ -589,7 +603,7 @@ test("regimens support medication and supplement groups plus stop handling", asy
     unit: "mg",
     schedule: "with dinner",
   });
-  const supplement = await upsertRegimenItem({
+  const supplement = await upsertProtocolItem({
     vaultRoot,
     title: "Fish oil",
     kind: "supplement",
@@ -617,27 +631,27 @@ test("regimens support medication and supplement groups plus stop handling", asy
       },
     ],
   });
-  const stopped = await stopRegimenItem({
+  const stopped = await stopProtocolItem({
     vaultRoot,
-    regimenId: medication.record.regimenId,
+    protocolId: medication.record.protocolId,
     stoppedOn: "2026-03-20",
   });
 
-  const listed = await listRegimenItems(vaultRoot);
-  const readMedication = await readRegimenItem({
+  const listed = await listProtocolItems(vaultRoot);
+  const readMedication = await readProtocolItem({
     vaultRoot,
-    regimenId: medication.record.regimenId,
+    protocolId: medication.record.protocolId,
   });
-  const readSupplement = await readRegimenItem({
+  const readSupplement = await readProtocolItem({
     vaultRoot,
     slug: supplement.record.slug,
     group: "supplement",
   });
-  const patchedSupplement = await upsertRegimenItem({
+  const patchedSupplement = await upsertProtocolItem({
     vaultRoot,
-    regimenId: supplement.record.regimenId,
+    protocolId: supplement.record.protocolId,
   });
-  const regimenAuditRecords = await readJsonlRecords({
+  const protocolAuditRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: patchedSupplement.auditPath,
   });
@@ -645,7 +659,7 @@ test("regimens support medication and supplement groups plus stop handling", asy
     vaultRoot,
     relativePath: stopped.auditPath,
   });
-  const regimenOperations = await Promise.all(
+  const protocolOperations = await Promise.all(
     (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
       readStoredWriteOperation(vaultRoot, relativePath),
     ),
@@ -686,7 +700,7 @@ test("regimens support medication and supplement groups plus stop handling", asy
   assert.equal(patchedSupplement.record.startedOn, "2026-02-15");
   assert.equal(patchedSupplement.record.brand, "Nordic Naturals");
   assert.equal(patchedSupplement.record.servingSize, "2 softgels");
-  assert.match(stopped.record.relativePath, /^bank\/regimens\/medication\//);
+  assert.match(stopped.record.relativePath, /^bank\/protocols\/medication\//);
   assert.match(readMedication.markdown, /Stopped on: 2026-03-20/);
   assert.match(readSupplement.markdown, /## Product/);
   assert.match(readSupplement.markdown, /Brand: Nordic Naturals/);
@@ -694,15 +708,15 @@ test("regimens support medication and supplement groups plus stop handling", asy
   assert.match(readSupplement.markdown, /## Ingredients/);
   assert.match(readSupplement.markdown, /EPA — 600 mg/);
   assert.match(readSupplement.markdown, /DHA — 400 mg/);
-  assert.deepEqual(selectAuditMetadata(regimenAuditRecords, "regimen_upsert"), [
-    { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "create" },
-    { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "create" },
-    { action: "regimen_upsert", commandName: "core.upsertRegimenItem", op: "update" },
+  assert.deepEqual(selectAuditMetadata(protocolAuditRecords, "protocol_upsert"), [
+    { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "create" },
+    { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "create" },
+    { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "update" },
   ]);
-  assert.deepEqual(selectAuditMetadata(stopAuditRecords, "regimen_stop"), [
-    { action: "regimen_stop", commandName: "core.stopRegimenItem", op: "update" },
+  assert.deepEqual(selectAuditMetadata(stopAuditRecords, "protocol_stop"), [
+    { action: "protocol_stop", commandName: "core.stopProtocolItem", op: "update" },
   ]);
-  assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_upsert").length, 3);
-  assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_stop").length, 1);
-  assert.ok(regimenOperations.every((operation) => operation.status === "committed"));
+  assert.equal(protocolOperations.filter((operation) => operation.operationType === "protocol_upsert").length, 3);
+  assert.equal(protocolOperations.filter((operation) => operation.operationType === "protocol_stop").length, 1);
+  assert.ok(protocolOperations.every((operation) => operation.status === "committed"));
 });

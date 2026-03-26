@@ -4,7 +4,7 @@
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/payloads/supplement-upsert.json",
-    "fixtures/health-extensions/vault-overlay/bank/regimens/sleep/magnesium-glycinate.md"
+    "fixtures/health-extensions/vault-overlay/bank/protocols/sleep/magnesium-glycinate.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/show",
   "purpose": "Documents direct compound-ledger reads for one supplement ingredient rollup."

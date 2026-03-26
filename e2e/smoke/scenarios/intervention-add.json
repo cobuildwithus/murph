@@ -1,6 +1,6 @@
 {
   "id": "intervention-add",
-  "command": "vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--regimen-id <regimenId>] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--protocol-id <protocolId>] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [],
   "goldenOutput": "fixtures/golden-outputs/intervention-add",

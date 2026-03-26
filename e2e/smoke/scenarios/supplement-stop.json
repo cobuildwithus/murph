@@ -1,11 +1,11 @@
 {
   "id": "supplement-stop",
-  "command": "vault-cli supplement stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]",
+  "command": "vault-cli supplement stop <protocolId> --vault <path> [--stopped-on <date>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/payloads/supplement-upsert.json",
-    "fixtures/health-extensions/vault-overlay/bank/regimens/sleep/magnesium-glycinate.md"
+    "fixtures/health-extensions/vault-overlay/bank/protocols/sleep/magnesium-glycinate.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/journal-ensure",
-  "purpose": "Documents stopping one supplement while preserving its canonical regimen id."
+  "purpose": "Documents stopping one supplement while preserving its canonical protocol id."
 }

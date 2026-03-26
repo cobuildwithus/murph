@@ -76,7 +76,7 @@ Treat the health model as a contract-first extension. Until the health updates l
 
 Storage and authority rules for the cutover:
 
-- Keep curated current state in Markdown bank docs. The cutover plan reserves Markdown registries for profile, goals, conditions, allergies, regimens, family members, and genetics.
+- Keep curated current state in Markdown bank docs. The cutover plan reserves Markdown registries for profile, goals, conditions, allergies, protocols, family members, and genetics.
 - Keep append-only machine history in JSONL. Assessments, profile snapshots, timed history, samples, and audit records stay ledger-backed rather than becoming mutable Markdown truth.
 - Keep `bank/profile/current.md` derived from profile snapshots instead of promoting it to the only source of truth.
 - Keep timed history in the existing `ledger/events` family. New health history kinds such as `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure` extend that ledger instead of creating a second event timeline.
@@ -84,7 +84,7 @@ Storage and authority rules for the cutover:
 
 CLI and package-boundary rules for the cutover:
 
-- Keep the public surface payload-first. The planned noun pattern is `scaffold`, `upsert --input`, `show`, and `list`, with special cases for `intake import`, `intake project`, `profile current rebuild`, and `regimen stop`.
+- Keep the public surface payload-first. The planned noun pattern is `scaffold`, `upsert --input`, `show`, and `list`, with special cases for `intake import`, `intake project`, `profile current rebuild`, and `protocol stop`.
 - Keep canonical writes in `@healthybob/core` even when health nouns originate from `@healthybob/importers` or `@healthybob/cli`.
 - Keep `@healthybob/query` read-only. If the health read model needs repair logic, move that work into core mutation or validation paths instead.
 - Do not introduce a generic "apply this assessment" mutation. The cutover plan keeps assessment projection separate from noun-specific writes so operators can review proposals before they become canonical state.

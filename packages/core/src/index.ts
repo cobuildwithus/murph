@@ -44,7 +44,7 @@ export {
   repairVault,
   rebuildCurrentProfile,
   stopExperiment,
-  stopRegimenItem,
+  stopProtocolItem,
   unlinkJournalEventIds,
   unlinkJournalStreams,
   updateExperiment,
@@ -58,7 +58,7 @@ export {
   upsertGeneticVariant,
   upsertGoal,
   upsertRecipe,
-  upsertRegimenItem,
+  upsertProtocolItem,
   validateVault,
 } from "./public-mutations.js";
 export {
@@ -92,7 +92,7 @@ export type {
   HistoryEventProposal,
   ImportAssessmentResponseInput,
   ProfileSnapshotProposal,
-  RegimenProposal,
+  ProtocolProposal,
 } from "./assessment/index.js";
 export * from "./bank/index.js";
 export * from "./profile/index.js";

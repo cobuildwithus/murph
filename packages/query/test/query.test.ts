@@ -1737,7 +1737,7 @@ function createEmptyReadModel(): Awaited<ReturnType<typeof readVault>> {
     goals: [],
     conditions: [],
     allergies: [],
-    regimens: [],
+    protocols: [],
     history: [],
     familyMembers: [],
     geneticVariants: [],

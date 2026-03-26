@@ -229,7 +229,7 @@ function buildMetrics(vault: VaultReadModel): OverviewMetric[] {
     vault.goals.length +
     vault.conditions.length +
     vault.allergies.length +
-    vault.regimens.length +
+    vault.protocols.length +
     vault.familyMembers.length +
     vault.geneticVariants.length;
 

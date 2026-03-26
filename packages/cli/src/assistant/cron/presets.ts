@@ -134,7 +134,7 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
           'The foods, beverages, supplements, or brands to track. The default uses memory and recent health context when available.',
         required: true,
         defaultValue:
-          'the foods, beverages, supplements, and brands I regularly ingest based on memory, regimens, and recent logs; if the watchlist is incomplete, say what is missing',
+          'the foods, beverages, supplements, and brands I regularly ingest based on memory, protocols, and recent logs; if the watchlist is incomplete, say what is missing',
         example:
           'Bob’s Red Mill granola, AG1, Nordic Naturals fish oil, and LMNT',
       },
@@ -221,7 +221,7 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
           'What objectives, targets, and self-experiments to compare the week against. The default uses saved goals and recent context.',
         required: true,
         defaultValue:
-          'my current health goals and self-experiments based on goals, experiments, regimens, recent logs, and memory; if any of that is missing, say what is not yet tracked',
+          'my current health goals and self-experiments based on goals, experiments, protocols, recent logs, and memory; if any of that is missing, say what is not yet tracked',
         example:
           'lower LDL, improve sleep consistency, and track the impact of extra walking after meals',
       },

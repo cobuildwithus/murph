@@ -137,7 +137,7 @@ export interface ExportPackHealthContext {
   goals: ExportPackBankPage[];
   conditions: ExportPackBankPage[];
   allergies: ExportPackBankPage[];
-  regimens: ExportPackBankPage[];
+  protocols: ExportPackBankPage[];
   familyMembers: ExportPackBankPage[];
   geneticVariants: ExportPackBankPage[];
 }
@@ -465,7 +465,7 @@ function renderAssistantContext(input: QuestionPack): string {
     pushRegistrySection(lines, "Goals", context.health.goals);
     pushRegistrySection(lines, "Conditions", context.health.conditions);
     pushRegistrySection(lines, "Allergies", context.health.allergies);
-    pushRegistrySection(lines, "Regimens", context.health.regimens);
+    pushRegistrySection(lines, "Protocols", context.health.protocols);
     pushRegistrySection(lines, "Family", context.health.familyMembers);
     pushRegistrySection(lines, "Genetics", context.health.geneticVariants);
   }
@@ -554,7 +554,7 @@ function buildPromptQuestions(input: {
 
   if (health.assessments.length > 0) {
     questions.push(
-      "Which intake-assessment answers appear most relevant to the current goals, conditions, or regimens?",
+      "Which intake-assessment answers appear most relevant to the current goals, conditions, or protocols?",
     );
   }
 
@@ -647,7 +647,7 @@ function countHealthBankPages(health: ExportPackHealthContext): number {
     health.goals.length +
     health.conditions.length +
     health.allergies.length +
-    health.regimens.length +
+    health.protocols.length +
     health.familyMembers.length +
     health.geneticVariants.length
   );

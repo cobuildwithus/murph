@@ -47,7 +47,7 @@ const vaultStatsResultSchema = z.object({
     goals: z.number().int().nonnegative(),
     conditions: z.number().int().nonnegative(),
     allergies: z.number().int().nonnegative(),
-    regimens: z.number().int().nonnegative(),
+    protocols: z.number().int().nonnegative(),
     history: z.number().int().nonnegative(),
     familyMembers: z.number().int().nonnegative(),
     geneticVariants: z.number().int().nonnegative(),

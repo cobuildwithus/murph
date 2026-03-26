@@ -24,7 +24,7 @@ export type CanonicalEntityFamily =
   | "history"
   | "journal"
   | "profile_snapshot"
-  | "regimen"
+  | "protocol"
   | "sample";
 
 export interface CanonicalEntity {
@@ -59,7 +59,7 @@ const REGISTRY_RELATION_ARRAY_KEYS = [
   "relatedIds",
   "relatedGoalIds",
   "relatedExperimentIds",
-  "relatedRegimenIds",
+  "relatedProtocolIds",
   "sourceFamilyMemberIds",
   "sourceAssessmentIds",
   "sourceEventIds",
@@ -67,7 +67,7 @@ const REGISTRY_RELATION_ARRAY_KEYS = [
   "familyMemberIds",
   "conditionIds",
   "goalIds",
-  "regimenIds",
+  "protocolIds",
 ] as const;
 
 const REGISTRY_RELATION_SCALAR_KEYS = [
@@ -75,7 +75,7 @@ const REGISTRY_RELATION_SCALAR_KEYS = [
   "snapshotId",
   "conditionId",
   "goalId",
-  "regimenId",
+  "protocolId",
   "sourceAssessmentId",
   "sourceEventId",
 ] as const;
@@ -381,7 +381,7 @@ export function projectHistoryEntity(
 export function projectRegistryEntity(
   family: Extract<
     CanonicalEntityFamily,
-    "allergy" | "condition" | "family" | "genetics" | "goal" | "regimen"
+    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
   >,
   record: RegistryMarkdownRecord,
 ): CanonicalEntity {

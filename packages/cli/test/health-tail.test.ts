@@ -1082,7 +1082,7 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
       vaultRoot,
     ]);
     const primaryUpsert = await runCli<{
-      regimenId: string;
+      protocolId: string;
     }>([
       "supplement",
       "upsert",
@@ -1092,7 +1092,7 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
       vaultRoot,
     ]);
     const secondaryUpsert = await runCli<{
-      regimenId: string;
+      protocolId: string;
     }>([
       "supplement",
       "upsert",
@@ -1102,8 +1102,8 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
       vaultRoot,
     ]);
 
-    const primarySupplementId = requireData(primaryUpsert).regimenId;
-    const secondarySupplementId = requireData(secondaryUpsert).regimenId;
+    const primarySupplementId = requireData(primaryUpsert).protocolId;
+    const secondarySupplementId = requireData(secondaryUpsert).protocolId;
 
     const showResult = await runCli<{
       entity: {
@@ -1173,7 +1173,7 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
       vaultRoot,
     ]);
     const stopResult = await runCli<{
-      regimenId: string;
+      protocolId: string;
       status: string;
       stoppedOn: string | null;
     }>([
@@ -1256,7 +1256,7 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
     assert.equal(requireData(compoundShowResult).compound.sources[1]?.brand, "LivOn Labs");
 
     assert.equal(stopResult.ok, true);
-    assert.equal(requireData(stopResult).regimenId, primarySupplementId);
+    assert.equal(requireData(stopResult).protocolId, primarySupplementId);
     assert.equal(requireData(stopResult).status, "stopped");
     assert.equal(requireData(stopResult).stoppedOn, "2026-03-20");
 

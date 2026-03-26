@@ -23,9 +23,9 @@ import { upsertGoal as upsertGoalInternal } from "./bank/goals.js";
 import { upsertProvider as upsertProviderInternal } from "./bank/providers.js";
 import { upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
 import {
-  stopRegimenItem as stopRegimenItemInternal,
-  upsertRegimenItem as upsertRegimenItemInternal,
-} from "./bank/regimens.js";
+  stopProtocolItem as stopProtocolItemInternal,
+  upsertProtocolItem as upsertProtocolItemInternal,
+} from "./bank/protocols.js";
 import { upsertFamilyMember as upsertFamilyMemberInternal } from "./family/api.js";
 import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics/api.js";
 import {
@@ -411,14 +411,14 @@ export async function upsertFood(
   return withCanonicalWriteLock(input.vaultRoot, () => upsertFoodInternal(input));
 }
 
-export async function upsertRegimenItem(
-  input: Parameters<typeof upsertRegimenItemInternal>[0],
-): ReturnType<typeof upsertRegimenItemInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upsertRegimenItemInternal(input));
+export async function upsertProtocolItem(
+  input: Parameters<typeof upsertProtocolItemInternal>[0],
+): ReturnType<typeof upsertProtocolItemInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => upsertProtocolItemInternal(input));
 }
 
-export async function stopRegimenItem(
-  input: Parameters<typeof stopRegimenItemInternal>[0],
-): ReturnType<typeof stopRegimenItemInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => stopRegimenItemInternal(input));
+export async function stopProtocolItem(
+  input: Parameters<typeof stopProtocolItemInternal>[0],
+): ReturnType<typeof stopProtocolItemInternal> {
+  return withCanonicalWriteLock(input.vaultRoot, () => stopProtocolItemInternal(input));
 }

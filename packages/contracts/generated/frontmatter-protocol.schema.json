@@ -4,15 +4,15 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.regimen.v1"
+      "const": "hb.frontmatter.protocol.v1"
     },
     "docType": {
       "type": "string",
-      "const": "regimen"
+      "const": "protocol"
     },
-    "regimenId": {
+    "protocolId": {
       "type": "string",
-      "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
     },
     "slug": {
       "type": "string",
@@ -140,7 +140,7 @@
   "required": [
     "schemaVersion",
     "docType",
-    "regimenId",
+    "protocolId",
     "slug",
     "title",
     "kind",
@@ -148,6 +148,6 @@
     "startedOn"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-regimen.schema.json",
-  "title": "Healthy Bob Regimen Frontmatter"
+  "$id": "@healthybob/contracts/frontmatter-protocol.schema.json",
+  "title": "Healthy Bob Protocol Frontmatter"
 }

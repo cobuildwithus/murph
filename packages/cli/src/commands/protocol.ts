@@ -9,51 +9,51 @@ import { suggestedCommandsCta } from "./health-command-factory.js";
 
 const stopResultSchema = z.object({
   vault: pathSchema,
-  regimenId: z.string().min(1),
+  protocolId: z.string().min(1),
   lookupId: z.string().min(1),
   stoppedOn: localDateSchema.nullable(),
   status: z.string().min(1),
 })
 
-export function registerRegimenCommands(
+export function registerProtocolCommands(
   cli: Cli.Cli,
   services: VaultCliServices,
 ) {
-  const regimen = createHealthEntityCrudGroup(services, "regimen");
-  regimen.command("stop", {
+  const protocol = createHealthEntityCrudGroup(services, "protocol");
+  protocol.command("stop", {
     args: z.object({
-      regimenId: z.string().min(1),
+      protocolId: z.string().min(1),
     }),
-    description: "Stop one regimen while preserving its canonical id.",
+    description: "Stop one protocol while preserving its canonical id.",
     examples: [
       {
         args: {
-          regimenId: "<regimen-id>",
+          protocolId: "<protocol-id>",
         },
-        description: "Stop a regimen today.",
+        description: "Stop a protocol today.",
         options: {
           vault: "./vault",
         },
       },
       {
         args: {
-          regimenId: "<regimen-id>",
+          protocolId: "<protocol-id>",
         },
-        description: "Stop a regimen on a specific calendar day.",
+        description: "Stop a protocol on a specific calendar day.",
         options: {
           stoppedOn: "2026-03-12",
           vault: "./vault",
         },
       },
     ],
-    hint: "Use the canonical regimen id so the stop event is attached to the existing registry record.",
+    hint: "Use the canonical protocol id so the stop event is attached to the existing registry record.",
     options: withBaseOptions({
       stoppedOn: localDateSchema.optional(),
     }),
     output: stopResultSchema,
     async run(context) {
-      const result = await services.core.stopRegimen({
-        regimenId: context.args.regimenId,
+      const result = await services.core.stopProtocol({
+        protocolId: context.args.protocolId,
         stoppedOn: context.options.stoppedOn,
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
@@ -62,18 +62,18 @@ export function registerRegimenCommands(
       return context.ok(result, {
         cta: suggestedCommandsCta([
           {
-            command: "regimen show",
+            command: "protocol show",
             args: {
-              id: context.args.regimenId,
+              id: context.args.protocolId,
             },
-            description: "Show the stopped regimen record.",
+            description: "Show the stopped protocol record.",
             options: {
               vault: true,
             },
           },
           {
-            command: "regimen list",
-            description: "List stopped regimens.",
+            command: "protocol list",
+            description: "List stopped protocols.",
             options: {
               status: "stopped",
               vault: true,
@@ -84,5 +84,5 @@ export function registerRegimenCommands(
     },
   });
 
-  cli.command(regimen);
+  cli.command(protocol);
 }

@@ -101,7 +101,7 @@ The repo does not define a deployment target yet. It is currently a local TypeSc
 Healthy Bob splits the overall system into seven kinds of state:
 
 1. Human-readable canonical docs
-   `CORE.md`, journal pages, experiments, current profile, goals, conditions, allergies, regimens, family records, and genetics records.
+   `CORE.md`, journal pages, experiments, current profile, goals, conditions, allergies, protocols, family records, and genetics records.
 2. Append-only machine ledgers
    `ledger/events`, `ledger/samples`, `ledger/assessments`, `ledger/profile-snapshots`, and `audit`.
 3. Immutable imported artifacts
@@ -169,7 +169,7 @@ vault/
   bank/goals/<slug>.md
   bank/conditions/<slug>.md
   bank/allergies/<slug>.md
-  bank/regimens/<group>/<slug>.md
+  bank/protocols/<group>/<slug>.md
   bank/family/<slug>.md
   bank/genetics/<slug>.md
   raw/documents/YYYY/MM/<documentId>/<filename>
@@ -216,7 +216,7 @@ Schema version policy:
 - incompatible schema changes require an explicit cutover plan: either ship a one-time migration in `packages/core` or deliberately drop old read support before emitting the new version in writes
 - query and CLI code may validate or branch on versions but must not silently preserve or rewrite legacy stored records during reads
 
-Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
+Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `evt_*`, `smp_*`, `aud_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `prot_*`, `fam_*`, and `var_*`.
 
 ## Package Layout
 
@@ -332,7 +332,7 @@ The repo also includes a larger health-record surface:
 - `vault-cli condition scaffold|upsert|show|list`
 - `vault-cli allergy scaffold|upsert|show|list`
 - `vault-cli recipe scaffold|upsert|show|list`
-- `vault-cli regimen scaffold|upsert|show|list|stop`
+- `vault-cli protocol scaffold|upsert|show|list|stop`
 - `vault-cli family scaffold|upsert|show|list`
 - `vault-cli genetics scaffold|upsert|show|list`
 - `vault-cli history scaffold|upsert|show|list`
@@ -353,7 +353,7 @@ Nouns are grouped by those bundles rather than a shared grammar plus exceptions:
 
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, `recipe`, and `event` are payload-CRUD nouns
 - `profile` is payload CRUD plus `rebuild`
-- `regimen` is payload CRUD plus `stop`
+- `protocol` is payload CRUD plus `stop`
 - `document` and `meal` are artifact-import nouns
 - `intake` is artifact import plus `raw` and `project`
 - `samples` is artifact import plus batch inspection
@@ -432,7 +432,7 @@ For product integration code, prefer `createParsedInboxPipeline(...)` or `runInb
 
 The query layer distinguishes between the primary lookup id used for follow-on reads and the display id surfaced on the record itself.
 
-- `show` accepts query-layer ids such as `journal:2026-03-12`, `evt_*`, `smp_*`, `exp_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `reg_*`, `fam_*`, and `var_*`.
+- `show` accepts query-layer ids such as `journal:2026-03-12`, `evt_*`, `smp_*`, `exp_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `prot_*`, `fam_*`, and `var_*`.
 - `provider show` accepts either the canonical `prov_*` id or the provider slug from `bank/providers/<slug>.md`
 - `recipe show` accepts either the canonical `rcp_*` id or the recipe slug from `bank/recipes/<slug>.md`
 - `event show` accepts `evt_*`; specialized nouns such as `document`, `meal`, `workout`, `history`, and `experiment` remain the preferred capture surface when they exist, but workout follow-on reads still use the returned `lookupId` or `eventId` through `event show` or generic `show`

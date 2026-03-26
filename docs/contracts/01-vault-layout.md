@@ -16,7 +16,7 @@ vault/
   bank/conditions/<slug>.md
   bank/allergies/<slug>.md
   bank/foods/<slug>.md
-  bank/regimens/<group>/<slug>.md
+  bank/protocols/<group>/<slug>.md
   bank/family/<slug>.md
   bank/genetics/<slug>.md
   raw/documents/YYYY/MM/<documentId>/<filename>
@@ -72,7 +72,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - `bank/profile/current.md` is a derived current-state document rebuilt from profile snapshots; append-only truth remains in `ledger/profile-snapshots/`.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists.
-- `bank/regimens/**/*.md` allows nested regimen group folders, but every path segment must remain slug-safe ASCII.
+- `bank/protocols/**/*.md` allows nested protocol group folders, but every path segment must remain slug-safe ASCII.
 
 ## Attachment Conventions
 

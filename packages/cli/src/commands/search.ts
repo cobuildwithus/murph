@@ -137,7 +137,7 @@ export function registerSearchCommands(
       recordType: z
         .array(z.string().min(1))
         .optional()
-        .describe('Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, regimen, history, family, genetics.'),
+        .describe('Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics.'),
       kind: z
         .array(z.string().min(1))
         .optional()

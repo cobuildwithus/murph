@@ -26,7 +26,7 @@ const compoundStatusOptionSchema = z
 
 const supplementUpsertResultSchema = z.object({
   vault: pathSchema,
-  regimenId: z.string().min(1),
+  protocolId: z.string().min(1),
   lookupId: z.string().min(1),
   path: pathSchema.optional(),
   created: z.boolean(),
@@ -34,7 +34,7 @@ const supplementUpsertResultSchema = z.object({
 
 const stopResultSchema = z.object({
   vault: pathSchema,
-  regimenId: z.string().min(1),
+  protocolId: z.string().min(1),
   lookupId: z.string().min(1),
   stoppedOn: localDateSchema.nullable(),
   status: z.string().min(1),
@@ -180,13 +180,13 @@ export function registerSupplementCommands(
 
   supplement.command('stop', {
     args: z.object({
-      regimenId: z.string().min(1),
+      protocolId: z.string().min(1),
     }),
     description: 'Stop one supplement while preserving its canonical id.',
     examples: [
       {
         args: {
-          regimenId: '<supplement-id>',
+          protocolId: '<supplement-id>',
         },
         description: 'Stop a supplement today.',
         options: {
@@ -195,7 +195,7 @@ export function registerSupplementCommands(
       },
       {
         args: {
-          regimenId: '<supplement-id>',
+          protocolId: '<supplement-id>',
         },
         description: 'Stop a supplement on a specific calendar day.',
         options: {
@@ -211,7 +211,7 @@ export function registerSupplementCommands(
     output: stopResultSchema,
     async run(context) {
       const result = await services.core.stopSupplement({
-        regimenId: context.args.regimenId,
+        protocolId: context.args.protocolId,
         stoppedOn: context.options.stoppedOn,
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
@@ -222,7 +222,7 @@ export function registerSupplementCommands(
           {
             command: 'supplement show',
             args: {
-              id: context.args.regimenId,
+              id: context.args.protocolId,
             },
             description: 'Show the stopped supplement record.',
             options: {

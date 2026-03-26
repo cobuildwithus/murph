@@ -58,7 +58,7 @@ export interface VaultReadModel {
   goals: VaultRecord[];
   conditions: VaultRecord[];
   allergies: VaultRecord[];
-  regimens: VaultRecord[];
+  protocols: VaultRecord[];
   history: VaultRecord[];
   familyMembers: VaultRecord[];
   geneticVariants: VaultRecord[];
@@ -158,7 +158,7 @@ export const ALL_VAULT_RECORD_TYPES = [
   "history",
   "journal",
   "profile_snapshot",
-  "regimen",
+  "protocol",
   "sample",
 ] as const satisfies readonly VaultRecordType[];
 
@@ -201,7 +201,7 @@ async function readVaultWithHealthMode(
   const goals = recordsOfType(records, "goal");
   const conditions = recordsOfType(records, "condition");
   const allergies = recordsOfType(records, "allergy");
-  const regimens = recordsOfType(records, "regimen");
+  const protocols = recordsOfType(records, "protocol");
   const history = recordsOfType(records, "history");
   const familyMembers = recordsOfType(records, "family");
   const geneticVariants = recordsOfType(records, "genetics");
@@ -223,7 +223,7 @@ async function readVaultWithHealthMode(
     goals,
     conditions,
     allergies,
-    regimens,
+    protocols,
     history,
     familyMembers,
     geneticVariants,

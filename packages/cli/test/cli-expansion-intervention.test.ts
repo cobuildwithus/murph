@@ -26,7 +26,7 @@ interface InterventionAddEnvelope {
   title: string
   interventionType: string
   durationMinutes: number | null
-  regimenId: string | null
+  protocolId: string | null
   note: string
 }
 
@@ -81,7 +81,7 @@ test('intervention add schema exposes the freeform intervention capture surface'
 
   assert.equal('duration' in schema.options.properties, true)
   assert.equal('type' in schema.options.properties, true)
-  assert.equal('regimenId' in schema.options.properties, true)
+  assert.equal('protocolId' in schema.options.properties, true)
   assert.equal('occurredAt' in schema.options.properties, true)
   assert.equal('source' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
@@ -139,7 +139,7 @@ test.sequential(
       assert.equal(requireData(sauna).kind, 'intervention_session')
       assert.equal(requireData(sauna).interventionType, 'sauna')
       assert.equal(requireData(sauna).durationMinutes, 20)
-      assert.equal(requireData(sauna).regimenId, null)
+      assert.equal(requireData(sauna).protocolId, null)
       assert.equal(requireData(sauna).title, '20-minute sauna')
       assert.equal(requireData(sauna).note, '20 min sauna after lifting.')
 
@@ -155,7 +155,7 @@ test.sequential(
       assert.equal(requireData(showSauna).entity.title, '20-minute sauna')
       assert.equal(requireData(showSauna).entity.data.interventionType, 'sauna')
       assert.equal(requireData(showSauna).entity.data.durationMinutes, 20)
-      assert.equal(requireData(showSauna).entity.data.regimenId, undefined)
+      assert.equal(requireData(showSauna).entity.data.protocolId, undefined)
       assert.equal(
         requireData(showSauna).entity.data.note,
         '20 min sauna after lifting.',
@@ -167,8 +167,8 @@ test.sequential(
         'HBOT session at the clinic.',
         '--duration',
         '60',
-        '--regimen-id',
-        'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+        '--protocol-id',
+        'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
         '--vault',
         vaultRoot,
       ])
@@ -176,8 +176,8 @@ test.sequential(
       assert.equal(requireData(hbot).interventionType, 'hbot')
       assert.equal(requireData(hbot).durationMinutes, 60)
       assert.equal(
-        requireData(hbot).regimenId,
-        'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+        requireData(hbot).protocolId,
+        'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
       )
       assert.equal(requireData(hbot).title, '60-minute HBOT')
 
@@ -192,11 +192,11 @@ test.sequential(
       assert.equal(requireData(showHbot).entity.data.interventionType, 'hbot')
       assert.equal(requireData(showHbot).entity.data.durationMinutes, 60)
       assert.equal(
-        requireData(showHbot).entity.data.regimenId,
-        'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+        requireData(showHbot).entity.data.protocolId,
+        'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
       )
       assert.deepEqual(requireData(showHbot).entity.data.relatedIds, [
-        'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+        'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
       ])
 
       const noDuration = await runCli<InterventionAddEnvelope>([

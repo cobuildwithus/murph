@@ -1,5 +1,5 @@
 import {
-  deriveRegimenGroupFromRelativePath,
+  deriveProtocolGroupFromRelativePath,
   healthEntityDefinitionByKind,
   hasHealthEntityRegistry,
   type HealthEntityDefinitionWithRegistry,
@@ -55,7 +55,7 @@ export interface RegistryListOptions {
 
 type ProjectedRegistryFamily = Extract<
   CanonicalEntityFamily,
-  "allergy" | "condition" | "family" | "genetics" | "goal" | "regimen"
+  "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
 >;
 
 interface RegistryDefinition<TRecord extends RegistryMarkdownRecord> {
@@ -373,7 +373,7 @@ export interface ConditionQueryRecord extends RegistryMarkdownRecord {
   severity: string | null;
   bodySites: string[];
   relatedGoalIds: string[];
-  relatedRegimenIds: string[];
+  relatedProtocolIds: string[];
   note: string | null;
 }
 
@@ -437,7 +437,7 @@ export function readSupplementIngredients(
   return [];
 }
 
-export interface RegimenQueryRecord extends RegistryMarkdownRecord {
+export interface ProtocolQueryRecord extends RegistryMarkdownRecord {
   kind: string | null;
   startedOn: string | null;
   stoppedOn: string | null;
@@ -454,8 +454,8 @@ export interface RegimenQueryRecord extends RegistryMarkdownRecord {
   group: string | null;
 }
 
-export const regimenRegistryDefinition: RegistryDefinition<RegimenQueryRecord> =
-  createHealthEntityRegistryDefinition("regimen");
+export const protocolRegistryDefinition: RegistryDefinition<ProtocolQueryRecord> =
+  createHealthEntityRegistryDefinition("protocol");
 
 export interface FamilyQueryRecord extends RegistryMarkdownRecord {
   relationship: string | null;
@@ -492,7 +492,7 @@ async function loadProjectedRegistryRecords<TRecord extends RegistryMarkdownReco
   definition: RegistryDefinition<TRecord>,
   family: Extract<
     CanonicalEntityFamily,
-    "allergy" | "condition" | "family" | "genetics" | "goal" | "regimen"
+    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
   >,
   mapEntity: (entity: CanonicalEntity) => TRecord | null,
 ): Promise<TRecord[]> {
@@ -575,7 +575,7 @@ export function conditionRecordFromEntity(
     severity: firstString(base.attributes, ["severity"]),
     bodySites: readRegistryStrings(base.attributes, ["bodySites"]),
     relatedGoalIds: readRegistryStrings(base.attributes, ["relatedGoalIds"]),
-    relatedRegimenIds: readRegistryStrings(base.attributes, ["relatedRegimenIds"]),
+    relatedProtocolIds: readRegistryStrings(base.attributes, ["relatedProtocolIds"]),
     note: firstString(base.attributes, ["note"]),
   };
 }
@@ -597,8 +597,8 @@ export function allergyRecordFromEntity(entity: CanonicalEntity): AllergyQueryRe
   };
 }
 
-export function regimenRecordFromEntity(entity: CanonicalEntity): RegimenQueryRecord | null {
-  const base = registryRecordBaseFromEntity(entity, "regimen");
+export function protocolRecordFromEntity(entity: CanonicalEntity): ProtocolQueryRecord | null {
+  const base = registryRecordBaseFromEntity(entity, "protocol");
   if (!base) {
     return null;
   }
@@ -620,7 +620,7 @@ export function regimenRecordFromEntity(entity: CanonicalEntity): RegimenQueryRe
     relatedConditionIds: readRegistryStrings(base.attributes, ["relatedConditionIds"]),
     group:
       firstString(base.attributes, ["group"]) ??
-      deriveRegimenGroupFromRelativePath(base.relativePath),
+      deriveProtocolGroupFromRelativePath(base.relativePath),
   };
 }
 

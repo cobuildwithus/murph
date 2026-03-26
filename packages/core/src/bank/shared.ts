@@ -148,12 +148,12 @@ export function normalizeGroupPath(value: string | undefined, fallback: string):
   return segments.join("/");
 }
 
-export function groupFromRegimenPath(relativePath: string, rootDirectory: string): string {
+export function groupFromProtocolPath(relativePath: string, rootDirectory: string): string {
   const relativeToRoot = path.posix.relative(rootDirectory, relativePath);
   const directoryName = path.posix.dirname(relativeToRoot);
 
   if (!directoryName || directoryName === ".") {
-    throw new VaultError("VAULT_INVALID_REGIMEN", "Regimen path is missing a group directory.");
+    throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol path is missing a group directory.");
   }
 
   return directoryName;

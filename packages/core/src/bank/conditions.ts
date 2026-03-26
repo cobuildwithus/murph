@@ -51,7 +51,7 @@ function buildBody(record: ConditionRecord): string {
     [
       listSection("Body Sites", record.bodySites),
       listSection("Related Goals", record.relatedGoalIds),
-      listSection("Related Regimens", record.relatedRegimenIds),
+      listSection("Related Protocols", record.relatedProtocolIds),
       section("Note", record.note ?? "- none"),
     ],
   );
@@ -88,7 +88,7 @@ function parseConditionRecord(
     severity: optionalEnum(attributes.severity, CONDITION_SEVERITIES, "severity"),
     bodySites: validateSortedStringList(attributes.bodySites, "bodySites", "bodySite", 16, 120),
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
-    relatedRegimenIds: normalizeRecordIdList(attributes.relatedRegimenIds, "relatedRegimenIds", "reg"),
+    relatedProtocolIds: normalizeRecordIdList(attributes.relatedProtocolIds, "relatedProtocolIds", "prot"),
     note: optionalString(attributes.note, "note", 4000),
     relativePath,
     markdown,
@@ -109,7 +109,7 @@ function buildAttributes(record: ConditionRecord): FrontmatterObject {
     severity: record.severity,
     bodySites: record.bodySites,
     relatedGoalIds: record.relatedGoalIds,
-    relatedRegimenIds: record.relatedRegimenIds,
+    relatedProtocolIds: record.relatedProtocolIds,
     note: record.note,
   }) as FrontmatterObject;
 }
@@ -207,10 +207,10 @@ export async function upsertCondition(
               existingRecord?.relatedGoalIds,
               (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
             ),
-            relatedRegimenIds: resolveOptionalUpsertValue(
-              input.relatedRegimenIds,
-              existingRecord?.relatedRegimenIds,
-              (value) => normalizeRecordIdList(value, "relatedRegimenIds", "reg"),
+            relatedProtocolIds: resolveOptionalUpsertValue(
+              input.relatedProtocolIds,
+              existingRecord?.relatedProtocolIds,
+              (value) => normalizeRecordIdList(value, "relatedProtocolIds", "prot"),
             ),
             note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
               optionalString(value, "note", 4000),

@@ -138,7 +138,7 @@ const checkedCommandNounCapabilities = [
   },
   {
     bundles: ["payloadCrud"],
-    noun: "regimen",
+    noun: "protocol",
     additionalCapabilities: ["stop"],
   },
   {

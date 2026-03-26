@@ -8,9 +8,9 @@ import type { VaultCliServices } from '../vault-cli-services.js'
 import { addInterventionRecord } from '../usecases/intervention.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
-const regimenIdSchema = z
+const protocolIdSchema = z
   .string()
-  .regex(/^reg_[0-9A-Za-z]+$/u, 'Expected a canonical regimen id in reg_* form.')
+  .regex(/^prot_[0-9A-Za-z]+$/u, 'Expected a canonical protocol id in prot_* form.')
 
 export function registerInterventionCommands(
   cli: Cli.Cli,
@@ -44,14 +44,14 @@ export function registerInterventionCommands(
         },
       },
       {
-        description: 'Capture an HBOT clinic session and link it to a regimen.',
+        description: 'Capture an HBOT clinic session and link it to a protocol.',
         args: {
           text: 'HBOT session at the clinic.',
         },
         options: {
           vault: './vault',
           duration: 60,
-          regimenId: 'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
+          protocolId: 'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
         },
       },
     ],
@@ -75,10 +75,10 @@ export function registerInterventionCommands(
         .describe(
           'Optional intervention type override such as "sauna" or "hbot".',
         ),
-      regimenId: regimenIdSchema
+      protocolId: protocolIdSchema
         .optional()
         .describe(
-          'Optional regimen id to relate this intervention session back to one active therapy or habit.',
+          'Optional protocol id to relate this intervention session back to one active therapy or habit.',
         ),
       occurredAt: isoTimestampSchema
         .optional()
@@ -97,9 +97,9 @@ export function registerInterventionCommands(
         durationMinutes: options.duration,
         interventionType:
           typeof options.type === 'string' ? options.type : undefined,
-        regimenId:
-          typeof options.regimenId === 'string'
-            ? options.regimenId
+        protocolId:
+          typeof options.protocolId === 'string'
+            ? options.protocolId
             : undefined,
         occurredAt:
           typeof options.occurredAt === 'string'

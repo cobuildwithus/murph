@@ -7,16 +7,16 @@ import {
 } from "../registry/markdown.js";
 
 import {
-  REGIMEN_DOC_TYPE,
-  REGIMEN_KINDS,
-  REGIMENS_DIRECTORY,
-  REGIMEN_SCHEMA_VERSION,
-  REGIMEN_STATUSES,
+  PROTOCOL_DOC_TYPE,
+  PROTOCOL_KINDS,
+  PROTOCOLS_DIRECTORY,
+  PROTOCOL_SCHEMA_VERSION,
+  PROTOCOL_STATUSES,
 } from "./types.js";
 import {
   buildMarkdownBody,
   detailList,
-  groupFromRegimenPath,
+  groupFromProtocolPath,
   requireObject,
   listSection,
   normalizeGroupPath,
@@ -38,13 +38,13 @@ import {
 
 import type { FrontmatterObject } from "../types.js";
 import type {
-  ReadRegimenItemInput,
-  RegimenItemRecord,
+  ReadProtocolItemInput,
+  ProtocolItemRecord,
   SupplementIngredientRecord,
-  StopRegimenItemInput,
-  StopRegimenItemResult,
-  UpsertRegimenItemInput,
-  UpsertRegimenItemResult,
+  StopProtocolItemInput,
+  StopProtocolItemResult,
+  UpsertProtocolItemInput,
+  UpsertProtocolItemResult,
 } from "./types.js";
 
 function optionalBoolean(value: unknown, fieldName: string): boolean | undefined {
@@ -114,7 +114,7 @@ function formatIngredientLine(ingredient: SupplementIngredientRecord): string {
   return parts.join("; ");
 }
 
-function buildBody(record: RegimenItemRecord): string {
+function buildBody(record: ProtocolItemRecord): string {
   const sections = [
     (record.brand || record.manufacturer || record.servingSize)
       ? section(
@@ -159,32 +159,32 @@ function buildBody(record: RegimenItemRecord): string {
   );
 }
 
-function parseRegimenItemRecord(
+function parseProtocolItemRecord(
   attributes: FrontmatterObject,
   relativePath: string,
   markdown: string,
-): RegimenItemRecord {
+): ProtocolItemRecord {
   requireMatchingDocType(
     attributes,
-    REGIMEN_SCHEMA_VERSION,
-    REGIMEN_DOC_TYPE,
-    "VAULT_INVALID_REGIMEN",
-    "Regimen registry document has an unexpected shape.",
+    PROTOCOL_SCHEMA_VERSION,
+    PROTOCOL_DOC_TYPE,
+    "VAULT_INVALID_PROTOCOL",
+    "Protocol registry document has an unexpected shape.",
   );
   const startedOn = optionalDateOnly(attributes.startedOn as string | undefined, "startedOn");
 
   if (!startedOn) {
-    throw new VaultError("VAULT_INVALID_REGIMEN", "Regimen registry document is missing startedOn.");
+    throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol registry document is missing startedOn.");
   }
 
   return stripUndefined({
-    schemaVersion: REGIMEN_SCHEMA_VERSION,
-    docType: REGIMEN_DOC_TYPE,
-    regimenId: requireString(attributes.regimenId, "regimenId", 64),
+    schemaVersion: PROTOCOL_SCHEMA_VERSION,
+    docType: PROTOCOL_DOC_TYPE,
+    protocolId: requireString(attributes.protocolId, "protocolId", 64),
     slug: requireString(attributes.slug, "slug", 160),
     title: requireString(attributes.title, "title", 160),
-    kind: optionalEnum(attributes.kind, REGIMEN_KINDS, "kind") ?? "medication",
-    status: optionalEnum(attributes.status, REGIMEN_STATUSES, "status") ?? "active",
+    kind: optionalEnum(attributes.kind, PROTOCOL_KINDS, "kind") ?? "medication",
+    status: optionalEnum(attributes.status, PROTOCOL_STATUSES, "status") ?? "active",
     startedOn,
     stoppedOn: optionalDateOnly(attributes.stoppedOn as string | undefined, "stoppedOn"),
     substance: optionalString(attributes.substance, "substance", 160),
@@ -197,17 +197,17 @@ function parseRegimenItemRecord(
     ingredients: normalizeSupplementIngredients(attributes.ingredients),
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
     relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
-    group: groupFromRegimenPath(relativePath, REGIMENS_DIRECTORY),
+    group: groupFromProtocolPath(relativePath, PROTOCOLS_DIRECTORY),
     relativePath,
     markdown,
   });
 }
 
-function buildAttributes(record: RegimenItemRecord): FrontmatterObject {
+function buildAttributes(record: ProtocolItemRecord): FrontmatterObject {
   return stripUndefined({
-    schemaVersion: REGIMEN_SCHEMA_VERSION,
-    docType: REGIMEN_DOC_TYPE,
-    regimenId: record.regimenId,
+    schemaVersion: PROTOCOL_SCHEMA_VERSION,
+    docType: PROTOCOL_DOC_TYPE,
+    protocolId: record.protocolId,
     slug: record.slug,
     title: record.title,
     kind: record.kind,
@@ -236,7 +236,7 @@ function buildAttributes(record: RegimenItemRecord): FrontmatterObject {
   }) as FrontmatterObject;
 }
 
-function validateRegimenTiming(record: RegimenItemRecord): RegimenItemRecord {
+function validateProtocolTiming(record: ProtocolItemRecord): ProtocolItemRecord {
   if (!record.startedOn) {
     throw new VaultError("VAULT_INVALID_INPUT", "startedOn is required.");
   }
@@ -256,56 +256,56 @@ function validateRegimenTiming(record: RegimenItemRecord): RegimenItemRecord {
   return record;
 }
 
-async function loadRegimenItems(vaultRoot: string): Promise<RegimenItemRecord[]> {
+async function loadProtocolItems(vaultRoot: string): Promise<ProtocolItemRecord[]> {
   const records = await loadMarkdownRegistryDocuments({
     vaultRoot,
-    directory: REGIMENS_DIRECTORY,
-    recordFromParts: parseRegimenItemRecord,
+    directory: PROTOCOLS_DIRECTORY,
+    recordFromParts: parseProtocolItemRecord,
     isExpectedRecord: (record) =>
-      record.docType === REGIMEN_DOC_TYPE && record.schemaVersion === REGIMEN_SCHEMA_VERSION,
-    invalidCode: "VAULT_INVALID_REGIMEN",
-    invalidMessage: "Regimen registry document has an unexpected shape.",
+      record.docType === PROTOCOL_DOC_TYPE && record.schemaVersion === PROTOCOL_SCHEMA_VERSION,
+    invalidCode: "VAULT_INVALID_PROTOCOL",
+    invalidMessage: "Protocol registry document has an unexpected shape.",
   });
 
   records.sort(
     (left, right) =>
       left.group.localeCompare(right.group) ||
       left.title.localeCompare(right.title) ||
-      left.regimenId.localeCompare(right.regimenId),
+      left.protocolId.localeCompare(right.protocolId),
   );
   return records;
 }
 
-function selectRegimenRecord(
-  records: RegimenItemRecord[],
-  regimenId: string | undefined,
+function selectProtocolRecord(
+  records: ProtocolItemRecord[],
+  protocolId: string | undefined,
   slug: string | undefined,
   group: string | undefined,
-): RegimenItemRecord | null {
-  const byId = regimenId ? records.find((record) => record.regimenId === regimenId) ?? null : null;
+): ProtocolItemRecord | null {
+  const byId = protocolId ? records.find((record) => record.protocolId === protocolId) ?? null : null;
   const slugMatches = slug
     ? records.filter((record) => record.slug === slug && (!group || record.group === group))
     : [];
   const bySlug = slugMatches.length > 0 ? slugMatches[0] ?? null : null;
 
-  if (slugMatches.length > 1 && !regimenId) {
-    throw new VaultError("VAULT_REGIMEN_CONFLICT", "slug resolves to multiple regimen records; include group or regimenId.");
+  if (slugMatches.length > 1 && !protocolId) {
+    throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group or protocolId.");
   }
 
-  if (byId && bySlug && byId.regimenId !== bySlug.regimenId) {
-    throw new VaultError("VAULT_REGIMEN_CONFLICT", "regimenId and slug resolve to different regimen records.");
+  if (byId && bySlug && byId.protocolId !== bySlug.protocolId) {
+    throw new VaultError("VAULT_PROTOCOL_CONFLICT", "protocolId and slug resolve to different protocol records.");
   }
 
   return byId ?? bySlug;
 }
 
-async function resolveRegimenRecord(input: ReadRegimenItemInput): Promise<RegimenItemRecord> {
-  const normalizedRegimenId = normalizeId(input.regimenId, "regimenId", "reg");
+async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<ProtocolItemRecord> {
+  const normalizedProtocolId = normalizeId(input.protocolId, "protocolId", "prot");
   const normalizedSlug = normalizeSelectorSlug(input.slug);
-  const normalizedGroup = input.group ? normalizeGroupPath(input.group, "regimen") : undefined;
-  const records = await loadRegimenItems(input.vaultRoot);
+  const normalizedGroup = input.group ? normalizeGroupPath(input.group, "protocol") : undefined;
+  const records = await loadProtocolItems(input.vaultRoot);
   const match = records.find((record) => {
-    if (normalizedRegimenId && record.regimenId === normalizedRegimenId) {
+    if (normalizedProtocolId && record.protocolId === normalizedProtocolId) {
       return true;
     }
 
@@ -321,52 +321,52 @@ async function resolveRegimenRecord(input: ReadRegimenItemInput): Promise<Regime
   });
 
   if (!match) {
-    throw new VaultError("VAULT_REGIMEN_MISSING", "Regimen item was not found.");
+    throw new VaultError("VAULT_PROTOCOL_MISSING", "Protocol item was not found.");
   }
 
-  if (normalizedSlug && !normalizedGroup && !normalizedRegimenId) {
+  if (normalizedSlug && !normalizedGroup && !normalizedProtocolId) {
     const collisions = records.filter((record) => record.slug === normalizedSlug);
     if (collisions.length > 1) {
-      throw new VaultError("VAULT_REGIMEN_CONFLICT", "slug resolves to multiple regimen records; include group.");
+      throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group.");
     }
   }
 
   return match;
 }
 
-export async function upsertRegimenItem(
-  input: UpsertRegimenItemInput,
-): Promise<UpsertRegimenItemResult> {
-  const normalizedRegimenId = normalizeId(input.regimenId, "regimenId", "reg");
-  const existingRecords = await loadRegimenItems(input.vaultRoot);
+export async function upsertProtocolItem(
+  input: UpsertProtocolItemInput,
+): Promise<UpsertProtocolItemResult> {
+  const normalizedProtocolId = normalizeId(input.protocolId, "protocolId", "prot");
+  const existingRecords = await loadProtocolItems(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "regimen") : undefined;
-  const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
+  const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "protocol") : undefined;
+  const existingRecord = selectProtocolRecord(existingRecords, normalizedProtocolId, requestedSlug, requestedGroup);
   const title = requireString(input.title ?? existingRecord?.title, "title", 160);
   const kind = resolveRequiredUpsertValue(input.kind, existingRecord?.kind, "medication", (value) =>
-    optionalEnum(value, REGIMEN_KINDS, "kind") ?? "medication",
+    optionalEnum(value, PROTOCOL_KINDS, "kind") ?? "medication",
   );
   const group = existingRecord?.group ?? requestedGroup ?? normalizeGroupPath(undefined, kind);
   const target = resolveMarkdownRegistryUpsertTarget({
     existingRecord,
-    recordId: normalizedRegimenId,
+    recordId: normalizedProtocolId,
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
-    directory: `${REGIMENS_DIRECTORY}/${group}`,
-    getRecordId: (record) => record.regimenId,
-    createRecordId: () => generateRecordId("reg"),
+    directory: `${PROTOCOLS_DIRECTORY}/${group}`,
+    getRecordId: (record) => record.protocolId,
+    createRecordId: () => generateRecordId("prot"),
   });
   const attributes = buildAttributes(
-    validateRegimenTiming(
+    validateProtocolTiming(
       stripUndefined({
-        schemaVersion: REGIMEN_SCHEMA_VERSION,
-        docType: REGIMEN_DOC_TYPE,
-        regimenId: target.recordId,
+        schemaVersion: PROTOCOL_SCHEMA_VERSION,
+        docType: PROTOCOL_DOC_TYPE,
+        protocolId: target.recordId,
         slug: target.slug,
         title,
         kind,
         status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
-          optionalEnum(value, REGIMEN_STATUSES, "status") ?? "active",
+          optionalEnum(value, PROTOCOL_STATUSES, "status") ?? "active",
         ),
         startedOn:
           optionalDateOnly(input.startedOn ?? existingRecord?.startedOn ?? new Date(), "startedOn") ?? "",
@@ -409,7 +409,7 @@ export async function upsertRegimenItem(
           existingRecord?.relatedConditionIds,
           (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
         ),
-      }) as RegimenItemRecord,
+      }) as ProtocolItemRecord,
     ),
   );
   const { auditPath, record } = await writeMarkdownRegistryRecord({
@@ -421,14 +421,14 @@ export async function upsertRegimenItem(
       group,
       relativePath: target.relativePath,
       markdown: existingRecord?.markdown ?? "",
-    } as RegimenItemRecord),
-    recordFromParts: parseRegimenItemRecord,
-    operationType: "regimen_upsert",
-    summary: `Upsert regimen ${target.recordId}`,
+    } as ProtocolItemRecord),
+    recordFromParts: parseProtocolItemRecord,
+    operationType: "protocol_upsert",
+    summary: `Upsert protocol ${target.recordId}`,
     audit: {
-      action: "regimen_upsert",
-      commandName: "core.upsertRegimenItem",
-      summary: `Upserted regimen ${target.recordId}.`,
+      action: "protocol_upsert",
+      commandName: "core.upsertProtocolItem",
+      summary: `Upserted protocol ${target.recordId}.`,
       targetIds: [target.recordId],
     },
   });
@@ -440,20 +440,20 @@ export async function upsertRegimenItem(
   };
 }
 
-export async function listRegimenItems(vaultRoot: string): Promise<RegimenItemRecord[]> {
-  return loadRegimenItems(vaultRoot);
+export async function listProtocolItems(vaultRoot: string): Promise<ProtocolItemRecord[]> {
+  return loadProtocolItems(vaultRoot);
 }
 
-export async function readRegimenItem(input: ReadRegimenItemInput): Promise<RegimenItemRecord> {
-  return resolveRegimenRecord(input);
+export async function readProtocolItem(input: ReadProtocolItemInput): Promise<ProtocolItemRecord> {
+  return resolveProtocolRecord(input);
 }
 
-export async function stopRegimenItem(
-  input: StopRegimenItemInput,
-): Promise<StopRegimenItemResult> {
-  const current = await resolveRegimenRecord(input);
+export async function stopProtocolItem(
+  input: StopProtocolItemInput,
+): Promise<StopProtocolItemResult> {
+  const current = await resolveProtocolRecord(input);
   const stoppedOn = optionalDateOnly(input.stoppedOn ?? new Date(), "stoppedOn") ?? "";
-  const updatedRecord = validateRegimenTiming({
+  const updatedRecord = validateProtocolTiming({
     ...current,
     status: "stopped",
     stoppedOn,
@@ -461,21 +461,21 @@ export async function stopRegimenItem(
   const { auditPath, record } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
     target: {
-      recordId: updatedRecord.regimenId,
+      recordId: updatedRecord.protocolId,
       slug: updatedRecord.slug,
       relativePath: updatedRecord.relativePath,
       created: false,
     },
     attributes: buildAttributes(updatedRecord),
     body: buildBody(updatedRecord),
-    recordFromParts: parseRegimenItemRecord,
-    operationType: "regimen_stop",
-    summary: `Stop regimen ${updatedRecord.regimenId}`,
+    recordFromParts: parseProtocolItemRecord,
+    operationType: "protocol_stop",
+    summary: `Stop protocol ${updatedRecord.protocolId}`,
     audit: {
-      action: "regimen_stop",
-      commandName: "core.stopRegimenItem",
-      summary: `Stopped regimen ${updatedRecord.regimenId}.`,
-      targetIds: [updatedRecord.regimenId],
+      action: "protocol_stop",
+      commandName: "core.stopProtocolItem",
+      summary: `Stopped protocol ${updatedRecord.protocolId}.`,
+      targetIds: [updatedRecord.protocolId],
     },
   });
 

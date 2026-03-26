@@ -94,9 +94,9 @@
               "type": "string",
               "const": "rcp"
             },
-            "regimen": {
+            "protocol": {
               "type": "string",
-              "const": "reg"
+              "const": "prot"
             },
             "sample": {
               "type": "string",
@@ -131,7 +131,7 @@
             "profileSnapshot",
             "provider",
             "recipe",
-            "regimen",
+            "protocol",
             "sample",
             "transform",
             "variant",
@@ -221,9 +221,9 @@
           "type": "string",
           "const": "ledger/events"
         },
-        "regimensRoot": {
+        "protocolsRoot": {
           "type": "string",
-          "const": "bank/regimens"
+          "const": "bank/protocols"
         },
         "samplesRoot": {
           "type": "string",
@@ -257,7 +257,7 @@
         "rawAssessmentsRoot",
         "rawRoot",
         "eventsRoot",
-        "regimensRoot",
+        "protocolsRoot",
         "samplesRoot",
         "auditRoot",
         "exportsRoot"

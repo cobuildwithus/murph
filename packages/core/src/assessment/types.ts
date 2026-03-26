@@ -84,7 +84,7 @@ export interface AllergyProposal {
   raw: UnknownRecord;
 }
 
-export interface RegimenProposal {
+export interface ProtocolProposal {
   source: AssessmentProposalSource;
   name: string;
   kind?: string;
@@ -129,7 +129,7 @@ export interface AssessmentResponseProposal {
   goals: GoalProposal[];
   conditions: ConditionProposal[];
   allergies: AllergyProposal[];
-  regimens: RegimenProposal[];
+  protocols: ProtocolProposal[];
   historyEvents: HistoryEventProposal[];
   familyMembers: FamilyMemberProposal[];
   geneticVariants: GeneticVariantProposal[];

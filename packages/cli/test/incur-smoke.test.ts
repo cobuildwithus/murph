@@ -46,7 +46,7 @@ test('root help lists the simple health CRUD command groups', async () => {
     'food',
     'recipe',
     'supplement',
-    'regimen',
+    'protocol',
     'history',
     'blood-test',
     'family',
@@ -388,6 +388,28 @@ test('assistant cron preset install schema exposes preset variables, instruction
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
+test('food add-daily schema exposes the recurring food options', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['food', 'add-daily', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('title' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['title'])
+  assert.equal('time' in schema.options.properties, true)
+  assert.equal('note' in schema.options.properties, true)
+  assert.equal('slug' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault', 'time'])
+})
+
 test('profile show help exposes only the global format flag', async () => {
   const help = await runRawCli(['profile', 'show', '--help'])
 
@@ -401,7 +423,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
   const supplementUpsertHelp = await runRawCli(['supplement', 'upsert', '--help'])
   const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
   const profileRebuildHelp = await runRawCli(['profile', 'current', 'rebuild', '--help'])
-  const regimenStopHelp = await runRawCli(['regimen', 'stop', '--help'])
+  const protocolStopHelp = await runRawCli(['protocol', 'stop', '--help'])
 
   assert.match(
     profileUpsertHelp,
@@ -424,8 +446,8 @@ test('health command help surfaces examples and hints through Incur metadata', a
     /Run this after accepting a snapshot if you need to refresh the derived current profile document immediately\./u,
   )
   assert.match(
-    regimenStopHelp,
-    /Use the canonical regimen id so the stop event is attached to the existing registry record\./u,
+    protocolStopHelp,
+    /Use the canonical protocol id so the stop event is attached to the existing registry record\./u,
   )
 }, INCUR_HELP_TIMEOUT_MS)
 

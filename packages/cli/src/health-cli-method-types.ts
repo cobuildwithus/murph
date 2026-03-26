@@ -120,9 +120,9 @@ export interface HealthCoreRuntimeMethods {
   upsertAllergy(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HealthRecordRuntimeResult<'allergyId'>>
-  upsertRegimenItem(
+  upsertProtocolItem(
     input: { vaultRoot: string } & JsonObject,
-  ): Promise<HealthRecordRuntimeResult<'regimenId'>>
+  ): Promise<HealthRecordRuntimeResult<'protocolId'>>
   appendHistoryEvent(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HistoryEventRuntimeResult>
@@ -146,7 +146,7 @@ export interface HealthCoreScaffoldServiceMethods {
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'condition'>>
   scaffoldAllergy(input: CommandContext): Promise<HealthScaffoldResult<'allergy'>>
-  scaffoldRegimen(input: CommandContext): Promise<HealthScaffoldResult<'regimen'>>
+  scaffoldProtocol(input: CommandContext): Promise<HealthScaffoldResult<'protocol'>>
   scaffoldHistoryEvent(
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'history'>>
@@ -174,9 +174,9 @@ export interface HealthCoreUpsertServiceMethods {
   upsertAllergy(
     input: JsonFileInput,
   ): Promise<UpsertRecordResult & { allergyId: string }>
-  upsertRegimen(
+  upsertProtocol(
     input: JsonFileInput,
-  ): Promise<UpsertRecordResult & { regimenId: string }>
+  ): Promise<UpsertRecordResult & { protocolId: string }>
   upsertHistoryEvent(
     input: JsonFileInput,
   ): Promise<UpsertHistoryEventResult>
@@ -201,7 +201,7 @@ export interface HealthQueryRuntimeShowMethods {
   showGoal(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showCondition(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showAllergy(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  showRegimen(vaultRoot: string, lookup: string): Promise<JsonObject | null>
+  showProtocol(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showHistoryEvent(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showBloodTest(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showFamilyMember(vaultRoot: string, lookup: string): Promise<JsonObject | null>
@@ -226,7 +226,7 @@ export interface HealthQueryRuntimeListMethods {
     vaultRoot: string,
     options?: Record<string, unknown>,
   ): Promise<JsonObject[]>
-  listRegimens(
+  listProtocols(
     vaultRoot: string,
     options?: Record<string, unknown>,
   ): Promise<JsonObject[]>
@@ -269,7 +269,7 @@ export interface HealthQueryShowServiceMethods {
   showGoal(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showCondition(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showAllergy(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  showRegimen(input: EntityLookupInput): Promise<HealthEntityEnvelope>
+  showProtocol(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showHistoryEvent(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showBloodTest(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showFamilyMember(input: EntityLookupInput): Promise<HealthEntityEnvelope>
@@ -282,7 +282,7 @@ export interface HealthQueryListServiceMethods {
   listGoals(input: HealthListInput): Promise<HealthListEnvelope>
   listConditions(input: HealthListInput): Promise<HealthListEnvelope>
   listAllergies(input: HealthListInput): Promise<HealthListEnvelope>
-  listRegimens(input: HealthListInput): Promise<HealthListEnvelope>
+  listProtocols(input: HealthListInput): Promise<HealthListEnvelope>
   listHistoryEvents(input: HealthListInput): Promise<HealthListEnvelope>
   listBloodTests(input: HealthListInput): Promise<HealthListEnvelope>
   listFamilyMembers(input: HealthListInput): Promise<HealthListEnvelope>

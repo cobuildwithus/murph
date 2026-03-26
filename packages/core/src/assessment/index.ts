@@ -17,7 +17,7 @@ export type {
   HistoryEventProposal,
   ImportAssessmentResponseInput,
   ProfileSnapshotProposal,
-  RegimenProposal,
+  ProtocolProposal,
 } from "./types.js";
 
 export {

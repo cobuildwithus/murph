@@ -143,7 +143,7 @@ export const healthListResultSchema = z.object({
 
 type StatusFilteredRegistryDescriptorCommandName = Extract<
   HealthEntityKind,
-  "goal" | "condition" | "allergy" | "regimen" | "family" | "genetics"
+  "goal" | "condition" | "allergy" | "protocol" | "family" | "genetics"
 >;
 
 interface StatusFilteredRegistryDescriptorInput {
@@ -343,25 +343,25 @@ const checkedHealthEntityDescriptorExtensions = {
     showServiceMethod: "showAllergy",
     upsertServiceMethod: "upsertAllergy",
   }),
-  regimen: buildStatusFilteredRegistryDescriptorExtension({
-    commandDescription: "Regimen registry commands for the health extension surface.",
-    commandName: "regimen",
-    listServiceMethod: "listRegimens",
-    listStatusDescription: "Optional regimen status to filter by.",
-    noun: "regimen",
-    payloadFile: "regimen.json",
-    pluralNoun: "regimens",
-    resultIdField: "regimenId",
-    runtimeListMethod: "listRegimens",
-    runtimeMethod: "upsertRegimenItem",
-    runtimeShowMethod: "showRegimen",
-    scaffoldServiceMethod: "scaffoldRegimen",
+  protocol: buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: "Protocol registry commands for the health extension surface.",
+    commandName: "protocol",
+    listServiceMethod: "listProtocols",
+    listStatusDescription: "Optional protocol status to filter by.",
+    noun: "protocol",
+    payloadFile: "protocol.json",
+    pluralNoun: "protocols",
+    resultIdField: "protocolId",
+    runtimeListMethod: "listProtocols",
+    runtimeMethod: "upsertProtocolItem",
+    runtimeShowMethod: "showProtocol",
+    scaffoldServiceMethod: "scaffoldProtocol",
     showId: {
-      description: "Regimen id or slug to show.",
-      example: "<regimen-id>",
+      description: "Protocol id or slug to show.",
+      example: "<protocol-id>",
     },
-    showServiceMethod: "showRegimen",
-    upsertServiceMethod: "upsertRegimen",
+    showServiceMethod: "showProtocol",
+    upsertServiceMethod: "upsertProtocol",
   }),
   history: {
     command: {

@@ -1,7 +1,7 @@
 ---
-schemaVersion: hb.frontmatter.regimen.v1
-docType: regimen
-regimenId: reg_01JNV447V6K3SW1Q9NJ7XVQZ7P
+schemaVersion: hb.frontmatter.protocol.v1
+docType: protocol
+protocolId: prot_01JNV447V6K3SW1Q9NJ7XVQZ7P
 slug: magnesium-glycinate
 title: Magnesium glycinate
 kind: supplement

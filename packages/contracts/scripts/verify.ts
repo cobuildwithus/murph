@@ -34,7 +34,7 @@ import {
   isStrictIsoDate,
   isStrictIsoDateTime,
   normalizeStrictIsoTimestamp,
-  regimenFrontmatterSchema,
+  protocolFrontmatterSchema,
   safeParseContract,
   sampleRecordSchema,
   vaultMetadataSchema,
@@ -129,9 +129,9 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-goal",
   "frontmatter-journal-day",
   "frontmatter-profile-current",
+  "frontmatter-protocol",
   "frontmatter-provider",
   "frontmatter-recipe",
-  "frontmatter-regimen",
   "profile-snapshot",
   "sample-record",
   "vault-metadata",
@@ -203,7 +203,7 @@ assertNoErrors("profile current frontmatter object", exampleHealthFrontmatterObj
 assertNoErrors("goal frontmatter object", exampleHealthFrontmatterObjects.goal, goalFrontmatterSchema);
 assertNoErrors("condition frontmatter object", exampleHealthFrontmatterObjects.condition, conditionFrontmatterSchema);
 assertNoErrors("allergy frontmatter object", exampleHealthFrontmatterObjects.allergy, allergyFrontmatterSchema);
-assertNoErrors("regimen frontmatter object", exampleHealthFrontmatterObjects.regimen, regimenFrontmatterSchema);
+assertNoErrors("protocol frontmatter object", exampleHealthFrontmatterObjects.protocol, protocolFrontmatterSchema);
 assertNoErrors("family-member frontmatter object", exampleHealthFrontmatterObjects.familyMember, familyMemberFrontmatterSchema);
 assertNoErrors("genetic-variant frontmatter object", exampleHealthFrontmatterObjects.geneticVariant, geneticVariantFrontmatterSchema);
 assertHasErrors(

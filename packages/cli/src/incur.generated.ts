@@ -122,7 +122,7 @@ declare module 'incur' {
       'intake project': { args: { id: string }; options: { vault: string; requestId: string } }
       'intake raw': { args: { id: string }; options: { vault: string; requestId: string } }
       'intake show': { args: { id: string }; options: { vault: string; requestId: string } }
-      'intervention add': { args: { text: string }; options: { vault: string; requestId: string; duration: number; type: string; regimenId: string; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'intervention add': { args: { text: string }; options: { vault: string; requestId: string; duration: number; type: string; protocolId: string; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
       'journal append': { args: { date: string }; options: { vault: string; requestId: string; text: string } }
       'journal ensure': { args: { date: string }; options: { vault: string; requestId: string } }
       'journal link': { args: { date: string }; options: { vault: string; requestId: string; eventId: string[]; stream: string[] } }
@@ -143,6 +143,7 @@ declare module 'incur' {
       'provider scaffold': { args: {}; options: { vault: string; requestId: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId: string } }
       'provider upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'food add-daily': { args: { title: string }; options: { vault: string; requestId: string; time: string; note: string; slug: string } }
       'food list': { args: {}; options: { vault: string; requestId: string; status: "active" | "archived"; limit: number } }
       'food scaffold': { args: {}; options: { vault: string; requestId: string } }
       'food show': { args: { id: string }; options: { vault: string; requestId: string } }
@@ -151,11 +152,11 @@ declare module 'incur' {
       'recipe scaffold': { args: {}; options: { vault: string; requestId: string } }
       'recipe show': { args: { id: string }; options: { vault: string; requestId: string } }
       'recipe upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
-      'regimen list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
-      'regimen scaffold': { args: {}; options: { vault: string; requestId: string } }
-      'regimen show': { args: { id: string }; options: { vault: string; requestId: string } }
-      'regimen stop': { args: { regimenId: string }; options: { vault: string; requestId: string; stoppedOn: string } }
-      'regimen upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
+      'protocol list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
+      'protocol scaffold': { args: {}; options: { vault: string; requestId: string } }
+      'protocol show': { args: { id: string }; options: { vault: string; requestId: string } }
+      'protocol stop': { args: { protocolId: string }; options: { vault: string; requestId: string; stoppedOn: string } }
+      'protocol upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'research': { args: { prompt: string }; options: { vault: string; requestId: string; title: string; chat: string; browserPath: string; timeout: string; waitTimeout: string } }
       'run': { args: {}; options: { vault: string; requestId: string; model: string; baseUrl: string; apiKey: string; apiKeyEnv: string; providerName: string; headersJson: string; scanIntervalMs: number; maxPerScan: number; allowSelfAuthored: boolean; sessionRolloverHours: number; once: boolean; skipDaemon: boolean } }
       'samples add': { args: {}; options: { vault: string; requestId: string; input: string } }
@@ -175,7 +176,7 @@ declare module 'incur' {
       'supplement list': { args: {}; options: { vault: string; requestId: string; status: string; limit: number } }
       'supplement scaffold': { args: {}; options: { vault: string; requestId: string } }
       'supplement show': { args: { id: string }; options: { vault: string; requestId: string } }
-      'supplement stop': { args: { regimenId: string }; options: { vault: string; requestId: string; stoppedOn: string } }
+      'supplement stop': { args: { protocolId: string }; options: { vault: string; requestId: string; stoppedOn: string } }
       'supplement upsert': { args: {}; options: { vault: string; requestId: string; input: string } }
       'timeline': { args: {}; options: { vault: string; requestId: string; from: string; to: string; experiment: string; kind: string[]; stream: string[]; entryType: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId: string } }

@@ -59,7 +59,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -195,7 +195,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -326,7 +326,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -464,7 +464,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -592,7 +592,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -714,7 +714,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -844,7 +844,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -979,7 +979,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1111,7 +1111,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1239,7 +1239,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1371,7 +1371,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1627,7 +1627,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1837,7 +1837,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1968,7 +1968,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -2021,9 +2021,9 @@
           "type": "integer",
           "minimum": 1
         },
-        "regimenId": {
+        "protocolId": {
           "type": "string",
-          "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
+          "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
         }
       },
       "required": [
@@ -2097,7 +2097,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -2234,7 +2234,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|reg|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^(?:alg|asmt|aud|cond|doc|evt|exp|fam|food|goal|meal|pack|psnap|prov|rcp|prot|smp|xfm|var|vault)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },

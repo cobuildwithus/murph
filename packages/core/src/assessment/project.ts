@@ -15,7 +15,7 @@ import type {
   GoalProposal,
   HistoryEventProposal,
   ProfileSnapshotProposal,
-  RegimenProposal,
+  ProtocolProposal,
 } from "./types.js";
 import { readAssessmentResponse } from "./storage.js";
 
@@ -230,10 +230,10 @@ function normalizeAllergyProposal(
   };
 }
 
-function normalizeRegimenProposal(
+function normalizeProtocolProposal(
   value: unknown,
   source: AssessmentProposalSource,
-): RegimenProposal | null {
+): ProtocolProposal | null {
   const raw = toPlainObject(value, "name");
 
   if (!raw) {
@@ -458,9 +458,9 @@ export async function projectAssessmentResponse(
     .map((entry) => normalizeAllergyProposal(entry.value, buildSource(assessmentResponse, entry.pointer)))
     .filter((entry): entry is AllergyProposal => entry !== null);
 
-  const regimens = readCategoryEntries(containers, ["regimens", "regimen", "medications", "supplements"])
-    .map((entry) => normalizeRegimenProposal(entry.value, buildSource(assessmentResponse, entry.pointer)))
-    .filter((entry): entry is RegimenProposal => entry !== null);
+  const protocols = readCategoryEntries(containers, ["protocols", "protocol", "medications", "supplements"])
+    .map((entry) => normalizeProtocolProposal(entry.value, buildSource(assessmentResponse, entry.pointer)))
+    .filter((entry): entry is ProtocolProposal => entry !== null);
 
   const historyEvents = readCategoryEntries(containers, ["historyEvents", "history", "events", "historyEvent"])
     .map((entry) => normalizeHistoryEventProposal(entry.value, buildSource(assessmentResponse, entry.pointer)))
@@ -486,7 +486,7 @@ export async function projectAssessmentResponse(
     goals,
     conditions,
     allergies,
-    regimens,
+    protocols,
     historyEvents,
     familyMembers,
     geneticVariants,

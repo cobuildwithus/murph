@@ -556,22 +556,22 @@ function createVaultWriteToolDefinitions(
           }),
       }),
       defineAssistantTool({
-        name: 'vault.regimen.stop',
+        name: 'vault.protocol.stop',
         description:
-          'Stop an existing regimen while preserving its canonical id.',
+          'Stop an existing protocol while preserving its canonical id.',
         inputSchema: z.object({
-          regimenId: z.string().min(1),
+          protocolId: z.string().min(1),
           stoppedOn: localDateSchema.optional(),
         }),
         inputExample: {
-          regimenId: 'reg_example',
+          protocolId: 'prot_example',
           stoppedOn: '2026-03-13',
         },
-        execute: ({ regimenId, stoppedOn }) =>
-          input.vaultServices!.core.stopRegimen({
+        execute: ({ protocolId, stoppedOn }) =>
+          input.vaultServices!.core.stopProtocol({
             vault: input.vault,
             requestId: input.requestId ?? null,
-            regimenId,
+            protocolId,
             stoppedOn,
           }),
       }),

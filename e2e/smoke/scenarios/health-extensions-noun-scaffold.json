@@ -7,7 +7,7 @@
     "fixtures/health-extensions/payloads/goal-upsert.json",
     "fixtures/health-extensions/payloads/condition-upsert.json",
     "fixtures/health-extensions/payloads/allergy-upsert.json",
-    "fixtures/health-extensions/payloads/regimen-upsert.json",
+    "fixtures/health-extensions/payloads/protocol-upsert.json",
     "fixtures/health-extensions/payloads/history-upsert.json",
     "fixtures/health-extensions/payloads/family-upsert.json",
     "fixtures/health-extensions/payloads/genetics-upsert.json"

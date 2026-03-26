@@ -579,7 +579,7 @@ export async function showVaultStats(vault: string) {
       goals: readModel.goals.length,
       conditions: readModel.conditions.length,
       allergies: readModel.allergies.length,
-      regimens: readModel.regimens.length,
+      protocols: readModel.protocols.length,
       history: readModel.history.length,
       familyMembers: readModel.familyMembers.length,
       geneticVariants: readModel.geneticVariants.length,

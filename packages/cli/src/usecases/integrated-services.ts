@@ -21,7 +21,7 @@ import type {
   ProjectAssessmentInput,
   QueryEntity,
   QueryServices,
-  StopRegimenInput,
+  StopProtocolInput,
   VaultCliServices,
 } from "./types.js"
 import {
@@ -69,6 +69,7 @@ import {
   upsertProviderRecordFromInput,
 } from "./provider-event.js"
 import {
+  addDailyFoodRecord,
   listFoodRecords,
   scaffoldFoodPayload,
   showFoodRecord,
@@ -122,7 +123,7 @@ const SUPPLEMENT_SCAFFOLD_PAYLOAD = Object.freeze({
 
 const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
   "id",
-  "regimenId",
+  "protocolId",
   "slug",
   "title",
   "markdown",
@@ -149,7 +150,7 @@ function toSupplementEntityData(record: object) {
 function toSupplementReadEntity(record: object) {
   const rawRecord = record as Record<string, unknown>
   const data = toSupplementEntityData(record)
-  const id = firstRawString(rawRecord.id) ?? firstRawString(rawRecord.regimenId) ?? ""
+  const id = firstRawString(rawRecord.id) ?? firstRawString(rawRecord.protocolId) ?? ""
 
   return {
     id,
@@ -332,6 +333,14 @@ function createIntegratedCoreServices(): CoreWriteServices {
     }) {
       return upsertFoodRecordFromInput(input)
     },
+    async addDailyFood(input: CommandContext & {
+      title: string
+      time: string
+      note?: string
+      slug?: string
+    }) {
+      return addDailyFoodRecord(input)
+    },
     async scaffoldEvent(input: CommandContext & {
       kind: string
     }) {
@@ -394,7 +403,7 @@ function createIntegratedCoreServices(): CoreWriteServices {
       const payload = await readJsonPayload(input.input)
       assertNoReservedPayloadKeys(payload)
       const { core } = await loadIntegratedRuntime()
-      const result = await core.upsertRegimenItem({
+      const result = await core.upsertProtocolItem({
         ...payload,
         kind: payload.kind ?? 'supplement',
         vaultRoot: vault,
@@ -402,8 +411,8 @@ function createIntegratedCoreServices(): CoreWriteServices {
 
       return {
         vault,
-        regimenId: String(result.record.regimenId),
-        lookupId: String(result.record.regimenId),
+        protocolId: String(result.record.protocolId),
+        lookupId: String(result.record.protocolId),
         path: recordPath(result.record),
         created: Boolean(result.created),
       }
@@ -422,36 +431,36 @@ function createIntegratedCoreServices(): CoreWriteServices {
         updated: result.updated,
       }
     },
-    async stopRegimen(input: StopRegimenInput) {
-      const { vault, regimenId, stoppedOn } = input
+    async stopProtocol(input: StopProtocolInput) {
+      const { vault, protocolId, stoppedOn } = input
       const { core } = await loadIntegratedRuntime()
-      const result = await core.stopRegimenItem({
+      const result = await core.stopProtocolItem({
         vaultRoot: vault,
-        regimenId,
+        protocolId,
         stoppedOn,
       })
 
       return {
         vault,
-        regimenId: String(result.record.regimenId),
-        lookupId: String(result.record.regimenId),
+        protocolId: String(result.record.protocolId),
+        lookupId: String(result.record.protocolId),
         stoppedOn: result.record.stoppedOn ?? null,
         status: String(result.record.status),
       }
     },
-    async stopSupplement(input: StopRegimenInput) {
-      const { vault, regimenId, stoppedOn } = input
+    async stopSupplement(input: StopProtocolInput) {
+      const { vault, protocolId, stoppedOn } = input
       const { core } = await loadIntegratedRuntime()
-      const result = await core.stopRegimenItem({
+      const result = await core.stopProtocolItem({
         vaultRoot: vault,
-        regimenId,
+        protocolId,
         stoppedOn,
       })
 
       return {
         vault,
-        regimenId: String(result.record.regimenId),
-        lookupId: String(result.record.regimenId),
+        protocolId: String(result.record.protocolId),
+        lookupId: String(result.record.protocolId),
         stoppedOn: result.record.stoppedOn ?? null,
         status: String(result.record.status),
       }

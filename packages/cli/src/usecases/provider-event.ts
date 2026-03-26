@@ -250,8 +250,8 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     title: '20-minute sauna',
     interventionType: 'sauna',
     durationMinutes: 20,
-    regimenId: 'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
-    relatedIds: ['reg_01JNV422Y2M5ZBV64ZP4N1DRB1'],
+    protocolId: 'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
+    relatedIds: ['prot_01JNV422Y2M5ZBV64ZP4N1DRB1'],
     note: '20 min sauna after lifting.',
   },
 }

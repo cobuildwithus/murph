@@ -178,7 +178,7 @@ export function readHealthContext(
       goals: mapBankPages(collected.goals, collected.markdownByPath),
       conditions: mapBankPages(collected.conditions, collected.markdownByPath),
       allergies: mapBankPages(collected.allergies, collected.markdownByPath),
-      regimens: mapBankPages(collected.regimens, collected.markdownByPath),
+      protocols: mapBankPages(collected.protocols, collected.markdownByPath),
       familyMembers: mapBankPages(collected.familyMembers, collected.markdownByPath),
       geneticVariants: mapBankPages(collected.geneticVariants, collected.markdownByPath),
     },

@@ -31,7 +31,7 @@ import {
   familyRegistryDefinition,
   geneticsRegistryDefinition,
   goalRegistryDefinition,
-  regimenRegistryDefinition,
+  protocolRegistryDefinition,
   toRegistryRecord,
   type RegistryDefinition,
   type RegistryMarkdownRecord,
@@ -47,14 +47,14 @@ import type { MarkdownDocumentRecord } from "./shared.js";
 
 type RegistryFamily = Extract<
   CanonicalEntityFamily,
-  "allergy" | "condition" | "family" | "genetics" | "goal" | "regimen"
+  "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
 >;
 
 type RegistryCollectionKey =
   | "goals"
   | "conditions"
   | "allergies"
-  | "regimens"
+  | "protocols"
   | "familyMembers"
   | "geneticVariants";
 
@@ -73,7 +73,7 @@ interface RegistryCollections {
   goals: CanonicalEntity[];
   conditions: CanonicalEntity[];
   allergies: CanonicalEntity[];
-  regimens: CanonicalEntity[];
+  protocols: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
 }
@@ -96,7 +96,7 @@ export interface CanonicalHealthEntityCollection {
   goals: CanonicalEntity[];
   conditions: CanonicalEntity[];
   allergies: CanonicalEntity[];
-  regimens: CanonicalEntity[];
+  protocols: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   entities: CanonicalEntity[];
@@ -136,10 +136,10 @@ const REGISTRY_COLLECTORS = [
       allergyRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
   },
   {
-    key: "regimens",
-    family: "regimen",
+    key: "protocols",
+    family: "protocol",
     definition:
-      regimenRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
+      protocolRegistryDefinition as unknown as RegistryDefinition<RegistryMarkdownRecord>,
   },
   {
     key: "familyMembers",
@@ -326,7 +326,7 @@ function buildCanonicalHealthCollection(input: {
   goals: CanonicalEntity[];
   conditions: CanonicalEntity[];
   allergies: CanonicalEntity[];
-  regimens: CanonicalEntity[];
+  protocols: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   failures: ParseFailure[];
@@ -342,7 +342,7 @@ function buildCanonicalHealthCollection(input: {
       ...input.goals,
       ...input.conditions,
       ...input.allergies,
-      ...input.regimens,
+      ...input.protocols,
       ...input.familyMembers,
       ...input.geneticVariants,
     ].sort(compareCanonicalEntities),
@@ -409,7 +409,7 @@ function createEmptyRegistryCollections(): RegistryCollections {
     goals: [],
     conditions: [],
     allergies: [],
-    regimens: [],
+    protocols: [],
     familyMembers: [],
     geneticVariants: [],
   };

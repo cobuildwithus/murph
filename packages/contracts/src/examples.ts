@@ -15,7 +15,7 @@ import type {
   ProfileSnapshotRecord,
   ProviderFrontmatter,
   RecipeFrontmatter,
-  RegimenFrontmatter,
+  ProtocolFrontmatter,
   SampleRecord,
   VaultMetadata,
 } from "./zod.js";
@@ -36,7 +36,7 @@ type HealthFrontmatterExamples = {
   geneticVariant: GeneticVariantFrontmatter;
   goal: GoalFrontmatter;
   profileCurrent: ProfileCurrentFrontmatter;
-  regimen: RegimenFrontmatter;
+  protocol: ProtocolFrontmatter;
 };
 
 export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<VaultMetadata>({
@@ -63,7 +63,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
       profileSnapshot: "psnap",
       provider: "prov",
       recipe: "rcp",
-      regimen: "reg",
+      protocol: "prot",
       sample: "smp",
       transform: "xfm",
       variant: "var",
@@ -89,7 +89,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
     rawAssessmentsRoot: "raw/assessments",
     rawRoot: "raw",
     eventsRoot: "ledger/events",
-    regimensRoot: "bank/regimens",
+    protocolsRoot: "bank/protocols",
     samplesRoot: "ledger/samples",
     auditRoot: "audit",
     exportsRoot: "exports",
@@ -344,10 +344,10 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     source: "manual",
     title: "20-minute sauna",
     note: "20 min sauna after lifting.",
-    relatedIds: ["reg_01JNV422Y2M5ZBV64ZP4N1DRB1"],
+    relatedIds: ["prot_01JNV422Y2M5ZBV64ZP4N1DRB1"],
     interventionType: "sauna",
     durationMinutes: 20,
-    regimenId: "reg_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    protocolId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1",
   },
 ]);
 
@@ -569,6 +569,9 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     ],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola and no honey.",
+    autoLogDaily: {
+      time: "08:00",
+    },
   },
   provider: {
     schemaVersion: "hb.frontmatter.provider.v1",
@@ -659,7 +662,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     severity: "moderate",
     bodySites: [],
     relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-    relatedRegimenIds: ["reg_01JNV447V6K3SW1Q9NJ7XVQZ7P"],
+    relatedProtocolIds: ["prot_01JNV447V6K3SW1Q9NJ7XVQZ7P"],
     note: "Self-reported difficulty falling asleep at least four nights per week.",
   },
   allergy: {
@@ -676,10 +679,10 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
     note: "Historical reaction reported during intake.",
   },
-  regimen: {
-    schemaVersion: "hb.frontmatter.regimen.v1",
-    docType: "regimen",
-    regimenId: "reg_01JNV447V6K3SW1Q9NJ7XVQZ7P",
+  protocol: {
+    schemaVersion: "hb.frontmatter.protocol.v1",
+    docType: "protocol",
+    protocolId: "prot_01JNV447V6K3SW1Q9NJ7XVQZ7P",
     slug: "magnesium-glycinate",
     title: "Magnesium glycinate",
     kind: "supplement",
@@ -806,6 +809,8 @@ tags:
   - breakfast
   - favorite
 note: Typical order includes extra granola and no honey.
+autoLogDaily:
+  time: 08:00
 ---
 
 # Regular Acai Bowl

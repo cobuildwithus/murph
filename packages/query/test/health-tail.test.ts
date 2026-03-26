@@ -274,10 +274,10 @@ status: active
 
   await writeVaultFile(
     vaultRoot,
-    "bank/regimens/supplements/magnesium-glycinate.md",
+    "bank/protocols/supplements/magnesium-glycinate.md",
     `---
-schemaVersion: hv/regimen@v1
-regimenId: reg_01
+schemaVersion: hv/protocol@v1
+protocolId: prot_01
 slug: magnesium-glycinate
 title: Magnesium glycinate
 status: active
@@ -326,10 +326,10 @@ test("supplement queries project product metadata and aggregate overlapping comp
   try {
     await writeVaultFile(
       vaultRoot,
-      "bank/regimens/supplements/liposomal-vitamin-c.md",
+      "bank/protocols/supplements/liposomal-vitamin-c.md",
       `---
-schemaVersion: hv/regimen@v1
-regimenId: reg_new
+schemaVersion: hv/protocol@v1
+protocolId: prot_new
 slug: liposomal-vitamin-c
 title: Liposomal Vitamin C
 status: active
@@ -355,10 +355,10 @@ ingredients:
 
     await writeVaultFile(
       vaultRoot,
-      "bank/regimens/supplements/electrolyte-c-mix.md",
+      "bank/protocols/supplements/electrolyte-c-mix.md",
       `---
-schemaVersion: hv/regimen@v1
-regimenId: reg_legacy
+schemaVersion: hv/protocol@v1
+protocolId: prot_legacy
 slug: electrolyte-c-mix
 title: Electrolyte C Mix
 status: active
@@ -375,10 +375,10 @@ schedule: post-training
 
     await writeVaultFile(
       vaultRoot,
-      "bank/regimens/supplements/cold-support.md",
+      "bank/protocols/supplements/cold-support.md",
       `---
-schemaVersion: hv/regimen@v1
-regimenId: reg_stopped
+schemaVersion: hv/protocol@v1
+protocolId: prot_stopped
 slug: cold-support
 title: Cold Support
 status: stopped
@@ -401,7 +401,7 @@ ingredients:
     const stoppedVitaminC = await showSupplementCompound(vaultRoot, "Vitamin C", {
       status: "stopped",
     });
-    const liposomal = supplements.find((record) => record.id === "reg_new") ?? null;
+    const liposomal = supplements.find((record) => record.id === "prot_new") ?? null;
 
     assert.equal(supplements.length, 3);
     assert.equal(liposomal?.brand, "LivOn Labs");
@@ -438,10 +438,10 @@ ingredients:
       },
     ]);
     assert.equal(vitaminC?.supplementCount, 2);
-    assert.deepEqual(vitaminC?.supplementIds, ["reg_legacy", "reg_new"]);
+    assert.deepEqual(vitaminC?.supplementIds, ["prot_legacy", "prot_new"]);
     assert.deepEqual(
       vitaminC?.sources.map((source) => source.supplementId),
-      ["reg_legacy", "reg_new"],
+      ["prot_legacy", "prot_new"],
     );
     assert.equal(vitaminC?.sources[1]?.brand, "LivOn Labs");
     assert.deepEqual(stoppedVitaminC?.totals, [
@@ -453,7 +453,7 @@ ingredients:
       },
     ]);
     assert.equal(stoppedVitaminC?.supplementCount, 1);
-    assert.deepEqual(stoppedVitaminC?.supplementIds, ["reg_stopped"]);
+    assert.deepEqual(stoppedVitaminC?.supplementIds, ["prot_stopped"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -524,7 +524,7 @@ function createManualVault(records: VaultRecord[]): VaultReadModel {
     goals: records.filter((record) => record.recordType === "goal"),
     conditions: records.filter((record) => record.recordType === "condition"),
     allergies: records.filter((record) => record.recordType === "allergy"),
-    regimens: records.filter((record) => record.recordType === "regimen"),
+    protocols: records.filter((record) => record.recordType === "protocol"),
     history: records.filter((record) => record.recordType === "history"),
     familyMembers: records.filter((record) => record.recordType === "family"),
     geneticVariants: records.filter((record) => record.recordType === "genetics"),
@@ -669,7 +669,7 @@ test("readVault promotes health families into the shared search and timeline pro
         "goal",
         "history",
         "profile_snapshot",
-        "regimen",
+        "protocol",
       ]),
     );
     assert.deepEqual(

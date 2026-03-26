@@ -260,7 +260,7 @@ export function buildEntityLinks(record: {
     "topGoalIds",
     "relatedGoalIds",
     "relatedConditionIds",
-    "relatedRegimenIds",
+    "relatedProtocolIds",
     "relatedExperimentIds",
     "sourceFamilyMemberIds",
     "familyMemberIds",

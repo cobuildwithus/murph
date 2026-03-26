@@ -21,10 +21,10 @@ export const ALLERGY_DOC_TYPE = "allergy";
 export const ALLERGY_STATUSES = ["active", "inactive", "resolved"] as const;
 export const ALLERGY_CRITICALITIES = ["low", "high", "unable_to_assess"] as const;
 
-export const REGIMEN_SCHEMA_VERSION = "hb.frontmatter.regimen.v1";
-export const REGIMEN_DOC_TYPE = "regimen";
-export const REGIMEN_KINDS = ["medication", "supplement", "therapy", "habit"] as const;
-export const REGIMEN_STATUSES = ["active", "paused", "completed", "stopped"] as const;
+export const PROTOCOL_SCHEMA_VERSION = "hb.frontmatter.protocol.v1";
+export const PROTOCOL_DOC_TYPE = "protocol";
+export const PROTOCOL_KINDS = ["medication", "supplement", "therapy", "habit"] as const;
+export const PROTOCOL_STATUSES = ["active", "paused", "completed", "stopped"] as const;
 
 export const RECIPE_SCHEMA_VERSION = "hb.frontmatter.recipe.v1";
 export const RECIPE_DOC_TYPE = "recipe";
@@ -39,7 +39,7 @@ export const CONDITIONS_DIRECTORY = "bank/conditions";
 export const ALLERGIES_DIRECTORY = "bank/allergies";
 export const FOODS_DIRECTORY = "bank/foods";
 export const RECIPES_DIRECTORY = "bank/recipes";
-export const REGIMENS_DIRECTORY = "bank/regimens";
+export const PROTOCOLS_DIRECTORY = "bank/protocols";
 
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export type GoalHorizon = (typeof GOAL_HORIZONS)[number];
@@ -50,8 +50,12 @@ export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
-export type RegimenKind = (typeof REGIMEN_KINDS)[number];
-export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
+export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
+export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
+
+export interface FoodAutoLogDailyRule {
+  time: string;
+}
 
 export interface FoodRecord {
   schemaVersion: typeof FOOD_SCHEMA_VERSION;
@@ -70,6 +74,7 @@ export interface FoodRecord {
   ingredients?: string[];
   tags?: string[];
   note?: string;
+  autoLogDaily?: FoodAutoLogDailyRule;
   relativePath: string;
   markdown: string;
 }
@@ -90,6 +95,7 @@ export interface UpsertFoodInput {
   ingredients?: string[];
   tags?: string[];
   note?: string;
+  autoLogDaily?: FoodAutoLogDailyRule | null;
 }
 
 export interface UpsertFoodResult {
@@ -236,7 +242,7 @@ export interface ConditionRecord {
   severity?: ConditionSeverity;
   bodySites?: string[];
   relatedGoalIds?: string[];
-  relatedRegimenIds?: string[];
+  relatedProtocolIds?: string[];
   note?: string;
   relativePath: string;
   markdown: string;
@@ -254,7 +260,7 @@ export interface UpsertConditionInput {
   severity?: ConditionSeverity;
   bodySites?: string[];
   relatedGoalIds?: string[];
-  relatedRegimenIds?: string[];
+  relatedProtocolIds?: string[];
   note?: string;
 }
 
@@ -313,14 +319,14 @@ export interface ReadAllergyInput {
   slug?: string;
 }
 
-export interface RegimenItemRecord {
-  schemaVersion: typeof REGIMEN_SCHEMA_VERSION;
-  docType: typeof REGIMEN_DOC_TYPE;
-  regimenId: string;
+export interface ProtocolItemRecord {
+  schemaVersion: typeof PROTOCOL_SCHEMA_VERSION;
+  docType: typeof PROTOCOL_DOC_TYPE;
+  protocolId: string;
   slug: string;
   title: string;
-  kind: RegimenKind;
-  status: RegimenStatus;
+  kind: ProtocolKind;
+  status: ProtocolStatus;
   startedOn: string;
   stoppedOn?: string;
   substance?: string;
@@ -338,13 +344,13 @@ export interface RegimenItemRecord {
   markdown: string;
 }
 
-export interface UpsertRegimenItemInput {
+export interface UpsertProtocolItemInput {
   vaultRoot: string;
-  regimenId?: string;
+  protocolId?: string;
   slug?: string;
   title?: string;
-  kind?: RegimenKind;
-  status?: RegimenStatus;
+  kind?: ProtocolKind;
+  status?: ProtocolStatus;
   startedOn?: DateInput;
   stoppedOn?: DateInput;
   substance?: string;
@@ -360,28 +366,28 @@ export interface UpsertRegimenItemInput {
   group?: string;
 }
 
-export interface UpsertRegimenItemResult {
+export interface UpsertProtocolItemResult {
   created: boolean;
   auditPath: string;
-  record: RegimenItemRecord;
+  record: ProtocolItemRecord;
 }
 
-export interface ReadRegimenItemInput {
+export interface ReadProtocolItemInput {
   vaultRoot: string;
-  regimenId?: string;
+  protocolId?: string;
   slug?: string;
   group?: string;
 }
 
-export interface StopRegimenItemInput {
+export interface StopProtocolItemInput {
   vaultRoot: string;
-  regimenId?: string;
+  protocolId?: string;
   slug?: string;
   group?: string;
   stoppedOn?: DateInput;
 }
 
-export interface StopRegimenItemResult {
+export interface StopProtocolItemResult {
   auditPath: string;
-  record: RegimenItemRecord;
+  record: ProtocolItemRecord;
 }

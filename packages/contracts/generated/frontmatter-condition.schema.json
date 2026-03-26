@@ -73,11 +73,11 @@
       },
       "uniqueItems": true
     },
-    "relatedRegimenIds": {
+    "relatedProtocolIds": {
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
+        "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
     },

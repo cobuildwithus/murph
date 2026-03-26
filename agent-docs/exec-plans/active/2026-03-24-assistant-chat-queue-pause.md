@@ -58,5 +58,5 @@ Updated: 2026-03-24
 
 - `pnpm exec vitest run packages/cli/test/assistant-codex.test.ts packages/cli/test/assistant-provider.test.ts packages/cli/test/assistant-runtime.test.ts --no-coverage --maxWorkers 1` passed (`3` files, `79` tests).
 - `pnpm typecheck` passed.
-- `pnpm test` failed in the pre-existing `packages/web` build path while compiling `packages/query/dist/**` because `@healthybob/contracts` is currently missing exports used by the built query bundle (`healthEntityDefinitionByKind`, `hasHealthEntityRegistry`, `deriveRegimenGroupFromRelativePath`, `parseFrontmatterDocument`, `parseFrontmatterScalar`).
+- `pnpm test` failed in the pre-existing `packages/web` build path while compiling `packages/query/dist/**` because `@healthybob/contracts` is currently missing exports used by the built query bundle (`healthEntityDefinitionByKind`, `hasHealthEntityRegistry`, `deriveProtocolGroupFromRelativePath`, `parseFrontmatterDocument`, `parseFrontmatterScalar`).
 - `pnpm test:coverage` failed for the same pre-existing `packages/web` build issue during `pnpm test:packages:coverage`.

@@ -5,17 +5,17 @@ import {
   matchesText,
 } from "./shared.js";
 import {
-  listRegimens,
-  readRegimen,
-} from "./regimens.js";
+  listProtocols,
+  readProtocol,
+} from "./protocols.js";
 
 import type {
-  RegimenQueryRecord,
+  ProtocolQueryRecord,
   RegistryListOptions,
   SupplementIngredientQueryRecord,
 } from "./registries.js";
 
-export interface SupplementQueryRecord extends RegimenQueryRecord {
+export interface SupplementQueryRecord extends ProtocolQueryRecord {
   kind: string | null;
 }
 
@@ -70,7 +70,7 @@ interface SupplementCompoundAggregationState {
   }>;
 }
 
-function isSupplement(record: RegimenQueryRecord | null): record is SupplementQueryRecord {
+function isSupplement(record: ProtocolQueryRecord | null): record is SupplementQueryRecord {
   return record?.kind?.toLowerCase() === "supplement";
 }
 
@@ -266,7 +266,7 @@ export async function listSupplements(
   vaultRoot: string,
   options: SupplementListOptions = {},
 ): Promise<SupplementQueryRecord[]> {
-  const records = await listRegimens(vaultRoot, {
+  const records = await listProtocols(vaultRoot, {
     ...options,
     limit: undefined,
   });
@@ -279,9 +279,9 @@ export async function listSupplements(
 
 export async function readSupplement(
   vaultRoot: string,
-  regimenId: string,
+  protocolId: string,
 ): Promise<SupplementQueryRecord | null> {
-  const record = await readRegimen(vaultRoot, regimenId);
+  const record = await readProtocol(vaultRoot, protocolId);
   return isSupplement(record) ? record : null;
 }
 

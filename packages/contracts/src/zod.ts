@@ -29,8 +29,8 @@ import {
   PROFILE_SNAPSHOT_SOURCES,
   RAW_IMPORT_KINDS,
   RECIPE_STATUSES,
-  REGIMEN_KINDS,
-  REGIMEN_STATUSES,
+  PROTOCOL_KINDS,
+  PROTOCOL_STATUSES,
   SAMPLE_QUALITIES,
   SAMPLE_SOURCES,
   SAMPLE_STREAMS,
@@ -57,8 +57,8 @@ export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type ProfileSnapshotSource = (typeof PROFILE_SNAPSHOT_SOURCES)[number];
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
-export type RegimenKind = (typeof REGIMEN_KINDS)[number];
-export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
+export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
+export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
 export type SampleStream = (typeof SAMPLE_STREAMS)[number];
 export type SampleSource = (typeof SAMPLE_SOURCES)[number];
 export type SampleQuality = (typeof SAMPLE_QUALITIES)[number];
@@ -90,6 +90,7 @@ const RAW_ASSESSMENT_SOURCE_PATTERN = "^raw/assessments/[A-Za-z0-9._/-]+/source\
 const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
+const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
@@ -391,7 +392,7 @@ export const vaultMetadataSchema = withContractMetadata(
               profileSnapshot: z.literal(ID_PREFIXES.profileSnapshot),
               provider: z.literal(ID_PREFIXES.provider),
               recipe: z.literal(ID_PREFIXES.recipe),
-              regimen: z.literal(ID_PREFIXES.regimen),
+              protocol: z.literal(ID_PREFIXES.protocol),
               sample: z.literal(ID_PREFIXES.sample),
               transform: z.literal(ID_PREFIXES.transform),
               variant: z.literal(ID_PREFIXES.variant),
@@ -420,7 +421,7 @@ export const vaultMetadataSchema = withContractMetadata(
           rawAssessmentsRoot: z.literal("raw/assessments"),
           rawRoot: z.literal("raw"),
           eventsRoot: z.literal("ledger/events"),
-          regimensRoot: z.literal("bank/regimens"),
+          protocolsRoot: z.literal("bank/protocols"),
           samplesRoot: z.literal("ledger/samples"),
           auditRoot: z.literal("audit"),
           exportsRoot: z.literal("exports"),
@@ -523,7 +524,7 @@ export const eventRecordSchema = withContractMetadata(
     eventSchema("intervention_session", {
       interventionType: patternedString(SLUG_PATTERN),
       durationMinutes: integerSchema(1).optional(),
-      regimenId: idSchema(ID_PREFIXES.regimen).optional(),
+      protocolId: idSchema(ID_PREFIXES.protocol).optional(),
     }),
     eventSchema("adverse_effect", {
       substance: boundedString(1, 160),
@@ -695,6 +696,12 @@ export const foodFrontmatterSchema = withContractMetadata(
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
+      autoLogDaily: z
+        .object({
+          time: patternedString(DAILY_TIME_PATTERN),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   "@healthybob/contracts/frontmatter-food.schema.json",
@@ -846,7 +853,7 @@ export const conditionFrontmatterSchema = withContractMetadata(
       severity: z.enum(CONDITION_SEVERITIES).optional(),
       bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-      relatedRegimenIds: uniqueArray(idSchema(ID_PREFIXES.regimen), { uniqueItems: true }).optional(),
+      relatedProtocolIds: uniqueArray(idSchema(ID_PREFIXES.protocol), { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
@@ -875,7 +882,7 @@ export const allergyFrontmatterSchema = withContractMetadata(
   "Healthy Bob Allergy Frontmatter",
 );
 
-export const regimenFrontmatterSchema = withContractMetadata(
+export const protocolFrontmatterSchema = withContractMetadata(
   (() => {
     const supplementIngredientSchema = z
       .object({
@@ -890,13 +897,13 @@ export const regimenFrontmatterSchema = withContractMetadata(
 
     return z
       .object({
-        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.regimenFrontmatter),
-        docType: z.literal(FRONTMATTER_DOC_TYPES.regimen),
-        regimenId: idSchema(ID_PREFIXES.regimen),
+        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.protocolFrontmatter),
+        docType: z.literal(FRONTMATTER_DOC_TYPES.protocol),
+        protocolId: idSchema(ID_PREFIXES.protocol),
         slug: patternedString(SLUG_PATTERN),
         title: boundedString(1, 160),
-        kind: z.enum(REGIMEN_KINDS),
-        status: z.enum(REGIMEN_STATUSES),
+        kind: z.enum(PROTOCOL_KINDS),
+        status: z.enum(PROTOCOL_STATUSES),
         startedOn: isoDateString(),
         stoppedOn: isoDateString().optional(),
         substance: boundedString(1, 160).optional(),
@@ -912,8 +919,8 @@ export const regimenFrontmatterSchema = withContractMetadata(
       })
       .strict();
   })(),
-  "@healthybob/contracts/frontmatter-regimen.schema.json",
-  "Healthy Bob Regimen Frontmatter",
+  "@healthybob/contracts/frontmatter-protocol.schema.json",
+  "Healthy Bob Protocol Frontmatter",
 );
 
 export const familyMemberFrontmatterSchema = withContractMetadata(
@@ -1000,7 +1007,7 @@ export type ProfileCurrentFrontmatter = z.infer<typeof profileCurrentFrontmatter
 export type GoalFrontmatter = z.infer<typeof goalFrontmatterSchema>;
 export type ConditionFrontmatter = z.infer<typeof conditionFrontmatterSchema>;
 export type AllergyFrontmatter = z.infer<typeof allergyFrontmatterSchema>;
-export type RegimenFrontmatter = z.infer<typeof regimenFrontmatterSchema>;
-export type SupplementIngredientFrontmatter = NonNullable<RegimenFrontmatter["ingredients"]>[number];
+export type ProtocolFrontmatter = z.infer<typeof protocolFrontmatterSchema>;
+export type SupplementIngredientFrontmatter = NonNullable<ProtocolFrontmatter["ingredients"]>[number];
 export type FamilyMemberFrontmatter = z.infer<typeof familyMemberFrontmatterSchema>;
 export type GeneticVariantFrontmatter = z.infer<typeof geneticVariantFrontmatterSchema>;

@@ -32,7 +32,7 @@ import { registerFoodCommands } from './commands/food.js'
 import { registerResearchCommands } from './commands/research.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
 import { registerReadCommands } from './commands/read.js'
-import { registerRegimenCommands } from './commands/regimen.js'
+import { registerProtocolCommands } from './commands/protocol.js'
 import { registerSamplesCommands } from './commands/samples.js'
 import { registerSearchCommands } from './commands/search.js'
 import { registerSupplementCommands } from './commands/supplement.js'
@@ -344,8 +344,30 @@ export const vaultCliCommandDescriptors = [
     id: 'food',
     bindingMode: 'direct',
     rootCommandNames: ['food'],
+    leafCommands: [
+      {
+        path: ['food', 'list'],
+        description: 'List food records with an optional status filter.',
+      },
+      {
+        path: ['food', 'scaffold'],
+        description: 'Emit a food payload template for `food upsert`.',
+      },
+      {
+        path: ['food', 'show'],
+        description: 'Show one food by canonical id or slug.',
+      },
+      {
+        path: ['food', 'upsert'],
+        description: 'Create or update one food Markdown record from a JSON payload file or stdin.',
+      },
+      {
+        path: ['food', 'add-daily'],
+        description: 'Create one remembered food plus a daily auto-log rule backed by the assistant runtime.',
+      },
+    ],
     directVaultServiceBindings: {
-      core: ['scaffoldFood', 'upsertFood'],
+      core: ['scaffoldFood', 'upsertFood', 'addDailyFood'],
       query: ['showFood', 'listFoods'],
     },
     register({ cli, services }) {
@@ -571,12 +593,12 @@ export const vaultCliCommandDescriptors = [
     },
   },
   buildHealthCommandManifestDescriptor({
-    commandName: 'regimen',
+    commandName: 'protocol',
     additionalVaultServiceBindings: {
-      core: ['stopRegimen'],
+      core: ['stopProtocol'],
     },
     register({ cli, services }) {
-      registerRegimenCommands(cli, services)
+      registerProtocolCommands(cli, services)
     },
   }),
 ] as const satisfies readonly VaultCliCommandDescriptor[]

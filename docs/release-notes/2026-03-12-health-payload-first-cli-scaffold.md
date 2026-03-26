@@ -8,7 +8,7 @@ Prepared the downstream release-note scaffold for the health CLI cutover. This n
 
 - Captured the planned payload-first operator surface for health nouns:
   - noun commands are expected to center on `scaffold`, `upsert --input`, `show`, and `list`
-  - special cases remain explicit for `intake import`, `intake project`, `profile current rebuild`, and `regimen stop`
+  - special cases remain explicit for `intake import`, `intake project`, `profile current rebuild`, and `protocol stop`
 - Recorded the intended boundary behavior for the cutover:
   - structured command payloads remain the machine-facing source of truth
   - Markdown rendering remains a presentation mode rather than an alternate contract

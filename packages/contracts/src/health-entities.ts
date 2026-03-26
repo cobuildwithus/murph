@@ -6,7 +6,7 @@ export type HealthEntityKind =
   | "goal"
   | "condition"
   | "allergy"
-  | "regimen"
+  | "protocol"
   | "history"
   | "blood_test"
   | "family"
@@ -65,7 +65,7 @@ export interface HealthEntityDefinition {
   registry?: HealthEntityRegistryMetadata;
 }
 
-export function deriveRegimenGroupFromRelativePath(relativePath: string): string | null {
+export function deriveProtocolGroupFromRelativePath(relativePath: string): string | null {
   const directories = relativePath.split("/").slice(0, -1);
 
   return directories.length > 2 ? directories.slice(2).join("/") : null;
@@ -195,7 +195,7 @@ const checkedHealthEntityDefinitions = [
           severity: helpers.firstString(attributes, ["severity"]),
           bodySites: helpers.firstStringArray(attributes, ["bodySites"]),
           relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
-          relatedRegimenIds: helpers.firstStringArray(attributes, ["relatedRegimenIds"]),
+          relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds"]),
           note: helpers.firstString(attributes, ["note"]),
         };
       },
@@ -230,11 +230,11 @@ const checkedHealthEntityDefinitions = [
     },
   },
   {
-    kind: "regimen",
-    listKinds: ["regimen"],
-    noun: "regimen",
-    plural: "regimens",
-    prefixes: [`${ID_PREFIXES.regimen}_`],
+    kind: "protocol",
+    listKinds: ["protocol"],
+    noun: "protocol",
+    plural: "protocols",
+    prefixes: [`${ID_PREFIXES.protocol}_`],
     scaffoldTemplate: {
       title: "Magnesium glycinate",
       kind: "supplement",
@@ -243,8 +243,8 @@ const checkedHealthEntityDefinitions = [
       group: "sleep",
     },
     registry: {
-      directory: "bank/regimens",
-      idKeys: ["regimenId"],
+      directory: "bank/protocols",
+      idKeys: ["protocolId"],
       titleKeys: ["title"],
       statusKeys: ["status"],
       transform({ attributes, helpers, relativePath }) {
@@ -262,7 +262,7 @@ const checkedHealthEntityDefinitions = [
           ingredients: projectSupplementIngredients(attributes.ingredients),
           relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
           relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
-          group: deriveRegimenGroupFromRelativePath(relativePath),
+          group: deriveProtocolGroupFromRelativePath(relativePath),
         };
       },
     },

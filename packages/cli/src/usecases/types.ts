@@ -47,8 +47,8 @@ export interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string
 }
 
-export interface StopRegimenInput extends CommandContext {
-  regimenId: string
+export interface StopProtocolInput extends CommandContext {
+  protocolId: string
   stoppedOn?: string
 }
 
@@ -137,6 +137,18 @@ export interface FoodUpsertResult {
   lookupId: string
   path: string
   created: boolean
+}
+
+export interface FoodAddDailyResult {
+  vault: string
+  foodId: string
+  lookupId: string
+  path: string
+  created: boolean
+  time: string
+  jobId: string
+  jobName: string
+  nextRunAt: string | null
 }
 
 export interface FoodListResult {
@@ -289,7 +301,7 @@ export interface VaultStatsResult {
     goals: number
     conditions: number
     allergies: number
-    regimens: number
+    protocols: number
     history: number
     familyMembers: number
     geneticVariants: number
@@ -323,9 +335,9 @@ export interface VaultRepairResult {
   auditPath: string | null
 }
 
-export interface StopRegimenResult {
+export interface StopProtocolResult {
   vault: string
-  regimenId: string
+  protocolId: string
   lookupId: string
   stoppedOn: string | null
   status: string
@@ -469,6 +481,14 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       inputFile: string
     },
   ): Promise<FoodUpsertResult>
+  addDailyFood(
+    input: CommandContext & {
+      title: string
+      time: string
+      note?: string
+      slug?: string
+    },
+  ): Promise<FoodAddDailyResult>
   scaffoldEvent(
     input: CommandContext & {
       kind: string
@@ -508,9 +528,9 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     input: CommandContext & {
       input: string
     },
-  ): Promise<UpsertRecordResult & { regimenId: string }>
-  stopRegimen(input: StopRegimenInput): Promise<StopRegimenResult>
-  stopSupplement(input: StopRegimenInput): Promise<StopRegimenResult>
+  ): Promise<UpsertRecordResult & { protocolId: string }>
+  stopProtocol(input: StopProtocolInput): Promise<StopProtocolResult>
+  stopSupplement(input: StopProtocolInput): Promise<StopProtocolResult>
 }
 
 export interface ImporterServices {
@@ -828,13 +848,13 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     } | null
     updated: boolean
   }>
-  stopRegimenItem(input: {
+  stopProtocolItem(input: {
     vaultRoot: string
-    regimenId: string
+    protocolId: string
     stoppedOn?: string
   }): Promise<{
     record: {
-      regimenId: string
+      protocolId: string
       stoppedOn?: string | null
       status: string
     }

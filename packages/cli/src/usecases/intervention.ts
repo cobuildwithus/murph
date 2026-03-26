@@ -91,7 +91,7 @@ export interface AddInterventionRecordInput {
   source?: 'manual' | 'import' | 'device' | 'derived'
   durationMinutes?: number
   interventionType?: string
-  regimenId?: string
+  protocolId?: string
 }
 
 export async function addInterventionRecord(
@@ -104,7 +104,7 @@ export async function addInterventionRecord(
 
   const intervention = resolveInterventionDescriptor(note, input.interventionType)
   const durationMinutes = resolveDurationMinutes(note, input.durationMinutes)
-  const regimenId = normalizeOptionalText(input.regimenId)
+  const protocolId = normalizeOptionalText(input.protocolId)
   const occurredAt = input.occurredAt ?? new Date().toISOString()
   const payload = compactObject({
     kind: 'intervention_session',
@@ -113,8 +113,8 @@ export async function addInterventionRecord(
     title: buildInterventionTitle(intervention.label, durationMinutes),
     interventionType: intervention.interventionType,
     durationMinutes: durationMinutes ?? undefined,
-    regimenId: regimenId ?? undefined,
-    relatedIds: regimenId ? [regimenId] : undefined,
+    protocolId: protocolId ?? undefined,
+    relatedIds: protocolId ? [protocolId] : undefined,
     note,
   })
 
@@ -130,7 +130,7 @@ export async function addInterventionRecord(
     title: String(payload.title),
     interventionType: String(payload.interventionType),
     durationMinutes: durationMinutes ?? null,
-    regimenId: regimenId ?? null,
+    protocolId: protocolId ?? null,
     note,
   }
 }

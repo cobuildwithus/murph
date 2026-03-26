@@ -14,7 +14,7 @@ export {
   parseFrontmatterScalar,
 } from "./frontmatter.js";
 export {
-  deriveRegimenGroupFromRelativePath,
+  deriveProtocolGroupFromRelativePath,
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
 } from "./health-entities.js";

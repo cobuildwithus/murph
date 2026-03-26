@@ -266,7 +266,7 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       false,
     )
     assert.equal(
-      result.bundle.tools.some((tool) => tool.name === 'vault.regimen.stop'),
+      result.bundle.tools.some((tool) => tool.name === 'vault.protocol.stop'),
       false,
     )
     assert.match(result.bundle.routingText, /Please file this lab summary/u)
@@ -647,7 +647,7 @@ test('createInboxRoutingAssistantToolCatalog excludes stateful write tools and r
       vaultServices,
     })
 
-    assert.equal(catalog.hasTool('vault.regimen.stop'), false)
+    assert.equal(catalog.hasTool('vault.protocol.stop'), false)
 
     const results = await catalog.executeCalls({
       calls: [

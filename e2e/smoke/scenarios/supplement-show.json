@@ -4,8 +4,8 @@
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/payloads/supplement-upsert.json",
-    "fixtures/health-extensions/vault-overlay/bank/regimens/sleep/magnesium-glycinate.md"
+    "fixtures/health-extensions/vault-overlay/bank/protocols/sleep/magnesium-glycinate.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/show",
-  "purpose": "Documents direct supplement reads by canonical regimen id or supplement slug."
+  "purpose": "Documents direct supplement reads by canonical protocol id or supplement slug."
 }

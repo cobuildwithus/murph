@@ -1,0 +1,11 @@
+{
+  "id": "health-extensions-protocol-stop",
+  "command": "vault-cli protocol stop <protocolId> --vault <path> [--stopped-on <date>] [--format json|md] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/payloads/protocol-upsert.json",
+    "fixtures/health-extensions/vault-overlay/bank/protocols/sleep/magnesium-glycinate.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/journal-ensure",
+  "purpose": "Documents the protocol-stop special case that closes an active protocol without changing its canonical id."
+}

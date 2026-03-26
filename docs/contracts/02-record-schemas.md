@@ -26,7 +26,7 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
 | goal | `goal` | goal Markdown record id |
 | condition | `cond` | condition Markdown record id |
 | allergy | `alg` | allergy Markdown record id |
-| regimen | `reg` | regimen Markdown record id |
+| protocol | `prot` | protocol Markdown record id |
 | family member | `fam` | family-member Markdown record id |
 | genetic variant | `var` | genetic-variant Markdown record id |
 
@@ -76,7 +76,7 @@ Shared optional event fields are limited to `note`, `tags`, `relatedIds`, `rawRe
 
 `activity_session` may also include optional `distanceKm` for cardio sessions and optional `strengthExercises` for explicit lifting notes. Each `strengthExercises` entry stores `exercise`, `setCount`, `repsPerSet`, and may also carry `load`, `loadUnit`, and `loadDescription`.
 
-`intervention_session` may also include optional `durationMinutes` when the session length is known and optional `regimenId` when the intervention should stay linked back to one therapy or habit regimen.
+`intervention_session` may also include optional `durationMinutes` when the session length is known and optional `protocolId` when the intervention should stay linked back to one therapy or habit protocol.
 
 ## Sample Streams
 
@@ -112,8 +112,8 @@ Sample records may also carry optional `externalRef` provenance with the same sh
   `schemaVersion`, `docType`, `conditionId`, `slug`, `clinicalStatus`, `title`
 - Allergy frontmatter:
   `schemaVersion`, `docType`, `allergyId`, `slug`, `substance`, `status`
-- Regimen frontmatter:
-  `schemaVersion`, `docType`, `regimenId`, `slug`, `status`, `title`, `startedOn`
+- Protocol frontmatter:
+  `schemaVersion`, `docType`, `protocolId`, `slug`, `status`, `title`, `startedOn`
 - Family-member frontmatter:
   `schemaVersion`, `docType`, `familyMemberId`, `slug`, `relationship`, `title`
 - Genetic-variant frontmatter:
@@ -138,6 +138,6 @@ Health artifact filenames are reserved here. They do not become valid generated 
 - `frontmatter-goal.schema.json`
 - `frontmatter-condition.schema.json`
 - `frontmatter-allergy.schema.json`
-- `frontmatter-regimen.schema.json`
+- `frontmatter-protocol.schema.json`
 - `frontmatter-family-member.schema.json`
 - `frontmatter-genetic-variant.schema.json`

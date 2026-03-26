@@ -63,7 +63,7 @@ function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
       "readAssessmentResponse",
       "projectAssessmentResponse",
       "rebuildCurrentProfile",
-      "stopRegimenItem",
+      "stopProtocolItem",
       ...healthCoreRuntimeMethodNames,
     ])
   )

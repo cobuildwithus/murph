@@ -16,7 +16,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   providerFrontmatter: "hb.frontmatter.provider.v1",
   recipeFrontmatter: "hb.frontmatter.recipe.v1",
   rawImportManifest: "hb.raw-import-manifest.v1",
-  regimenFrontmatter: "hb.frontmatter.regimen.v1",
+  protocolFrontmatter: "hb.frontmatter.protocol.v1",
   sample: "hb.sample.v1",
   vault: "hb.vault.v1",
 } as const);
@@ -39,7 +39,7 @@ export const ID_PREFIXES = Object.freeze({
   profileSnapshot: "psnap",
   provider: "prov",
   recipe: "rcp",
-  regimen: "reg",
+  protocol: "prot",
   sample: "smp",
   transform: "xfm",
   variant: "var",
@@ -113,9 +113,9 @@ export const ALLERGY_STATUSES = Object.freeze(["active", "inactive", "resolved"]
 
 export const ALLERGY_CRITICALITIES = Object.freeze(["low", "high", "unable_to_assess"] as const);
 
-export const REGIMEN_KINDS = Object.freeze(["medication", "supplement", "therapy", "habit"] as const);
+export const PROTOCOL_KINDS = Object.freeze(["medication", "supplement", "therapy", "habit"] as const);
 
-export const REGIMEN_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
+export const PROTOCOL_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
 
 export const FOOD_STATUSES = Object.freeze(["active", "archived"] as const);
 
@@ -159,8 +159,8 @@ export const AUDIT_ACTIONS = Object.freeze([
   "profile_current_rebuild",
   "profile_snapshot_add",
   "recipe_upsert",
-  "regimen_stop",
-  "regimen_upsert",
+  "protocol_stop",
+  "protocol_upsert",
   "samples_import_csv",
   "show",
   "validate",
@@ -185,7 +185,7 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   profileCurrent: "profile_current",
   provider: "provider",
   recipe: "recipe",
-  regimen: "regimen",
+  protocol: "protocol",
 } as const);
 
 export const EXPERIMENT_STATUSES = Object.freeze([
