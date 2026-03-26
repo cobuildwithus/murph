@@ -15,6 +15,9 @@ import { normalizeNullableString } from './assistant/shared.js'
 import { resolveAssistantLanguageModel } from './model-harness.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
+const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
+const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
+
 export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
 
 export interface AssistantProviderTurnInput {
@@ -173,6 +176,9 @@ export async function executeAssistantProviderTurn(
           sessionContext: input.sessionContext,
           userPrompt: input.userPrompt,
         }),
+        abortSignal: input.abortSignal,
+        timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
+        maxRetries: OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
       })
 
       return {

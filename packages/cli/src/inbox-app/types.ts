@@ -1,3 +1,4 @@
+import type { ConnectorRestartPolicy } from '@healthybob/inboxd'
 import type { RuntimePaths } from '@healthybob/runtime-state'
 import { z } from 'incur'
 import type { AgentmailApiClient } from '../agentmail-runtime.js'
@@ -388,6 +389,7 @@ export interface InboxRuntimeModule {
     connectors: PollConnector[]
     signal: AbortSignal
     continueOnConnectorFailure?: boolean
+    connectorRestartPolicy?: ConnectorRestartPolicy
     restartConnectorOnFailure?: boolean
     connectorRestartDelayMs?: number
     maxConnectorRestartDelayMs?: number
@@ -459,6 +461,7 @@ export interface ParsersRuntimeModule {
     connectors: PollConnector[]
     signal: AbortSignal
     continueOnConnectorFailure?: boolean
+    connectorRestartPolicy?: ConnectorRestartPolicy
     restartConnectorOnFailure?: boolean
     connectorRestartDelayMs?: number
     maxConnectorRestartDelayMs?: number

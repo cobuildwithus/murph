@@ -9,6 +9,7 @@ import { createImessageConnector } from "../src/connectors/imessage/connector.js
 import { normalizeImessageMessage } from "../src/connectors/imessage/normalize.js";
 import type { PollConnector } from "../src/connectors/types.js";
 import { runInboxDaemon, runPollConnector } from "../src/kernel/daemon.js";
+import type { InboxPipeline } from "../src/kernel/pipeline.js";
 import { createConnectorRegistry } from "../src/kernel/registry.js";
 
 test("connector registry keeps distinct runtime ids under the same source family", () => {
@@ -937,22 +938,49 @@ test("runInboxDaemon can keep sibling connectors alive after a connector failure
   assert.equal(runningConnectorClosed, 1);
 });
 
-test("runInboxDaemon restarts failed connectors when restart-on-failure is enabled", async () => {
+test("runInboxDaemon restarts failed connectors when restart policy is enabled", async () => {
   const controller = new AbortController();
-  let watchCalls = 0;
+  let healthyConnectorAborted = false;
+  let healthyConnectorClosed = 0;
+  let flakyConnectorAttempts = 0;
+  let flakyConnectorClosed = 0;
   let resolveRestarted!: () => void;
   const restarted = new Promise<void>((resolve) => {
     resolveRestarted = resolve;
   });
 
-  const connector = createStubPollConnector({
+  const healthyConnector = createStubPollConnector({
+    id: "telegram:primary",
+    source: "telegram",
+    accountId: "primary",
+    async watch(_cursor, _emit, signal) {
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          healthyConnectorAborted = true;
+          resolve();
+          return;
+        }
+
+        const onAbort = () => {
+          healthyConnectorAborted = true;
+          resolve();
+        };
+
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+    async close() {
+      healthyConnectorClosed += 1;
+    },
+  });
+  const flakyConnector = createStubPollConnector({
     id: "email:agentmail",
     source: "email",
     accountId: "agentmail",
     async watch(_cursor, _emit, signal) {
-      watchCalls += 1;
+      flakyConnectorAttempts += 1;
 
-      if (watchCalls === 1) {
+      if (flakyConnectorAttempts === 1) {
         throw new Error("watch exploded");
       }
 
@@ -966,65 +994,65 @@ test("runInboxDaemon restarts failed connectors when restart-on-failure is enabl
         signal.addEventListener("abort", () => resolve(), { once: true });
       });
     },
+    async close() {
+      flakyConnectorClosed += 1;
+    },
   });
 
   const running = runInboxDaemon({
-    pipeline: {
-      runtime: {
-        databasePath: ":memory:",
-        close() {},
-        getCursor() {
-          return null;
-        },
-        setCursor() {},
-        findByExternalId() {
-          return null;
-        },
-        upsertCaptureIndex() {},
-        enqueueDerivedJobs() {},
-        listAttachmentParseJobs() {
-          return [];
-        },
-        claimNextAttachmentParseJob() {
-          return null;
-        },
-        requeueAttachmentParseJobs() {
-          return 0;
-        },
-        completeAttachmentParseJob() {
-          throw new Error("completeAttachmentParseJob should not be called");
-        },
-        failAttachmentParseJob() {
-          throw new Error("failAttachmentParseJob should not be called");
-        },
-        listCaptures() {
-          return [];
-        },
-        searchCaptures() {
-          return [];
-        },
-        getCapture() {
-          return null;
-        },
-      },
-      async processCapture(_input) {
-        throw new Error("processCapture should not be called");
-      },
-      close() {},
-    },
-    connectors: [connector],
+    pipeline: createStubInboxPipeline(),
+    connectors: [healthyConnector, flakyConnector],
     signal: controller.signal,
     continueOnConnectorFailure: true,
-    restartConnectorOnFailure: true,
-    connectorRestartDelayMs: 1,
-    maxConnectorRestartDelayMs: 4,
+    connectorRestartPolicy: {
+      enabled: true,
+      backoffMs: [0],
+      maxAttempts: 1,
+    },
   });
 
   await restarted;
+  assert.equal(flakyConnectorAttempts, 2);
+  assert.equal(flakyConnectorClosed, 1);
+  assert.equal(healthyConnectorAborted, false);
+
   controller.abort();
   await running;
 
-  assert.equal(watchCalls, 2);
+  assert.equal(healthyConnectorAborted, true);
+  assert.equal(healthyConnectorClosed, 1);
+  assert.equal(flakyConnectorClosed, 2);
+});
+
+test("runInboxDaemon stops cleanly when aborted during connector restart backoff", async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  const connector = createStubPollConnector({
+    id: "email:agentmail",
+    source: "email",
+    accountId: "agentmail",
+    async watch() {
+      attempts += 1;
+      throw new Error("watch exploded");
+    },
+  });
+
+  const running = runInboxDaemon({
+    pipeline: createStubInboxPipeline(),
+    connectors: [connector],
+    signal: controller.signal,
+    continueOnConnectorFailure: true,
+    connectorRestartPolicy: {
+      enabled: true,
+      backoffMs: [60_000],
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  controller.abort();
+  await running;
+
+  assert.equal(attempts, 1);
 });
 
 test("runInboxDaemon still rejects when every connector fails in isolation mode", async () => {
@@ -1109,6 +1137,52 @@ test("runInboxDaemon still rejects when every connector fails in isolation mode"
     },
   );
 });
+
+function createStubInboxPipeline(): InboxPipeline {
+  return {
+    runtime: {
+      databasePath: ":memory:",
+      close() {},
+      getCursor() {
+        return null;
+      },
+      setCursor() {},
+      findByExternalId() {
+        return null;
+      },
+      upsertCaptureIndex() {},
+      enqueueDerivedJobs() {},
+      listAttachmentParseJobs() {
+        return [];
+      },
+      claimNextAttachmentParseJob() {
+        return null;
+      },
+      requeueAttachmentParseJobs() {
+        return 0;
+      },
+      completeAttachmentParseJob() {
+        throw new Error("completeAttachmentParseJob should not be called");
+      },
+      failAttachmentParseJob() {
+        throw new Error("failAttachmentParseJob should not be called");
+      },
+      listCaptures() {
+        return [];
+      },
+      searchCaptures() {
+        return [];
+      },
+      getCapture() {
+        return null;
+      },
+    },
+    async processCapture(_input) {
+      throw new Error("processCapture should not be called");
+    },
+    close() {},
+  };
+}
 
 function createStubPollConnector(input: {
   id: string;

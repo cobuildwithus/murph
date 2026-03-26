@@ -185,6 +185,9 @@ export {
   runInboxDaemon,
   runPollConnector,
 } from "./kernel/daemon.js";
+export type {
+  ConnectorRestartPolicy,
+} from "./kernel/daemon.js";
 export {
   createInboxPipeline,
   processCapture,

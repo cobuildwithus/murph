@@ -2,10 +2,13 @@ import type {
   LinqListPhoneNumbersResponse,
   LinqSendMessageResponse,
 } from '@healthybob/inboxd'
-import { normalizeNullableString } from './text/shared.js'
+import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
+const LINQ_HTTP_TIMEOUT_MS = 30_000
+const LINQ_HTTP_MAX_ATTEMPTS = 3
+const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 
 export interface LinqFetchResponse {
   arrayBuffer(): Promise<ArrayBuffer>
@@ -145,26 +148,87 @@ async function requestLinqJson<T>(input: {
     resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
   )
   const url = new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`)
-  const response = await fetchImplementation(url.toString(), {
-    method: input.method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(input.body ? { 'content-type': 'application/json' } : {}),
-    },
-    body: input.body ? JSON.stringify(input.body) : undefined,
-    signal: input.signal,
-  })
+  let attempt = 1
 
-  if (!response.ok) {
-    throw await createLinqHttpError(response, input.method, input.path)
+  while (true) {
+    let response: LinqFetchResponse
+
+    try {
+      response = await fetchLinqResponse({
+        fetchImplementation,
+        url: url.toString(),
+        method: input.method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(input.body ? { 'content-type': 'application/json' } : {}),
+        },
+        body: input.body ? JSON.stringify(input.body) : undefined,
+        signal: input.signal,
+        path: input.path,
+      })
+    } catch (error) {
+      if (isRetryableLinqRequestError(error) && attempt < LINQ_HTTP_MAX_ATTEMPTS) {
+        await waitForLinqRetryDelay(attempt, input.signal)
+        attempt += 1
+        continue
+      }
+
+      throw error
+    }
+
+    if (!response.ok) {
+      const failure = await createLinqHttpError(response, input.method, input.path)
+      if (isRetryableLinqRequestError(failure) && attempt < LINQ_HTTP_MAX_ATTEMPTS) {
+        await waitForLinqRetryDelay(attempt, input.signal)
+        attempt += 1
+        continue
+      }
+
+      throw failure
+    }
+
+    return (await response.json()) as T
   }
+}
 
-  return (await response.json()) as T
+async function fetchLinqResponse(input: {
+  fetchImplementation: LinqFetch
+  url: string
+  method: 'GET' | 'POST'
+  path: string
+  headers: Record<string, string>
+  body?: string
+  signal?: AbortSignal
+}): Promise<LinqFetchResponse> {
+  const timeout = createTimeoutAbortController(input.signal, LINQ_HTTP_TIMEOUT_MS)
+
+  try {
+    return await input.fetchImplementation(input.url, {
+      method: input.method,
+      headers: input.headers,
+      body: input.body,
+      signal: timeout.signal,
+    })
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw error
+    }
+
+    throw createLinqRequestError({
+      method: input.method,
+      path: input.path,
+      error,
+      timedOut: timeout.timedOut(),
+      retryable: shouldRetryLinqTransportFailure(input.method),
+    })
+  } finally {
+    timeout.cleanup()
+  }
 }
 
 async function createLinqHttpError(
   response: LinqFetchResponse,
-  method: string,
+  method: 'GET' | 'POST',
   path: string,
 ): Promise<VaultCliError> {
   let payload: unknown = null
@@ -185,9 +249,125 @@ async function createLinqHttpError(
     {
       method,
       path,
+      retryable: shouldRetryLinqHttpStatus(method, response.status),
       status: response.status,
     },
   )
+}
+
+function createLinqRequestError(input: {
+  method: 'GET' | 'POST'
+  path: string
+  error: unknown
+  timedOut: boolean
+  retryable: boolean
+}): VaultCliError {
+  const baseMessage = input.timedOut
+    ? `Linq request ${input.method} ${input.path} timed out after ${LINQ_HTTP_TIMEOUT_MS}ms.`
+    : `Linq request ${input.method} ${input.path} failed before a response was returned.`
+
+  return new VaultCliError(
+    'LINQ_API_REQUEST_FAILED',
+    baseMessage,
+    {
+      error: errorMessage(input.error),
+      method: input.method,
+      path: input.path,
+      retryable: input.retryable,
+      timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+      timedOut: input.timedOut,
+    },
+  )
+}
+
+function isRetryableLinqRequestError(error: unknown): error is VaultCliError {
+  return (
+    error instanceof VaultCliError &&
+    error.code === 'LINQ_API_REQUEST_FAILED' &&
+    error.context?.retryable === true
+  )
+}
+
+function shouldRetryLinqHttpStatus(method: 'GET' | 'POST', status: number): boolean {
+  if (status === 429) {
+    return true
+  }
+
+  return method === 'GET' && (status === 408 || status >= 500)
+}
+
+function shouldRetryLinqTransportFailure(method: 'GET' | 'POST'): boolean {
+  return method === 'GET'
+}
+
+async function waitForLinqRetryDelay(
+  attempt: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const delay =
+    LINQ_HTTP_RETRY_DELAYS_MS[
+      Math.min(Math.max(attempt - 1, 0), LINQ_HTTP_RETRY_DELAYS_MS.length - 1)
+    ] ?? 0
+
+  if (delay <= 0) {
+    return
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError())
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, delay)
+
+    const onAbort = () => {
+      clearTimeout(timeout)
+      cleanup()
+      reject(createAbortError())
+    }
+
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function createTimeoutAbortController(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): {
+  cleanup(): void
+  signal: AbortSignal
+  timedOut(): boolean
+} {
+  const controller = new AbortController()
+  let didTimeout = false
+
+  const onAbort = () => controller.abort()
+  if (signal?.aborted) {
+    controller.abort()
+  } else {
+    signal?.addEventListener('abort', onAbort, { once: true })
+  }
+
+  const timeout = setTimeout(() => {
+    didTimeout = signal?.aborted !== true
+    controller.abort()
+  }, timeoutMs)
+
+  return {
+    cleanup() {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+    },
+    signal: controller.signal,
+    timedOut() {
+      return didTimeout
+    },
+  }
 }
 
 function extractLinqErrorMessage(payload: unknown, rawText: string | null): string | null {
@@ -214,4 +394,10 @@ function normalizeRequiredString(value: string | null | undefined, label: string
   }
 
   return normalized
+}
+
+function createAbortError(): Error {
+  const error = new Error('Operation aborted.')
+  error.name = 'AbortError'
+  return error
 }

@@ -34,6 +34,10 @@ import {
   runtimeNamespaceAccountId,
 } from '../inbox-services/shared.js'
 
+const FOREGROUND_CONNECTOR_RESTART_POLICY = {
+  enabled: true,
+} as const
+
 function instrumentConnectorForRunEvents(
   connector: PollConnector,
   onEvent?: ((event: InboxRunEvent) => void) | null,
@@ -470,7 +474,7 @@ export function createInboxRuntimeOps(
           connectors: instrumentedConnectors,
           signal: runSignal,
           continueOnConnectorFailure: true,
-          restartConnectorOnFailure: true,
+          connectorRestartPolicy: FOREGROUND_CONNECTOR_RESTART_POLICY,
         })
       } catch (error) {
         reason = runSignal.aborted ? 'signal' : 'error'

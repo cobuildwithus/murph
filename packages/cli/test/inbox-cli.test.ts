@@ -484,6 +484,11 @@ function createFakeParsersRuntimeModule(input?: {
     signal: AbortSignal
     vaultRoot: string
     continueOnConnectorFailure?: boolean
+    connectorRestartPolicy?: {
+      enabled?: boolean
+      backoffMs?: readonly number[]
+      maxAttempts?: number | null
+    }
     restartConnectorOnFailure?: boolean
     connectorRestartDelayMs?: number
     maxConnectorRestartDelayMs?: number
@@ -656,6 +661,11 @@ function createFakeParsersRuntimeModule(input?: {
       signal: AbortSignal
       vaultRoot: string
       continueOnConnectorFailure?: boolean
+      connectorRestartPolicy?: {
+        enabled?: boolean
+        backoffMs?: readonly number[]
+        maxAttempts?: number | null
+      }
       restartConnectorOnFailure?: boolean
       connectorRestartDelayMs?: number
       maxConnectorRestartDelayMs?: number
@@ -664,6 +674,7 @@ function createFakeParsersRuntimeModule(input?: {
         await input?.onRunInboxDaemonWithParsers?.({
           connectors: payload.connectors,
           continueOnConnectorFailure: payload.continueOnConnectorFailure,
+          connectorRestartPolicy: payload.connectorRestartPolicy,
           restartConnectorOnFailure: payload.restartConnectorOnFailure,
           connectorRestartDelayMs: payload.connectorRestartDelayMs,
           maxConnectorRestartDelayMs: payload.maxConnectorRestartDelayMs,
@@ -2680,14 +2691,18 @@ test.sequential('run writes daemon state and status updates after abort', async 
   }
 })
 
-test.sequential('run enables connector isolation for parser-backed daemon runs', async () => {
+test.sequential('run enables connector isolation and connector restarts for parser-backed daemon runs', async () => {
   const fixture = await makeVaultFixture('healthybob-inbox-run-isolated-connectors')
-  const observedFlags: boolean[] = []
-  const observedRestartFlags: boolean[] = []
+  const observedSettings: Array<{
+    continueOnConnectorFailure: boolean
+    connectorRestartPolicyEnabled: boolean
+  }> = []
   const fakeParsers = createFakeParsersRuntimeModule({
     async onRunInboxDaemonWithParsers(payload) {
-      observedFlags.push(payload.continueOnConnectorFailure === true)
-      observedRestartFlags.push(payload.restartConnectorOnFailure === true)
+      observedSettings.push({
+        continueOnConnectorFailure: payload.continueOnConnectorFailure === true,
+        connectorRestartPolicyEnabled: payload.connectorRestartPolicy?.enabled === true,
+      })
     },
   })
   const services = createIntegratedInboxCliServices({
@@ -2721,8 +2736,12 @@ test.sequential('run enables connector isolation for parser-backed daemon runs',
     })
 
     assert.equal(result.reason, 'completed')
-    assert.deepEqual(observedFlags, [true])
-    assert.deepEqual(observedRestartFlags, [true])
+    assert.deepEqual(observedSettings, [
+      {
+        continueOnConnectorFailure: true,
+        connectorRestartPolicyEnabled: true,
+      },
+    ])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

@@ -142,12 +142,14 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
 
 test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter with transcript context', async () => {
   const languageModel = { provider: 'mock-model' }
+  const abortController = new AbortController()
   providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
   providerMocks.generateText.mockResolvedValue({
     text: 'assistant reply',
   })
 
   const result = await executeAssistantProviderTurn({
+    abortSignal: abortController.signal,
     provider: 'openai-compatible',
     workingDirectory: '/tmp/vault',
     env: {
@@ -199,6 +201,9 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
   const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
   assert.equal(generateCall?.model, languageModel)
   assert.equal(generateCall?.system, 'system prompt')
+  assert.equal(generateCall?.abortSignal, abortController.signal)
+  assert.equal(generateCall?.timeout, 10 * 60 * 1000)
+  assert.equal(generateCall?.maxRetries, 2)
   assert.deepEqual(generateCall?.messages?.slice(0, 2), [
     {
       role: 'user',

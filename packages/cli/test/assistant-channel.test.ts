@@ -354,6 +354,63 @@ test('sendEmailMessage sends new outbound email through the configured AgentMail
   })
 })
 
+test('sendEmailMessage retries AgentMail send requests after a 429 response', async () => {
+  const requests: Array<{
+    method: string
+    url: string
+  }> = []
+  let attempt = 0
+
+  await sendEmailMessage(
+    {
+      identityId: 'inbox_123',
+      message: 'Daily summary',
+      target: 'user@example.com',
+      targetKind: 'participant',
+    },
+    {
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+      },
+      fetchImplementation: async (url, init) => {
+        attempt += 1
+        requests.push({
+          method: init.method,
+          url,
+        })
+
+        if (attempt === 1) {
+          return {
+            ok: false,
+            status: 429,
+            json: async () => ({ message: 'Rate limited' }),
+            text: async () => '',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ message_id: 'msg_1', thread_id: 'thr_1' }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 2)
+  assert.equal(requests[0]?.method, 'POST')
+  assert.equal(requests[1]?.method, 'POST')
+  assert.equal(
+    requests[0]?.url,
+    'https://mail.example.test/v0/inboxes/inbox_123/messages/send',
+  )
+  assert.equal(requests[0]?.url, requests[1]?.url)
+})
+
 test('sendEmailMessage resolves a thread and replies to the latest AgentMail message', async () => {
   const requests: Array<{
     body: Record<string, unknown> | null
@@ -481,6 +538,66 @@ test('sendLinqMessage posts Linq chat message payloads to the configured API bas
       ],
     },
   })
+})
+
+test('sendLinqMessage retries Linq sends after a 429 response', async () => {
+  const requests: Array<{
+    method: string
+    url: string
+  }> = []
+  let attempt = 0
+
+  await sendLinqMessage(
+    {
+      message: 'Queued the Linq reply.',
+      target: 'chat_123',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (url, init) => {
+        attempt += 1
+        requests.push({
+          method: init.method,
+          url,
+        })
+
+        if (attempt === 1) {
+          return {
+            ok: false,
+            status: 429,
+            json: async () => ({ message: 'Rate limited' }),
+            text: async () => '',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            chat_id: 'chat_123',
+            message: {
+              id: 'msg_1',
+            },
+          }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 2)
+  assert.equal(requests[0]?.method, 'POST')
+  assert.equal(requests[1]?.method, 'POST')
+  assert.equal(
+    requests[0]?.url,
+    'https://linq.example.test/api/partner/v3/chats/chat_123/messages',
+  )
+  assert.equal(requests[0]?.url, requests[1]?.url)
 })
 
 test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including topic targets', async () => {

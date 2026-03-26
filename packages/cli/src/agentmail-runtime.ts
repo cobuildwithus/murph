@@ -2,6 +2,9 @@ import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_AGENTMAIL_BASE_URL = 'https://api.agentmail.to/v0'
+const AGENTMAIL_REQUEST_TIMEOUT_MS = 30_000
+const AGENTMAIL_HTTP_MAX_ATTEMPTS = 3
+const AGENTMAIL_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 
 export interface AgentmailInbox {
   pod_id?: string | null
@@ -270,34 +273,52 @@ export function createAgentmailApiClient(
       url.search = input.query.toString()
     }
 
-    let response: AgentmailFetchResponse
-    try {
-      response = await fetchImplementation(url.toString(), {
-        method: input.method,
-        headers: {
-          authorization: `Bearer ${normalizedApiKey}`,
-          ...(input.body ? { 'content-type': 'application/json' } : {}),
-        },
-        body: input.body ? JSON.stringify(input.body) : undefined,
-        signal: input.signal,
-      })
-    } catch (error) {
-      throw new VaultCliError(
-        'AGENTMAIL_REQUEST_FAILED',
-        `AgentMail request ${input.method} ${input.path} failed before a response was returned.`,
-        createAgentmailErrorContext({
-          error: errorMessage(error),
+    let attempt = 1
+
+    while (true) {
+      let response: AgentmailFetchResponse
+
+      try {
+        response = await fetchAgentmailResponse({
+          body: input.body ?? undefined,
+          fetchImplementation,
+          headers: {
+            authorization: `Bearer ${normalizedApiKey}`,
+            ...(input.body ? { 'content-type': 'application/json' } : {}),
+          },
           method: input.method,
           path: input.path,
-        }),
-      )
-    }
+          signal: input.signal,
+          url: url.toString(),
+        })
+      } catch (error) {
+        if (isRetryableAgentmailError(error) && attempt < AGENTMAIL_HTTP_MAX_ATTEMPTS) {
+          await waitForAgentmailRetryDelay(attempt, input.signal)
+          attempt += 1
+          continue
+        }
 
-    if (!response.ok) {
-      throw await createAgentmailHttpError(response, input.method, input.path)
-    }
+        throw error
+      }
 
-    return (await response.json()) as T
+      if (!response.ok) {
+        const failure = await createAgentmailHttpError(
+          response,
+          input.method,
+          input.path,
+          input.body ?? undefined,
+        )
+        if (isRetryableAgentmailError(failure) && attempt < AGENTMAIL_HTTP_MAX_ATTEMPTS) {
+          await waitForAgentmailRetryDelay(attempt, input.signal)
+          attempt += 1
+          continue
+        }
+
+        throw failure
+      }
+
+      return (await response.json()) as T
+    }
   }
 
   return {
@@ -492,10 +513,174 @@ export function createAgentmailApiClient(
   }
 }
 
+async function fetchAgentmailResponse(input: {
+  body?: Record<string, unknown>
+  fetchImplementation: AgentmailFetch
+  headers: Record<string, string>
+  method: 'GET' | 'PATCH' | 'POST'
+  path: string
+  signal?: AbortSignal
+  url: string
+}): Promise<AgentmailFetchResponse> {
+  const timeout = createTimeoutAbortController(input.signal, AGENTMAIL_REQUEST_TIMEOUT_MS)
+
+  try {
+    return await input.fetchImplementation(input.url, {
+      method: input.method,
+      headers: input.headers,
+      body: input.body ? JSON.stringify(input.body) : undefined,
+      signal: timeout.signal,
+    })
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw error
+    }
+
+    throw new VaultCliError(
+      'AGENTMAIL_REQUEST_FAILED',
+      timeout.timedOut()
+        ? `AgentMail request ${input.method} ${input.path} timed out after ${AGENTMAIL_REQUEST_TIMEOUT_MS}ms.`
+        : `AgentMail request ${input.method} ${input.path} failed before a response was returned.`,
+      createAgentmailErrorContext({
+        error: errorMessage(error),
+        method: input.method,
+        path: input.path,
+        retryable: shouldRetryAgentmailTransportFailure(input.method, input.path, input.body),
+        timedOut: timeout.timedOut(),
+        timeoutMs: AGENTMAIL_REQUEST_TIMEOUT_MS,
+      }),
+    )
+  } finally {
+    timeout.cleanup()
+  }
+}
+
+function shouldRetryAgentmailTransportFailure(
+  method: 'GET' | 'PATCH' | 'POST',
+  path: string,
+  body?: Record<string, unknown>,
+): boolean {
+  return isAgentmailRequestReplaySafe(method, path, body)
+}
+
+function shouldRetryAgentmailHttpStatus(
+  method: 'GET' | 'PATCH' | 'POST',
+  path: string,
+  status: number,
+  body?: Record<string, unknown>,
+): boolean {
+  if (status === 429) {
+    return true
+  }
+
+  return (status === 408 || status >= 500) && isAgentmailRequestReplaySafe(method, path, body)
+}
+
+function isAgentmailRequestReplaySafe(
+  method: 'GET' | 'PATCH' | 'POST',
+  path: string,
+  body?: Record<string, unknown>,
+): boolean {
+  if (method === 'GET' || method === 'PATCH') {
+    return true
+  }
+
+  return (
+    path === '/inboxes' &&
+    typeof body?.client_id === 'string' &&
+    normalizeNullableString(body.client_id) !== null
+  )
+}
+
+function isRetryableAgentmailError(error: unknown): error is VaultCliError {
+  return (
+    error instanceof VaultCliError &&
+    error.code === 'AGENTMAIL_REQUEST_FAILED' &&
+    error.context?.retryable === true
+  )
+}
+
+async function waitForAgentmailRetryDelay(
+  attempt: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const delay =
+    AGENTMAIL_HTTP_RETRY_DELAYS_MS[
+      Math.min(Math.max(attempt - 1, 0), AGENTMAIL_HTTP_RETRY_DELAYS_MS.length - 1)
+    ] ?? 0
+
+  if (delay <= 0) {
+    return
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError())
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, delay)
+
+    const onAbort = () => {
+      clearTimeout(timeout)
+      cleanup()
+      reject(createAbortError())
+    }
+
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function createTimeoutAbortController(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): {
+  cleanup(): void
+  signal: AbortSignal
+  timedOut(): boolean
+} {
+  const controller = new AbortController()
+  let didTimeout = false
+
+  const onAbort = () => controller.abort()
+  if (signal?.aborted) {
+    controller.abort()
+  } else {
+    signal?.addEventListener('abort', onAbort, { once: true })
+  }
+
+  const timeout = setTimeout(() => {
+    didTimeout = signal?.aborted !== true
+    controller.abort()
+  }, timeoutMs)
+
+  return {
+    cleanup() {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+    },
+    signal: controller.signal,
+    timedOut() {
+      return didTimeout
+    },
+  }
+}
+
+function createAbortError(): Error {
+  const error = new Error('Operation aborted.')
+  error.name = 'AbortError'
+  return error
+}
+
 async function createAgentmailHttpError(
   response: AgentmailFetchResponse,
-  method: string,
+  method: 'GET' | 'PATCH' | 'POST',
   path: string,
+  body?: Record<string, unknown>,
 ): Promise<VaultCliError> {
   let payload: unknown = null
   let rawText: string | null = null
@@ -516,6 +701,7 @@ async function createAgentmailHttpError(
       status: response.status,
       method,
       path,
+      retryable: shouldRetryAgentmailHttpStatus(method, path, response.status, body),
     }),
   )
 }
@@ -525,6 +711,9 @@ function createAgentmailErrorContext(input: {
   method: string
   path: string
   error?: string
+  retryable?: boolean
+  timedOut?: boolean
+  timeoutMs?: number
 }): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries({
@@ -532,6 +721,9 @@ function createAgentmailErrorContext(input: {
       method: input.method,
       path: input.path,
       error: input.error,
+      retryable: input.retryable,
+      timedOut: input.timedOut,
+      timeoutMs: input.timeoutMs,
     }).filter(([, value]) => value !== undefined),
   )
 }

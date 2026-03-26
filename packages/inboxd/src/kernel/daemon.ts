@@ -2,8 +2,21 @@ import type { PollConnector } from "../connectors/types.js";
 import type { InboxPipeline } from "./pipeline.js";
 import { createCaptureCheckpoint } from "../shared.js";
 
+const DEFAULT_CONNECTOR_RESTART_BACKOFF_MS = Object.freeze([1_000, 5_000, 15_000, 30_000]);
 const DEFAULT_CONNECTOR_RESTART_DELAY_MS = 1_000;
 const DEFAULT_MAX_CONNECTOR_RESTART_DELAY_MS = 30_000;
+
+export interface ConnectorRestartPolicy {
+  enabled?: boolean;
+  backoffMs?: readonly number[];
+  maxAttempts?: number | null;
+}
+
+interface ResolvedConnectorRestartPolicy {
+  enabled: boolean;
+  backoffMs: readonly number[];
+  maxAttempts: number | null;
+}
 
 export interface RunPollConnectorInput {
   connector: PollConnector;
@@ -96,6 +109,7 @@ export async function runInboxDaemon(input: {
   connectors: PollConnector[];
   signal: AbortSignal;
   continueOnConnectorFailure?: boolean;
+  connectorRestartPolicy?: ConnectorRestartPolicy;
   restartConnectorOnFailure?: boolean;
   connectorRestartDelayMs?: number;
   maxConnectorRestartDelayMs?: number;
@@ -103,19 +117,23 @@ export async function runInboxDaemon(input: {
   const controller = new AbortController();
   const releaseAbortRelay = relayAbort(input.signal, controller);
   const continueOnConnectorFailure = input.continueOnConnectorFailure ?? false;
+  const connectorRestartPolicy = resolveConnectorRestartPolicy({
+    connectorRestartPolicy: input.connectorRestartPolicy,
+    restartConnectorOnFailure: input.restartConnectorOnFailure,
+    connectorRestartDelayMs: input.connectorRestartDelayMs,
+    maxConnectorRestartDelayMs: input.maxConnectorRestartDelayMs,
+  });
   const runners = input.connectors.map((connector) =>
-    runPollConnector({
+    runConnectorWithRestart({
       connector,
       pipeline: input.pipeline,
       signal: controller.signal,
-      restartConnectorOnFailure: input.restartConnectorOnFailure ?? false,
-      connectorRestartDelayMs: input.connectorRestartDelayMs,
-      maxConnectorRestartDelayMs: input.maxConnectorRestartDelayMs,
+      restartPolicy: connectorRestartPolicy,
     }).catch((error: unknown) => {
       if (!continueOnConnectorFailure) {
         controller.abort();
       }
-      throw createConnectorFailure(connector, error);
+      throw error;
     }),
   );
 
@@ -138,6 +156,149 @@ export async function runInboxDaemon(input: {
     }
   } finally {
     releaseAbortRelay();
+  }
+}
+
+async function runConnectorWithRestart(input: {
+  connector: PollConnector;
+  pipeline: InboxPipeline;
+  signal: AbortSignal;
+  restartPolicy: ResolvedConnectorRestartPolicy;
+}): Promise<void> {
+  let restartAttempts = 0;
+
+  while (true) {
+    if (input.signal.aborted) {
+      return;
+    }
+
+    try {
+      await runPollConnector({
+        connector: input.connector,
+        pipeline: input.pipeline,
+        signal: input.signal,
+      });
+      return;
+    } catch (error) {
+      if (input.signal.aborted) {
+        return;
+      }
+
+      if (!shouldRetryConnectorFailure(input.restartPolicy, restartAttempts)) {
+        throw createConnectorFailure(input.connector, error);
+      }
+
+      restartAttempts += 1;
+      await waitForAbortOrTimeout(
+        input.signal,
+        resolveConnectorRestartDelayMs(input.restartPolicy, restartAttempts),
+      );
+    }
+  }
+}
+
+function shouldRetryConnectorFailure(
+  policy: ResolvedConnectorRestartPolicy,
+  restartAttempts: number,
+): boolean {
+  if (!policy.enabled) {
+    return false;
+  }
+
+  return policy.maxAttempts === null || restartAttempts < policy.maxAttempts;
+}
+
+function resolveConnectorRestartDelayMs(
+  policy: ResolvedConnectorRestartPolicy,
+  restartAttempt: number,
+): number {
+  const index = Math.min(
+    Math.max(restartAttempt - 1, 0),
+    policy.backoffMs.length - 1,
+  );
+
+  return policy.backoffMs[index] ?? policy.backoffMs[policy.backoffMs.length - 1] ?? 0;
+}
+
+function resolveConnectorRestartPolicy(input: {
+  connectorRestartPolicy?: ConnectorRestartPolicy;
+  restartConnectorOnFailure?: boolean;
+  connectorRestartDelayMs?: number;
+  maxConnectorRestartDelayMs?: number;
+}): ResolvedConnectorRestartPolicy {
+  return {
+    enabled:
+      input.connectorRestartPolicy?.enabled ?? input.restartConnectorOnFailure ?? false,
+    backoffMs:
+      input.connectorRestartPolicy?.backoffMs !== undefined
+        ? normalizeRestartBackoffMs(input.connectorRestartPolicy.backoffMs)
+        : buildLegacyRestartBackoffMs(
+            input.connectorRestartDelayMs,
+            input.maxConnectorRestartDelayMs,
+          ),
+    maxAttempts: normalizeRestartMaxAttempts(
+      input.connectorRestartPolicy?.maxAttempts,
+    ),
+  };
+}
+
+function normalizeRestartBackoffMs(
+  value?: readonly number[],
+): readonly number[] {
+  if (!value || value.length === 0) {
+    return DEFAULT_CONNECTOR_RESTART_BACKOFF_MS;
+  }
+
+  const normalized = value
+    .map((entry) => Math.max(0, Math.floor(entry)))
+    .filter((entry) => Number.isFinite(entry));
+
+  return normalized.length > 0
+    ? Object.freeze(normalized)
+    : DEFAULT_CONNECTOR_RESTART_BACKOFF_MS;
+}
+
+function normalizeRestartMaxAttempts(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor(value));
+}
+
+function buildLegacyRestartBackoffMs(
+  connectorRestartDelayMs: number | undefined,
+  maxConnectorRestartDelayMs: number | undefined,
+): readonly number[] {
+  const normalizedRestartDelayMs = normalizeRestartDelay(
+    connectorRestartDelayMs ?? DEFAULT_CONNECTOR_RESTART_DELAY_MS,
+    "Connector restart delay",
+  );
+  const normalizedMaxRestartDelayMs = normalizeRestartDelay(
+    maxConnectorRestartDelayMs ?? DEFAULT_MAX_CONNECTOR_RESTART_DELAY_MS,
+    "Connector max restart delay",
+  );
+  if (normalizedMaxRestartDelayMs < normalizedRestartDelayMs) {
+    throw new TypeError("Connector max restart delay must be at least the restart delay.");
+  }
+
+  const backoffMs: number[] = [];
+  let nextRestartDelayMs = normalizedRestartDelayMs;
+
+  while (true) {
+    backoffMs.push(nextRestartDelayMs);
+    if (nextRestartDelayMs >= normalizedMaxRestartDelayMs) {
+      return Object.freeze(backoffMs);
+    }
+
+    nextRestartDelayMs = Math.min(
+      nextRestartDelayMs * 2,
+      normalizedMaxRestartDelayMs,
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 import {
   createInboxPipeline,
   runInboxDaemon,
+  type ConnectorRestartPolicy,
   type CreateInboxPipelineInput,
   type InboxPipeline,
   type PollConnector,
@@ -21,6 +22,7 @@ export interface RunInboxDaemonWithParsersInput extends CreateParsedInboxPipelin
   connectors: PollConnector[];
   signal: AbortSignal;
   continueOnConnectorFailure?: boolean;
+  connectorRestartPolicy?: ConnectorRestartPolicy;
   restartConnectorOnFailure?: boolean;
   connectorRestartDelayMs?: number;
   maxConnectorRestartDelayMs?: number;
@@ -55,6 +57,7 @@ export async function runInboxDaemonWithParsers(
     connectors,
     signal,
     continueOnConnectorFailure,
+    connectorRestartPolicy,
     restartConnectorOnFailure,
     connectorRestartDelayMs,
     maxConnectorRestartDelayMs,
@@ -87,6 +90,7 @@ export async function runInboxDaemonWithParsers(
       connectors,
       signal,
       continueOnConnectorFailure,
+      connectorRestartPolicy,
       restartConnectorOnFailure,
       connectorRestartDelayMs,
       maxConnectorRestartDelayMs,
