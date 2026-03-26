@@ -198,6 +198,16 @@ const assistantDeliveryOptionFields = {
     .optional()
     .describe(
       'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
+  ),
+}
+
+const assistantCronDeliveryOptionFields = {
+  deliveryTarget: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional explicit outbound destination for each cron run. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound cron jobs reply in place.',
     ),
 }
 
@@ -1127,7 +1137,7 @@ export function registerAssistantCommands(
       }),
       description: 'Create one assistant cron job from a built-in preset template.',
       hint:
-        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule.',
+        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule. Cron jobs now require an explicit outbound channel route and always deliver their response.',
       examples: [
         {
           args: {
@@ -1150,7 +1160,6 @@ export function registerAssistantCommands(
             channel: 'telegram',
             participant: '123456789',
             sourceThread: '123456789',
-            deliverResponse: true,
           },
           description: 'Install the environment-health preset and deliver the weekly report back into a Telegram chat.',
         },
@@ -1192,7 +1201,7 @@ export function registerAssistantCommands(
           .optional()
           .describe('Create the preset-backed cron job in a disabled state without scheduling it yet.'),
         ...assistantSessionOptionFields,
-        ...assistantDeliveryOptionFields,
+        ...assistantCronDeliveryOptionFields,
       }),
       output: assistantCronPresetInstallResultSchema,
       async run(context) {
@@ -1279,7 +1288,7 @@ export function registerAssistantCommands(
       }),
       description: 'Create one assistant cron job backed by the local assistant runtime.',
       hint:
-        'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun.',
+        'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun. Cron jobs require an explicit outbound channel route and always deliver their response.',
       examples: [
         {
           args: {
@@ -1313,7 +1322,6 @@ export function registerAssistantCommands(
             cron: '0 8 * * 1-5',
             channel: 'telegram',
             participant: '-1001234567890',
-            deliverResponse: true,
           },
           description: 'Create a cron expression job that also delivers the reply back out.',
         },
@@ -1347,7 +1355,7 @@ export function registerAssistantCommands(
           .optional()
           .describe('Create the job in a disabled state without scheduling it yet.'),
         ...assistantSessionOptionFields,
-        ...assistantDeliveryOptionFields,
+        ...assistantCronDeliveryOptionFields,
       }),
       output: assistantCronAddResultSchema,
       async run(context) {

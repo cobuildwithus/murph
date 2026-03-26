@@ -18,6 +18,7 @@ import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 const require = createRequire(import.meta.url)
 const packageJson = require('../package.json') as { version?: string }
 const INCUR_HELP_TIMEOUT_MS = 45_000
+const INCUR_SCHEMA_TIMEOUT_MS = 45_000
 
 test('root help exposes the Incur built-ins', async () => {
   const help = await runRawCli(['--help'])
@@ -350,9 +351,10 @@ test('assistant cron add schema exposes the scheduler-specific options', async (
   assert.equal('at' in schema.options.properties, true)
   assert.equal('every' in schema.options.properties, true)
   assert.equal('cron' in schema.options.properties, true)
-  assert.equal('deliverResponse' in schema.options.properties, true)
+  assert.equal('deliverResponse' in schema.options.properties, false)
+  assert.equal('deliveryTarget' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'name'])
-})
+}, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('assistant cron preset install schema exposes preset variables, instructions, and delivery options', async () => {
   const schema = JSON.parse(
@@ -384,9 +386,10 @@ test('assistant cron preset install schema exposes preset variables, instruction
   assert.equal('at' in schema.options.properties, true)
   assert.equal('every' in schema.options.properties, true)
   assert.equal('cron' in schema.options.properties, true)
-  assert.equal('deliverResponse' in schema.options.properties, true)
+  assert.equal('deliverResponse' in schema.options.properties, false)
+  assert.equal('deliveryTarget' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
-})
+}, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('food add-daily schema exposes the recurring food options', async () => {
   const schema = JSON.parse(

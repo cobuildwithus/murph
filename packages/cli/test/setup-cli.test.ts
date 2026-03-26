@@ -60,6 +60,7 @@ import {
 } from './cli-test-helpers.js'
 
 const execFileAsync = promisify(execFile)
+const SETUP_ALIAS_TIMEOUT_MS = 45_000
 
 function buildFakeJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none' }), 'utf8')
@@ -115,7 +116,7 @@ test('setup wizard scheduled updates default to the starter bundle', () => {
   ])
 })
 
-test('setup scheduled updates install the selected preset-backed jobs', async () => {
+test('setup scheduled updates defer preset-backed jobs until an explicit delivery route is configured', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
   const steps: SetupResult['steps'] = []
 
@@ -130,25 +131,23 @@ test('setup scheduled updates install the selected preset-backed jobs', async ()
     assert.deepEqual(
       scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
       [
-        ['environment-health-watch', 'completed'],
-        ['weekly-health-snapshot', 'completed'],
+        ['environment-health-watch', 'skipped'],
+        ['weekly-health-snapshot', 'skipped'],
       ],
     )
     assert.equal(steps.length, 1)
     assert.equal(steps[0]?.id, 'assistant-scheduled-updates')
-    assert.equal(steps[0]?.status, 'completed')
+    assert.equal(steps[0]?.status, 'skipped')
+    assert.match(steps[0]?.detail ?? '', /require an explicit outbound channel route/i)
 
     const jobs = await listAssistantCronJobs(vaultRoot)
-    assert.deepEqual(
-      jobs.map((job) => job.name).sort(),
-      ['environment-health-watch', 'weekly-health-snapshot'],
-    )
+    assert.deepEqual(jobs, [])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 
-test('setup scheduled updates reuse existing cron jobs with matching preset names', async () => {
+test('setup scheduled updates keep returning deferred recommendations on repeated onboarding runs', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
 
   try {
@@ -169,9 +168,9 @@ test('setup scheduled updates reuse existing cron jobs with matching preset name
 
     assert.deepEqual(
       scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
-      [['environment-health-watch', 'reused']],
+      [['environment-health-watch', 'skipped']],
     )
-    assert.equal(steps[0]?.status, 'reused')
+    assert.equal(steps[0]?.status, 'skipped')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -3041,6 +3040,11 @@ test('setup routing helpers keep the setup alias stable', () => {
 })
 
 test.sequential('healthybob alias routes empty and help invocations to setup help', async () => {
+  await execFileAsync('pnpm', ['--dir', 'packages/cli', 'build'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: withoutNodeV8Coverage(),
+  })
   const help = await runSetupAliasRaw('healthybob', ['--help'])
   const onboardHelp = await runSetupAliasRaw('healthybob', ['onboard', '--help'])
   const emptyInvocation = await runSetupAliasRaw('healthybob', [])
@@ -3053,7 +3057,7 @@ test.sequential('healthybob alias routes empty and help invocations to setup hel
   assert.match(emptyInvocation, /Healthy Bob local machine setup helpers\./u)
   assert.doesNotMatch(inboxHelp, /Healthy Bob local machine setup helpers\./u)
   assert.match(inboxHelp, /vault-cli inbox doctor/u)
-})
+}, SETUP_ALIAS_TIMEOUT_MS)
 
 test.sequential('healthybob loads VAULT from a local .env file', async () => {
   const originalVault = process.env.VAULT

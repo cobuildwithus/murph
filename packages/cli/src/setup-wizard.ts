@@ -864,13 +864,13 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'Set your default assistant, pick a small starter bundle of scheduled updates, choose message channels, and optionally connect wearables in the same onboarding flow.',
+                'Set your default assistant, review a small starter bundle of scheduled-update presets, choose message channels, and optionally connect wearables in the same onboarding flow.',
               ),
               createElement(Text, null, ''),
               createElement(
                 Text,
                 null,
-                'The next screens can install preset-backed scheduled updates like weekly health snapshots, environment checks, ingestible watchlists, and research roundups. You can change or remove them later.',
+                'The next screens highlight preset-backed scheduled updates like weekly health snapshots, environment checks, ingestible watchlists, and research roundups. Cron jobs now require an explicit outbound destination, so onboarding leaves these for later installation with `assistant cron preset install --channel ...`.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),
@@ -919,7 +919,7 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'Healthy Bob will install these as assistant cron jobs. Two broad starter updates are selected by default, and they run while `assistant run` is active for this vault.',
+                'Two broad starter updates are selected by default. Onboarding will not install them automatically because cron jobs now require an explicit outbound destination; use this screen to review what you may want to install later with `assistant cron preset install --channel ...`.',
               ),
               createElement(Text, null, ''),
               ...scheduledUpdateLines,
@@ -1020,10 +1020,10 @@ export async function runSetupWizard(
                 null,
                 selectedNeedsEnv.length > 0
                   ? selectedScheduledUpdates.length > 0
-                    ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup, install the selected scheduled updates, and open any ready wearable connect flows.'
+                    ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup, leave the selected scheduled updates for explicit later installation, and open any ready wearable connect flows.'
                     : 'Healthy Bob will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
                   : selectedScheduledUpdates.length > 0
-                    ? 'Healthy Bob will finish setup, install the selected scheduled updates, and open any selected wearable connect flows that are ready.'
+                    ? 'Healthy Bob will finish setup, leave the selected scheduled updates for explicit later installation, and open any selected wearable connect flows that are ready.'
                     : 'Healthy Bob will finish setup and open any selected wearable connect flows that are ready.',
               ),
               createElement(Text, null, ''),

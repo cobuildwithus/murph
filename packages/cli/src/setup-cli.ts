@@ -341,7 +341,13 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     })
   }
 
-  if (result.scheduledUpdates.length > 0) {
+  if (
+    result.scheduledUpdates.some(
+      (scheduledUpdate) =>
+        scheduledUpdate.status === 'completed' ||
+        scheduledUpdate.status === 'reused',
+    )
+  ) {
     commands.push({
       command: 'assistant cron list',
       description:

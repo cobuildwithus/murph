@@ -41,6 +41,8 @@ import {
   writeAssistantCronStore,
 } from './cron/store.js'
 import { sendAssistantMessage } from './service.js'
+import { getAssistantChannelAdapter } from './channel-adapters.js'
+import { resolveAssistantBindingDelivery } from './bindings.js'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -195,6 +197,7 @@ export async function addAssistantCronJob(
   }
 
   await ensureAssistantCronState(paths)
+  const target = buildValidatedAssistantCronTarget(input)
 
   return withAssistantCronWriteLock(paths, async () => {
     const store = await readAssistantCronStore(paths)
@@ -209,7 +212,7 @@ export async function addAssistantCronJob(
       keepAfterRun,
       prompt,
       schedule: input.schedule,
-      target: buildAssistantCronTarget(input),
+      target,
       foodAutoLog: input.foodAutoLog,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -435,6 +438,70 @@ export async function processDueAssistantCronJobs(
 }
 
 export { buildAssistantCronSchedule }
+
+function buildValidatedAssistantCronTarget(
+  input: AddAssistantCronJobInput,
+): ReturnType<typeof buildAssistantCronTarget> {
+  if (input.foodAutoLog) {
+    return buildAssistantCronTarget(input)
+  }
+
+  const channel = normalizeNullableString(input.channel)
+  if (!channel) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      'Assistant cron jobs must declare an outbound channel and delivery route. Pass --channel plus --sourceThread, --participant, or --deliveryTarget. Cron jobs always deliver their response.',
+    )
+  }
+
+  if (!getAssistantChannelAdapter(channel)) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_UNSUPPORTED',
+      `Outbound delivery for channel "${channel}" is not supported in this build.`,
+    )
+  }
+
+  if (input.deliverResponse === false) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      'Assistant cron jobs always deliver their response. Remove the deliverResponse override and bind an explicit outbound route.',
+    )
+  }
+
+  const identityId = normalizeNullableString(input.identityId)
+  if (channel === 'email' && !identityId) {
+    throw new VaultCliError(
+      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+      'Email cron jobs require an AgentMail inbox identity. Pass --identity with the configured inbox id.',
+    )
+  }
+
+  const participantId = normalizeNullableString(input.participantId)
+  const sourceThreadId = normalizeNullableString(input.sourceThreadId)
+  const deliveryTarget = normalizeNullableString(input.deliveryTarget)
+  const bindingDelivery = resolveAssistantBindingDelivery({
+    channel,
+    actorId: participantId,
+    threadId: sourceThreadId,
+  })
+
+  if (!deliveryTarget && !bindingDelivery) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      'Assistant cron jobs must bind an explicit outbound route. Pass --sourceThread, --participant, or --deliveryTarget for the selected channel.',
+    )
+  }
+
+  return buildAssistantCronTarget({
+    ...input,
+    channel,
+    identityId,
+    participantId,
+    sourceThreadId,
+    deliveryTarget,
+    deliverResponse: true,
+  })
+}
 
 async function claimNextDueAssistantCronJob(
   paths: AssistantStatePaths,

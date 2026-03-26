@@ -1,8 +1,4 @@
 import {
-  getAssistantCronJob,
-  installAssistantCronPreset,
-} from '../assistant/cron.js'
-import {
   getAssistantCronPresetDefinition,
   listAssistantCronPresets,
 } from '../assistant/cron/presets.js'
@@ -38,61 +34,18 @@ export async function configureSetupScheduledUpdates(
     return []
   }
 
-  if (input.dryRun) {
-    const planned = selectedPresets.map((preset) => ({
-      preset,
-      jobName: preset.suggestedName,
-      status: 'planned' as const,
-    }))
-
-    input.steps.push(
-      createStep({
-        detail: `Would install ${formatScheduledUpdateList(selectedPresets)}. These run while assistant run is active for the vault.`,
-        id: 'assistant-scheduled-updates',
-        kind: 'configure',
-        status: 'planned',
-        title: 'Assistant scheduled updates',
-      }),
-    )
-
-    return planned
-  }
-
-  const configured: SetupScheduledUpdate[] = []
-
-  for (const preset of selectedPresets) {
-    try {
-      const installed = await installAssistantCronPreset({
-        vault: input.vault,
-        presetId: preset.id,
-      })
-      configured.push({
-        preset: installed.preset,
-        jobName: installed.job.name,
-        status: 'completed',
-      })
-    } catch (error) {
-      if (!hasErrorCode(error, 'ASSISTANT_CRON_JOB_EXISTS')) {
-        throw error
-      }
-
-      const existing = await getAssistantCronJob(input.vault, preset.suggestedName)
-      configured.push({
-        preset,
-        jobName: existing.name,
-        status: 'reused',
-      })
-    }
-  }
+  const configured: SetupScheduledUpdate[] = selectedPresets.map((preset) => ({
+    preset,
+    jobName: preset.suggestedName,
+    status: 'skipped',
+  }))
 
   input.steps.push(
     createStep({
-      detail: formatConfiguredScheduledUpdatesDetail(configured),
+      detail: formatDeferredScheduledUpdatesDetail(selectedPresets, input.dryRun),
       id: 'assistant-scheduled-updates',
       kind: 'configure',
-      status: configured.some((entry) => entry.status === 'completed')
-        ? 'completed'
-        : 'reused',
+      status: 'skipped',
       title: 'Assistant scheduled updates',
     }),
   )
@@ -145,29 +98,12 @@ function formatScheduledUpdateList(
     .join(', ')}`
 }
 
-function formatConfiguredScheduledUpdatesDetail(
-  configured: readonly SetupScheduledUpdate[],
+function formatDeferredScheduledUpdatesDetail(
+  presets: readonly AssistantCronPreset[],
+  dryRun: boolean,
 ): string {
-  const completed = configured.filter((entry) => entry.status === 'completed').length
-  const reused = configured.filter((entry) => entry.status === 'reused').length
-  const titles = configured.map((entry) => entry.preset.title).join(', ')
+  const titles = presets.map((entry) => entry.title).join(', ')
+  const prefix = dryRun ? 'Would defer' : 'Deferred'
 
-  if (completed > 0 && reused > 0) {
-    return `Installed ${completed} assistant scheduled update${completed === 1 ? '' : 's'} and reused ${reused} existing job${reused === 1 ? '' : 's'}: ${titles}. Existing jobs with matching names were left unchanged.`
-  }
-
-  if (completed > 0) {
-    return `Installed ${completed} assistant scheduled update${completed === 1 ? '' : 's'}: ${titles}. These run while assistant run is active for the vault.`
-  }
-
-  return `Reused ${reused} existing assistant scheduled update${reused === 1 ? '' : 's'}: ${titles}. Existing jobs with matching names were left unchanged.`
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === code
-  )
+  return `${prefix} ${presets.length} assistant scheduled update${presets.length === 1 ? '' : 's'}: ${titles}. Cron jobs now require an explicit outbound channel route and delivery target, so onboarding no longer installs preset jobs automatically. Install them later with \`assistant cron preset install --channel ...\`.`
 }
