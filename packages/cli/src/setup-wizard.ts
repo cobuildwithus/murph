@@ -870,7 +870,7 @@ export async function runSetupWizard(
               createElement(
                 Text,
                 null,
-                'The next screens highlight preset-backed scheduled updates like weekly health snapshots, environment checks, ingestible watchlists, and research roundups. Cron jobs now require an explicit outbound destination, so onboarding leaves these for later installation with `assistant cron preset install --channel ...`.',
+                'The next screens highlight preset-backed scheduled updates like weekly health compass summaries, environment checks, ingestible watchlists, and research roundups. Cron jobs now require an explicit outbound destination, so onboarding leaves these for later installation with `assistant cron preset install --channel ...`.',
               ),
               createElement(Text, null, ''),
               createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),

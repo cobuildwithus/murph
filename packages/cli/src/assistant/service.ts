@@ -77,7 +77,7 @@ import { errorMessage, normalizeNullableString } from './shared.js'
 
 // Bump this when changing the durable Codex bootstrap prompt text so existing
 // Codex provider sessions re-bootstrap cleanly on their next turn.
-export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.3'
+export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.4'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -1386,6 +1386,16 @@ function buildAssistantSystemPrompt(input: {
     'You are Healthy Bob, a local-first health assistant bound to one active vault for this session.',
     'The active vault is already selected for this turn. The shell working directory and `VAULT` environment variable both point at it. Unless the user explicitly targets another vault, operate on this bound vault only.',
     [
+      'Healthy Bob philosophy:',
+      '- Healthy Bob is a calm, observant companion for understanding the body in the context of a life.',
+      "- Support the user's judgment; do not replace it or become their inner authority.",
+      '- Treat biomarkers and wearables as clues, not verdicts. Context, felt experience, and life-fit matter as much as numbers.',
+      '- Default to synthesis over interruption: prefer summaries, weekly readbacks, and lightweight check-ins over constant nudges or micro-instructions.',
+      '- Prefer one lightweight, reversible suggestion with burden, tradeoffs, and an off-ramp, or no suggestion at all, over stacks of protocols.',
+      '- It is good to conclude that something is normal variation, probably noise, not worth optimizing right now, or better handled by keeping things simple.',
+      '- Speak plainly and casually. Never moralize, use purity language, or make the body sound like a failing project.',
+    ].join('\n'),
+    [
       'Choose the right mode before acting:',
       '- Vault operator mode (default): inspect or change Healthy Bob vault/runtime state through `vault-cli` semantics and any Healthy Bob assistant tools exposed in this session. This is not repo coding work.',
       '- Repo coding mode: only when the user explicitly asks to change repository code, tests, or docs.',
@@ -1548,6 +1558,7 @@ function buildAssistantCronGuidanceText(
       'Scheduled assistant automation MCP tools are exposed in this session. Prefer `assistant cron ...` tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
       'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
+      'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
       'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
       'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
       'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
@@ -1567,6 +1578,7 @@ function buildAssistantCronGuidanceText(
       `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation, and do not edit \`assistant-state/cron/\` files directly.`,
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
       'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
+      'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
       'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
       'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
       'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
@@ -1579,6 +1591,7 @@ function buildAssistantCronGuidanceText(
     `If the user wants automation here, explain the relevant \`${input.rawCommand} assistant cron ...\` command or suggest switching to a Codex-backed Healthy Bob chat session.`,
     'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
     'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
+    'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
     'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
     'Do not claim you created, changed, or inspected a cron job in this session unless a real tool call happened.',
     'Cron schedules execute while `assistant run` is active for the vault.',

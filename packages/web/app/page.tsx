@@ -8,6 +8,11 @@ import {
   type OverviewWeeklyStat,
 } from "../src/lib/overview";
 import {
+  buildInvestigationSurfaceNote,
+  buildOverviewCompass,
+  filterActiveExperiments,
+} from "../src/lib/overview-compass";
+import {
   loadDeviceSyncOverviewFromEnv,
   type DeviceSyncAccountRecord,
   type DeviceSyncOverview,
@@ -36,11 +41,20 @@ export default async function HomePage() {
   return (
     <main className="mx-auto max-w-[1080px] min-h-screen px-6 pt-12 pb-24 max-sm:px-4 max-sm:pt-8 max-sm:pb-16">
       <header className="mb-10 animate-settle">
-        <p className="text-accent font-display text-xs font-bold tracking-[0.14em] uppercase mb-3">Observatory</p>
-        <h1 className="font-display tracking-[-0.04em] text-[clamp(2.8rem,6vw,4.4rem)] leading-[0.92] mb-4">Healthy Bob</h1>
-        <p className="text-muted text-lg leading-relaxed max-w-[52ch]">
-          Your profile, measurements, and activity — all in one place.
-        </p>
+        <div className="flex items-end justify-between gap-4 max-sm:flex-col max-sm:items-start">
+          <div>
+            <p className="text-accent font-display text-xs font-bold tracking-[0.14em] uppercase mb-3">Overview</p>
+            <h1 className="font-display tracking-[-0.04em] text-[clamp(2.35rem,5vw,3.4rem)] leading-[0.94] mb-3">Healthy Bob</h1>
+            <p className="text-muted text-base leading-relaxed max-w-[52ch]">
+              What changed, what stayed steady, and what can stay simple.
+            </p>
+          </div>
+          {overview.status === "ready" ? (
+            <p className="text-muted font-display text-[0.78rem] font-bold tracking-[0.12em] uppercase">
+              Last read {formatMoment(overview.generatedAt)}
+            </p>
+          ) : null}
+        </div>
       </header>
 
       {overview.status === "ready" ? <ReadyState overview={overview} deviceSync={deviceSync} /> : null}
@@ -58,38 +72,48 @@ function ReadyState({
   deviceSync: DeviceSyncOverview;
 }) {
   const stats = mergeWithPlaceholders(overview.weeklyStats);
+  const compassRows = buildOverviewCompass(overview);
+  const activeExperiments = filterActiveExperiments(overview.experiments);
+  const investigationNote = buildInvestigationSurfaceNote(activeExperiments);
 
   return (
     <div className="grid gap-8 animate-settle">
-      <DeviceSyncSection deviceSync={deviceSync} />
+      <CompassSection rows={compassRows} />
 
-      {/* ── Weekly stats ── */}
-      <div className="grid grid-cols-5 gap-3 max-[940px]:grid-cols-2 max-sm:grid-cols-1">
-        {stats.map((stat) => (
-          <div className="py-5 px-5 rounded-2xl bg-card border border-line" key={`${stat.stream}:${stat.unit ?? "none"}`}>
-            <div className="flex items-baseline gap-2 mb-1">
-              <span className="font-display text-[2rem] font-bold tracking-[-0.03em] leading-none">
-                {stat.currentWeekAvg !== null ? formatStatValue(stat.currentWeekAvg) : "—"}
-              </span>
-              {stat.unit ? (
-                <span className="text-muted font-display text-xs font-bold uppercase">{stat.unit}</span>
-              ) : null}
-            </div>
-            <div className="text-muted font-display text-xs font-medium tracking-wide uppercase">
-              {humanizeToken(stat.stream)}
-            </div>
-            {stat.deltaPercent !== null ? (
-              <div className={`text-xs font-display font-bold mt-1 ${stat.deltaPercent >= 0 ? "text-accent" : "text-warm"}`}>
-                {stat.deltaPercent >= 0 ? "+" : ""}{stat.deltaPercent.toFixed(1)}% vs last week
-              </div>
-            ) : (
-              <div className="text-muted/40 text-xs mt-1">No prior week data</div>
-            )}
+      <section>
+        <div className="flex items-end justify-between gap-4 mb-4 max-sm:flex-col max-sm:items-start">
+          <div>
+            <p className="text-accent font-display text-xs font-bold tracking-[0.14em] uppercase mb-2">Week over week</p>
+            <h2 className="font-display text-[1.4rem] font-bold tracking-[-0.02em]">Current signals</h2>
           </div>
-        ))}
-      </div>
+          <p className="text-muted text-sm">Simple comparisons between this week and the last one.</p>
+        </div>
+        <div className="grid grid-cols-5 gap-3 max-[940px]:grid-cols-2 max-sm:grid-cols-1">
+          {stats.map((stat) => (
+            <div className="py-5 px-5 rounded-2xl bg-card border border-line" key={`${stat.stream}:${stat.unit ?? "none"}`}>
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="font-display text-[2rem] font-bold tracking-[-0.03em] leading-none">
+                  {stat.currentWeekAvg !== null ? formatStatValue(stat.currentWeekAvg) : "—"}
+                </span>
+                {stat.unit ? (
+                  <span className="text-muted font-display text-xs font-bold uppercase">{stat.unit}</span>
+                ) : null}
+              </div>
+              <div className="text-muted font-display text-xs font-medium tracking-wide uppercase">
+                {humanizeToken(stat.stream)}
+              </div>
+              {stat.deltaPercent !== null ? (
+                <div className={`text-xs font-display font-bold mt-1 ${stat.deltaPercent >= 0 ? "text-accent" : "text-warm"}`}>
+                  {stat.deltaPercent >= 0 ? "+" : ""}{stat.deltaPercent.toFixed(1)}% vs last week
+                </div>
+              ) : (
+                <div className="text-muted/40 text-xs mt-1">No prior week data</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
 
-      {/* ── Profile ── */}
       <section>
         <div className="flex items-baseline justify-between mb-4 max-sm:flex-col max-sm:gap-1">
           <h2 className="font-display text-[1.4rem] font-bold tracking-[-0.02em]">
@@ -116,23 +140,28 @@ function ReadyState({
         )}
       </section>
 
-      {/* ── Experiments ── */}
       <section>
-        <h2 className="font-display text-xs font-bold tracking-[0.14em] uppercase text-accent mb-4">Experiments</h2>
+        <div className="flex items-end justify-between gap-4 mb-4 max-sm:flex-col max-sm:items-start">
+          <div>
+            <h2 className="font-display text-xs font-bold tracking-[0.14em] uppercase text-accent mb-2">Current investigations</h2>
+            <p className="text-muted text-sm">{investigationNote}</p>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-2.5 max-sm:grid-cols-1">
-          {overview.experiments.length ? (
-            overview.experiments.map((experiment) => (
+          {activeExperiments.length ? (
+            activeExperiments.map((experiment) => (
               <ExperimentCard experiment={experiment} key={experiment.id} />
             ))
           ) : (
-            <p className="text-muted text-sm py-6 text-center col-span-2">No experiments yet.</p>
+            <p className="text-muted text-sm py-6 text-center col-span-2">No active investigations right now.</p>
           )}
         </div>
       </section>
 
-      {/* ── Timeline ── */}
+      <DeviceSyncSection deviceSync={deviceSync} />
+
       <section>
-        <h2 className="font-display text-xs font-bold tracking-[0.14em] uppercase text-accent mb-4">Activity</h2>
+        <h2 className="font-display text-xs font-bold tracking-[0.14em] uppercase text-accent mb-4">Recent activity</h2>
         <div className="grid gap-2">
           {overview.timeline.length ? (
             overview.timeline.map((entry) => <TimelineRow entry={entry} key={entry.id} />)
@@ -142,6 +171,32 @@ function ReadyState({
         </div>
       </section>
     </div>
+  );
+}
+
+function CompassSection({ rows }: { rows: ReturnType<typeof buildOverviewCompass> }) {
+  return (
+    <section className="rounded-[1.8rem] border border-line bg-paper/80 shadow-card overflow-hidden">
+      <div className="border-b border-line/70 px-6 py-5 max-sm:px-4">
+        <p className="text-accent font-display text-xs font-bold tracking-[0.14em] uppercase mb-2">Weekly compass</p>
+        <div className="flex items-end justify-between gap-4 max-sm:flex-col max-sm:items-start">
+          <div>
+            <h2 className="font-display text-[1.6rem] font-bold tracking-[-0.03em]">What changed, what stayed steady, and what can stay simple</h2>
+            <p className="text-muted text-sm leading-relaxed max-w-[64ch]">
+              Use this as the first pass on the week before reacting to a single metric or adding another experiment.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="divide-y divide-line/70">
+        {rows.map((row) => (
+          <div className="grid grid-cols-[12rem_1fr] gap-4 px-6 py-4 max-sm:grid-cols-1 max-sm:px-4" key={row.label}>
+            <div className="text-accent font-display text-[0.78rem] font-bold tracking-[0.12em] uppercase">{row.label}</div>
+            <p className="text-foreground leading-relaxed">{row.text}</p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

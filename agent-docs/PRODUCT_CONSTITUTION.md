@@ -29,6 +29,13 @@ HealthyBob should create:
 - more **participation in life**, less inward fixation
 - more **gentle discernment**, less compulsive improvement
 
+## Additional Operating Principles
+
+- **Curiosity beats compliance.** The right feeling is "huh, interesting" rather than "I need to get back on track."
+- **Silence is a feature.** A great health product knows when not to speak.
+- **Delight counts as data.** If something improves a metric but makes life more brittle, annoying, or joyless, that matters.
+- **Life-fit beats marginal gain.** Recommendations should be ranked partly by how well they fit work, relationships, travel, appetite, pleasure, and ordinary human mess.
+
 ## What We Refuse To Become
 
 ### 1. A Whispering Earring

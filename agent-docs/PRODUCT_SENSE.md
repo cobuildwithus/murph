@@ -19,5 +19,6 @@ Last verified: 2026-03-12
 
 - `packages/web` is currently an operator-facing local observability UI, not a marketing site.
 - Default to utility copy, current-state visibility, recent activity, and obvious next actions.
+- Prefer a compass-first read of the week: what changed, what stayed steady, what likely explains the shift, and what is probably not worth reacting to yet.
 - Prefer calm hierarchy and scannable sections over decorative density.
 - Avoid aspirational hero copy, campaign-style messaging, and ornamental UI devices unless the user explicitly asks for a more branded surface.

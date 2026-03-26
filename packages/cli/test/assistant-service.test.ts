@@ -208,6 +208,12 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
 
   assert.equal(firstCall?.workingDirectory, vaultRoot)
   assert.match(firstCall?.systemPrompt ?? '', /bound to one active vault/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Healthy Bob philosophy:/u)
+  assert.match(firstCall?.systemPrompt ?? '', /calm, observant companion/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Support the user's judgment; do not replace it/u)
+  assert.match(firstCall?.systemPrompt ?? '', /numbers\./u)
+  assert.match(firstCall?.systemPrompt ?? '', /Default to synthesis over interruption/u)
+  assert.match(firstCall?.systemPrompt ?? '', /normal variation, probably noise, not worth optimizing right now/u)
   assert.match(firstCall?.systemPrompt ?? '', /Vault operator mode \(default\)/u)
   assert.match(firstCall?.systemPrompt ?? '', /Repo coding mode/u)
   assert.match(
@@ -267,6 +273,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   )
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron add/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron preset install/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Prefer digest-style or summary-style automation over nagging coaching/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
   assert.match(firstCall?.systemPrompt ?? '', /broad current-evidence scan/u)
   assert.match(firstCall?.systemPrompt ?? '', /keep waiting on the tool unless it actually errors or times out/u)

@@ -275,6 +275,68 @@ Ordinary notes without the filename token.
   }
 });
 
+test("loadVaultOverview keeps older active experiments in the summarized investigation list", async () => {
+  const vaultRoot = await createWebFixtureVault();
+
+  try {
+    await writeFixtureFile(
+      vaultRoot,
+      "bank/experiments/older-active-anchor.md",
+      `---
+schemaVersion: hv/experiment@v1
+experimentId: exp_active_anchor_01
+slug: active-anchor
+title: Active Anchor
+status: active
+startedOn: 2026-03-01
+---
+# Active Anchor
+
+Keep the long-running active investigation visible.
+`,
+    );
+
+    for (let index = 0; index < 6; index += 1) {
+      const day = String(20 + index).padStart(2, "0");
+      await writeFixtureFile(
+        vaultRoot,
+        `bank/experiments/completed-${index + 1}.md`,
+        `---
+schemaVersion: hv/experiment@v1
+experimentId: exp_completed_${index + 1}
+slug: completed-${index + 1}
+title: Completed ${index + 1}
+status: completed
+startedOn: 2026-03-${day}
+---
+# Completed ${index + 1}
+
+Finished experiment ${index + 1}.
+`,
+      );
+    }
+
+    const result = await loadVaultOverview({
+      vaultRoot,
+    });
+
+    assert.equal(result.status, "ready");
+    assert.equal(result.experiments.length, 6);
+    assert.ok(result.experiments.some((experiment) => experiment.title === "Active Anchor"));
+    assert.ok(
+      result.experiments.some(
+        (experiment) => experiment.title === "Completed 6",
+      ),
+    );
+    assert.equal(
+      result.experiments.some((experiment) => experiment.title === "Completed 1"),
+      false,
+    );
+  } finally {
+    await destroyWebFixtureVault(vaultRoot);
+  }
+});
+
 test("loadVaultOverview keeps weekly stats separated by unit for the same stream", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-03-24T12:00:00.000Z"));

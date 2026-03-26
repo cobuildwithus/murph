@@ -394,10 +394,15 @@ function buildWeeklyStatKey(stream: string, unit: string | null): string {
 }
 
 function summarizeExperiments(vault: VaultReadModel): OverviewExperiment[] {
-  return [...vault.experiments]
-    .sort((left, right) => compareLatestStrings(right.occurredAt ?? right.date, left.occurredAt ?? left.date))
-    .slice(0, 6)
-    .map((entry) => ({
+  const sortedExperiments = [...vault.experiments].sort((left, right) =>
+    compareLatestStrings(right.occurredAt ?? right.date, left.occurredAt ?? left.date),
+  );
+  const prioritizedExperiments = [
+    ...sortedExperiments.filter((entry) => isActiveExperimentStatus(entry.status)),
+    ...sortedExperiments.filter((entry) => !isActiveExperimentStatus(entry.status)),
+  ];
+
+  return prioritizedExperiments.slice(0, 6).map((entry) => ({
       id: entry.displayId,
       slug: entry.experimentSlug,
       startedOn: entry.date ?? extractDate(entry.occurredAt),
@@ -406,6 +411,10 @@ function summarizeExperiments(vault: VaultReadModel): OverviewExperiment[] {
       tags: compactStrings(entry.tags),
       title: entry.title ?? entry.displayId,
     }));
+}
+
+function isActiveExperimentStatus(status: string | null | undefined): boolean {
+  return status?.trim().toLowerCase() === "active";
 }
 
 function searchVaultSafely(

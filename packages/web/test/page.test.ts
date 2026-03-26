@@ -55,7 +55,17 @@ test("HomePage renders the ready state", async () => {
         },
       ],
     },
-    experiments: [],
+    experiments: [
+      {
+        id: "exp_sleep_reset_01",
+        slug: "sleep-reset",
+        startedOn: "2026-03-08",
+        status: "active",
+        summary: "Keep the last meal earlier and hold the rest steady.",
+        tags: ["sleep", "recovery"],
+        title: "Sleep Reset",
+      },
+    ],
     generatedAt: "2026-03-12T15:00:00Z",
     metrics: [
       {
@@ -135,9 +145,17 @@ test("HomePage renders the ready state", async () => {
     timelineLimit: 8,
   });
   assert.match(markup, /Healthy Bob/);
+  assert.match(markup, /Weekly compass/);
+  assert.match(markup, /What changed, what stayed steady, and what can stay simple/);
+  assert.match(markup, /Not enough prior-week data yet to call a meaningful shift\./);
+  assert.match(markup, /Current investigations/);
+  assert.match(markup, /Keep the current investigation simple long enough to learn something from it\./);
+  assert.match(markup, /Sleep Reset/);
   assert.match(markup, /Protect sleep consistency/);
   assert.match(markup, /Wearable connections/);
   assert.match(markup, /Connect/);
+  assert.ok(markup.indexOf("Weekly compass") < markup.indexOf("Current investigations"));
+  assert.ok(markup.indexOf("Current investigations") < markup.indexOf("Wearable connections"));
   assert.doesNotMatch(markup, /localhost only/);
   assert.doesNotMatch(markup, /safe fields only/);
 });
@@ -189,6 +207,49 @@ test("HomePage keeps additional weekly stat rows when the same stream has multip
   assert.match(markup, />450</);
   assert.match(markup, />hrs</);
   assert.match(markup, />min</);
+});
+
+test("HomePage keeps the current investigations section scoped to active experiments", async () => {
+  const { default: HomePage } = await import("../app/page");
+  const { loadVaultOverviewFromEnv } = await import("../src/lib/overview");
+  const { loadDeviceSyncOverviewFromEnv } = await import("../src/lib/device-sync");
+  const mockedLoadVaultOverviewFromEnv = vi.mocked(loadVaultOverviewFromEnv);
+  const mockedLoadDeviceSyncOverviewFromEnv = vi.mocked(loadDeviceSyncOverviewFromEnv);
+
+  mockedLoadVaultOverviewFromEnv.mockResolvedValue({
+    currentProfile: null,
+    experiments: [
+      {
+        id: "exp_done_01",
+        slug: "sleep-reset",
+        startedOn: "2026-03-08",
+        status: "completed",
+        summary: "Completed already.",
+        tags: ["sleep"],
+        title: "Sleep Reset",
+      },
+    ],
+    generatedAt: "2026-03-24T15:00:00Z",
+    metrics: [],
+    recentJournals: [],
+    sampleSummaries: [],
+    search: null,
+    status: "ready",
+    timeline: [],
+    weeklyStats: [],
+  });
+  mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({
+    status: "ready",
+    baseUrl: "http://127.0.0.1:8788",
+    providers: [],
+    accounts: [],
+  });
+
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Current investigations/);
+  assert.match(markup, /No active investigations right now\./);
+  assert.doesNotMatch(markup, /Sleep Reset/);
 });
 
 test("HomePage renders the setup state when no vault is configured", async () => {

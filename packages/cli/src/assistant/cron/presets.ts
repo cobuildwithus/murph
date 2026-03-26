@@ -249,9 +249,9 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
   {
     id: 'weekly-health-snapshot',
     category: 'summary',
-    title: 'Weekly health snapshot',
+    title: 'Weekly health compass',
     description:
-      'A weekly snapshot of progress versus goals, experiments, routines, and problem areas across the health data already available to Healthy Bob.',
+      'A weekly compass that highlights what changed, what stayed steady, what likely explains the week, and what is or is not worth reacting to yet.',
     suggestedName: 'weekly-health-snapshot',
     suggestedScheduleLabel: 'Sundays at 18:00',
     suggestedSchedule: {
@@ -263,32 +263,36 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
         key: 'goals_and_experiments',
         label: 'Goals and experiments',
         description:
-          'What objectives, targets, and self-experiments to compare the week against. The default uses saved goals and recent context.',
+          'What goals, active investigations, and bounded experiments should anchor the weekly read. The default uses saved goals and recent context.',
         required: true,
         defaultValue:
-          'my current health goals and self-experiments based on goals, experiments, protocols, recent logs, and memory; if any of that is missing, say what is not yet tracked',
+          'my current health goals and current investigations based on goals, experiments, protocols, recent logs, and memory; if any of that is missing, say what is not yet tracked',
         example:
-          'lower LDL, improve sleep consistency, and track the impact of extra walking after meals',
+          'lower LDL, protect sleep consistency, and continue extra walking after meals long enough to get a cleaner read',
       },
       {
         key: 'snapshot_focus',
         label: 'Snapshot focus',
         description:
-          'Which evaluation dimensions to emphasize in the weekly summary.',
+          'Which dimensions should shape the weekly compass summary.',
         required: true,
         defaultValue:
-          'progress versus goals, experiment status, problem areas, leading indicators, habit consistency, and concrete recommendations for next week',
+          'what changed, what stayed steady, what was probably noise, the likely context behind the week, one thing worth keeping, one lightweight thing worth trying, and one thing not worth overreacting to',
         example:
-          'goal progress, missed habits, experiment outcomes, and what to improve next week',
+          'what changed, likely context, one thing to keep, and one thing to leave alone',
       },
     ],
     promptTemplate: [
-      'Produce a weekly health snapshot for me.',
+      'Produce a weekly health compass for me.',
       'Use this as the goal and experiment context: {{goals_and_experiments}}.',
       'Focus the analysis on: {{snapshot_focus}}.',
-      'Summarize how I am doing, what seems to be improving, what is slipping, where the main problem areas are, and what the highest-leverage next steps would be for the coming week.',
+      'Lead with a calm weekly read: what changed, what stayed steady, and what seems like normal variation or thin data rather than something to fix.',
+      'Interpret the week in context, including sleep, stress, illness, travel, work, meals, relationships, and any other real-life factors that seem relevant from the available data.',
+      'If there is a useful next step, keep it lightweight, reversible, and easy to live with. Include burden, tradeoffs, and when it would make sense to stop or ignore it.',
+      'It is good to conclude that nothing new needs to be added right now, that an existing investigation simply needs more time, or that a change in the numbers did not obviously make life better.',
+      'Do not sound like a nagging coach. Avoid compliance framing, shame framing, purity language, or a stack of protocols.',
       'When the available data is thin or missing for a claim, say that clearly instead of overreaching.',
-      'Keep the final snapshot practical and concise enough that I could actually use it as a weekly review.',
+      'Keep the final compass practical, concise, and easy to scan in a message thread.',
     ].join('\n\n'),
   },
 ] satisfies readonly AssistantCronPresetDefinition[]
