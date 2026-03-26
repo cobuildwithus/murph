@@ -2,7 +2,7 @@
 
 Healthy Bob is a file-native health vault. It keeps human-reviewable truth in Markdown, machine-readable truth in append-only JSONL ledgers, and exposes a typed `vault-cli` surface over a shared TypeScript workspace.
 
-The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, a local-only Next.js web surface, and the CLI, along with deterministic fixtures and repo-level verification.
+The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, a local-only Next.js web surface, a hosted Next.js control plane, a hosted Cloudflare runner, and the CLI, along with deterministic fixtures and repo-level verification.
 
 ## Install (recommended)
 
@@ -91,10 +91,12 @@ The current repo implements:
 - local-first multimedia parsing and derived artifact publication in `packages/parsers`
 - a read model and export-pack builder in `packages/query`
 - a local-only Next.js observability app in `packages/web`
+- a hosted Next.js control plane in `apps/web` for onboarding, billing, hosted device sync, and hosted Linq ingress
+- a hosted Cloudflare execution app in `apps/cloudflare` for signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot inbox/assistant runs
 - a typed `vault-cli` command surface in `packages/cli`, including provider-backed assistant chat/session commands plus an always-on inbox triage loop
 - deterministic fixtures and smoke manifests under `fixtures/` and `e2e/`
 
-The repo does not define a deployment target yet. It is currently a local TypeScript workspace with truthful package/runtime verification and fixture-based smoke coverage.
+The hosted apps define an initial deployment shape, but deployment automation is still repo-local and manual. Verification remains package/runtime-truthful and fixture-based rather than a live hosted environment proof.
 
 ## Mental Model
 
@@ -267,6 +269,7 @@ VAULT=../../fixtures/demo-web-vault pnpm dev
 | `vault-cli vault show|paths|stats|update` | Exposes explicit vault metadata, layout, record-count summaries, and stable metadata updates. |
 | `vault-cli audit show|list|tail` | Exposes first-class audit inspection and filtering over canonical audit shards. |
 | `vault-cli provider scaffold|upsert|show|list` | Gives `bank/providers/*.md` a first-class noun with stable `prov_*` ids and slug-based follow-up reads. |
+| `vault-cli food scaffold|upsert|show|list|schedule` | Gives `bank/foods/*.md` a first-class noun for remembered foods such as smoothie presets, and `food schedule` adds the thin daily auto-log layer for recurring meal capture. |
 | `vault-cli recipe scaffold|upsert|show|list` | Gives `bank/recipes/*.md` a first-class noun with stable `rcp_*` ids so the vault can remember dishes, ingredients, and prep steps. |
 | `vault-cli event scaffold|upsert|show|list` | Covers the non-specialized canonical event kinds without requiring a separate noun per kind. |
 | `vault-cli document import <file>` | Copies a source document into `raw/documents/...`, writes an immutable raw manifest, and appends a document event. |
@@ -331,6 +334,7 @@ The repo also includes a larger health-record surface:
 - `vault-cli goal scaffold|upsert|show|list`
 - `vault-cli condition scaffold|upsert|show|list`
 - `vault-cli allergy scaffold|upsert|show|list`
+- `vault-cli food scaffold|upsert|show|list|schedule`
 - `vault-cli recipe scaffold|upsert|show|list`
 - `vault-cli protocol scaffold|upsert|show|list|stop`
 - `vault-cli family scaffold|upsert|show|list`
@@ -351,7 +355,7 @@ The noun-oriented surface is organized around capability bundles:
 
 Nouns are grouped by those bundles rather than a shared grammar plus exceptions:
 
-- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, `recipe`, and `event` are payload-CRUD nouns
+- `goal`, `condition`, `allergy`, `family`, `genetics`, `history`, `blood-test`, `provider`, `food`, `recipe`, and `event` are payload-CRUD nouns
 - `profile` is payload CRUD plus `rebuild`
 - `protocol` is payload CRUD plus `stop`
 - `document` and `meal` are artifact-import nouns
@@ -434,6 +438,7 @@ The query layer distinguishes between the primary lookup id used for follow-on r
 
 - `show` accepts query-layer ids such as `journal:2026-03-12`, `evt_*`, `smp_*`, `exp_*`, `asmt_*`, `psnap_*`, `goal_*`, `cond_*`, `alg_*`, `prot_*`, `fam_*`, and `var_*`.
 - `provider show` accepts either the canonical `prov_*` id or the provider slug from `bank/providers/<slug>.md`
+- `food show` accepts either the canonical `food_*` id or the food slug from `bank/foods/<slug>.md`
 - `recipe show` accepts either the canonical `rcp_*` id or the recipe slug from `bank/recipes/<slug>.md`
 - `event show` accepts `evt_*`; specialized nouns such as `document`, `meal`, `workout`, `history`, and `experiment` remain the preferred capture surface when they exist, but workout follow-on reads still use the returned `lookupId` or `eventId` through `event show` or generic `show`
 - generic `show` still expects query-layer ids for event-backed records, but `document show` and `meal show` also accept `doc_*` and `meal_*`
@@ -469,6 +474,10 @@ The main write flows map cleanly onto the vault:
   mutates only the targeted journal page through focused append/frontmatter helpers
 - `provider upsert`
   creates or updates `bank/providers/<slug>.md` with a stable `prov_*` id
+- `food upsert`
+  creates or updates `bank/foods/<slug>.md` with a stable `food_*` id
+- `food schedule`
+  creates or updates one remembered food with `autoLogDaily.time` and creates a paired assistant-cron `foodAutoLog` job that writes a derived note-only meal each day
 - `recipe upsert`
   creates or updates `bank/recipes/<slug>.md` with a stable `rcp_*` id
 - `event upsert`

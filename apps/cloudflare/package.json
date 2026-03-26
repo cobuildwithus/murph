@@ -1,0 +1,19 @@
+{
+  "name": "@healthybob/cloudflare-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --pretty false",
+    "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1"
+  },
+  "dependencies": {
+    "healthybob": "workspace:*",
+    "@healthybob/inboxd": "workspace:*",
+    "@healthybob/runtime-state": "workspace:*"
+  }
+}

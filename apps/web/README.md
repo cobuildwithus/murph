@@ -70,6 +70,8 @@ Hosted onboarding extras:
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
+- `HOSTED_EXECUTION_DISPATCH_URL`
+- `HOSTED_EXECUTION_SIGNING_SECRET`
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
@@ -166,3 +168,4 @@ The onboarding lane is intentionally thin:
 - passkeys create/authenticate that hosted member through a `webauthx`-backed server/client ceremony wrapper with short-lived single-use challenges stored server-side
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
+- once a member is active, hosted onboarding dispatches signed internal execution events to `apps/cloudflare` for member activation, direct Linq messages, and later scheduled assistant ticks instead of trying to run the inbox/assistant loop inside Next.js

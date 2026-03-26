@@ -12,6 +12,7 @@ import {
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
+import { dispatchHostedExecution } from "../hosted-execution/dispatch";
 import { hostedOnboardingError } from "./errors";
 import {
   buildHostedInviteReply,
@@ -235,6 +236,26 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       },
     },
   });
+
+  if (existingMember?.billingStatus === HostedBillingStatus.active) {
+    await dispatchHostedExecutionSafely({
+      event: {
+        kind: "linq.message.received",
+        linqChatId: summary.chatId,
+        linqEvent: event as unknown as Record<string, unknown>,
+        normalizedPhoneNumber,
+        userId: existingMember.id,
+      },
+      eventId: event.event_id,
+      occurredAt: new Date().toISOString(),
+    });
+
+    return {
+      ok: true,
+      ignored: false,
+      reason: "dispatched-active-member",
+    };
+  }
 
   const shouldStart = !existingMember || shouldStartHostedOnboarding(summary.text);
 
@@ -1084,6 +1105,9 @@ async function applyStripeCheckoutCompleted(session: Stripe.Checkout.Session, pr
         stripeLatestCheckoutSessionId: session.id,
       },
     });
+    if (billingStatus === HostedBillingStatus.active) {
+      await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
+    }
   }
 
   await prisma.hostedBillingCheckout.updateMany({
@@ -1169,6 +1193,9 @@ async function applyStripeSubscriptionUpdated(subscription: Stripe.Subscription,
       stripeSubscriptionId: subscription.id,
     },
   });
+  if (billingStatus === HostedBillingStatus.active) {
+    await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
+  }
   await prisma.hostedBillingCheckout.updateMany({
     where: {
       memberId: member.id,
@@ -1209,6 +1236,7 @@ async function applyStripeInvoicePaid(invoice: Stripe.Invoice, prisma: PrismaCli
       stripeSubscriptionId: subscriptionId ?? member.stripeSubscriptionId,
     },
   });
+  await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
 }
 
 async function applyStripeInvoicePaymentFailed(invoice: Stripe.Invoice, prisma: PrismaClient): Promise<void> {
@@ -1298,4 +1326,34 @@ async function findMemberForStripeObject(input: {
   }
 
   return null;
+}
+
+async function dispatchHostedMemberActivationSafely(
+  memberId: string,
+  normalizedPhoneNumber: string,
+  linqChatId: string | null,
+): Promise<void> {
+  await dispatchHostedExecutionSafely({
+    event: {
+      kind: "member.activated",
+      linqChatId,
+      normalizedPhoneNumber,
+      userId: memberId,
+    },
+    eventId: `member.activated:${memberId}:${Date.now()}`,
+    occurredAt: new Date().toISOString(),
+  });
+}
+
+async function dispatchHostedExecutionSafely(
+  input: import("@healthybob/runtime-state").HostedExecutionDispatchRequest,
+): Promise<void> {
+  try {
+    await dispatchHostedExecution(input);
+  } catch (error) {
+    console.error(
+      "Hosted execution dispatch failed.",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }

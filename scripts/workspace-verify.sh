@@ -47,6 +47,7 @@ readonly typecheck_package_dirs=(
   "packages/cli"
   "packages/web"
   "apps/web"
+  "apps/cloudflare"
 )
 
 readonly cli_verify_test_files=(
@@ -95,6 +96,7 @@ run_test_packages_common() {
   tsx "packages/cli/scripts/verify-package-shape.ts"
   pnpm --dir "packages/web" test
   pnpm --dir "apps/web" test
+  pnpm --dir "apps/cloudflare" test
 }
 
 seed_coverage_placeholders() {
@@ -133,6 +135,7 @@ run_test_packages_coverage() {
   tsx "packages/cli/scripts/verify-package-shape.ts"
   pnpm --dir "packages/web" test
   pnpm --dir "apps/web" test
+  pnpm --dir "apps/cloudflare" test
   vitest run --coverage --maxWorkers 1
 }
 
