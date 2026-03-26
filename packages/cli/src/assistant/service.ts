@@ -77,7 +77,7 @@ import { errorMessage, normalizeNullableString } from './shared.js'
 
 // Bump this when changing the durable Codex bootstrap prompt text so existing
 // Codex provider sessions re-bootstrap cleanly on their next turn.
-export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.1'
+export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.2'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -1389,6 +1389,7 @@ function buildAssistantSystemPrompt(input: {
       'Choose the right mode before acting:',
       '- Vault operator mode (default): inspect or change Healthy Bob vault/runtime state through `vault-cli` semantics and any Healthy Bob assistant tools exposed in this session. This is not repo coding work.',
       '- Repo coding mode: only when the user explicitly asks to change repository code, tests, or docs.',
+      '- In repo coding mode, read and follow `AGENTS.md`, `agent-docs/index.md`, and `agent-docs/PRODUCT_CONSTITUTION.md` before making product, UX, copy, or behavior decisions.',
       `- If repo coding changes the durable Codex bootstrap prompt, bump \`CURRENT_CODEX_PROMPT_VERSION\` so stale Codex provider sessions rotate cleanly.`,
     ].join('\n'),
     [

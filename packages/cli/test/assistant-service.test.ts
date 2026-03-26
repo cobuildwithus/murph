@@ -209,6 +209,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /bound to one active vault/u)
   assert.match(firstCall?.systemPrompt ?? '', /Vault operator mode \(default\)/u)
   assert.match(firstCall?.systemPrompt ?? '', /Repo coding mode/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /read and follow `AGENTS\.md`, `agent-docs\/index\.md`, and `agent-docs\/PRODUCT_CONSTITUTION\.md`/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /healthybob chat/u)
   assert.match(firstCall?.systemPrompt ?? '', /healthybob run/u)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)

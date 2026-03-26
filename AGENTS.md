@@ -19,14 +19,15 @@ If instructions still conflict after applying this order, ask the user before ac
 1. `agent-docs/index.md`
 2. `ARCHITECTURE.md`
 3. `agent-docs/PRODUCT_SENSE.md`
-4. `agent-docs/FRONTEND.md`
-5. `agent-docs/RELIABILITY.md`
-6. `agent-docs/SECURITY.md`
-7. `agent-docs/references/repo-scope.md`
-8. `agent-docs/references/testing-ci-map.md`
-9. `agent-docs/operations/verification-and-runtime.md`
-10. `agent-docs/operations/completion-workflow.md`
-11. `packages/web/AGENTS.md`
+4. `agent-docs/PRODUCT_CONSTITUTION.md`
+5. `agent-docs/FRONTEND.md`
+6. `agent-docs/RELIABILITY.md`
+7. `agent-docs/SECURITY.md`
+8. `agent-docs/references/repo-scope.md`
+9. `agent-docs/references/testing-ci-map.md`
+10. `agent-docs/operations/verification-and-runtime.md`
+11. `agent-docs/operations/completion-workflow.md`
+12. `packages/web/AGENTS.md`
 
 ## Hard Rules (Non-Negotiable)
 
