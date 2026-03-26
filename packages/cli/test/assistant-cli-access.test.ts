@@ -42,11 +42,12 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /vault-cli meal add/u)
   assert.match(guidance, /no longer requires a photo/u)
   assert.match(guidance, /meals, snacks, and drinks/u)
-  assert.match(guidance, /repeatable order, staple, smoothie/u)
-  assert.match(guidance, /shown up at least twice/u)
-  assert.match(guidance, /saved as a food too so future logging is easier/u)
+  assert.match(guidance, /same detailed meal more than once/u)
+  assert.match(guidance, /acai bowl with basically the same components/u)
+  assert.match(guidance, /where it is from or what the specific version is/u)
+  assert.match(guidance, /add it as a food for future reuse/u)
+  assert.match(guidance, /two separate logs like "I ate steak" are not enough/u)
   assert.match(guidance, /Do not silently create the food record unless the user clearly asks/u)
-  assert.match(guidance, /save it as a food for easier future logging/u)
   assert.match(guidance, /Older food logs may still live/u)
   assert.match(
     guidance,
