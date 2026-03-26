@@ -3333,6 +3333,84 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
   assert.deepEqual(secondArtifact.groupCaptureIds, ['cap-album-1', 'cap-album-2'])
 })
 
+test('runAssistantAutomation rejects concurrent runs for the same vault and releases the lock after shutdown', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-run-lock-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const signal = new AbortController()
+  const firstRun = runAssistantAutomation({
+    vault: vaultRoot,
+    once: false,
+    startDaemon: false,
+    scanIntervalMs: 1_000,
+    signal: signal.signal,
+    inboxServices: {} as any,
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 25))
+
+  await assert.rejects(
+    () =>
+      runAssistantAutomation({
+        vault: vaultRoot,
+        once: true,
+        startDaemon: false,
+        inboxServices: {} as any,
+      }),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'ASSISTANT_ALREADY_RUNNING')
+      assert.equal(error.context?.pid, process.pid)
+      return true
+    },
+  )
+
+  signal.abort()
+  const firstResult = await firstRun
+  assert.equal(firstResult.reason, 'signal')
+
+  const secondResult = await runAssistantAutomation({
+    vault: vaultRoot,
+    once: true,
+    startDaemon: false,
+    inboxServices: {} as any,
+  })
+  assert.equal(secondResult.reason, 'completed')
+})
+
+test('runAssistantAutomation clears stale run locks before starting', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-stale-run-lock-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(path.join(paths.assistantStateRoot, '.automation-run.lock'), {
+    recursive: true,
+  })
+  await writeFile(
+    path.join(paths.assistantStateRoot, '.automation-run-lock.json'),
+    JSON.stringify({
+      command: 'node healthybob assistant run',
+      mode: 'continuous',
+      pid: 999_999,
+      startedAt: '2026-03-26T00:00:00.000Z',
+    }),
+    'utf8',
+  )
+
+  const result = await runAssistantAutomation({
+    vault: vaultRoot,
+    once: true,
+    startDaemon: false,
+    inboxServices: {} as any,
+  })
+
+  assert.equal(result.reason, 'completed')
+})
+
 test('runAssistantAutomation reports daemon failures as error results', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-daemon-'))
   const vaultRoot = path.join(parent, 'vault')

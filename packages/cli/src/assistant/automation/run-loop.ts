@@ -11,6 +11,7 @@ import { processDueAssistantCronJobs } from '../cron.js'
 import {
   readAssistantAutomationState,
   redactAssistantDisplayPath,
+  resolveAssistantStatePaths,
   saveAssistantAutomationState,
 } from '../store.js'
 import { errorMessage } from '../shared.js'
@@ -26,6 +27,7 @@ import {
   scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
 } from './scanner.js'
+import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 
 export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
@@ -50,11 +52,25 @@ export async function runAssistantAutomation(
   const startedAt = new Date().toISOString()
   const controller = new AbortController()
   const cleanup = bridgeAbortSignals(controller, input.signal)
+  const paths = resolveAssistantStatePaths(input.vault)
   const aggregateRouting = createEmptyInboxScanResult()
   const aggregateReplies = createEmptyAutoReplyScanResult()
   let scans = 0
   let lastError: string | null = null
   const daemonStarted = input.startDaemon ?? true
+  let runLock: Awaited<
+    ReturnType<typeof acquireAssistantAutomationRunLock>
+  > | null = null
+
+  try {
+    runLock = await acquireAssistantAutomationRunLock({
+      once: input.once,
+      paths,
+    })
+  } catch (error) {
+    cleanup()
+    throw error
+  }
 
   let daemonPromise: Promise<unknown> | null = null
   if (daemonStarted) {
@@ -242,5 +258,7 @@ export async function runAssistantAutomation(
         // surfaced through lastError/reason when relevant
       }
     }
+
+    await runLock?.release()
   }
 }

@@ -1,3 +1,4 @@
+import { parseRetryAfterHeaderMs, type ResponseHeadersLike } from './http-retry.js'
 import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -109,6 +110,7 @@ export interface AgentmailMessageMutationResult {
 
 export interface AgentmailFetchResponse {
   arrayBuffer(): Promise<ArrayBuffer>
+  headers?: ResponseHeadersLike | null
   json(): Promise<unknown>
   ok: boolean
   status: number
@@ -309,7 +311,11 @@ export function createAgentmailApiClient(
           input.body ?? undefined,
         )
         if (isRetryableAgentmailError(failure) && attempt < AGENTMAIL_HTTP_MAX_ATTEMPTS) {
-          await waitForAgentmailRetryDelay(attempt, input.signal)
+          await waitForAgentmailRetryDelay(
+            attempt,
+            input.signal,
+            response.headers,
+          )
           attempt += 1
           continue
         }
@@ -603,11 +609,16 @@ function isRetryableAgentmailError(error: unknown): error is VaultCliError {
 async function waitForAgentmailRetryDelay(
   attempt: number,
   signal?: AbortSignal,
+  headers?: ResponseHeadersLike | null,
 ): Promise<void> {
   const delay =
-    AGENTMAIL_HTTP_RETRY_DELAYS_MS[
+    parseRetryAfterHeaderMs({
+      headers,
+      maxDelayMs: 30_000,
+    }) ??
+    (AGENTMAIL_HTTP_RETRY_DELAYS_MS[
       Math.min(Math.max(attempt - 1, 0), AGENTMAIL_HTTP_RETRY_DELAYS_MS.length - 1)
-    ] ?? 0
+    ] ?? 0)
 
   if (delay <= 0) {
     return

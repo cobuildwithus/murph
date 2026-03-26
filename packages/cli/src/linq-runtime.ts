@@ -2,6 +2,7 @@ import type {
   LinqListPhoneNumbersResponse,
   LinqSendMessageResponse,
 } from '@healthybob/inboxd'
+import { parseRetryAfterHeaderMs, type ResponseHeadersLike } from './http-retry.js'
 import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -12,6 +13,7 @@ const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 
 export interface LinqFetchResponse {
   arrayBuffer(): Promise<ArrayBuffer>
+  headers?: ResponseHeadersLike | null
   json(): Promise<unknown>
   ok: boolean
   status: number
@@ -179,7 +181,7 @@ async function requestLinqJson<T>(input: {
     if (!response.ok) {
       const failure = await createLinqHttpError(response, input.method, input.path)
       if (isRetryableLinqRequestError(failure) && attempt < LINQ_HTTP_MAX_ATTEMPTS) {
-        await waitForLinqRetryDelay(attempt, input.signal)
+        await waitForLinqRetryDelay(attempt, input.signal, response.headers)
         attempt += 1
         continue
       }
@@ -303,11 +305,16 @@ function shouldRetryLinqTransportFailure(method: 'GET' | 'POST'): boolean {
 async function waitForLinqRetryDelay(
   attempt: number,
   signal?: AbortSignal,
+  headers?: ResponseHeadersLike | null,
 ): Promise<void> {
   const delay =
-    LINQ_HTTP_RETRY_DELAYS_MS[
+    parseRetryAfterHeaderMs({
+      headers,
+      maxDelayMs: 30_000,
+    }) ??
+    (LINQ_HTTP_RETRY_DELAYS_MS[
       Math.min(Math.max(attempt - 1, 0), LINQ_HTTP_RETRY_DELAYS_MS.length - 1)
-    ] ?? 0
+    ] ?? 0)
 
   if (delay <= 0) {
     return
