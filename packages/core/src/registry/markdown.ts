@@ -53,6 +53,7 @@ interface UpsertMarkdownRegistryDocumentInput {
   operationType: string;
   summary: string;
   relativePath: string;
+  previousRelativePath?: string;
   markdown: string;
   created: boolean;
   audit: MarkdownRegistryUpsertAuditInput;
@@ -63,6 +64,7 @@ interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord extends ExistingMar
   recordId?: string;
   requestedSlug?: string;
   defaultSlug: string;
+  allowSlugUpdate?: boolean;
   directory: string;
   getRecordId: (record: TRecord) => string;
   createRecordId: () => string;
@@ -72,6 +74,7 @@ export interface MarkdownRegistryUpsertTarget {
   recordId: string;
   slug: string;
   relativePath: string;
+  previousRelativePath?: string;
   created: boolean;
 }
 
@@ -162,15 +165,23 @@ export function resolveMarkdownRegistryUpsertTarget<TRecord extends ExistingMark
   recordId,
   requestedSlug,
   defaultSlug,
+  allowSlugUpdate,
   directory,
   getRecordId,
   createRecordId,
 }: ResolveMarkdownRegistryUpsertTargetOptions<TRecord>): MarkdownRegistryUpsertTarget {
-  const slug = existingRecord?.slug ?? requestedSlug ?? defaultSlug;
+  const slug = allowSlugUpdate
+    ? requestedSlug ?? existingRecord?.slug ?? defaultSlug
+    : existingRecord?.slug ?? requestedSlug ?? defaultSlug;
+  const relativePath = `${directory}/${slug}.md`;
   return {
     recordId: existingRecord ? getRecordId(existingRecord) : (recordId ?? createRecordId()),
     slug,
-    relativePath: existingRecord?.relativePath ?? `${directory}/${slug}.md`,
+    relativePath,
+    previousRelativePath:
+      allowSlugUpdate && existingRecord && existingRecord.relativePath !== relativePath
+        ? existingRecord.relativePath
+        : undefined,
     created: !existingRecord,
   };
 }
@@ -180,6 +191,7 @@ export async function upsertMarkdownRegistryDocument({
   operationType,
   summary,
   relativePath,
+  previousRelativePath,
   markdown,
   created,
   audit,
@@ -191,6 +203,15 @@ export async function upsertMarkdownRegistryDocument({
     occurredAt: audit.occurredAt,
     mutate: async ({ batch }) => {
       await batch.stageTextWrite(relativePath, markdown);
+      if (previousRelativePath && previousRelativePath !== relativePath) {
+        await batch.stageDelete(previousRelativePath);
+      }
+
+      const files = previousRelativePath ? [relativePath, previousRelativePath] : [relativePath];
+      const changes = [
+        { path: relativePath, op: created ? "create" as const : "update" as const },
+      ]
+
       return emitAuditRecord({
         vaultRoot,
         batch,
@@ -198,14 +219,9 @@ export async function upsertMarkdownRegistryDocument({
         commandName: audit.commandName,
         summary: audit.summary,
         occurredAt: audit.occurredAt,
-        files: [relativePath],
+        files,
         targetIds: audit.targetIds ?? [],
-        changes: [
-          {
-            path: relativePath,
-            op: created ? "create" : "update",
-          },
-        ],
+        changes,
       });
     },
   });
@@ -232,6 +248,7 @@ export async function writeMarkdownRegistryRecord<TRecord>({
     operationType,
     summary,
     relativePath: target.relativePath,
+    previousRelativePath: target.previousRelativePath,
     markdown,
     created: target.created,
     audit,

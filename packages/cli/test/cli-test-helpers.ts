@@ -1,8 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 
 export interface CliSuccessEnvelope<TData = Record<string, unknown>> {
   ok: true
@@ -48,20 +47,9 @@ export const packageDir = fileURLToPath(new URL('../', import.meta.url))
 export const repoRoot = path.resolve(packageDir, '../..')
 export const binPath = path.join(packageDir, 'dist/bin.js')
 const cliIndexPath = path.join(packageDir, 'dist/index.js')
-const execFileAsync = promisify(execFile)
 const CLI_MAX_OUTPUT_BUFFER_BYTES = 8 * 1024 * 1024
-const requiredRuntimeModulePaths = [
-  path.join(repoRoot, 'packages/contracts/dist/index.js'),
-  path.join(repoRoot, 'packages/runtime-state/dist/index.js'),
-  path.join(repoRoot, 'packages/core/dist/index.js'),
-  path.join(repoRoot, 'packages/importers/dist/index.js'),
-  path.join(repoRoot, 'packages/device-syncd/dist/index.js'),
-  path.join(repoRoot, 'packages/query/dist/index.js'),
-  path.join(repoRoot, 'packages/inboxd/dist/index.js'),
-  path.join(repoRoot, 'packages/parsers/dist/index.js'),
-  cliIndexPath,
-]
-
+const CLI_RUNTIME_ARTIFACT_WAIT_TIMEOUT_MS = 15_000
+const CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS = 100
 const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
   path.join(repoRoot, 'packages/contracts/dist/index.d.ts'),
@@ -88,20 +76,6 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/cli/dist/vault-cli-contracts.js'),
   path.join(repoRoot, 'packages/cli/dist/inbox-cli-contracts.js'),
 ]
-
-const runtimeBuildSteps: Array<{ cwd: string; args: string[] }> = [
-  { cwd: repoRoot, args: ['--dir', 'packages/contracts', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/runtime-state', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/core', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/importers', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/device-syncd', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/query', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/inboxd', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/parsers', 'build'] },
-  { cwd: repoRoot, args: ['--dir', 'packages/cli', 'build'] },
-]
-
-let cliRuntimeArtifactsPromise: Promise<void> | null = null
 let cliRuntimeArtifactsVerified = false
 const strippedTestRunnerEnvKeys = ['NODE_OPTIONS', 'VITEST'] as const
 const strippedTestRunnerEnvPrefixes = ['VITEST_', 'C8_', 'NYC_'] as const
@@ -149,14 +123,13 @@ async function runCliAttempt<TData = Record<string, unknown>>(
     env?: NodeJS.ProcessEnv
     stdin?: string
   } | undefined,
-  allowEnvelopeRetry: boolean,
+  allowRetry: boolean,
 ): Promise<CliEnvelope<TData>> {
   try {
     const { stdout } = await execCli(withMachineOutput(args), options)
     const result = JSON.parse(stdout) as CliEnvelope<TData>
 
-    if (allowEnvelopeRetry && shouldRetryCliEnvelope(result)) {
-      await rebuildCliRuntimeArtifacts()
+    if (allowRetry && shouldRetryCliEnvelope(result) && (await waitForCliRuntimeArtifacts())) {
       return runCliAttempt(args, options, false)
     }
 
@@ -220,11 +193,6 @@ export function commandOutputFromError(error: unknown): string | null {
 }
 
 export async function ensureCliRuntimeArtifacts(): Promise<void> {
-  if (cliRuntimeArtifactsPromise !== null) {
-    await cliRuntimeArtifactsPromise
-    return
-  }
-
   if (
     cliRuntimeArtifactsVerified &&
     requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))
@@ -236,45 +204,15 @@ export async function ensureCliRuntimeArtifacts(): Promise<void> {
     return
   }
 
-  await rebuildCliRuntimeArtifacts()
-}
-
-export async function rebuildCliRuntimeArtifacts(): Promise<void> {
-  if (cliRuntimeArtifactsPromise !== null) {
-    await cliRuntimeArtifactsPromise
+  if (await waitForCliRuntimeArtifacts()) {
     return
   }
 
-  cliRuntimeArtifactsVerified = false
-  cliRuntimeArtifactsPromise = (async () => {
-    let lastError: unknown = null
+  throw createMissingRuntimeArtifactsError()
+}
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        for (const step of runtimeBuildSteps) {
-          await execFileAsync('pnpm', step.args, {
-            cwd: step.cwd,
-            encoding: 'utf8',
-            env: withoutNodeV8Coverage(),
-          })
-        }
-
-        if (await verifyCliRuntimeArtifacts()) {
-          return
-        }
-
-        lastError = new Error('CLI runtime artifacts were rebuilt but remain incomplete.')
-      } catch (error) {
-        lastError = error
-      }
-    }
-
-    throw lastError ?? new Error('Failed to rebuild CLI runtime artifacts.')
-  })().finally(() => {
-    cliRuntimeArtifactsPromise = null
-  })
-
-  await cliRuntimeArtifactsPromise
+export async function rebuildCliRuntimeArtifacts(): Promise<void> {
+  await ensureCliRuntimeArtifacts()
 }
 
 function decodeCommandOutput(output: Buffer | string | undefined): string | null {
@@ -316,12 +254,11 @@ async function execCli(
   try {
     return await execCliProcess(args, options)
   } catch (error) {
-    if (!shouldRetryCliExecution(error)) {
-      throw error
+    if (shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
+      return await execCliProcess(args, options)
     }
 
-    await rebuildCliRuntimeArtifacts()
-    return await execCliProcess(args, options)
+    throw error
   }
 }
 
@@ -360,6 +297,27 @@ async function execCliProcess(
   })
 }
 
+async function verifyCliRuntimeArtifacts(): Promise<boolean> {
+  cliRuntimeArtifactsVerified = requiredRuntimeArtifactPaths.every((artifactPath) =>
+    existsSync(artifactPath),
+  )
+  return cliRuntimeArtifactsVerified
+}
+
+async function waitForCliRuntimeArtifacts(): Promise<boolean> {
+  const deadline = Date.now() + CLI_RUNTIME_ARTIFACT_WAIT_TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS))
+
+    if (await verifyCliRuntimeArtifacts()) {
+      return true
+    }
+  }
+
+  return false
+}
+
 function shouldRetryCliExecution(error: unknown): boolean {
   return shouldRetryCliOutput(commandOutputFromError(error))
 }
@@ -378,40 +336,25 @@ function shouldRetryCliOutput(output: string | null): boolean {
   }
 
   return (
-    (output.includes('ERR_MODULE_NOT_FOUND') ||
-      output.includes('Cannot find module')) &&
-      output.includes('/packages/') &&
+    (output.includes('ERR_MODULE_NOT_FOUND') || output.includes('Cannot find module')) &&
+    output.includes('/packages/') &&
     output.includes('/dist/')
   )
 }
 
-async function verifyCliRuntimeArtifacts(): Promise<boolean> {
-  if (!requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))) {
-    cliRuntimeArtifactsVerified = false
-    return false
-  }
+function createMissingRuntimeArtifactsError(): Error {
+  const missingArtifacts = requiredRuntimeArtifactPaths.filter(
+    (artifactPath) => !existsSync(artifactPath),
+  )
+  const relativeMissingArtifacts = missingArtifacts.map((artifactPath) =>
+    path.relative(repoRoot, artifactPath),
+  )
+  const detail =
+    relativeMissingArtifacts.length > 0
+      ? ` Missing artifacts: ${relativeMissingArtifacts.join(', ')}.`
+      : ''
 
-  try {
-    for (const modulePath of requiredRuntimeModulePaths) {
-      await execFileAsync(
-        process.execPath,
-        [
-          '--input-type=module',
-          '--eval',
-          `await import(${JSON.stringify(pathToFileURL(modulePath).href)})`,
-        ],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: withoutNodeV8Coverage(),
-        },
-      )
-    }
-
-    cliRuntimeArtifactsVerified = true
-    return true
-  } catch {
-    cliRuntimeArtifactsVerified = false
-    return false
-  }
+  return new Error(
+    `Built CLI runtime artifacts are unavailable.${detail} Run \`pnpm build\` before invoking CLI integration tests.`,
+  )
 }

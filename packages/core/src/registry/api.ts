@@ -44,6 +44,7 @@ interface UpsertMarkdownRegistryApiRecordInput<TRecord extends RegistryApiRecord
   recordId?: string;
   requestedSlug?: string;
   defaultSlug: string;
+  allowSlugUpdate?: boolean;
   buildDocument: (target: MarkdownRegistryUpsertTarget) => {
     attributes: FrontmatterObject;
     body: string;
@@ -122,6 +123,7 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
     recordId,
     requestedSlug,
     defaultSlug,
+    allowSlugUpdate,
     buildDocument,
   }: UpsertMarkdownRegistryApiRecordInput<TRecord>): Promise<{
     created: boolean;
@@ -133,6 +135,7 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
       recordId,
       requestedSlug,
       defaultSlug,
+      allowSlugUpdate,
       directory,
       getRecordId,
       createRecordId,

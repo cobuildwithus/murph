@@ -83,6 +83,7 @@ export interface UpsertFoodInput {
   vaultRoot: string;
   foodId?: string;
   slug?: string;
+  allowSlugRename?: boolean;
   title?: string;
   status?: FoodStatus;
   summary?: string;
@@ -348,6 +349,7 @@ export interface UpsertProtocolItemInput {
   vaultRoot: string;
   protocolId?: string;
   slug?: string;
+  allowSlugRename?: boolean;
   title?: string;
   kind?: ProtocolKind;
   status?: ProtocolStatus;

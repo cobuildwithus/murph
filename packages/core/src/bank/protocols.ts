@@ -352,6 +352,7 @@ export async function upsertProtocolItem(
     recordId: normalizedProtocolId,
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
+    allowSlugUpdate: input.allowSlugRename === true,
     directory: `${PROTOCOLS_DIRECTORY}/${group}`,
     getRecordId: (record) => record.protocolId,
     createRecordId: () => generateRecordId("prot"),

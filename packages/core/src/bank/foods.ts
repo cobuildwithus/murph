@@ -222,6 +222,7 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
     recordId: normalizedFoodId,
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
+    allowSlugUpdate: input.allowSlugRename === true,
     buildDocument: (target) => {
       const attributes = buildAttributes(
         stripUndefined({

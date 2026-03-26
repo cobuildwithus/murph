@@ -123,6 +123,9 @@ export interface HealthCoreRuntimeMethods {
   upsertProtocolItem(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HealthRecordRuntimeResult<'protocolId'>>
+  readProtocolItem(
+    input: { vaultRoot: string } & JsonObject,
+  ): Promise<JsonObject & { protocolId: string }>
   appendHistoryEvent(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HistoryEventRuntimeResult>
