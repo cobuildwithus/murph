@@ -9,8 +9,6 @@ import {
 
 import { readHostedExecutionDispatchEnvironment } from "./env";
 
-const HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = 2_000;
-
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,
 ): Promise<HostedExecutionUserStatus> {
@@ -35,7 +33,7 @@ export async function dispatchHostedExecutionStatus(
       [HOSTED_EXECUTION_TIMESTAMP_HEADER]: envelopeTimestamp,
     },
     method: "POST",
-    signal: AbortSignal.timeout(HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(environment.dispatchTimeoutMs),
   });
 
   if (!response.ok) {

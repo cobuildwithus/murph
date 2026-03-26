@@ -84,6 +84,8 @@ Current expectations for that runner container:
 
 `Dockerfile.cloudflare-hosted-runner` is the current manual scaffold for that container. It installs the repo workspace plus common Linux parser dependencies (`ffmpeg`, `poppler-utils`, Python tooling) so the runtime does not reinstall those packages on each wake. Large model weights and any custom toolchain artifacts are still expected to be mounted or baked in separately under `/root/.healthybob`.
 
+The current runner server serializes hosted jobs inside a single container process so per-user environment overrides do not bleed between concurrent runs through shared `process.env` mutation. Scale out horizontally with more runner instances if you need higher parallelism before adopting native Container-backed Durable Objects.
+
 ## Deployment status
 
 Current scaffold files:
@@ -106,7 +108,7 @@ Still intentionally placeholder:
 
 1. Create or choose a Cloudflare Workers Paid account and create the R2 bucket names you want for hosted bundles.
 2. Update `apps/cloudflare/wrangler.jsonc` with the real bucket names and the real worker name.
-3. Copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` for local development, or set the same values through the Cloudflare secret/vars UI for deployed environments. Generate `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` with a 32-byte base64 value such as `openssl rand -base64 32`.
+3. Copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` for local development, or set the same values through the Cloudflare secret/vars UI for deployed environments. Generate `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` with a 32-byte base64 value such as `openssl rand -base64 32`. Also set `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL` to the public Worker origin that the runner will call back for durable commit completion.
 4. Build and run the separate hosted runner container:
    - `cp apps/cloudflare/.runner.env.example apps/cloudflare/.runner.env`
    - `pnpm --dir apps/cloudflare runner:docker:build`

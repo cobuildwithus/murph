@@ -36,6 +36,29 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("returns the service banner for / but 404s unknown worker routes", async () => {
+    const rootResponse = await worker.fetch(
+      new Request("https://runner.example.test/"),
+      createWorkerEnv(),
+    );
+
+    expect(rootResponse.status).toBe(200);
+    await expect(rootResponse.json()).resolves.toMatchObject({
+      ok: true,
+      service: "cloudflare-hosted-runner",
+    });
+
+    const unknownResponse = await worker.fetch(
+      new Request("https://runner.example.test/unknown"),
+      createWorkerEnv(),
+    );
+
+    expect(unknownResponse.status).toBe(404);
+    await expect(unknownResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
 
   it("injects the path user id into manual run requests", async () => {
     const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));

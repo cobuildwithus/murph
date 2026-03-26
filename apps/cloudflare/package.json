@@ -13,8 +13,8 @@
     "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1",
     "runner:docker:build": "docker build -f ../../Dockerfile.cloudflare-hosted-runner -t healthybob-cloudflare-runner ../..",
     "runner:docker:run": "docker run --rm -p 8080:8080 --env-file .runner.env healthybob-cloudflare-runner",
-    "worker:deploy": "pnpm dlx wrangler@latest deploy",
-    "worker:dev": "pnpm dlx wrangler@latest dev"
+    "worker:deploy": "pnpm exec wrangler deploy",
+    "worker:dev": "pnpm exec wrangler dev"
   },
   "dependencies": {
     "@healthybob/device-syncd": "workspace:*",
@@ -23,5 +23,13 @@
     "@healthybob/parsers": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
     "@healthybob/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260317.1",
+    "@types/node": "^25.5.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18",
+    "wrangler": "^4.68.0"
   }
 }

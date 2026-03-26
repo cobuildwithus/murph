@@ -9,6 +9,7 @@ describe("readHostedExecutionDispatchEnvironment", () => {
       HOSTED_EXECUTION_SIGNING_SECRET: "secret",
     });
 
+    expect(environment.dispatchTimeoutMs).toBe(30_000);
     expect(environment.dispatchUrl).toBe("https://runner.example.test");
     expect(environment.signingSecret).toBe("secret");
   });
@@ -19,7 +20,16 @@ describe("readHostedExecutionDispatchEnvironment", () => {
       HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "secret",
     });
 
+    expect(environment.dispatchTimeoutMs).toBe(30_000);
     expect(environment.dispatchUrl).toBe("https://runner.example.test");
     expect(environment.signingSecret).toBe("secret");
+  });
+
+  it("parses an explicit dispatch timeout", () => {
+    const environment = readHostedExecutionDispatchEnvironment({
+      HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "45000",
+    });
+
+    expect(environment.dispatchTimeoutMs).toBe(45_000);
   });
 });

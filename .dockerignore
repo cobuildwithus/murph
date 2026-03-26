@@ -11,6 +11,7 @@
 **/coverage
 **/dist
 **/node_modules
+*.log
 .agents
 .claude
 .codex-runs
@@ -21,5 +22,7 @@ vault
 audit-packages
 output-packages
 chatgpt-artifacts
-apps/cloudflare/.dev.vars
-apps/cloudflare/.runner.env
+apps/cloudflare/.dev.vars*
+apps/cloudflare/.runner.env*
+*.zip
+*.patch

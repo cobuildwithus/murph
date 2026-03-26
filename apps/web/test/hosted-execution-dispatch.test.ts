@@ -15,12 +15,14 @@ import {
 describe("dispatchHostedExecutionBestEffort", () => {
   const originalDispatchUrl = process.env.HOSTED_EXECUTION_DISPATCH_URL;
   const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+  const originalDispatchTimeoutMs = process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
   const originalFetch = global.fetch;
 
   beforeEach(() => {
     vi.restoreAllMocks();
     delete process.env.HOSTED_EXECUTION_DISPATCH_URL;
     delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+    delete process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
     global.fetch = vi.fn();
   });
 
@@ -37,6 +39,12 @@ describe("dispatchHostedExecutionBestEffort", () => {
       process.env.HOSTED_EXECUTION_SIGNING_SECRET = originalSigningSecret;
     } else {
       delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
+    }
+
+    if (typeof originalDispatchTimeoutMs === "string") {
+      process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = originalDispatchTimeoutMs;
+    } else {
+      delete process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
     }
 
     global.fetch = originalFetch;
@@ -93,7 +101,7 @@ describe("dispatchHostedExecutionBestEffort", () => {
       "Hosted execution dispatch failed (device-sync webhook-accepted user=user-123 provider=oura connection=dsc_123).",
       "Hosted execution dispatch failed with HTTP 503.",
     );
-    expect(timeoutSpy).toHaveBeenCalledWith(2_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(30_000);
   });
 
   it("swallows transport rejections and logs the provided context", async () => {
@@ -125,6 +133,28 @@ describe("dispatchHostedExecutionBestEffort", () => {
       "Hosted execution dispatch failed (device-sync disconnect user=user-123 provider=oura connection=dsc_123).",
       "socket hang up",
     );
+  });
+
+  it("uses an explicit dispatch timeout override", async () => {
+    process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
+    process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = "45000";
+    global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await dispatchHostedExecutionBestEffort({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "user-123",
+      },
+      eventId: "evt_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+    expect(errorSpy).toHaveBeenCalled();
   });
 
   it("signs dispatches with a fresh envelope timestamp instead of business occurredAt", async () => {

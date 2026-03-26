@@ -59,6 +59,7 @@ Optional but recommended:
 Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
+- `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/` that uses the current verified SMS signup entrypoint
 - `HOSTED_ONBOARDING_PASSKEY_ORIGIN`
 - `HOSTED_ONBOARDING_PASSKEY_RP_ID`
 - `HOSTED_ONBOARDING_PASSKEY_RP_NAME`
@@ -73,6 +74,7 @@ Hosted onboarding extras:
 - `LINQ_API_BASE_URL`
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
+- `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 

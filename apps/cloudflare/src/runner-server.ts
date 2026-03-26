@@ -6,6 +6,9 @@ export async function startHostedRunnerServer(input: {
   controlToken: string | null;
   port?: number;
 }): Promise<ReturnType<typeof createServer>> {
+  // The one-shot runner mutates process.env around execution, so jobs must not overlap.
+  let runQueue = Promise.resolve<void>(undefined);
+
   const server = createServer(async (request, response) => {
     try {
       if (request.method === "GET" && request.url === "/health") {
@@ -37,9 +40,8 @@ export async function startHostedRunnerServer(input: {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
 
-      const result = await runHostedExecutionJob(
-        JSON.parse(Buffer.concat(chunks).toString("utf8")) as HostedExecutionRunnerJobRequest,
-      );
+      const job = JSON.parse(Buffer.concat(chunks).toString("utf8")) as HostedExecutionRunnerJobRequest;
+      const result = await enqueueHostedRunnerJob(() => runHostedExecutionJob(job));
 
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
@@ -54,6 +56,12 @@ export async function startHostedRunnerServer(input: {
       );
     }
   });
+
+  function enqueueHostedRunnerJob<T>(job: () => Promise<T>): Promise<T> {
+    const nextJob = runQueue.then(job, job);
+    runQueue = nextJob.then(() => undefined, () => undefined);
+    return nextJob;
+  }
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

@@ -1,4 +1,5 @@
 export interface HostedExecutionDispatchEnvironment {
+  dispatchTimeoutMs: number;
   dispatchUrl: string | null;
   signingSecret: string | null;
 }
@@ -9,6 +10,11 @@ export function readHostedExecutionDispatchEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionDispatchEnvironment {
   return {
+    dispatchTimeoutMs: parsePositiveInteger(
+      normalizeString(source.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS),
+      30_000,
+      "HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS",
+    ),
     dispatchUrl: normalizeBaseUrl(
       source.HOSTED_EXECUTION_DISPATCH_URL
         ?? source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL,
@@ -40,4 +46,18 @@ function normalizeString(value: string | undefined): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function parsePositiveInteger(value: string | null, fallback: number, label: string): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new RangeError(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
 }

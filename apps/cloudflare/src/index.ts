@@ -144,7 +144,7 @@ export default {
         return env.USER_RUNNER.getByName(decodedUserId).fetch(forwarded);
       }
 
-      return json({ ok: true, service: "cloudflare-hosted-runner" });
+      return json({ error: "Not found" }, 404);
     } catch (error) {
       return json(
         {

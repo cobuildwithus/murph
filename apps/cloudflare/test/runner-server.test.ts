@@ -1,19 +1,20 @@
 import { once } from "node:events";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as nodeRunner from "../src/node-runner.js";
 import { startHostedRunnerServer } from "../src/runner-server.js";
 
+const servers: Array<Awaited<ReturnType<typeof startHostedRunnerServer>>> = [];
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map(async (server) => {
+    server.close();
+    await once(server, "close");
+  }));
+});
+
 describe("startHostedRunnerServer", () => {
-  const servers: Array<Awaited<ReturnType<typeof startHostedRunnerServer>>> = [];
-
-  afterEach(async () => {
-    await Promise.all(servers.splice(0).map(async (server) => {
-      server.close();
-      await once(server, "close");
-    }));
-  });
-
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedRunnerServer({
       controlToken: null,
@@ -33,5 +34,160 @@ describe("startHostedRunnerServer", () => {
       ok: true,
       service: "cloudflare-hosted-runner-node",
     });
+  });
+
+  it("serializes concurrent hosted jobs inside one runner process", async () => {
+    const started: string[] = [];
+    const finished: string[] = [];
+    let inFlight = 0;
+    let sawOverlap = false;
+
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (job: any) => {
+      started.push(job.dispatch.eventId);
+      inFlight += 1;
+
+      if (inFlight > 1) {
+        sawOverlap = true;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight -= 1;
+      finished.push(job.dispatch.eventId);
+
+      return {
+        bundles: { agentState: null, vault: null },
+        result: { eventsHandled: 1, summary: job.dispatch.eventId },
+      };
+    });
+
+    try {
+      const server = await startHostedRunnerServer({ controlToken: null, port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted runner server to expose a TCP port.");
+      }
+
+      const url = `http://127.0.0.1:${address.port}/__internal/run`;
+      await Promise.all([
+        fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json; charset=utf-8" },
+          body: JSON.stringify({
+            bundles: { agentState: null, vault: null },
+            dispatch: {
+              event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+              eventId: "evt_a",
+              occurredAt: "2026-03-26T12:00:00.000Z",
+            },
+          }),
+        }),
+        fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json; charset=utf-8" },
+          body: JSON.stringify({
+            bundles: { agentState: null, vault: null },
+            dispatch: {
+              event: { kind: "assistant.cron.tick", reason: "manual", userId: "u2" },
+              eventId: "evt_b",
+              occurredAt: "2026-03-26T12:00:00.000Z",
+            },
+          }),
+        }),
+      ]);
+
+      expect(sawOverlap).toBe(false);
+      expect(started).toEqual(["evt_a", "evt_b"]);
+      expect(finished).toEqual(["evt_a", "evt_b"]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("continues with queued jobs after a prior hosted job fails", async () => {
+    const started: string[] = [];
+    const finished: string[] = [];
+    let rejectFirstJob: ((error: Error) => void) | null = null;
+
+    const firstJob = new Promise<never>((_, reject) => {
+      rejectFirstJob = reject;
+    });
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (job: any) => {
+      started.push(job.dispatch.eventId);
+
+      if (job.dispatch.eventId === "evt_a") {
+        try {
+          await firstJob;
+          throw new Error("Expected the first hosted job to reject.");
+        } finally {
+          finished.push(job.dispatch.eventId);
+        }
+      }
+
+      finished.push(job.dispatch.eventId);
+      return {
+        bundles: { agentState: null, vault: null },
+        result: { eventsHandled: 1, summary: job.dispatch.eventId },
+      };
+    });
+
+    try {
+      const server = await startHostedRunnerServer({ controlToken: null, port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted runner server to expose a TCP port.");
+      }
+
+      const url = `http://127.0.0.1:${address.port}/__internal/run`;
+      const firstResponsePromise = fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          bundles: { agentState: null, vault: null },
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_a",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        }),
+      });
+      const secondResponsePromise = fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          bundles: { agentState: null, vault: null },
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u2" },
+            eventId: "evt_b",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        }),
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(started).toEqual(["evt_a"]);
+      rejectFirstJob?.(new Error("boom"));
+
+      const [firstResponse, secondResponse] = await Promise.all([
+        firstResponsePromise,
+        secondResponsePromise,
+      ]);
+
+      expect(started).toEqual(["evt_a", "evt_b"]);
+      expect(finished).toEqual(["evt_a", "evt_b"]);
+      expect(firstResponse.status).toBe(500);
+      await expect(firstResponse.json()).resolves.toEqual({
+        error: "boom",
+      });
+      expect(secondResponse.status).toBe(200);
+      await expect(secondResponse.json()).resolves.toMatchObject({
+        result: { summary: "evt_b" },
+      });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
