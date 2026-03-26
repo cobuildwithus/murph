@@ -37,11 +37,13 @@ If instructions still conflict after applying this order, ask the user before ac
 - Never print or commit full secrets, tokens, raw credentials, or full `Authorization` headers.
 - Inside this monorepo, source/test/config code must import sibling workspace packages by package name and only through declared public entrypoints; do not reach into another package's `src/` or `dist/` tree. Keep repo-local Next/Vitest source aliasing in `config/workspace-source-resolution.ts`, and do not add TS paths, aliases, or package-local typecheck steps that point internal consumers at sibling `dist/` output. Treat `dist/` as a publish/runtime artifact only.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
-- COORDINATION_LEDGER hard gate for every coding task (single-agent and multi-agent): before any code change, add or update your active entry in `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` with scope and planned symbol add/rename/delete work; do not edit code, generate code, or apply patches until that entry exists; if you cannot update the ledger first, stop and escalate; keep the entry current as scope changes, and remove your entry when done.
+- Default inbox, auto-reply, and vault-maintenance work is data work, not repo work: when the task's intended writes stay under `vault/**`, keep the work inside the vault and do not edit repo code/docs/process files unless the user explicitly asks for tooling or instruction changes.
+- COORDINATION_LEDGER hard gate applies to repo code/docs/test/config changes only. It does not apply to vault-only data tasks whose writes stay under `vault/**`.
 - Ledger rows are active-work notices by default, not hard file locks. Read overlapping rows first, preserve adjacent edits, and coordinate through scope/symbol notes. Treat a row as exclusive only when it explicitly says overlap is unsafe, the lane is a large refactor, or the user gives a conflicting direction.
 - Any spawned subagent that may review or edit code must read `COORDINATION_LEDGER.md`, follow the same hard gate before making code changes, and honor any explicit exclusive/refactor notes on overlapping rows.
-- For non-doc changes that touch production code or tests, run completion workflow audit passes: `simplify` -> `test-coverage-audit` -> `task-finish-review`.
-- Docs/process-only changes skip completion workflow audit passes unless the user explicitly asks to run them.
+- For non-doc repo changes that touch production code or tests, run completion workflow audit passes in order: `simplify` -> `test-coverage-audit` -> `task-finish-review`.
+- Those required audit passes must be executed explicitly via spawned subagents using the matching docs in `agent-docs/prompts/`; do not treat local self-review by the main implementation agent as satisfying the requirement.
+- Docs/process-only changes and vault-only data tasks skip completion workflow audit passes unless the user explicitly asks to run them.
 - For UI-affecting `packages/web` changes, inspect the rendered result at desktop and mobile sizes before handoff.
 - Until product/runtime tooling exists, do not invent fake compatibility or deployment requirements; define them in `agent-docs/operations/verification-and-runtime.md` and `package.json` in the same change that introduces them.
 - Keep this file short and route-oriented; move durable detail into `agent-docs/`.
@@ -71,10 +73,11 @@ If instructions still conflict after applying this order, ask the user before ac
 
 ## Required Checks
 
-- Current bootstrap baseline:
+- Current bootstrap baseline for repo code/docs/test changes:
   - `pnpm typecheck`
   - `pnpm test`
   - `pnpm test:coverage`
+- Vault-only data tasks under `vault/**` do not run repo-wide verification by default. Verify them by reading back the touched records plus any audit or ledger entries written by the mutation path.
 - These bootstrap commands currently validate shell-wrapper syntax plus docs drift/gardening integrity.
 - When repo-specific code/tooling is introduced, replace or extend these commands rather than bypassing them.
 
