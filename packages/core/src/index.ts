@@ -63,11 +63,22 @@ export {
   upsertProtocolItem,
   validateVault,
 } from "./public-mutations.js";
+export type {
+  ApplyCanonicalWriteBatchInput,
+  ApplyCanonicalWriteBatchResult,
+  CanonicalDeleteInput,
+  CanonicalJsonlAppendInput,
+  CanonicalRawContentInput,
+  CanonicalRawCopyInput,
+  CanonicalTextWriteInput,
+} from "./public-mutations.js";
 export {
   acquireCanonicalWriteLock,
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
   inspectCanonicalWriteLock,
+  listWriteOperationMetadataPaths,
+  readStoredWriteOperation,
 } from "./operations/index.js";
 export type {
   CanonicalWriteLockHandle,

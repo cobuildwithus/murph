@@ -22,6 +22,7 @@ import { upsertFood as upsertFoodInternal } from "./bank/foods.js";
 import { upsertGoal as upsertGoalInternal } from "./bank/goals.js";
 import { upsertProvider as upsertProviderInternal } from "./bank/providers.js";
 import { upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
+import { upsertWorkoutFormat as upsertWorkoutFormatInternal } from "./bank/workout-formats.js";
 import {
   stopProtocolItem as stopProtocolItemInternal,
   upsertProtocolItem as upsertProtocolItemInternal,
@@ -62,33 +63,53 @@ import {
 
 import type { DateInput, ValidationIssue } from "./types.js";
 
-interface CanonicalTextWriteInput {
+export interface CanonicalTextWriteInput {
   relativePath: string;
   content: string;
   overwrite?: boolean;
   allowExistingMatch?: boolean;
 }
 
-interface CanonicalJsonlAppendInput<TRecord extends object = Record<string, unknown>> {
+export interface CanonicalJsonlAppendInput<TRecord extends object = Record<string, unknown>> {
   relativePath: string;
   record: TRecord;
 }
 
-interface CanonicalDeleteInput {
+export interface CanonicalRawCopyInput {
+  targetRelativePath: string;
+  sourcePath: string;
+  originalFileName: string;
+  mediaType: string;
+  allowExistingMatch?: boolean;
+}
+
+export interface CanonicalRawContentInput {
+  targetRelativePath: string;
+  content: string | Uint8Array;
+  originalFileName: string;
+  mediaType: string;
+  allowExistingMatch?: boolean;
+}
+
+export interface CanonicalDeleteInput {
   relativePath: string;
 }
 
-interface ApplyCanonicalWriteBatchInput {
+export interface ApplyCanonicalWriteBatchInput {
   vaultRoot: string;
   operationType: string;
   summary: string;
   occurredAt?: DateInput;
+  rawCopies?: CanonicalRawCopyInput[];
+  rawContents?: CanonicalRawContentInput[];
   textWrites?: CanonicalTextWriteInput[];
   jsonlAppends?: CanonicalJsonlAppendInput[];
   deletes?: CanonicalDeleteInput[];
 }
 
-interface ApplyCanonicalWriteBatchResult {
+export interface ApplyCanonicalWriteBatchResult {
+  rawCopies: string[];
+  rawContents: string[];
   textWrites: string[];
   jsonlAppends: string[];
   deletes: string[];
@@ -170,11 +191,19 @@ export async function appendJsonlRecord<TRecord extends object>(input: {
 export async function applyCanonicalWriteBatch(
   input: ApplyCanonicalWriteBatchInput,
 ): Promise<ApplyCanonicalWriteBatchResult> {
+  const rawCopies = input.rawCopies ?? [];
+  const rawContents = input.rawContents ?? [];
   const textWrites = input.textWrites ?? [];
   const jsonlAppends = input.jsonlAppends ?? [];
   const deletes = input.deletes ?? [];
 
-  if (textWrites.length === 0 && jsonlAppends.length === 0 && deletes.length === 0) {
+  if (
+    rawCopies.length === 0 &&
+    rawContents.length === 0 &&
+    textWrites.length === 0 &&
+    jsonlAppends.length === 0 &&
+    deletes.length === 0
+  ) {
     throw new VaultError(
       "HB_CANONICAL_WRITE_EMPTY",
       "Canonical write batch requires at least one staged action.",
@@ -190,6 +219,37 @@ export async function applyCanonicalWriteBatch(
       summary: input.summary,
       occurredAt: input.occurredAt,
       mutate: async ({ batch }) => {
+        for (const rawCopy of rawCopies) {
+          await batch.stageRawCopy({
+            sourcePath: rawCopy.sourcePath,
+            targetRelativePath: rawCopy.targetRelativePath,
+            originalFileName: rawCopy.originalFileName,
+            mediaType: rawCopy.mediaType,
+            allowExistingMatch: rawCopy.allowExistingMatch,
+          });
+        }
+
+        for (const rawContent of rawContents) {
+          if (typeof rawContent.content === "string") {
+            await batch.stageRawText({
+              targetRelativePath: rawContent.targetRelativePath,
+              originalFileName: rawContent.originalFileName,
+              mediaType: rawContent.mediaType,
+              content: rawContent.content,
+              allowExistingMatch: rawContent.allowExistingMatch,
+            });
+            continue;
+          }
+
+          await batch.stageRawBytes({
+            targetRelativePath: rawContent.targetRelativePath,
+            originalFileName: rawContent.originalFileName,
+            mediaType: rawContent.mediaType,
+            content: rawContent.content,
+            allowExistingMatch: rawContent.allowExistingMatch,
+          });
+        }
+
         for (const textWrite of textWrites) {
           await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
             overwrite: textWrite.overwrite,
@@ -209,6 +269,8 @@ export async function applyCanonicalWriteBatch(
         }
 
         return {
+          rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
+          rawContents: rawContents.map((entry) => entry.targetRelativePath),
           textWrites: textWrites.map((entry) => entry.relativePath),
           jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
           deletes: deletes.map((entry) => entry.relativePath),
@@ -416,6 +478,12 @@ export async function upsertFood(
   input: Parameters<typeof upsertFoodInternal>[0],
 ): ReturnType<typeof upsertFoodInternal> {
   return withCanonicalInputWriteLock(input, upsertFoodInternal);
+}
+
+export async function upsertWorkoutFormat(
+  input: Parameters<typeof upsertWorkoutFormatInternal>[0],
+): ReturnType<typeof upsertWorkoutFormatInternal> {
+  return withCanonicalInputWriteLock(input, upsertWorkoutFormatInternal);
 }
 
 export async function upsertProtocolItem(

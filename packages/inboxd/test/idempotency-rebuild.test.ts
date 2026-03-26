@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
-import { initializeVault, isVaultError, readJsonlRecords } from "@healthybob/core";
+import {
+  initializeVault,
+  isVaultError,
+  listWriteOperationMetadataPaths,
+  readJsonlRecords,
+  readStoredWriteOperation,
+} from "@healthybob/core";
 import { resolveRuntimePaths } from "@healthybob/runtime-state";
 
 import {
@@ -104,6 +111,14 @@ async function readImportAuditsForCapture(vaultRoot: string, storedAt: string) {
   return records.filter((record) => record.action === "intake_import");
 }
 
+async function findOperationByType(vaultRoot: string, operationType: string) {
+  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
+  const operations = await Promise.all(
+    operationPaths.map((relativePath) => readStoredWriteOperation(vaultRoot, relativePath)),
+  );
+  return operations.find((operation) => operation.operationType === operationType) ?? null;
+}
+
 test("processCapture recovers from a crash after vault persistence without duplicating vault artifacts", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-idempotent-vault");
   const sourceRoot = await makeTempDirectory("healthybob-inbox-idempotent-source");
@@ -182,6 +197,76 @@ test("processCapture recovers from a crash after vault persistence without dupli
   pipeline.close();
 });
 
+test("persistRawCapture stores in-memory attachment bytes through audited raw operations without inlining payload metadata", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-inbox-inline-bytes-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const attachmentBytes = Buffer.from("raw-image-bytes");
+  const inbound = createCapture({
+    externalId: "msg-inline-bytes",
+    occurredAt: "2026-03-13T10:20:00.000Z",
+    attachments: [
+      {
+        externalId: "att-inline-bytes",
+        kind: "image",
+        mime: "image/jpeg",
+        data: attachmentBytes,
+        fileName: "photo.jpg",
+      },
+    ],
+    raw: {
+      transientPath: "/Users/<REDACTED_USER>/chat-export/photo.jpg",
+    },
+  });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = "evt_01HQW7K0M9N8P7Q6R5S4T3V2WC";
+
+  const stored = await persistRawCapture({
+    vaultRoot,
+    captureId,
+    eventId,
+    input: inbound,
+    storedAt: "2026-03-13T10:21:00.000Z",
+  });
+
+  assert.equal(stored.attachments.length, 1);
+  const attachment = stored.attachments[0];
+  assert.ok(attachment);
+  assert.match(attachment.storedPath ?? "", /attachments\/01__photo\.jpg$/u);
+  assert.equal(attachment.byteSize, attachmentBytes.byteLength);
+  assert.equal(attachment.sha256, createHash("sha256").update(attachmentBytes).digest("hex"));
+  assert.equal(attachment.originalPath, null);
+
+  const attachmentAbsolutePath = path.join(vaultRoot, attachment.storedPath ?? "");
+  assert.deepEqual(await fs.readFile(attachmentAbsolutePath), attachmentBytes);
+
+  const envelope = await findStoredCaptureEnvelope({
+    vaultRoot,
+    inbound,
+    captureId,
+  });
+  assert.ok(envelope);
+  assert.equal(envelope.input.attachments[0]?.originalPath, null);
+  assert.equal(envelope.input.raw?.transientPath, "<REDACTED_PATH>");
+  assert.equal(envelope.stored.attachments[0]?.storedPath, attachment.storedPath);
+  assert.equal(envelope.stored.attachments[0]?.byteSize, attachmentBytes.byteLength);
+
+  const rawPersistOperation = await findOperationByType(vaultRoot, "inbox_capture_raw_persist");
+  assert.ok(rawPersistOperation);
+  assert.equal(rawPersistOperation.status, "committed");
+  assert.equal(
+    rawPersistOperation.actions.filter((action) => action.kind === "raw_copy").length,
+    2,
+  );
+  for (const action of rawPersistOperation.actions) {
+    if (action.kind !== "raw_copy") {
+      continue;
+    }
+
+    assert.equal("committedPayloadBase64" in action, false);
+  }
+});
+
 test("processCapture repairs a raw-only stored envelope by appending missing event and audit rows", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-inbox-replay-raw-only-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -214,6 +299,24 @@ test("processCapture repairs a raw-only stored envelope by appending missing eve
   assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 0);
+
+  const repairOperation = await findOperationByType(vaultRoot, "inbox_capture_canonical_evidence");
+  assert.ok(repairOperation);
+  assert.equal(repairOperation.status, "committed");
+  assert.equal(
+    repairOperation.actions.every(
+      (action) => action.kind === "jsonl_append" && typeof action.committedPayloadBase64 === "string",
+    ),
+    true,
+  );
+  assert.equal(
+    repairOperation.actions.some((action) => action.targetRelativePath === "ledger/events/2026/2026-03.jsonl"),
+    true,
+  );
+  assert.equal(
+    repairOperation.actions.some((action) => action.targetRelativePath === "audit/2026/2026-03.jsonl"),
+    true,
+  );
 
   pipeline.close();
 });
@@ -516,10 +619,10 @@ test("persistRawCapture rejects attachment writes that traverse vault symlinks",
         eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3",
         input: inbound,
       }),
-    {
-      name: "TypeError",
-      message: "Vault paths may not traverse symbolic links.",
-    },
+    (error: unknown) =>
+      isVaultError(error) &&
+      error.code === "VAULT_PATH_SYMLINK" &&
+      error.message === "Vault paths may not traverse symbolic links.",
   );
 
   assert.deepEqual(await fs.readdir(outsideRoot), []);

@@ -1,6 +1,6 @@
 import path from "node:path";
-import { constants as fsConstants } from "node:fs";
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, stat } from "node:fs/promises";
 
 import {
   assertContract,
@@ -11,7 +11,9 @@ import {
 } from "@healthybob/contracts";
 import {
   acquireCanonicalWriteLock,
-  appendJsonlRecord,
+  applyCanonicalWriteBatch,
+  type CanonicalRawContentInput,
+  type CanonicalRawCopyInput,
   isVaultError,
   loadVault,
   readJsonlRecords,
@@ -25,7 +27,6 @@ import {
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
   assertVaultPathOnDisk,
-  ensureParentDirectory,
   generatePrefixedId,
   normalizeStoredAttachments,
   normalizeAccountKey,
@@ -102,6 +103,8 @@ export async function persistRawCapture({
   const sourceDirectory = buildInboxCaptureDirectory(input, captureId);
   const attachmentDirectory = path.posix.join(sourceDirectory, "attachments");
   const storedAttachments: StoredAttachment[] = [];
+  const rawCopies: CanonicalRawCopyInput[] = [];
+  const rawContents: CanonicalRawContentInput[] = [];
 
   for (const [index, attachment] of input.attachments.entries()) {
     const ordinal = index + 1;
@@ -129,59 +132,66 @@ export async function persistRawCapture({
         `${String(ordinal).padStart(2, "0")}__${safeName}`,
       ),
     );
-    const absolutePath = await resolveVaultPath(vaultRoot, relativePath);
-    await ensureParentDirectory(absolutePath);
-    await assertVaultPathOnDisk(vaultRoot, absolutePath);
     if (attachment.data) {
-      try {
-        await writeFile(absolutePath, attachment.data, { flag: "wx" });
-      } catch (error) {
-        if (!isAlreadyExistsError(error)) {
-          throw error;
-        }
-      }
+      const sha256 = createHash("sha256").update(attachment.data).digest("hex");
+      rawContents.push({
+        targetRelativePath: relativePath,
+        content: attachment.data,
+        originalFileName: safeName,
+        mediaType: attachment.mime ?? "application/octet-stream",
+        allowExistingMatch: true,
+      });
+      storedAttachments.push({
+        ...sanitizedAttachment,
+        attachmentId,
+        ordinal,
+        storedPath: relativePath,
+        fileName: attachment.fileName ?? safeName,
+        byteSize: attachment.byteSize ?? attachment.data.byteLength,
+        sha256,
+        originalPath: null,
+      });
     } else if (attachment.originalPath) {
+      const sourceAbsolutePath = path.resolve(attachment.originalPath);
       try {
-        await copyFile(path.resolve(attachment.originalPath), absolutePath, fsConstants.COPYFILE_EXCL);
+        const sourceStats = await stat(sourceAbsolutePath);
+        const sha256 = await sha256File(sourceAbsolutePath);
+
+        rawCopies.push({
+          sourcePath: sourceAbsolutePath,
+          targetRelativePath: relativePath,
+          originalFileName: safeName,
+          mediaType: attachment.mime ?? "application/octet-stream",
+          allowExistingMatch: true,
+        });
+        storedAttachments.push({
+          ...sanitizedAttachment,
+          attachmentId,
+          ordinal,
+          storedPath: relativePath,
+          fileName: attachment.fileName ?? safeName,
+          byteSize: attachment.byteSize ?? sourceStats.size,
+          sha256,
+          originalPath: null,
+        });
       } catch (error) {
-        if (isMissingFileError(error)) {
-          storedAttachments.push(
-            buildUnstoredAttachment({
-              attachment: sanitizedAttachment,
-              attachmentId,
-              ordinal,
-            }),
-          );
-          continue;
+        if (!isMissingFileError(error)) {
+          throw error;
         }
 
-        if (!isAlreadyExistsError(error)) {
-          throw error;
-        }
+        storedAttachments.push(
+          buildUnstoredAttachment({
+            attachment: sanitizedAttachment,
+            attachmentId,
+            ordinal,
+          }),
+        )
+        continue;
       }
     }
-
-    await assertVaultPathOnDisk(vaultRoot, absolutePath);
-    const fileStats = await stat(absolutePath);
-    await assertVaultPathOnDisk(vaultRoot, absolutePath);
-    const sha256 = await sha256File(absolutePath);
-
-    storedAttachments.push({
-      ...sanitizedAttachment,
-      attachmentId,
-      ordinal,
-      storedPath: relativePath,
-      fileName: attachment.fileName ?? safeName,
-      byteSize: attachment.byteSize ?? fileStats.size,
-      sha256,
-      originalPath: null,
-    });
   }
 
   const envelopePath = normalizeRelativePath(path.posix.join(sourceDirectory, "envelope.json"));
-  const absoluteEnvelopePath = await resolveVaultPath(vaultRoot, envelopePath);
-  await ensureParentDirectory(absoluteEnvelopePath);
-  await assertVaultPathOnDisk(vaultRoot, absoluteEnvelopePath);
 
   const storedCapture: StoredCapture = {
     captureId,
@@ -202,9 +212,9 @@ export async function persistRawCapture({
     raw: redactSensitivePaths(input.raw) as Record<string, unknown>,
   };
 
-  await writeFile(
-    absoluteEnvelopePath,
-    `${JSON.stringify(
+  rawContents.push({
+    targetRelativePath: storedCapture.envelopePath,
+    content: `${JSON.stringify(
       {
         schema: "healthybob.inbox-envelope.v1",
         captureId,
@@ -215,10 +225,20 @@ export async function persistRawCapture({
       },
       null,
       2,
-    )}
-`,
-    "utf8",
-  );
+    )}\n`,
+    originalFileName: "envelope.json",
+    mediaType: "application/json",
+    allowExistingMatch: true,
+  });
+
+  await applyCanonicalWriteBatch({
+    vaultRoot,
+    operationType: "inbox_capture_raw_persist",
+    summary: `Persist inbox capture ${captureId}`,
+    occurredAt: storedAt,
+    rawCopies,
+    rawContents,
+  });
 
   return storedCapture;
 }
@@ -277,14 +297,19 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
     const eventExists = eventRecords.some((record) =>
       isInboxCaptureEventRecord(record, input.envelope),
     );
+    const jsonlAppends: Array<{
+      relativePath: string;
+      record: AuditRecord | EventRecord;
+    }> = [];
 
     if (!eventExists) {
-      await appendInboxCaptureEvent({
-        vaultRoot: input.vaultRoot,
-        eventId: input.envelope.eventId,
-        occurredAt: input.envelope.input.occurredAt,
-        inbound: input.envelope.input,
-        stored: input.envelope.stored,
+      jsonlAppends.push({
+        relativePath: eventPath,
+        record: buildInboxCaptureEventRecord({
+          eventId: input.envelope.eventId,
+          inbound: input.envelope.input,
+          stored: input.envelope.stored,
+        }),
       });
     }
 
@@ -299,13 +324,25 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
 
     if (!auditExists) {
       auditId = input.createAuditId?.() ?? generatePrefixedId("aud");
-      await appendImportAudit({
+      jsonlAppends.push({
+        relativePath: auditPath,
+        record: buildInboxCaptureAuditRecord({
+          auditId,
+          eventId: input.envelope.eventId,
+          inbound: input.envelope.input,
+          stored: input.envelope.stored,
+          eventPath,
+        }),
+      });
+    }
+
+    if (jsonlAppends.length > 0) {
+      await applyCanonicalWriteBatch({
         vaultRoot: input.vaultRoot,
-        auditId,
-        eventId: input.envelope.eventId,
-        inbound: input.envelope.input,
-        stored: input.envelope.stored,
-        eventPath,
+        operationType: "inbox_capture_canonical_evidence",
+        summary: `Ensure canonical evidence for inbox capture ${input.envelope.captureId}`,
+        occurredAt: input.envelope.stored.storedAt,
+        jsonlAppends,
       });
     }
 
@@ -327,29 +364,23 @@ export async function appendInboxCaptureEvent(input: {
     input.occurredAt,
     "occurredAt",
   );
-  const record = assertContract<EventRecord>(eventRecordSchema, {
-    schemaVersion: "hb.event.v1",
-    id: input.eventId,
-    occurredAt: input.inbound.occurredAt,
-    recordedAt: input.stored.storedAt,
-    dayKey: input.inbound.occurredAt.slice(0, 10),
-    source: "import",
-    kind: "note",
-    title: `Inbox capture from ${input.inbound.source}`,
-    note: buildEventNote(input.inbound),
-    tags: ["inbox", `source-${sanitizeSegment(input.inbound.source, "source")}`],
-    rawRefs: [
-      input.stored.envelopePath,
-      ...input.stored.attachments
-        .map((attachment) => attachment.storedPath)
-        .filter((value): value is string => typeof value === "string" && value.length > 0),
-    ],
-  }, "inbox capture event");
+  const record = buildInboxCaptureEventRecord({
+    eventId: input.eventId,
+    inbound: input.inbound,
+    stored: input.stored,
+  });
 
-  await appendJsonlRecord({
+  await applyCanonicalWriteBatch({
     vaultRoot: input.vaultRoot,
-    relativePath,
-    record,
+    operationType: "inbox_capture_event_append",
+    summary: `Append inbox capture event ${input.eventId}`,
+    occurredAt: input.stored.storedAt,
+    jsonlAppends: [
+      {
+        relativePath,
+        record,
+      },
+    ],
   });
 
   return { relativePath, record };
@@ -369,31 +400,25 @@ export async function appendImportAudit(input: {
     "occurredAt",
   );
 
-  const record = assertContract<AuditRecord>(auditRecordSchema, {
-    schemaVersion: "hb.audit.v1",
-    id: input.auditId,
-    action: "intake_import",
-    status: "success",
-    occurredAt: input.stored.storedAt,
-    actor: "importer",
-    commandName: `inboxd.processCapture:${sanitizeSegment(input.inbound.source, "source")}`,
-    summary: `Imported inbox capture from ${input.inbound.source}.`,
-    targetIds: [input.eventId],
-    changes: [
-      { path: input.stored.envelopePath, op: "create" },
-      ...input.stored.attachments
-        .map((attachment) => attachment.storedPath)
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-        .map((storedPath) => ({ path: storedPath, op: "copy" as const })),
-      { path: input.eventPath, op: "append" },
-      { path: relativePath, op: "append" },
-    ],
-  }, "inbox capture audit");
+  const record = buildInboxCaptureAuditRecord({
+    auditId: input.auditId,
+    eventId: input.eventId,
+    inbound: input.inbound,
+    stored: input.stored,
+    eventPath: input.eventPath,
+  });
 
-  await appendJsonlRecord({
+  await applyCanonicalWriteBatch({
     vaultRoot: input.vaultRoot,
-    relativePath,
-    record,
+    operationType: "inbox_capture_audit_append",
+    summary: `Append inbox capture audit ${input.auditId}`,
+    occurredAt: input.stored.storedAt,
+    jsonlAppends: [
+      {
+        relativePath,
+        record,
+      },
+    ],
   });
 
   return { relativePath, record };
@@ -460,6 +485,66 @@ function buildEventNote(capture: InboundCapture): string {
   }
 
   return `Inbox capture from ${capture.source}.`;
+}
+
+function buildInboxCaptureEventRecord(input: {
+  eventId: string;
+  inbound: InboundCapture;
+  stored: StoredCapture;
+}): EventRecord {
+  return assertContract<EventRecord>(eventRecordSchema, {
+    schemaVersion: "hb.event.v1",
+    id: input.eventId,
+    occurredAt: input.inbound.occurredAt,
+    recordedAt: input.stored.storedAt,
+    dayKey: input.inbound.occurredAt.slice(0, 10),
+    source: "import",
+    kind: "note",
+    title: `Inbox capture from ${input.inbound.source}`,
+    note: buildEventNote(input.inbound),
+    tags: ["inbox", `source-${sanitizeSegment(input.inbound.source, "source")}`],
+    rawRefs: [
+      input.stored.envelopePath,
+      ...input.stored.attachments
+        .map((attachment) => attachment.storedPath)
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    ],
+  }, "inbox capture event");
+}
+
+function buildInboxCaptureAuditRecord(input: {
+  auditId: string;
+  eventId: string;
+  inbound: InboundCapture;
+  stored: StoredCapture;
+  eventPath: string;
+}): AuditRecord {
+  const relativePath = toMonthlyShardRelativePath(
+    VAULT_LAYOUT.auditDirectory,
+    input.stored.storedAt,
+    "occurredAt",
+  );
+
+  return assertContract<AuditRecord>(auditRecordSchema, {
+    schemaVersion: "hb.audit.v1",
+    id: input.auditId,
+    action: "intake_import",
+    status: "success",
+    occurredAt: input.stored.storedAt,
+    actor: "importer",
+    commandName: `inboxd.processCapture:${sanitizeSegment(input.inbound.source, "source")}`,
+    summary: `Imported inbox capture from ${input.inbound.source}.`,
+    targetIds: [input.eventId],
+    changes: [
+      { path: input.stored.envelopePath, op: "create" },
+      ...input.stored.attachments
+        .map((attachment) => attachment.storedPath)
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .map((storedPath) => ({ path: storedPath, op: "copy" as const })),
+      { path: input.eventPath, op: "append" },
+      { path: relativePath, op: "append" },
+    ],
+  }, "inbox capture audit");
 }
 
 function buildInboxCaptureEventPath(envelope: StoredCaptureEnvelope): string {
@@ -775,8 +860,4 @@ async function resolveQuarantinedEnvelopePath(absolutePath: string): Promise<str
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-}
-
-function isAlreadyExistsError(error: unknown): error is NodeJS.ErrnoException {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
 }

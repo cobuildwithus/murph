@@ -1391,6 +1391,61 @@ test("direct and batched raw copies reuse identical files and reject divergent f
   assert.equal(failedOperation.status, "rolled_back");
 });
 
+test("committed raw-copy actions omit payload blobs while replayable text and jsonl actions keep them", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const sourcePath = await writeExternalFile(sourceRoot, "artifact.txt", "raw payload\n");
+
+  await applyCanonicalWriteBatch({
+    vaultRoot,
+    operationType: "test_payload_metadata_shapes",
+    summary: "verify committed payload metadata by action kind",
+    rawCopies: [
+      {
+        sourcePath,
+        targetRelativePath: "raw/testing/fixed/artifact.txt",
+        originalFileName: "artifact.txt",
+        mediaType: "text/plain",
+      },
+    ],
+    textWrites: [
+      {
+        relativePath: "notes/payload-metadata.txt",
+        content: "text payload\n",
+        overwrite: false,
+      },
+    ],
+    jsonlAppends: [
+      {
+        relativePath: "audit/2026/payload-metadata.jsonl",
+        record: {
+          ok: true,
+        },
+      },
+    ],
+  });
+
+  const operation = (
+    await Promise.all(
+      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+        readStoredWriteOperation(vaultRoot, relativePath),
+      ),
+    )
+  ).find((candidate) => candidate.operationType === "test_payload_metadata_shapes");
+
+  assert.ok(operation);
+  assert.equal(operation.status, "committed");
+  assert.equal(operation.actions.length, 3);
+  assert.equal(operation.actions[0]?.kind, "raw_copy");
+  assert.equal("committedPayloadBase64" in (operation.actions[0] ?? {}), false);
+  assert.equal(operation.actions[1]?.kind, "text_write");
+  assert.equal(typeof operation.actions[1]?.committedPayloadBase64, "string");
+  assert.equal(operation.actions[2]?.kind, "jsonl_append");
+  assert.equal(typeof operation.actions[2]?.committedPayloadBase64, "string");
+});
+
 test("direct and batched text writes keep no-overwrite and append semantics aligned", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });

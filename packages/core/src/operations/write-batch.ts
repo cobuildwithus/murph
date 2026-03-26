@@ -72,6 +72,13 @@ interface StageRawBytesInput extends StageRawCopyOptions {
   content: Uint8Array;
 }
 
+interface StageRawContentInput extends StageRawCopyOptions {
+  targetRelativePath: string;
+  originalFileName: string;
+  mediaType: string;
+  content: string | Uint8Array;
+}
+
 interface StagedRawCopy {
   relativePath: string;
   originalFileName: string;
@@ -90,7 +97,6 @@ type StoredWriteAction =
       mediaType: string;
       effect?: "copy" | "reuse";
       existedBefore?: boolean;
-      committedPayloadBase64?: string;
       appliedAt?: string;
       rolledBackAt?: string;
     }
@@ -445,40 +451,13 @@ export class WriteBatch {
     content,
     allowExistingMatch = false,
   }: StageRawTextInput): Promise<StagedRawCopy> {
-    this.assertMutable();
-    const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
-    assertWriteTargetPolicy(normalizedTarget, {
-      kind: "raw",
-      messages: {
-        rawRequired: "Raw copies must target the raw/ tree.",
-      },
-    });
-
-    const stageRelativePath = stageArtifactRelativePath(
-      this.operationId,
-      `${String(this.record.actions.length).padStart(4, "0")}.raw`,
-    );
-    const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
-    await ensureDirectory(path.dirname(stageAbsolutePath));
-    await fs.writeFile(stageAbsolutePath, content, "utf8");
-
-    this.record.actions.push({
-      kind: "raw_copy",
-      state: "staged",
-      targetRelativePath: normalizedTarget,
-      stageRelativePath,
+    return this.stageRawContent({
+      targetRelativePath,
+      originalFileName,
+      mediaType,
+      content,
       allowExistingMatch,
-      originalFileName,
-      mediaType,
     });
-    await this.persist();
-
-    return {
-      relativePath: normalizedTarget,
-      originalFileName,
-      mediaType,
-      stagedAbsolutePath: stageAbsolutePath,
-    };
   }
 
   async stageRawBytes({
@@ -488,6 +467,22 @@ export class WriteBatch {
     content,
     allowExistingMatch = false,
   }: StageRawBytesInput): Promise<StagedRawCopy> {
+    return this.stageRawContent({
+      targetRelativePath,
+      originalFileName,
+      mediaType,
+      content,
+      allowExistingMatch,
+    });
+  }
+
+  private async stageRawContent({
+    targetRelativePath,
+    originalFileName,
+    mediaType,
+    content,
+    allowExistingMatch = false,
+  }: StageRawContentInput): Promise<StagedRawCopy> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
     assertWriteTargetPolicy(normalizedTarget, {
@@ -503,7 +498,11 @@ export class WriteBatch {
     );
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, stageRelativePath).absolutePath;
     await ensureDirectory(path.dirname(stageAbsolutePath));
-    await fs.writeFile(stageAbsolutePath, content);
+    if (typeof content === "string") {
+      await fs.writeFile(stageAbsolutePath, content, "utf8");
+    } else {
+      await fs.writeFile(stageAbsolutePath, content);
+    }
 
     this.record.actions.push({
       kind: "raw_copy",
@@ -726,7 +725,6 @@ export class WriteBatch {
     action.state = result.effect === "reuse" ? "reused" : "applied";
     action.effect = result.effect === "reuse" ? "reuse" : "copy";
     action.existedBefore = result.existedBefore;
-    action.committedPayloadBase64 = encodeCommittedPayload(stagedContent);
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();
