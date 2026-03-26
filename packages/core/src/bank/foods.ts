@@ -15,6 +15,7 @@ import {
   listSection,
   normalizeDomainList,
   normalizeId,
+  normalizeRecordIdList,
   normalizeSelectorSlug,
   normalizeUpsertSelectorSlug,
   optionalEnum,
@@ -102,6 +103,7 @@ function buildBody(record: FoodRecord): string {
     record.aliases?.length ? listSection("Aliases", record.aliases) : null,
     record.ingredients?.length ? listSection("Ingredients", record.ingredients) : null,
     listSection("Tags", record.tags),
+    listSection("Attached protocols", record.attachedProtocolIds),
     record.note ? section("Notes", record.note) : null,
   ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
 
@@ -150,6 +152,7 @@ function parseFoodRecord(
     ingredients: normalizeFoodTextList(attributes.ingredients, "ingredients"),
     tags: normalizeDomainList(attributes.tags, "tags"),
     note: optionalString(attributes.note, "note", 4000),
+    attachedProtocolIds: normalizeRecordIdList(attributes.attachedProtocolIds, "attachedProtocolIds", "prot"),
     autoLogDaily: normalizeFoodAutoLogDailyRule(attributes.autoLogDaily),
     relativePath,
     markdown,
@@ -174,6 +177,7 @@ function buildAttributes(record: FoodRecord): FrontmatterObject {
     ingredients: record.ingredients,
     tags: record.tags,
     note: record.note,
+    attachedProtocolIds: record.attachedProtocolIds,
     autoLogDaily: record.autoLogDaily,
   }) as unknown as FrontmatterObject;
 }
@@ -261,6 +265,11 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
           ),
           note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
             optionalString(value, "note", 4000),
+          ),
+          attachedProtocolIds: resolveOptionalUpsertValue(
+            input.attachedProtocolIds,
+            existingRecord?.attachedProtocolIds,
+            (value) => normalizeRecordIdList(value, "attachedProtocolIds", "prot"),
           ),
           autoLogDaily: resolveOptionalUpsertValue(
             input.autoLogDaily,

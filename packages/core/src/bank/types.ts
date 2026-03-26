@@ -1,3 +1,5 @@
+import type { ActivityStrengthExercise } from "@healthybob/contracts";
+
 import type { DateInput } from "../types.js";
 
 export const GOAL_SCHEMA_VERSION = "hb.frontmatter.goal.v1";
@@ -34,12 +36,17 @@ export const FOOD_SCHEMA_VERSION = "hb.frontmatter.food.v1";
 export const FOOD_DOC_TYPE = "food";
 export const FOOD_STATUSES = ["active", "archived"] as const;
 
+export const WORKOUT_FORMAT_SCHEMA_VERSION = "hb.frontmatter.workout-format.v1";
+export const WORKOUT_FORMAT_DOC_TYPE = "workout_format";
+export const WORKOUT_FORMAT_STATUSES = ["active", "archived"] as const;
+
 export const GOALS_DIRECTORY = "bank/goals";
 export const CONDITIONS_DIRECTORY = "bank/conditions";
 export const ALLERGIES_DIRECTORY = "bank/allergies";
 export const FOODS_DIRECTORY = "bank/foods";
 export const RECIPES_DIRECTORY = "bank/recipes";
 export const PROTOCOLS_DIRECTORY = "bank/protocols";
+export const WORKOUT_FORMATS_DIRECTORY = "bank/workout-formats";
 
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export type GoalHorizon = (typeof GOAL_HORIZONS)[number];
@@ -50,11 +57,58 @@ export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
+export type WorkoutFormatStatus = (typeof WORKOUT_FORMAT_STATUSES)[number];
 export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
 export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
 
 export interface FoodAutoLogDailyRule {
   time: string;
+}
+
+export interface WorkoutFormatRecord {
+  schemaVersion: typeof WORKOUT_FORMAT_SCHEMA_VERSION;
+  docType: typeof WORKOUT_FORMAT_DOC_TYPE;
+  workoutFormatId: string;
+  slug: string;
+  title: string;
+  status: WorkoutFormatStatus;
+  summary?: string;
+  activityType: string;
+  durationMinutes?: number;
+  distanceKm?: number;
+  strengthExercises?: ActivityStrengthExercise[];
+  tags?: string[];
+  note?: string;
+  relativePath: string;
+  markdown: string;
+}
+
+export interface UpsertWorkoutFormatInput {
+  vaultRoot: string;
+  workoutFormatId?: string;
+  slug?: string;
+  allowSlugRename?: boolean;
+  title?: string;
+  status?: WorkoutFormatStatus;
+  summary?: string;
+  activityType?: string;
+  durationMinutes?: number;
+  distanceKm?: number;
+  strengthExercises?: ActivityStrengthExercise[];
+  tags?: string[];
+  note?: string;
+}
+
+export interface UpsertWorkoutFormatResult {
+  created: boolean;
+  auditPath: string;
+  record: WorkoutFormatRecord;
+}
+
+export interface ReadWorkoutFormatInput {
+  vaultRoot: string;
+  workoutFormatId?: string;
+  slug?: string;
 }
 
 export interface FoodRecord {
@@ -74,6 +128,7 @@ export interface FoodRecord {
   ingredients?: string[];
   tags?: string[];
   note?: string;
+  attachedProtocolIds?: string[];
   autoLogDaily?: FoodAutoLogDailyRule;
   relativePath: string;
   markdown: string;
@@ -96,6 +151,7 @@ export interface UpsertFoodInput {
   ingredients?: string[];
   tags?: string[];
   note?: string;
+  attachedProtocolIds?: string[];
   autoLogDaily?: FoodAutoLogDailyRule | null;
 }
 

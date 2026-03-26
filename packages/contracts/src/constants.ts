@@ -15,9 +15,11 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   profileSnapshot: "hb.profile-snapshot.v1",
   providerFrontmatter: "hb.frontmatter.provider.v1",
   recipeFrontmatter: "hb.frontmatter.recipe.v1",
+  workoutFormatFrontmatter: "hb.frontmatter.workout-format.v1",
   rawImportManifest: "hb.raw-import-manifest.v1",
   protocolFrontmatter: "hb.frontmatter.protocol.v1",
   sample: "hb.sample.v1",
+  sharePack: "hb.share-pack.v1",
   vault: "hb.vault.v1",
 } as const);
 
@@ -44,6 +46,7 @@ export const ID_PREFIXES = Object.freeze({
   transform: "xfm",
   variant: "var",
   vault: "vault",
+  workoutFormat: "wfmt",
 } as const);
 
 export const EVENT_KINDS = Object.freeze([
@@ -118,6 +121,7 @@ export const PROTOCOL_KINDS = Object.freeze(["medication", "supplement", "therap
 export const PROTOCOL_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
 
 export const FOOD_STATUSES = Object.freeze(["active", "archived"] as const);
+export const WORKOUT_FORMAT_STATUSES = Object.freeze(["active", "archived"] as const);
 
 export const RECIPE_STATUSES = Object.freeze(["draft", "saved", "archived"] as const);
 
@@ -164,6 +168,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "samples_import_csv",
   "show",
   "validate",
+  "workout_format_upsert",
 ] as const);
 
 export const AUDIT_ACTORS = Object.freeze(["cli", "core", "importer", "query"] as const);
@@ -186,6 +191,7 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   provider: "provider",
   recipe: "recipe",
   protocol: "protocol",
+  workoutFormat: "workout_format",
 } as const);
 
 export const EXPERIMENT_STATUSES = Object.freeze([

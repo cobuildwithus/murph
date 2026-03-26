@@ -2,9 +2,12 @@ export const dynamic = "force-dynamic";
 
 export default async function JoinInviteCancelPage(input: {
   params: Promise<{ inviteCode: string }>;
+  searchParams: Promise<{ share?: string }>;
 }) {
   const { inviteCode } = await input.params;
-  const href = `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}`;
+  const searchParams = await input.searchParams;
+  const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
+  const href = `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}${shareCode ? `?share=${encodeURIComponent(shareCode)}` : ""}`;
 
   return (
     <main

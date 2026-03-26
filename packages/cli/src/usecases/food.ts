@@ -1,4 +1,4 @@
-import { FOOD_STATUSES } from '@healthybob/contracts'
+import { foodUpsertPayloadSchema } from '@healthybob/contracts'
 import { z } from 'incur'
 
 import {
@@ -40,6 +40,7 @@ interface FoodReadModel {
   ingredients?: string[]
   tags?: string[]
   note?: string
+  attachedProtocolIds?: string[]
   autoLogDaily?: FoodAutoLogDailyReadModel | null
   relativePath: string
   markdown: string
@@ -66,6 +67,7 @@ interface FoodCoreRuntime {
     ingredients?: string[]
     tags?: string[]
     note?: string
+    attachedProtocolIds?: string[]
     autoLogDaily?: FoodAutoLogDailyReadModel | null
   }): Promise<{
     created: boolean
@@ -82,40 +84,7 @@ interface FoodCoreRuntime {
   }): Promise<FoodReadModel>
 }
 
-const slugSchema = z
-  .string()
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
-
-const foodAutoLogDailySchema: z.ZodType<FoodAutoLogDailyReadModel> = z
-  .object({
-    time: dailyFoodTimeSchema,
-  })
-  .strict()
-
-const foodPayloadSchema = z
-  .object({
-    foodId: z
-      .string()
-      .regex(/^food_[0-9A-Za-z]+$/u)
-      .optional(),
-    slug: slugSchema.optional(),
-    title: z.string().min(1).max(160),
-    status: z.enum(FOOD_STATUSES).default('active'),
-    summary: z.string().min(1).max(4000).optional(),
-    kind: z.string().min(1).max(160).optional(),
-    brand: z.string().min(1).max(160).optional(),
-    vendor: z.string().min(1).max(160).optional(),
-    location: z.string().min(1).max(160).optional(),
-    serving: z.string().min(1).max(160).optional(),
-    aliases: z.array(z.string().min(1).max(160)).optional(),
-    ingredients: z.array(z.string().min(1).max(4000)).optional(),
-    tags: z.array(slugSchema).optional(),
-    note: z.string().min(1).max(4000).optional(),
-    autoLogDaily: foodAutoLogDailySchema.optional(),
-  })
-  .strict()
-
-export type FoodPayload = z.infer<typeof foodPayloadSchema>
+export type FoodPayload = z.infer<typeof foodUpsertPayloadSchema>
 
 export function scaffoldFoodPayload() {
   return {
@@ -131,11 +100,12 @@ export function scaffoldFoodPayload() {
     ingredients: ['acai base', 'banana', 'strawberries', 'granola', 'almond butter'],
     tags: ['breakfast', 'favorite'],
     note: 'Typical order includes extra granola and no honey.',
+    attachedProtocolIds: ['prot_01JEXAMPLEATTACHED1', 'prot_01JEXAMPLEATTACHED2'],
   } satisfies FoodPayload
 }
 
 export function parseFoodPayload(value: unknown) {
-  const result = foodPayloadSchema.safeParse(value)
+  const result = foodUpsertPayloadSchema.safeParse(value)
 
   if (!result.success) {
     throw new VaultCliError('contract_invalid', 'Food payload is invalid.', {
@@ -173,6 +143,7 @@ export async function upsertFoodRecord(input: {
       ingredients: input.payload.ingredients,
       tags: input.payload.tags,
       note: input.payload.note,
+      attachedProtocolIds: input.payload.attachedProtocolIds,
       autoLogDaily: input.payload.autoLogDaily,
     })
 
@@ -247,6 +218,7 @@ export async function renameFoodRecord(input: {
       ingredients: existing.ingredients,
       tags: existing.tags,
       note: existing.note,
+      attachedProtocolIds: existing.attachedProtocolIds,
       autoLogDaily: existing.autoLogDaily ?? undefined,
     })
 

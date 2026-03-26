@@ -420,6 +420,7 @@ export const vaultMetadataSchema = withContractMetadata(
           profileSnapshotsRoot: z.literal("ledger/profile-snapshots"),
           providersRoot: z.literal("bank/providers"),
           recipesRoot: z.literal("bank/recipes"),
+          workoutFormatsRoot: z.literal("bank/workout-formats"),
           rawAssessmentsRoot: z.literal("raw/assessments"),
           rawRoot: z.literal("raw"),
           eventsRoot: z.literal("ledger/events"),

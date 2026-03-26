@@ -58,6 +58,7 @@ export {
   upsertGeneticVariant,
   upsertGoal,
   upsertRecipe,
+  upsertWorkoutFormat,
   upsertProtocolItem,
   validateVault,
 } from "./public-mutations.js";
@@ -99,3 +100,5 @@ export * from "./profile/index.js";
 export * from "./history/index.js";
 export * from "./family/index.js";
 export * from "./genetics/index.js";
+
+export * from "./shares.js";

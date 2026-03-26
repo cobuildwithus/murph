@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { FOOD_STATUSES, RECIPE_STATUSES } from '@healthybob/contracts'
+import { buildSharePackFromVault } from '@healthybob/core'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -23,6 +24,16 @@ const isoTimestampSchema = z.string().min(1)
 const vaultFilePathSchema = z.string().min(1)
 const jsonObjectSchema = z.record(z.string(), z.unknown())
 const optionalStringArraySchema = z.array(z.string().min(1)).optional()
+const shareEntitySelectorSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    slug: z.string().min(1).optional(),
+    group: z.string().min(1).optional(),
+  })
+  .refine((value) => Boolean(value.id || value.slug), {
+    message: 'Provide either an id or slug.',
+  })
+
 
 interface AssistantToolContext {
   captureId?: string
@@ -457,6 +468,58 @@ function createVaultWriteToolDefinitions(
       },
     }),
     defineAssistantTool({
+      name: 'vault.share.createLink',
+      description:
+        'Create a one-time hosted share link for remembered foods, recipes, and protocols. When a food has attached protocol ids, keep includeAttachedProtocols=true so the recipient gets the full smoothie + supplement bundle.',
+      inputSchema: z.object({
+        title: z.string().min(1).optional(),
+        foods: z.array(shareEntitySelectorSchema).optional(),
+        protocols: z.array(shareEntitySelectorSchema).optional(),
+        recipes: z.array(shareEntitySelectorSchema).optional(),
+        includeAttachedProtocols: z.boolean().optional(),
+        logMeal: z.object({
+          food: shareEntitySelectorSchema,
+          note: z.string().min(1).optional(),
+          occurredAt: isoTimestampSchema.optional(),
+        }).optional(),
+        recipientPhoneNumber: z.string().min(1).optional(),
+        inviteCode: z.string().min(1).optional(),
+        expiresInHours: z.number().int().positive().max(24 * 30).optional(),
+      }),
+      inputExample: {
+        foods: [
+          {
+            slug: 'morning-smoothie',
+          },
+        ],
+        includeAttachedProtocols: true,
+        logMeal: {
+          food: {
+            slug: 'morning-smoothie',
+          },
+        },
+      },
+      execute: async ({ expiresInHours, foods, includeAttachedProtocols, inviteCode, logMeal, protocols, recipientPhoneNumber, recipes, title }) => {
+        const pack = await buildSharePackFromVault({
+          vaultRoot: input.vault,
+          title,
+          foods,
+          protocols,
+          recipes,
+          includeAttachedProtocols,
+          logMeal,
+        })
+
+        return issueHostedShareLink({
+          pack,
+          expiresInHours,
+          inviteCode,
+          recipientPhoneNumber,
+          senderMemberId: process.env.HEALTHYBOB_HOSTED_MEMBER_ID ?? null,
+        })
+      },
+    }),
+    defineAssistantTool({
       name: 'vault.event.upsert',
       description:
         'Upsert one canonical event record from a JSON payload object.',
@@ -622,6 +685,78 @@ function createHealthUpsertToolDefinitions(
         },
       }),
     )
+}
+
+async function issueHostedShareLink(input: {
+  pack: Awaited<ReturnType<typeof buildSharePackFromVault>>
+  expiresInHours?: number
+  inviteCode?: string
+  recipientPhoneNumber?: string
+  senderMemberId?: string | null
+}) {
+  const baseUrl = normalizeHostedShareApiBaseUrl(
+    process.env.HOSTED_SHARE_API_BASE_URL
+      ?? process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL
+      ?? null,
+  )
+  const token = normalizeHostedShareApiToken(process.env.HOSTED_SHARE_INTERNAL_TOKEN ?? null)
+
+  if (!baseUrl || !token) {
+    throw new Error(
+      'Hosted share link creation requires HOSTED_SHARE_API_BASE_URL or HOSTED_ONBOARDING_PUBLIC_BASE_URL plus HOSTED_SHARE_INTERNAL_TOKEN in the assistant environment.',
+    )
+  }
+
+  const response = await fetch(`${baseUrl}/api/hosted-share/internal/create`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({
+      pack: input.pack,
+      expiresInHours: input.expiresInHours,
+      inviteCode: input.inviteCode,
+      recipientPhoneNumber: input.recipientPhoneNumber,
+      senderMemberId: input.senderMemberId,
+    }),
+  })
+  const payload = await response.json()
+
+  if (!response.ok) {
+    throw new Error(
+      typeof payload?.error?.message === 'string'
+        ? payload.error.message
+        : 'Hosted share link creation failed.',
+    )
+  }
+
+  return payload
+}
+
+function normalizeHostedShareApiBaseUrl(value: string | null): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+
+  const url = new URL(normalized)
+  url.hash = ''
+  url.search = ''
+  return url.toString().replace(/\/$/u, '')
+}
+
+function normalizeHostedShareApiToken(value: string | null): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : null
 }
 
 async function writeAssistantPayloadFile(

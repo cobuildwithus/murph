@@ -3,6 +3,11 @@ import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:f
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { test, vi } from 'vitest'
+import {
+  initializeVault,
+  upsertFood,
+  upsertProtocolItem,
+} from '@healthybob/core'
 import type { AssistantAskResult } from '../src/assistant-cli-contracts.js'
 import { writeAssistantChatResultArtifacts } from '../src/assistant/automation/artifacts.js'
 import {
@@ -935,6 +940,205 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
       vendor: 'Neighborhood Acai Bar',
     })
   } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('createDefaultAssistantToolCatalog share-link tool exports attached protocols and posts the hosted request', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-share-tools-'))
+  const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
+  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
+  const originalFetch = global.fetch
+  let recordedRequest:
+    | {
+        body: Record<string, unknown>
+        headers: Headers
+        url: string
+      }
+    | undefined
+
+  process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
+  process.env.HOSTED_SHARE_INTERNAL_TOKEN = 'share-token'
+  global.fetch = vi.fn(async (input, init) => {
+    recordedRequest = {
+      body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      headers: new Headers(init?.headers),
+      url: String(input),
+    }
+
+    return new Response(
+      JSON.stringify({
+        shareCode: 'share_123',
+        shareUrl: 'https://share.example.test/share/share_123',
+        url: 'https://share.example.test/share/share_123',
+      }),
+      {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        status: 200,
+      },
+    )
+  }) as typeof global.fetch
+
+  try {
+    await initializeVault({ vaultRoot })
+    const creatine = await upsertProtocolItem({
+      vaultRoot,
+      title: 'Creatine monohydrate',
+      kind: 'supplement',
+      group: 'supplement',
+      startedOn: '2026-03-01',
+      schedule: 'daily',
+    })
+    await upsertFood({
+      vaultRoot,
+      title: 'Morning Smoothie',
+      kind: 'smoothie',
+      attachedProtocolIds: [creatine.record.protocolId],
+    })
+
+    const catalog = createDefaultAssistantToolCatalog(
+      {
+        requestId: 'req_share',
+        vault: vaultRoot,
+        vaultServices: createStubVaultServices(),
+      },
+      { includeQueryTools: false },
+    )
+
+    assert.equal(catalog.hasTool('vault.share.createLink'), true)
+
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.share.createLink',
+          input: {
+            foods: [{ slug: 'morning-smoothie' }],
+            includeAttachedProtocols: true,
+            logMeal: {
+              food: { slug: 'morning-smoothie' },
+            },
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'succeeded')
+    assert.equal(recordedRequest?.url, 'https://share.example.test/api/hosted-share/internal/create')
+    assert.equal(recordedRequest?.headers.get('authorization'), 'Bearer share-token')
+    assert.equal(recordedRequest?.body.shareCode, undefined)
+    assert.equal(recordedRequest?.body.senderMemberId, null)
+    assert.equal((recordedRequest?.body.pack as { title?: string })?.title, 'Morning Smoothie')
+    assert.equal(
+      Array.isArray((recordedRequest?.body.pack as { entities?: unknown[] })?.entities),
+      true,
+    )
+    assert.equal(
+      ((recordedRequest?.body.pack as {
+        entities?: Array<{ kind: string; payload?: { attachedProtocolRefs?: string[] } }>
+      })?.entities ?? []).some(
+        (entity) =>
+          entity.kind === 'food'
+          && Array.isArray(entity.payload?.attachedProtocolRefs)
+          && entity.payload.attachedProtocolRefs.length === 1,
+      ),
+      true,
+    )
+    assert.deepEqual(results[0]?.result, {
+      shareCode: 'share_123',
+      shareUrl: 'https://share.example.test/share/share_123',
+      url: 'https://share.example.test/share/share_123',
+    })
+  } finally {
+    if (originalBaseUrl === undefined) {
+      delete process.env.HOSTED_SHARE_API_BASE_URL
+    } else {
+      process.env.HOSTED_SHARE_API_BASE_URL = originalBaseUrl
+    }
+
+    if (originalToken === undefined) {
+      delete process.env.HOSTED_SHARE_INTERNAL_TOKEN
+    } else {
+      process.env.HOSTED_SHARE_INTERNAL_TOKEN = originalToken
+    }
+
+    global.fetch = originalFetch
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API errors', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-share-tools-error-'))
+  const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
+  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
+  const originalFetch = global.fetch
+
+  process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
+  process.env.HOSTED_SHARE_INTERNAL_TOKEN = 'share-token'
+  global.fetch = vi.fn(async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          message: 'Hosted share link creation failed upstream.',
+        },
+      }),
+      {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        status: 502,
+      },
+    ),
+  ) as typeof global.fetch
+
+  try {
+    await initializeVault({ vaultRoot })
+    await upsertFood({
+      vaultRoot,
+      title: 'Morning Smoothie',
+      kind: 'smoothie',
+    })
+
+    const catalog = createDefaultAssistantToolCatalog(
+      {
+        requestId: 'req_share_error',
+        vault: vaultRoot,
+        vaultServices: createStubVaultServices(),
+      },
+      { includeQueryTools: false },
+    )
+
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.share.createLink',
+          input: {
+            foods: [{ slug: 'morning-smoothie' }],
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'failed')
+    assert.equal(results[0]?.errorCode, 'ASSISTANT_TOOL_EXECUTION_FAILED')
+    assert.match(results[0]?.errorMessage ?? '', /Hosted share link creation failed upstream\./u)
+  } finally {
+    if (originalBaseUrl === undefined) {
+      delete process.env.HOSTED_SHARE_API_BASE_URL
+    } else {
+      process.env.HOSTED_SHARE_API_BASE_URL = originalBaseUrl
+    }
+
+    if (originalToken === undefined) {
+      delete process.env.HOSTED_SHARE_INTERNAL_TOKEN
+    } else {
+      process.env.HOSTED_SHARE_INTERNAL_TOKEN = originalToken
+    }
+
+    global.fetch = originalFetch
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })

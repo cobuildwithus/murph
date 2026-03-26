@@ -615,6 +615,7 @@ export async function createHostedBillingCheckout(input: {
   now?: Date;
   prisma?: PrismaClient;
   sessionRecord: HostedSessionRecord;
+  shareCode?: string | null;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -643,7 +644,7 @@ export async function createHostedBillingCheckout(input: {
     stripe,
   });
   const checkoutSession = await stripe.checkout.sessions.create({
-    cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode),
+    cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, normalizeNullableString(input.shareCode)),
     client_reference_id: invite.member.id,
     customer: customerId,
     line_items: [
@@ -659,7 +660,7 @@ export async function createHostedBillingCheckout(input: {
       normalizedPhoneNumber: invite.member.normalizedPhoneNumber,
     },
     mode: billingMode,
-    success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode),
+    success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode, normalizeNullableString(input.shareCode)),
   });
 
   if (!checkoutSession.url) {
@@ -825,7 +826,7 @@ async function findHostedInviteByCode(inviteCode: string, prisma: PrismaClient) 
 }
 
 async function ensureHostedMemberForPhone(input: {
-  linqChatId: string;
+  linqChatId: string | null;
   normalizedPhoneNumber: string;
   originalPhoneNumber: string;
   prisma: PrismaClient;
@@ -874,8 +875,8 @@ async function ensureHostedMemberForPhone(input: {
 }
 
 async function issueHostedInvite(input: {
-  linqChatId: string;
-  linqEventId: string;
+  linqChatId: string | null;
+  linqEventId: string | null;
   memberId: string;
   prisma: PrismaClient;
   triggerText: string | null;
@@ -907,6 +908,7 @@ async function issueHostedInvite(input: {
         id: existingInvite.id,
       },
       data: {
+        channel: input.linqChatId ? "linq" : "share",
         linqChatId: input.linqChatId,
         linqEventId: input.linqEventId,
         triggerText: input.triggerText,
@@ -920,13 +922,49 @@ async function issueHostedInvite(input: {
       memberId: input.memberId,
       inviteCode: generateHostedInviteCode(),
       status: HostedInviteStatus.pending,
-      channel: "linq",
+      channel: input.linqChatId ? "linq" : "share",
       triggerText: input.triggerText,
       linqChatId: input.linqChatId,
       linqEventId: input.linqEventId,
       expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
     },
   });
+}
+
+export async function issueHostedInviteForPhone(input: {
+  phoneNumber: string;
+  prisma?: PrismaClient;
+}): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMember }> {
+  const prisma = input.prisma ?? getPrisma();
+  const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+
+  if (!normalizedPhoneNumber) {
+    throw hostedOnboardingError({
+      code: "PHONE_NUMBER_INVALID",
+      message: "A valid phone number is required to issue a hosted invite.",
+      httpStatus: 400,
+    });
+  }
+
+  const member = await ensureHostedMemberForPhone({
+    linqChatId: null,
+    normalizedPhoneNumber,
+    originalPhoneNumber: input.phoneNumber,
+    prisma,
+  });
+  const invite = await issueHostedInvite({
+    linqChatId: member.linqChatId,
+    linqEventId: null,
+    memberId: member.id,
+    prisma,
+    triggerText: null,
+  });
+
+  return {
+    invite,
+    inviteUrl: buildHostedInviteUrl(invite.inviteCode),
+    member,
+  };
 }
 
 function buildHostedInviteUrl(inviteCode: string): string {

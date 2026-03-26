@@ -23,6 +23,7 @@ export default defineConfig({
       "packages/core/test/device-import.test.ts",
       "packages/core/test/health-bank.test.ts",
       "packages/core/test/profile.test.ts",
+      "packages/core/test/share-pack.test.ts",
       "packages/core/test/health-history-family.test.ts",
       "packages/core/test/ids.test.ts",
       "packages/importers/test/device-providers.test.ts",

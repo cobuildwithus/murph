@@ -4,22 +4,20 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   type HostedExecutionDispatchRequest,
+  type HostedExecutionUserStatus,
 } from "@healthybob/runtime-state";
 
 import { readHostedExecutionDispatchEnvironment } from "./env";
 
 const HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = 2_000;
 
-export async function dispatchHostedExecution(
+export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,
-): Promise<{ dispatched: boolean; reason?: string }> {
+): Promise<HostedExecutionUserStatus> {
   const environment = readHostedExecutionDispatchEnvironment();
 
   if (!environment.dispatchUrl || !environment.signingSecret) {
-    return {
-      dispatched: false,
-      reason: "not-configured",
-    };
+    return buildHostedExecutionNotConfiguredStatus(input.event.userId);
   }
 
   const payload = JSON.stringify(input);
@@ -42,6 +40,23 @@ export async function dispatchHostedExecution(
   if (!response.ok) {
     throw new Error(`Hosted execution dispatch failed with HTTP ${response.status}.`);
   }
+
+  return (await response.json()) as HostedExecutionUserStatus;
+}
+
+export async function dispatchHostedExecution(
+  input: HostedExecutionDispatchRequest,
+): Promise<{ dispatched: boolean; reason?: string }> {
+  const environment = readHostedExecutionDispatchEnvironment();
+
+  if (!environment.dispatchUrl || !environment.signingSecret) {
+    return {
+      dispatched: false,
+      reason: "not-configured",
+    };
+  }
+
+  await dispatchHostedExecutionStatus(input);
 
   return {
     dispatched: true,
@@ -67,6 +82,24 @@ export async function dispatchHostedExecutionBestEffort(
       reason: "dispatch-failed",
     };
   }
+}
+
+function buildHostedExecutionNotConfiguredStatus(userId: string): HostedExecutionUserStatus {
+  return {
+    bundleRefs: {
+      agentState: null,
+      vault: null,
+    },
+    inFlight: false,
+    lastError: "Hosted execution dispatch is not configured.",
+    lastEventId: null,
+    lastRunAt: null,
+    nextWakeAt: null,
+    pendingEventCount: 0,
+    poisonedEventIds: [],
+    retryingEventId: null,
+    userId,
+  };
 }
 
 function createExecutionSignature(input: {

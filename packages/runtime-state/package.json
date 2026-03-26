@@ -29,5 +29,8 @@
   },
   "engines": {
     "node": ">=22.16.0"
+  },
+  "dependencies": {
+    "@healthybob/contracts": "workspace:*"
   }
 }

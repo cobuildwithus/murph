@@ -1,3 +1,5 @@
+import type { SharePack } from "@healthybob/contracts";
+
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hb-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hb-execution-timestamp";
 
@@ -5,7 +7,8 @@ export type HostedExecutionEventKind =
   | "member.activated"
   | "linq.message.received"
   | "assistant.cron.tick"
-  | "device-sync.wake";
+  | "device-sync.wake"
+  | "vault.share.accepted";
 
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
@@ -37,11 +40,18 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
 }
 
+export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionBaseEvent {
+  kind: "vault.share.accepted";
+  shareCode: string;
+  pack: SharePack;
+}
+
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionLinqMessageReceivedEvent
   | HostedExecutionAssistantCronTickEvent
-  | HostedExecutionDeviceSyncWakeEvent;
+  | HostedExecutionDeviceSyncWakeEvent
+  | HostedExecutionVaultShareAcceptedEvent;
 
 export interface HostedExecutionDispatchRequest {
   event: HostedExecutionEvent;

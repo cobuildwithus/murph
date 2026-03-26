@@ -310,6 +310,30 @@ model HostedBillingCheckout {
   @@map("hosted_billing_checkout")
 }
 
+model HostedShareLink {
+  id                 String   @id
+  codeHash           String   @unique @map("code_hash")
+  senderMemberId     String?  @map("sender_member_id")
+  previewTitle       String   @map("preview_title")
+  previewJson        Json?    @map("preview_json")
+  encryptedPayload   String   @map("encrypted_payload")
+  encryptionKeyVersion String @map("encryption_key_version")
+  expiresAt          DateTime @map("expires_at")
+  acceptedAt         DateTime? @map("accepted_at")
+  acceptedByMemberId String?  @map("accepted_by_member_id")
+  consumedAt         DateTime? @map("consumed_at")
+  consumedByMemberId String?  @map("consumed_by_member_id")
+  lastEventId        String?  @map("last_event_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@index([senderMemberId, createdAt])
+  @@index([expiresAt])
+  @@index([acceptedByMemberId, acceptedAt])
+  @@index([consumedByMemberId, consumedAt])
+  @@map("hosted_share_link")
+}
+
 model HostedWebhookReceipt {
   source          String
   eventId         String   @map("event_id")

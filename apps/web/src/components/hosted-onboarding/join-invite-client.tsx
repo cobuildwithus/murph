@@ -1,21 +1,25 @@
 "use client";
 
-import { type CSSProperties, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { Authentication, Registration } from "webauthx/client";
 
+import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 interface JoinInviteClientProps {
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
+  shareCode: string | null;
+  sharePreview: HostedSharePreview | null;
 }
 
-export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClientProps) {
+export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePreview }: JoinInviteClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<
-    "register" | "authenticate" | "checkout" | "logout" | null
+    "register" | "authenticate" | "checkout" | "logout" | "share" | null
   >(null);
+  const [shareImported, setShareImported] = useState(false);
 
   const title = useMemo(() => {
     switch (status.stage) {
@@ -54,6 +58,14 @@ export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClient
         return "Healthy Bob hosted onboarding";
     }
   }, [status.invite?.phoneHint, status.stage]);
+
+  useEffect(() => {
+    if (!shareCode || shareImported || status.stage !== "active") {
+      return;
+    }
+
+    void handleAcceptShare();
+  }, [shareCode, shareImported, status.stage]);
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
     const response = await fetch(`/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/status`, {
@@ -140,7 +152,10 @@ export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClient
     try {
       const payload = await postJson<{ alreadyActive: boolean; url: string | null }>(
         "/api/hosted-onboarding/billing/checkout",
-        { inviteCode },
+        {
+          inviteCode,
+          shareCode,
+        },
       );
 
       if (payload.alreadyActive) {
@@ -153,6 +168,27 @@ export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClient
       }
 
       window.location.assign(payload.url);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleAcceptShare() {
+    if (!shareCode || shareImported) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setPendingAction("share");
+
+    try {
+      await postJson<{ imported: boolean; alreadyImported?: boolean }>(
+        `/api/hosted-share/${encodeURIComponent(shareCode)}/accept`,
+        {},
+      );
+      setShareImported(true);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -248,6 +284,35 @@ export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClient
             </div>
           ) : null}
 
+          {sharePreview ? (
+            <div
+              style={{
+                borderRadius: "1rem",
+                border: "1px solid rgba(59, 130, 246, 0.18)",
+                background: "rgba(239, 246, 255, 0.9)",
+                padding: "0.95rem 1rem",
+                display: "grid",
+                gap: "0.4rem",
+                lineHeight: 1.5,
+              }}
+            >
+              <strong>Add after signup: {sharePreview.title}</strong>
+              <span>
+                {[
+                  sharePreview.counts.foods ? `${sharePreview.counts.foods} foods` : null,
+                  sharePreview.counts.protocols ? `${sharePreview.counts.protocols} protocols` : null,
+                  sharePreview.counts.recipes ? `${sharePreview.counts.recipes} recipes` : null,
+                ].filter(Boolean).join(" · ")}
+              </span>
+              {sharePreview.protocolTitles.length > 0 ? (
+                <span>Protocols: {sharePreview.protocolTitles.join(", ")}</span>
+              ) : null}
+              {sharePreview.logMealAfterImport ? (
+                <span style={{ color: "rgb(2 132 199)" }}>Healthy Bob will also log the smoothie after import.</span>
+              ) : null}
+            </div>
+          ) : null}
+
           {status.session.authenticated && !status.session.matchesInvite ? (
             <div
               style={{
@@ -328,9 +393,27 @@ export function JoinInviteClient({ initialStatus, inviteCode }: JoinInviteClient
                 color: "rgb(21 128 61)",
                 padding: "1rem 1.05rem",
                 lineHeight: 1.6,
+                display: "grid",
+                gap: "0.75rem",
               }}
             >
-              Your hosted identity is active. The next step can layer in vault bootstrap and encrypted sync using the secret we already generated for this member.
+              <span>
+                Your hosted identity is active. The next step can layer in vault bootstrap and encrypted sync using the secret we already generated for this member.
+              </span>
+              {sharePreview ? (
+                shareImported ? (
+                  <span>{sharePreview.title} has been added to this hosted vault.</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAcceptShare}
+                    disabled={pendingAction !== null}
+                    style={primaryButtonStyle}
+                  >
+                    {pendingAction === "share" ? "Adding shared bundle..." : `Add ${sharePreview.title}`}
+                  </button>
+                )
+              ) : null}
             </div>
           ) : null}
         </div>

@@ -5,12 +5,13 @@ import { requireHostedSessionFromRequest } from "@/src/lib/hosted-onboarding/ses
 
 export async function POST(request: Request) {
   try {
-    const { inviteCode } = await requireHostedInviteCodeFromRequest(request);
+    const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);
     const sessionRecord = await requireHostedSessionFromRequest(request);
     return jsonOk(
       await createHostedBillingCheckout({
         inviteCode,
         sessionRecord,
+        ...(typeof body.shareCode === "string" ? { shareCode: body.shareCode } : {}),
       }),
     );
   } catch (error) {

@@ -21,6 +21,7 @@
     "healthybob": "workspace:*",
     "@healthybob/inboxd": "workspace:*",
     "@healthybob/parsers": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*"
+    "@healthybob/runtime-state": "workspace:*",
+    "@healthybob/core": "workspace:*"
   }
 }

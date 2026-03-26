@@ -54,6 +54,7 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
+- `HOSTED_SHARE_INTERNAL_TOKEN` for server-to-server share-link issuance from the assistant or other trusted callers
 
 Hosted onboarding extras:
 
@@ -160,6 +161,9 @@ This repo now also includes a first hosted onboarding lane for phone-bound invit
 - `POST /api/hosted-onboarding/session/logout`
 - `GET|POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
+- `GET /share/:shareCode`
+- `POST /api/hosted-share/:shareCode/accept`
+- `POST /api/hosted-share/internal/create`
 
 The onboarding lane is intentionally thin:
 
@@ -168,4 +172,5 @@ The onboarding lane is intentionally thin:
 - passkeys create/authenticate that hosted member through a `webauthx`-backed server/client ceremony wrapper with short-lived single-use challenges stored server-side
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
-- once a member is active, hosted onboarding dispatches signed internal execution events to `apps/cloudflare` for member activation, direct Linq messages, and later scheduled assistant ticks instead of trying to run the inbox/assistant loop inside Next.js
+- hosted share links can now store an encrypted one-time share pack for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation
+- once a member is active, hosted onboarding and hosted share acceptance dispatch signed internal execution events to `apps/cloudflare` for member activation, shared-bundle imports, direct Linq messages, and later scheduled assistant ticks instead of trying to run the inbox/assistant loop inside Next.js

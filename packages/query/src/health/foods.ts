@@ -20,6 +20,7 @@ export interface FoodQueryRecord extends RegistryMarkdownRecord {
   ingredients: string[];
   tags: string[];
   note: string | null;
+  attachedProtocolIds: string[];
   autoLogDaily: FoodAutoLogDailyQueryRule | null;
 }
 
@@ -50,6 +51,7 @@ const foodQueries = createRegistryQueries<FoodQueryRecord>({
       ingredients: firstStringArray(attributes, ["ingredients"]),
       tags: firstStringArray(attributes, ["tags"]),
       note: firstString(attributes, ["note"]),
+      attachedProtocolIds: firstStringArray(attributes, ["attachedProtocolIds"]),
       autoLogDaily: readFoodAutoLogDailyRule(attributes),
     };
   },

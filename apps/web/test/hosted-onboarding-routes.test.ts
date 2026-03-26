@@ -205,6 +205,33 @@ describe("hosted onboarding passkey routes", () => {
     });
   });
 
+  it("forwards share state through the hosted billing checkout route when present", async () => {
+    const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+      body: JSON.stringify({
+        inviteCode: "invite-code",
+        shareCode: "share_123",
+      }),
+      method: "POST",
+    });
+
+    const response = await billingCheckoutRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireHostedSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
+      inviteCode: "invite-code",
+      shareCode: "share_123",
+      sessionRecord: {
+        member: { id: "member_123" },
+        session: { id: "session_123" },
+      },
+    });
+    await expect(response.json()).resolves.toEqual({
+      checkoutUrl: "https://billing.example.test/session_123",
+    });
+  });
+
   it("revokes the current hosted session record on logout before clearing the cookie", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/session/logout", {
       headers: {

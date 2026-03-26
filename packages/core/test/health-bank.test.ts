@@ -13,6 +13,7 @@ import {
   listGoals,
   listProviders,
   listRecipes,
+  listWorkoutFormats,
   listProtocolItems,
   readAllergy,
   readCondition,
@@ -20,6 +21,7 @@ import {
   readGoal,
   readProvider,
   readRecipe,
+  readWorkoutFormat,
   readProtocolItem,
   stopProtocolItem,
   upsertAllergy,
@@ -28,6 +30,7 @@ import {
   upsertGoal,
   upsertProvider,
   upsertRecipe,
+  upsertWorkoutFormat,
   upsertProtocolItem,
 } from "../src/bank/index.js";
 
@@ -390,6 +393,130 @@ test("foods use first-class markdown registry reads for regular meals and staple
   );
 });
 
+test("workout formats use first-class markdown registry reads for repeated sessions", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-workout-format-registry");
+  await initializeVault({ vaultRoot });
+
+  const createdFormat = await upsertWorkoutFormat({
+    vaultRoot,
+    title: "Upper Body A",
+    slug: "upper-body-a",
+    status: "active",
+    summary: "Default upper-body strength session I repeat most weeks.",
+    activityType: "strength training",
+    durationMinutes: 45,
+    strengthExercises: [
+      {
+        exercise: "pushups",
+        setCount: 4,
+        repsPerSet: 20,
+      },
+      {
+        exercise: "incline bench",
+        setCount: 4,
+        repsPerSet: 12,
+        load: 65,
+        loadUnit: "lb",
+        loadDescription: "45 lb bar plus 10 lb plates on both sides",
+      },
+    ],
+    tags: ["gym", "strength"],
+    note: "Usual upper-body session.",
+  });
+  const updatedFormat = await upsertWorkoutFormat({
+    vaultRoot,
+    workoutFormatId: createdFormat.record.workoutFormatId,
+    title: "Upper Body A",
+    summary: "Default upper-body lift with push and incline bench work.",
+    activityType: "strength-training",
+    durationMinutes: 50,
+    strengthExercises: [
+      {
+        exercise: "pushups",
+        setCount: 4,
+        repsPerSet: 20,
+      },
+      {
+        exercise: "incline bench",
+        setCount: 5,
+        repsPerSet: 10,
+        load: 65,
+        loadUnit: "lb",
+        loadDescription: "45 lb bar plus 10 lb plates on both sides",
+      },
+    ],
+    tags: ["gym", "strength"],
+    note: "Usual upper-body session.",
+  });
+  const secondFormat = await upsertWorkoutFormat({
+    vaultRoot,
+    title: "Half Marathon",
+    slug: "half-marathon",
+    status: "archived",
+    activityType: "running",
+    distanceKm: 21.1,
+    tags: ["race"],
+  });
+
+  const listedFormats = await listWorkoutFormats(vaultRoot);
+  const readFormatById = await readWorkoutFormat({
+    vaultRoot,
+    workoutFormatId: createdFormat.record.workoutFormatId,
+  });
+  const readFormatBySlug = await readWorkoutFormat({
+    vaultRoot,
+    slug: createdFormat.record.slug,
+  });
+  const workoutFormatMarkdown = await fs.readFile(
+    path.join(vaultRoot, updatedFormat.record.relativePath),
+    "utf8",
+  );
+
+  assert.equal(createdFormat.created, true);
+  assert.equal(updatedFormat.created, false);
+  assert.equal(updatedFormat.record.relativePath, createdFormat.record.relativePath);
+  assert.equal(updatedFormat.record.slug, createdFormat.record.slug);
+  assert.equal(listedFormats.length, 2);
+  assert.equal(readFormatById.workoutFormatId, createdFormat.record.workoutFormatId);
+  assert.equal(readFormatById.activityType, "strength-training");
+  assert.equal(readFormatById.durationMinutes, 50);
+  assert.equal(readFormatBySlug.workoutFormatId, createdFormat.record.workoutFormatId);
+  assert.equal(readFormatBySlug.summary, "Default upper-body lift with push and incline bench work.");
+  assert.equal(listedFormats[0]?.workoutFormatId, secondFormat.record.workoutFormatId);
+  assert.equal(listedFormats[1]?.workoutFormatId, createdFormat.record.workoutFormatId);
+  assert.match(workoutFormatMarkdown, /workoutFormatId:/u);
+  assert.match(workoutFormatMarkdown, /activityType: strength-training/u);
+  assert.match(workoutFormatMarkdown, /## Strength Exercises/u);
+  assert.match(workoutFormatMarkdown, /Default duration/u);
+
+  await assert.rejects(
+    () =>
+      upsertWorkoutFormat({
+        vaultRoot,
+        workoutFormatId: createdFormat.record.workoutFormatId,
+        slug: secondFormat.record.relativePath
+          .replace("bank/workout-formats/", "")
+          .replace(".md", ""),
+        title: "Upper Body A",
+        activityType: "strength-training",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_WORKOUT_FORMAT_CONFLICT",
+  );
+
+  await assert.rejects(
+    () =>
+      readWorkoutFormat({
+        vaultRoot,
+        slug: "missing-workout-format",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_WORKOUT_FORMAT_MISSING" &&
+      error.message === "Workout format was not found.",
+  );
+});
+
 test("conditions and allergies are stored as deterministic markdown registry pages", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-conditions");
   await initializeVault({ vaultRoot });
@@ -719,4 +846,116 @@ test("protocols support medication and supplement groups plus stop handling", as
   assert.equal(protocolOperations.filter((operation) => operation.operationType === "protocol_upsert").length, 3);
   assert.equal(protocolOperations.filter((operation) => operation.operationType === "protocol_stop").length, 1);
   assert.ok(protocolOperations.every((operation) => operation.status === "committed"));
+});
+
+test("protocol reads with conflicting protocolId and slug currently return the first sorted selector match", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-protocol-read-conflict");
+  await initializeVault({ vaultRoot });
+
+  const medication = await upsertProtocolItem({
+    vaultRoot,
+    title: "Magnesium glycinate medication",
+    slug: "magnesium-glycinate",
+    kind: "medication",
+    status: "active",
+    startedOn: "2026-02-01",
+  });
+  const supplement = await upsertProtocolItem({
+    vaultRoot,
+    title: "Magnesium glycinate supplement",
+    slug: "magnesium-glycinate-supplement",
+    kind: "supplement",
+    status: "active",
+    startedOn: "2026-02-02",
+  });
+
+  const readByConflictingSelectors = await readProtocolItem({
+    vaultRoot,
+    protocolId: supplement.record.protocolId,
+    slug: medication.record.slug,
+  });
+
+  assert.equal(readByConflictingSelectors.protocolId, medication.record.protocolId);
+  assert.equal(readByConflictingSelectors.group, "medication");
+});
+
+test("protocol reads reject ambiguous slugs across groups unless group is supplied", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-protocol-read-ambiguous-slug");
+  await initializeVault({ vaultRoot });
+
+  await upsertProtocolItem({
+    vaultRoot,
+    title: "Electrolyte support medication",
+    slug: "electrolyte-support",
+    kind: "medication",
+    group: "medication",
+    status: "active",
+    startedOn: "2026-02-01",
+  });
+  const supplement = await upsertProtocolItem({
+    vaultRoot,
+    title: "Electrolyte support supplement",
+    slug: "electrolyte-support",
+    kind: "supplement",
+    group: "supplement",
+    status: "active",
+    startedOn: "2026-02-02",
+  });
+
+  await assert.rejects(
+    () =>
+      readProtocolItem({
+        vaultRoot,
+        slug: "electrolyte-support",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_PROTOCOL_CONFLICT" &&
+      error.message === "slug resolves to multiple protocol records; include group.",
+  );
+
+  const readSupplement = await readProtocolItem({
+    vaultRoot,
+    slug: "electrolyte-support",
+    group: "supplement",
+  });
+
+  assert.equal(readSupplement.protocolId, supplement.record.protocolId);
+  assert.equal(readSupplement.group, "supplement");
+});
+
+test("protocol upserts reject ambiguous slugs across groups unless protocolId or group is supplied", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-protocol-upsert-ambiguous-slug");
+  await initializeVault({ vaultRoot });
+
+  await upsertProtocolItem({
+    vaultRoot,
+    title: "Vitamin D medication",
+    slug: "vitamin-d",
+    kind: "medication",
+    group: "medication",
+    status: "active",
+    startedOn: "2026-02-01",
+  });
+  await upsertProtocolItem({
+    vaultRoot,
+    title: "Vitamin D supplement",
+    slug: "vitamin-d",
+    kind: "supplement",
+    group: "supplement",
+    status: "active",
+    startedOn: "2026-02-02",
+  });
+
+  await assert.rejects(
+    () =>
+      upsertProtocolItem({
+        vaultRoot,
+        slug: "vitamin-d",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_PROTOCOL_CONFLICT" &&
+      error.message === "slug resolves to multiple protocol records; include group or protocolId.",
+  );
 });
