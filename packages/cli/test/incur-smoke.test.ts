@@ -416,6 +416,7 @@ test('food schedule schema exposes the recurring food options', async () => {
 test('food help exposes schedule and no longer exposes add-daily', async () => {
   const help = await runRawCli(['food', '--help'])
 
+  assert.match(help, /rename\s+Rename one remembered food while preserving its canonical id\./u)
   assert.match(help, /schedule\s+Schedule one remembered food for daily auto-log meal creation\./u)
   assert.doesNotMatch(help, /add-daily/u)
 })
@@ -430,7 +431,9 @@ test('profile show help exposes only the global format flag', async () => {
 
 test('health command help surfaces examples and hints through Incur metadata', async () => {
   const profileUpsertHelp = await runRawCli(['profile', 'upsert', '--help'])
+  const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
   const supplementUpsertHelp = await runRawCli(['supplement', 'upsert', '--help'])
+  const supplementRenameHelp = await runRawCli(['supplement', 'rename', '--help'])
   const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
   const profileRebuildHelp = await runRawCli(['profile', 'current', 'rebuild', '--help'])
   const protocolStopHelp = await runRawCli(['protocol', 'stop', '--help'])
@@ -444,8 +447,16 @@ test('health command help surfaces examples and hints through Incur metadata', a
     /--input accepts @file\.json or - so the CLI can load the structured profile snapshot payload from disk or stdin\./u,
   )
   assert.match(
+    foodRenameHelp,
+    /The previous food title is kept as an alias automatically so older operator language still resolves in the saved record\./u,
+  )
+  assert.match(
     supplementUpsertHelp,
     /--input accepts @file\.json or - so the CLI can load a supplement payload with product metadata and ingredients\./u,
+  )
+  assert.match(
+    supplementRenameHelp,
+    /Use the canonical supplement id or current slug; the CLI reuses the existing supplement record instead of creating a new one\./u,
   )
   assert.match(
     supplementCompoundListHelp,

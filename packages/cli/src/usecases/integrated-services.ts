@@ -71,6 +71,7 @@ import {
 import {
   addDailyFoodRecord,
   listFoodRecords,
+  renameFoodRecord,
   scaffoldFoodPayload,
   showFoodRecord,
   upsertFoodRecordFromInput,
@@ -101,6 +102,7 @@ import {
   unlinkJournalEventIds,
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
+import { toVaultCliError } from "./vault-usecase-helpers.js"
 
 const SUPPLEMENT_SCAFFOLD_PAYLOAD = Object.freeze({
   title: "Magnesium glycinate",
@@ -132,6 +134,15 @@ const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
   "path",
   "attributes",
 ])
+const SUPPLEMENT_ID_PATTERN = /^prot_[0-9A-Za-z]+$/u
+
+function slugifyLookup(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+}
 
 function firstRawString(value: unknown): string | null {
   return typeof value === "string" ? value : null
@@ -163,6 +174,85 @@ function toSupplementReadEntity(record: object) {
     links: buildEntityLinks({
       data,
     }),
+  }
+}
+
+async function renameSupplementRecord(input: CommandContext & {
+  lookup: string
+  title: string
+  slug?: string
+}) {
+  const { vault } = input
+  const lookup = input.lookup.trim()
+  const title = input.title.trim()
+  const slugInput = typeof input.slug === "string" ? input.slug.trim() || undefined : undefined
+
+  if (!title) {
+    throw new VaultCliError("contract_invalid", "title must be a non-empty string.")
+  }
+
+  const slug = slugInput ?? slugifyLookup(title)
+
+  const { core } = await loadIntegratedRuntime()
+
+  try {
+    const existing = await core.readProtocolItem({
+      vaultRoot: vault,
+      protocolId: SUPPLEMENT_ID_PATTERN.test(lookup) ? lookup : undefined,
+      slug: SUPPLEMENT_ID_PATTERN.test(lookup) ? undefined : lookup,
+      group: "supplement",
+    })
+
+    if (existing.kind !== "supplement") {
+      throw new VaultCliError("not_found", `No supplement found for "${input.lookup}".`)
+    }
+
+    const result = await core.upsertProtocolItem({
+      vaultRoot: vault,
+      protocolId: existing.protocolId,
+      slug,
+      allowSlugRename: true,
+      title,
+      kind: existing.kind,
+      status: existing.status,
+      startedOn: existing.startedOn,
+      stoppedOn: existing.stoppedOn,
+      substance: existing.substance,
+      dose: existing.dose,
+      unit: existing.unit,
+      schedule: existing.schedule,
+      brand: existing.brand,
+      manufacturer: existing.manufacturer,
+      servingSize: existing.servingSize,
+      ingredients: existing.ingredients,
+      relatedGoalIds: existing.relatedGoalIds,
+      relatedConditionIds: existing.relatedConditionIds,
+      group: existing.group,
+    })
+
+    return {
+      vault,
+      protocolId: String(result.record.protocolId),
+      lookupId: String(result.record.protocolId),
+      path: recordPath(result.record),
+      created: Boolean(result.created),
+    }
+  } catch (error) {
+    throw toVaultCliError(error, {
+      VAULT_PROTOCOL_MISSING: {
+        code: "not_found",
+        message: `No supplement found for "${input.lookup}".`,
+      },
+      VAULT_INVALID_INPUT: {
+        code: "contract_invalid",
+      },
+      VAULT_INVALID_PROTOCOL: {
+        code: "contract_invalid",
+      },
+      VAULT_PROTOCOL_CONFLICT: {
+        code: "conflict",
+      },
+    })
   }
 }
 
@@ -333,6 +423,13 @@ function createIntegratedCoreServices(): CoreWriteServices {
     }) {
       return upsertFoodRecordFromInput(input)
     },
+    async renameFood(input: CommandContext & {
+      lookup: string
+      title: string
+      slug?: string
+    }) {
+      return renameFoodRecord(input)
+    },
     async addDailyFood(input: CommandContext & {
       title: string
       time: string
@@ -416,6 +513,13 @@ function createIntegratedCoreServices(): CoreWriteServices {
         path: recordPath(result.record),
         created: Boolean(result.created),
       }
+    },
+    async renameSupplement(input: CommandContext & {
+      lookup: string
+      title: string
+      slug?: string
+    }) {
+      return renameSupplementRecord(input)
     },
     async rebuildCurrentProfile(input: CommandContext) {
       const { vault } = input
@@ -609,16 +713,10 @@ function createIntegratedQueryServices(): QueryServices {
         status: effectiveStatus,
       })
 
-      return {
-        vault: input.vault,
-        filters: {
-          status: effectiveStatus,
-          limit: input.limit,
-        },
-        items,
-        count: items.length,
-        nextCursor: null,
-      }
+      return asListEnvelope(input.vault, {
+        status: effectiveStatus,
+        limit: input.limit,
+      }, items)
     },
     async showDocument(input: CommandContext & {
       id: string
@@ -778,23 +876,17 @@ function createIntegratedQueryServices(): QueryServices {
         .slice(0, limit)
         .map(toGenericListItem)
 
-      return {
-        vault,
-        filters: {
-          recordType: recordTypes,
-          kind,
-          status,
-          stream: streams,
-          experiment,
-          from,
-          to,
-          tag: tags,
-          limit,
-        },
-        items,
-        count: items.length,
-        nextCursor: null,
-      }
+      return asListEnvelope(vault, {
+        recordType: recordTypes,
+        kind,
+        status,
+        stream: streams,
+        experiment,
+        from,
+        to,
+        tag: tags,
+        limit,
+      }, items)
     },
     async exportPack(input: CommandContext & {
       from: string

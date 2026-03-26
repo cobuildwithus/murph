@@ -481,6 +481,13 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       inputFile: string
     },
   ): Promise<FoodUpsertResult>
+  renameFood(
+    input: CommandContext & {
+      lookup: string
+      title: string
+      slug?: string
+    },
+  ): Promise<FoodUpsertResult>
   addDailyFood(
     input: CommandContext & {
       title: string
@@ -527,6 +534,13 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   upsertSupplement(
     input: CommandContext & {
       input: string
+    },
+  ): Promise<UpsertRecordResult & { protocolId: string }>
+  renameSupplement(
+    input: CommandContext & {
+      lookup: string
+      title: string
+      slug?: string
     },
   ): Promise<UpsertRecordResult & { protocolId: string }>
   stopProtocol(input: StopProtocolInput): Promise<StopProtocolResult>

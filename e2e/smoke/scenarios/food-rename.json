@@ -1,0 +1,10 @@
+{
+  "id": "food-rename",
+  "command": "vault-cli food rename <id> --vault <path> --title <title> [--slug <slug>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/food-schedule",
+  "purpose": "Documents the dedicated remembered-food rename path so operators can move titles and slugs without hand-authoring an upsert payload."
+}

@@ -15,7 +15,10 @@ import {
   dailyFoodTimeSchema,
   slugifyFoodLookup,
 } from './food-autolog.js'
-import { buildEntityLinks } from './shared.js'
+import {
+  asListEnvelope,
+  buildEntityLinks,
+} from './shared.js'
 import { toVaultCliError } from './vault-usecase-helpers.js'
 
 interface FoodAutoLogDailyReadModel {
@@ -27,6 +30,16 @@ interface FoodReadModel {
   slug: string
   title: string
   status: string
+  summary?: string
+  kind?: string
+  brand?: string
+  vendor?: string
+  location?: string
+  serving?: string
+  aliases?: string[]
+  ingredients?: string[]
+  tags?: string[]
+  note?: string
   autoLogDaily?: FoodAutoLogDailyReadModel | null
   relativePath: string
   markdown: string
@@ -40,6 +53,7 @@ interface FoodCoreRuntime {
     vaultRoot: string
     foodId?: string
     slug?: string
+    allowSlugRename?: boolean
     title?: string
     status?: string
     summary?: string
@@ -196,6 +210,66 @@ export async function upsertFoodRecordFromInput(input: {
     vault: input.vault,
     payload,
   })
+}
+
+export async function renameFoodRecord(input: {
+  vault: string
+  lookup: string
+  title: string
+  slug?: string
+}) {
+  const core = await loadFoodCoreRuntime()
+  const existing = await requireFoodRecord(input.vault, input.lookup)
+  const title = input.title.trim()
+  const slugInput = typeof input.slug === 'string' ? input.slug.trim() || undefined : undefined
+
+  if (!title) {
+    throw new VaultCliError('contract_invalid', 'title must be a non-empty string.')
+  }
+
+  const slug = slugInput ?? slugifyFoodLookup(title)
+
+  try {
+    const result = await core.upsertFood({
+      vaultRoot: input.vault,
+      foodId: existing.foodId,
+      slug,
+      allowSlugRename: true,
+      title,
+      status: existing.status,
+      summary: existing.summary,
+      kind: existing.kind,
+      brand: existing.brand,
+      vendor: existing.vendor,
+      location: existing.location,
+      serving: existing.serving,
+      aliases: mergeFoodAliases(existing.aliases, existing.title, title),
+      ingredients: existing.ingredients,
+      tags: existing.tags,
+      note: existing.note,
+      autoLogDaily: existing.autoLogDaily ?? undefined,
+    })
+
+    return {
+      vault: input.vault,
+      foodId: result.record.foodId,
+      lookupId: result.record.foodId,
+      path: result.record.relativePath,
+      created: result.created,
+    }
+  } catch (error) {
+    throw toVaultCliError(error, {
+      VAULT_INVALID_INPUT: {
+        code: 'contract_invalid',
+      },
+      VAULT_INVALID_FOOD: {
+        code: 'contract_invalid',
+      },
+      VAULT_FOOD_CONFLICT: {
+        code: 'conflict',
+      },
+    })
+  }
 }
 
 export async function addDailyFoodRecord(input: {
@@ -386,16 +460,10 @@ export async function listFoodRecords(input: {
       }
     })
 
-  return {
-    vault: input.vault,
-    filters: {
-      status: input.status ?? null,
-      limit: input.limit,
-    },
-    items,
-    count: items.length,
-    nextCursor: null,
-  }
+  return asListEnvelope(input.vault, {
+    status: input.status ?? null,
+    limit: input.limit,
+  }, items)
 }
 
 async function requireFoodRecord(vault: string, lookup: string) {
@@ -478,6 +546,33 @@ function isDailyFoodCronJobExpression(
   desiredExpression: string,
 ) {
   return schedule.kind === 'cron' && schedule.expression === desiredExpression
+}
+
+function mergeFoodAliases(
+  aliases: string[] | undefined,
+  previousTitle: string,
+  nextTitle: string,
+) {
+  const seen = new Set<string>()
+  const merged: string[] = []
+  const append = (value: string | undefined) => {
+    const trimmed = value?.trim()
+
+    if (!trimmed || trimmed === nextTitle || seen.has(trimmed)) {
+      return
+    }
+
+    seen.add(trimmed)
+    merged.push(trimmed)
+  }
+
+  aliases?.forEach(append)
+
+  if (previousTitle !== nextTitle) {
+    append(previousTitle)
+  }
+
+  return merged.length > 0 ? merged : undefined
 }
 
 function buildFoodData(food: FoodReadModel) {

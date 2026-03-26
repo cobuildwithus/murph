@@ -1,0 +1,10 @@
+{
+  "id": "supplement-rename",
+  "command": "vault-cli supplement rename <id> --vault <path> --title <title> [--slug <slug>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/experiment-create",
+  "purpose": "Documents the dedicated supplement rename path so operators can move product titles and slugs without a JSON payload round-trip."
+}

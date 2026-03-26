@@ -509,6 +509,77 @@ test.sequential(
 )
 
 test.sequential(
+  'food rename moves the record to the new slug while preserving the id and prior title alias',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-rename-'))
+    const foodPayloadPath = path.join(vaultRoot, 'food.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      await writeFile(
+        foodPayloadPath,
+        JSON.stringify({
+          title: 'Morning Supplement Mix',
+          slug: 'morning-supplement-mix',
+          status: 'active',
+          note: 'Bone broth protein, inulin, creatine, and coconut water.',
+          aliases: ['morning mix'],
+        }),
+        'utf8',
+      )
+
+      const created = await runSliceCli<{
+        foodId: string
+        path: string
+      }>([
+        'food',
+        'upsert',
+        '--input',
+        `@${foodPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(created.ok, true)
+
+      const renamed = await runSliceCli<{
+        foodId: string
+        path: string
+        created: boolean
+      }>([
+        'food',
+        'rename',
+        requireData(created).foodId,
+        '--title',
+        'Morning Protein Drink',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(renamed.ok, true)
+      assert.equal(requireData(renamed).foodId, requireData(created).foodId)
+      assert.equal(requireData(renamed).path, 'bank/foods/morning-protein-drink.md')
+      assert.equal(requireData(renamed).created, false)
+
+      await access(path.join(vaultRoot, 'bank/foods/morning-protein-drink.md'))
+      await assert.rejects(() => access(path.join(vaultRoot, 'bank/foods/morning-supplement-mix.md')))
+
+      const renamedMarkdown = await readFile(
+        path.join(vaultRoot, requireData(renamed).path),
+        'utf8',
+      )
+
+      assert.match(renamedMarkdown, /title: "Morning Protein Drink"/u)
+      assert.match(renamedMarkdown, /- morning mix/u)
+      assert.match(renamedMarkdown, /- Morning Supplement Mix/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'provider upsert/show/list, event upsert/show/list, and samples add work through the slice commands',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-provider-'))

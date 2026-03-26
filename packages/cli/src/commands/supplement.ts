@@ -13,6 +13,9 @@ import { localDateSchema, pathSchema } from "../vault-cli-contracts.js"
 import type { VaultCliServices } from "../vault-cli-services.js"
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
+const supplementSlugSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
 const statusOptionSchema = z
   .string()
   .min(1)
@@ -238,6 +241,42 @@ export function registerSupplementCommands(
             },
           },
         ]),
+      })
+    },
+  })
+
+  supplement.command('rename', {
+    args: z.object({
+      lookup: z.string().min(1).describe('Supplement id or slug to rename.'),
+    }),
+    description: 'Rename one supplement product while preserving its canonical id.',
+    examples: [
+      {
+        args: {
+          lookup: '<supplement-id>',
+        },
+        description: 'Rename a supplement and let the slug move with the new title.',
+        options: {
+          title: 'Morning Protein Drink',
+          vault: './vault',
+        },
+      },
+    ],
+    hint: 'Use the canonical supplement id or current slug; the CLI reuses the existing supplement record instead of creating a new one.',
+    options: withBaseOptions({
+      title: z.string().min(1).max(160).describe('New supplement title.'),
+      slug: supplementSlugSchema
+        .optional()
+        .describe('Optional stable slug override for the renamed supplement record.'),
+    }),
+    output: supplementUpsertResultSchema,
+    async run(context) {
+      return services.core.renameSupplement({
+        lookup: context.args.lookup,
+        title: context.options.title,
+        slug: context.options.slug,
+        vault: context.options.vault,
+        requestId: requestIdFromOptions(context.options),
       })
     },
   })

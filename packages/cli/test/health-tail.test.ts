@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -1290,6 +1290,90 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
         },
       ],
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test.sequential("supplement rename moves the product record to the new slug while preserving the id", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-supplement-rename-"));
+  const payloadPath = path.join(vaultRoot, "supplement.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: "Morning Supplement Mix",
+        kind: "supplement",
+        status: "active",
+        startedOn: "2026-03-10",
+        brand: "HB",
+        manufacturer: "Healthy Bob",
+      }),
+      "utf8",
+    );
+
+    const created = await runCli<{
+      protocolId: string;
+      path?: string;
+    }>([
+      "supplement",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(created.ok, true);
+
+    const renamed = await runCli<{
+      protocolId: string;
+      path?: string;
+      created: boolean;
+    }>([
+      "supplement",
+      "rename",
+      requireData(created).protocolId,
+      "--title",
+      "Morning Protein Drink",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(renamed.ok, true);
+    assert.equal(requireData(renamed).protocolId, requireData(created).protocolId);
+    assert.equal(requireData(renamed).created, false);
+    assert.match(requireData(renamed).path ?? "", /morning-protein-drink\.md$/u);
+
+    const renamedPath = requireData(renamed).path;
+    assert.equal(typeof renamedPath, "string");
+
+    await access(path.join(vaultRoot, String(renamedPath)));
+
+    const renamedMarkdown = await readFile(
+      path.join(vaultRoot, String(renamedPath)),
+      "utf8",
+    );
+    assert.match(renamedMarkdown, /title: "Morning Protein Drink"/u);
+
+    const showResult = await runCli<{
+      entity: {
+        id: string;
+        title: string | null;
+      };
+    }>([
+      "supplement",
+      "show",
+      "morning-protein-drink",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(showResult.ok, true);
+    assert.equal(requireData(showResult).entity.id, requireData(created).protocolId);
+    assert.equal(requireData(showResult).entity.title, "Morning Protein Drink");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

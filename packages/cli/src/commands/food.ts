@@ -13,6 +13,9 @@ import { dailyFoodTimeSchema } from '../usecases/food-autolog.js'
 import { createRegistryDocEntityGroup } from './health-command-factory.js'
 
 const foodStatusSchema = z.enum(FOOD_STATUSES)
+const foodSlugSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
 
 const foodScaffoldResultSchema = z.object({
   vault: pathSchema,
@@ -51,6 +54,42 @@ const foodListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
+function createFoodRenameCommandConfig(services: VaultCliServices) {
+  return {
+    args: z.object({
+      lookup: z.string().min(1).describe('Food id or slug to rename.'),
+    }),
+    description: 'Rename one remembered food while preserving its canonical id.',
+    hint: 'The previous food title is kept as an alias automatically so older operator language still resolves in the saved record.',
+    options: withBaseOptions({
+      title: z.string().min(1).max(160).describe('New remembered food title.'),
+      slug: foodSlugSchema
+        .optional()
+        .describe('Optional stable slug override for the renamed food record.'),
+    }),
+    output: foodUpsertResultSchema,
+    async run(context: {
+      args: {
+        lookup: string
+      }
+      options: {
+        vault: string
+        requestId?: string
+        title: string
+        slug?: string
+      }
+    }) {
+      return services.core.renameFood({
+        lookup: context.args.lookup,
+        title: context.options.title,
+        slug: context.options.slug,
+        requestId: requestIdFromOptions(context.options),
+        vault: context.options.vault,
+      })
+    },
+  }
+}
+
 function createFoodScheduleCommandConfig(services: VaultCliServices) {
   return {
     args: z.object({
@@ -66,9 +105,7 @@ function createFoodScheduleCommandConfig(services: VaultCliServices) {
         .max(4000)
         .optional()
         .describe('Optional remembered food note that will be used in the auto-logged meal entry.'),
-      slug: z
-        .string()
-        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
+      slug: foodSlugSchema
         .optional()
         .describe('Optional stable slug override for the remembered food record.'),
     }),
@@ -152,6 +189,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
     },
   })
 
+  food.command('rename', createFoodRenameCommandConfig(services))
   food.command('schedule', createFoodScheduleCommandConfig(services))
 
   cli.command(food)
