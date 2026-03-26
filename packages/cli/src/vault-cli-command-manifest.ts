@@ -304,6 +304,31 @@ export const vaultCliCommandDescriptors = [
     id: 'workout',
     bindingMode: 'none',
     rootCommandNames: ['workout'],
+    leafCommands: [
+      {
+        path: ['workout', 'add'],
+        description:
+          'Record one workout from a freeform note with lightweight structured inference.',
+      },
+      {
+        path: ['workout', 'format', 'save'],
+        description:
+          'Save or update one reusable workout format from a name plus workout text.',
+      },
+      {
+        path: ['workout', 'format', 'show'],
+        description: 'Show one saved workout format by name or slug.',
+      },
+      {
+        path: ['workout', 'format', 'list'],
+        description: 'List saved workout formats.',
+      },
+      {
+        path: ['workout', 'format', 'log'],
+        description:
+          'Log one dated workout from a saved workout format through the same canonical event path as workout add.',
+      },
+    ],
     register({ cli, services }) {
       registerWorkoutCommands(cli, services)
     },

@@ -70,6 +70,7 @@ export default defineConfig({
       "packages/cli/test/inbox-model-route.test.ts",
       "packages/cli/test/list-cursor-compat.test.ts",
       "packages/cli/test/cli-expansion-export-intake.test.ts",
+      "packages/cli/test/cli-expansion-workout.test.ts",
       "packages/cli/test/runtime.test.ts",
       "packages/cli/test/search-runtime.test.ts",
       "packages/cli/test/setup-channels.test.ts",

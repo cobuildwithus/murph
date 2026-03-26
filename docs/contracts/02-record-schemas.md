@@ -45,7 +45,7 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
 - Profile snapshot records:
   `schemaVersion`, `id`, `recordedAt`, `sourceAssessmentIds`, `sourceEventIds`, `profile`
 - Markdown frontmatter:
-  `CORE.md`, journal day pages, experiment pages, provider pages, food pages, and health registry pages each use a closed frontmatter schema
+  `CORE.md`, journal day pages, experiment pages, provider pages, food pages, workout-format pages, and health registry pages each use a closed or explicitly documented frontmatter schema
 
 Baseline does not define a standalone transform record family. `xfm_*` ids are batch identifiers surfaced by import flows and raw-path layout only.
 
@@ -104,6 +104,8 @@ Sample records may also carry optional `externalRef` provenance with the same sh
   `schemaVersion`, `docType`, `providerId`, `slug`, `title`, `status`, `specialty`, `organization`
 - Food frontmatter:
   `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`, optional `autoLogDaily.time`
+- Workout-format frontmatter (vault-local saved defaults, not a canonical event family):
+  `schemaVersion`, `docType`, `slug`, `title`, `text`, optional `type`, optional `durationMinutes`, optional `distanceKm`
 - Profile current frontmatter:
   `schemaVersion`, `docType`, `snapshotId`, `updatedAt`
 - Goal frontmatter:

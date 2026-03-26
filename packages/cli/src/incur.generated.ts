@@ -186,6 +186,10 @@ declare module 'incur' {
       'vault stats': { args: {}; options: { vault: string; requestId: string } }
       'vault update': { args: {}; options: { vault: string; requestId: string; title: string; timezone: string } }
       'workout add': { args: { text: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'workout format list': { args: {}; options: { vault: string; requestId: string; limit: number } }
+      'workout format log': { args: { name: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number; occurredAt: string; source: "manual" | "import" | "device" | "derived" } }
+      'workout format save': { args: { name: string; text: string }; options: { vault: string; requestId: string; duration: number; type: string; distanceKm: number } }
+      'workout format show': { args: { name: string }; options: { vault: string; requestId: string } }
     }
   }
 }

@@ -171,6 +171,7 @@ vault/
   bank/goals/<slug>.md
   bank/conditions/<slug>.md
   bank/allergies/<slug>.md
+  bank/workout-formats/<slug>.md
   bank/protocols/<group>/<slug>.md
   bank/family/<slug>.md
   bank/genetics/<slug>.md
@@ -277,6 +278,7 @@ VAULT=../../fixtures/demo-web-vault pnpm dev
 | `vault-cli meal add` | Copies meal attachments into `raw/meals/...`, writes an immutable raw manifest, and appends a meal event. |
 | `vault-cli meal show|list|manifest` | Lets operators follow `meal_*`/`evt_*` ids back to the event record and immutable raw manifest. |
 | `vault-cli workout add <text>` | Captures a freeform workout note as a canonical `activity_session` event with minimal structured inference plus optional overrides. |
+| `vault-cli workout format save|show|list|log` | Stores thin reusable workout defaults in `bank/workout-formats/*.md` and later logs them through the same canonical `activity_session` path as `workout add`. |
 | `vault-cli samples add` | Appends one or more manually curated sample records from a JSON payload without going through CSV import. |
 | `vault-cli samples import-csv <file>` | Copies a CSV into `raw/samples/...`, writes an immutable batch manifest, and appends sample records into sharded sample ledgers. |
 | `vault-cli samples show|list|batch show|batch list` | Adds first-class sample follow-up reads plus `xfm_*` import-batch inspection. |
@@ -460,6 +462,8 @@ The main write flows map cleanly onto the vault:
   copies photo/audio attachments into `raw/meals/...`, writes an immutable raw manifest with checksums/provenance, appends a `kind: "meal"` event, and appends an audit record
 - `workout add`
   parses one freeform workout note into the minimum canonical `activity_session` fields, preserves the original note text verbatim on the event, and appends one `evt_*` event record without introducing a separate workout ledger
+- `workout format save|show|list|log`
+  stores one reusable workout note plus optional defaults under `bank/workout-formats/<slug>.md` and later logs that saved note through the same canonical `activity_session` event path rather than a separate workout subsystem
 - `samples import-csv`
   copies the CSV into `raw/samples/...`, writes an immutable batch manifest with checksum/import config/row provenance, returns an `xfm_*` batch id, and appends `smp_*` records to stream-specific sample ledgers
 - `samples add`

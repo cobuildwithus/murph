@@ -2,9 +2,18 @@ import { Cli, z } from 'incur'
 import { withBaseOptions } from '../command-helpers.js'
 import {
   isoTimestampSchema,
+  showResultSchema,
   workoutAddResultSchema,
+  workoutFormatListResultSchema,
+  workoutFormatSaveResultSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
+import {
+  listWorkoutFormats,
+  logWorkoutFormat,
+  saveWorkoutFormat,
+  showWorkoutFormat,
+} from '../usecases/workout-format.js'
 import { addWorkoutRecord } from '../usecases/workout.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
@@ -107,5 +116,188 @@ export function registerWorkoutCommands(
     },
   })
 
+  const format = Cli.create('format', {
+    description:
+      'Saved workout-format defaults that feed the same canonical workout add pipeline.',
+  })
+
+  format.command('save', {
+    description:
+      'Save or update one reusable workout format from a name plus workout text.',
+    args: z.object({
+      name: z
+        .string()
+        .min(1)
+        .max(160)
+        .describe('Saved workout format name such as "Push Day A".'),
+      text: z
+        .string()
+        .min(1)
+        .max(4000)
+        .describe('Saved workout text that should later log through workout add.'),
+    }),
+    examples: [
+      {
+        description: 'Save one reusable strength workout format.',
+        args: {
+          name: 'Push Day A',
+          text: '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+        },
+        options: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'This stores thin reusable defaults only. Saved workout formats are validated up front by the same inference rules that power workout add so later logging stays on the canonical activity_session path.',
+    options: withBaseOptions({
+      duration: z
+        .number()
+        .int()
+        .positive()
+        .max(24 * 60)
+        .optional()
+        .describe(
+          'Optional default duration override in minutes when the saved note is missing or ambiguous.',
+        ),
+      type: z
+        .string()
+        .min(1)
+        .max(120)
+        .optional()
+        .describe(
+          'Optional default workout type override such as "run" or "strength training".',
+        ),
+      distanceKm: z
+        .number()
+        .positive()
+        .max(1_000)
+        .optional()
+        .describe('Optional default workout distance override in kilometers.'),
+    }),
+    output: workoutFormatSaveResultSchema,
+    async run({ args, options }) {
+      return saveWorkoutFormat({
+        vault: options.vault,
+        name: args.name,
+        text: args.text,
+        durationMinutes: options.duration,
+        activityType:
+          typeof options.type === 'string' ? options.type : undefined,
+        distanceKm:
+          typeof options.distanceKm === 'number'
+            ? options.distanceKm
+            : undefined,
+      })
+    },
+  })
+
+  format.command('show', {
+    description: 'Show one saved workout format by name or slug.',
+    args: z.object({
+      name: z
+        .string()
+        .min(1)
+        .max(160)
+        .describe('Saved workout format name or slug.'),
+    }),
+    options: withBaseOptions(),
+    output: showResultSchema,
+    async run({ args, options }) {
+      return showWorkoutFormat(options.vault, args.name)
+    },
+  })
+
+  format.command('list', {
+    description: 'List saved workout formats.',
+    args: z.object({}),
+    options: withBaseOptions({
+      limit: z.number().int().positive().max(200).default(50),
+    }),
+    output: workoutFormatListResultSchema,
+    async run({ options }) {
+      return listWorkoutFormats({
+        vault: options.vault,
+        limit: options.limit,
+      })
+    },
+  })
+
+  format.command('log', {
+    description:
+      'Log one dated workout from a saved workout format through the same canonical event path as workout add.',
+    args: z.object({
+      name: z
+        .string()
+        .min(1)
+        .max(160)
+        .describe('Saved workout format name or slug.'),
+    }),
+    examples: [
+      {
+        description: 'Log one saved workout format for today.',
+        args: {
+          name: 'Push Day A',
+        },
+        options: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'This is a thin source-of-defaults layer only. The saved workout text and defaults feed the exact same activity_session write path and strength inference behavior used by workout add.',
+    options: withBaseOptions({
+      duration: z
+        .number()
+        .int()
+        .positive()
+        .max(24 * 60)
+        .optional()
+        .describe('Optional duration override in minutes.'),
+      type: z
+        .string()
+        .min(1)
+        .max(120)
+        .optional()
+        .describe(
+          'Optional workout type override such as "run" or "strength training".',
+        ),
+      distanceKm: z
+        .number()
+        .positive()
+        .max(1_000)
+        .optional()
+        .describe('Optional workout distance override in kilometers.'),
+      occurredAt: isoTimestampSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe(
+          'Optional event source (`manual`, `import`, `device`, or `derived`).',
+        ),
+    }),
+    output: workoutAddResultSchema,
+    async run({ args, options }) {
+      return logWorkoutFormat({
+        vault: options.vault,
+        name: args.name,
+        durationMinutes: options.duration,
+        activityType:
+          typeof options.type === 'string' ? options.type : undefined,
+        distanceKm:
+          typeof options.distanceKm === 'number'
+            ? options.distanceKm
+            : undefined,
+        occurredAt:
+          typeof options.occurredAt === 'string'
+            ? options.occurredAt
+            : undefined,
+        source: typeof options.source === 'string' ? options.source : undefined,
+      })
+    },
+  })
+
+  workout.command(format)
   cli.command(workout)
 }

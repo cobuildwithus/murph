@@ -89,6 +89,10 @@ vault-cli document manifest <id> --vault <path> [--request-id <id>]
 vault-cli meal add --vault <path> [--photo <path>] [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli meal show <id> --vault <path> [--request-id <id>]
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
+vault-cli workout format show <name> --vault <path> [--request-id <id>]
+vault-cli workout format list --vault <path> [--limit <n>] [--request-id <id>]
+vault-cli workout format log <name> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--protocol-id <protocolId>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
 vault-cli meal manifest <id> --vault <path> [--request-id <id>]
@@ -191,7 +195,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `protocol` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `supplement` is a protocol-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` and `meal` are artifact-import nouns.
-- `workout` is a quick-capture noun layered on top of canonical `activity_session` events; it intentionally does not introduce a separate workout record family or follow-up read grammar.
+- `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
 - `intake` is an artifact-import noun that also exposes `raw` and `project`.
 - `samples` composes artifact import with batch inspection.
@@ -258,7 +262,7 @@ Every command now uses native `incur` command definitions directly:
 - `provider show` accepts either the canonical `prov_*` id or the stable provider slug stored in `bank/providers/<slug>.md`.
 - `food show` accepts either the canonical `food_*` id or the stable food slug stored in `bank/foods/<slug>.md`.
 - `recipe show` accepts either the canonical `rcp_*` id or the stable recipe slug stored in `bank/recipes/<slug>.md`.
-- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `history`, `blood-test`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add` and `intervention add` intentionally return the queryable event id and rely on `event show|list` plus generic `show|list` for follow-on reads.
+- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `history`, `blood-test`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add`, `workout format log`, and `intervention add` intentionally return the queryable event id and rely on `event show|list` plus generic `show|list` for follow-on reads.
 - `blood-test show` accepts the canonical `evt_*` id and may also resolve the stored blood test by its title, `testName`, or `labPanelId`.
 - Generic `show` still expects query-layer ids for event-backed records, but `document show`, `document manifest`, `meal show`, and `meal manifest` accept the stable `doc_*` and `meal_*` related ids as well as `evt_*`.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
@@ -405,6 +409,24 @@ The examples below are the full successful non-verbose `--format json` response 
 ```
 
 The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `activity_session` event plus optional duration, type, and distance fields for general workouts, and optional `strengthExercises` only when an explicit lifting note clearly names exercises, sets, reps, or load.
+
+### `workout format save`
+
+```json
+{
+  "vault": "<path>",
+  "name": "Push Day A",
+  "slug": "push-day-a",
+  "path": "bank/workout-formats/push-day-a.md",
+  "created": true
+}
+```
+
+Saved workout formats are vault-local Markdown docs only. They store a reusable workout note plus optional duration, type, and distance defaults, and they are validated up front by the same inference rules that power `workout add`.
+
+### `workout format log`
+
+`workout format log` returns the same payload shape as `workout add`. It loads one saved format, applies any explicit CLI overrides, and then writes the same canonical `activity_session` event path.
 
 ### `intervention add`
 
@@ -677,7 +699,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `food upsert`, `food schedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant cron state.
+- `provider upsert`, `food upsert`, `food schedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `profile current rebuild`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant cron state.
 - `show`, `list`, `search query`, `search index status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|paths|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

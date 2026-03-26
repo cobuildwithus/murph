@@ -64,6 +64,7 @@ readonly cli_verify_test_files=(
   "packages/cli/test/inbox-model-harness.test.ts"
   "packages/cli/test/inbox-model-route.test.ts"
   "packages/cli/test/search-runtime.test.ts"
+  "packages/cli/test/cli-expansion-workout.test.ts"
   "packages/cli/test/setup-cli.test.ts"
   "packages/cli/test/release-script-coverage-audit.test.ts"
   "packages/cli/test/release-workflow-guards.test.ts"

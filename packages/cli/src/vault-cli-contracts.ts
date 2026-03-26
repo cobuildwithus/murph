@@ -102,6 +102,24 @@ export const workoutAddResultSchema = z.object({
   note: z.string().min(1),
 })
 
+export const workoutFormatSaveResultSchema = z.object({
+  vault: pathSchema,
+  name: z.string().min(1),
+  slug: slugSchema,
+  path: pathSchema,
+  created: z.boolean(),
+})
+
+export const workoutFormatListResultSchema = z.object({
+  vault: pathSchema,
+  filters: z.object({
+    limit: z.number().int().positive().max(200),
+  }),
+  items: z.array(z.lazy(() => readEntitySchema)),
+  count: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
+})
+
 export const interventionAddResultSchema = z.object({
   vault: pathSchema,
   eventId: z.string().min(1),
@@ -205,6 +223,8 @@ export type VaultValidateResult = z.infer<typeof vaultValidateResultSchema>
 export type DocumentImportResult = z.infer<typeof documentImportResultSchema>
 export type MealAddResult = z.infer<typeof mealAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
+export type WorkoutFormatSaveResult = z.infer<typeof workoutFormatSaveResultSchema>
+export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
 export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
 export type SamplesImportCsvResult = z.infer<
   typeof samplesImportCsvResultSchema

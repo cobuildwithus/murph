@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -46,7 +46,28 @@ interface ShowEnvelope {
     title: string | null
     occurredAt: string | null
     data: Record<string, unknown>
+    path?: string | null
+    markdown?: string | null
   }
+}
+
+interface WorkoutFormatSaveEnvelope {
+  name: string
+  slug: string
+  path: string
+  created: boolean
+}
+
+interface WorkoutFormatListEnvelope {
+  items: Array<{
+    id: string
+    kind: string
+    title: string | null
+    path: string | null
+    data: Record<string, unknown>
+    markdown: string | null
+  }>
+  count: number
 }
 
 function createSliceCli() {
@@ -110,6 +131,175 @@ test('workout add help uses a positional text argument', async () => {
 
   assert.match(help, /Usage: vault-cli workout add <text> \[options\]/u)
 })
+
+test('workout format save help uses positional name and text arguments', async () => {
+  const help = await runSliceCliRaw(['workout', 'format', 'save', '--help'])
+
+  assert.match(
+    help,
+    /Usage: vault-cli workout format save <name> <text> \[options\]/u,
+  )
+})
+
+test.sequential(
+  'workout format save, show, list, and log stay thin while feeding the same canonical event path',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-format-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const saveFormat = await runCli<WorkoutFormatSaveEnvelope>([
+        'workout',
+        'format',
+        'save',
+        'Push Day A',
+        '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(saveFormat.ok, true)
+      assert.equal(saveFormat.meta?.command, 'workout format save')
+      assert.equal(requireData(saveFormat).name, 'Push Day A')
+      assert.equal(requireData(saveFormat).slug, 'push-day-a')
+      assert.equal(
+        requireData(saveFormat).path,
+        'bank/workout-formats/push-day-a.md',
+      )
+      assert.equal(requireData(saveFormat).created, true)
+
+      const savedMarkdownPath = path.join(vaultRoot, requireData(saveFormat).path)
+      const savedMarkdown = await readFile(savedMarkdownPath, 'utf8')
+      assert.match(savedMarkdown, /schemaVersion: hb\.frontmatter\.workout-format\.v1/u)
+      assert.match(savedMarkdown, /docType: workout_format/u)
+      assert.match(savedMarkdown, /slug: push-day-a/u)
+      assert.match(savedMarkdown, /## Saved workout text/u)
+
+      const showFormat = await runCli<ShowEnvelope>([
+        'workout',
+        'format',
+        'show',
+        'push-day-a',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(showFormat.ok, true)
+      assert.equal(requireData(showFormat).entity.kind, 'workout_format')
+      assert.equal(requireData(showFormat).entity.title, 'Push Day A')
+      assert.equal(
+        requireData(showFormat).entity.path,
+        'bank/workout-formats/push-day-a.md',
+      )
+      assert.equal(
+        requireData(showFormat).entity.data.text,
+        '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+      )
+
+      const listFormats = await runCli<WorkoutFormatListEnvelope>([
+        'workout',
+        'format',
+        'list',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(listFormats.ok, true)
+      assert.equal(requireData(listFormats).count, 1)
+      assert.equal(requireData(listFormats).items[0]?.kind, 'workout_format')
+      assert.equal(requireData(listFormats).items[0]?.title, 'Push Day A')
+      assert.equal(requireData(listFormats).items[0]?.markdown, null)
+
+      const logFormat = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'format',
+        'log',
+        'Push Day A',
+        '--occurred-at',
+        '2026-03-12T17:30:00Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(logFormat.ok, true)
+      assert.equal(logFormat.meta?.command, 'workout format log')
+      assert.equal(requireData(logFormat).kind, 'activity_session')
+      assert.equal(requireData(logFormat).activityType, 'strength-training')
+      assert.equal(requireData(logFormat).durationMinutes, 20)
+      assert.equal(requireData(logFormat).title, '20-minute strength training')
+      assert.deepEqual(requireData(logFormat).strengthExercises, [
+        {
+          exercise: 'pushups',
+          setCount: 4,
+          repsPerSet: 20,
+        },
+        {
+          exercise: 'incline bench',
+          setCount: 4,
+          repsPerSet: 12,
+          load: 65,
+          loadUnit: 'lb',
+          loadDescription: '45 lb bar plus 10 lb plates on both sides',
+        },
+      ])
+
+      const showLoggedWorkout = await runCli<ShowEnvelope>([
+        'event',
+        'show',
+        requireData(logFormat).lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(showLoggedWorkout.ok, true)
+      assert.equal(requireData(showLoggedWorkout).entity.kind, 'activity_session')
+      assert.equal(
+        requireData(showLoggedWorkout).entity.data.note,
+        '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'workout format save validates future loggability up front',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-format-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const invalidSavedFormat = await runCli([
+        'workout',
+        'format',
+        'save',
+        'Ambiguous Lift',
+        'Strength training for the last 20 or 30 minutes. Did like 80 push-ups and incline bench at 115 lb.',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(invalidSavedFormat.ok, false)
+      assert.equal(invalidSavedFormat.error.code, 'invalid_option')
+      assert.match(
+        invalidSavedFormat.error.message ?? '',
+        /Pass --duration <minutes> to record it explicitly/u,
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
 
 test.sequential(
   'workout add captures activity_session events and fails fast on ambiguous durations',

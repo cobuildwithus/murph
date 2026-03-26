@@ -200,6 +200,7 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'supplement compound',
   'vault',
   'workout',
+  'workout format',
 ])
 
 const COMMAND_PATHS_EXEMPT_FROM_VAULT = new Set([
