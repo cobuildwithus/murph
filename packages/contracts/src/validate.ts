@@ -4,7 +4,8 @@ import { ZodError } from "zod";
 import type { FrontmatterParseProblem } from "./frontmatter.js";
 import { parseFrontmatterDocument } from "./frontmatter.js";
 
-type FrontmatterValue = string | string[];
+type FrontmatterObjectValue = Record<string, string>;
+type FrontmatterValue = string | string[] | FrontmatterObjectValue;
 
 export type ContractSchema<TOutput = unknown> = ZodType<TOutput>;
 
@@ -115,6 +116,7 @@ function projectLegacyFrontmatterAttributes(
       continue;
     }
 
+    const objectEntries: FrontmatterObjectValue = {};
     const values: string[] = [];
     index += 1;
 
@@ -123,7 +125,24 @@ function projectLegacyFrontmatterAttributes(
       index += 1;
     }
 
-    result[key] = values;
+    if (values.length > 0) {
+      result[key] = values;
+      continue;
+    }
+
+    while (index < lines.length) {
+      const objectLine = lines[index] ?? "";
+      const objectMatch = /^  ([A-Za-z0-9]+):\s(.*)$/u.exec(objectLine);
+      if (!objectMatch) {
+        break;
+      }
+
+      const [, objectKey, objectValue] = objectMatch;
+      objectEntries[objectKey] = objectValue;
+      index += 1;
+    }
+
+    result[key] = Object.keys(objectEntries).length > 0 ? objectEntries : values;
   }
 
   return result;

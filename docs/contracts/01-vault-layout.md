@@ -71,7 +71,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
 - `bank/profile/current.md` is a derived current-state document rebuilt from profile snapshots; append-only truth remains in `ledger/profile-snapshots/`.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias.
-- `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists.
+- `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
 - `bank/protocols/**/*.md` allows nested protocol group folders, but every path segment must remain slug-safe ASCII.
 
 ## Attachment Conventions

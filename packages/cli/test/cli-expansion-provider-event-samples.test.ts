@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { listAssistantCronJobs } from '../src/assistant/cron.js'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerEventCommands } from '../src/commands/event.js'
@@ -414,6 +415,93 @@ test.sequential(
       assert.match(foodMarkdown, /foodId:/u)
       assert.match(foodMarkdown, /## Aliases/u)
       assert.match(foodMarkdown, /## Ingredients/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'food add-daily creates a remembered food plus a daily auto-log job',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-daily-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const foodAddDaily = await runSliceCli<{
+        foodId: string
+        path: string
+        created: boolean
+        time: string
+        jobId: string
+        jobName: string
+        nextRunAt: string | null
+      }>([
+        'food',
+        'add-daily',
+        'Morning Smoothie',
+        '--time',
+        '08:00',
+        '--note',
+        'Bone broth protein, inulin, prebiotic GOS, creatine, and coconut water.',
+        '--vault',
+        vaultRoot,
+      ])
+      const foodShow = await runSliceCli<{
+        entity: {
+          id: string
+          data: {
+            autoLogDaily?: {
+              time: string
+            } | null
+            note?: string
+          }
+        }
+      }>([
+        'food',
+        'show',
+        requireData(foodAddDaily).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const jobs = await listAssistantCronJobs(vaultRoot)
+
+      assert.equal(foodAddDaily.ok, true, JSON.stringify(foodAddDaily))
+      assert.equal(foodAddDaily.meta?.command, 'food add-daily')
+      assert.match(requireData(foodAddDaily).foodId, /^food_/u)
+      assert.equal(requireData(foodAddDaily).path, 'bank/foods/morning-smoothie.md')
+      assert.equal(requireData(foodAddDaily).created, true)
+      assert.equal(requireData(foodAddDaily).time, '08:00')
+      assert.equal(requireData(foodAddDaily).jobName, 'food-daily:morning-smoothie')
+      assert.equal(requireData(foodAddDaily).nextRunAt !== null, true)
+
+      assert.equal(foodShow.ok, true)
+      assert.equal(requireData(foodShow).entity.id, requireData(foodAddDaily).foodId)
+      assert.deepEqual(requireData(foodShow).entity.data.autoLogDaily, {
+        time: '08:00',
+      })
+      assert.equal(
+        requireData(foodShow).entity.data.note,
+        'Bone broth protein, inulin, prebiotic GOS, creatine, and coconut water.',
+      )
+
+      assert.equal(jobs.length, 1)
+      assert.equal(jobs[0]?.jobId, requireData(foodAddDaily).jobId)
+      assert.equal(jobs[0]?.name, 'food-daily:morning-smoothie')
+      assert.equal(jobs[0]?.schedule.kind, 'cron')
+      assert.equal(jobs[0]?.schedule.expression, '0 8 * * *')
+      assert.deepEqual(jobs[0]?.foodAutoLog, {
+        foodId: requireData(foodAddDaily).foodId,
+      })
+
+      const foodMarkdown = await readFile(
+        path.join(vaultRoot, requireData(foodAddDaily).path),
+        'utf8',
+      )
+      assert.match(foodMarkdown, /autoLogDaily:/u)
+      assert.match(foodMarkdown, /time: ['"]?08:00['"]?/u)
+      assert.match(foodMarkdown, /Auto-log daily/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

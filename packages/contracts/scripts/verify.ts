@@ -256,14 +256,17 @@ tags:
     tags: ["true", "42"],
   },
 );
-assert.throws(
-  () =>
-    parseFrontmatterMarkdown(`---
+assert.deepEqual(
+  parseFrontmatterMarkdown(`---
 details:
   nested: true
 ---
 `),
-  /Unsupported frontmatter line:   nested: true/,
+  {
+    details: {
+      nested: "true",
+    },
+  },
 );
 assert.throws(
   () =>

@@ -18,6 +18,7 @@ import {
   normalizeUpsertSelectorSlug,
   optionalEnum,
   optionalString,
+  requireObject,
   requireMatchingDocType,
   requireString,
   resolveOptionalUpsertValue,
@@ -28,12 +29,15 @@ import {
 
 import type { FrontmatterObject } from "../types.js";
 import type {
+  FoodAutoLogDailyRule,
   FoodRecord,
   FoodStatus,
   ReadFoodInput,
   UpsertFoodInput,
   UpsertFoodResult,
 } from "./types.js";
+
+const DAILY_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 function normalizeFoodTextList(
   value: unknown,
@@ -71,6 +75,26 @@ function normalizeFoodStatus(value: unknown): FoodStatus {
   return optionalEnum(value, FOOD_STATUSES, "status") ?? "active";
 }
 
+function normalizeFoodAutoLogDailyRule(
+  value: unknown,
+): FoodAutoLogDailyRule | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const object = requireObject(value, "autoLogDaily");
+  const time = requireString(object.time, "autoLogDaily.time", 5);
+
+  if (!DAILY_TIME_PATTERN.test(time)) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "autoLogDaily.time must use 24-hour HH:MM form.",
+    );
+  }
+
+  return { time };
+}
+
 function buildBody(record: FoodRecord): string {
   const sections = [
     record.summary ? section("Summary", record.summary) : null,
@@ -89,6 +113,7 @@ function buildBody(record: FoodRecord): string {
       ["Vendor", record.vendor],
       ["Location", record.location],
       ["Serving", record.serving],
+      ["Auto-log daily", record.autoLogDaily?.time],
     ]),
     sections,
   );
@@ -124,6 +149,7 @@ function parseFoodRecord(
     ingredients: normalizeFoodTextList(attributes.ingredients, "ingredients"),
     tags: normalizeDomainList(attributes.tags, "tags"),
     note: optionalString(attributes.note, "note", 4000),
+    autoLogDaily: normalizeFoodAutoLogDailyRule(attributes.autoLogDaily),
     relativePath,
     markdown,
   });
@@ -147,7 +173,8 @@ function buildAttributes(record: FoodRecord): FrontmatterObject {
     ingredients: record.ingredients,
     tags: record.tags,
     note: record.note,
-  }) as FrontmatterObject;
+    autoLogDaily: record.autoLogDaily,
+  }) as unknown as FrontmatterObject;
 }
 
 const foodRegistryApi = createMarkdownRegistryApi<FoodRecord>({
@@ -232,6 +259,11 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
           ),
           note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
             optionalString(value, "note", 4000),
+          ),
+          autoLogDaily: resolveOptionalUpsertValue(
+            input.autoLogDaily,
+            existingRecord?.autoLogDaily,
+            (value) => normalizeFoodAutoLogDailyRule(value),
           ),
         }) as FoodRecord,
       );

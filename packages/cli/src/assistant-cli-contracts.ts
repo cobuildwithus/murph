@@ -548,6 +548,12 @@ export const assistantCronJobStateSchema = z
   })
   .strict()
 
+export const assistantCronFoodAutoLogSchema = z
+  .object({
+    foodId: z.string().min(1),
+  })
+  .strict()
+
 export const assistantCronJobSchema = z
   .object({
     schema: z.literal('healthybob.assistant-cron-job.v1'),
@@ -558,6 +564,7 @@ export const assistantCronJobSchema = z
     prompt: z.string().min(1),
     schedule: assistantCronScheduleSchema,
     target: assistantCronTargetSchema,
+    foodAutoLog: assistantCronFoodAutoLogSchema.optional(),
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     state: assistantCronJobStateSchema,
@@ -881,6 +888,7 @@ export type AssistantMemoryForgetResult = z.infer<
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronTarget = z.infer<typeof assistantCronTargetSchema>
 export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
+export type AssistantCronFoodAutoLog = z.infer<typeof assistantCronFoodAutoLogSchema>
 export type AssistantCronJob = z.infer<typeof assistantCronJobSchema>
 export type AssistantCronRunRecord = z.infer<
   typeof assistantCronRunRecordSchema

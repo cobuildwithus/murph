@@ -7,6 +7,9 @@ import {
   type AssistantCronSchedule,
   type AssistantCronTrigger,
 } from '../assistant-cli-contracts.js'
+import { loadRuntimeModule } from '../runtime-import.js'
+import { renderAutoLoggedFoodMealNote } from '../usecases/food-autolog.js'
+import { loadImporterRuntime } from '../usecases/runtime.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { withAssistantCronWriteLock } from './cron/locking.js'
 import {
@@ -48,8 +51,28 @@ const ASSISTANT_CRON_JOB_SCHEMA = 'healthybob.assistant-cron-job.v1'
 const ASSISTANT_CRON_RUN_SCHEMA = 'healthybob.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 
+interface FoodAutoLogRecord {
+  foodId: string
+  title: string
+  summary?: string
+  serving?: string
+  ingredients?: string[]
+  note?: string
+}
+
+interface FoodAutoLogCoreRuntime {
+  readFood(input: {
+    vaultRoot: string
+    foodId?: string
+    slug?: string
+  }): Promise<FoodAutoLogRecord>
+}
+
 export interface AddAssistantCronJobInput extends AssistantCronTargetInput {
   enabled?: boolean
+  foodAutoLog?: {
+    foodId: string
+  }
   keepAfterRun?: boolean
   name: string
   now?: Date
@@ -187,6 +210,7 @@ export async function addAssistantCronJob(
       prompt,
       schedule: input.schedule,
       target: buildAssistantCronTarget(input),
+      foodAutoLog: input.foodAutoLog,
       createdAt: timestamp,
       updatedAt: timestamp,
       state: {
@@ -468,23 +492,30 @@ async function executeClaimedAssistantCronJob(input: {
       )
     }
 
-    const result = await sendAssistantMessage({
-      vault: input.vault,
-      prompt: input.job.prompt,
-      sessionId: input.job.target.sessionId ?? undefined,
-      alias: input.job.target.alias ?? undefined,
-      channel: input.job.target.channel ?? undefined,
-      identityId: input.job.target.identityId ?? undefined,
-      participantId: input.job.target.participantId ?? undefined,
-      sourceThreadId: input.job.target.sourceThreadId ?? undefined,
-      deliverResponse: input.job.target.deliverResponse,
-      deliveryTarget: input.job.target.deliveryTarget ?? undefined,
-      turnTrigger: 'automation-cron',
-      workingDirectory: input.vault,
-    })
+    if (input.job.foodAutoLog) {
+      response = await runFoodAutoLogCronJob({
+        vault: input.vault,
+        foodId: input.job.foodAutoLog.foodId,
+      })
+    } else {
+      const result = await sendAssistantMessage({
+        vault: input.vault,
+        prompt: input.job.prompt,
+        sessionId: input.job.target.sessionId ?? undefined,
+        alias: input.job.target.alias ?? undefined,
+        channel: input.job.target.channel ?? undefined,
+        identityId: input.job.target.identityId ?? undefined,
+        participantId: input.job.target.participantId ?? undefined,
+        sourceThreadId: input.job.target.sourceThreadId ?? undefined,
+        deliverResponse: input.job.target.deliverResponse,
+        deliveryTarget: input.job.target.deliveryTarget ?? undefined,
+        turnTrigger: 'automation-cron',
+        workingDirectory: input.vault,
+      })
 
-    response = result.response
-    sessionId = result.session.sessionId
+      response = result.response
+      sessionId = result.session.sessionId
+    }
     status = 'succeeded'
   } catch (error) {
     errorText = errorMessage(error)
@@ -692,4 +723,27 @@ function truncateAssistantCronResponse(response: string | null): string | null {
   }
 
   return response.slice(0, ASSISTANT_CRON_MAX_RESPONSE_LENGTH)
+}
+
+async function runFoodAutoLogCronJob(input: {
+  vault: string
+  foodId: string
+}) {
+  const [core, importers] = await Promise.all([
+    loadRuntimeModule<FoodAutoLogCoreRuntime>('@healthybob/core'),
+    loadImporterRuntime(),
+  ])
+  const food = await core.readFood({
+    vaultRoot: input.vault,
+    foodId: input.foodId,
+  })
+  const note = renderAutoLoggedFoodMealNote(food)
+  const result = await importers.importMeal({
+    vaultRoot: input.vault,
+    occurredAt: new Date().toISOString(),
+    note,
+    source: 'derived',
+  })
+
+  return `Auto-logged recurring food "${food.title}" as meal ${result.mealId}.`
 }

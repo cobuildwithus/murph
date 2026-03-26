@@ -1,13 +1,16 @@
 import { FOOD_STATUSES } from '@healthybob/contracts'
 import { Cli, z } from 'incur'
 
+import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
 import {
+  isoTimestampSchema,
   listItemSchema,
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-import { registerRegistryDocEntityGroup } from './health-command-factory.js'
+import { dailyFoodTimeSchema } from '../usecases/food-autolog.js'
+import { createRegistryDocEntityGroup } from './health-command-factory.js'
 
 const foodStatusSchema = z.enum(FOOD_STATUSES)
 
@@ -25,6 +28,18 @@ const foodUpsertResultSchema = z.object({
   created: z.boolean(),
 })
 
+const foodAddDailyResultSchema = z.object({
+  vault: pathSchema,
+  foodId: z.string().min(1),
+  lookupId: z.string().min(1),
+  path: pathSchema,
+  created: z.boolean(),
+  time: dailyFoodTimeSchema,
+  jobId: z.string().min(1),
+  jobName: z.string().min(1),
+  nextRunAt: isoTimestampSchema.nullable(),
+})
+
 const foodListResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
@@ -37,7 +52,7 @@ const foodListResultSchema = z.object({
 })
 
 export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
-  registerRegistryDocEntityGroup(cli, {
+  const food = createRegistryDocEntityGroup({
     commandName: 'food',
     description: 'Food registry commands for bank/foods Markdown records.',
     scaffold: {
@@ -90,4 +105,39 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
       },
     },
   })
+
+  food.command('add-daily', {
+    args: z.object({
+      title: z.string().min(1).max(160).describe('Remembered food title.'),
+    }),
+    description: 'Create one remembered food plus a daily auto-log rule that writes a note-only meal each day.',
+    hint: 'This creates a recurring food, not a raw cron workflow. The daily log fires while `vault-cli assistant run` is active for the same vault.',
+    options: withBaseOptions({
+      time: dailyFoodTimeSchema.describe('Daily local time in 24-hour HH:MM form.'),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional remembered food note that will be used in the auto-logged meal entry.'),
+      slug: z
+        .string()
+        .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
+        .optional()
+        .describe('Optional stable slug override for the remembered food record.'),
+    }),
+    output: foodAddDailyResultSchema,
+    async run(context) {
+      return services.core.addDailyFood({
+        title: context.args.title,
+        time: context.options.time,
+        note: context.options.note,
+        slug: context.options.slug,
+        requestId: requestIdFromOptions(context.options),
+        vault: context.options.vault,
+      })
+    },
+  })
+
+  cli.command(food)
 }

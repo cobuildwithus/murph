@@ -103,7 +103,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Provider frontmatter:
   `schemaVersion`, `docType`, `providerId`, `slug`, `title`, `status`, `specialty`, `organization`
 - Food frontmatter:
-  `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`
+  `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`, optional `autoLogDaily.time`
 - Profile current frontmatter:
   `schemaVersion`, `docType`, `snapshotId`, `updatedAt`
 - Goal frontmatter:

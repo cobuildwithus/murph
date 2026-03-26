@@ -19,7 +19,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
   - sample imports returning `lookupIds` plus an `xfm_*` batch id
   - intake import returning an `asmt_*` id and intake project returning deterministic proposal payloads
   - profile snapshot append plus `profile current rebuild`
-  - noun flows for `scaffold`, `upsert --input`, `show`, `list`, and `protocol stop`
+  - noun flows for `scaffold`, `upsert --input`, `show`, `list`, `food add-daily`, and `protocol stop`
   - history writes for `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure`
   - experiment creation idempotence via `created: false`
   - validation issue accumulation for malformed markdown frontmatter

@@ -3,7 +3,11 @@ import {
   type RegistryListOptions,
   type RegistryMarkdownRecord,
 } from "./registries.js";
-import { firstString, firstStringArray } from "./shared.js";
+import { firstObject, firstString, firstStringArray } from "./shared.js";
+
+interface FoodAutoLogDailyQueryRule {
+  time: string;
+}
 
 export interface FoodQueryRecord extends RegistryMarkdownRecord {
   summary: string | null;
@@ -16,6 +20,16 @@ export interface FoodQueryRecord extends RegistryMarkdownRecord {
   ingredients: string[];
   tags: string[];
   note: string | null;
+  autoLogDaily: FoodAutoLogDailyQueryRule | null;
+}
+
+function readFoodAutoLogDailyRule(
+  attributes: Record<string, unknown>,
+): FoodAutoLogDailyQueryRule | null {
+  const value = firstObject(attributes, ["autoLogDaily"]);
+  const time = value ? firstString(value, ["time"]) : null;
+
+  return time ? { time } : null;
 }
 
 const foodQueries = createRegistryQueries<FoodQueryRecord>({
@@ -36,6 +50,7 @@ const foodQueries = createRegistryQueries<FoodQueryRecord>({
       ingredients: firstStringArray(attributes, ["ingredients"]),
       tags: firstStringArray(attributes, ["tags"]),
       note: firstString(attributes, ["note"]),
+      autoLogDaily: readFoodAutoLogDailyRule(attributes),
     };
   },
 });

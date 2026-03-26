@@ -2,6 +2,12 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import {
+  initializeVault,
+  readJsonlRecords,
+  toMonthlyShardRelativePath,
+  upsertFood,
+} from '@healthybob/core'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const cronServiceMocks = vi.hoisted(() => ({
@@ -293,6 +299,74 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   assert.equal(history.jobId, job.jobId)
   assert.equal(history.runs.length, 1)
   assert.equal(history.runs[0]?.status, 'succeeded')
+})
+
+test('assistant cron recurring food jobs auto-log derived note-only meals without invoking the assistant', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-food-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await initializeVault({ vaultRoot })
+
+  const food = await upsertFood({
+    vaultRoot,
+    title: 'Morning Smoothie',
+    slug: 'morning-smoothie',
+    note: 'Bone broth protein, inulin, GOS, creatine, and coconut water.',
+    ingredients: [
+      'bone broth protein',
+      'inulin',
+      'prebiotic GOS',
+      'creatine',
+      'coconut water',
+    ],
+    autoLogDaily: {
+      time: '08:00',
+    },
+  })
+
+  const job = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'food-daily:morning-smoothie',
+    prompt: 'Auto-log recurring food "Morning Smoothie" as a note-only meal.',
+    schedule: buildAssistantCronSchedule({
+      at: new Date(Date.now() + 60_000).toISOString(),
+    }),
+    foodAutoLog: {
+      foodId: food.record.foodId,
+    },
+  })
+
+  const result = await runAssistantCronJobNow({
+    vault: vaultRoot,
+    job: job.jobId,
+  })
+  const history = await listAssistantCronRuns({
+    vault: vaultRoot,
+    job: job.jobId,
+  })
+  const events = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath('ledger/events', result.run.finishedAt),
+  })
+  const mealEvent = events.at(-1) as {
+    kind?: string
+    source?: string
+    note?: string
+  }
+
+  assert.equal(result.run.status, 'succeeded')
+  assert.equal(result.run.sessionId, null)
+  assert.equal(result.removedAfterRun, true)
+  assert.match(result.run.response ?? '', /Auto-logged recurring food "Morning Smoothie" as meal meal_/u)
+  assert.equal(cronServiceMocks.sendAssistantMessage.mock.calls.length, 0)
+  assert.equal(history.runs.length, 1)
+  assert.equal(history.runs[0]?.status, 'succeeded')
+  assert.equal(mealEvent.kind, 'meal')
+  assert.equal(mealEvent.source, 'derived')
+  assert.match(mealEvent.note ?? '', /Morning Smoothie/u)
+  assert.match(mealEvent.note ?? '', /Ingredients:/u)
+  assert.match(mealEvent.note ?? '', /bone broth protein/u)
 })
 
 test('assistant cron scheduler processes due jobs and backs off failed runs', async () => {

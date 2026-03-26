@@ -121,6 +121,10 @@
       "path": "fixtures/golden-outputs/experiment-create"
     },
     {
+      "id": "food-add-daily",
+      "path": "fixtures/golden-outputs/food-add-daily"
+    },
+    {
       "id": "journal-ensure",
       "path": "fixtures/golden-outputs/journal-ensure"
     },

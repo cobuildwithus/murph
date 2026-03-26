@@ -45,6 +45,8 @@ tags:
   - breakfast
   - favorite
 note: Typical order includes extra granola and no honey.
+autoLogDaily:
+  time: 08:00
 ---
 # Regular Acai Bowl
 `,
@@ -90,7 +92,13 @@ kind: granola
       "granola",
       "almond butter",
     ]);
+    assert.deepEqual(readById?.autoLogDaily, {
+      time: "08:00",
+    });
     assert.equal(shownBySlug?.slug, "regular-acai-bowl");
+    assert.deepEqual(shownBySlug?.autoLogDaily, {
+      time: "08:00",
+    });
     assert.equal(shownByTitle?.id, "food_01JNV4R0R1DVH1YP8KQQD5GQ7X");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
