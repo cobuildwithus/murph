@@ -4,6 +4,7 @@ import {
   createJsonErrorResponse,
   mapDomainJsonError,
   mergeJsonHeaders,
+  readOptionalJsonObject,
   readJsonObject,
 } from "../http";
 import { isHostedOnboardingError } from "./errors";
@@ -33,7 +34,7 @@ export function jsonError(error: unknown, headers?: HeadersInit): NextResponse {
   });
 }
 
-export { readJsonObject };
+export { readJsonObject, readOptionalJsonObject };
 
 function mapHostedOnboardingError(error: unknown) {
   return isHostedOnboardingError(error) ? mapDomainJsonError(error) : null;

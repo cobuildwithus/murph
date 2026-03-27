@@ -1,20 +1,21 @@
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { jsonError, jsonOk, readJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { readHostedPrivyIdentityTokenFromCookieHeader } from "@/src/lib/hosted-onboarding/privy";
 import { attachHostedSessionCookie, completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/service";
 
 export async function POST(request: Request) {
   try {
-    const body = await readJsonObject(request);
-    const identityToken = typeof body.identityToken === "string" ? body.identityToken : null;
+    const identityToken = readHostedPrivyIdentityTokenFromCookieHeader(request.headers.get("cookie"));
 
     if (!identityToken) {
       throw hostedOnboardingError({
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "A Privy identity token is required to continue.",
-        httpStatus: 400,
+        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        httpStatus: 401,
       });
     }
 
+    const body = await readOptionalJsonObject(request);
     const result = await completeHostedPrivyVerification({
       identityToken,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,

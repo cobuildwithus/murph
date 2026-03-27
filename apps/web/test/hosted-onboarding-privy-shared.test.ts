@@ -103,6 +103,27 @@ describe("hosted Privy identity helpers", () => {
       type: "wallet",
     });
   });
+
+  it("requires the preferred wallet chain when one is requested", () => {
+    expect(
+      extractHostedPrivyWalletAccount(
+        [
+          {
+            address: "So11111111111111111111111111111111111111112",
+            chain_type: "solana",
+            connector_type: "embedded",
+            delegated: false,
+            imported: false,
+            type: "wallet",
+            wallet_client: "privy",
+            wallet_client_type: "privy",
+            wallet_index: 0,
+          },
+        ],
+        "ethereum",
+      ),
+    ).toBeNull();
+  });
 });
 
 function buildIdentityToken(payload: Record<string, unknown>): string {

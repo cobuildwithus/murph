@@ -2,7 +2,6 @@
 
 import {
   getIdentityToken,
-  useCreateWallet,
   useLoginWithSms,
   usePrivy,
 } from "@privy-io/react-auth";
@@ -41,7 +40,6 @@ export function HostedPhoneAuth(props: HostedPhoneAuthProps) {
 
 function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onCompleted, phoneHint }: HostedPhoneAuthProps) {
   const { authenticated, logout, ready } = usePrivy();
-  const { createWallet } = useCreateWallet();
   const { loginWithCode, sendCode } = useLoginWithSms();
   const [authenticatedSessionIssue, setAuthenticatedSessionIssue] = useState<string | null>(null);
   const [checkingAuthenticatedSession, setCheckingAuthenticatedSession] = useState(false);
@@ -75,6 +73,15 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
           if (!cancelled) {
             setAuthenticatedSessionIssue(
               "Your current Privy session is missing a verified phone number. Sign out and continue with SMS.",
+            );
+          }
+          return;
+        }
+
+        if (!extractHostedPrivyWalletAccount(linkedAccounts, "ethereum")) {
+          if (!cancelled) {
+            setAuthenticatedSessionIssue(
+              "Your current Privy session does not have a rewards wallet yet. Sign out and continue with SMS to finish setup.",
             );
           }
           return;
@@ -136,7 +143,6 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
     try {
       await loginWithCode({ code: code.trim() });
       await finalizeHostedPrivyVerification({
-        createWallet,
         inviteCode,
         onCompleted,
       });
@@ -153,7 +159,6 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
 
     try {
       await finalizeHostedPrivyVerification({
-        createWallet,
         inviteCode,
         onCompleted,
       });
@@ -309,16 +314,12 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
 }
 
 async function finalizeHostedPrivyVerification(input: {
-  createWallet: () => Promise<unknown>;
   inviteCode?: string | null;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
 }) {
-  const identityToken = await ensureHostedPrivyWalletIdentityToken(input.createWallet);
+  await requireHostedPrivyPhoneAndWalletReady();
   const payload = await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
-    payload: {
-      identityToken,
-      ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
-    },
+    payload: input.inviteCode ? { inviteCode: input.inviteCode } : {},
     url: "/api/hosted-onboarding/privy/complete",
   });
 
@@ -344,43 +345,45 @@ async function finalizeHostedPrivyVerification(input: {
   window.location.assign(payload.joinUrl);
 }
 
-async function ensureHostedPrivyWalletIdentityToken(createWallet: () => Promise<unknown>): Promise<string> {
-  let identityToken = await requireHostedPrivyIdentityToken();
-  let linkedAccounts = parseHostedPrivyIdentityToken(identityToken).linkedAccounts;
-  const phoneAccount = extractHostedPrivyPhoneAccount(linkedAccounts);
+async function requireHostedPrivyPhoneAndWalletReady(): Promise<void> {
+  let sawPhoneAccount = false;
 
-  if (!phoneAccount) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const identityToken = await readHostedPrivyIdentityTokenOnce();
+
+    if (!identityToken) {
+      await sleep(150 * (attempt + 1));
+      continue;
+    }
+
+    const linkedAccounts = parseHostedPrivyIdentityToken(identityToken).linkedAccounts;
+    const phoneAccount = extractHostedPrivyPhoneAccount(linkedAccounts);
+    const walletAccount = extractHostedPrivyWalletAccount(linkedAccounts, "ethereum");
+
+    if (!phoneAccount) {
+      await sleep(150 * (attempt + 1));
+      continue;
+    }
+
+    sawPhoneAccount = true;
+
+    if (walletAccount) {
+      return;
+    }
+
+    await sleep(250 * (attempt + 1));
+  }
+
+  if (!sawPhoneAccount) {
     throw new Error("This Privy session is missing a verified phone number.");
   }
 
-  let walletAccount = extractHostedPrivyWalletAccount(linkedAccounts, "ethereum");
-
-  if (!walletAccount) {
-    await createWallet();
-
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      identityToken = await requireHostedPrivyIdentityToken();
-      linkedAccounts = parseHostedPrivyIdentityToken(identityToken).linkedAccounts;
-      walletAccount = extractHostedPrivyWalletAccount(linkedAccounts, "ethereum");
-
-      if (walletAccount) {
-        break;
-      }
-
-      await sleep(250 * (attempt + 1));
-    }
-  }
-
-  if (!walletAccount) {
-    throw new Error("We could not finish creating your rewards wallet.");
-  }
-
-  return identityToken;
+  throw new Error("We could not finish preparing your rewards wallet. Sign out and try the SMS flow again.");
 }
 
 async function requireHostedPrivyIdentityToken(): Promise<string> {
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const identityToken = await getIdentityToken();
+    const identityToken = await readHostedPrivyIdentityTokenOnce();
 
     if (identityToken) {
       return identityToken;
@@ -390,6 +393,10 @@ async function requireHostedPrivyIdentityToken(): Promise<string> {
   }
 
   throw new Error("Your Privy session is missing an identity token. Refresh and try again.");
+}
+
+async function readHostedPrivyIdentityTokenOnce(): Promise<string | null> {
+  return (await getIdentityToken()) ?? null;
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {

@@ -21,7 +21,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
-import { requireHostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
+import {
+  readHostedPrivyIdentityTokenFromCookieHeader,
+  requireHostedPrivyIdentity,
+} from "@/src/lib/hosted-onboarding/privy";
 
 describe("hosted Privy verification", () => {
   beforeEach(() => {
@@ -226,6 +229,52 @@ describe("hosted Privy verification", () => {
       code: "PRIVY_WALLET_REQUIRED",
       httpStatus: 400,
     });
+  });
+
+  it("rejects verified sessions that only include a non-ethereum embedded wallet", async () => {
+    mocks.userGet.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+        {
+          address: "So11111111111111111111111111111111111111112",
+          chain_type: "solana",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_solana",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+    });
+
+    await expect(
+      requireHostedPrivyIdentity(
+        buildIdentityToken({
+          linked_accounts: [],
+          sub: "did:privy:user_123",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: "PRIVY_WALLET_REQUIRED",
+      httpStatus: 400,
+    });
+  });
+
+  it("reads the Privy identity token from request cookies", () => {
+    expect(
+      readHostedPrivyIdentityTokenFromCookieHeader(
+        "other-cookie=abc; privy-id-token=identity-token; hb_hosted_session=session-token",
+      ),
+    ).toBe("identity-token");
+    expect(readHostedPrivyIdentityTokenFromCookieHeader("other-cookie=abc")).toBeNull();
   });
 });
 

@@ -113,6 +113,8 @@ export function extractHostedPrivyWalletAccount(
     if (preferred) {
       return preferred;
     }
+
+    return null;
   }
 
   return walletAccounts[0] ?? null;

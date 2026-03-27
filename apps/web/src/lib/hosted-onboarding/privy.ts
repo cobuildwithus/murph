@@ -20,6 +20,8 @@ const globalForHostedPrivy = globalThis as typeof globalThis & {
   __healthybobHostedPrivyClient?: PrivyClient;
 };
 
+const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
+
 export interface HostedPrivyIdentity {
   linkedAccounts: PrivyLinkedAccountLike[];
   phone: HostedPrivyPhoneAccount;
@@ -101,6 +103,24 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
       },
     });
   }
+}
+
+export function readHostedPrivyIdentityTokenFromCookieHeader(cookieHeader: string | null): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const entries = cookieHeader.split(/;\s*/u);
+
+  for (const entry of entries) {
+    const [name, ...valueParts] = entry.split("=");
+
+    if (name === HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME) {
+      return valueParts.join("=") || null;
+    }
+  }
+
+  return null;
 }
 
 export function getHostedPrivyClient(): PrivyClient {
