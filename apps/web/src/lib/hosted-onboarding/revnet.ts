@@ -24,6 +24,8 @@ export interface HostedRevnetConfig {
   weiPerStripeMinorUnit: bigint;
 }
 
+const treasurySubmissionLocks = new Map<string, Promise<void>>();
+
 export function isHostedOnboardingRevnetEnabled(): boolean {
   const environment = getHostedOnboardingEnvironment();
 
@@ -73,9 +75,13 @@ export function convertStripeMinorAmountToRevnetPaymentAmount(
 }
 
 export async function submitHostedRevnetPayment(input: {
-  amountMinor: number;
   beneficiaryAddress: Address;
+  chainId?: number;
   memo: string;
+  paymentAmount?: bigint;
+  amountMinor?: number;
+  projectId?: bigint;
+  terminalAddress?: Address;
 }): Promise<{ payTxHash: Hex; paymentAmount: bigint }> {
   const config = requireHostedRevnetConfig();
   const account = privateKeyToAccount(config.treasuryPrivateKey);
@@ -87,10 +93,10 @@ export async function submitHostedRevnetPayment(input: {
     account,
     transport,
   });
-  const paymentAmount = convertStripeMinorAmountToRevnetPaymentAmount(
-    input.amountMinor,
-    config.weiPerStripeMinorUnit,
-  );
+  const chainId = input.chainId ?? config.chainId;
+  const projectId = input.projectId ?? config.projectId;
+  const terminalAddress = input.terminalAddress ?? config.terminalAddress;
+  const paymentAmount = resolveHostedRevnetPaymentAmount(input, config.weiPerStripeMinorUnit);
 
   const writeRequestWithNonceRetry = async (
     request: Parameters<typeof walletClient.writeContract>[0],
@@ -121,19 +127,29 @@ export async function submitHostedRevnetPayment(input: {
     throw new Error("Hosted RevNet transaction could not be submitted after retrying nonce conflicts.");
   };
 
-  const paySimulation = await publicClient.simulateContract({
-    account,
-    ...buildRevnetPayIntent({
-      amount: paymentAmount,
-      beneficiary: input.beneficiaryAddress,
-      memo: sanitizeMemo(input.memo),
-      projectId: config.projectId,
-      terminalAddress: config.terminalAddress,
-    }),
-  });
+  const payTxHash = await withTreasurySubmissionLock(
+    `${chainId}:${account.address.toLowerCase()}`,
+    async () => {
+      await assertHostedRevnetRpcChain({
+        chainId,
+        publicClient,
+        rpcUrl: config.rpcUrl,
+      });
+      const paySimulation = await publicClient.simulateContract({
+        account,
+        ...buildRevnetPayIntent({
+          amount: paymentAmount,
+          beneficiary: input.beneficiaryAddress,
+          memo: sanitizeMemo(input.memo),
+          projectId,
+          terminalAddress,
+        }),
+      });
 
-  const payTxHash = await writeRequestWithNonceRetry(
-    paySimulation.request as Parameters<typeof walletClient.writeContract>[0],
+      return writeRequestWithNonceRetry(
+        paySimulation.request as Parameters<typeof walletClient.writeContract>[0],
+      );
+    },
   );
 
   return {
@@ -142,18 +158,23 @@ export async function submitHostedRevnetPayment(input: {
   };
 }
 
-export async function waitForHostedRevnetPaymentConfirmation(input: { txHash: Hex }): Promise<void> {
+export async function waitForHostedRevnetPaymentConfirmation(input: {
+  chainId?: number;
+  txHash: Hex;
+}): Promise<void> {
   const config = requireHostedRevnetConfig();
-
-  if (config.waitConfirmations < 1) {
-    return;
-  }
+  const confirmations = Math.max(1, config.waitConfirmations);
 
   const publicClient = createPublicClient({
     transport: http(config.rpcUrl),
   });
+  await assertHostedRevnetRpcChain({
+    chainId: input.chainId ?? config.chainId,
+    publicClient,
+    rpcUrl: config.rpcUrl,
+  });
   const receipt = await publicClient.waitForTransactionReceipt({
-    confirmations: config.waitConfirmations,
+    confirmations,
     hash: input.txHash,
   });
 
@@ -298,9 +319,78 @@ function parseUnsignedBigInt(value: string | null, label: string): bigint {
   return BigInt(value);
 }
 
+function resolveHostedRevnetPaymentAmount(
+  input: Pick<Parameters<typeof submitHostedRevnetPayment>[0], "amountMinor" | "paymentAmount">,
+  weiPerStripeMinorUnit: bigint,
+): bigint {
+  if (typeof input.paymentAmount === "bigint") {
+    if (input.paymentAmount < 0n) {
+      throw new RangeError("Hosted RevNet payment amounts must be non-negative.");
+    }
+
+    return input.paymentAmount;
+  }
+
+  if (typeof input.amountMinor !== "number") {
+    throw new TypeError("Hosted RevNet submissions require either paymentAmount or amountMinor.");
+  }
+
+  return convertStripeMinorAmountToRevnetPaymentAmount(input.amountMinor, weiPerStripeMinorUnit);
+}
+
 function sanitizeMemo(value: string): string {
   const trimmed = value.trim();
   return trimmed.length <= 200 ? trimmed : trimmed.slice(0, 200);
+}
+
+export function isHostedRevnetBroadcastStatusUnknownError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+
+  return (
+    message.includes("already known") ||
+    message.includes("known transaction") ||
+    message.includes("already imported")
+  );
+}
+
+async function assertHostedRevnetRpcChain(input: {
+  chainId: number;
+  publicClient: Pick<ReturnType<typeof createPublicClient>, "getChainId">;
+  rpcUrl: string;
+}): Promise<void> {
+  const actualChainId = await input.publicClient.getChainId();
+
+  if (actualChainId !== input.chainId) {
+    throw hostedOnboardingError({
+      code: "REVNET_RPC_CHAIN_MISMATCH",
+      message: `Hosted RevNet RPC ${input.rpcUrl} reported chain ${actualChainId}, expected ${input.chainId}.`,
+      httpStatus: 502,
+    });
+  }
+}
+
+async function withTreasurySubmissionLock<T>(
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const prior = treasurySubmissionLocks.get(key) ?? Promise.resolve();
+  let releaseCurrent = () => {};
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  const tail = prior.catch(() => undefined).then(() => current);
+  treasurySubmissionLocks.set(key, tail);
+  await prior.catch(() => undefined);
+
+  try {
+    return await operation();
+  } finally {
+    releaseCurrent();
+
+    if (treasurySubmissionLocks.get(key) === tail) {
+      treasurySubmissionLocks.delete(key);
+    }
+  }
 }
 
 function isRetriableNonceError(error: unknown): boolean {
@@ -308,7 +398,6 @@ function isRetriableNonceError(error: unknown): boolean {
 
   return (
     message.includes("nonce too low") ||
-    message.includes("replacement transaction underpriced") ||
-    message.includes("already known")
+    message.includes("replacement transaction underpriced")
   );
 }

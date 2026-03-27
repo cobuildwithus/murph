@@ -68,6 +68,17 @@ export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPri
   return requireHostedPrivyIdentity(identityToken);
 }
 
+export async function getOptionalHostedPrivyIdentityFromCookies(): Promise<HostedPrivyIdentity | null> {
+  const cookieStore = await cookies();
+  const identityToken = readHostedPrivyIdentityTokenFromCookieStore(cookieStore);
+
+  if (!identityToken) {
+    return null;
+  }
+
+  return requireHostedPrivyIdentity(identityToken);
+}
+
 export async function verifyHostedPrivyIdentityToken(identityToken: string): Promise<HostedPrivyUser> {
   const token = identityToken.trim();
 

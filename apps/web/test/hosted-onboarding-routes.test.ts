@@ -348,7 +348,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("forwards wallet state through the hosted billing checkout route when present", async () => {
+  it("does not forward wallet state from the hosted billing checkout request body", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
       body: JSON.stringify({
         inviteCode: "invite-code",
@@ -368,7 +368,6 @@ describe("hosted onboarding routes", () => {
         member: { id: "member_123" },
         session: { id: "session_123" },
       },
-      walletAddress: "0x00000000000000000000000000000000000000aa",
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
