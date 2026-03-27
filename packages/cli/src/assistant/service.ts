@@ -1,4 +1,5 @@
 import {
+  assistantCanonicalWriteBlockSchema,
   assistantAskResultSchema,
   type AssistantSession,
   type AssistantApprovalPolicy,
@@ -75,10 +76,14 @@ import {
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
 import {
+  extractRecoveredAssistantSession,
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
-import { executeWithCanonicalWriteGuard } from './canonical-write-guard.js'
+import {
+  executeWithCanonicalWriteGuard,
+  isAssistantCanonicalWriteBlockedError,
+} from './canonical-write-guard.js'
 import { resolveAssistantProviderWorkingDirectory } from './provider-workspace.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 import { withAssistantTurnLock } from './turn-lock.js'
@@ -141,7 +146,7 @@ interface AssistantTurnSharedPlan {
   cliAccess: ReturnType<typeof resolveAssistantCliAccessContext>
   onboardingSummary: AssistantOnboardingSummary | null
   persistUserPromptOnFailure: boolean
-  workingDirectory: string
+  requestedWorkingDirectory: string
 }
 
 interface AssistantRouteTurnPlan {
@@ -159,6 +164,7 @@ interface AssistantRouteTurnPlan {
     binding: AssistantSession['binding']
   }
   systemPrompt: string | null
+  workingDirectory: string
 }
 
 interface PersistedUserTurn {
@@ -201,6 +207,86 @@ type AssistantDeliveryOutcome =
 interface AssistantTurnDeliveryFinalizationPlan {
   diagnostic: Parameters<typeof recordAssistantDiagnosticEvent>[0]
   receipt: Parameters<typeof finalizeAssistantTurnReceipt>[0]
+}
+
+function clampVaultBoundAssistantSandbox(
+  sandbox: AssistantSandbox | null | undefined,
+): AssistantSandbox | null | undefined {
+  return sandbox === 'danger-full-access' ? 'workspace-write' : sandbox
+}
+
+function buildAssistantCanonicalWriteBlockedResult(input: {
+  error: unknown
+  prompt: string
+  session: AssistantSession
+  vault: string
+}): AssistantAskResult | null {
+  if (!isAssistantCanonicalWriteBlockedError(input.error)) {
+    return null
+  }
+
+  const context =
+    input.error.context &&
+    typeof input.error.context === 'object' &&
+    !Array.isArray(input.error.context)
+      ? (input.error.context as Record<string, unknown>)
+      : {}
+  const blockedPaths = Array.isArray(context.paths)
+    ? context.paths.filter((value): value is string => typeof value === 'string')
+    : []
+
+  return assistantAskResultSchema.parse({
+    vault: redactAssistantDisplayPath(input.vault),
+    status: 'blocked',
+    prompt: input.prompt,
+    response: '',
+    session: input.session,
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryIntentId: null,
+    deliveryError: null,
+    blocked: assistantCanonicalWriteBlockSchema.parse({
+      code: input.error.code,
+      message: input.error.message,
+      paths: blockedPaths,
+      pathCount:
+        typeof context.pathCount === 'number' && Number.isFinite(context.pathCount)
+          ? Math.max(0, Math.trunc(context.pathCount))
+          : blockedPaths.length,
+      guardFailureReason:
+        context.guardFailureReason === 'invalid_committed_payload' ||
+        context.guardFailureReason === 'invalid_write_operation_metadata'
+          ? context.guardFailureReason
+          : null,
+      guardFailurePath:
+        typeof context.guardFailurePath === 'string' ? context.guardFailurePath : null,
+      guardFailureMessage:
+        typeof context.guardFailureMessage === 'string'
+          ? context.guardFailureMessage
+          : null,
+      guardFailureCode:
+        typeof context.guardFailureCode === 'string' ? context.guardFailureCode : null,
+      guardFailureOperationId:
+        typeof context.guardFailureOperationId === 'string'
+          ? context.guardFailureOperationId
+          : null,
+      guardFailureTargetPath:
+        typeof context.guardFailureTargetPath === 'string'
+          ? context.guardFailureTargetPath
+          : null,
+      guardFailureActionKind:
+        context.guardFailureActionKind === 'jsonl_append' ||
+        context.guardFailureActionKind === 'text_write'
+          ? context.guardFailureActionKind
+          : null,
+      providerErrorCode:
+        typeof context.providerErrorCode === 'string' ? context.providerErrorCode : null,
+      providerErrorMessage:
+        typeof context.providerErrorMessage === 'string'
+          ? context.providerErrorMessage
+          : null,
+    }),
+  })
 }
 
 export function buildResolveAssistantSessionInput(
@@ -248,7 +334,7 @@ export function buildResolveAssistantSessionInput(
             : undefined,
     provider: input.provider ?? defaults?.provider ?? undefined,
     model: providerConfig.model,
-    sandbox: providerConfig.sandbox ?? 'workspace-write',
+    sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox) ?? 'workspace-write',
     approvalPolicy: providerConfig.approvalPolicy ?? 'on-request',
     oss: providerConfig.oss ?? false,
     profile: providerConfig.profile,
@@ -338,6 +424,7 @@ export async function sendAssistantMessage(
 
         return assistantAskResultSchema.parse({
           vault: redactAssistantDisplayPath(input.vault),
+          status: 'completed',
           prompt: input.prompt,
           response: providerResult.response,
           session: deliveryOutcome.session,
@@ -353,8 +440,58 @@ export async function sendAssistantMessage(
             deliveryOutcome.kind === 'queued' || deliveryOutcome.kind === 'failed'
               ? deliveryOutcome.error
               : null,
+          blocked: null,
         })
       } catch (error) {
+        const blockedResult = buildAssistantCanonicalWriteBlockedResult({
+          error,
+          prompt: input.prompt,
+          session: extractRecoveredAssistantSession(error) ?? resolved.session,
+          vault: input.vault,
+        })
+
+        if (blockedResult) {
+          const blockedAt = new Date().toISOString()
+          const blockedError = blockedResult.blocked
+            ? {
+                code: blockedResult.blocked.code,
+                message: blockedResult.blocked.message,
+              }
+            : {
+                code: 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
+                message: 'Assistant turn was blocked by the canonical write guard.',
+              }
+
+          await runAssistantTurnBestEffort(() =>
+            finalizeAssistantTurnReceipt({
+              vault: input.vault,
+              turnId: receipt.turnId,
+              status: 'blocked',
+              deliveryDisposition: 'blocked',
+              error: blockedError,
+              response: responseText,
+              completedAt: blockedAt,
+            }),
+          )
+
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'turn.blocked',
+              level: 'warn',
+              message: blockedError.message,
+              code: blockedError.code,
+              sessionId: blockedResult.session.sessionId,
+              turnId: receipt.turnId,
+              data: blockedResult.blocked,
+              at: blockedAt,
+            }),
+          )
+
+          return blockedResult
+        }
+
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
 
@@ -416,6 +553,9 @@ export async function updateAssistantSessionOptions(input: {
     providerOptions: {
       ...session.session.providerOptions,
       ...input.providerOptions,
+      sandbox: clampVaultBoundAssistantSandbox(
+        input.providerOptions.sandbox ?? session.session.providerOptions.sandbox,
+      ) ?? null,
     },
     updatedAt: new Date().toISOString(),
   })
@@ -440,11 +580,7 @@ async function resolveAssistantTurnSharedPlan(
           })
         : null,
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
-    workingDirectory: await resolveAssistantProviderWorkingDirectory({
-      requestedWorkingDirectory,
-      sessionId: resolved.session.sessionId,
-      vault: input.vault,
-    }),
+    requestedWorkingDirectory,
   }
 }
 
@@ -454,12 +590,16 @@ function resolveAssistantTurnRoutes(
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
   const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
+  const mergedProviderConfig = mergeAssistantProviderConfigs(
+    input,
+    resolved.session.providerOptions,
+    defaults,
+  )
   const providerOptions = serializeAssistantProviderSessionOptions(
-    mergeAssistantProviderConfigs(
-      input,
-      resolved.session.providerOptions,
-      defaults,
-    ),
+    {
+      ...mergedProviderConfig,
+      sandbox: clampVaultBoundAssistantSandbox(mergedProviderConfig.sandbox),
+    },
   )
   const executionConfig = mergeAssistantProviderConfigs(input, defaults)
   return buildAssistantFailoverRoutes({
@@ -468,7 +608,13 @@ function resolveAssistantTurnRoutes(
     defaults,
     provider,
     providerOptions,
-  })
+  }).map((route) => ({
+    ...route,
+    providerOptions: serializeAssistantProviderSessionOptions({
+      ...route.providerOptions,
+      sandbox: clampVaultBoundAssistantSandbox(route.providerOptions.sandbox),
+    }),
+  }))
 }
 
 async function resolveAssistantRouteTurnPlan(input: {
@@ -514,14 +660,21 @@ async function resolveAssistantRouteTurnPlan(input: {
     : null
   const providerCapabilities = resolveAssistantProviderCapabilities(input.route.provider)
   const supportsDirectCliExecution = providerCapabilities.supportsDirectCliExecution
+  const workingDirectory = supportsDirectCliExecution
+    ? await resolveAssistantProviderWorkingDirectory({
+        requestedWorkingDirectory: input.sharedPlan.requestedWorkingDirectory,
+        sessionId: input.session.sessionId,
+        vault: input.input.vault,
+      })
+    : input.sharedPlan.requestedWorkingDirectory
   const stateMcpConfig = buildAssistantStateMcpConfig(
-    input.sharedPlan.workingDirectory,
+    workingDirectory,
   )
   const memoryMcpConfig = buildAssistantMemoryMcpConfig(
-    input.sharedPlan.workingDirectory,
+    workingDirectory,
   )
   const cronMcpConfig = buildAssistantCronMcpConfig(
-    input.sharedPlan.workingDirectory,
+    workingDirectory,
   )
   const assistantStateMcpAvailable =
     supportsDirectCliExecution && stateMcpConfig !== null
@@ -556,6 +709,7 @@ async function resolveAssistantRouteTurnPlan(input: {
           binding: input.session.binding,
         }
       : undefined,
+    workingDirectory,
     systemPrompt: shouldInjectBootstrapContext
       ? buildAssistantSystemPrompt({
           assistantStateMcpAvailable,
@@ -885,7 +1039,7 @@ async function executeProviderTurnWithRecovery(input: {
           executeAssistantProviderTurn({
             abortSignal: input.input.abortSignal,
             provider: route.provider,
-            workingDirectory: input.plan.workingDirectory,
+            workingDirectory: routePlan.workingDirectory,
             configOverrides: routePlan.configOverrides,
             env: {
               ...routePlan.cliEnv,
@@ -1721,6 +1875,8 @@ function buildAssistantMemoryGuidanceText(
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
       'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
       'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',
+      'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
+      'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
       'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
     ].join('\n\n')
   }

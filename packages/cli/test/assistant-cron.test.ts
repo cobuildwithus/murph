@@ -544,6 +544,7 @@ test('assistant cron manual runs record history and remove completed one-shot jo
 
   cronServiceMocks.sendAssistantMessage.mockResolvedValue({
     vault: vaultRoot,
+    status: 'completed',
     prompt: 'Remind me to drink water.',
     response: 'Drink water now.',
     session: {
@@ -575,7 +576,10 @@ test('assistant cron manual runs record history and remove completed one-shot jo
       turnCount: 1,
     },
     delivery: null,
+    deliveryDeferred: false,
+    deliveryIntentId: null,
     deliveryError: null,
+    blocked: null,
   })
 
   const job = await addAssistantCronJob({

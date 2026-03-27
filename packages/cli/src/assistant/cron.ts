@@ -654,10 +654,17 @@ async function executeClaimedAssistantCronJob(input: {
         workingDirectory: input.vault,
       })
 
-      response = result.response
       sessionId = result.session.sessionId
+      if (result.status === 'blocked') {
+        errorText = result.blocked?.message ?? 'assistant turn was blocked'
+        status = 'skipped'
+      } else {
+        response = result.response
+      }
     }
-    status = 'succeeded'
+    if (status === 'failed') {
+      status = 'succeeded'
+    }
   } catch (error) {
     errorText = errorMessage(error)
     status = 'failed'

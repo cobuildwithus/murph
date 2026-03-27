@@ -112,6 +112,7 @@ function createStubInboxServices(showResult: Awaited<ReturnType<InboxCliServices
 function createStubAssistantResult(vault: string): AssistantAskResult {
   return {
     vault,
+    status: 'completed',
     prompt: 'Reply to the capture.',
     response: 'Acknowledged.',
     session: {
@@ -149,6 +150,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
     deliveryDeferred: false,
     deliveryIntentId: null,
     deliveryError: null,
+    blocked: null,
   }
 }
 

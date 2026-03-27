@@ -201,6 +201,18 @@ interface ComposerControlledSyncResult {
   pendingValues: string[]
 }
 
+interface AssistantTurnErrorPresentation {
+  entry: {
+    kind: 'error' | 'status'
+    text: string
+  }
+  persistTranscriptError: boolean
+  status: {
+    kind: 'error' | 'info'
+    text: string
+  }
+}
+
 type ComposerTerminalAction =
   | {
       kind: 'edit'
@@ -572,6 +584,48 @@ export function renderWrappedPlainTextBlock(input: {
       ),
     ),
   )
+}
+
+export function resolveAssistantTurnErrorPresentation(input: {
+  error: unknown
+  restoredQueuedPromptCount: number
+}): AssistantTurnErrorPresentation {
+  const errorText =
+    input.error instanceof Error ? input.error.message : String(input.error)
+  const canonicalWriteBlocked = isAssistantCanonicalWriteBlockedError(input.error)
+  const connectionLost = isAssistantProviderConnectionLostError(input.error)
+  const missingSession = isAssistantSessionNotFoundError(input.error)
+  const queuedFollowUpSuffix =
+    input.restoredQueuedPromptCount > 0
+      ? ' Queued follow-ups are back in the composer.'
+      : ''
+
+  return {
+    entry: {
+      kind: canonicalWriteBlocked ? 'status' : 'error',
+      text: errorText,
+    },
+    persistTranscriptError: !missingSession && !canonicalWriteBlocked,
+    status: canonicalWriteBlocked
+      ? {
+          kind: 'info',
+          text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Healthy Bob tools.${queuedFollowUpSuffix}`,
+        }
+      : connectionLost
+        ? {
+            kind: 'error',
+            text: `The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.${queuedFollowUpSuffix}`,
+          }
+        : missingSession
+          ? {
+              kind: 'error',
+              text: `The local assistant session record is missing. Check the current vault/default vault or start a new chat.${queuedFollowUpSuffix}`,
+            }
+          : {
+              kind: 'error',
+              text: `The assistant hit an error. Fix it or keep chatting.${queuedFollowUpSuffix}`,
+            },
+  }
 }
 
 const WrappedPlainTextBlock = React.memo(function WrappedPlainTextBlock(input: {
@@ -3128,6 +3182,25 @@ export async function runAssistantChatWithInk(
             completedTurn = true
             latestSessionRef.current = result.session
             setSession(result.session)
+            if (result.status === 'blocked') {
+              setEntries((previous: InkChatEntry[]) => [
+                ...previous,
+                {
+                  kind: 'status',
+                  text:
+                    result.blocked?.message ??
+                    'Assistant turn was blocked by the canonical write guard.',
+                },
+              ])
+              setStatus({
+                kind: 'info',
+                text:
+                  result.blocked?.message ??
+                  'Assistant turn was blocked by the canonical write guard.',
+              })
+              return
+            }
+
             setTurns((previous: number) => previous + 1)
             setEntries((previous: InkChatEntry[]) =>
               streamedAssistantEntryKey
@@ -3173,50 +3246,23 @@ export async function runAssistantChatWithInk(
             }
 
             const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
-            const errorText = error instanceof Error ? error.message : String(error)
-            const canonicalWriteBlocked = isAssistantCanonicalWriteBlockedError(error)
-            const connectionLost = isAssistantProviderConnectionLostError(error)
-            const missingSession = isAssistantSessionNotFoundError(error)
-            const queuedFollowUpSuffix =
-              restoredQueuedPromptCount > 0
-                ? ' Queued follow-ups are back in the composer.'
-                : ''
+            const errorPresentation = resolveAssistantTurnErrorPresentation({
+              error,
+              restoredQueuedPromptCount,
+            })
             setEntries((previous: InkChatEntry[]) => [
               ...previous,
-              {
-                kind: canonicalWriteBlocked ? 'status' : 'error',
-                text: errorText,
-              },
+              errorPresentation.entry,
             ])
-            setStatus(
-              canonicalWriteBlocked
-                ? {
-                    kind: 'info',
-                    text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Healthy Bob tools.${queuedFollowUpSuffix}`,
-                  }
-                : connectionLost
-                ? {
-                    kind: 'error',
-                    text: `The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.${queuedFollowUpSuffix}`,
-                  }
-                : missingSession
-                  ? {
-                      kind: 'error',
-                      text: `The local assistant session record is missing. Check the current vault/default vault or start a new chat.${queuedFollowUpSuffix}`,
-                    }
-                  : {
-                      kind: 'error',
-                      text: `The assistant hit an error. Fix it or keep chatting.${queuedFollowUpSuffix}`,
-                    },
-            )
-            if (!missingSession && !canonicalWriteBlocked) {
+            setStatus(errorPresentation.status)
+            if (errorPresentation.persistTranscriptError) {
               void appendAssistantTranscriptEntries(
                 input.vault,
                 latestSessionRef.current.sessionId,
                 [
                   {
                     kind: 'error',
-                    text: errorText,
+                    text: errorPresentation.entry.text,
                   },
                 ],
               ).catch(() => {})

@@ -192,7 +192,7 @@ const assistantProviderOptionFields = {
     .enum(assistantSandboxValues)
     .optional()
     .describe(
-      'Codex sandbox mode for local assistant chat. Defaults to workspace-write for low-friction local tool use.',
+      'Codex sandbox mode for local assistant chat. Vault-bound assistant turns clamp danger-full-access back to workspace-write.',
     ),
   approvalPolicy: z
     .enum(assistantApprovalPolicyValues)

@@ -155,10 +155,17 @@ export async function finalizeAssistantTurnReceipt(input: {
   const completedAt = input.completedAt ?? new Date().toISOString()
   const statusEvent: AssistantTurnTimelineEvent = assistantTurnTimelineEventSchema.parse({
     at: completedAt,
-    kind: input.status === 'deferred' ? 'turn.deferred' : 'turn.completed',
+    kind:
+      input.status === 'deferred'
+        ? 'turn.deferred'
+        : input.status === 'blocked'
+          ? 'turn.blocked'
+          : 'turn.completed',
     detail:
       input.status === 'failed'
         ? input.error?.message ?? 'assistant turn failed'
+        : input.status === 'blocked'
+          ? input.error?.message ?? 'assistant turn blocked'
         : null,
     metadata: {},
   })

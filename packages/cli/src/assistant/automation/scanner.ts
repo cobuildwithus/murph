@@ -418,6 +418,17 @@ export async function scanAssistantAutoReplyOnce(input: {
         replyCaptureId: context.firstCaptureId,
         vault: input.vault,
       })
+      if (result.status === 'blocked') {
+        applySkippedGroup({
+          context,
+          onEvent: input.onEvent,
+          reason: result.blocked?.message ?? 'assistant reply was blocked',
+          scanState,
+          summary,
+          advanceCursor: true,
+        })
+        continue
+      }
       if (result.deliveryDeferred) {
         await applyDeferredReply({
           context,
@@ -805,6 +816,10 @@ function resolveAssistantAutoReplySendResult(input: {
   replyCaptureId: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
 }): Awaited<ReturnType<typeof sendAssistantMessage>> {
+  if (input.result.status === 'blocked') {
+    return input.result
+  }
+
   if (input.result.deliveryDeferred) {
     input.onEvent?.({
       type: 'capture.reply-progress',

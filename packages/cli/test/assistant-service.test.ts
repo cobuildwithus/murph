@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { getEventListeners } from 'node:events'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -107,6 +108,52 @@ async function waitForPredicate(
     }
 
     await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+function assertBlockedAssistantResult(
+  result: Awaited<ReturnType<typeof sendAssistantMessage>>,
+  input?: {
+    actionKind?: 'jsonl_append' | 'text_write' | null
+    guardFailureCode?: string | null
+    guardFailurePathPattern?: RegExp
+    guardFailureReason?:
+      | 'invalid_committed_payload'
+      | 'invalid_write_operation_metadata'
+      | null
+    guardFailureTargetPath?: string | null
+    paths?: string[]
+    providerErrorCode?: string | null
+  },
+): void {
+  assert.equal(result.status, 'blocked')
+  assert.equal(result.response, '')
+  assert.equal(result.delivery, null)
+  assert.equal(result.deliveryDeferred, false)
+  assert.equal(result.deliveryIntentId, null)
+  assert.equal(result.deliveryError, null)
+  assert.equal(result.blocked?.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+  assert.equal(result.blocked?.pathCount, input?.paths?.length ?? result.blocked?.paths.length ?? 0)
+  if (input?.paths) {
+    assert.deepEqual(result.blocked?.paths, input.paths)
+  }
+  if (input?.guardFailureReason !== undefined) {
+    assert.equal(result.blocked?.guardFailureReason, input.guardFailureReason)
+  }
+  if (input?.guardFailureCode !== undefined) {
+    assert.equal(result.blocked?.guardFailureCode, input.guardFailureCode)
+  }
+  if (input?.guardFailureTargetPath !== undefined) {
+    assert.equal(result.blocked?.guardFailureTargetPath, input.guardFailureTargetPath)
+  }
+  if (input?.actionKind !== undefined) {
+    assert.equal(result.blocked?.guardFailureActionKind, input.actionKind)
+  }
+  if (input?.providerErrorCode !== undefined) {
+    assert.equal(result.blocked?.providerErrorCode, input.providerErrorCode)
+  }
+  if (input?.guardFailurePathPattern) {
+    assert.match(result.blocked?.guardFailurePath ?? '', input.guardFailurePathPattern)
   }
 }
 
@@ -372,14 +419,17 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /10 to 60 minutes/u)
   assert.match(firstCall?.systemPrompt ?? '', /defaults the overall timeout to 40m/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
-  assert.match(firstCall?.systemPrompt ?? '', /assistant state show/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /assistant state (show|list|patch)/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /non-canonical runtime scratchpads/u)
   assert.match(firstCall?.systemPrompt ?? '', /search assistant memory before answering/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /consider offering one short remember suggestion/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /assistant memory forget/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant memory .*forget/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
     /phrase `text` as the exact stored sentence you want committed/u,
@@ -508,6 +558,118 @@ test('sendAssistantMessage reuses the same isolated provider workspace across re
   assert.match(path.relative(vaultRoot, expectedWorkspace), /^\.\.(?:[\\/]|$)/u)
 })
 
+test('sendAssistantMessage keeps the requested working directory for non-shell providers', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-nonshell-working-dir-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:nonshell-working-dir',
+    provider: 'openai-compatible',
+    prompt: 'Use the non-shell provider path.',
+    workingDirectory: vaultRoot,
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const unexpectedWorkspace = path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    'workspaces',
+    result.session.sessionId,
+  )
+
+  assert.equal(firstCall?.provider, 'openai-compatible')
+  assert.equal(firstCall?.workingDirectory, vaultRoot)
+  await assert.rejects(
+    readFile(path.join(unexpectedWorkspace, 'README.md'), 'utf8'),
+    /ENOENT/u,
+  )
+})
+
+test('sendAssistantMessage keeps an outside-vault working directory for direct-CLI providers', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-external-working-dir-'))
+  const vaultRoot = path.join(parent, 'vault')
+  const externalRoot = path.join(parent, 'repo')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await mkdir(externalRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-external-working-dir',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:external-working-dir',
+    provider: 'codex-cli',
+    prompt: 'Use the external working directory.',
+    workingDirectory: externalRoot,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const unexpectedWorkspace = path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    'workspaces',
+    result.session.sessionId,
+  )
+
+  assert.equal(firstCall?.provider, 'codex-cli')
+  assert.equal(firstCall?.workingDirectory, externalRoot)
+  assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))
+  await assert.rejects(
+    readFile(path.join(unexpectedWorkspace, 'README.md'), 'utf8'),
+    /ENOENT/u,
+  )
+})
+
+test('sendAssistantMessage clamps vault-bound danger-full-access requests back to workspace-write', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-sandbox-clamp-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-sandbox-clamp',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:sandbox-clamp',
+    prompt: 'Use the vault-bound assistant lane.',
+    sandbox: 'danger-full-access',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.sandbox, 'workspace-write')
+  assert.equal(result.session.providerOptions.sandbox, 'workspace-write')
+})
+
 test('sendAssistantMessage serializes concurrent provider turns per vault', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -577,6 +739,211 @@ test('sendAssistantMessage serializes concurrent provider turns per vault', asyn
     ),
     ['First turn.', 'Second turn.'],
   )
+})
+
+test('sendAssistantMessage aborts while waiting for the vault turn lock', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-abort-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  let releaseFirstTurn!: () => void
+  const firstTurnGate = new Promise<void>((resolve) => {
+    releaseFirstTurn = resolve
+  })
+  let firstTurnStarted = false
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async (call: any) => {
+    const prompt = call.userPrompt ?? call.prompt
+    if (prompt === 'First turn.') {
+      firstTurnStarted = true
+      await firstTurnGate
+    }
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-turn-lock-abort',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const firstTurn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock-abort:first',
+    prompt: 'First turn.',
+  })
+
+  await waitForPredicate(() => firstTurnStarted)
+
+  const abortController = new AbortController()
+  const secondTurn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock-abort:second',
+    prompt: 'Second turn.',
+    abortSignal: abortController.signal,
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  abortController.abort()
+
+  await assert.rejects(
+    secondTurn,
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_TURN_ABORTED')
+      return true
+    },
+  )
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+
+  releaseFirstTurn()
+  await firstTurn
+})
+
+test('sendAssistantMessage removes the prior-turn abort listener once the queue advances', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-listeners-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  let releaseFirstTurn!: () => void
+  const firstTurnGate = new Promise<void>((resolve) => {
+    releaseFirstTurn = resolve
+  })
+  let firstTurnStarted = false
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async (call: any) => {
+    const prompt = call.userPrompt ?? call.prompt
+    if (prompt === 'First turn.') {
+      firstTurnStarted = true
+      await firstTurnGate
+    }
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-turn-lock-listeners',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const firstTurn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock-listeners:first',
+    prompt: 'First turn.',
+  })
+
+  await waitForPredicate(() => firstTurnStarted)
+
+  const abortController = new AbortController()
+  const secondTurn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock-listeners:second',
+    prompt: 'Second turn.',
+    abortSignal: abortController.signal,
+  })
+
+  await waitForPredicate(
+    () => getEventListeners(abortController.signal, 'abort').length > 0,
+  )
+
+  releaseFirstTurn()
+  await secondTurn
+  await firstTurn
+
+  assert.equal(getEventListeners(abortController.signal, 'abort').length, 0)
+})
+
+test('sendAssistantMessage retries after an externally held vault turn lock clears', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-external-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const lockPath = path.join(paths.assistantStateRoot, '.locks', 'assistant-turn')
+  const metadataPath = path.join(lockPath, 'owner.json')
+
+  await mkdir(lockPath, { recursive: true })
+  await writeFile(
+    metadataPath,
+    `${JSON.stringify({
+      command: 'test-external-lock',
+      pid: process.pid,
+      startedAt: '2026-03-27T00:00:00.000Z',
+    })}\n`,
+  )
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-turn-lock-external',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const turn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock:external',
+    prompt: 'Retry after the external lock clears.',
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+
+  await rm(lockPath, { recursive: true, force: true })
+
+  const result = await turn
+  assert.equal(result.response, 'assistant reply')
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+})
+
+test('sendAssistantMessage aborts while polling for an externally held vault turn lock', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-external-abort-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const lockPath = path.join(paths.assistantStateRoot, '.locks', 'assistant-turn')
+  const metadataPath = path.join(lockPath, 'owner.json')
+
+  await mkdir(lockPath, { recursive: true })
+  await writeFile(
+    metadataPath,
+    `${JSON.stringify({
+      command: 'test-external-lock',
+      pid: process.pid,
+      startedAt: '2026-03-27T00:00:00.000Z',
+    })}\n`,
+  )
+
+  const abortController = new AbortController()
+  const turn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock:external-abort',
+    prompt: 'Abort while waiting on the external lock.',
+    abortSignal: abortController.signal,
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  abortController.abort()
+
+  await assert.rejects(
+    turn,
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_TURN_ABORTED')
+      return true
+    },
+  )
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
 })
 
 test('sendAssistantMessage adds no-citations formatting guidance for outbound channel replies only', async () => {
@@ -1741,18 +2108,15 @@ test('sendAssistantMessage rolls back unauthorized direct canonical vault edits 
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-guard',
-      prompt: 'Inspect the vault.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.deepEqual(error.context?.paths, ['vault.json'])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-guard',
+    prompt: 'Inspect the vault.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    paths: ['vault.json'],
+  })
 
   assert.equal(await readFile(metadataPath, 'utf8'), beforeMetadata)
 
@@ -2017,18 +2381,15 @@ test('sendAssistantMessage restores the committed canonical content when a provi
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-tamper',
-      prompt: 'Inspect the vault.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.deepEqual(error.context?.paths, ['CORE.md', 'vault.json'])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-tamper',
+    prompt: 'Inspect the vault.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    paths: ['CORE.md', 'vault.json'],
+  })
 
   const metadata = JSON.parse(await readFile(metadataPath, 'utf8'))
   assert.equal(metadata.title, 'Legit Guarded Title')
@@ -2086,21 +2447,18 @@ test('sendAssistantMessage blocks on malformed write-operation metadata and stil
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-bad-operation-metadata',
-      prompt: 'Update the vault title.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.equal(error.context?.guardFailureReason, 'invalid_write_operation_metadata')
-      assert.equal(error.context?.guardFailureCode, 'OPERATION_INVALID')
-      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
-      assert.deepEqual(error.context?.paths, [targetRelativePath])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-bad-operation-metadata',
+    prompt: 'Update the vault title.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailurePathPattern: /^\.runtime\/operations\/op_/u,
+    paths: [targetRelativePath],
+  })
 
   assert.equal(await readFile(targetPath, 'utf8'), committedContent)
 
@@ -2167,22 +2525,19 @@ test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-missing-committed-payload',
-      prompt: 'Update the vault title.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.equal(error.context?.guardFailureReason, 'invalid_committed_payload')
-      assert.equal(error.context?.guardFailureActionKind, 'text_write')
-      assert.equal(error.context?.guardFailureTargetPath, targetRelativePath)
-      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
-      assert.deepEqual(error.context?.paths, [targetRelativePath])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-missing-committed-payload',
+    prompt: 'Update the vault title.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    actionKind: 'text_write',
+    guardFailureReason: 'invalid_committed_payload',
+    guardFailureTargetPath: targetRelativePath,
+    guardFailurePathPattern: /^\.runtime\/operations\/op_/u,
+    paths: [targetRelativePath],
+  })
 
   await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
 
@@ -2256,22 +2611,19 @@ test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and st
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-noncanonical-committed-payload',
-      prompt: 'Update the vault title.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.equal(error.context?.guardFailureReason, 'invalid_committed_payload')
-      assert.equal(error.context?.guardFailureActionKind, 'text_write')
-      assert.equal(error.context?.guardFailureTargetPath, targetRelativePath)
-      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
-      assert.deepEqual(error.context?.paths, [targetRelativePath])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-noncanonical-committed-payload',
+    prompt: 'Update the vault title.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    actionKind: 'text_write',
+    guardFailureReason: 'invalid_committed_payload',
+    guardFailureTargetPath: targetRelativePath,
+    guardFailurePathPattern: /^\.runtime\/operations\/op_/u,
+    paths: [targetRelativePath],
+  })
 
   await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
 
@@ -2338,22 +2690,19 @@ test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossi
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-binary-committed-payload',
-      prompt: 'Update the vault title.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.equal(error.context?.guardFailureReason, 'invalid_committed_payload')
-      assert.equal(error.context?.guardFailureActionKind, 'text_write')
-      assert.equal(error.context?.guardFailureTargetPath, targetRelativePath)
-      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
-      assert.deepEqual(error.context?.paths, [targetRelativePath])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-binary-committed-payload',
+    prompt: 'Update the vault title.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    actionKind: 'text_write',
+    guardFailureReason: 'invalid_committed_payload',
+    guardFailureTargetPath: targetRelativePath,
+    guardFailurePathPattern: /^\.runtime\/operations\/op_/u,
+    paths: [targetRelativePath],
+  })
 
   await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
 
@@ -2393,18 +2742,16 @@ test('sendAssistantMessage prefers the canonical write guard error when the prov
     )
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-provider-error',
-      prompt: 'Inspect the vault.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.equal(error.context?.providerErrorCode, 'ASSISTANT_CODEX_FAILED')
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-provider-error',
+    prompt: 'Inspect the vault.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    paths: ['vault.json'],
+    providerErrorCode: 'ASSISTANT_CODEX_FAILED',
+  })
 
   assert.equal(await readFile(metadataPath, 'utf8'), beforeMetadata)
 })
@@ -2446,18 +2793,15 @@ test('sendAssistantMessage reconstructs audited ledger appends and rolls back la
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-append',
-      prompt: 'Append to the event ledger.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.deepEqual(error.context?.paths, [ledgerRelativePath])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-append',
+    prompt: 'Append to the event ledger.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    paths: [ledgerRelativePath],
+  })
 
   assert.equal(
     await readFile(ledgerPath, 'utf8'),
@@ -2502,18 +2846,15 @@ test('sendAssistantMessage preserves large audited protected text writes after l
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-large-text',
-      prompt: 'Write a large protected bank note.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.deepEqual(error.context?.paths, [targetRelativePath])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-large-text',
+    prompt: 'Write a large protected bank note.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    paths: [targetRelativePath],
+  })
 
   assert.equal(await readFile(targetPath, 'utf8'), largeContent)
 })
@@ -2564,18 +2905,15 @@ test('sendAssistantMessage preserves large audited protected jsonl appends after
     }
   })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-large-append',
-      prompt: 'Append a large protected ledger record.',
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      assert.deepEqual(error.context?.paths, [ledgerRelativePath])
-      return true
-    },
-  )
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-large-append',
+    prompt: 'Append a large protected ledger record.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    paths: [ledgerRelativePath],
+  })
 
   assert.equal(await readFile(ledgerPath, 'utf8'), expectedAppend)
 })
@@ -2674,34 +3012,32 @@ test('sendAssistantMessage does not fail over or start cooldown when the canonic
       rawEvents: [],
     })
 
-  await assert.rejects(
-    sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'chat:canonical-no-failover',
-      prompt: 'Inspect the vault.',
-      failoverRoutes: [
-        {
-          name: 'backup',
-          provider: 'openai-compatible',
-          codexCommand: null,
-          model: null,
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          cooldownMs: null,
-          baseUrl: null,
-          apiKeyEnv: null,
-          providerName: null,
-        },
-      ],
-    }),
-    (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
-      return true
-    },
-  )
+  const first = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-no-failover',
+    prompt: 'Inspect the vault.',
+    failoverRoutes: [
+      {
+        name: 'backup',
+        provider: 'openai-compatible',
+        codexCommand: null,
+        model: null,
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        cooldownMs: null,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+      },
+    ],
+  })
+
+  assertBlockedAssistantResult(first, {
+    paths: ['vault.json'],
+  })
 
   const second = await sendAssistantMessage({
     vault: vaultRoot,

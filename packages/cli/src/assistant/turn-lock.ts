@@ -11,6 +11,7 @@ const ASSISTANT_TURN_LOCK_METADATA_PATH =
   `${ASSISTANT_TURN_LOCK_DIRECTORY}/owner.json`
 const ASSISTANT_TURN_LOCK_RETRY_MS = 50
 const ASSISTANT_TURN_LOCK_HELD_CODE = 'ASSISTANT_TURN_LOCKED'
+const processTurnQueues = new Map<string, Promise<void>>()
 
 const assistantTurnLock = createAssistantStateWriteLock<AssistantStatePaths>({
   ownerKeyPrefix: 'assistant-turn',
@@ -31,19 +32,33 @@ export async function withAssistantTurnLock<TResult>(input: {
   vault: string
 }): Promise<TResult> {
   const paths = resolveAssistantStatePaths(input.vault)
+  const releaseProcessQueue = await waitForProcessTurnQueue(
+    paths.assistantStateRoot,
+    input.abortSignal,
+  )
 
-  while (true) {
-    throwIfAssistantTurnLockAborted(input.abortSignal)
+  try {
+    while (true) {
+      throwIfAssistantTurnLockAborted(input.abortSignal)
 
-    try {
-      return await assistantTurnLock.withWriteLock(paths, input.run)
-    } catch (error) {
-      if (!isAssistantTurnLockHeldError(error)) {
-        throw error
+      try {
+        const handle = await assistantTurnLock.acquireWriteLock(paths)
+
+        try {
+          return await input.run()
+        } finally {
+          await handle.release()
+        }
+      } catch (error) {
+        if (!isAssistantTurnLockHeldError(error)) {
+          throw error
+        }
+
+        await waitForAssistantTurnLockAvailability(input.abortSignal)
       }
-
-      await waitForAssistantTurnLockAvailability(input.abortSignal)
     }
+  } finally {
+    releaseProcessQueue()
   }
 }
 
@@ -84,4 +99,71 @@ function isAssistantTurnLockHeldError(error: unknown): error is VaultCliError {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+async function waitForProcessTurnQueue(
+  assistantStateRoot: string,
+  abortSignal?: AbortSignal,
+): Promise<() => void> {
+  const prior = processTurnQueues.get(assistantStateRoot) ?? Promise.resolve()
+  let releaseQueue!: () => void
+  const queued = new Promise<void>((resolve) => {
+    releaseQueue = resolve
+  })
+  const tail = prior.then(
+    () => queued,
+    () => queued,
+  )
+  processTurnQueues.set(assistantStateRoot, tail)
+
+  try {
+    await waitForPriorTurn(prior, abortSignal)
+    return () => {
+      releaseQueue()
+      if (processTurnQueues.get(assistantStateRoot) === tail) {
+        processTurnQueues.delete(assistantStateRoot)
+      }
+    }
+  } catch (error) {
+    releaseQueue()
+    if (processTurnQueues.get(assistantStateRoot) === tail) {
+      processTurnQueues.delete(assistantStateRoot)
+    }
+    throw error
+  }
+}
+
+async function waitForPriorTurn(
+  prior: Promise<void>,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  if (!abortSignal) {
+    await prior.catch(() => undefined)
+    return
+  }
+
+  if (abortSignal.aborted) {
+    throw createAssistantTurnAbortedError()
+  }
+
+  let onAbort: (() => void) | null = null
+
+  try {
+    await Promise.race([
+      prior.catch(() => undefined),
+      new Promise<never>((_, reject) => {
+        onAbort = () => {
+          reject(createAssistantTurnAbortedError())
+        }
+
+        abortSignal.addEventListener('abort', onAbort, {
+          once: true,
+        })
+      }),
+    ])
+  } finally {
+    if (onAbort) {
+      abortSignal.removeEventListener('abort', onAbort)
+    }
+  }
 }

@@ -75,6 +75,7 @@ interface GuardOperationEntry {
   relativePath: string
   snapshotStatus: string | null
 }
+
 const PROTECTED_ROOT_FILES = new Set<string>([
   VAULT_LAYOUT.metadata,
   VAULT_LAYOUT.coreDocument,
@@ -427,6 +428,10 @@ async function readStoredWriteOperationStatusForGuard(
 }
 
 function isProtectedCanonicalPath(relativePath: string): boolean {
+  // Raw artifacts remain enforced by the isolated provider workspace +
+  // sandbox boundary rather than full snapshot/replay in this guard. Walking
+  // and copying the entire `raw/**` tree on every assistant turn would turn
+  // large vaults into a pathological hot path.
   return (
     PROTECTED_ROOT_FILES.has(relativePath) ||
     relativePath.startsWith(`${VAULT_LAYOUT.journalDirectory}/`) ||
@@ -436,6 +441,15 @@ function isProtectedCanonicalPath(relativePath: string): boolean {
       relativePath.startsWith(`${VAULT_LAYOUT.auditDirectory}/`) &&
       relativePath.endsWith('.jsonl')
     )
+  )
+}
+
+export function isAssistantCanonicalWriteBlockedError(
+  error: unknown,
+): error is VaultCliError {
+  return (
+    error instanceof VaultCliError &&
+    error.code === 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED'
   )
 }
 
