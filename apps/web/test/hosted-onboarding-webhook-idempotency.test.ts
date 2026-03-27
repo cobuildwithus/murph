@@ -150,6 +150,111 @@ describe("hosted onboarding webhook retry safety", () => {
     });
   });
 
+  it.each([
+    {
+      body: buildLinqMessageWebhookBody({
+        eventType: "message.delivered",
+      }),
+      reason: "message.delivered",
+    },
+    {
+      body: buildLinqMessageWebhookBody({
+        isFromMe: true,
+      }),
+      reason: "own-message",
+    },
+    {
+      body: buildLinqMessageWebhookBody({
+        from: "not-a-phone",
+      }),
+      reason: "invalid-phone",
+    },
+  ])("ignores Linq webhooks without side effects for $reason", async ({ body, reason }) => {
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: body,
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason,
+    });
+
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores a Linq webhook with no onboarding trigger without queueing side effects", async () => {
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+        update: vi.fn(),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody({
+          text: "hello",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "no-trigger",
+    });
+
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("completes a Linq active-member webhook after the dispatch is durably queued", async () => {
     const prisma: any = withPrismaTransaction({
       hostedBillingCheckout: {
@@ -741,7 +846,7 @@ describe("hosted onboarding webhook retry safety", () => {
       memberId: "member_123",
       sentAt: null,
       status: "pending",
-      triggerText: "I want to get healthy",
+      triggerText: "start murph",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
     const prisma: any = withPrismaTransaction({
@@ -777,7 +882,7 @@ describe("hosted onboarding webhook retry safety", () => {
       handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildLinqMessageWebhookBody({
-          text: "I want to get healthy",
+          text: "start murph",
         }),
         signature: null,
         timestamp: null,
@@ -855,7 +960,7 @@ describe("hosted onboarding webhook retry safety", () => {
       handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildLinqMessageWebhookBody({
-          text: "I want to get healthy",
+          text: "start murph",
         }),
         signature: null,
         timestamp: null,
@@ -2181,6 +2286,9 @@ describe("hosted onboarding webhook retry safety", () => {
 });
 
 function buildLinqMessageWebhookBody(input: {
+  eventType?: string;
+  from?: string;
+  isFromMe?: boolean;
   text?: string;
 } = {}): string {
   return JSON.stringify({
@@ -2188,8 +2296,8 @@ function buildLinqMessageWebhookBody(input: {
     created_at: "2026-03-26T12:00:00.000Z",
     data: {
       chat_id: "chat_123",
-      from: "+15551234567",
-      is_from_me: false,
+      from: input.from ?? "+15551234567",
+      is_from_me: input.isFromMe ?? false,
       message: {
         id: "msg_123",
         parts: [
@@ -2204,7 +2312,7 @@ function buildLinqMessageWebhookBody(input: {
       service: "sms",
     },
     event_id: "evt_123",
-    event_type: "message.received",
+    event_type: input.eventType ?? "message.received",
   });
 }
 
