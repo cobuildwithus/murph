@@ -6,6 +6,7 @@
 !.env.example
 !**/.env.example
 **/.next
+**/.wrangler
 **/.test-dist
 **/*.tsbuildinfo
 **/coverage
@@ -24,5 +25,6 @@ output-packages
 chatgpt-artifacts
 apps/cloudflare/.dev.vars*
 apps/cloudflare/.runner.env*
+apps/cloudflare/.deploy
 *.zip
 *.patch

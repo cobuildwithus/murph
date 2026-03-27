@@ -34,6 +34,12 @@
     "HOSTED_EXECUTION_RUNNER_BASE_URL": "https://REPLACE_ME-hosted-runner.example.invalid",
     "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "60000"
   },
+  "secrets": {
+    "required": [
+      "HOSTED_EXECUTION_SIGNING_SECRET",
+      "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY"
+    ]
+  },
   // Configure these outside source control for real deployments:
   // - HOSTED_EXECUTION_SIGNING_SECRET
   // - HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY

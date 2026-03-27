@@ -92,11 +92,11 @@ The current repo implements:
 - a read model and export-pack builder in `packages/query`
 - a local-only Next.js observability app in `packages/web`
 - a hosted Next.js control plane in `apps/web` for onboarding, billing, hosted device sync, and hosted Linq ingress
-- a hosted Cloudflare execution app in `apps/cloudflare` for signed internal dispatch, per-user coordination, encrypted hosted bundle storage, one-shot inbox/parser/assistant/device-sync runs, and a manual worker-plus-runner deploy scaffold
+- a hosted Cloudflare execution app in `apps/cloudflare` for signed internal dispatch, per-user coordination, encrypted hosted bundle storage, one-shot inbox/parser/assistant/device-sync runs, and a worker-plus-runner deploy scaffold with generated config/secrets helpers plus a manual GitHub Actions workflow
 - a typed `vault-cli` command surface in `packages/cli`, including provider-backed assistant chat/session commands plus an always-on inbox triage loop
 - deterministic fixtures and smoke manifests under `fixtures/` and `e2e/`
 
-The hosted apps define an initial deployment shape, but deployment automation is still repo-local and manual. `apps/cloudflare/wrangler.jsonc`, `apps/cloudflare/.dev.vars.example`, `apps/cloudflare/.runner.env.example`, and `Dockerfile.cloudflare-hosted-runner` now document the current worker binding/env contract, retry knobs, health/internal route shape, encrypted per-user runner-env override support, the separate runner-container expectation, and the minimum local setup steps, but account-specific names, secrets wiring, container orchestration, and CI deploy automation remain explicit placeholders. Verification remains package/runtime-truthful and fixture-based rather than a live hosted environment proof.
+The hosted apps define an initial deployment shape, and the repo now includes generated deploy-artifact helpers plus a manual GitHub Actions workflow for the Cloudflare worker and runner image publication. `apps/cloudflare/DEPLOY.md` is the end-to-end guide. Account-specific names, secrets wiring, and the separate runner-service rollout target still remain explicit operator choices. Verification remains package/runtime-truthful and fixture-based rather than a live hosted environment proof.
 
 ## Mental Model
 

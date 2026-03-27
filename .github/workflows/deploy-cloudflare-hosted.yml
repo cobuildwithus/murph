@@ -1,0 +1,187 @@
+name: Deploy Cloudflare Hosted Execution
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment to deploy from
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+      publish_runner_image:
+        description: Build and push the hosted runner image to GHCR
+        required: true
+        default: true
+        type: boolean
+      sync_worker_secrets:
+        description: Upload the Worker secret set before deploy
+        required: true
+        default: true
+        type: boolean
+      deploy_worker:
+        description: Deploy the Cloudflare Worker after rendering config
+        required: true
+        default: true
+        type: boolean
+      smoke_user_id:
+        description: Optional hosted user id for a manual /run smoke test
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    name: Deploy hosted execution (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: cloudflare-hosted-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      HB_CF_ALLOWED_USER_ENV_KEYS: ${{ vars.HB_CF_ALLOWED_USER_ENV_KEYS }}
+      HB_CF_ALLOWED_USER_ENV_PREFIXES: ${{ vars.HB_CF_ALLOWED_USER_ENV_PREFIXES }}
+      HB_CF_BUNDLES_BUCKET: ${{ vars.HB_CF_BUNDLES_BUCKET }}
+      HB_CF_BUNDLES_PREVIEW_BUCKET: ${{ vars.HB_CF_BUNDLES_PREVIEW_BUCKET }}
+      HB_CF_BUNDLE_KEY_ID: ${{ vars.HB_CF_BUNDLE_KEY_ID }}
+      HB_CF_COMPATIBILITY_DATE: ${{ vars.HB_CF_COMPATIBILITY_DATE }}
+      HB_CF_DEFAULT_ALARM_DELAY_MS: ${{ vars.HB_CF_DEFAULT_ALARM_DELAY_MS }}
+      HB_CF_MAX_EVENT_ATTEMPTS: ${{ vars.HB_CF_MAX_EVENT_ATTEMPTS }}
+      HB_CF_PUBLIC_BASE_URL: ${{ vars.HB_CF_PUBLIC_BASE_URL }}
+      HB_CF_RETRY_DELAY_MS: ${{ vars.HB_CF_RETRY_DELAY_MS }}
+      HB_CF_RUNNER_BASE_URL: ${{ vars.HB_CF_RUNNER_BASE_URL }}
+      HB_CF_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.HB_CF_RUNNER_COMMIT_TIMEOUT_MS }}
+      HB_CF_RUNNER_TIMEOUT_MS: ${{ vars.HB_CF_RUNNER_TIMEOUT_MS }}
+      HB_CF_WORKER_NAME: ${{ vars.HB_CF_WORKER_NAME }}
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: ${{ secrets.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY }}
+      HOSTED_EXECUTION_CONTROL_TOKEN: ${{ secrets.HOSTED_EXECUTION_CONTROL_TOKEN }}
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.HB_CF_RUNNER_COMMIT_TIMEOUT_MS }}
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: ${{ secrets.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN }}
+      HOSTED_EXECUTION_SIGNING_SECRET: ${{ secrets.HOSTED_EXECUTION_SIGNING_SECRET }}
+      DEVICE_SYNC_PUBLIC_BASE_URL: ${{ vars.DEVICE_SYNC_PUBLIC_BASE_URL }}
+      DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
+      WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
+      WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
+      OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
+      OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
+      LINQ_API_BASE_URL: ${{ vars.LINQ_API_BASE_URL }}
+      LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
+      HEALTHYBOB_LINQ_API_BASE_URL: ${{ vars.HEALTHYBOB_LINQ_API_BASE_URL }}
+      HEALTHYBOB_LINQ_API_TOKEN: ${{ secrets.HEALTHYBOB_LINQ_API_TOKEN }}
+      LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
+      HEALTHYBOB_LINQ_WEBHOOK_SECRET: ${{ secrets.HEALTHYBOB_LINQ_WEBHOOK_SECRET }}
+      AGENTMAIL_API_BASE_URL: ${{ vars.AGENTMAIL_API_BASE_URL }}
+      AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_BOT_USERNAME: ${{ vars.TELEGRAM_BOT_USERNAME }}
+      TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      WHISPER_MODEL: ${{ vars.WHISPER_MODEL }}
+      WHISPER_MODEL_DIR: ${{ vars.WHISPER_MODEL_DIR }}
+      PADDLEOCR_MODEL_DIR: ${{ vars.PADDLEOCR_MODEL_DIR }}
+      PARSER_FFMPEG_PATH: ${{ vars.PARSER_FFMPEG_PATH }}
+      HB_INSTALL_PADDLEOCR: ${{ vars.HB_INSTALL_PADDLEOCR || '0' }}
+      HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.HB_CF_PUBLIC_BASE_URL }}
+      HOSTED_EXECUTION_SMOKE_RUNNER_BASE_URL: ${{ vars.HB_CF_RUNNER_BASE_URL }}
+      HOSTED_EXECUTION_SMOKE_USER_ID: ${{ inputs.smoke_user_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused Cloudflare checks
+        run: pnpm --dir apps/cloudflare test
+
+      - name: Render generated deploy artifacts
+        run: |
+          pnpm --dir apps/cloudflare deploy:config:render
+          pnpm --dir apps/cloudflare deploy:secrets:render
+          pnpm --dir apps/cloudflare deploy:runner-env:render
+
+      - name: Show generated artifact paths
+        run: ls -lah apps/cloudflare/.deploy
+
+      - name: Resolve runner image coordinates
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image_repo="ghcr.io/${owner}/healthybob-cloudflare-runner"
+          echo "repo=${image_repo}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "env_tag=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: ${{ inputs.publish_runner_image }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push hosted runner image
+        if: ${{ inputs.publish_runner_image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.cloudflare-hosted-runner
+          push: true
+          build-args: |
+            HB_INSTALL_PADDLEOCR=${{ env.HB_INSTALL_PADDLEOCR || '0' }}
+          tags: |
+            ${{ steps.image.outputs.repo }}:${{ steps.image.outputs.sha_tag }}
+            ${{ steps.image.outputs.repo }}:${{ steps.image.outputs.env_tag }}
+
+      - name: Sync Worker secrets
+        if: ${{ inputs.sync_worker_secrets }}
+        run: pnpm --dir apps/cloudflare worker:secret:bulk -- ./.deploy/worker-secrets.json --config ./.deploy/wrangler.generated.jsonc
+
+      - name: Deploy Worker
+        if: ${{ inputs.deploy_worker }}
+        run: pnpm --dir apps/cloudflare worker:deploy -- --config ./.deploy/wrangler.generated.jsonc
+
+      - name: Smoke test deployed endpoints
+        if: ${{ inputs.deploy_worker }}
+        run: pnpm --dir apps/cloudflare deploy:smoke
+
+      - name: Publish deployment summary
+        shell: bash
+        run: |
+          {
+            echo "## Cloudflare hosted execution deploy"
+            echo
+            echo "- Environment: \`${{ inputs.environment }}\`"
+            echo "- Worker name: \`${HB_CF_WORKER_NAME}\`"
+            echo "- Worker URL: \`${HB_CF_PUBLIC_BASE_URL}\`"
+            echo "- Runner URL: \`${HB_CF_RUNNER_BASE_URL}\`"
+            echo "- Runner image: \`${{ steps.image.outputs.repo }}:${{ steps.image.outputs.env_tag }}\`"
+            echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
