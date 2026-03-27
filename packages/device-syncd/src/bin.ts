@@ -1,4 +1,5 @@
 import { loadDeviceSyncEnvironment } from "./config.js";
+import { formatDeviceSyncStartupError } from "./errors.js";
 import { startDeviceSyncHttpServer } from "./http.js";
 import { createDeviceSyncService } from "./service.js";
 
@@ -27,6 +28,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error) => {
-  console.error(error);
+  console.error(formatDeviceSyncStartupError(error));
   process.exitCode = 1;
 });

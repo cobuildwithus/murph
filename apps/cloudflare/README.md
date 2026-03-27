@@ -12,6 +12,7 @@ This app is intentionally separate from `apps/web`:
 - verify signed internal dispatch from `apps/web`
 - coordinate per-user runs through a `USER_RUNNER` Durable Object
 - store encrypted hosted `vault` and broader `agent-state` bundle snapshots in the `BUNDLES` R2 bucket
+- perform durable hosted bootstrap explicitly on `member.activated` instead of mutating vault/assistant config during every run
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
 - run the existing Healthy Bob inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@healthybob/assistant-runtime` package
@@ -28,16 +29,16 @@ This app is intentionally separate from `apps/web`:
 
 Current worker bindings read directly by `src/index.ts`:
 
-- `USER_RUNNER`: Durable Object namespace for per-user coordination and container lifecycle
+- `USER_RUNNER`: Durable Object namespace for per-user coordination, queue state, and hosted execution orchestration
+- `RUNNER_CONTAINER`: Durable Object namespace for the companion `RunnerContainer` class that owns container startup, port readiness, and idle lifecycle
 - `BUNDLES`: R2 bucket for encrypted `vault` and `agent-state` bundle blobs
 
 Current worker env/config names read directly by `src/env.ts`:
 
 - required secret: `HOSTED_EXECUTION_SIGNING_SECRET` (the worker also accepts the historical alias `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`)
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
-- required in practice: `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL` so the containerized runner can call the worker's internal commit/finalize/outbox routes
 - optional secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes
-- optional secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the internal worker commit/finalize/outbox routes and the private container HTTP server
+- optional secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the private container HTTP server
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the per-user encrypted env key allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` extends the per-user encrypted env prefix allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
@@ -57,11 +58,8 @@ Current worker routes:
 - `GET /internal/users/:userId/status` is an operator/internal status route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN` when that token is configured
 - `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN` when that token is configured
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
-- `PUT /internal/users/:userId/env` merges or replaces encrypted per-user env overrides inside the user's `agent-state` bundle
-- `DELETE /internal/users/:userId/env` clears the encrypted per-user runner env override file while preserving other `agent-state` contents
-- `POST /internal/runner-events/:userId/:eventId/commit` records the committed hosted bundles and per-event journal entry before assistant outbox drain
-- `POST /internal/runner-events/:userId/:eventId/finalize` updates the committed journal entry with any bundle changes made after outbox drain
-- `GET|PUT /internal/runner-outbox/:userId/:intentId` reads or records hosted assistant delivery reconciliation for the durable post-commit outbox path
+- `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
+- `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`
 
 `apps/cloudflare/wrangler.jsonc` is the checked-in scaffold for those bindings, env names, and the native container image reference. It intentionally leaves bucket names, worker name, and secrets as placeholders until a real Cloudflare account target exists.
 
@@ -75,8 +73,8 @@ That means:
 - the per-user Durable Object keeps queue/process state in its SQLite storage tables (`runner_meta`, `pending_events`, `consumed_events`, and `poisoned_events`) instead of one serialized record blob
 - the Worker's internal control routes call direct Durable Object methods such as `dispatch`, `commit`, `finalizeCommit`, `status`, and per-user env updates instead of routing those control hops back through worker-local `fetch()` URLs
 - the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
-- the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, and per-run env injection before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
-- the runner process calls back to the worker's internal commit/finalize/outbox routes so the existing durable hosted assistant outbox and bundle-journal flow remains intact
+- the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, per-run env injection, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
+- the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://outbox.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object still destroys the companion container after each drained batch instead of keeping its own lease manager
 
@@ -98,8 +96,8 @@ Current expectations for the container image:
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - `PORT` for the internal bridge listen port, defaulting to `8080`
 - provider/runtime env such as WHOOP, Oura, Linq, AgentMail, Telegram, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
-- optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when encrypted per-user env overrides need to cover additional key names
-- encrypted per-user overrides are loaded from `.healthybob/hosted/user-env.json` inside the user's `agent-state` bundle, forwarded into the one-shot runtime context, and the default hosted execution path runs each job in an isolated child process so per-user env overrides no longer force container-wide request serialization
+- optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when separately encrypted per-user env overrides need to cover additional key names
+- encrypted per-user overrides are read from a dedicated per-user hosted object, injected into the one-shot runtime request, and the default hosted execution path runs each job in an isolated child process so per-user env overrides no longer force container-wide request serialization
 
 ## Deployment status
 
@@ -116,17 +114,28 @@ Still intentionally placeholder:
 - real Cloudflare account ids, domains, and worker names
 - final bucket names
 - final container-capacity tuning
-- fully automated production rollout and smoke orchestration
+- fully automatic canary promotion without an operator decision
 
 For the end-to-end deployment path, including the GitHub Actions workflow and generated deploy artifacts, see `apps/cloudflare/DEPLOY.md`.
+
+## Verification
+
+The Cloudflare app now keeps two focused Vitest lanes:
+
+- `pnpm --dir apps/cloudflare test:node` keeps the fast Node-based unit and integration coverage for auth, journaling, bundle storage, control routes, and the one-shot runner path.
+- `pnpm --dir apps/cloudflare test:workers` runs a smaller Workers-runtime suite through `@cloudflare/vitest-pool-workers`, covering signed dispatch, direct Durable Object RPC, Durable Object alarms, bundle journaling, and runner control flows inside the actual Workers runtime.
+- `pnpm --dir apps/cloudflare test` runs both lanes behind the app-local typecheck gate.
 
 ## Operational notes
 
 - The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references.
-- Hosted bundle reads/writes and per-user env bundle updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
-- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` includes sibling `assistant-state`, the minimal operator-home config needed for bootstrap, and the encrypted per-user runner env file when one is configured. Vault `.runtime/**` stays local-only and is not bundled into hosted `agent-state`.
+- Hosted bundle reads/writes and per-user env object updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
+- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` includes sibling `assistant-state` plus the minimal operator-home config needed for explicit `member.activated` bootstrap. Vault `.runtime/**` stays local-only and is not bundled into hosted `agent-state`, and per-user runner env overrides live in their own encrypted hosted object.
 - Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.
-- Hosted assistant replies still queue during the one-shot run, the committed hosted bundles are durably recorded first, and only then does the runner drain the assistant outbox with the hosted delivery journal for reconciliation.
+- Hosted one-shot runs now collect due outward side effects with the committed hosted result, then the runner drains those committed side effects after the durable commit succeeds. Assistant replies are the first concrete side-effect kind on that path and still originate from the assistant outbox intents in `assistant-state/`.
+- Follow-up hosted events now require an already bootstrapped member context; they no longer create the vault or force-enable Linq auto-reply as a hidden side effect.
+- The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production rollout. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
+- Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys and Durable Object migrations still require a direct `wrangler deploy`.
 
 ## Runtime boundary
 
@@ -134,5 +143,5 @@ For the end-to-end deployment path, including the GitHub Actions workflow and ge
 
 ## Known follow-ups
 
-- The current journal plus durable commit/finalize path protects bundle consistency and hosted assistant delivery reconciliation, but it does not yet provide a generalized outbox for every externally visible side effect.
+- Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
 - Cloudflare container lifecycle is currently "start on demand, destroy after drained batch." If you later want keep-warm or pool behavior, that should be a separate follow-up rather than an implicit background contract.

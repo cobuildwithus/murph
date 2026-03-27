@@ -316,14 +316,8 @@ test("Oura provider validates webhook signatures and turns notifications into re
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T09:58:00.000Z",
     payload: {
-      event_type: "daily_sleep.updated",
-      data_type: "daily_sleep",
-      object_id: "daily-sleep-1",
-      user_id: "oura-user-1",
-      timestamp: "2026-03-16T09:58:00.000Z",
       eventType: "daily_sleep.updated",
       dataType: "daily_sleep",
-      objectId: "daily-sleep-1",
     },
     jobs: [
       {

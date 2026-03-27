@@ -12,6 +12,7 @@ What it does:
 - serves a provider-agnostic local control plane for CLI and web auth flows
 - owns OAuth connection state
 - stores encrypted provider tokens in SQLite under `.runtime/device-syncd.sqlite`
+- keeps `.runtime/device-syncd.sqlite` plus `.runtime/device-syncd/**` local-only; those control, cursor, and log artifacts are not part of hosted `agent-state` bundles
 - accepts provider webhooks when a provider supports them
 - runs background backfill and reconcile jobs
 - serializes active jobs per account so rotating refresh-token flows do not race

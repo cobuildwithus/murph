@@ -35,6 +35,8 @@ export interface CreateDeviceSyncPublicIngressInput {
   log?: DeviceSyncLogger;
 }
 
+const WEBHOOK_TRACE_PROCESSING_TTL_MS = 5 * 60_000;
+
 export class DeviceSyncPublicIngress {
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
@@ -242,25 +244,6 @@ export class DeviceSyncPublicIngress {
       now,
     });
 
-    const inserted = await this.store.recordWebhookTraceIfNew({
-      provider: provider.provider,
-      traceId: parsed.traceId,
-      externalAccountId: parsed.externalAccountId,
-      eventType: parsed.eventType,
-      receivedAt: now,
-      payload: parsed.payload,
-    });
-
-    if (!inserted) {
-      return {
-        accepted: true,
-        duplicate: true,
-        provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-      };
-    }
-
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
 
     if (!account) {
@@ -286,8 +269,6 @@ export class DeviceSyncPublicIngress {
       };
     }
 
-    await this.store.markWebhookReceived(account.id, now);
-
     if (account.status !== "active") {
       this.logger.warn?.("Ignoring webhook side effects for non-active device sync account.", {
         provider: provider.provider,
@@ -305,12 +286,50 @@ export class DeviceSyncPublicIngress {
       };
     }
 
-    await this.hooks.onWebhookAccepted?.({
-      account,
-      webhook: parsed,
-      provider,
-      now,
+    const traceClaim = await this.store.claimWebhookTrace({
+      provider: provider.provider,
+      traceId: parsed.traceId,
+      externalAccountId: parsed.externalAccountId,
+      eventType: parsed.eventType,
+      receivedAt: now,
+      payload: parsed.payload,
+      processingExpiresAt: addMilliseconds(now, WEBHOOK_TRACE_PROCESSING_TTL_MS),
     });
+
+    if (traceClaim === "processed") {
+      return {
+        accepted: true,
+        duplicate: true,
+        provider: provider.provider,
+        eventType: parsed.eventType,
+        traceId: parsed.traceId,
+      };
+    }
+
+    if (traceClaim === "processing") {
+      throw deviceSyncError({
+        code: "WEBHOOK_TRACE_IN_PROGRESS",
+        message: "Webhook delivery is already being processed. Retry later.",
+        retryable: true,
+        httpStatus: 503,
+      });
+    }
+
+    await this.store.markWebhookReceived(account.id, now);
+
+    try {
+      await this.hooks.onWebhookAccepted?.({
+        account,
+        webhook: parsed,
+        provider,
+        now,
+      });
+    } catch (error) {
+      await this.store.releaseWebhookTrace(provider.provider, parsed.traceId);
+      throw error;
+    }
+
+    await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
 
     return {
       accepted: true,

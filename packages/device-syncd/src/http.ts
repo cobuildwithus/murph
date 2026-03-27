@@ -696,14 +696,7 @@ function sendError(response: ServerResponse, error: unknown): void {
       response.setHeader("WWW-Authenticate", CONTROL_PLANE_WWW_AUTHENTICATE);
     }
 
-    sendJson(response, error.httpStatus, {
-      error: {
-        code: error.code,
-        message: error.message,
-        retryable: error.retryable,
-        details: error.details,
-      },
-    });
+    sendJson(response, error.httpStatus, buildPublicDeviceSyncErrorPayload(error));
     return;
   }
 
@@ -734,6 +727,49 @@ function sendError(response: ServerResponse, error: unknown): void {
       message,
     },
   });
+}
+
+export function buildPublicDeviceSyncErrorPayload(error: DeviceSyncError): {
+  error: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    details?: Record<string, unknown>;
+  };
+} {
+  return {
+    error: {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      details: buildPublicDeviceSyncErrorDetails(error.details),
+    },
+  };
+}
+
+function buildPublicDeviceSyncErrorDetails(
+  details: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const status = readDeviceSyncErrorStatusDetail(details);
+  return status === null ? undefined : { status };
+}
+
+function readDeviceSyncErrorStatusDetail(
+  details: Record<string, unknown> | undefined,
+): number | null {
+  if (!details) {
+    return null;
+  }
+
+  const statusValue = details.status;
+  const status =
+    typeof statusValue === "number"
+      ? statusValue
+      : typeof statusValue === "string" && statusValue.trim()
+        ? Number(statusValue)
+        : Number.NaN;
+
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
 }
 
 function readStringField(record: Record<string, unknown>, key: string): string | null {

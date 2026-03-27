@@ -40,6 +40,13 @@ import type {
   StoredDeviceSyncAccount,
 } from "./types.js";
 
+class DeviceSyncJobExecutionCancelledError extends Error {
+  constructor(readonly accountId: string, readonly jobId: string) {
+    super(`Device sync job ${jobId} is no longer active for account ${accountId}.`);
+    this.name = "DeviceSyncJobExecutionCancelledError";
+  }
+}
+
 export interface CreateDeviceSyncServiceInput {
   secret: string;
   config: DeviceSyncServiceConfig;
@@ -114,7 +121,9 @@ export class DeviceSyncService {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
         },
-        recordWebhookTraceIfNew: (record) => this.store.recordWebhookTraceIfNew(record),
+        claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
+        completeWebhookTrace: (provider, traceId) => this.store.completeWebhookTrace(provider, traceId),
+        releaseWebhookTrace: (provider, traceId) => this.store.releaseWebhookTrace(provider, traceId),
         markWebhookReceived: (accountId, now) => this.store.markWebhookReceived(accountId, now),
       },
       hooks: {
@@ -122,7 +131,12 @@ export class DeviceSyncService {
           this.enqueueJobs(account, connection.initialJobs ?? []);
         },
         onWebhookAccepted: async ({ account, webhook }) => {
-          this.enqueueJobs(account, webhook.jobs);
+          this.store.enqueueJobsAndCompleteWebhookTrace({
+            accountId: account.id,
+            provider: account.provider,
+            traceId: webhook.traceId,
+            jobs: webhook.jobs,
+          });
         },
       },
       log: this.logger,
@@ -353,6 +367,21 @@ export class DeviceSyncService {
 
     this.store.markSyncStarted(storedAccount.id, now);
 
+    const disconnectGeneration = storedAccount.disconnectGeneration;
+    const ensureExecutionActive = (): void => {
+      const currentJob = this.store.getJobById(job.id);
+
+      if (!currentJob || currentJob.status !== "running" || currentJob.leaseOwner !== this.workerId) {
+        throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
+      }
+
+      const currentAccount = this.store.getAccountById(storedAccount.id);
+
+      if (!currentAccount || currentAccount.status !== "active" || currentAccount.disconnectGeneration !== disconnectGeneration) {
+        throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
+      }
+    };
+
     let currentAccount = this.toDecryptedAccount(storedAccount);
 
     try {
@@ -360,15 +389,27 @@ export class DeviceSyncService {
         {
           account: currentAccount,
           now,
-          importSnapshot: async (snapshot: unknown) =>
-            this.importer.importDeviceProviderSnapshot({
+          importSnapshot: async (snapshot: unknown) => {
+            ensureExecutionActive();
+            return this.importer.importDeviceProviderSnapshot({
               provider: provider.provider,
               snapshot,
               vaultRoot: this.vaultRoot,
-            }),
+            });
+          },
           refreshAccountTokens: async () => {
+            ensureExecutionActive();
             const refreshed = await provider.refreshTokens(currentAccount);
-            const updated = this.store.updateAccountTokens(currentAccount.id, this.encryptTokens(refreshed));
+            const updated = this.store.updateAccountTokens(
+              currentAccount.id,
+              this.encryptTokens(refreshed),
+              disconnectGeneration,
+            );
+
+            if (!updated) {
+              throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, job.id);
+            }
+
             currentAccount = this.toDecryptedAccount(updated);
             return currentAccount;
           },
@@ -377,14 +418,33 @@ export class DeviceSyncService {
         job,
       );
 
-      this.store.completeJob(job.id, now);
-      this.enqueueJobs(storedAccount, result.scheduledJobs ?? []);
-      this.store.markSyncSucceeded(storedAccount.id, now, {
+      ensureExecutionActive();
+
+      if (!this.store.completeJobIfOwned(job.id, this.workerId, now)) {
+        return job;
+      }
+
+      const markedSucceeded = this.store.markSyncSucceeded(storedAccount.id, now, disconnectGeneration, {
         metadataPatch: result.metadataPatch,
         nextReconcileAt: result.nextReconcileAt,
       });
+
+      if (!markedSucceeded) {
+        return job;
+      }
+
+      this.enqueueJobs(storedAccount, result.scheduledJobs ?? []);
       return job;
     } catch (error) {
+      if (error instanceof DeviceSyncJobExecutionCancelledError) {
+        this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
+          provider: provider.provider,
+          accountId: storedAccount.id,
+          jobId: job.id,
+        });
+        return job;
+      }
+
       const failure = normalizeExecutionError(error);
       const retryAt = failure.retryable ? addMilliseconds(now, computeRetryDelayMs(job.attempts)) : null;
       this.store.failJob(job.id, now, failure.code, failure.message, retryAt, failure.retryable);
@@ -465,13 +525,18 @@ export class DeviceSyncService {
   }
 
   private toPublicAccount(account: StoredDeviceSyncAccount): PublicDeviceSyncAccount {
-    const { accessTokenEncrypted: _accessTokenEncrypted, refreshTokenEncrypted: _refreshTokenEncrypted, ...publicAccount } =
-      account;
+    const {
+      accessTokenEncrypted: _accessTokenEncrypted,
+      refreshTokenEncrypted: _refreshTokenEncrypted,
+      disconnectGeneration: _disconnectGeneration,
+      ...publicAccount
+    } = account;
     return publicAccount;
   }
 
   private toDecryptedAccount(account: StoredDeviceSyncAccount): DeviceSyncAccount {
     return {
+      disconnectGeneration: account.disconnectGeneration,
       ...this.toPublicAccount(account),
       accessToken: account.accessTokenEncrypted ? this.codec.decrypt(account.accessTokenEncrypted) : "",
       refreshToken: account.refreshTokenEncrypted ? this.codec.decrypt(account.refreshTokenEncrypted) : null,

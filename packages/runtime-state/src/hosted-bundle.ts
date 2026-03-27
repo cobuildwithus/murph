@@ -71,9 +71,11 @@ export async function snapshotHostedBundleRoots(input: {
 export async function restoreHostedBundleRoots(input: {
   bytes: Uint8Array | ArrayBuffer;
   expectedKind: HostedExecutionBundleKind;
+  ignoredRoots?: readonly string[];
   roots: HostedBundleRestoreRootMap;
 }): Promise<void> {
   const archive = parseHostedBundleArchive(input.bytes);
+  const ignoredRoots = new Set(input.ignoredRoots ?? []);
 
   if (archive.kind !== input.expectedKind) {
     throw new Error(
@@ -85,6 +87,10 @@ export async function restoreHostedBundleRoots(input: {
     const root = input.roots[file.root];
 
     if (!root) {
+      if (ignoredRoots.has(file.root)) {
+        continue;
+      }
+
       throw new Error(`Hosted bundle root "${file.root}" is not mapped for restore.`);
     }
 

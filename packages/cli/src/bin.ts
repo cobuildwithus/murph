@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import path from 'node:path'
-import { Errors } from 'incur'
+import { formatStructuredErrorMessage } from './text/shared.js'
 
 installSqliteExperimentalWarningFilter()
 loadCliEnvFiles()
@@ -32,11 +32,7 @@ const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
 type SuccessfulSetupContext = import('./setup-cli.js').SuccessfulSetupContext
 
 actionMain().catch((error) => {
-  if (error instanceof Errors.IncurError) {
-    console.error(error.message)
-  } else {
-    console.error(error)
-  }
+  console.error(formatStructuredErrorMessage(error))
   process.exitCode = 1
 })
 

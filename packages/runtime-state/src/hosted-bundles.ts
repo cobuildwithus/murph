@@ -6,11 +6,10 @@ import {
   restoreHostedBundleRoots,
   snapshotHostedBundleRoots,
 } from "./hosted-bundle.js";
-import { RUNTIME_ROOT_RELATIVE_PATH } from "./runtime-paths.js";
 
 const AGENT_STATE_ASSISTANT_ROOT = "assistant-state";
 const AGENT_STATE_OPERATOR_HOME_ROOT = "operator-home";
-const AGENT_STATE_VAULT_RUNTIME_ROOT = "vault-runtime";
+const LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT = "vault-runtime";
 
 export async function snapshotHostedExecutionContext(input: {
   operatorHomeRoot?: string | null;
@@ -41,35 +40,10 @@ export async function snapshotHostedExecutionContext(input: {
   return {
     agentStateBundle: await snapshotHostedBundleRoots({
       kind: "agent-state",
-      roots: [
-        {
-          optional: true,
-          root: assistantStateRoot,
-          rootKey: AGENT_STATE_ASSISTANT_ROOT,
-        },
-        {
-          optional: true,
-          root: path.join(vaultRoot, RUNTIME_ROOT_RELATIVE_PATH),
-          rootKey: AGENT_STATE_VAULT_RUNTIME_ROOT,
-        },
-        ...(input.operatorHomeRoot
-          ? [
-              {
-                optional: true,
-                root: path.resolve(input.operatorHomeRoot),
-                rootKey: AGENT_STATE_OPERATOR_HOME_ROOT,
-                shouldIncludeRelativePath(relativePath: string) {
-                  return (
-                    relativePath === ".healthybob"
-                    || relativePath === ".healthybob/config.json"
-                    || relativePath === ".healthybob/hosted"
-                    || relativePath.startsWith(".healthybob/hosted/")
-                  );
-                },
-              },
-            ]
-          : []),
-      ],
+      roots: buildHostedAgentStateRoots({
+        assistantStateRoot,
+        operatorHomeRoot: input.operatorHomeRoot,
+      }),
     }),
     vaultBundle,
   };
@@ -107,10 +81,10 @@ export async function restoreHostedExecutionContext(input: {
     await restoreHostedBundleRoots({
       bytes: input.agentStateBundle,
       expectedKind: "agent-state",
+      ignoredRoots: [LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT],
       roots: {
         [AGENT_STATE_ASSISTANT_ROOT]: assistantStateRoot,
         [AGENT_STATE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
-        [AGENT_STATE_VAULT_RUNTIME_ROOT]: path.join(vaultRoot, RUNTIME_ROOT_RELATIVE_PATH),
       },
     });
   }
@@ -132,5 +106,37 @@ function shouldSkipVaultRelativePath(relativePath: string): boolean {
     || relativePath.startsWith(`exports/packs${path.posix.sep}`)
     || path.posix.basename(relativePath) === ".env"
     || path.posix.basename(relativePath).startsWith(".env.")
+  );
+}
+
+function buildHostedAgentStateRoots(input: {
+  assistantStateRoot: string;
+  operatorHomeRoot?: string | null;
+}) {
+  return [
+    {
+      optional: true,
+      root: input.assistantStateRoot,
+      rootKey: AGENT_STATE_ASSISTANT_ROOT,
+    },
+    ...(input.operatorHomeRoot
+      ? [
+          {
+            optional: true,
+            root: path.resolve(input.operatorHomeRoot),
+            rootKey: AGENT_STATE_OPERATOR_HOME_ROOT,
+            shouldIncludeRelativePath(relativePath: string) {
+              return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
+            },
+          },
+        ]
+      : []),
+  ];
+}
+
+function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
+  return (
+    relativePath === ".healthybob"
+    || relativePath === ".healthybob/config.json"
   );
 }

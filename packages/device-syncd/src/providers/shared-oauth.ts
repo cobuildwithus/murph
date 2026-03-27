@@ -16,7 +16,7 @@ export function buildProviderApiError(
   code: string,
   message: string,
   response: Response,
-  body: string,
+  _body: string,
   options: {
     retryable?: boolean;
     accountStatus?: DeviceSyncErrorOptions["accountStatus"];
@@ -30,7 +30,6 @@ export function buildProviderApiError(
     accountStatus: options.accountStatus ?? null,
     details: {
       status: response.status,
-      bodySnippet: body.slice(0, 500),
     },
   });
 }

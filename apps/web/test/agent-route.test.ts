@@ -4,8 +4,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   exportTokenBundle: vi.fn(),
+  handleWebhook: vi.fn(),
+  listSignals: vi.fn(),
   refreshTokenBundle: vi.fn(),
   requireAgentSession: vi.fn(),
+  resolveWebhookVerificationChallenge: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -14,9 +17,13 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
 type RefreshRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
+type SignalsRouteModule = typeof import("../app/api/device-sync/agent/signals/route");
+type WebhookRouteModule = typeof import("../app/api/device-sync/webhooks/[provider]/route");
 
 let exportRoute: ExportRouteModule;
 let refreshRoute: RefreshRouteModule;
+let signalsRoute: SignalsRouteModule;
+let webhookRoute: WebhookRouteModule;
 
 function createRouteContext(connectionId: string) {
   return {
@@ -24,23 +31,44 @@ function createRouteContext(connectionId: string) {
   };
 }
 
-describe("hosted device-sync agent token routes", () => {
+describe("hosted device-sync agent and webhook routes", () => {
   beforeAll(async () => {
     exportRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
     refreshRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
+    signalsRoute = await import("../app/api/device-sync/agent/signals/route");
+    webhookRoute = await import("../app/api/device-sync/webhooks/[provider]/route");
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       exportTokenBundle: mocks.exportTokenBundle,
+      handleWebhook: mocks.handleWebhook,
+      listSignals: mocks.listSignals,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
+      resolveWebhookVerificationChallenge: mocks.resolveWebhookVerificationChallenge,
     });
     mocks.requireAgentSession.mockResolvedValue({
       id: "dsa_current",
       userId: "user-123",
     });
+    mocks.listSignals.mockResolvedValue({
+      nextCursor: 9,
+      signals: [
+        {
+          id: 8,
+          kind: "webhook_hint",
+          payload: {
+            eventType: "sleep.updated",
+            traceId: "trace_123",
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            resourceCategory: "daily_sleep",
+          },
+        },
+      ],
+    });
+    mocks.resolveWebhookVerificationChallenge.mockReturnValue(null);
   });
 
   it("rejects export-token-bundle when the bearer token has expired", async () => {
@@ -109,5 +137,53 @@ describe("hosted device-sync agent token routes", () => {
       },
     });
     expect(mocks.refreshTokenBundle).not.toHaveBeenCalled();
+  });
+
+  it("passes the authenticated agent user and returns sparse webhook hints from signals", async () => {
+    const response = await signalsRoute.GET(
+      new Request("https://example.test/api/device-sync/agent/signals?after=7&limit=2", {
+        headers: {
+          authorization: "Bearer active-session-token",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listSignals).toHaveBeenCalledTimes(1);
+    expect(mocks.listSignals.mock.calls[0]?.[0]).toBe("user-123");
+    expect(mocks.listSignals.mock.calls[0]?.[1]).toBeInstanceOf(URL);
+    expect(mocks.listSignals.mock.calls[0]?.[1]?.searchParams.get("after")).toBe("7");
+    expect(mocks.listSignals.mock.calls[0]?.[1]?.searchParams.get("limit")).toBe("2");
+    await expect(response.json()).resolves.toEqual({
+      nextCursor: 9,
+      signals: [
+        {
+          id: 8,
+          kind: "webhook_hint",
+          payload: {
+            eventType: "sleep.updated",
+            traceId: "trace_123",
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            resourceCategory: "daily_sleep",
+          },
+        },
+      ],
+    });
+  });
+
+  it("keeps webhook verification challenges as plain-text responses", async () => {
+    mocks.resolveWebhookVerificationChallenge.mockReturnValue("oura-challenge-token");
+
+    const response = await webhookRoute.GET(
+      new Request("https://example.test/api/device-sync/webhooks/oura?challenge=1"),
+      {
+        params: Promise.resolve({ provider: "oura" }),
+      },
+    );
+
+    expect(mocks.resolveWebhookVerificationChallenge).toHaveBeenCalledWith("oura");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    await expect(response.text()).resolves.toBe("oura-challenge-token");
   });
 });

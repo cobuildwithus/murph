@@ -1,9 +1,12 @@
-import { DeviceSyncError, isDeviceSyncError } from "@healthybob/device-syncd";
+import {
+  buildPublicDeviceSyncErrorPayload,
+  DeviceSyncError,
+  isDeviceSyncError,
+} from "@healthybob/device-syncd";
 import { NextResponse } from "next/server";
 
 import {
   createJsonErrorResponse,
-  mapDomainJsonError,
 } from "../http";
 
 export { jsonOk, readJsonObject, readOptionalJsonObject, readRawBodyBuffer, resolveRouteParams } from "../http";
@@ -14,6 +17,18 @@ export function jsonError(error: unknown): NextResponse {
     logMessage: "Hosted device-sync route failed.",
     matchers: [mapDeviceSyncError],
   });
+}
+
+export function withJsonError<TArgs extends unknown[]>(
+  handler: (...args: TArgs) => Promise<Response>,
+): (...args: TArgs) => Promise<Response> {
+  return async (...args) => {
+    try {
+      return await handler(...args);
+    } catch (error) {
+      return jsonError(error);
+    }
+  };
 }
 
 export function callbackHtml(title: string, body: string, status = 200): NextResponse {
@@ -78,5 +93,12 @@ function escapeHtml(value: string): string {
 }
 
 function mapDeviceSyncError(error: unknown) {
-  return isDeviceSyncError(error) ? mapDomainJsonError(error) : null;
+  if (!isDeviceSyncError(error)) {
+    return null;
+  }
+
+  return {
+    error: buildPublicDeviceSyncErrorPayload(error).error,
+    status: error.httpStatus,
+  };
 }

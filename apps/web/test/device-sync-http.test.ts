@@ -28,6 +28,15 @@ const mocks = vi.hoisted(() => {
 
   return {
     DeviceSyncError: MockDeviceSyncError,
+    buildPublicDeviceSyncErrorPayload: vi.fn((error: InstanceType<typeof MockDeviceSyncError>) => ({
+      error: {
+        code: error.code,
+        details:
+          typeof error.details?.status === "number" ? { status: error.details.status } : undefined,
+        message: error.message,
+        retryable: error.retryable,
+      },
+    })),
     deviceSyncError: vi.fn(
       (options: ConstructorParameters<typeof MockDeviceSyncError>[0]) =>
         new MockDeviceSyncError(options),
@@ -82,10 +91,16 @@ describe("device sync callback redirect helpers", () => {
   });
 
   it("maps device-sync domain errors through the shared JSON error helper", async () => {
+    const sensitiveBodySnippet =
+      "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=offline";
     const response = httpModule.jsonError(
       mocks.deviceSyncError({
         code: "ACCOUNT_REQUIRES_REAUTH",
-        details: { provider: "oura" },
+        details: {
+          status: 401,
+          bodySnippet: sensitiveBodySnippet,
+          provider: "oura",
+        },
         httpStatus: 409,
         message: "Reconnect the account to continue syncing.",
         retryable: true,
@@ -93,10 +108,15 @@ describe("device sync callback redirect helpers", () => {
     );
 
     expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
+    const body = await response.text();
+
+    expect(body).not.toContain("acct_fake_sensitive_123");
+    expect(body).not.toContain("tok_fake_sensitive_456");
+    expect(body).not.toContain("bodySnippet");
+    expect(JSON.parse(body)).toEqual({
       error: {
         code: "ACCOUNT_REQUIRES_REAUTH",
-        details: { provider: "oura" },
+        details: { status: 401 },
         message: "Reconnect the account to continue syncing.",
         retryable: true,
       },
@@ -124,6 +144,54 @@ describe("device sync callback redirect helpers", () => {
       error: {
         code: "INVALID_REQUEST",
         message: "Expected a shorter callback state value.",
+      },
+    });
+  });
+
+  it("passes through successful wrapped responses", async () => {
+    const handler = httpModule.withJsonError(async (value: string) =>
+      new Response(`ok:${value}`, {
+        status: 201,
+      }),
+    );
+
+    const response = await handler("demo");
+
+    expect(response.status).toBe(201);
+    await expect(response.text()).resolves.toBe("ok:demo");
+  });
+
+  it("wraps thrown handler errors with the hosted device-sync JSON mapper", async () => {
+    const sensitiveBodySnippet =
+      "account_id=acct_fake_sensitive_789 access_token=tok_fake_sensitive_987 scope=recovery";
+    const handler = httpModule.withJsonError(async () => {
+      throw mocks.deviceSyncError({
+        code: "ACCOUNT_REQUIRES_REAUTH",
+        details: {
+          status: 401,
+          bodySnippet: sensitiveBodySnippet,
+          provider: "oura",
+        },
+        httpStatus: 409,
+        message: "Reconnect the account to continue syncing.",
+        retryable: true,
+      });
+    });
+
+    const response = await handler();
+
+    expect(response.status).toBe(409);
+    const body = await response.text();
+
+    expect(body).not.toContain("acct_fake_sensitive_789");
+    expect(body).not.toContain("tok_fake_sensitive_987");
+    expect(body).not.toContain("bodySnippet");
+    expect(JSON.parse(body)).toEqual({
+      error: {
+        code: "ACCOUNT_REQUIRES_REAUTH",
+        details: { status: 401 },
+        message: "Reconnect the account to continue syncing.",
+        retryable: true,
       },
     });
   });

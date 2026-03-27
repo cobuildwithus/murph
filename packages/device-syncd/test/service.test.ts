@@ -7,6 +7,7 @@ import { test } from "vitest";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.js";
 import { createDeviceSyncService } from "../src/service.js";
+import { SqliteDeviceSyncStore } from "../src/store.js";
 
 import type {
   DeviceSyncAccount,
@@ -174,6 +175,14 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   const firstWebhook = await service.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(firstWebhook.accepted, true);
   assert.equal(firstWebhook.duplicate, false);
+  assert.equal(
+    (
+      service.store.database
+        .prepare("select status from webhook_trace where provider = ? and trace_id = ?")
+        .get("demo", "trace-1") as { status?: string } | undefined
+    )?.status,
+    "processed",
+  );
 
   const duplicateWebhook = await service.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(duplicateWebhook.duplicate, true);
@@ -517,4 +526,269 @@ test("manual reconcile queues every scheduled job and store claims only one job 
   );
 
   service.close();
+});
+
+test("device sync service fences in-flight jobs after disconnect", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-disconnect-fence");
+  const imports: unknown[] = [];
+  let refreshCalls = 0;
+  let providerStartedResolve: (() => void) | null = null;
+  let releaseProviderResolve: (() => void) | null = null;
+  const providerStarted = new Promise<void>((resolve) => {
+    providerStartedResolve = resolve;
+  });
+  const releaseProvider = new Promise<void>((resolve) => {
+    releaseProviderResolve = resolve;
+  });
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot(input) {
+      imports.push(input);
+      return {
+        ok: true,
+      };
+    },
+  };
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://healthybob.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async refreshTokens(_account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+          refreshCalls += 1;
+          return {
+            accessToken: "access-token-fenced",
+            refreshToken: "refresh-token-fenced",
+          };
+        },
+        async executeJob(context, _job) {
+          providerStartedResolve?.();
+          await releaseProvider;
+          await context.refreshAccountTokens();
+          await context.importSnapshot({
+            accountId: context.account.externalAccountId,
+            importedAt: context.now,
+          });
+          return {
+            scheduledJobs: [
+              {
+                kind: "follow-up",
+                dedupeKey: `follow-up:${context.account.id}`,
+              },
+            ],
+            metadataPatch: {
+              fenced: false,
+            },
+            nextReconcileAt: "2026-03-19T00:00:00.000Z",
+          };
+        },
+      }),
+    ],
+    importer,
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "fence",
+  });
+  const accountBeforeDisconnect = service.store.getAccountById(connected.account.id);
+  const initialJob = service.summarize();
+
+  assert.equal(initialJob.jobsQueued, 1);
+  assert.ok(accountBeforeDisconnect);
+
+  const workerPromise = service.runWorkerOnce();
+  await providerStarted;
+
+  const disconnected = await service.disconnectAccount(connected.account.id);
+  assert.equal(disconnected.account.status, "disconnected");
+
+  releaseProviderResolve?.();
+  await workerPromise;
+
+  const storedAccount = service.store.getAccountById(connected.account.id);
+  const jobs = service.store.database.prepare(`
+    select id, kind, status, last_error_code
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+  `).all(connected.account.id) as Array<{
+    id: string;
+    kind: string;
+    status: string;
+    last_error_code: string | null;
+  }>;
+
+  assert.equal(refreshCalls, 0);
+  assert.equal(imports.length, 0);
+  assert.ok(storedAccount);
+  assert.equal(storedAccount.status, "disconnected");
+  assert.equal(storedAccount.disconnectGeneration, (accountBeforeDisconnect?.disconnectGeneration ?? 0) + 1);
+  assert.equal(storedAccount.accessTokenEncrypted, accountBeforeDisconnect?.accessTokenEncrypted);
+  assert.equal(storedAccount.refreshTokenEncrypted, accountBeforeDisconnect?.refreshTokenEncrypted);
+  assert.equal(storedAccount.lastSyncCompletedAt, null);
+  assert.equal(service.summarize().jobsQueued, 0);
+  assert.equal(service.summarize().jobsRunning, 0);
+  assert.equal(service.summarize().jobsDead, 1);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.kind, "backfill");
+  assert.equal(jobs[0]?.status, "dead");
+  assert.equal(jobs[0]?.last_error_code, "ACCOUNT_DISCONNECTED");
+
+  service.close();
+});
+
+test("sqlite store persists the webhook trace claim lifecycle", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-webhook-trace-store");
+  const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
+
+  const baseTrace = {
+    eventType: "demo.updated",
+    externalAccountId: "demo-abc",
+    payload: {
+      resourceId: "resource-1",
+    },
+    provider: "demo",
+  };
+
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-processing",
+      receivedAt: "2026-03-27T00:00:00.000Z",
+      processingExpiresAt: "2026-03-27T00:05:00.000Z",
+    }),
+    "claimed",
+  );
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-processing",
+      receivedAt: "2026-03-27T00:01:00.000Z",
+      processingExpiresAt: "2026-03-27T00:06:00.000Z",
+    }),
+    "processing",
+  );
+
+  store.completeWebhookTrace("demo", "trace-processing");
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-processing",
+      receivedAt: "2026-03-27T00:02:00.000Z",
+      processingExpiresAt: "2026-03-27T00:07:00.000Z",
+    }),
+    "processed",
+  );
+
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-release",
+      receivedAt: "2026-03-27T00:03:00.000Z",
+      processingExpiresAt: "2026-03-27T00:08:00.000Z",
+    }),
+    "claimed",
+  );
+  store.releaseWebhookTrace("demo", "trace-release");
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-release",
+      receivedAt: "2026-03-27T00:04:00.000Z",
+      processingExpiresAt: "2026-03-27T00:09:00.000Z",
+    }),
+    "claimed",
+  );
+
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-stale",
+      receivedAt: "2026-03-27T00:05:00.000Z",
+      processingExpiresAt: "2026-03-27T00:06:00.000Z",
+    }),
+    "claimed",
+  );
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-stale",
+      receivedAt: "2026-03-27T00:07:00.000Z",
+      processingExpiresAt: "2026-03-27T00:12:00.000Z",
+    }),
+    "claimed",
+  );
+
+  store.database.prepare(`
+    insert into webhook_trace (
+      provider,
+      trace_id,
+      external_account_id,
+      event_type,
+      received_at,
+      payload_json
+    ) values (?, ?, ?, ?, ?, ?)
+  `).run(
+    "demo",
+    "trace-legacy",
+    "demo-legacy",
+    "demo.updated",
+    "2026-03-27T00:08:00.000Z",
+    JSON.stringify({ resourceId: "resource-legacy" }),
+  );
+  assert.equal(
+    store.claimWebhookTrace({
+      ...baseTrace,
+      traceId: "trace-legacy",
+      receivedAt: "2026-03-27T00:09:00.000Z",
+      processingExpiresAt: "2026-03-27T00:14:00.000Z",
+    }),
+    "processed",
+  );
+
+  const rows = (store.database.prepare(`
+    select trace_id, status, processing_expires_at
+    from webhook_trace
+    where provider = 'demo'
+    order by trace_id asc
+  `).all() as Array<{
+    trace_id: string;
+    status: string;
+    processing_expires_at: string | null;
+  }>).map((row) => ({
+    ...row,
+  }));
+
+  assert.deepEqual(rows, [
+    {
+      trace_id: "trace-legacy",
+      status: "processed",
+      processing_expires_at: null,
+    },
+    {
+      trace_id: "trace-processing",
+      status: "processed",
+      processing_expires_at: null,
+    },
+    {
+      trace_id: "trace-release",
+      status: "processing",
+      processing_expires_at: "2026-03-27T00:09:00.000Z",
+    },
+    {
+      trace_id: "trace-stale",
+      status: "processing",
+      processing_expires_at: "2026-03-27T00:12:00.000Z",
+    },
+  ]);
+
+  store.close();
 });

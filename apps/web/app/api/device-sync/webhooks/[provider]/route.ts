@@ -1,45 +1,38 @@
 import { createHostedDeviceSyncControlPlane } from "../../../../../src/lib/device-sync/control-plane";
-import { jsonError, jsonOk, resolveRouteParams } from "../../../../../src/lib/device-sync/http";
+import { jsonOk, resolveRouteParams, withJsonError } from "../../../../../src/lib/device-sync/http";
 
-export async function GET(
+export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
-) {
-  try {
-    const { provider } = await resolveRouteParams(context.params);
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    const challenge = controlPlane.resolveWebhookVerificationChallenge(decodeURIComponent(provider));
+) => {
+  const { provider } = await resolveRouteParams(context.params);
+  const decodedProvider = decodeURIComponent(provider);
+  const controlPlane = createHostedDeviceSyncControlPlane(request);
+  const challenge = controlPlane.resolveWebhookVerificationChallenge(decodedProvider);
 
-    if (!challenge) {
-      return jsonOk(
-        {
-          ok: true,
-          provider: decodeURIComponent(provider),
-        },
-        200,
-      );
-    }
-
-    return new Response(challenge, {
-      status: 200,
-      headers: {
-        "content-type": "text/plain; charset=utf-8",
+  if (!challenge) {
+    return jsonOk(
+      {
+        ok: true,
+        provider: decodedProvider,
       },
-    });
-  } catch (error) {
-    return jsonError(error);
+      200,
+    );
   }
-}
 
-export async function POST(
+  return new Response(challenge, {
+    status: 200,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+    },
+  });
+});
+
+export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
-) {
-  try {
-    const { provider } = await resolveRouteParams(context.params);
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    return jsonOk(await controlPlane.handleWebhook(decodeURIComponent(provider)), 202);
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+) => {
+  const { provider } = await resolveRouteParams(context.params);
+  const controlPlane = createHostedDeviceSyncControlPlane(request);
+  return jsonOk(await controlPlane.handleWebhook(decodeURIComponent(provider)), 202);
+});

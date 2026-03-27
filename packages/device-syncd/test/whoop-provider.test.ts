@@ -421,6 +421,10 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
     assert.equal(result?.eventType, testCase.eventType);
     assert.equal(result?.externalAccountId, "whoop-user-1");
     assert.equal(result?.traceId, `trace:${testCase.eventType}`);
+    assert.deepEqual(result?.payload, {
+      eventType: testCase.eventType,
+      resourceType: testCase.resourceType,
+    });
     assert.deepEqual(result?.jobs, [
       {
         kind: testCase.kind,

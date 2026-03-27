@@ -6,6 +6,8 @@ import { createDeviceSyncPublicIngress } from "../src/public-ingress.js";
 import { createDeviceSyncRegistry } from "../src/registry.js";
 
 import type {
+  ClaimDeviceSyncWebhookTraceInput,
+  DeviceSyncWebhookTraceClaimResult,
   DeviceSyncProvider,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceRecord,
@@ -19,7 +21,14 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly oauthStates = new Map<string, OAuthStateRecord>();
   private readonly accounts = new Map<string, PublicDeviceSyncAccount>();
   private readonly accountsByProviderExternal = new Map<string, string>();
-  private readonly webhookTraces = new Set<string>();
+  private readonly webhookTraces = new Map<
+    string,
+    {
+      expiresAt: string | null;
+      record: DeviceSyncWebhookTraceRecord;
+      status: DeviceSyncWebhookTraceClaimResult | "stored";
+    }
+  >();
   lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
   private accountCounter = 0;
 
@@ -89,16 +98,74 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     return id ? (this.accounts.get(id) ?? null) : null;
   }
 
-  recordWebhookTraceIfNew(input: DeviceSyncWebhookTraceRecord): boolean {
+  claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
     const key = `${input.provider}:${input.traceId}`;
+    const existing = this.webhookTraces.get(key);
 
-    if (this.webhookTraces.has(key)) {
-      return false;
+    if (!existing) {
+      this.webhookTraces.set(key, {
+        expiresAt: input.processingExpiresAt,
+        record: {
+          eventType: input.eventType,
+          externalAccountId: input.externalAccountId,
+          payload: input.payload,
+          provider: input.provider,
+          receivedAt: input.receivedAt,
+          traceId: input.traceId,
+        },
+        status: "processing",
+      });
+      return "claimed";
     }
 
-    this.webhookTraces.add(key);
-    this.lastRecordedWebhookTrace = input;
-    return true;
+    if (existing.status === "stored") {
+      return "processed";
+    }
+
+    if (existing.expiresAt && Date.parse(existing.expiresAt) > Date.parse(input.receivedAt)) {
+      return "processing";
+    }
+
+    this.webhookTraces.set(key, {
+      expiresAt: input.processingExpiresAt,
+      record: {
+        eventType: input.eventType,
+        externalAccountId: input.externalAccountId,
+        payload: input.payload,
+        provider: input.provider,
+        receivedAt: input.receivedAt,
+        traceId: input.traceId,
+      },
+      status: "processing",
+    });
+    return "claimed";
+  }
+
+  completeWebhookTrace(provider: string, traceId: string): void {
+    const key = `${provider}:${traceId}`;
+    const existing = this.webhookTraces.get(key);
+
+    if (!existing || existing.status !== "processing") {
+      return;
+    }
+
+    this.lastRecordedWebhookTrace = existing.record;
+    this.webhookTraces.set(key, {
+      expiresAt: null,
+      record: existing.record,
+      status: "stored",
+    });
+  }
+
+  releaseWebhookTrace(provider: string, traceId: string): void {
+    const key = `${provider}:${traceId}`;
+    const existing = this.webhookTraces.get(key);
+
+    if (!existing || existing.status !== "processing") {
+      return;
+    }
+
+    this.webhookTraces.delete(key);
   }
 
   markWebhookReceived(accountId: string, now: string): void {
@@ -234,16 +301,81 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
   ]);
 });
 
-test("public ingress deduplicates webhook traces and suppresses side effects for inactive accounts", async () => {
+test("public ingress processes an unknown-account retry exactly once after the account exists", async () => {
   const store = new InMemoryPublicIngressStore();
   const acceptedWebhooks: string[] = [];
+  const unknownWebhooks: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.healthybob.test/device-sync",
-    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-late",
+            eventType: "demo.updated",
+            traceId: "trace-late",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
     store,
     hooks: {
       onWebhookAccepted({ account, webhook }) {
         acceptedWebhooks.push(`${account.id}:${webhook.eventType}`);
+      },
+      onUnknownWebhook({ provider, externalAccountId, webhook }) {
+        unknownWebhooks.push(`${provider.provider}:${externalAccountId}:${webhook.traceId}`);
+      },
+    },
+  });
+
+  const first = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(first.accepted, true);
+  assert.equal(first.duplicate, false);
+  assert.deepEqual(acceptedWebhooks, []);
+  assert.deepEqual(unknownWebhooks, ["demo:demo-late:trace-late"]);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "late",
+  });
+
+  const retry = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(retry.accepted, true);
+  assert.equal(retry.duplicate, false);
+  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:demo.updated`]);
+  assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-late");
+
+  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(duplicate.duplicate, true);
+  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:demo.updated`]);
+});
+
+test("public ingress processes an inactive-account retry exactly once after reactivation", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const acceptedWebhooks: string[] = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.deleted",
+            traceId: "trace-inactive",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted({ account, webhook }) {
+        acceptedWebhooks.push(`${account.id}:${webhook.traceId}`);
       },
     },
   });
@@ -254,56 +386,40 @@ test("public ingress deduplicates webhook traces and suppresses side effects for
     state: begin.state,
     code: "abc",
   });
+  store.patchAccountStatus(connected.account.id, "disconnected");
 
   const first = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(first.accepted, true);
   assert.equal(first.duplicate, false);
-  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:demo.updated`]);
+  assert.deepEqual(acceptedWebhooks, []);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+
+  store.patchAccountStatus(connected.account.id, "active");
+
+  const retry = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(retry.accepted, true);
+  assert.equal(retry.duplicate, false);
+  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:trace-inactive`]);
+  assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-inactive");
 
   const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(duplicate.duplicate, true);
-  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:demo.updated`]);
-
-  store.patchAccountStatus(connected.account.id, "disconnected");
-  const inactiveProvider = createFakeProvider({
-    async verifyAndParseWebhook() {
-      return {
-        externalAccountId: "demo-abc",
-        eventType: "demo.deleted",
-        traceId: "trace-2",
-        jobs: [],
-      };
-    },
-  });
-  const inactiveIngress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
-    registry: createDeviceSyncRegistry([inactiveProvider]),
-    store,
-    hooks: {
-      onWebhookAccepted() {
-        acceptedWebhooks.push("should-not-run");
-      },
-    },
-  });
-
-  const inactive = await inactiveIngress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
-  assert.equal(inactive.accepted, true);
-  assert.equal(inactive.duplicate, false);
-  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:demo.updated`]);
+  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:trace-inactive`]);
 });
 
-test("public ingress accepts unknown-account webhooks and reports them through the hook", async () => {
+test("public ingress leaves the webhook trace retryable when the durable acceptance hook fails", async () => {
   const store = new InMemoryPublicIngressStore();
-  const unknownWebhooks: string[] = [];
+  let attempts = 0;
+  let successes = 0;
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.healthybob.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async verifyAndParseWebhook() {
           return {
-            externalAccountId: "demo-missing",
-            eventType: "demo.created",
-            traceId: "trace-missing",
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-retryable",
             jobs: [],
           };
         },
@@ -311,17 +427,110 @@ test("public ingress accepts unknown-account webhooks and reports them through t
     ]),
     store,
     hooks: {
-      onUnknownWebhook({ provider, externalAccountId, webhook }) {
-        unknownWebhooks.push(`${provider.provider}:${externalAccountId}:${webhook.eventType}`);
+      onWebhookAccepted() {
+        attempts += 1;
+
+        if (attempts === 1) {
+          throw new Error("transient enqueue failure");
+        }
+
+        successes += 1;
       },
     },
   });
 
-  const webhook = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
 
-  assert.equal(webhook.accepted, true);
-  assert.equal(webhook.duplicate, false);
-  assert.deepEqual(unknownWebhooks, ["demo:demo-missing:demo.created"]);
+  await assert.rejects(() => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")), /transient enqueue failure/u);
+  assert.equal(attempts, 1);
+  assert.equal(successes, 0);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+
+  const retry = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(retry.accepted, true);
+  assert.equal(retry.duplicate, false);
+  assert.equal(attempts, 2);
+  assert.equal(successes, 1);
+  assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-retryable");
+
+  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(attempts, 2);
+  assert.equal(successes, 1);
+});
+
+test("public ingress rejects overlapping active webhook deliveries until the first claim finishes", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let acceptedCalls = 0;
+  let releaseProcessing: (() => void) | null = null;
+  const enteredProcessing = new Promise<void>((resolve) => {
+    releaseProcessing = resolve;
+  });
+  let unblockProcessing: (() => void) | null = null;
+  const processingGate = new Promise<void>((resolve) => {
+    unblockProcessing = resolve;
+  });
+
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-overlap",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      async onWebhookAccepted() {
+        acceptedCalls += 1;
+        releaseProcessing?.();
+        await processingGate;
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  const firstWebhook = ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  await enteredProcessing;
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_TRACE_IN_PROGRESS"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+
+  unblockProcessing?.();
+  const firstResult = await firstWebhook;
+
+  assert.equal(firstResult.accepted, true);
+  assert.equal(firstResult.duplicate, false);
+  assert.equal(acceptedCalls, 1);
+  assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-overlap");
+
+  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(duplicate.accepted, true);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(acceptedCalls, 1);
 });
 
 test("public ingress preserves callback redirect context on OAuth callback failures", async () => {

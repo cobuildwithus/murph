@@ -54,11 +54,13 @@ export interface OAuthStateRecord {
 export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
 
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
+  disconnectGeneration: number;
   accessTokenEncrypted: string;
   refreshTokenEncrypted: string | null;
 }
 
 export interface DeviceSyncAccount extends PublicDeviceSyncAccount {
+  disconnectGeneration: number;
   accessToken: string;
   refreshToken: string | null;
 }
@@ -91,6 +93,15 @@ export interface DeviceSyncWebhookTraceRecord {
   payload?: Record<string, unknown>;
 }
 
+export interface ClaimDeviceSyncWebhookTraceInput extends DeviceSyncWebhookTraceRecord {
+  processingExpiresAt: string;
+}
+
+export type DeviceSyncWebhookTraceClaimResult =
+  | "claimed"
+  | "processed"
+  | "processing";
+
 export interface DeviceSyncPublicIngressStore {
   deleteExpiredOAuthStates(now: string): number | Promise<number>;
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord | Promise<OAuthStateRecord>;
@@ -100,7 +111,9 @@ export interface DeviceSyncPublicIngressStore {
     provider: string,
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
-  recordWebhookTraceIfNew(input: DeviceSyncWebhookTraceRecord): boolean | Promise<boolean>;
+  claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
+  completeWebhookTrace(provider: string, traceId: string): void | Promise<void>;
+  releaseWebhookTrace(provider: string, traceId: string): void | Promise<void>;
   markWebhookReceived(accountId: string, now: string): void | Promise<void>;
 }
 

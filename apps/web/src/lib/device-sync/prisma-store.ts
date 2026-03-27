@@ -4,10 +4,11 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@healthybob/device-syncd";
 
 import type {
+  ClaimDeviceSyncWebhookTraceInput,
   DeviceSyncAccount,
   DeviceSyncAccountStatus,
   DeviceSyncPublicIngressStore,
-  DeviceSyncWebhookTraceRecord,
+  DeviceSyncWebhookTraceClaimResult,
   OAuthStateRecord,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
@@ -80,6 +81,7 @@ export interface CreateHostedSignalInput {
   kind: string;
   payload?: Record<string, unknown> | null;
   createdAt?: string;
+  tx?: HostedPrismaTransactionClient;
 }
 
 export interface UpdateLocalHeartbeatInput {
@@ -300,26 +302,115 @@ export class PrismaDeviceSyncControlPlaneStore
     return record ? mapHostedPublicAccountRecord(record) : null;
   }
 
-  async recordWebhookTraceIfNew(input: DeviceSyncWebhookTraceRecord): Promise<boolean> {
-    try {
-      await this.prisma.deviceWebhookTrace.create({
-        data: {
-          provider: input.provider,
-          traceId: input.traceId,
-          externalAccountId: input.externalAccountId,
-          eventType: input.eventType,
-          receivedAt: new Date(input.receivedAt),
-          payloadJson: toNullablePrismaJsonValue(input.payload),
-        },
-      });
-      return true;
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        return false;
+  async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
+    const claimedAt = new Date(input.receivedAt);
+    const processingExpiresAt = new Date(input.processingExpiresAt);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.prisma.deviceWebhookTrace.create({
+          data: {
+            provider: input.provider,
+            traceId: input.traceId,
+            externalAccountId: input.externalAccountId,
+            eventType: input.eventType,
+            processingExpiresAt,
+            receivedAt: claimedAt,
+            payloadJson: toNullablePrismaJsonValue(input.payload),
+            status: "processing",
+          },
+        });
+        return "claimed";
+      } catch (error) {
+        if (!isUniqueViolation(error)) {
+          throw error;
+        }
       }
 
-      throw error;
+      const existing = await this.prisma.deviceWebhookTrace.findUnique({
+        where: {
+          provider_traceId: {
+            provider: input.provider,
+            traceId: input.traceId,
+          },
+        },
+        select: {
+          processingExpiresAt: true,
+          status: true,
+        },
+      });
+
+      if (!existing) {
+        continue;
+      }
+
+      if (existing.status === "processed") {
+        return "processed";
+      }
+
+      if (existing.processingExpiresAt && existing.processingExpiresAt.getTime() > claimedAt.getTime()) {
+        return "processing";
+      }
+
+      const takeover = await this.prisma.deviceWebhookTrace.updateMany({
+        where: {
+          provider: input.provider,
+          traceId: input.traceId,
+          status: "processing",
+          OR: [
+            {
+              processingExpiresAt: null,
+            },
+            {
+              processingExpiresAt: {
+                lte: claimedAt,
+              },
+            },
+          ],
+        },
+        data: {
+          externalAccountId: input.externalAccountId,
+          eventType: input.eventType,
+          payloadJson: toNullablePrismaJsonValue(input.payload),
+          processingExpiresAt,
+          receivedAt: claimedAt,
+          status: "processing",
+        },
+      });
+
+      return takeover.count > 0 ? "claimed" : "processing";
     }
+
+    return "processing";
+  }
+
+  async completeWebhookTrace(
+    provider: string,
+    traceId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
+    const prisma = tx ?? this.prisma;
+    await prisma.deviceWebhookTrace.updateMany({
+      where: {
+        provider,
+        traceId,
+        status: "processing",
+      },
+      data: {
+        processingExpiresAt: null,
+        status: "processed",
+      },
+    });
+  }
+
+  async releaseWebhookTrace(provider: string, traceId: string): Promise<void> {
+    await this.prisma.deviceWebhookTrace.deleteMany({
+      where: {
+        provider,
+        traceId,
+        status: "processing",
+      },
+    });
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
@@ -385,7 +476,8 @@ export class PrismaDeviceSyncControlPlaneStore
   }
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
-    const record = await this.prisma.deviceSyncSignal.create({
+    const prisma = input.tx ?? this.prisma;
+    const record = await prisma.deviceSyncSignal.create({
       data: {
         userId: input.userId,
         connectionId: input.connectionId ?? null,
@@ -641,8 +733,9 @@ export class PrismaDeviceSyncControlPlaneStore
     now: string;
     errorCode?: string | null;
     errorMessage?: string | null;
+    tx?: HostedPrismaTransactionClient;
   }): Promise<PublicDeviceSyncAccount> {
-    const updated = await this.prisma.$transaction(async (tx) => {
+    const run = async (tx: HostedPrismaTransactionClient) => {
       const existing = await tx.deviceConnection.findFirst({
         where: {
           id: input.connectionId,
@@ -679,7 +772,10 @@ export class PrismaDeviceSyncControlPlaneStore
           updatedAt: new Date(input.now),
         },
       });
-    });
+    };
+    const updated = input.tx
+      ? await run(input.tx)
+      : await this.prisma.$transaction(run);
 
     return mapHostedPublicAccountRecord(updated);
   }
@@ -846,6 +942,7 @@ export function requireHostedConnectionBundleRecord(
     userId: record.userId,
     account: {
       ...mapHostedPublicAccountRecord(record),
+      disconnectGeneration: 0,
       accessToken: codec.decrypt(record.secret.accessTokenEncrypted),
       refreshToken: record.secret.refreshTokenEncrypted ? codec.decrypt(record.secret.refreshTokenEncrypted) : null,
     },

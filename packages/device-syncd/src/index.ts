@@ -7,7 +7,7 @@ export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService }
 export type { CreateDeviceSyncServiceInput } from "./service.js";
 export { loadDeviceSyncEnvironment, createConsoleDeviceSyncLogger } from "./config.js";
 export type { LoadedDeviceSyncEnvironment } from "./config.js";
-export { startDeviceSyncHttpServer } from "./http.js";
+export { buildPublicDeviceSyncErrorPayload, startDeviceSyncHttpServer } from "./http.js";
 export type { CreateDeviceSyncHttpServerInput } from "./http.js";
 export { SqliteDeviceSyncStore } from "./store.js";
 export { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "./providers/oura.js";

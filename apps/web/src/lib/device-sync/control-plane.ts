@@ -1,23 +1,17 @@
-import { Prisma } from "@prisma/client";
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
 import {
   createDeviceSyncPublicIngress,
   deviceSyncError,
-  isDeviceSyncError,
   resolveOuraWebhookVerificationChallenge,
 } from "@healthybob/device-syncd";
 
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
-  DeviceSyncProvider,
   HandleWebhookResult,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
-  ProviderAuthTokens,
 } from "@healthybob/device-syncd";
 import { getPrisma } from "../prisma";
-import { dispatchHostedExecutionBestEffort } from "../hosted-execution/dispatch";
 import {
   assertBrowserMutationOrigin,
   requireAuthenticatedHostedUser,
@@ -25,41 +19,26 @@ import {
 } from "./auth";
 import { createHostedSecretCodec } from "./crypto";
 import { readHostedDeviceSyncEnvironment } from "./env";
-import { createHostedDeviceSyncRegistry, requireHostedDeviceSyncProvider } from "./providers";
+import { createHostedDeviceSyncRegistry } from "./providers";
 import {
   generateHostedAgentBearerToken,
-  hostedConnectionWithSecretArgs,
   type HostedAgentSessionRecord,
-  type HostedConnectionSecretBundle,
-  type HostedPrismaTransactionClient,
   type UpdateLocalHeartbeatInput,
-  mapHostedPublicAccountRecord,
   PrismaDeviceSyncControlPlaneStore,
-  requireHostedConnectionBundleRecord,
 } from "./prisma-store";
-import { parseInteger, sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
-
-const TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
-const HOSTED_AGENT_SESSION_TTL_MS = 24 * 60 * 60_000;
-
-export interface HostedAgentSessionBearer {
-  id: string;
-  label: string | null;
-  createdAt: string;
-  expiresAt: string;
-  bearerToken: string;
-}
-
-export interface HostedTokenExport {
-  accessToken: string;
-  refreshToken: string | null;
-  accessTokenExpiresAt: string | null;
-  tokenVersion: number;
-  keyVersion: string;
-  exportedAt: string;
-}
-
-export type HostedDeviceSyncWakeSource = "connection-established" | "disconnect" | "webhook-accepted";
+import { toIsoTimestamp } from "./shared";
+import {
+  dispatchHostedDeviceSyncWake as dispatchHostedDeviceSyncWakeInternal,
+  disconnectHostedDeviceSyncConnection,
+  handleHostedDeviceSyncConnectionEstablished,
+  handleHostedDeviceSyncWebhookAccepted,
+  type HostedDeviceSyncWakeSource,
+} from "./wake-service";
+import {
+  HostedDeviceSyncAgentSessionService,
+  type HostedAgentSessionBearer,
+  type HostedTokenExport,
+} from "./agent-session-service";
 
 export class HostedDeviceSyncControlPlane {
   readonly request: Request;
@@ -75,12 +54,19 @@ export class HostedDeviceSyncControlPlane {
   });
   readonly publicBaseUrl: string;
   readonly allowedReturnOrigins: string[];
+  readonly agentSessions: HostedDeviceSyncAgentSessionService;
   private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
 
   constructor(request: Request) {
     this.request = request;
     this.publicBaseUrl = resolveHostedPublicBaseUrl(request, this.env.publicBaseUrl);
     this.allowedReturnOrigins = resolveAllowedReturnOrigins(request, this.publicBaseUrl, this.env.allowedReturnOrigins);
+    this.agentSessions = new HostedDeviceSyncAgentSessionService({
+      request,
+      store: this.store,
+      registry: this.registry,
+      codec: this.codec,
+    });
   }
 
   requireAuthenticatedUser(): Promise<AuthenticatedHostedUser> {
@@ -168,70 +154,12 @@ export class HostedDeviceSyncControlPlane {
     connection: PublicDeviceSyncAccount;
     warning?: { code: string; message: string };
   }> {
-    const existing = await this.store.getConnectionForUser(userId, connectionId);
-
-    if (!existing) {
-      throw deviceSyncError({
-        code: "CONNECTION_NOT_FOUND",
-        message: "Hosted device-sync connection was not found for the current user.",
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    const bundle = await this.store.getConnectionBundleForUser(userId, connectionId);
-    let warning: { code: string; message: string } | undefined;
-
-    if (bundle) {
-      const provider = this.registry.get(bundle.account.provider);
-
-      if (provider?.revokeAccess) {
-        try {
-          await provider.revokeAccess(bundle.account);
-        } catch (error) {
-          warning = {
-            code: isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
-            message: error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
-          };
-        }
-      }
-    }
-
-    const now = toIsoTimestamp(new Date());
-    const connection = await this.store.markConnectionDisconnected({
+    return disconnectHostedDeviceSyncConnection({
       connectionId,
-      userId,
-      now,
-      errorCode: null,
-      errorMessage: null,
-    });
-    await this.store.createSignal({
-      userId,
-      connectionId,
-      provider: connection.provider,
-      kind: "disconnected",
-      payload: warning
-        ? {
-            reason: "user_disconnect",
-            revokeWarning: warning,
-          }
-        : {
-            reason: "user_disconnect",
-          },
-      createdAt: now,
-    });
-    await dispatchHostedDeviceSyncWake({
-      connectionId,
-      occurredAt: now,
-      provider: connection.provider,
-      source: "disconnect",
+      registry: this.registry,
+      store: this.store,
       userId,
     });
-
-    return {
-      connection,
-      ...(warning ? { warning } : {}),
-    };
   }
 
   async pairAgent(userId: string, label: string | null): Promise<{
@@ -271,63 +199,11 @@ export class HostedDeviceSyncControlPlane {
   }
 
   async requireAgentSession() {
-    const header = this.request.headers.get("authorization") ?? "";
-    const [scheme, rawToken] = header.split(/\s+/u);
-
-    if (scheme?.toLowerCase() !== "bearer" || !rawToken) {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_REQUIRED",
-        message: "Hosted device-sync agent routes require a bearer token created by /api/device-sync/agents/pair.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    const auth = await this.store.authenticateAgentSessionByTokenHash(sha256Hex(rawToken), toIsoTimestamp(new Date()));
-
-    if (auth.status === "active" && auth.session) {
-      return auth.session;
-    }
-
-    if (auth.status === "expired") {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_EXPIRED",
-        message:
-          "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    if (auth.status === "revoked" || auth.status === "missing") {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_INVALID",
-        message: "Hosted device-sync agent bearer token is invalid or revoked.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    throw deviceSyncError({
-      code: "AGENT_AUTH_INVALID",
-      message: "Hosted device-sync agent bearer token is invalid or revoked.",
-      retryable: false,
-      httpStatus: 401,
-    });
+    return this.agentSessions.requireAgentSession();
   }
 
   async listSignals(agentUserId: string, url: URL) {
-    const afterId = parseInteger(url.searchParams.get("after"));
-    const limit = parseInteger(url.searchParams.get("limit")) ?? 100;
-    const signals = await this.store.listSignalsForUser(agentUserId, {
-      afterId: afterId ?? undefined,
-      limit,
-    });
-
-    return {
-      signals,
-      nextCursor: signals.length > 0 ? signals[signals.length - 1].id : afterId,
-    };
+    return this.agentSessions.listSignals(agentUserId, url);
   }
 
   async exportTokenBundle(session: HostedAgentSessionRecord, connectionId: string): Promise<{
@@ -335,24 +211,7 @@ export class HostedDeviceSyncControlPlane {
     tokenBundle: HostedTokenExport;
     agentSession: HostedAgentSessionBearer;
   }> {
-    const bundle = await this.store.getConnectionBundleForUser(session.userId, connectionId);
-
-    if (!bundle) {
-      throw deviceSyncError({
-        code: "CONNECTION_NOT_FOUND",
-        message: "Hosted device-sync connection was not found for the current agent user.",
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    const now = toIsoTimestamp(new Date());
-
-    return {
-      connection: await this.requireOwnedConnection(session.userId, connectionId),
-      tokenBundle: buildTokenExport(bundle, now),
-      agentSession: await this.rotateAgentSession(session, now),
-    };
+    return this.agentSessions.exportTokenBundle(session, connectionId);
   }
 
   async refreshTokenBundle(
@@ -366,104 +225,7 @@ export class HostedDeviceSyncControlPlane {
     tokenVersionChanged: boolean;
     agentSession: HostedAgentSessionBearer;
   }> {
-    const now = toIsoTimestamp(new Date());
-
-    const result = await this.store.withConnectionRefreshLock(connectionId, async (tx) => {
-      const record = await tx.deviceConnection.findFirst({
-        where: {
-          id: connectionId,
-          userId: session.userId,
-        },
-        ...hostedConnectionWithSecretArgs,
-      });
-
-      if (!record) {
-        throw deviceSyncError({
-          code: "CONNECTION_NOT_FOUND",
-          message: "Hosted device-sync connection was not found for the current agent user.",
-          retryable: false,
-          httpStatus: 404,
-        });
-      }
-
-      const bundle = requireHostedConnectionBundleRecord(record, this.codec);
-      const currentConnection = mapHostedPublicAccountRecord(record);
-
-      if (
-        typeof options.expectedTokenVersion === "number" &&
-        options.expectedTokenVersion > 0 &&
-        bundle.tokenVersion !== options.expectedTokenVersion
-      ) {
-        return {
-          connection: currentConnection,
-          tokenBundle: buildTokenExport(bundle, now),
-          refreshed: false,
-          tokenVersionChanged: true,
-        };
-      }
-
-      if (!options.force && !shouldRefreshHostedToken(bundle.account.accessTokenExpiresAt ?? null, now)) {
-        return {
-          connection: currentConnection,
-          tokenBundle: buildTokenExport(bundle, now),
-          refreshed: false,
-          tokenVersionChanged: false,
-        };
-      }
-
-      const provider = requireHostedDeviceSyncProvider(this.registry, bundle.account.provider);
-      const nextTokens = await this.refreshProviderTokensWithStatusHandling({
-        tx,
-        provider,
-        bundle,
-        now,
-      });
-      const nextRefreshToken = nextTokens.refreshToken ?? bundle.account.refreshToken;
-      const updatedConnection = await tx.deviceConnection.update({
-        where: {
-          id: connectionId,
-        },
-        data: {
-          status: "active",
-          accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ? new Date(nextTokens.accessTokenExpiresAt) : null,
-          lastSyncErrorAt: null,
-          lastErrorCode: null,
-          lastErrorMessage: null,
-        },
-      });
-      const updatedSecret = await tx.deviceConnectionSecret.update({
-        where: {
-          connectionId,
-        },
-        data: {
-          accessTokenEncrypted: this.codec.encrypt(nextTokens.accessToken),
-          refreshTokenEncrypted: nextRefreshToken ? this.codec.encrypt(nextRefreshToken) : null,
-          tokenVersion: {
-            increment: 1,
-          },
-          keyVersion: this.codec.keyVersion,
-        },
-      });
-
-      return {
-        connection: mapHostedPublicAccountRecord(updatedConnection),
-        tokenBundle: {
-          accessToken: nextTokens.accessToken,
-          refreshToken: nextRefreshToken ?? null,
-          accessTokenExpiresAt: nextTokens.accessTokenExpiresAt ?? null,
-          tokenVersion: updatedSecret.tokenVersion,
-          keyVersion: updatedSecret.keyVersion,
-          exportedAt: now,
-        },
-        refreshed: true,
-        tokenVersionChanged: false,
-      };
-    });
-
-    return {
-      ...result,
-      agentSession: await this.rotateAgentSession(session, now),
-    };
+    return this.agentSessions.refreshTokenBundle(session, connectionId, options);
   }
 
   async revokeAgentSession(session: HostedAgentSessionRecord): Promise<{
@@ -473,29 +235,7 @@ export class HostedDeviceSyncControlPlane {
       revokeReason: string | null;
     };
   }> {
-    const now = toIsoTimestamp(new Date());
-    const revoked = await this.store.revokeAgentSession({
-      sessionId: session.id,
-      now,
-      reason: "agent_request",
-    });
-
-    if (!revoked?.revokedAt) {
-      throw deviceSyncError({
-        code: "AGENT_AUTH_INVALID",
-        message: "Hosted device-sync agent bearer token is invalid or revoked.",
-        retryable: false,
-        httpStatus: 401,
-      });
-    }
-
-    return {
-      agentSession: {
-        id: revoked.id,
-        revokedAt: revoked.revokedAt,
-        revokeReason: revoked.revokeReason,
-      },
-    };
+    return this.agentSessions.revokeAgentSession(session);
   }
 
   async recordLocalHeartbeat(
@@ -503,53 +243,7 @@ export class HostedDeviceSyncControlPlane {
     connectionId: string,
     patch: UpdateLocalHeartbeatInput,
   ) {
-    const connection = await this.store.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
-
-    if (!connection) {
-      throw deviceSyncError({
-        code: "CONNECTION_NOT_FOUND",
-        message: "Hosted device-sync connection was not found for the current agent user.",
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    return {
-      connection,
-    };
-  }
-
-  private async requireOwnedConnection(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount> {
-    const connection = await this.store.getConnectionForUser(userId, connectionId);
-
-    if (!connection) {
-      throw deviceSyncError({
-        code: "CONNECTION_NOT_FOUND",
-        message: "Hosted device-sync connection was not found for the current user.",
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    return connection;
-  }
-
-  private async rotateAgentSession(session: HostedAgentSessionRecord, now: string): Promise<HostedAgentSessionBearer> {
-    const token = generateHostedAgentBearerToken();
-    const rotated = await this.store.rotateAgentSession({
-      sessionId: session.id,
-      tokenHash: token.tokenHash,
-      now,
-      expiresAt: resolveHostedAgentSessionExpiry(now),
-    });
-
-    return {
-      id: rotated.id,
-      label: rotated.label,
-      createdAt: rotated.createdAt,
-      expiresAt: rotated.expiresAt,
-      bearerToken: token.token,
-    };
+    return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
   }
 
   private createIngress() {
@@ -560,105 +254,23 @@ export class HostedDeviceSyncControlPlane {
       store: this.store,
       hooks: {
         onConnectionEstablished: async ({ account, connection, now }) => {
-          const ownerId = await this.store.getConnectionOwnerId(account.id);
-
-          if (!ownerId) {
-            return;
-          }
-
-          await this.store.createSignal({
-            userId: ownerId,
-            connectionId: account.id,
-            provider: account.provider,
-            kind: "connected",
-            payload: {
-              initialJobs: connection.initialJobs ?? [],
-              nextReconcileAt: connection.nextReconcileAt ?? null,
-              scopes: account.scopes,
-            },
-            createdAt: now,
-          });
-          await dispatchHostedDeviceSyncWake({
-            connectionId: account.id,
-            occurredAt: now,
-            provider: account.provider,
-            source: "connection-established",
-            userId: ownerId,
+          await handleHostedDeviceSyncConnectionEstablished({
+            account,
+            connection,
+            now,
+            store: this.store,
           });
         },
         onWebhookAccepted: async ({ account, webhook, now }) => {
-          const ownerId = await this.store.getConnectionOwnerId(account.id);
-
-          if (!ownerId) {
-            return;
-          }
-
-          await this.store.createSignal({
-            userId: ownerId,
-            connectionId: account.id,
-            provider: account.provider,
-            kind: "webhook_hint",
-            payload: {
-              eventType: webhook.eventType,
-              traceId: webhook.traceId ?? null,
-              occurredAt: webhook.occurredAt ?? null,
-              jobs: webhook.jobs,
-              payload: webhook.payload ?? {},
-            },
-            createdAt: now,
-          });
-          await dispatchHostedDeviceSyncWake({
-            connectionId: account.id,
-            occurredAt: now,
-            provider: account.provider,
-            source: "webhook-accepted",
-            traceId: webhook.traceId ?? null,
-            userId: ownerId,
+          await handleHostedDeviceSyncWebhookAccepted({
+            account,
+            now,
+            store: this.store,
+            webhook,
           });
         },
       },
     });
-  }
-
-  private async refreshProviderTokensWithStatusHandling(input: {
-    tx: HostedPrismaTransactionClient;
-    provider: DeviceSyncProvider;
-    bundle: HostedConnectionSecretBundle;
-    now: string;
-  }): Promise<ProviderAuthTokens> {
-    try {
-      return await input.provider.refreshTokens(input.bundle.account);
-    } catch (error) {
-      if (isDeviceSyncError(error) && error.accountStatus) {
-        await input.tx.deviceConnection.update({
-          where: {
-            id: input.bundle.account.id,
-          },
-          data: {
-            status: error.accountStatus,
-            lastSyncErrorAt: new Date(input.now),
-            lastErrorCode: error.code,
-            lastErrorMessage: error.message,
-          },
-        });
-        await input.tx.deviceSyncSignal.create({
-          data: {
-            userId: input.bundle.userId,
-            connectionId: input.bundle.account.id,
-            provider: input.bundle.account.provider,
-            kind: error.accountStatus === "disconnected" ? "disconnected" : "reauthorization_required",
-            payloadJson: toJsonRecord({
-              reason: "token_refresh_failed",
-              code: error.code,
-              message: error.message,
-            }) as Prisma.InputJsonObject,
-            createdAt: new Date(input.now),
-          },
-        });
-      }
-
-      throw error;
-    }
   }
 }
 
@@ -674,9 +286,7 @@ export async function dispatchHostedDeviceSyncWake(input: {
   traceId?: string | null;
   userId: string;
 }): Promise<{ dispatched: boolean; reason?: string }> {
-  return dispatchHostedExecutionBestEffort(buildHostedDeviceSyncWakeDispatch(input), {
-    context: `device-sync ${input.source} user=${input.userId} provider=${input.provider} connection=${input.connectionId}`,
-  });
+  return dispatchHostedDeviceSyncWakeInternal(input);
 }
 
 function resolveHostedPublicBaseUrl(request: Request, configuredBaseUrl: string | null): string {
@@ -689,82 +299,6 @@ function resolveAllowedReturnOrigins(request: Request, publicBaseUrl: string, co
   return [...new Set([requestOrigin, publicOrigin, ...configuredOrigins])];
 }
 
-function buildTokenExport(
-  bundle: HostedConnectionSecretBundle,
-  exportedAt: string,
-): HostedTokenExport {
-  return {
-    accessToken: bundle.account.accessToken,
-    refreshToken: bundle.account.refreshToken ?? null,
-    accessTokenExpiresAt: bundle.account.accessTokenExpiresAt ?? null,
-    tokenVersion: bundle.tokenVersion,
-    keyVersion: bundle.keyVersion,
-    exportedAt,
-  };
-}
-
 function resolveHostedAgentSessionExpiry(now: string): string {
-  return new Date(Date.parse(now) + HOSTED_AGENT_SESSION_TTL_MS).toISOString();
-}
-
-function shouldRefreshHostedToken(accessTokenExpiresAt: string | null, now: string): boolean {
-  if (!accessTokenExpiresAt) {
-    return false;
-  }
-
-  return Date.parse(accessTokenExpiresAt) <= Date.parse(now) + TOKEN_REFRESH_LEEWAY_MS;
-}
-
-function buildHostedDeviceSyncWakeDispatch(input: {
-  connectionId: string;
-  occurredAt: string;
-  provider: string;
-  source: HostedDeviceSyncWakeSource;
-  traceId?: string | null;
-  userId: string;
-}): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "device-sync.wake",
-      connectionId: input.connectionId,
-      provider: input.provider,
-      reason: mapHostedDeviceSyncWakeReason(input.source),
-      userId: input.userId,
-    },
-    eventId: buildHostedDeviceSyncWakeEventId(input),
-    occurredAt: input.occurredAt,
-  };
-}
-
-function buildHostedDeviceSyncWakeEventId(input: {
-  connectionId: string;
-  occurredAt: string;
-  provider: string;
-  source: HostedDeviceSyncWakeSource;
-  traceId?: string | null;
-  userId: string;
-}): string {
-  return [
-    "device-sync",
-    input.source,
-    input.userId,
-    input.provider,
-    input.connectionId,
-    input.traceId ?? input.occurredAt,
-  ].join(":");
-}
-
-function mapHostedDeviceSyncWakeReason(
-  source: HostedDeviceSyncWakeSource,
-): Extract<HostedExecutionDispatchRequest["event"], { kind: "device-sync.wake" }>["reason"] {
-  switch (source) {
-    case "connection-established":
-      return "connected";
-    case "disconnect":
-      return "disconnected";
-    case "webhook-accepted":
-      return "webhook_hint";
-    default:
-      return source satisfies never;
-  }
+  return new Date(Date.parse(now) + 24 * 60 * 60_000).toISOString();
 }

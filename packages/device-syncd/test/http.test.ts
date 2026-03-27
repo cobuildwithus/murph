@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { DeviceSyncError } from "../src/errors.js";
+import { DeviceSyncError, formatDeviceSyncStartupError } from "../src/errors.js";
 import {
   assertDeviceSyncControlRequest,
+  buildPublicDeviceSyncErrorPayload,
   renderCallbackHtml,
   startDeviceSyncHttpServer,
 } from "../src/http.js";
@@ -148,6 +149,119 @@ test("device sync http server protects control routes and keeps webhooks on the 
   } finally {
     await server.close();
   }
+});
+
+test("device sync http server redacts provider response bodies from control-plane JSON errors", async () => {
+  const sensitiveBodySnippet =
+    "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=heartrate";
+  const service = createStubService({
+    listAccounts() {
+      throw new DeviceSyncError({
+        code: "OURA_API_REQUEST_FAILED",
+        message: "Oura API request failed for /v2/usercollection/daily_sleep.",
+        retryable: true,
+        httpStatus: 502,
+        details: {
+          status: 502,
+          bodySnippet: sensitiveBodySnippet,
+        },
+      });
+    },
+  });
+  const server = await startDeviceSyncHttpServer({
+    service,
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      controlToken: "control-token-for-tests",
+    },
+  });
+
+  try {
+    const controlBaseUrl = `http://127.0.0.1:${server.control.port}`;
+    const response = await fetch(`${controlBaseUrl}/accounts`, {
+      headers: {
+        Authorization: "Bearer control-token-for-tests",
+      },
+    });
+
+    assert.equal(response.status, 502);
+
+    const body = await response.text();
+
+    assert.doesNotMatch(body, /acct_fake_sensitive_123/u);
+    assert.doesNotMatch(body, /tok_fake_sensitive_456/u);
+    assert.doesNotMatch(body, /scope=heartrate/u);
+    assert.doesNotMatch(body, /bodySnippet/u);
+    assert.deepEqual(JSON.parse(body), {
+      error: {
+        code: "OURA_API_REQUEST_FAILED",
+        message: "Oura API request failed for /v2/usercollection/daily_sleep.",
+        retryable: true,
+        details: {
+          status: 502,
+        },
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("device sync public error payload keeps only sanitized provider status details", () => {
+  const sensitiveBodySnippet =
+    "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=heartrate";
+  const payload = buildPublicDeviceSyncErrorPayload(
+    new DeviceSyncError({
+      code: "OURA_API_REQUEST_FAILED",
+      message: "Oura API request failed for /v2/usercollection/daily_sleep.",
+      retryable: true,
+      httpStatus: 502,
+      details: {
+        status: 502,
+        bodySnippet: sensitiveBodySnippet,
+        provider: "oura",
+      },
+    }),
+  );
+  const body = JSON.stringify(payload);
+
+  assert.doesNotMatch(body, /acct_fake_sensitive_123/u);
+  assert.doesNotMatch(body, /tok_fake_sensitive_456/u);
+  assert.doesNotMatch(body, /scope=heartrate/u);
+  assert.doesNotMatch(body, /bodySnippet/u);
+  assert.doesNotMatch(body, /provider/u);
+  assert.deepEqual(payload, {
+    error: {
+      code: "OURA_API_REQUEST_FAILED",
+      message: "Oura API request failed for /v2/usercollection/daily_sleep.",
+      retryable: true,
+      details: {
+        status: 502,
+      },
+    },
+  });
+});
+
+test("device sync startup error formatting omits sensitive provider response details", () => {
+  const formatted = formatDeviceSyncStartupError(
+    new DeviceSyncError({
+      code: "WHOOP_API_REQUEST_FAILED",
+      message: "Whoop API request failed for /developer/v1/cycle.",
+      retryable: true,
+      httpStatus: 502,
+      details: {
+        accountId: "acct_fake_sensitive_123",
+        bodySnippet: "access_token=tok_fake_sensitive_456",
+        status: 502,
+      },
+    }),
+  );
+
+  assert.equal(formatted, "DeviceSyncError WHOOP_API_REQUEST_FAILED: Whoop API request failed for /developer/v1/cycle.");
+  assert.doesNotMatch(formatted, /acct_fake_sensitive_123/u);
+  assert.doesNotMatch(formatted, /tok_fake_sensitive_456/u);
+  assert.doesNotMatch(formatted, /bodySnippet/u);
 });
 
 test("renderCallbackHtml escapes plain-text body content", () => {

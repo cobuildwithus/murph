@@ -33,3 +33,15 @@ export function deviceSyncError(options: DeviceSyncErrorOptions): DeviceSyncErro
 export function isDeviceSyncError(error: unknown): error is DeviceSyncError {
   return error instanceof DeviceSyncError;
 }
+
+export function formatDeviceSyncStartupError(error: unknown): string {
+  if (isDeviceSyncError(error)) {
+    return `${error.name} ${error.code}: ${error.message}`;
+  }
+
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+
+  return String(error);
+}

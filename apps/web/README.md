@@ -14,6 +14,7 @@ This app is intentionally separate from `packages/web`:
 - hosted Linq webhook ingress plus sparse chat routing state
 - per-user connection ownership mapping
 - encrypted provider-token escrow
+- durable `execution_outbox` records for Cloudflare-bound hosted execution intents
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
 ## Non-goals
@@ -154,6 +155,11 @@ Local-agent routes:
 - `POST /api/linq/agents/pair`
 - `GET /api/linq/agent/events`
 
+Hosted device-sync agent signals stay sparse by design:
+
+- webhook wake hints expose only minimal metadata such as `eventType`, `traceId`, `occurredAt`, and an optional coarse `resourceCategory`
+- hosted Postgres/API state must not persist or return raw provider webhook payload blobs or local scheduling/job arrays
+
 ## Hosted onboarding routes
 
 This repo now also includes a hosted onboarding lane for phone-bound invites and public signup:
@@ -182,8 +188,9 @@ The onboarding lane is intentionally thin:
 - optional hosted RevNet issuance can submit an inline onchain payment from `invoice.paid` after Stripe succeeds, using invoice-level Postgres idempotency plus stored tx hashes to prevent duplicate issuance
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
 - hosted share links can now store an encrypted one-time share pack for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation
-- once a member is active, hosted onboarding and hosted share acceptance dispatch signed internal execution events to `apps/cloudflare` for member activation, shared-bundle imports, direct Linq messages, and later scheduled assistant ticks instead of trying to run the inbox/assistant loop inside Next.js
-- hosted onboarding webhook receipts now keep receipt-local side-effect markers for Cloudflare dispatches and Linq invite replies so a retried webhook only redrains still-pending effects instead of replaying an already-sent outbound action
+- once a member is active, hosted onboarding, hosted share acceptance, and hosted device-sync wakes write signed internal execution intents to the shared Postgres `execution_outbox` in the same transaction as their control-plane state changes instead of synchronously depending on `apps/cloudflare`
+- a best-effort drain still runs after commit, but Cloudflare delivery retries and dedupe now converge through the outbox row instead of request/response coupling
+- hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, while hosted execution side effects are marked sent once their outbox row is durable so a retried webhook only redrains still-pending non-outbox effects
 
 Current RevNet MVP assumptions:
 

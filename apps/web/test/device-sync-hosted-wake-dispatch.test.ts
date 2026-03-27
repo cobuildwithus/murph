@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  completeWebhookTrace: vi.fn(),
   createDeviceSyncPublicIngress: vi.fn(),
   createSignal: vi.fn(),
-  dispatchHostedExecutionBestEffort: vi.fn(),
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedExecutionOutbox: vi.fn(),
   getConnectionBundleForUser: vi.fn(),
   getConnectionForUser: vi.fn(),
   getConnectionOwnerId: vi.fn(),
   markConnectionDisconnected: vi.fn(),
+  prismaTx: { __tx: true },
+  prisma: {
+    $transaction: vi.fn(),
+  },
 }));
 
 vi.mock("@healthybob/device-syncd", () => ({
@@ -18,11 +24,12 @@ vi.mock("@healthybob/device-syncd", () => ({
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: vi.fn(() => ({})),
+  getPrisma: vi.fn(() => mocks.prisma),
 }));
 
-vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
-  dispatchHostedExecutionBestEffort: mocks.dispatchHostedExecutionBestEffort,
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -58,11 +65,13 @@ vi.mock("@/src/lib/device-sync/providers", () => ({
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   PrismaDeviceSyncControlPlaneStore: class PrismaDeviceSyncControlPlaneStore {
+    completeWebhookTrace = mocks.completeWebhookTrace;
     createSignal = mocks.createSignal;
     getConnectionBundleForUser = mocks.getConnectionBundleForUser;
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     markConnectionDisconnected = mocks.markConnectionDisconnected;
+    prisma = mocks.prisma;
   },
   generateHostedAgentBearerToken: vi.fn(),
   hostedConnectionWithSecretArgs: {},
@@ -85,6 +94,9 @@ import {
 describe("dispatchHostedDeviceSyncWake", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
+      callback(mocks.prismaTx),
+    );
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -123,10 +135,23 @@ describe("dispatchHostedDeviceSyncWake", () => {
           provider: {},
           webhook: {
             eventType: "sleep.updated",
-            jobs: [],
+            jobs: [
+              {
+                kind: "reconcile",
+                payload: {
+                  windowStart: "2026-03-19T00:00:00.000Z",
+                  oauthRefreshToken: "job-secret-refresh-token",
+                },
+              },
+            ],
             occurredAt: "2026-03-26T11:59:00.000Z",
             payload: {
-              accountId: "oura-account-123",
+              dataType: "daily_sleep",
+              access_token: "provider-secret-token",
+              nested: {
+                ssn: "123-45-6789",
+              },
+              objectId: "daily-sleep-1",
             },
             traceId: "trace_123",
           },
@@ -137,9 +162,10 @@ describe("dispatchHostedDeviceSyncWake", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.dispatchHostedExecutionBestEffort.mockResolvedValue({
-      dispatched: true,
-    });
+    mocks.createSignal.mockResolvedValue({ id: 8 });
+    mocks.completeWebhookTrace.mockResolvedValue(undefined);
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.getConnectionBundleForUser.mockResolvedValue(null);
     mocks.getConnectionForUser.mockResolvedValue({
       id: "dsc_123",
@@ -161,22 +187,29 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
-    expect(mocks.dispatchHostedExecutionBestEffort).toHaveBeenCalledWith(
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       {
-        event: {
-          connectionId: "dsc_123",
-          kind: "device-sync.wake",
-          provider: "oura",
-          reason: "connected",
-          userId: "user-123",
+        dispatch: {
+          event: {
+            connectionId: "dsc_123",
+            kind: "device-sync.wake",
+            provider: "oura",
+            reason: "connected",
+            userId: "user-123",
+          },
+          eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+          occurredAt: "2026-03-26T12:00:00.000Z",
         },
-        eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
-      {
-        context: "device-sync connection-established user=user-123 provider=oura connection=dsc_123",
+        sourceId: "dsc_123",
+        sourceType: "device_sync_signal",
+        tx: mocks.prismaTx,
       },
     );
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+        context: "device-sync connection-established user=user-123 provider=oura connection=dsc_123",
+        eventIds: ["device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z"],
+        prisma: mocks.prisma,
+      });
   });
 
   it("uses the webhook trace id for a stable wake event id when one is available", async () => {
@@ -189,11 +222,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
-    expect(mocks.dispatchHostedExecutionBestEffort).toHaveBeenCalledWith(
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
+        dispatch: expect.objectContaining({
+          eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
+        }),
       }),
-      expect.any(Object),
     );
   });
 
@@ -206,28 +240,29 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
-    expect(mocks.dispatchHostedExecutionBestEffort).toHaveBeenCalledWith(
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: {
-          connectionId: "dsc_123",
-          kind: "device-sync.wake",
-          provider: "oura",
-          reason: "disconnected",
-          userId: "user-123",
+        dispatch: {
+          event: {
+            connectionId: "dsc_123",
+            kind: "device-sync.wake",
+            provider: "oura",
+            reason: "disconnected",
+            userId: "user-123",
+          },
+          eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+          occurredAt: "2026-03-26T12:00:00.000Z",
         },
-        eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
       }),
-      {
-        context: "device-sync disconnect user=user-123 provider=oura connection=dsc_123",
-      },
     );
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+        context: "device-sync disconnect user=user-123 provider=oura connection=dsc_123",
+        eventIds: ["device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z"],
+        prisma: mocks.prisma,
+      });
   });
 
-  it("keeps disconnect successful when wake dispatch reports a failure", async () => {
-    mocks.dispatchHostedExecutionBestEffort.mockResolvedValue({
-      dispatched: false,
-      reason: "dispatch-failed",
-    });
+  it("queues a disconnected signal and wake together inside the disconnect flow", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/connections/dsc_123/disconnect"),
     );
@@ -241,24 +276,25 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         connectionId: "dsc_123",
+        createdAt: "2026-03-26T12:00:00.000Z",
         kind: "disconnected",
+        payload: {
+          reason: "user_disconnect",
+        },
+        provider: "oura",
+        tx: mocks.prismaTx,
         userId: "user-123",
       }),
     );
-    expect(mocks.dispatchHostedExecutionBestEffort).toHaveBeenCalledWith(
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: {
-          connectionId: "dsc_123",
-          kind: "device-sync.wake",
-          provider: "oura",
-          reason: "disconnected",
-          userId: "user-123",
-        },
-        eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+        dispatch: expect.objectContaining({
+          eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+        }),
+        sourceId: "8",
+        sourceType: "device_sync_signal",
+        tx: mocks.prismaTx,
       }),
-      {
-        context: "device-sync disconnect user=user-123 provider=oura connection=dsc_123",
-      },
     );
   });
 
@@ -272,28 +308,26 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         connectionId: "dsc_123",
+        createdAt: "2026-03-26T12:00:00.000Z",
         kind: "connected",
+        provider: "oura",
+        tx: mocks.prismaTx,
         userId: "user-123",
       }),
     );
-    expect(mocks.dispatchHostedExecutionBestEffort).toHaveBeenCalledWith(
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: {
-          connectionId: "dsc_123",
-          kind: "device-sync.wake",
-          provider: "oura",
-          reason: "connected",
-          userId: "user-123",
-        },
-        eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+        dispatch: expect.objectContaining({
+          eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+        }),
+        sourceId: "8",
+        sourceType: "device_sync_signal",
+        tx: mocks.prismaTx,
       }),
-      {
-        context: "device-sync connection-established user=user-123 provider=oura connection=dsc_123",
-      },
     );
   });
 
-  it("dispatches a wake from the webhook ingress hook with the webhook trace id", async () => {
+  it("stores and dispatches only sparse webhook hints from the ingress hook", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -308,27 +342,45 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
     await controlPlane.handleWebhook("oura");
 
+    const signalInput = mocks.createSignal.mock.calls[0]?.[0];
+
     expect(mocks.createSignal).toHaveBeenCalledWith(
-      expect.objectContaining({
+      {
         connectionId: "dsc_123",
         kind: "webhook_hint",
-        userId: "user-123",
-      }),
-    );
-    expect(mocks.dispatchHostedExecutionBestEffort).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: {
-          connectionId: "dsc_123",
-          kind: "device-sync.wake",
-          provider: "oura",
-          reason: "webhook_hint",
-          userId: "user-123",
+        payload: {
+          eventType: "sleep.updated",
+          traceId: "trace_123",
+          occurredAt: "2026-03-26T11:59:00.000Z",
+          resourceCategory: "daily_sleep",
         },
-        eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
-      }),
-      {
-        context: "device-sync webhook-accepted user=user-123 provider=oura connection=dsc_123",
+        userId: "user-123",
+        provider: "oura",
+        createdAt: "2026-03-26T12:00:00.000Z",
+        tx: mocks.prismaTx,
       },
+    );
+    expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("provider-secret-token");
+    expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("123-45-6789");
+    expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("job-secret-refresh-token");
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: {
+          event: {
+            connectionId: "dsc_123",
+            kind: "device-sync.wake",
+            provider: "oura",
+            reason: "webhook_hint",
+            userId: "user-123",
+          },
+          eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+        sourceId: "8",
+        sourceType: "device_sync_signal",
+        tx: mocks.prismaTx,
+      }),
     );
   });
 
@@ -349,6 +401,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     await controlPlane.handleWebhook("oura");
 
     expect(mocks.createSignal).not.toHaveBeenCalled();
-    expect(mocks.dispatchHostedExecutionBestEffort).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 });

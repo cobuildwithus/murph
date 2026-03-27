@@ -440,6 +440,19 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     ];
   }
 
+  function buildWhoopWebhookHint(eventType: string): Record<string, unknown> {
+    const eventDescriptor = WHOOP_WEBHOOK_EVENT_MAP[eventType];
+
+    return eventDescriptor
+      ? {
+          eventType,
+          resourceType: eventDescriptor.resourceType,
+        }
+      : {
+          eventType,
+        };
+  }
+
   async function refreshAccountForRevoke(account: DeviceSyncAccount): Promise<string> {
     if (!isTokenNearExpiry(account) || !account.refreshToken) {
       return account.accessToken;
@@ -765,7 +778,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         eventType,
         traceId,
         occurredAt: context.now,
-        payload,
+        payload: buildWhoopWebhookHint(eventType),
         jobs: buildWhoopWebhookJobs(eventType, resourceId, payload, traceId),
       };
     },

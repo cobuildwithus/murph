@@ -589,10 +589,8 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         traceId,
         occurredAt,
         payload: {
-          ...payload,
           eventType,
           dataType,
-          objectId,
         },
         jobs: [
           {

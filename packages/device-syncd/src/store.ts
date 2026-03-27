@@ -10,6 +10,8 @@ import {
 } from "./shared.js";
 
 import type {
+  ClaimDeviceSyncWebhookTraceInput,
+  DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
@@ -45,15 +47,6 @@ interface EnqueueJobInput extends DeviceSyncJobInput {
   accountId: string;
 }
 
-interface WebhookTraceInput {
-  provider: string;
-  traceId: string;
-  externalAccountId: string;
-  eventType: string;
-  receivedAt: string;
-  payload?: Record<string, unknown>;
-}
-
 interface StoredAccountRow {
   id: string;
   provider: string;
@@ -61,6 +54,7 @@ interface StoredAccountRow {
   display_name: string | null;
   status: DeviceSyncAccountStatus;
   scopes_json: string | null;
+  disconnect_generation: number;
   access_token_encrypted: string;
   refresh_token_encrypted: string | null;
   access_token_expires_at: string | null;
@@ -108,6 +102,13 @@ interface OAuthStateRow {
   expires_at: string;
 }
 
+interface StoredWebhookTraceRow {
+  provider: string;
+  trace_id: string;
+  status: string | null;
+  processing_expires_at: string | null;
+}
+
 function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccount | null {
   if (!row) {
     return null;
@@ -120,6 +121,7 @@ function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccou
     displayName: row.display_name,
     status: row.status,
     scopes: JSON.parse(row.scopes_json ?? "[]") as string[],
+    disconnectGeneration: row.disconnect_generation,
     accessTokenEncrypted: row.access_token_encrypted,
     refreshTokenEncrypted: row.refresh_token_encrypted,
     accessTokenExpiresAt: row.access_token_expires_at,
@@ -180,6 +182,21 @@ function mapOAuthStateRow(row: OAuthStateRow | undefined): OAuthStateRecord | nu
   };
 }
 
+function ensureColumn(
+  database: DatabaseSync,
+  table: string,
+  column: string,
+  columnDefinition: string,
+): void {
+  const rows = database.prepare(`pragma table_info(${table})`).all() as Array<{ name?: string }>;
+
+  if (rows.some((row) => row.name === column)) {
+    return;
+  }
+
+  database.exec(`alter table ${table} add column ${column} ${columnDefinition}`);
+}
+
 export class SqliteDeviceSyncStore {
   readonly databasePath: string;
   readonly database: DatabaseSync;
@@ -207,6 +224,7 @@ export class SqliteDeviceSyncStore {
         display_name text,
         status text not null,
         scopes_json text not null,
+        disconnect_generation integer not null default 0,
         access_token_encrypted text not null,
         refresh_token_encrypted text,
         access_token_expires_at text,
@@ -265,12 +283,19 @@ export class SqliteDeviceSyncStore {
         event_type text not null,
         received_at text not null,
         payload_json text not null,
+        status text not null default 'processed',
+        processing_expires_at text,
         primary key (provider, trace_id)
       );
 
       create index if not exists webhook_trace_received_idx
       on webhook_trace (received_at desc);
     `);
+
+    ensureColumn(this.database, "device_account", "disconnect_generation", "integer not null default 0");
+    ensureColumn(this.database, "webhook_trace", "status", "text not null default 'processed'");
+    ensureColumn(this.database, "webhook_trace", "processing_expires_at", "text");
+    this.database.exec("update webhook_trace set status = 'processed' where status is null");
   }
 
   close(): void {
@@ -510,22 +535,30 @@ export class SqliteDeviceSyncStore {
   updateAccountTokens(
     accountId: string,
     tokens: ProviderAuthTokens & { accessTokenEncrypted: string; refreshTokenEncrypted?: string | null },
-  ): StoredDeviceSyncAccount {
+    disconnectGeneration?: number,
+  ): StoredDeviceSyncAccount | null {
     const now = toIsoTimestamp(new Date());
-    this.database.prepare(`
+    const result = this.database.prepare(`
       update device_account
       set access_token_encrypted = ?,
           refresh_token_encrypted = ?,
           access_token_expires_at = ?,
           updated_at = ?
       where id = ?
+        and (? is null or (disconnect_generation = ? and status = 'active'))
     `).run(
       tokens.accessTokenEncrypted,
       tokens.refreshTokenEncrypted ?? null,
       tokens.accessTokenExpiresAt ?? null,
       now,
       accountId,
-    );
+      disconnectGeneration ?? null,
+      disconnectGeneration ?? null,
+    ) as { changes: number };
+
+    if ((result.changes ?? 0) === 0) {
+      return null;
+    }
 
     return this.getAccountById(accountId)!;
   }
@@ -534,6 +567,7 @@ export class SqliteDeviceSyncStore {
     this.database.prepare(`
       update device_account
       set status = 'disconnected',
+          disconnect_generation = disconnect_generation + 1,
           next_reconcile_at = null,
           updated_at = ?
       where id = ?
@@ -561,12 +595,13 @@ export class SqliteDeviceSyncStore {
   markSyncSucceeded(
     accountId: string,
     now: string,
+    disconnectGeneration: number | null = null,
     options: { metadataPatch?: Record<string, unknown>; nextReconcileAt?: string | null } = {},
-  ): void {
+  ): boolean {
     const existing = this.getAccountById(accountId);
 
     if (!existing) {
-      return;
+      return false;
     }
 
     const metadata = options.metadataPatch ? { ...existing.metadata, ...options.metadataPatch } : existing.metadata;
@@ -574,7 +609,7 @@ export class SqliteDeviceSyncStore {
       ? options.nextReconcileAt ?? null
       : existing.nextReconcileAt;
 
-    this.database.prepare(`
+    const result = this.database.prepare(`
       update device_account
       set status = case when status = 'disconnected' then status else 'active' end,
           metadata_json = ?,
@@ -585,13 +620,18 @@ export class SqliteDeviceSyncStore {
           last_error_message = null,
           updated_at = ?
       where id = ?
+        and (? is null or (disconnect_generation = ? and status = 'active'))
     `).run(
       stringifyJson(metadata),
       nextReconcileAt,
       now,
       now,
       accountId,
-    );
+      disconnectGeneration ?? null,
+      disconnectGeneration ?? null,
+    ) as { changes: number };
+
+    return (result.changes ?? 0) > 0;
   }
 
   markSyncFailed(
@@ -613,54 +653,31 @@ export class SqliteDeviceSyncStore {
   }
 
   enqueueJob(input: EnqueueJobInput): DeviceSyncJobRecord {
+    return withImmediateTransaction(this.database, () => this.enqueueJobInTransaction(input));
+  }
+
+  enqueueJobsAndCompleteWebhookTrace(input: {
+    accountId: string;
+    provider: string;
+    traceId: string;
+    jobs: readonly DeviceSyncJobInput[];
+  }): DeviceSyncJobRecord[] {
     return withImmediateTransaction(this.database, () => {
-      if (input.dedupeKey) {
-        const existing = this.database.prepare(`
-          select *
-          from device_job
-          where account_id = ? and provider = ? and dedupe_key = ? and status in ('queued', 'running')
-          order by created_at desc, id desc
-          limit 1
-        `).get(input.accountId, input.provider, input.dedupeKey) as StoredJobRow | undefined;
-
-        if (existing) {
-          return mapJobRow(existing)!;
-        }
-      }
-
-      const now = toIsoTimestamp(new Date());
-      const id = generatePrefixedId("dsj");
-      this.database.prepare(`
-        insert into device_job (
-          id,
-          provider,
-          account_id,
-          kind,
-          payload_json,
-          priority,
-          available_at,
-          attempts,
-          max_attempts,
-          dedupe_key,
-          status,
-          created_at,
-          updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'queued', ?, ?)
-      `).run(
-        id,
-        input.provider,
-        input.accountId,
-        input.kind,
-        stringifyJson(input.payload ?? {}),
-        input.priority ?? 0,
-        input.availableAt ?? now,
-        input.maxAttempts ?? 5,
-        input.dedupeKey ?? null,
-        now,
-        now,
+      const queuedJobs = input.jobs.map((job) =>
+        this.enqueueJobInTransaction({
+          provider: input.provider,
+          accountId: input.accountId,
+          kind: job.kind,
+          payload: job.payload ?? {},
+          priority: job.priority ?? 0,
+          availableAt: job.availableAt,
+          maxAttempts: job.maxAttempts,
+          dedupeKey: job.dedupeKey,
+        }),
       );
 
-      return this.getJobById(id)!;
+      this.completeWebhookTrace(input.provider, input.traceId);
+      return queuedJobs;
     });
   }
 
@@ -729,6 +746,22 @@ export class SqliteDeviceSyncStore {
     `).run(now, now, jobId);
   }
 
+  completeJobIfOwned(jobId: string, workerId: string, now: string): boolean {
+    const result = this.database.prepare(`
+      update device_job
+      set status = 'succeeded',
+          lease_owner = null,
+          lease_expires_at = null,
+          finished_at = ?,
+          updated_at = ?
+      where id = ?
+        and status = 'running'
+        and lease_owner = ?
+    `).run(now, now, jobId, workerId) as { changes: number };
+
+    return (result.changes ?? 0) > 0;
+  }
+
   failJob(
     jobId: string,
     now: string,
@@ -740,6 +773,10 @@ export class SqliteDeviceSyncStore {
     const job = this.getJobById(jobId);
 
     if (!job) {
+      return;
+    }
+
+    if (job.status !== "queued" && job.status !== "running") {
       return;
     }
 
@@ -787,25 +824,148 @@ export class SqliteDeviceSyncStore {
     return result.changes ?? 0;
   }
 
-  recordWebhookTraceIfNew(input: WebhookTraceInput): boolean {
-    const result = this.database.prepare(`
-      insert or ignore into webhook_trace (
-        provider,
-        trace_id,
-        external_account_id,
-        event_type,
-        received_at,
-        payload_json
-      ) values (?, ?, ?, ?, ?, ?)
-    `).run(
-      input.provider,
-      input.traceId,
-      input.externalAccountId,
-      input.eventType,
-      input.receivedAt,
-      stringifyJson(input.payload ?? {}),
-    ) as { changes: number };
+  claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
+    return withImmediateTransaction(this.database, () => {
+      const existing = this.database.prepare(`
+        select provider, trace_id, status, processing_expires_at
+        from webhook_trace
+        where provider = ?
+          and trace_id = ?
+      `).get(input.provider, input.traceId) as StoredWebhookTraceRow | undefined;
 
-    return (result.changes ?? 0) > 0;
+      if (!existing) {
+        this.database.prepare(`
+          insert into webhook_trace (
+            provider,
+            trace_id,
+            external_account_id,
+            event_type,
+            received_at,
+            payload_json,
+            status,
+            processing_expires_at
+          ) values (?, ?, ?, ?, ?, ?, 'processing', ?)
+        `).run(
+          input.provider,
+          input.traceId,
+          input.externalAccountId,
+          input.eventType,
+          input.receivedAt,
+          stringifyJson(input.payload ?? {}),
+          input.processingExpiresAt,
+        );
+
+        return "claimed";
+      }
+
+      if ((existing.status ?? "processed") === "processed") {
+        return "processed";
+      }
+
+      if (
+        existing.processing_expires_at
+        && Date.parse(existing.processing_expires_at) > Date.parse(input.receivedAt)
+      ) {
+        return "processing";
+      }
+
+      const result = this.database.prepare(`
+        update webhook_trace
+        set external_account_id = ?,
+            event_type = ?,
+            received_at = ?,
+            payload_json = ?,
+            status = 'processing',
+            processing_expires_at = ?
+        where provider = ?
+          and trace_id = ?
+          and coalesce(status, 'processed') = 'processing'
+          and (
+            processing_expires_at is null
+            or processing_expires_at <= ?
+          )
+      `).run(
+        input.externalAccountId,
+        input.eventType,
+        input.receivedAt,
+        stringifyJson(input.payload ?? {}),
+        input.processingExpiresAt,
+        input.provider,
+        input.traceId,
+        input.receivedAt,
+      ) as { changes: number };
+
+      return (result.changes ?? 0) > 0 ? "claimed" : "processing";
+    });
+  }
+
+  completeWebhookTrace(provider: string, traceId: string): void {
+    this.database.prepare(`
+      update webhook_trace
+      set status = 'processed',
+          processing_expires_at = null
+      where provider = ?
+        and trace_id = ?
+        and coalesce(status, 'processed') = 'processing'
+    `).run(provider, traceId);
+  }
+
+  releaseWebhookTrace(provider: string, traceId: string): void {
+    this.database.prepare(`
+      delete from webhook_trace
+      where provider = ?
+        and trace_id = ?
+        and coalesce(status, 'processed') = 'processing'
+    `).run(provider, traceId);
+  }
+
+  private enqueueJobInTransaction(input: EnqueueJobInput): DeviceSyncJobRecord {
+    if (input.dedupeKey) {
+      const existing = this.database.prepare(`
+        select *
+        from device_job
+        where account_id = ? and provider = ? and dedupe_key = ? and status in ('queued', 'running')
+        order by created_at desc, id desc
+        limit 1
+      `).get(input.accountId, input.provider, input.dedupeKey) as StoredJobRow | undefined;
+
+      if (existing) {
+        return mapJobRow(existing)!;
+      }
+    }
+
+    const now = toIsoTimestamp(new Date());
+    const id = generatePrefixedId("dsj");
+    this.database.prepare(`
+      insert into device_job (
+        id,
+        provider,
+        account_id,
+        kind,
+        payload_json,
+        priority,
+        available_at,
+        attempts,
+        max_attempts,
+        dedupe_key,
+        status,
+        created_at,
+        updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'queued', ?, ?)
+    `).run(
+      id,
+      input.provider,
+      input.accountId,
+      input.kind,
+      stringifyJson(input.payload ?? {}),
+      input.priority ?? 0,
+      input.availableAt ?? now,
+      input.maxAttempts ?? 5,
+      input.dedupeKey ?? null,
+      now,
+      now,
+    );
+
+    return this.getJobById(id)!;
   }
 }
