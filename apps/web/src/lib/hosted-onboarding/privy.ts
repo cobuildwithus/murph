@@ -1,10 +1,9 @@
-import { PrivyClient } from "@privy-io/node";
+import { verifyIdentityToken } from "@privy-io/node";
 
 import { hostedOnboardingError } from "./errors";
 import {
   extractHostedPrivyPhoneAccount,
   extractHostedPrivyWalletAccount,
-  parseHostedPrivyIdentityToken,
   type HostedPrivyPhoneAccount,
   type HostedPrivyWalletAccount,
   type PrivyLinkedAccountLike,
@@ -15,10 +14,6 @@ interface HostedPrivyUser {
   id: string;
   linked_accounts?: unknown;
 }
-
-const globalForHostedPrivy = globalThis as typeof globalThis & {
-  __healthybobHostedPrivyClient?: PrivyClient;
-};
 
 const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 
@@ -31,24 +26,9 @@ export interface HostedPrivyIdentity {
 
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
   const user = await verifyHostedPrivyIdentityToken(identityToken);
-  const parsedToken = parseHostedPrivyIdentityToken(identityToken);
-  const linkedAccounts = [
-    ...parsedToken.linkedAccounts,
-    ...coerceLinkedAccounts(user.linked_accounts),
-  ];
-  const userId = typeof parsedToken.subject === "string" && parsedToken.subject
-    ? parsedToken.subject
-    : user.id;
+  const linkedAccounts = coerceLinkedAccounts(user.linked_accounts);
   const phone = extractHostedPrivyPhoneAccount(linkedAccounts);
   const wallet = extractHostedPrivyWalletAccount(linkedAccounts, "ethereum");
-
-  if (userId !== user.id) {
-    throw hostedOnboardingError({
-      code: "PRIVY_AUTH_FAILED",
-      message: "We could not verify your Privy session. Request a fresh code and try again.",
-      httpStatus: 401,
-    });
-  }
 
   if (!phone) {
     throw hostedOnboardingError({
@@ -69,7 +49,7 @@ export async function requireHostedPrivyIdentity(identityToken: string): Promise
   return {
     linkedAccounts,
     phone,
-    userId,
+    userId: user.id,
     wallet,
   };
 }
@@ -85,8 +65,14 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
     });
   }
 
+  const { appId, verificationKey } = requireHostedPrivyVerificationConfig();
+
   try {
-    const user = await getHostedPrivyClient().users().get({ id_token: token });
+    const user = await verifyIdentityToken({
+      identity_token: token,
+      app_id: appId,
+      verification_key: verificationKey,
+    });
 
     if (!user || typeof user !== "object" || typeof (user as { id?: unknown }).id !== "string") {
       throw new TypeError("Privy identity verification did not return a valid user object.");
@@ -123,31 +109,21 @@ export function readHostedPrivyIdentityTokenFromCookieHeader(cookieHeader: strin
   return null;
 }
 
-export function getHostedPrivyClient(): PrivyClient {
-  if (globalForHostedPrivy.__healthybobHostedPrivyClient) {
-    return globalForHostedPrivy.__healthybobHostedPrivyClient;
-  }
-
+function requireHostedPrivyVerificationConfig(): { appId: string; verificationKey: string } {
   const environment = getHostedOnboardingEnvironment();
 
-  if (!environment.privyAppId || !environment.privyAppSecret) {
+  if (!environment.privyAppId || !environment.privyVerificationKey) {
     throw hostedOnboardingError({
       code: "PRIVY_CONFIG_REQUIRED",
-      message: "NEXT_PUBLIC_PRIVY_APP_ID and PRIVY_APP_SECRET must be configured for hosted phone signup.",
+      message: "NEXT_PUBLIC_PRIVY_APP_ID and PRIVY_VERIFICATION_KEY must be configured for hosted phone signup.",
       httpStatus: 500,
     });
   }
 
-  const client = new PrivyClient({
+  return {
     appId: environment.privyAppId,
-    appSecret: environment.privyAppSecret,
-  });
-
-  if (process.env.NODE_ENV !== "production") {
-    globalForHostedPrivy.__healthybobHostedPrivyClient = client;
-  }
-
-  return client;
+    verificationKey: environment.privyVerificationKey.replace(/\\n/g, "\n").trim(),
+  };
 }
 
 function coerceLinkedAccounts(input: unknown): PrivyLinkedAccountLike[] {

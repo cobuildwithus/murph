@@ -57,7 +57,7 @@ export function extractHostedPrivyPhoneAccount(
 
     const rawNumber = firstString(account, ["phone_number", "number", "phoneNumber", "address"]);
     const normalizedNumber = normalizePhoneNumber(rawNumber);
-    const verifiedAt = firstNumber(account, ["latest_verified_at", "verified_at", "first_verified_at"]);
+    const verifiedAt = firstNumber(account, ["latest_verified_at", "verified_at", "first_verified_at", "lv"]);
 
     if (!normalizedNumber || verifiedAt === null) {
       continue;

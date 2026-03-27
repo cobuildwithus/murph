@@ -19,7 +19,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqApiToken: "linq-token",
     linqWebhookSecret: null,
     privyAppId: "cm_app_123",
-    privyAppSecret: "privy-secret",
+    privyVerificationKey: "privy-verification-key",
     publicBaseUrl: "https://join.example.test",
     sessionCookieName: "hb_hosted_session",
     sessionTtlDays: 30,

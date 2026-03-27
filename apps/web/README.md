@@ -61,8 +61,9 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
-- `PRIVY_APP_SECRET`
+- `PRIVY_VERIFICATION_KEY`
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
+- set a Privy base domain so the hosted app receives the `privy-id-token` HttpOnly cookie
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_SESSION_TTL_DAYS`
 - `HOSTED_ONBOARDING_SESSION_COOKIE_NAME`
@@ -176,7 +177,7 @@ The onboarding lane is intentionally thin:
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the public landing page can start the same flow with Privy SMS verification
 - the invite page binds the verified phone number to a hosted member row in Postgres
-- Privy handles phone OTP, auto-creates the embedded wallet for users who do not already have one, and the backend reads a Privy identity token from the Privy cookie before creating the hosted session cookie
+- Privy handles phone OTP, auto-creates the embedded wallet for users who do not already have one, and the backend locally verifies the Privy identity token from the Privy cookie before creating the hosted session cookie
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
 - optional hosted RevNet issuance can submit an inline onchain payment from `invoice.paid` after Stripe succeeds, using invoice-level Postgres idempotency plus stored tx hashes to prevent duplicate issuance
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step

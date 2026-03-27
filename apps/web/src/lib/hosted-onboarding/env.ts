@@ -10,7 +10,7 @@ export interface HostedOnboardingEnvironment {
   linqApiToken: string | null;
   linqWebhookSecret: string | null;
   privyAppId: string | null;
-  privyAppSecret: string | null;
+  privyVerificationKey: string | null;
   publicBaseUrl: string | null;
   revnetChainId: number | null;
   revnetProjectId: string | null;
@@ -70,7 +70,7 @@ export function readHostedOnboardingEnvironment(
     linqApiToken: readEnv(source, ["LINQ_API_TOKEN"]),
     linqWebhookSecret: readEnv(source, ["LINQ_WEBHOOK_SECRET"]),
     privyAppId: readEnv(source, ["NEXT_PUBLIC_PRIVY_APP_ID"]),
-    privyAppSecret: readEnv(source, ["PRIVY_APP_SECRET"]),
+    privyVerificationKey: readEnv(source, ["PRIVY_VERIFICATION_KEY"]),
     publicBaseUrl,
     revnetChainId: revnet.chainId,
     revnetProjectId: revnet.projectId,

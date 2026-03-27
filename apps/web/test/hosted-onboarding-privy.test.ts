@@ -1,64 +1,41 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  userGet: vi.fn(),
+  runtimeEnv: {
+    privyAppId: "cm_app_123" as string | null,
+    privyVerificationKey: "line-1\\nline-2" as string | null,
+  },
+  verifyIdentityToken: vi.fn(),
 }));
 
 vi.mock("@privy-io/node", () => ({
-  PrivyClient: class PrivyClient {
-    users() {
-      return {
-        get: mocks.userGet,
-      };
-    }
-  },
+  verifyIdentityToken: mocks.verifyIdentityToken,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingEnvironment: () => ({
-    privyAppId: "cm_app_123",
-    privyAppSecret: "privy-secret",
-  }),
+  getHostedOnboardingEnvironment: () => mocks.runtimeEnv,
 }));
 
 import {
   readHostedPrivyIdentityTokenFromCookieHeader,
   requireHostedPrivyIdentity,
+  verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
 
 describe("hosted Privy verification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete (globalThis as typeof globalThis & { __healthybobHostedPrivyClient?: unknown }).__healthybobHostedPrivyClient;
+    mocks.runtimeEnv.privyAppId = "cm_app_123";
+    mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
   });
 
-  afterEach(() => {
-    delete (globalThis as typeof globalThis & { __healthybobHostedPrivyClient?: unknown }).__healthybobHostedPrivyClient;
-  });
-
-  it("verifies the identity token server-side and falls back to the verified user linked accounts", async () => {
-    const token = buildIdentityToken({
-      linked_accounts: JSON.stringify([
-        {
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-        {
-          address: "0x1111111111111111111111111111111111111111",
-          chain_type: "ethereum",
-          connector_type: "injected",
-          type: "wallet",
-          wallet_client: "metamask",
-        },
-      ]),
-      sub: "did:privy:user_123",
-    });
-    mocks.userGet.mockResolvedValue({
+  it("verifies the identity token locally and uses the verified linked accounts", async () => {
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
           latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
+          phoneNumber: "+1 415 555 2671",
           type: "phone",
         },
         {
@@ -76,22 +53,11 @@ describe("hosted Privy verification", () => {
       ],
     });
 
-    await expect(requireHostedPrivyIdentity(`  ${token}  `)).resolves.toEqual({
+    await expect(requireHostedPrivyIdentity("  signed-identity-token  ")).resolves.toEqual({
       linkedAccounts: [
         {
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-        {
-          address: "0x1111111111111111111111111111111111111111",
-          chain_type: "ethereum",
-          connector_type: "injected",
-          type: "wallet",
-          wallet_client: "metamask",
-        },
-        {
           latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
+          phoneNumber: "+1 415 555 2671",
           type: "phone",
         },
         {
@@ -120,124 +86,101 @@ describe("hosted Privy verification", () => {
       },
     });
 
-    expect(mocks.userGet).toHaveBeenCalledWith({
-      id_token: token,
+    expect(mocks.verifyIdentityToken).toHaveBeenCalledWith({
+      app_id: "cm_app_123",
+      identity_token: "signed-identity-token",
+      verification_key: "line-1\nline-2",
     });
   });
 
-  it("rejects verified sessions whose linked phone account is not actually verified", async () => {
-    mocks.userGet.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-        {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          id: "wallet_123",
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ],
-    });
+  it("requires the Privy verification key config for hosted verification", async () => {
+    mocks.runtimeEnv.privyVerificationKey = null;
 
-    await expect(
-      requireHostedPrivyIdentity(
-        buildIdentityToken({
-          linked_accounts: [],
-          sub: "did:privy:user_123",
-        }),
-      ),
-    ).rejects.toMatchObject({
-      code: "PRIVY_PHONE_REQUIRED",
-      httpStatus: 400,
+    await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).rejects.toMatchObject({
+      code: "PRIVY_CONFIG_REQUIRED",
+      httpStatus: 500,
     });
+    expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
   });
 
-  it("rejects identity tokens whose subject does not match the verified Privy user", async () => {
-    mocks.userGet.mockResolvedValue({
-      id: "did:privy:user_456",
-      linked_accounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
-          type: "phone",
-        },
-        {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          id: "wallet_123",
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ],
-    });
+  it("maps local token-verifier failures to hosted auth errors", async () => {
+    mocks.verifyIdentityToken.mockRejectedValue(new Error("bad token"));
 
-    await expect(
-      requireHostedPrivyIdentity(
-        buildIdentityToken({
-          linked_accounts: [],
-          sub: "did:privy:user_123",
-        }),
-      ),
-    ).rejects.toMatchObject({
+    await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_AUTH_FAILED",
       httpStatus: 401,
     });
   });
 
+  it("rejects malformed verifier results", async () => {
+    mocks.verifyIdentityToken.mockResolvedValue({});
+
+    await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).rejects.toMatchObject({
+      code: "PRIVY_AUTH_FAILED",
+      httpStatus: 401,
+    });
+  });
+
+  it("rejects verified sessions whose linked phone account is not actually verified", async () => {
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          phoneNumber: "+1 415 555 2671",
+          type: "phone",
+        },
+        {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
+      code: "PRIVY_PHONE_REQUIRED",
+      httpStatus: 400,
+    });
+  });
+
   it("rejects verified sessions that do not include an embedded wallet account", async () => {
-    mocks.userGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
           latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
+          phoneNumber: "+1 415 555 2671",
           type: "phone",
         },
         {
           address: "0x1111111111111111111111111111111111111111",
           chain_type: "ethereum",
-          connector_type: "injected",
-          id: "wallet_external",
           type: "wallet",
           wallet_client: "metamask",
         },
       ],
     });
 
-    await expect(
-      requireHostedPrivyIdentity(
-        buildIdentityToken({
-          linked_accounts: [],
-          sub: "did:privy:user_123",
-        }),
-      ),
-    ).rejects.toMatchObject({
+    await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_WALLET_REQUIRED",
       httpStatus: 400,
     });
   });
 
   it("rejects verified sessions that only include a non-ethereum embedded wallet", async () => {
-    mocks.userGet.mockResolvedValue({
+    mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
         {
           latest_verified_at: 1741194420,
-          phone_number: "+1 415 555 2671",
+          phoneNumber: "+1 415 555 2671",
           type: "phone",
         },
         {
@@ -255,14 +198,7 @@ describe("hosted Privy verification", () => {
       ],
     });
 
-    await expect(
-      requireHostedPrivyIdentity(
-        buildIdentityToken({
-          linked_accounts: [],
-          sub: "did:privy:user_123",
-        }),
-      ),
-    ).rejects.toMatchObject({
+    await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_WALLET_REQUIRED",
       httpStatus: 400,
     });
@@ -277,11 +213,3 @@ describe("hosted Privy verification", () => {
     expect(readHostedPrivyIdentityTokenFromCookieHeader("other-cookie=abc")).toBeNull();
   });
 });
-
-function buildIdentityToken(payload: Record<string, unknown>): string {
-  return `${encodeJwtSegment({ alg: "none", typ: "JWT" })}.${encodeJwtSegment(payload)}.`;
-}
-
-function encodeJwtSegment(value: Record<string, unknown>): string {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-}

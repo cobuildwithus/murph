@@ -26,13 +26,13 @@ describe("hosted onboarding landing helpers", () => {
     expect(parseHostedSignupPhoneNumber("1234")).toBeNull();
   });
 
-  it("derives phone-auth readiness from the public app id plus the server secret", () => {
+  it("derives phone-auth readiness from the public app id plus the verification key", () => {
     expect(resolveHostedPrivyClientAppId({} as NodeJS.ProcessEnv)).toBeNull();
     expect(hasHostedPrivyPhoneAuthConfig(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" }))).toBe(false);
     expect(
       hasHostedPrivyPhoneAuthConfig(createProcessEnv({
         NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
-        PRIVY_APP_SECRET: "privy-secret",
+        PRIVY_VERIFICATION_KEY: "privy-verification-key",
       })),
     ).toBe(true);
   });

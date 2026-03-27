@@ -39,7 +39,7 @@ export function hasHostedPrivyClientConfig(source: NodeJS.ProcessEnv = process.e
 }
 
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(resolveHostedPrivyClientAppId(source) && normalizeEnvValue(source.PRIVY_APP_SECRET));
+  return Boolean(resolveHostedPrivyClientAppId(source) && normalizeEnvValue(source.PRIVY_VERIFICATION_KEY));
 }
 
 function normalizeEnvValue(value: string | null | undefined): string | null {

@@ -70,6 +70,21 @@ describe("hosted Privy identity helpers", () => {
     ).toBeNull();
   });
 
+  it("accepts the compact Privy identity-token verification timestamp field", () => {
+    expect(
+      extractHostedPrivyPhoneAccount([
+        {
+          lv: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ]),
+    ).toEqual({
+      number: "+14155552671",
+      verifiedAt: 1741194420,
+    });
+  });
+
   it("only accepts embedded Privy wallets when selecting a hosted wallet", () => {
     expect(
       extractHostedPrivyWalletAccount([

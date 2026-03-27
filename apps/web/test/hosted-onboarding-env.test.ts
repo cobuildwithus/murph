@@ -13,13 +13,13 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID: "price_123",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
-      PRIVY_APP_SECRET: "privy-secret",
+      PRIVY_VERIFICATION_KEY: "privy-verification-key",
       STRIPE_SECRET_KEY: "sk_test_123",
     }));
 
     expect(environment.publicBaseUrl).toBe("https://join.example.test");
     expect(environment.privyAppId).toBe("cm_app_123");
-    expect(environment.privyAppSecret).toBe("privy-secret");
+    expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.revnetChainId).toBeNull();
     expect(environment.revnetStripeCurrency).toBeNull();
     expect(environment.sessionCookieName).toBe("hb_hosted_session");
