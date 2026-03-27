@@ -9,6 +9,8 @@ import {
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
+import { asListEnvelope } from './shared.js'
+import { applyRecordPatch } from './record-mutations.js'
 import {
   compactObject,
   inferVaultLinkKind,
@@ -52,6 +54,15 @@ interface ProviderEventCoreRuntime {
     relativePath: string
     created: boolean
   }>
+  deleteProvider(input: {
+    vaultRoot: string
+    providerId?: string
+    slug?: string
+  }): Promise<{
+    providerId: string
+    relativePath: string
+    deleted: true
+  }>
   upsertEvent(input: {
     vaultRoot: string
     payload: JsonObject
@@ -84,6 +95,7 @@ interface ProviderEventCoreRuntime {
   }): Promise<ProviderReadModel>
 }
 
+const PROVIDER_ID_PATTERN = /^prov_[0-9A-Za-z]+$/u
 const providerStatusSchema = z.string().min(1)
 const slugSchema = z
   .string()
@@ -301,24 +313,17 @@ export function scaffoldEventPayload(
 export async function upsertProviderRecord(input: {
   vault: string
   payload: ProviderPayload
+  clearedFields?: ReadonlySet<string>
 }) {
   const core = await loadProviderEventCoreRuntime()
   try {
-    const result = await core.upsertProvider({
-      vaultRoot: input.vault,
-      providerId: input.payload.providerId,
-      slug: input.payload.slug,
-      title: input.payload.title,
-      status: input.payload.status,
-      specialty: input.payload.specialty,
-      organization: input.payload.organization,
-      location: input.payload.location,
-      website: input.payload.website,
-      phone: input.payload.phone,
-      note: input.payload.note,
-      aliases: input.payload.aliases,
-      body: input.payload.body,
-    })
+    const result = await core.upsertProvider(
+      buildProviderCoreInput({
+        vault: input.vault,
+        payload: input.payload,
+        clearedFields: input.clearedFields,
+      }),
+    )
 
     return {
       vault: input.vault,
@@ -329,13 +334,13 @@ export async function upsertProviderRecord(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
-      HB_PROVIDER_CONFLICT: {
+      PROVIDER_CONFLICT: {
         code: 'conflict',
       },
-      HB_PROVIDER_SLUG_INVALID: {
+      PROVIDER_SLUG_INVALID: {
         code: 'contract_invalid',
       },
-      HB_PROVIDER_FRONTMATTER_INVALID: {
+      PROVIDER_FRONTMATTER_INVALID: {
         code: 'contract_invalid',
       },
     })
@@ -354,6 +359,74 @@ export async function upsertProviderRecordFromInput(input: {
     vault: input.vault,
     payload,
   })
+}
+
+export async function editProviderRecord(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+}) {
+  const provider = await requireProviderRecord(input.vault, input.lookup)
+  const payload = buildProviderPayload(provider)
+  const patched = await applyRecordPatch({
+    record: payload,
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    patchLabel: 'provider payload',
+  })
+  const patchedPayload = parseProviderPayload({
+    ...patched.record,
+    providerId: provider.providerId,
+  })
+
+  await upsertProviderRecord({
+    vault: input.vault,
+    payload: patchedPayload,
+    clearedFields: patched.clearedFields,
+  })
+
+  return showProviderRecord(input.vault, provider.providerId)
+}
+
+export async function deleteProviderRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  const provider = await requireProviderRecord(input.vault, input.lookup)
+  const normalizedLookup = input.lookup.trim()
+  const core = await loadProviderEventCoreRuntime()
+
+  try {
+    await core.deleteProvider({
+      vaultRoot: input.vault,
+      providerId: PROVIDER_ID_PATTERN.test(normalizedLookup)
+        ? normalizedLookup
+        : provider.providerId,
+      slug: normalizedLookup,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      PROVIDER_MISSING: {
+        code: 'not_found',
+        message: `No provider found for "${input.lookup}".`,
+      },
+      PROVIDER_FRONTMATTER_INVALID: {
+        code: 'contract_invalid',
+      },
+    })
+  }
+
+  return {
+    vault: input.vault,
+    entityId: provider.providerId,
+    lookupId: provider.providerId,
+    kind: 'provider',
+    deleted: true as const,
+    retainedPaths: [],
+  }
 }
 
 export async function showProviderRecord(vault: string, lookup: string) {
@@ -403,16 +476,10 @@ export async function listProviderRecords(input: {
       }
     })
 
-  return {
-    vault: input.vault,
-    filters: {
-      status: input.status ?? null,
-      limit: input.limit,
-    },
-    items,
-    count: items.length,
-    nextCursor: null,
-  }
+  return asListEnvelope(input.vault, {
+    status: input.status ?? null,
+    limit: input.limit,
+  }, items)
 }
 
 export async function upsertEventRecord(input: {
@@ -435,19 +502,19 @@ export async function upsertEventRecord(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
-      HB_EVENT_KIND_INVALID: {
+      EVENT_KIND_INVALID: {
         code: 'contract_invalid',
       },
-      HB_EVENT_OCCURRED_AT_MISSING: {
+      EVENT_OCCURRED_AT_MISSING: {
         code: 'invalid_timestamp',
       },
-      HB_EVENT_CONTRACT_INVALID: {
+      EVENT_CONTRACT_INVALID: {
         code: 'contract_invalid',
       },
-      HB_INVALID_TIMESTAMP: {
+      INVALID_TIMESTAMP: {
         code: 'invalid_timestamp',
       },
-      HB_INVALID_INPUT: {
+      INVALID_INPUT: {
         code: 'contract_invalid',
       },
     })
@@ -504,20 +571,14 @@ export async function listEventRecords(input: {
     .slice(0, input.limit)
     .map(toCommandListItem)
 
-  return {
-    vault: input.vault,
-    filters: {
-      kind: input.kind ?? null,
-      from: input.from ?? null,
-      to: input.to ?? null,
-      tag: tags ?? [],
-      experiment: input.experiment ?? null,
-      limit: input.limit,
-    },
-    items,
-    count: items.length,
-    nextCursor: null,
-  }
+  return asListEnvelope(input.vault, {
+    kind: input.kind ?? null,
+    from: input.from ?? null,
+    to: input.to ?? null,
+    tag: tags ?? [],
+    experiment: input.experiment ?? null,
+    limit: input.limit,
+  }, items)
 }
 
 export async function addSampleRecords(input: {
@@ -601,15 +662,80 @@ async function requireProviderRecord(vault: string, lookup: string) {
     })
   } catch (error) {
     throw toVaultCliError(error, {
-      HB_PROVIDER_MISSING: {
+      PROVIDER_MISSING: {
         code: 'not_found',
         message: `No provider found for "${lookup}".`,
       },
-      HB_PROVIDER_FRONTMATTER_INVALID: {
+      PROVIDER_FRONTMATTER_INVALID: {
         code: 'contract_invalid',
       },
     })
   }
+}
+
+interface ProviderCoreUpsertInput {
+  vaultRoot: string
+  providerId?: string
+  slug?: string
+  title: string
+  status?: string
+  specialty?: string
+  organization?: string
+  location?: string
+  website?: string
+  phone?: string
+  note?: string
+  aliases?: string[]
+  body?: string
+}
+
+function buildProviderBodyTemplate(title: string, note?: string) {
+  const noteBlock = note ? `${note}\n` : ''
+
+  return `# ${title}
+
+## Notes
+
+${noteBlock}`
+}
+
+function buildProviderCoreInput(input: {
+  vault: string
+  payload: ProviderPayload
+  clearedFields?: ReadonlySet<string>
+}): ProviderCoreUpsertInput {
+  const clearedFields = input.clearedFields ?? new Set<string>()
+  const note = clearedFields.has('note') ? '' : input.payload.note
+
+  return compactObject({
+    vaultRoot: input.vault,
+    providerId: input.payload.providerId,
+    slug: clearedFields.has('slug') ? undefined : input.payload.slug,
+    title: input.payload.title,
+    status: clearedFields.has('status') ? '' : input.payload.status,
+    specialty: clearedFields.has('specialty') ? '' : input.payload.specialty,
+    organization: clearedFields.has('organization') ? '' : input.payload.organization,
+    location: clearedFields.has('location') ? '' : input.payload.location,
+    website: clearedFields.has('website') ? '' : input.payload.website,
+    phone: clearedFields.has('phone') ? '' : input.payload.phone,
+    note,
+    aliases: clearedFields.has('aliases') ? [] : input.payload.aliases,
+    body: clearedFields.has('body')
+      ? buildProviderBodyTemplate(input.payload.title, undefined)
+      : input.payload.body,
+  }) as ProviderCoreUpsertInput
+}
+
+function buildProviderPayload(provider: ProviderReadModel): ProviderPayload {
+  const {
+    schemaVersion: _schemaVersion,
+    docType: _docType,
+    relativePath: _relativePath,
+    markdown: _markdown,
+    ...payload
+  } = provider
+
+  return structuredClone(payload) as ProviderPayload
 }
 
 async function readProviderEntries(vaultRoot: string) {
@@ -618,7 +744,7 @@ async function readProviderEntries(vaultRoot: string) {
     return await core.listProviders(vaultRoot)
   } catch (error) {
     throw toVaultCliError(error, {
-      HB_PROVIDER_FRONTMATTER_INVALID: {
+      PROVIDER_FRONTMATTER_INVALID: {
         code: 'contract_invalid',
       },
     })

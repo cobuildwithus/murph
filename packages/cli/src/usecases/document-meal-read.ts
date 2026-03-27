@@ -11,6 +11,11 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { pathSchema } from '../vault-cli-contracts.js'
+import {
+  deleteEventRecord,
+  editEventRecord,
+} from './event-record-mutations.js'
+import { asListEnvelope } from './shared.js'
 
 type DocumentMealKind = 'document' | 'meal'
 
@@ -198,19 +203,12 @@ async function listOwnedRecords(input: {
     .slice(0, DEFAULT_LIST_LIMIT)
     .map((record: QueryRecord) => toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS))
 
-  return {
-    vault: input.vault,
-    filters: {
-      kind: input.expectedKind,
-      experiment: undefined,
-      from: input.from,
-      to: input.to,
-      limit: DEFAULT_LIST_LIMIT,
-    },
-    items,
-    count: items.length,
-    nextCursor: null,
-  }
+  return asListEnvelope(input.vault, {
+    kind: input.expectedKind,
+    from: input.from,
+    to: input.to,
+    limit: DEFAULT_LIST_LIMIT,
+  }, items)
 }
 
 async function showOwnedManifest(
@@ -272,4 +270,72 @@ export async function listMealRecords(input: {
 
 export async function showMealManifest(vault: string, lookup: string) {
   return showOwnedManifest(vault, lookup, 'meal')
+}
+
+export async function editDocumentRecord(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+  dayKeyPolicy?: 'keep' | 'recompute'
+}) {
+  const result = await editEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'document',
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    dayKeyPolicy: input.dayKeyPolicy,
+    expectedKinds: ['document'],
+  })
+
+  return showDocumentRecord(input.vault, result.lookupId)
+}
+
+export async function deleteDocumentRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  return deleteEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'document',
+    expectedKinds: ['document'],
+  })
+}
+
+export async function editMealRecord(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+  dayKeyPolicy?: 'keep' | 'recompute'
+}) {
+  const result = await editEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'meal',
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    dayKeyPolicy: input.dayKeyPolicy,
+    expectedKinds: ['meal'],
+  })
+
+  return showMealRecord(input.vault, result.lookupId)
+}
+
+export async function deleteMealRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  return deleteEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'meal',
+    expectedKinds: ['meal'],
+  })
 }

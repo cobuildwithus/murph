@@ -18,10 +18,10 @@ import { copyRawArtifact as copyRawArtifactInternal } from "./raw.js";
 import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.js";
 import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.js";
 import { upsertCondition as upsertConditionInternal } from "./bank/conditions.js";
-import { upsertFood as upsertFoodInternal } from "./bank/foods.js";
+import { deleteFood as deleteFoodInternal, upsertFood as upsertFoodInternal } from "./bank/foods.js";
 import { upsertGoal as upsertGoalInternal } from "./bank/goals.js";
-import { upsertProvider as upsertProviderInternal } from "./bank/providers.js";
-import { upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
+import { deleteProvider as deleteProviderInternal, upsertProvider as upsertProviderInternal } from "./bank/providers.js";
+import { deleteRecipe as deleteRecipeInternal, upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
 import { upsertWorkoutFormat as upsertWorkoutFormatInternal } from "./bank/workout-formats.js";
 import {
   stopProtocolItem as stopProtocolItemInternal,
@@ -47,7 +47,7 @@ import {
   unlinkJournalEventIds as unlinkJournalEventIdsInternal,
   unlinkJournalStreams as unlinkJournalStreamsInternal,
 } from "./domains/journal.js";
-import { upsertEvent as upsertEventInternal } from "./domains/events.js";
+import { deleteEvent as deleteEventInternal, upsertEvent as upsertEventInternal } from "./domains/events.js";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.js";
 import {
   appendProfileSnapshot as appendProfileSnapshotInternal,
@@ -147,7 +147,7 @@ function buildStaleCanonicalWriteLockIssue(
     : "";
 
   return {
-    code: "HB_CANONICAL_WRITE_LOCK_STALE",
+    code: "CANONICAL_WRITE_LOCK_STALE",
     message: `Canonical write lock is stale: ${issue.reason}.${detail}`,
     path: issue.relativePath,
     severity: "error",
@@ -205,7 +205,7 @@ export async function applyCanonicalWriteBatch(
     deletes.length === 0
   ) {
     throw new VaultError(
-      "HB_CANONICAL_WRITE_EMPTY",
+      "CANONICAL_WRITE_EMPTY",
       "Canonical write batch requires at least one staged action.",
     );
   }
@@ -372,10 +372,22 @@ export async function upsertProvider(
   return withCanonicalInputWriteLock(input, upsertProviderInternal);
 }
 
+export async function deleteProvider(
+  input: Parameters<typeof deleteProviderInternal>[0],
+): ReturnType<typeof deleteProviderInternal> {
+  return withCanonicalInputWriteLock(input, deleteProviderInternal);
+}
+
 export async function upsertEvent(
   input: Parameters<typeof upsertEventInternal>[0],
 ): ReturnType<typeof upsertEventInternal> {
   return withCanonicalInputWriteLock(input, upsertEventInternal);
+}
+
+export async function deleteEvent(
+  input: Parameters<typeof deleteEventInternal>[0],
+): ReturnType<typeof deleteEventInternal> {
+  return withCanonicalInputWriteLock(input, deleteEventInternal);
 }
 
 export async function updateVaultSummary(
@@ -474,10 +486,22 @@ export async function upsertRecipe(
   return withCanonicalInputWriteLock(input, upsertRecipeInternal);
 }
 
+export async function deleteRecipe(
+  input: Parameters<typeof deleteRecipeInternal>[0],
+): ReturnType<typeof deleteRecipeInternal> {
+  return withCanonicalInputWriteLock(input, deleteRecipeInternal);
+}
+
 export async function upsertFood(
   input: Parameters<typeof upsertFoodInternal>[0],
 ): ReturnType<typeof upsertFoodInternal> {
   return withCanonicalInputWriteLock(input, upsertFoodInternal);
+}
+
+export async function deleteFood(
+  input: Parameters<typeof deleteFoodInternal>[0],
+): ReturnType<typeof deleteFoodInternal> {
+  return withCanonicalInputWriteLock(input, deleteFoodInternal);
 }
 
 export async function upsertWorkoutFormat(

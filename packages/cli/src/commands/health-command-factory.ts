@@ -443,6 +443,7 @@ interface RegistryDocEntityGroupConfig<
     statusOption?: z.ZodType<string | undefined>
     run(input: ListCommandContext): Promise<TList>
   }
+  additionalCommands?: readonly AnyFactoryCommandConfig[]
 }
 
 interface LedgerEventListCommandContext extends ListCommandContext {
@@ -478,6 +479,7 @@ interface LedgerEventEntityGroupConfig<
     tagOption?: z.ZodType<unknown>
     run(input: LedgerEventListCommandContext): Promise<TList>
   }
+  additionalCommands?: readonly AnyFactoryCommandConfig[]
 }
 
 interface ArtifactListOptionNames {
@@ -943,6 +945,7 @@ export function createRegistryDocEntityGroup<
           return config.list.run(input)
         },
       }),
+      ...(config.additionalCommands ?? []),
     ],
   })
 }
@@ -1016,6 +1019,7 @@ export function createLedgerEventEntityGroup<
           return config.list.run(input)
         },
       }),
+      ...(config.additionalCommands ?? []),
     ],
   })
 }

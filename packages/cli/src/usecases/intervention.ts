@@ -3,7 +3,14 @@ import {
   inferDurationMinutes,
   validateDurationMinutes,
 } from './text-duration.js'
-import { upsertEventRecord } from './provider-event.js'
+import {
+  deleteEventRecord,
+  editEventRecord,
+} from './event-record-mutations.js'
+import {
+  showEventRecord,
+  upsertEventRecord,
+} from './provider-event.js'
 import {
   compactObject,
   normalizeOptionalText,
@@ -133,6 +140,40 @@ export async function addInterventionRecord(
     protocolId: protocolId ?? null,
     note,
   }
+}
+
+export async function editInterventionRecord(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+  dayKeyPolicy?: 'keep' | 'recompute'
+}) {
+  const result = await editEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'intervention',
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    dayKeyPolicy: input.dayKeyPolicy,
+    expectedKinds: ['intervention_session'],
+  })
+
+  return showEventRecord(input.vault, result.lookupId)
+}
+
+export async function deleteInterventionRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  return deleteEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'intervention',
+    expectedKinds: ['intervention_session'],
+  })
 }
 
 function resolveInterventionDescriptor(

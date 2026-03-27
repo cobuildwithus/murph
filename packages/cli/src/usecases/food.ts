@@ -20,7 +20,11 @@ import {
   asListEnvelope,
   buildEntityLinks,
 } from './shared.js'
-import { toVaultCliError } from './vault-usecase-helpers.js'
+import { applyRecordPatch } from './record-mutations.js'
+import {
+  compactObject,
+  toVaultCliError,
+} from './vault-usecase-helpers.js'
 
 interface FoodAutoLogDailyReadModel {
   time: string
@@ -85,6 +89,15 @@ interface FoodCoreRuntime {
     }
   }>
   listFoods(vaultRoot: string): Promise<FoodReadModel[]>
+  deleteFood(input: {
+    vaultRoot: string
+    foodId?: string
+    slug?: string
+  }): Promise<{
+    foodId: string
+    relativePath: string
+    deleted: true
+  }>
   readFood(input: {
     vaultRoot: string
     foodId?: string
@@ -131,29 +144,18 @@ async function loadJsonInputFile(input: string, label: string) {
 export async function upsertFoodRecord(input: {
   vault: string
   payload: FoodPayload
+  clearedFields?: ReadonlySet<string>
 }) {
   const core = await loadFoodCoreRuntime()
 
   try {
-    const result = await core.upsertFood({
-      vaultRoot: input.vault,
-      foodId: input.payload.foodId,
-      slug: input.payload.slug,
-      title: input.payload.title,
-      status: input.payload.status,
-      summary: input.payload.summary,
-      kind: input.payload.kind,
-      brand: input.payload.brand,
-      vendor: input.payload.vendor,
-      location: input.payload.location,
-      serving: input.payload.serving,
-      aliases: input.payload.aliases,
-      ingredients: input.payload.ingredients,
-      tags: input.payload.tags,
-      note: input.payload.note,
-      attachedProtocolIds: input.payload.attachedProtocolIds,
-      autoLogDaily: input.payload.autoLogDaily,
-    })
+    const result = await core.upsertFood(
+      buildFoodCoreInput({
+        vault: input.vault,
+        payload: input.payload,
+        clearedFields: input.clearedFields,
+      }),
+    )
 
     return {
       vault: input.vault,
@@ -189,6 +191,74 @@ export async function upsertFoodRecordFromInput(input: {
     vault: input.vault,
     payload,
   })
+}
+
+export async function editFoodRecord(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+}) {
+  const food = await requireFoodRecord(input.vault, input.lookup)
+  const payload = buildFoodPayload(food)
+  const patched = await applyRecordPatch({
+    record: payload,
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    patchLabel: 'food payload',
+  })
+  const patchedPayload = parseFoodPayload({
+    ...patched.record,
+    foodId: food.foodId,
+  })
+
+  await upsertFoodRecord({
+    vault: input.vault,
+    payload: patchedPayload,
+    clearedFields: patched.clearedFields,
+  })
+
+  return showFoodRecord(input.vault, food.foodId)
+}
+
+export async function deleteFoodRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  const food = await requireFoodRecord(input.vault, input.lookup)
+  const normalizedLookup = input.lookup.trim()
+  const core = await loadFoodCoreRuntime()
+
+  try {
+    await core.deleteFood({
+      vaultRoot: input.vault,
+      foodId: FOOD_ID_PATTERN.test(normalizedLookup)
+        ? normalizedLookup
+        : food.foodId,
+      slug: normalizedLookup,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      VAULT_FOOD_MISSING: {
+        code: 'not_found',
+        message: `No food found for "${input.lookup}".`,
+      },
+      VAULT_INVALID_FOOD: {
+        code: 'contract_invalid',
+      },
+    })
+  }
+
+  return {
+    vault: input.vault,
+    entityId: food.foodId,
+    lookupId: food.foodId,
+    kind: 'food',
+    deleted: true as const,
+    retainedPaths: [],
+  }
 }
 
 export async function renameFoodRecord(input: {
@@ -475,6 +545,69 @@ async function requireFoodRecord(vault: string, lookup: string) {
       },
     })
   }
+}
+
+interface FoodCoreUpsertInput {
+  vaultRoot: string
+  foodId?: string
+  slug?: string
+  allowSlugRename?: boolean
+  title?: string
+  status?: string
+  summary?: string
+  kind?: string
+  brand?: string
+  vendor?: string
+  location?: string
+  serving?: string
+  aliases?: string[]
+  ingredients?: string[]
+  tags?: string[]
+  note?: string
+  attachedProtocolIds?: string[]
+  autoLogDaily?: FoodAutoLogDailyReadModel | null
+}
+
+function buildFoodCoreInput(input: {
+  vault: string
+  payload: FoodPayload
+  clearedFields?: ReadonlySet<string>
+}): FoodCoreUpsertInput {
+  const clearedFields = input.clearedFields ?? new Set<string>()
+
+  return compactObject({
+    vaultRoot: input.vault,
+    foodId: input.payload.foodId,
+    slug: clearedFields.has('slug') ? undefined : input.payload.slug,
+    title: input.payload.title,
+    status: clearedFields.has('status') ? 'active' : input.payload.status,
+    summary: clearedFields.has('summary') ? '' : input.payload.summary,
+    kind: clearedFields.has('kind') ? '' : input.payload.kind,
+    brand: clearedFields.has('brand') ? '' : input.payload.brand,
+    vendor: clearedFields.has('vendor') ? '' : input.payload.vendor,
+    location: clearedFields.has('location') ? '' : input.payload.location,
+    serving: clearedFields.has('serving') ? '' : input.payload.serving,
+    aliases: clearedFields.has('aliases') ? [] : input.payload.aliases,
+    ingredients: clearedFields.has('ingredients') ? [] : input.payload.ingredients,
+    tags: clearedFields.has('tags') ? [] : input.payload.tags,
+    note: clearedFields.has('note') ? '' : input.payload.note,
+    attachedProtocolIds: clearedFields.has('attachedProtocolIds')
+      ? []
+      : input.payload.attachedProtocolIds,
+    autoLogDaily: clearedFields.has('autoLogDaily') ? null : input.payload.autoLogDaily,
+  }) as FoodCoreUpsertInput
+}
+
+function buildFoodPayload(food: FoodReadModel): FoodPayload {
+  const {
+    schemaVersion: _schemaVersion,
+    docType: _docType,
+    relativePath: _relativePath,
+    markdown: _markdown,
+    ...payload
+  } = food
+
+  return structuredClone(payload) as FoodPayload
 }
 
 async function readFoodEntries(vaultRoot: string) {

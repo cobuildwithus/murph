@@ -1,14 +1,17 @@
 import type { ProviderFrontmatter } from "@healthybob/contracts";
-import {
-  CONTRACT_SCHEMA_VERSION,
-  providerFrontmatterSchema,
-  safeParseContract,
-} from "@healthybob/contracts";
+import { CONTRACT_SCHEMA_VERSION, providerFrontmatterSchema } from "@healthybob/contracts";
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.js";
 import { VaultError } from "../errors.js";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.js";
 import { generateRecordId } from "../ids.js";
+import {
+  compactObject,
+  ensureMarkdownHeading,
+  normalizeOptionalText,
+  uniqueTrimmedStringList,
+  validateContract,
+} from "../domains/shared.js";
 import { runCanonicalWrite } from "../operations/write-batch.js";
 import {
   loadMarkdownRegistryDocuments,
@@ -52,48 +55,19 @@ export interface UpsertProviderResult {
   created: boolean;
 }
 
+export interface DeleteProviderInput {
+  vaultRoot: string;
+  providerId?: string;
+  slug?: string;
+}
+
+export interface DeleteProviderResult {
+  providerId: string;
+  relativePath: string;
+  deleted: true;
+}
+
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
-
-function compactObject<TRecord extends Record<string, unknown>>(record: TRecord): TRecord {
-  return Object.fromEntries(
-    Object.entries(record).filter(([, value]) => value !== undefined),
-  ) as TRecord;
-}
-
-function normalizeOptionalText(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values)];
-}
-
-function uniqueTrimmedStringList(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const normalized = value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-
-  return normalized.length > 0 ? uniqueStrings(normalized) : undefined;
-}
-
-function ensureMarkdownHeading(body: string, title: string): string {
-  const trimmed = body.trimStart();
-  if (trimmed.startsWith("# ")) {
-    return body.replace(/^# .*(?:\r?\n)?/u, `# ${title}\n`);
-  }
-
-  return `# ${title}\n\n${body.trimStart()}`;
-}
 
 function normalizeProviderSlug(value: string): string {
   const normalized = value
@@ -104,7 +78,7 @@ function normalizeProviderSlug(value: string): string {
 
   if (!SLUG_PATTERN.test(normalized)) {
     throw new VaultError(
-      "HB_PROVIDER_SLUG_INVALID",
+      "PROVIDER_SLUG_INVALID",
       "Provider payload requires a valid slug or title-derived slug.",
     );
   }
@@ -138,15 +112,13 @@ function validateProviderFrontmatter(
   value: unknown,
   relativePath: string,
 ): ProviderFrontmatter {
-  const result = safeParseContract(providerFrontmatterSchema, value);
-  if (!result.success) {
-    throw new VaultError("HB_PROVIDER_FRONTMATTER_INVALID", "Provider frontmatter is invalid.", {
-      relativePath,
-      errors: result.errors,
-    });
-  }
-
-  return result.data;
+  return validateContract(
+    providerFrontmatterSchema,
+    value,
+    "PROVIDER_FRONTMATTER_INVALID",
+    "Provider frontmatter is invalid.",
+    { relativePath },
+  );
 }
 
 function parseProviderRecord(
@@ -172,7 +144,7 @@ async function loadProviderRecords(vaultRoot: string): Promise<ProviderRecord[]>
     isExpectedRecord: (record) =>
       record.docType === "provider" &&
       record.schemaVersion === CONTRACT_SCHEMA_VERSION.providerFrontmatter,
-    invalidCode: "HB_PROVIDER_FRONTMATTER_INVALID",
+    invalidCode: "PROVIDER_FRONTMATTER_INVALID",
     invalidMessage: "Provider frontmatter is invalid.",
   });
 
@@ -196,7 +168,7 @@ function selectExistingProviderRecord(
 
   if (slugOwner && providerId && slugOwner.providerId !== providerId) {
     throw new VaultError(
-      "HB_PROVIDER_CONFLICT",
+      "PROVIDER_CONFLICT",
       `Provider slug "${slug}" is already owned by "${slugOwner.providerId}".`,
       {
         conflictingProviderId: slugOwner.providerId,
@@ -286,7 +258,33 @@ export async function readProvider({
     recordId: providerId,
     slug,
     getRecordId: (record) => record.providerId,
-    readMissingCode: "HB_PROVIDER_MISSING",
+    readMissingCode: "PROVIDER_MISSING",
     readMissingMessage: "Provider was not found.",
+  });
+}
+
+export async function deleteProvider({
+  vaultRoot,
+  providerId,
+  slug,
+}: DeleteProviderInput): Promise<DeleteProviderResult> {
+  const provider = await readProvider({
+    vaultRoot,
+    providerId,
+    slug,
+  });
+
+  return runCanonicalWrite({
+    vaultRoot,
+    operationType: "provider_delete",
+    summary: `Delete provider ${provider.providerId}`,
+    mutate: async ({ batch }) => {
+      await batch.stageDelete(provider.relativePath);
+      return {
+        providerId: provider.providerId,
+        relativePath: provider.relativePath,
+        deleted: true as const,
+      };
+    },
   });
 }

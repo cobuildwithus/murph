@@ -8,10 +8,17 @@ import {
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
+  deleteDocumentRecord,
   documentLookupSchema,
+  editDocumentRecord,
   rawImportManifestResultSchema,
 } from '../usecases/document-meal-read.js'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
+import {
+  createEntityDeleteCommandConfig,
+  createEntityEditCommandConfig,
+  dayKeyPolicySchema,
+} from './record-mutation-command-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
@@ -94,5 +101,44 @@ export function registerDocumentCommands(
         })
       },
     },
+    additionalCommands: [
+      createEntityEditCommandConfig({
+        arg: {
+          name: 'id',
+          schema: documentLookupSchema,
+        },
+        description:
+          'Edit one imported document event by merging a partial JSON patch or one or more path assignments into the saved event.',
+        hint:
+          'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved document day stays explicit.',
+        options: {
+          dayKeyPolicy: dayKeyPolicySchema.optional(),
+        },
+        run(input) {
+          return editDocumentRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+            inputFile: input.inputFile,
+            set: input.set,
+            clear: input.clear,
+            dayKeyPolicy: input.dayKeyPolicy,
+          })
+        },
+      }),
+      createEntityDeleteCommandConfig({
+        arg: {
+          name: 'id',
+          schema: documentLookupSchema,
+        },
+        description:
+          'Delete one imported document event while retaining any immutable raw artifacts and manifest files.',
+        run(input) {
+          return deleteDocumentRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+          })
+        },
+      }),
+    ],
   })
 }

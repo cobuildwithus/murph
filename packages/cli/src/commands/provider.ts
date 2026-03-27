@@ -5,7 +5,15 @@ import {
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
+import {
+  deleteProviderRecord,
+  editProviderRecord,
+} from '../usecases/provider-event.js'
 import { registerRegistryDocEntityGroup } from './health-command-factory.js'
+import {
+  createEntityDeleteCommandConfig,
+  createEntityEditCommandConfig,
+} from './record-mutation-command-helpers.js'
 
 const providerStatusSchema = z.string().min(1)
 
@@ -90,5 +98,37 @@ export function registerProviderCommands(
         })
       },
     },
+    additionalCommands: [
+      createEntityEditCommandConfig({
+        arg: {
+          name: 'id',
+          schema: z.string().min(1).describe('Provider id or slug to edit.'),
+        },
+        description:
+          'Edit one provider by merging a partial JSON patch or one or more path assignments into the saved record.',
+        run(input) {
+          return editProviderRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+            inputFile: input.inputFile,
+            set: input.set,
+            clear: input.clear,
+          })
+        },
+      }),
+      createEntityDeleteCommandConfig({
+        arg: {
+          name: 'id',
+          schema: z.string().min(1).describe('Provider id or slug to delete.'),
+        },
+        description: 'Delete one provider Markdown record.',
+        run(input) {
+          return deleteProviderRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+          })
+        },
+      }),
+    ],
   })
 }

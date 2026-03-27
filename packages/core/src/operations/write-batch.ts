@@ -270,7 +270,7 @@ export async function readStoredWriteOperation(
   const raw = JSON.parse(await readText(resolved.absolutePath)) as unknown;
 
   if (!isPlainRecord(raw)) {
-    throw new VaultError("HB_OPERATION_INVALID", "Write operation metadata must be a JSON object.", {
+    throw new VaultError("OPERATION_INVALID", "Write operation metadata must be a JSON object.", {
       relativePath,
     });
   }
@@ -289,7 +289,7 @@ export async function readStoredWriteOperation(
     !actions ||
     actions.some((action) => action === null)
   ) {
-    throw new VaultError("HB_OPERATION_INVALID", "Write operation metadata has an unexpected shape.", {
+    throw new VaultError("OPERATION_INVALID", "Write operation metadata has an unexpected shape.", {
       relativePath,
     });
   }
@@ -590,11 +590,17 @@ export class WriteBatch {
     return normalizedTarget;
   }
 
-  async stageDelete(targetRelativePath: string): Promise<string> {
+  async stageDelete(
+    targetRelativePath: string,
+    options: {
+      allowAppendOnlyJsonl?: boolean;
+    } = {},
+  ): Promise<string> {
     this.assertMutable();
     const normalizedTarget = normalizeRelativeVaultPath(targetRelativePath);
     assertWriteTargetPolicy(normalizedTarget, {
       kind: "delete",
+      allowAppendOnlyJsonl: options.allowAppendOnlyJsonl,
       messages: {
         appendOnlyDisallowed: "Use stageJsonlAppend for ledger and audit shards.",
         rawDisallowed: "Use stageRawCopy for raw artifacts.",
@@ -674,7 +680,7 @@ export class WriteBatch {
   private assertMutable(): void {
     if (isTerminalWriteOperationStatus(this.record.status) || this.record.status === "failed") {
       throw new VaultError(
-        "HB_OPERATION_STATE_INVALID",
+        "OPERATION_STATE_INVALID",
         `Write batch "${this.operationId}" can no longer be modified after status "${this.record.status}".`,
       );
     }

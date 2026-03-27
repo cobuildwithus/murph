@@ -263,6 +263,32 @@ export const vaultCliCommandDescriptors = [
     id: 'document',
     bindingMode: 'direct',
     rootCommandNames: ['document'],
+    leafCommands: [
+      {
+        path: ['document', 'import'],
+        description: 'Import one document artifact as a canonical document event plus immutable raw artifacts.',
+      },
+      {
+        path: ['document', 'show'],
+        description: 'Show one imported document by document id or canonical event id.',
+      },
+      {
+        path: ['document', 'list'],
+        description: 'List imported document events within an optional date range.',
+      },
+      {
+        path: ['document', 'manifest'],
+        description: 'Show the immutable raw-import manifest for one imported document.',
+      },
+      {
+        path: ['document', 'edit'],
+        description: 'Edit one imported document event by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['document', 'delete'],
+        description: 'Delete one imported document event while leaving immutable raw artifacts on disk.',
+      },
+    ],
     directVaultServiceBindings: {
       importers: ['importDocument'],
       query: ['showDocument', 'listDocuments', 'showDocumentManifest'],
@@ -296,6 +322,32 @@ export const vaultCliCommandDescriptors = [
     id: 'meal',
     bindingMode: 'none',
     rootCommandNames: ['meal'],
+    leafCommands: [
+      {
+        path: ['meal', 'add'],
+        description: 'Record one meal from raw photo/audio artifacts or a freeform note.',
+      },
+      {
+        path: ['meal', 'show'],
+        description: 'Show one meal by meal id or canonical event id.',
+      },
+      {
+        path: ['meal', 'list'],
+        description: 'List meal events within an optional date range.',
+      },
+      {
+        path: ['meal', 'manifest'],
+        description: 'Show the immutable raw-import manifest for one recorded meal.',
+      },
+      {
+        path: ['meal', 'edit'],
+        description: 'Edit one meal event by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['meal', 'delete'],
+        description: 'Delete one meal event while leaving immutable raw artifacts on disk.',
+      },
+    ],
     register({ cli, services }) {
       registerMealCommands(cli, services)
     },
@@ -309,6 +361,15 @@ export const vaultCliCommandDescriptors = [
         path: ['workout', 'add'],
         description:
           'Record one workout from a freeform note with lightweight structured inference.',
+      },
+      {
+        path: ['workout', 'edit'],
+        description:
+          'Edit one saved workout activity event by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['workout', 'delete'],
+        description: 'Delete one workout activity event.',
       },
       {
         path: ['workout', 'format', 'save'],
@@ -337,6 +398,22 @@ export const vaultCliCommandDescriptors = [
     id: 'intervention',
     bindingMode: 'none',
     rootCommandNames: ['intervention'],
+    leafCommands: [
+      {
+        path: ['intervention', 'add'],
+        description:
+          'Record one intervention session from a freeform note with lightweight structured inference.',
+      },
+      {
+        path: ['intervention', 'edit'],
+        description:
+          'Edit one saved intervention session event by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['intervention', 'delete'],
+        description: 'Delete one intervention_session event.',
+      },
+    ],
     register({ cli, services }) {
       registerInterventionCommands(cli, services)
     },
@@ -345,6 +422,32 @@ export const vaultCliCommandDescriptors = [
     id: 'provider',
     bindingMode: 'direct',
     rootCommandNames: ['provider'],
+    leafCommands: [
+      {
+        path: ['provider', 'scaffold'],
+        description: 'Emit a provider payload template for `provider upsert`.',
+      },
+      {
+        path: ['provider', 'show'],
+        description: 'Show one provider by canonical id or slug.',
+      },
+      {
+        path: ['provider', 'list'],
+        description: 'List provider records with an optional status filter.',
+      },
+      {
+        path: ['provider', 'upsert'],
+        description: 'Create or update one provider Markdown record from a JSON payload file or stdin.',
+      },
+      {
+        path: ['provider', 'edit'],
+        description: 'Edit one provider by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['provider', 'delete'],
+        description: 'Delete one provider Markdown record.',
+      },
+    ],
     directVaultServiceBindings: {
       core: ['scaffoldProvider', 'upsertProvider'],
       query: ['showProvider', 'listProviders'],
@@ -357,6 +460,32 @@ export const vaultCliCommandDescriptors = [
     id: 'recipe',
     bindingMode: 'direct',
     rootCommandNames: ['recipe'],
+    leafCommands: [
+      {
+        path: ['recipe', 'scaffold'],
+        description: 'Emit a recipe payload template for `recipe upsert`.',
+      },
+      {
+        path: ['recipe', 'show'],
+        description: 'Show one recipe by canonical id or slug.',
+      },
+      {
+        path: ['recipe', 'list'],
+        description: 'List recipe records with an optional status filter.',
+      },
+      {
+        path: ['recipe', 'upsert'],
+        description: 'Create or update one recipe Markdown record from a JSON payload file or stdin.',
+      },
+      {
+        path: ['recipe', 'edit'],
+        description: 'Edit one recipe by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['recipe', 'delete'],
+        description: 'Delete one recipe Markdown record.',
+      },
+    ],
     directVaultServiceBindings: {
       core: ['scaffoldRecipe', 'upsertRecipe'],
       query: ['showRecipe', 'listRecipes'],
@@ -387,6 +516,14 @@ export const vaultCliCommandDescriptors = [
         description: 'Create or update one food Markdown record from a JSON payload file or stdin.',
       },
       {
+        path: ['food', 'edit'],
+        description: 'Edit one food by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['food', 'delete'],
+        description: 'Delete one remembered food Markdown record.',
+      },
+      {
         path: ['food', 'schedule'],
         description: 'Schedule one remembered food for daily auto-log meal creation.',
       },
@@ -403,6 +540,32 @@ export const vaultCliCommandDescriptors = [
     id: 'event',
     bindingMode: 'direct',
     rootCommandNames: ['event'],
+    leafCommands: [
+      {
+        path: ['event', 'list'],
+        description: 'List canonical event records with optional date, tag, and experiment filters.',
+      },
+      {
+        path: ['event', 'scaffold'],
+        description: 'Emit an event payload template for one supported canonical event kind.',
+      },
+      {
+        path: ['event', 'show'],
+        description: 'Show one canonical event by event id.',
+      },
+      {
+        path: ['event', 'upsert'],
+        description: 'Create or update one canonical event from a JSON payload file or stdin.',
+      },
+      {
+        path: ['event', 'edit'],
+        description: 'Edit one canonical event by merging a partial JSON patch or path assignments.',
+      },
+      {
+        path: ['event', 'delete'],
+        description: 'Delete one canonical event by event id.',
+      },
+    ],
     directVaultServiceBindings: {
       core: ['scaffoldEvent', 'upsertEvent'],
       query: ['showEvent', 'listEvents'],

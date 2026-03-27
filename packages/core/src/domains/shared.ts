@@ -55,13 +55,17 @@ export function sortStrings(values: readonly string[]): string[] {
   return [...values].sort((left, right) => left.localeCompare(right));
 }
 
-export function ensureMarkdownHeading(body: string, title: string): string {
+function replaceMarkdownHeading(body: string, title: string): string {
   const trimmed = body.trimStart();
   if (trimmed.startsWith("# ")) {
     return body.replace(/^# .*(?:\r?\n)?/u, `# ${title}\n`);
   }
 
   return `# ${title}\n\n${body.trimStart()}`;
+}
+
+export function ensureMarkdownHeading(body: string, title: string): string {
+  return replaceMarkdownHeading(body, title);
 }
 
 export function appendMarkdownParagraph(body: string, text: string): string {
@@ -76,12 +80,7 @@ export function appendMarkdownParagraph(body: string, text: string): string {
 }
 
 export function replaceMarkdownTitle(body: string, title: string): string {
-  const trimmedBody = body.trimStart();
-  if (trimmedBody.startsWith("# ")) {
-    return body.replace(/^# .*(?:\r?\n)?/u, `# ${title}\n`);
-  }
-
-  return `# ${title}\n\n${body.trimStart()}`;
+  return replaceMarkdownHeading(body, title);
 }
 
 export function normalizeTimestampInput(value: unknown): string | undefined {
@@ -91,7 +90,7 @@ export function normalizeTimestampInput(value: unknown): string | undefined {
 
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new VaultError("HB_INVALID_TIMESTAMP", `Invalid timestamp "${String(value)}".`);
+    throw new VaultError("INVALID_TIMESTAMP", `Invalid timestamp "${String(value)}".`);
   }
 
   return date.toISOString();

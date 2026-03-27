@@ -7,7 +7,15 @@ import {
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
+import {
+  deleteRecipeRecord,
+  editRecipeRecord,
+} from '../usecases/recipe.js'
 import { registerRegistryDocEntityGroup } from './health-command-factory.js'
+import {
+  createEntityDeleteCommandConfig,
+  createEntityEditCommandConfig,
+} from './record-mutation-command-helpers.js'
 
 const recipeStatusSchema = z.enum(RECIPE_STATUSES)
 
@@ -28,7 +36,7 @@ const recipeUpsertResultSchema = z.object({
 const recipeListResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
-    status: recipeStatusSchema.nullable(),
+    status: z.string().nullable(),
     limit: z.number().int().positive().max(200),
   }),
   items: z.array(listItemSchema),
@@ -89,5 +97,37 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultCliServices)
         })
       },
     },
+    additionalCommands: [
+      createEntityEditCommandConfig({
+        arg: {
+          name: 'id',
+          schema: z.string().min(1).describe('Recipe id or slug to edit.'),
+        },
+        description:
+          'Edit one recipe by merging a partial JSON patch or one or more path assignments into the saved record.',
+        run(input) {
+          return editRecipeRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+            inputFile: input.inputFile,
+            set: input.set,
+            clear: input.clear,
+          })
+        },
+      }),
+      createEntityDeleteCommandConfig({
+        arg: {
+          name: 'id',
+          schema: z.string().min(1).describe('Recipe id or slug to delete.'),
+        },
+        description: 'Delete one recipe Markdown record.',
+        run(input) {
+          return deleteRecipeRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+          })
+        },
+      }),
+    ],
   })
 }

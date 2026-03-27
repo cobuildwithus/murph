@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
@@ -48,6 +48,14 @@ interface ShowEnvelope {
       queryable: boolean
     }>
   }
+}
+
+interface DeleteEnvelope {
+  entityId: string
+  lookupId: string
+  kind: string
+  deleted: true
+  retainedPaths: string[]
 }
 
 interface ListEnvelope {
@@ -110,16 +118,28 @@ async function createVault(): Promise<string> {
 }
 
 test(
-  'document and meal command schemas expose the expansion surface',
+  'document and meal command schemas expose the expansion and mutation surfaces',
   async () => {
     const documentImportSchema = JSON.parse(
       await runRawSourceCli(['document', 'import', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
+    const documentEditSchema = JSON.parse(
+      await runRawSourceCli(['document', 'edit', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
+    const documentDeleteSchema = JSON.parse(
+      await runRawSourceCli(['document', 'delete', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
     const documentListSchema = JSON.parse(
       await runRawSourceCli(['document', 'list', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
     const mealAddSchema = JSON.parse(
       await runRawSourceCli(['meal', 'add', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
+    const mealEditSchema = JSON.parse(
+      await runRawSourceCli(['meal', 'edit', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
+    const mealDeleteSchema = JSON.parse(
+      await runRawSourceCli(['meal', 'delete', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
     const mealListSchema = JSON.parse(
       await runRawSourceCli(['meal', 'list', '--schema', '--format', 'json']),
@@ -136,8 +156,22 @@ test(
     assert.equal('kind' in documentListSchema.options.properties, false)
     assert.deepEqual(documentListSchema.options.required, ['vault'])
 
+    assert.equal('input' in documentEditSchema.options.properties, true)
+    assert.equal('set' in documentEditSchema.options.properties, true)
+    assert.equal('clear' in documentEditSchema.options.properties, true)
+    assert.equal('dayKeyPolicy' in documentEditSchema.options.properties, true)
+    assert.deepEqual(documentEditSchema.options.required, ['vault'])
+    assert.deepEqual(documentDeleteSchema.options.required, ['vault'])
+
     assert.equal('source' in mealAddSchema.options.properties, true)
     assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
+
+    assert.equal('input' in mealEditSchema.options.properties, true)
+    assert.equal('set' in mealEditSchema.options.properties, true)
+    assert.equal('clear' in mealEditSchema.options.properties, true)
+    assert.equal('dayKeyPolicy' in mealEditSchema.options.properties, true)
+    assert.deepEqual(mealEditSchema.options.required, ['vault'])
+    assert.deepEqual(mealDeleteSchema.options.required, ['vault'])
 
     assert.equal('from' in mealListSchema.options.properties, true)
     assert.equal('to' in mealListSchema.options.properties, true)
@@ -330,6 +364,142 @@ test.sequential(
 )
 
 test.sequential(
+  'document and meal edit/delete reuse the saved records while preserving immutable artifacts',
+  async () => {
+    const vaultRoot = await createVault()
+
+    try {
+      const documentRecord = requireData(
+        await runSourceCli<DocumentImportEnvelope>([
+          'document',
+          'import',
+          sampleDocumentPath,
+          '--title',
+          'Lab Report',
+          '--occurred-at',
+          '2026-03-12T09:30:00Z',
+          '--note',
+          'Fasted lipid panel.',
+          '--vault',
+          vaultRoot,
+        ]),
+      )
+      const mealRecord = requireData(
+        await runSourceCli<MealAddEnvelope>([
+          'meal',
+          'add',
+          '--photo',
+          sampleDocumentPath,
+          '--occurred-at',
+          '2026-03-12T12:15:00Z',
+          '--note',
+          'Smoothie after training.',
+          '--vault',
+          vaultRoot,
+        ]),
+      )
+      const mealManifest = requireData(
+        await runSourceCli<ManifestEnvelope>([
+          'meal',
+          'manifest',
+          mealRecord.lookupId,
+          '--vault',
+          vaultRoot,
+        ]),
+      )
+
+      const editedDocument = await runSourceCli<ShowEnvelope>([
+        'document',
+        'edit',
+        documentRecord.documentId,
+        '--set',
+        'title=Updated Lab Report',
+        '--set',
+        'note=Reviewed with PCP.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(editedDocument.ok, true)
+      assert.equal(editedDocument.meta?.command, 'document edit')
+      assert.equal(requireData(editedDocument).entity.title, 'Updated Lab Report')
+      assert.equal(requireData(editedDocument).entity.data.note, 'Reviewed with PCP.')
+
+      const editedMeal = await runSourceCli<ShowEnvelope>([
+        'meal',
+        'edit',
+        mealRecord.mealId,
+        '--set',
+        'note=Green smoothie after training.',
+        '--set',
+        'ingredients=[\"spinach\",\"banana\",\"greek yogurt\"]',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(editedMeal.ok, true)
+      assert.equal(editedMeal.meta?.command, 'meal edit')
+      assert.equal(requireData(editedMeal).entity.data.note, 'Green smoothie after training.')
+      assert.deepEqual(requireData(editedMeal).entity.data.ingredients, [
+        'spinach',
+        'banana',
+        'greek yogurt',
+      ])
+
+      const deletedDocument = await runSourceCli<DeleteEnvelope>([
+        'document',
+        'delete',
+        documentRecord.lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(deletedDocument.ok, true)
+      assert.equal(deletedDocument.meta?.command, 'document delete')
+      assert.equal(requireData(deletedDocument).entityId, documentRecord.documentId)
+      assert.equal(requireData(deletedDocument).kind, 'document')
+      assert.equal(requireData(deletedDocument).deleted, true)
+      assert.equal(requireData(deletedDocument).retainedPaths.length > 0, true)
+      await access(path.join(vaultRoot, documentRecord.manifestFile))
+
+      const missingDocument = await runSourceCli([
+        'document',
+        'show',
+        documentRecord.lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(missingDocument.ok, false)
+      assert.equal(missingDocument.error?.code, 'not_found')
+
+      const deletedMeal = await runSourceCli<DeleteEnvelope>([
+        'meal',
+        'delete',
+        mealRecord.lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(deletedMeal.ok, true)
+      assert.equal(deletedMeal.meta?.command, 'meal delete')
+      assert.equal(requireData(deletedMeal).entityId, mealRecord.mealId)
+      assert.equal(requireData(deletedMeal).kind, 'meal')
+      assert.equal(requireData(deletedMeal).deleted, true)
+      assert.equal(requireData(deletedMeal).retainedPaths.length > 0, true)
+      await access(path.join(vaultRoot, mealManifest.manifestFile))
+
+      const missingMeal = await runSourceCli([
+        'meal',
+        'show',
+        mealRecord.lookupId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(missingMeal.ok, false)
+      assert.equal(missingMeal.error?.code, 'not_found')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'meal add/show/list/manifest support meal ids, event ids, and manifest inspection',
   async () => {
     const vaultRoot = await createVault()
@@ -447,4 +617,5 @@ test.sequential(
       await rm(vaultRoot, { recursive: true, force: true })
     }
   },
+  60_000,
 )

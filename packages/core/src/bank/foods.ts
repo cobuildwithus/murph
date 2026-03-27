@@ -31,6 +31,8 @@ import {
 
 import type { FrontmatterObject } from "../types.js";
 import type {
+  DeleteFoodInput,
+  DeleteFoodResult,
   FoodAutoLogDailyRule,
   FoodRecord,
   FoodStatus,
@@ -203,6 +205,8 @@ const foodRegistryApi = createMarkdownRegistryApi<FoodRecord>({
   createRecordId: () => generateRecordId("food"),
   operationType: "food_upsert",
   summary: (recordId) => `Upsert food ${recordId}`,
+  deleteOperationType: "food_delete",
+  deleteSummary: (recordId) => `Delete food ${recordId}`,
   audit: {
     action: "food_upsert",
     commandName: "core.upsertFood",
@@ -302,4 +306,20 @@ export async function readFood({ vaultRoot, foodId, slug }: ReadFoodInput): Prom
     recordId: normalizedFoodId,
     slug: normalizedSlug,
   });
+}
+
+export async function deleteFood({ vaultRoot, foodId, slug }: DeleteFoodInput): Promise<DeleteFoodResult> {
+  const normalizedFoodId = normalizeId(foodId, "foodId", "food");
+  const normalizedSlug = normalizeSelectorSlug(slug);
+  const result = await foodRegistryApi.deleteRecord({
+    vaultRoot,
+    recordId: normalizedFoodId,
+    slug: normalizedSlug,
+  });
+
+  return {
+    foodId: result.record.foodId,
+    relativePath: result.record.relativePath,
+    deleted: true,
+  };
 }

@@ -5,12 +5,24 @@ import {
   isoTimestampSchema,
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
-import { addInterventionRecord } from '../usecases/intervention.js'
+import {
+  addInterventionRecord,
+  deleteInterventionRecord,
+  editInterventionRecord,
+} from '../usecases/intervention.js'
+import {
+  createDirectEntityDeleteCommandDefinition,
+  createDirectEntityEditCommandDefinition,
+  dayKeyPolicySchema,
+} from './record-mutation-command-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 const protocolIdSchema = z
   .string()
   .regex(/^prot_[0-9A-Za-z]+$/u, 'Expected a canonical protocol id in prot_* form.')
+const interventionLookupSchema = z
+  .string()
+  .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical intervention event id in evt_* form.')
 
 export function registerInterventionCommands(
   cli: Cli.Cli,
@@ -109,6 +121,44 @@ export function registerInterventionCommands(
       })
     },
   })
+
+  intervention.command('edit', createDirectEntityEditCommandDefinition({
+    arg: {
+      name: 'id',
+      schema: interventionLookupSchema.describe('Canonical intervention event id such as evt_<ULID>.'),
+    },
+    description:
+      'Edit one intervention session by merging a partial JSON patch or one or more path assignments into the saved event.',
+    hint:
+      'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved intervention day stays explicit.',
+    options: {
+      dayKeyPolicy: dayKeyPolicySchema.optional(),
+    },
+    run(input) {
+      return editInterventionRecord({
+        vault: input.vault,
+        lookup: input.lookup,
+        inputFile: input.inputFile,
+        set: input.set,
+        clear: input.clear,
+        dayKeyPolicy: input.dayKeyPolicy,
+      })
+    },
+  }))
+
+  intervention.command('delete', createDirectEntityDeleteCommandDefinition({
+    arg: {
+      name: 'id',
+      schema: interventionLookupSchema.describe('Canonical intervention event id such as evt_<ULID>.'),
+    },
+    description: 'Delete one intervention_session event.',
+    run(input) {
+      return deleteInterventionRecord({
+        vault: input.vault,
+        lookup: input.lookup,
+      })
+    },
+  }))
 
   cli.command(intervention)
 }

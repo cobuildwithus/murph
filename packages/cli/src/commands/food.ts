@@ -10,7 +10,15 @@ import {
 } from '../vault-cli-contracts.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import { dailyFoodTimeSchema } from '../usecases/food-autolog.js'
+import {
+  deleteFoodRecord,
+  editFoodRecord,
+} from '../usecases/food.js'
 import { createRegistryDocEntityGroup } from './health-command-factory.js'
+import {
+  createDirectEntityDeleteCommandDefinition,
+  createDirectEntityEditCommandDefinition,
+} from './record-mutation-command-helpers.js'
 
 const foodStatusSchema = z.enum(FOOD_STATUSES)
 const foodSlugSchema = z
@@ -188,6 +196,38 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
       },
     },
   })
+
+  food.command('edit', createDirectEntityEditCommandDefinition({
+    arg: {
+      name: 'id',
+      schema: z.string().min(1).describe('Food id or slug to edit.'),
+    },
+    description:
+      'Edit one food by merging a partial JSON patch or one or more path assignments into the saved record.',
+    run(input) {
+      return editFoodRecord({
+        vault: input.vault,
+        lookup: input.lookup,
+        inputFile: input.inputFile,
+        set: input.set,
+        clear: input.clear,
+      })
+    },
+  }))
+
+  food.command('delete', createDirectEntityDeleteCommandDefinition({
+    arg: {
+      name: 'id',
+      schema: z.string().min(1).describe('Food id or slug to delete.'),
+    },
+    description: 'Delete one remembered food Markdown record.',
+    run(input) {
+      return deleteFoodRecord({
+        vault: input.vault,
+        lookup: input.lookup,
+      })
+    },
+  }))
 
   food.command('rename', createFoodRenameCommandConfig(services))
   food.command('schedule', createFoodScheduleCommandConfig(services))

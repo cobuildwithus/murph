@@ -5,4 +5,5 @@ export * from "./goals.js";
 export * from "./providers.js";
 export * from "./recipes.js";
 export * from "./protocols.js";
+export * from "./workout-formats.js";
 export * from "./types.js";

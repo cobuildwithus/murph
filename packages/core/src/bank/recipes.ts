@@ -32,6 +32,8 @@ import {
 
 import type { FrontmatterObject } from "../types.js";
 import type {
+  DeleteRecipeInput,
+  DeleteRecipeResult,
   ReadRecipeInput,
   RecipeRecord,
   RecipeStatus,
@@ -196,6 +198,8 @@ const recipeRegistryApi = createMarkdownRegistryApi<RecipeRecord>({
   createRecordId: () => generateRecordId("rcp"),
   operationType: "recipe_upsert",
   summary: (recordId) => `Upsert recipe ${recordId}`,
+  deleteOperationType: "recipe_delete",
+  deleteSummary: (recordId) => `Delete recipe ${recordId}`,
   audit: {
     action: "recipe_upsert",
     commandName: "core.upsertRecipe",
@@ -309,4 +313,20 @@ export async function readRecipe({ vaultRoot, recipeId, slug }: ReadRecipeInput)
     recordId: normalizedRecipeId,
     slug: normalizedSlug,
   });
+}
+
+export async function deleteRecipe({ vaultRoot, recipeId, slug }: DeleteRecipeInput): Promise<DeleteRecipeResult> {
+  const normalizedRecipeId = normalizeId(recipeId, "recipeId", "rcp");
+  const normalizedSlug = normalizeSelectorSlug(slug);
+  const result = await recipeRegistryApi.deleteRecord({
+    vaultRoot,
+    recordId: normalizedRecipeId,
+    slug: normalizedSlug,
+  });
+
+  return {
+    recipeId: result.record.recipeId,
+    relativePath: result.record.relativePath,
+    deleted: true,
+  };
 }

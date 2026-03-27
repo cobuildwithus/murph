@@ -214,6 +214,15 @@ export const listResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
+export const deleteResultSchema = z.object({
+  vault: pathSchema,
+  entityId: z.string().min(1),
+  lookupId: z.string().min(1),
+  kind: z.string().min(1),
+  deleted: z.literal(true),
+  retainedPaths: z.array(pathSchema),
+})
+
 export const exportPackResultSchema = z.object({
   vault: pathSchema,
   from: localDateSchema,
@@ -244,4 +253,5 @@ export type ReadEntity = z.infer<typeof readEntitySchema>
 export type ShowResult = z.infer<typeof showResultSchema>
 export type ListFilters = z.infer<typeof listFilterSchema>
 export type ListResult = z.infer<typeof listResultSchema>
+export type DeleteResult = z.infer<typeof deleteResultSchema>
 export type ExportPackResult = z.infer<typeof exportPackResultSchema>

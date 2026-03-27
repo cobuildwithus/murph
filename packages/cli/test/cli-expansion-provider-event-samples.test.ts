@@ -15,6 +15,14 @@ import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
+interface DeleteEnvelope {
+  entityId: string
+  lookupId: string
+  kind: string
+  deleted: true
+  retainedPaths: string[]
+}
+
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
     description: 'provider/food/recipe/event/samples slice test cli',
@@ -106,6 +114,71 @@ test('provider, food, recipe, event, and samples schemas expose the new noun ent
   assert.equal('kind' in eventSchema.options.properties, true)
   assert.deepEqual(eventSchema.options.required, ['vault', 'kind'])
   assert.equal('input' in samplesSchema.options.properties, true)
+})
+
+test('provider, food, recipe, and event edit/delete schemas expose shared record mutation options', async () => {
+  const providerEditSchema = JSON.parse(
+    await runSliceCliRaw(['provider', 'edit', '--schema']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const foodEditSchema = JSON.parse(
+    await runSliceCliRaw(['food', 'edit', '--schema']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const recipeEditSchema = JSON.parse(
+    await runSliceCliRaw(['recipe', 'edit', '--schema']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const eventEditSchema = JSON.parse(
+    await runSliceCliRaw(['event', 'edit', '--schema']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const providerDeleteSchema = JSON.parse(
+    await runSliceCliRaw(['provider', 'delete', '--schema']),
+  ) as {
+    options: {
+      required?: string[]
+    }
+  }
+
+  assert.equal('input' in providerEditSchema.options.properties, true)
+  assert.equal('set' in providerEditSchema.options.properties, true)
+  assert.equal('clear' in providerEditSchema.options.properties, true)
+  assert.deepEqual(providerEditSchema.options.required, ['vault'])
+
+  assert.equal('input' in foodEditSchema.options.properties, true)
+  assert.equal('set' in foodEditSchema.options.properties, true)
+  assert.equal('clear' in foodEditSchema.options.properties, true)
+  assert.deepEqual(foodEditSchema.options.required, ['vault'])
+
+  assert.equal('input' in recipeEditSchema.options.properties, true)
+  assert.equal('set' in recipeEditSchema.options.properties, true)
+  assert.equal('clear' in recipeEditSchema.options.properties, true)
+  assert.deepEqual(recipeEditSchema.options.required, ['vault'])
+
+  assert.equal('input' in eventEditSchema.options.properties, true)
+  assert.equal('set' in eventEditSchema.options.properties, true)
+  assert.equal('clear' in eventEditSchema.options.properties, true)
+  assert.equal('dayKeyPolicy' in eventEditSchema.options.properties, true)
+  assert.deepEqual(eventEditSchema.options.required, ['vault'])
+
+  assert.deepEqual(providerDeleteSchema.options.required, ['vault'])
 })
 
 test('provider/food/recipe/event/samples help uses generic id selectors for read commands', async () => {
@@ -1090,6 +1163,393 @@ test.sequential(
       )
       assert.match(renamedMarkdown, new RegExp(requireData(created).providerId, 'u'))
       assert.match(renamedMarkdown, /Alpha Clinic Renamed/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'provider, food, recipe, and event edit/delete mutate existing records and remove them cleanly',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-record-mutations-'))
+    const providerPayloadPath = path.join(vaultRoot, 'provider.json')
+    const foodPayloadPath = path.join(vaultRoot, 'food.json')
+    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
+    const eventPayloadPath = path.join(vaultRoot, 'event.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      await writeFile(
+        providerPayloadPath,
+        JSON.stringify({
+          title: 'Labcorp',
+          slug: 'labcorp',
+          status: 'active',
+          specialty: 'lab',
+          website: 'https://labcorp.example.test',
+          body: '# Labcorp\n',
+        }),
+        'utf8',
+      )
+      await writeFile(
+        foodPayloadPath,
+        JSON.stringify({
+          title: 'Regular Acai Bowl',
+          slug: 'regular-acai-bowl',
+          status: 'active',
+          vendor: 'Neighborhood Acai Bar',
+          aliases: ['regular acai bowl', 'usual acai bowl'],
+          tags: ['breakfast'],
+          note: 'Typical order.',
+          autoLogDaily: {
+            time: '08:00',
+          },
+        }),
+        'utf8',
+      )
+      await writeFile(
+        recipePayloadPath,
+        JSON.stringify({
+          title: 'Sheet Pan Salmon Bowls',
+          slug: 'sheet-pan-salmon-bowls',
+          status: 'saved',
+          summary: 'Weeknight salmon bowls.',
+          ingredients: ['2 salmon fillets'],
+          steps: ['Roast the salmon.'],
+        }),
+        'utf8',
+      )
+      await writeFile(
+        eventPayloadPath,
+        JSON.stringify({
+          kind: 'symptom',
+          occurredAt: '2026-03-12T08:15:00.000Z',
+          title: 'Morning headache',
+          symptom: 'headache',
+          intensity: 4,
+          note: 'Resolved after breakfast.',
+          tags: ['symptom'],
+        }),
+        'utf8',
+      )
+
+      const providerUpsert = await runSliceCli<{ providerId: string }>([
+        'provider',
+        'upsert',
+        '--input',
+        `@${providerPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const foodUpsert = await runSliceCli<{ foodId: string }>([
+        'food',
+        'upsert',
+        '--input',
+        `@${foodPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeUpsert = await runSliceCli<{ recipeId: string }>([
+        'recipe',
+        'upsert',
+        '--input',
+        `@${recipePayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const eventUpsert = await runSliceCli<{ eventId: string }>([
+        'event',
+        'upsert',
+        '--input',
+        `@${eventPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(providerUpsert.ok, true)
+      assert.equal(foodUpsert.ok, true)
+      assert.equal(recipeUpsert.ok, true)
+      assert.equal(eventUpsert.ok, true)
+
+      const providerEdit = await runSliceCli<{
+        entity: {
+          title: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'provider',
+        'edit',
+        requireData(providerUpsert).providerId,
+        '--set',
+        'title=Labcorp West',
+        '--clear',
+        'website',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(providerEdit.ok, true)
+      assert.equal(providerEdit.meta?.command, 'provider edit')
+      assert.equal(requireData(providerEdit).entity.title, 'Labcorp West')
+      assert.equal(requireData(providerEdit).entity.data.website, undefined)
+
+      const foodEdit = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'food',
+        'edit',
+        requireData(foodUpsert).foodId,
+        '--set',
+        'note=Now with chia seeds.',
+        '--set',
+        'tags=[\"breakfast\",\"protein\"]',
+        '--clear',
+        'aliases.0',
+        '--clear',
+        'autoLogDaily.time',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(foodEdit.ok, true)
+      assert.equal(foodEdit.meta?.command, 'food edit')
+      assert.equal(requireData(foodEdit).entity.data.note, 'Now with chia seeds.')
+      assert.deepEqual(requireData(foodEdit).entity.data.aliases, ['usual acai bowl'])
+      assert.deepEqual(requireData(foodEdit).entity.data.tags, ['breakfast', 'protein'])
+      assert.equal(requireData(foodEdit).entity.data.autoLogDaily, undefined)
+
+      const recipeEdit = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'recipe',
+        'edit',
+        requireData(recipeUpsert).recipeId,
+        '--set',
+        'summary=Updated rotation dinner.',
+        '--clear',
+        'ingredients',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(recipeEdit.ok, true)
+      assert.equal(recipeEdit.meta?.command, 'recipe edit')
+      assert.equal(requireData(recipeEdit).entity.data.summary, 'Updated rotation dinner.')
+      assert.equal(requireData(recipeEdit).entity.data.ingredients, undefined)
+
+      const eventEdit = await runSliceCli<{
+        entity: {
+          kind: string
+          data: Record<string, unknown>
+        }
+      }>([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'note=Resolved after hydration.',
+        '--set',
+        'tags=[\"symptom\",\"resolved\"]',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(eventEdit.ok, true)
+      assert.equal(eventEdit.meta?.command, 'event edit')
+      assert.equal(requireData(eventEdit).entity.kind, 'symptom')
+      assert.equal(requireData(eventEdit).entity.data.note, 'Resolved after hydration.')
+      assert.deepEqual(requireData(eventEdit).entity.data.tags, ['symptom', 'resolved'])
+
+      const eventDelete = await runSliceCli<DeleteEnvelope>([
+        'event',
+        'delete',
+        requireData(eventUpsert).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(eventDelete.ok, true)
+      assert.equal(requireData(eventDelete).kind, 'symptom')
+
+      const recipeDelete = await runSliceCli<DeleteEnvelope>([
+        'recipe',
+        'delete',
+        requireData(recipeUpsert).recipeId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(recipeDelete.ok, true)
+      await assert.rejects(() =>
+        access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-bowls.md')))
+
+      const foodDelete = await runSliceCli<DeleteEnvelope>([
+        'food',
+        'delete',
+        requireData(foodUpsert).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(foodDelete.ok, true)
+      await assert.rejects(() =>
+        access(path.join(vaultRoot, 'bank/foods/regular-acai-bowl.md')))
+
+      const providerDelete = await runSliceCli<DeleteEnvelope>([
+        'provider',
+        'delete',
+        requireData(providerUpsert).providerId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(providerDelete.ok, true)
+      await assert.rejects(() =>
+        access(path.join(vaultRoot, 'bank/providers/labcorp.md')))
+
+      const missingEvent = await runSliceCli([
+        'event',
+        'show',
+        requireData(eventUpsert).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      const missingRecipe = await runSliceCli([
+        'recipe',
+        'show',
+        requireData(recipeUpsert).recipeId,
+        '--vault',
+        vaultRoot,
+      ])
+      const missingFood = await runSliceCli([
+        'food',
+        'show',
+        requireData(foodUpsert).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const missingProvider = await runSliceCli([
+        'provider',
+        'show',
+        requireData(providerUpsert).providerId,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(missingEvent.ok, false)
+      assert.equal(missingEvent.error?.code, 'not_found')
+      assert.equal(missingRecipe.ok, false)
+      assert.equal(missingRecipe.error?.code, 'not_found')
+      assert.equal(missingFood.ok, false)
+      assert.equal(missingFood.error?.code, 'not_found')
+      assert.equal(missingProvider.ok, false)
+      assert.equal(missingProvider.error?.code, 'not_found')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'event edit requires an explicit dayKey policy for temporal edits and keeps fallback timezones out of legacy records',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-event-timezone-edit-'))
+    const eventPayloadPath = path.join(vaultRoot, 'event.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot, '--timezone', 'Australia/Melbourne'])
+
+      await writeFile(
+        eventPayloadPath,
+        JSON.stringify({
+          kind: 'symptom',
+          occurredAt: '2026-03-26T21:00:00.000Z',
+          title: 'Breakfast headache',
+          symptom: 'headache',
+          intensity: 4,
+        }),
+        'utf8',
+      )
+
+      const eventUpsert = await runSliceCli<{ eventId: string }>([
+        'event',
+        'upsert',
+        '--input',
+        `@${eventPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(eventUpsert.ok, true)
+
+      const missingPolicy = await runSliceCli([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'occurredAt=2026-03-27T01:30:00.000Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(missingPolicy.ok, false)
+      assert.match(
+        missingPolicy.error?.message ?? '',
+        /requires an explicit local-day choice/u,
+      )
+
+      const recomputeWithoutExplicitTimeZone = await runSliceCli([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'occurredAt=2026-03-27T01:30:00.000Z',
+        '--day-key-policy',
+        'recompute',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(recomputeWithoutExplicitTimeZone.ok, false)
+      assert.match(
+        recomputeWithoutExplicitTimeZone.error?.message ?? '',
+        /Cannot recompute dayKey without an explicit timeZone/u,
+      )
+
+      const keepDayKey = await runSliceCli<{
+        entity: {
+          occurredAt: string | null
+          data: Record<string, unknown>
+        }
+      }>([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'occurredAt=2026-03-27T01:30:00.000Z',
+        '--day-key-policy',
+        'keep',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(keepDayKey.ok, true)
+      assert.equal(requireData(keepDayKey).entity.occurredAt, '2026-03-27T01:30:00.000Z')
+      assert.equal(requireData(keepDayKey).entity.data.dayKey, '2026-03-27')
+      assert.equal(requireData(keepDayKey).entity.data.timeZone, undefined)
+
+      const setExplicitTimeZoneAndRecompute = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'timeZone=America/New_York',
+        '--day-key-policy',
+        'recompute',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(setExplicitTimeZoneAndRecompute.ok, true)
+      assert.equal(requireData(setExplicitTimeZoneAndRecompute).entity.data.timeZone, 'America/New_York')
+      assert.equal(requireData(setExplicitTimeZoneAndRecompute).entity.data.dayKey, '2026-03-26')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

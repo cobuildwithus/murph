@@ -4,7 +4,14 @@ import {
   inferDurationMinutes,
   validateDurationMinutes,
 } from './text-duration.js'
-import { upsertEventRecord } from './provider-event.js'
+import {
+  deleteEventRecord,
+  editEventRecord,
+} from './event-record-mutations.js'
+import {
+  showEventRecord,
+  upsertEventRecord,
+} from './provider-event.js'
 import {
   compactObject,
   normalizeOptionalText,
@@ -186,6 +193,40 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
     strengthExercises: capture.strengthExercises,
     note: capture.note,
   }
+}
+
+export async function editWorkoutRecord(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+  dayKeyPolicy?: 'keep' | 'recompute'
+}) {
+  const result = await editEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'workout',
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    dayKeyPolicy: input.dayKeyPolicy,
+    expectedKinds: ['activity_session'],
+  })
+
+  return showEventRecord(input.vault, result.lookupId)
+}
+
+export async function deleteWorkoutRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  return deleteEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'workout',
+    expectedKinds: ['activity_session'],
+  })
 }
 
 function resolveWorkoutActivityDescriptor(

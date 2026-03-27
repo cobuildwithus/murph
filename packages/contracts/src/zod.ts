@@ -479,6 +479,7 @@ export const eventRecordSchema = withContractMetadata(
       mealId: idSchema(ID_PREFIXES.meal),
       photoPaths: uniqueArray(patternedString(RAW_MEAL_PATH_PATTERN), { uniqueItems: true }),
       audioPaths: z.array(patternedString(RAW_MEAL_PATH_PATTERN)),
+      ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
     }),
     eventSchema("symptom", {
       symptom: boundedString(1, 120),

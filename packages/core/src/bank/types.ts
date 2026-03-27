@@ -161,6 +161,18 @@ export interface UpsertFoodResult {
   record: FoodRecord;
 }
 
+export interface DeleteFoodInput {
+  vaultRoot: string;
+  foodId?: string;
+  slug?: string;
+}
+
+export interface DeleteFoodResult {
+  foodId: string;
+  relativePath: string;
+  deleted: true;
+}
+
 export interface ReadFoodInput {
   vaultRoot: string;
   foodId?: string;
@@ -210,10 +222,10 @@ export interface UpsertRecipeInput {
   cuisine?: string;
   dishType?: string;
   source?: string;
-  servings?: number;
-  prepTimeMinutes?: number;
-  cookTimeMinutes?: number;
-  totalTimeMinutes?: number;
+  servings?: number | null;
+  prepTimeMinutes?: number | null;
+  cookTimeMinutes?: number | null;
+  totalTimeMinutes?: number | null;
   tags?: string[];
   ingredients?: string[];
   steps?: string[];
@@ -225,6 +237,18 @@ export interface UpsertRecipeResult {
   created: boolean;
   auditPath: string;
   record: RecipeRecord;
+}
+
+export interface DeleteRecipeInput {
+  vaultRoot: string;
+  recipeId?: string;
+  slug?: string;
+}
+
+export interface DeleteRecipeResult {
+  recipeId: string;
+  relativePath: string;
+  deleted: true;
 }
 
 export interface ReadRecipeInput {

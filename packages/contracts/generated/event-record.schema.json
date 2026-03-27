@@ -404,6 +404,15 @@
             "type": "string",
             "pattern": "^raw\\/meals\\/[A-Za-z0-9._/-]+$"
           }
+        },
+        "ingredients": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
         }
       },
       "required": [

@@ -21,7 +21,6 @@ import {
 
 import type {
   HealthEntityEnvelope,
-  HealthListEnvelope,
   JsonObject,
 } from "../health-cli-method-types.js"
 import type { VaultValidateResult } from "../vault-cli-contracts.js"
@@ -193,11 +192,22 @@ export function asEntityEnvelope(
   }
 }
 
-export function asListEnvelope(
+export function asListEnvelope<
+  TFilters extends {
+    limit: number
+  },
+  TItem,
+>(
   vault: string,
-  filters: HealthListEnvelope["filters"],
-  items: HealthListEnvelope["items"],
-): HealthListEnvelope {
+  filters: TFilters,
+  items: TItem[],
+): {
+  vault: string
+  filters: TFilters
+  items: TItem[]
+  count: number
+  nextCursor: string | null
+} {
   return {
     vault,
     filters,

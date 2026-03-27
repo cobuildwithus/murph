@@ -4,8 +4,15 @@ import { z } from 'incur'
 import { loadJsonInputObject } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-import { buildEntityLinks } from './shared.js'
-import { toVaultCliError } from './vault-usecase-helpers.js'
+import {
+  asListEnvelope,
+  buildEntityLinks,
+} from './shared.js'
+import { applyRecordPatch } from './record-mutations.js'
+import {
+  compactObject,
+  toVaultCliError,
+} from './vault-usecase-helpers.js'
 
 interface RecipeReadModel {
   recipeId: string
@@ -30,10 +37,10 @@ interface RecipeCoreRuntime {
     cuisine?: string
     dishType?: string
     source?: string
-    servings?: number
-    prepTimeMinutes?: number
-    cookTimeMinutes?: number
-    totalTimeMinutes?: number
+    servings?: number | null
+    prepTimeMinutes?: number | null
+    cookTimeMinutes?: number | null
+    totalTimeMinutes?: number | null
     tags?: string[]
     ingredients?: string[]
     steps?: string[]
@@ -47,6 +54,15 @@ interface RecipeCoreRuntime {
     }
   }>
   listRecipes(vaultRoot: string): Promise<RecipeReadModel[]>
+  deleteRecipe(input: {
+    vaultRoot: string
+    recipeId?: string
+    slug?: string
+  }): Promise<{
+    recipeId: string
+    relativePath: string
+    deleted: true
+  }>
   readRecipe(input: {
     vaultRoot: string
     recipeId?: string
@@ -134,30 +150,18 @@ async function loadJsonInputFile(input: string, label: string) {
 export async function upsertRecipeRecord(input: {
   vault: string
   payload: RecipePayload
+  clearedFields?: ReadonlySet<string>
 }) {
   const core = await loadRecipeCoreRuntime()
 
   try {
-    const result = await core.upsertRecipe({
-      vaultRoot: input.vault,
-      recipeId: input.payload.recipeId,
-      slug: input.payload.slug,
-      title: input.payload.title,
-      status: input.payload.status,
-      summary: input.payload.summary,
-      cuisine: input.payload.cuisine,
-      dishType: input.payload.dishType,
-      source: input.payload.source,
-      servings: input.payload.servings,
-      prepTimeMinutes: input.payload.prepTimeMinutes,
-      cookTimeMinutes: input.payload.cookTimeMinutes,
-      totalTimeMinutes: input.payload.totalTimeMinutes,
-      tags: input.payload.tags,
-      ingredients: input.payload.ingredients,
-      steps: input.payload.steps,
-      relatedGoalIds: input.payload.relatedGoalIds,
-      relatedConditionIds: input.payload.relatedConditionIds,
-    })
+    const result = await core.upsertRecipe(
+      buildRecipeCoreInput({
+        vault: input.vault,
+        payload: input.payload,
+        clearedFields: input.clearedFields,
+      }),
+    )
 
     return {
       vault: input.vault,
@@ -193,6 +197,74 @@ export async function upsertRecipeRecordFromInput(input: {
     vault: input.vault,
     payload,
   })
+}
+
+export async function editRecipeRecord(input: {
+  vault: string
+  lookup: string
+  inputFile?: string
+  set?: string[]
+  clear?: string[]
+}) {
+  const recipe = await requireRecipeRecord(input.vault, input.lookup)
+  const payload = buildRecipePayload(recipe)
+  const patched = await applyRecordPatch({
+    record: payload,
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    patchLabel: 'recipe payload',
+  })
+  const patchedPayload = parseRecipePayload({
+    ...patched.record,
+    recipeId: recipe.recipeId,
+  })
+
+  await upsertRecipeRecord({
+    vault: input.vault,
+    payload: patchedPayload,
+    clearedFields: patched.clearedFields,
+  })
+
+  return showRecipeRecord(input.vault, recipe.recipeId)
+}
+
+export async function deleteRecipeRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  const recipe = await requireRecipeRecord(input.vault, input.lookup)
+  const normalizedLookup = input.lookup.trim()
+  const core = await loadRecipeCoreRuntime()
+
+  try {
+    await core.deleteRecipe({
+      vaultRoot: input.vault,
+      recipeId: RECIPE_ID_PATTERN.test(normalizedLookup)
+        ? normalizedLookup
+        : recipe.recipeId,
+      slug: normalizedLookup,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      VAULT_RECIPE_MISSING: {
+        code: 'not_found',
+        message: `No recipe found for "${input.lookup}".`,
+      },
+      VAULT_INVALID_RECIPE: {
+        code: 'contract_invalid',
+      },
+    })
+  }
+
+  return {
+    vault: input.vault,
+    entityId: recipe.recipeId,
+    lookupId: recipe.recipeId,
+    kind: 'recipe',
+    deleted: true as const,
+    retainedPaths: [],
+  }
 }
 
 export async function showRecipeRecord(vault: string, lookup: string) {
@@ -247,16 +319,10 @@ export async function listRecipeRecords(input: {
       }
     })
 
-  return {
-    vault: input.vault,
-    filters: {
-      status: input.status ?? null,
-      limit: input.limit,
-    },
-    items,
-    count: items.length,
-    nextCursor: null,
-  }
+  return asListEnvelope(input.vault, {
+    status: input.status ?? null,
+    limit: input.limit,
+  }, items)
 }
 
 async function requireRecipeRecord(vault: string, lookup: string) {
@@ -280,6 +346,82 @@ async function requireRecipeRecord(vault: string, lookup: string) {
       },
     })
   }
+}
+
+interface RecipeCoreUpsertInput {
+  vaultRoot: string
+  recipeId?: string
+  slug?: string
+  title?: string
+  status?: string
+  summary?: string
+  cuisine?: string
+  dishType?: string
+  source?: string
+  servings?: number | null
+  prepTimeMinutes?: number | null
+  cookTimeMinutes?: number | null
+  totalTimeMinutes?: number | null
+  tags?: string[]
+  ingredients?: string[]
+  steps?: string[]
+  relatedGoalIds?: string[]
+  relatedConditionIds?: string[]
+}
+
+function buildRecipeCoreInput(input: {
+  vault: string
+  payload: RecipePayload
+  clearedFields?: ReadonlySet<string>
+}): RecipeCoreUpsertInput {
+  const clearedFields = input.clearedFields ?? new Set<string>()
+  const resetTotalTimeMinutes =
+    !clearedFields.has('totalTimeMinutes') &&
+    (clearedFields.has('prepTimeMinutes') || clearedFields.has('cookTimeMinutes'))
+
+  return compactObject({
+    vaultRoot: input.vault,
+    recipeId: input.payload.recipeId,
+    slug: clearedFields.has('slug') ? undefined : input.payload.slug,
+    title: input.payload.title,
+    status: clearedFields.has('status') ? 'saved' : input.payload.status,
+    summary: clearedFields.has('summary') ? '' : input.payload.summary,
+    cuisine: clearedFields.has('cuisine') ? '' : input.payload.cuisine,
+    dishType: clearedFields.has('dishType') ? '' : input.payload.dishType,
+    source: clearedFields.has('source') ? '' : input.payload.source,
+    servings: clearedFields.has('servings') ? null : input.payload.servings,
+    prepTimeMinutes: clearedFields.has('prepTimeMinutes')
+      ? null
+      : input.payload.prepTimeMinutes,
+    cookTimeMinutes: clearedFields.has('cookTimeMinutes')
+      ? null
+      : input.payload.cookTimeMinutes,
+    totalTimeMinutes:
+      clearedFields.has('totalTimeMinutes') || resetTotalTimeMinutes
+        ? null
+        : input.payload.totalTimeMinutes,
+    tags: clearedFields.has('tags') ? [] : input.payload.tags,
+    ingredients: clearedFields.has('ingredients') ? [] : input.payload.ingredients,
+    steps: clearedFields.has('steps') ? [] : input.payload.steps,
+    relatedGoalIds: clearedFields.has('relatedGoalIds')
+      ? []
+      : input.payload.relatedGoalIds,
+    relatedConditionIds: clearedFields.has('relatedConditionIds')
+      ? []
+      : input.payload.relatedConditionIds,
+  }) as RecipeCoreUpsertInput
+}
+
+function buildRecipePayload(recipe: RecipeReadModel): RecipePayload {
+  const {
+    schemaVersion: _schemaVersion,
+    docType: _docType,
+    relativePath: _relativePath,
+    markdown: _markdown,
+    ...payload
+  } = recipe
+
+  return structuredClone(payload) as RecipePayload
 }
 
 async function readRecipeEntries(vaultRoot: string) {

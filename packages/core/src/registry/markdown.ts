@@ -59,6 +59,13 @@ interface UpsertMarkdownRegistryDocumentInput {
   audit: MarkdownRegistryUpsertAuditInput;
 }
 
+interface DeleteMarkdownRegistryDocumentInput {
+  vaultRoot: string;
+  operationType: string;
+  summary: string;
+  relativePath: string;
+}
+
 interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord extends ExistingMarkdownRegistryRecord> {
   existingRecord: TRecord | null;
   recordId?: string;
@@ -227,6 +234,27 @@ export async function upsertMarkdownRegistryDocument({
   });
 
   return stagedAudit.relativePath;
+}
+
+export async function deleteMarkdownRegistryDocument({
+  vaultRoot,
+  operationType,
+  summary,
+  relativePath,
+}: DeleteMarkdownRegistryDocumentInput): Promise<{
+  relativePath: string;
+}> {
+  return runCanonicalWrite({
+    vaultRoot,
+    operationType,
+    summary,
+    mutate: async ({ batch }) => {
+      await batch.stageDelete(relativePath);
+      return {
+        relativePath,
+      };
+    },
+  });
 }
 
 export async function writeMarkdownRegistryRecord<TRecord>({

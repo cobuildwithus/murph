@@ -6,11 +6,21 @@ import {
   showResultSchema,
   slugSchema,
 } from '../vault-cli-contracts.js'
+import {
+  deleteEventRecord,
+  editEventRecord,
+} from '../usecases/event-record-mutations.js'
+import { showEventRecord } from '../usecases/provider-event.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import {
   eventScaffoldKindSchema,
 } from './event-command-helpers.js'
 import { registerLedgerEventEntityGroup } from './health-command-factory.js'
+import {
+  createEntityDeleteCommandConfig,
+  createEntityEditCommandConfig,
+  dayKeyPolicySchema,
+} from './record-mutation-command-helpers.js'
 
 const eventIdSchema = z
   .string()
@@ -108,5 +118,47 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultCliServices) 
         })
       },
     },
+    additionalCommands: [
+      createEntityEditCommandConfig({
+        arg: {
+          name: 'id',
+          schema: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
+        },
+        description:
+          'Edit one canonical event by merging a partial JSON patch or one or more path assignments into the saved record.',
+        hint:
+          'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the local-calendar day stays explicit.',
+        options: {
+          dayKeyPolicy: dayKeyPolicySchema.optional(),
+        },
+        async run(input) {
+          const result = await editEventRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+            entityLabel: 'event',
+            inputFile: input.inputFile,
+            set: input.set,
+            clear: input.clear,
+            dayKeyPolicy: input.dayKeyPolicy,
+          })
+
+          return showEventRecord(input.vault, result.lookupId)
+        },
+      }),
+      createEntityDeleteCommandConfig({
+        arg: {
+          name: 'id',
+          schema: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
+        },
+        description: 'Delete one canonical event by event id.',
+        run(input) {
+          return deleteEventRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+            entityLabel: 'event',
+          })
+        },
+      }),
+    ],
   })
 }

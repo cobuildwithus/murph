@@ -46,6 +46,14 @@ interface ShowEnvelope {
   }
 }
 
+interface DeleteEnvelope {
+  entityId: string
+  lookupId: string
+  kind: string
+  deleted: true
+  retainedPaths: string[]
+}
+
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
     description: 'intervention slice test cli',
@@ -85,6 +93,22 @@ test('intervention add schema exposes the freeform intervention capture surface'
   assert.equal('occurredAt' in schema.options.properties, true)
   assert.equal('source' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
+})
+
+test('intervention edit/delete schemas expose shared record mutation options', async () => {
+  const editSchema = JSON.parse(
+    await runSliceCliRaw(['intervention', 'edit', '--schema']),
+  ) as SchemaEnvelope
+  const deleteSchema = JSON.parse(
+    await runSliceCliRaw(['intervention', 'delete', '--schema']),
+  ) as SchemaEnvelope
+
+  assert.equal('input' in editSchema.options.properties, true)
+  assert.equal('set' in editSchema.options.properties, true)
+  assert.equal('clear' in editSchema.options.properties, true)
+  assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
+  assert.deepEqual(editSchema.options.required, ['vault'])
+  assert.deepEqual(deleteSchema.options.required, ['vault'])
 })
 
 test('intervention add help uses a positional text argument', async () => {
@@ -275,6 +299,79 @@ test.sequential(
       assert.equal(invalidTimestamp.ok, false)
       assert.equal(invalidTimestamp.error.code, 'VALIDATION_ERROR')
       assert.match(invalidTimestamp.error.message ?? '', /Invalid ISO datetime/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'intervention edit/delete mutate and remove the saved intervention_session event',
+  async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), 'healthybob-cli-intervention-edit-'),
+    )
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const created = await runCli<InterventionAddEnvelope>([
+        'intervention',
+        'add',
+        '20 min sauna after lifting.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(created.ok, true)
+
+      const edited = await runCli<ShowEnvelope>([
+        'intervention',
+        'edit',
+        requireData(created).eventId,
+        '--set',
+        'note=Cooldown sauna after lifting.',
+        '--set',
+        'durationMinutes=25',
+        '--set',
+        'title=25-minute sauna',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(edited.ok, true)
+      assert.equal(edited.meta?.command, 'intervention edit')
+      assert.equal(requireData(edited).entity.kind, 'intervention_session')
+      assert.equal(requireData(edited).entity.data.note, 'Cooldown sauna after lifting.')
+      assert.equal(requireData(edited).entity.data.durationMinutes, 25)
+      assert.equal(requireData(edited).entity.title, '25-minute sauna')
+
+      const deleted = await runCli<DeleteEnvelope>([
+        'intervention',
+        'delete',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(deleted.ok, true)
+      assert.equal(deleted.meta?.command, 'intervention delete')
+      assert.equal(requireData(deleted).entityId, requireData(created).eventId)
+      assert.equal(requireData(deleted).kind, 'intervention_session')
+      assert.equal(requireData(deleted).deleted, true)
+
+      const missing = await runCli([
+        'event',
+        'show',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(missing.ok, false)
+      assert.equal(missing.error?.code, 'not_found')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

@@ -1,4 +1,5 @@
 import {
+  deleteMarkdownRegistryDocument,
   loadMarkdownRegistryDocuments,
   type MarkdownRegistryUpsertTarget,
   readRegistryRecord,
@@ -31,6 +32,8 @@ interface CreateMarkdownRegistryApiOptions<TRecord extends RegistryApiRecord> {
   createRecordId: () => string;
   operationType: string;
   summary: (recordId: string) => string;
+  deleteOperationType?: string;
+  deleteSummary?: (recordId: string) => string;
   audit: {
     action: MarkdownRegistryAuditAction;
     commandName: string;
@@ -57,6 +60,12 @@ interface ReadMarkdownRegistryApiRecordInput {
   slug?: string;
 }
 
+interface DeleteMarkdownRegistryApiRecordInput {
+  vaultRoot: string;
+  recordId?: string;
+  slug?: string;
+}
+
 interface ResolveExistingMarkdownRegistryApiRecordInput {
   vaultRoot: string;
   recordId?: string;
@@ -78,6 +87,8 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
   createRecordId,
   operationType,
   summary,
+  deleteOperationType,
+  deleteSummary,
   audit,
 }: CreateMarkdownRegistryApiOptions<TRecord>) {
   async function loadRecords(vaultRoot: string): Promise<TRecord[]> {
@@ -180,6 +191,35 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
     });
   }
 
+  async function deleteRecord({
+    vaultRoot,
+    recordId,
+    slug,
+  }: DeleteMarkdownRegistryApiRecordInput): Promise<{
+    record: TRecord;
+  }> {
+    const record = await readRecord({
+      vaultRoot,
+      recordId,
+      slug,
+    });
+
+    if (!deleteOperationType || !deleteSummary) {
+      throw new Error("Markdown registry delete is not configured for this record type.");
+    }
+
+    await deleteMarkdownRegistryDocument({
+      vaultRoot,
+      operationType: deleteOperationType,
+      summary: deleteSummary(getRecordId(record)),
+      relativePath: record.relativePath,
+    });
+
+    return {
+      record,
+    };
+  }
+
   return {
     loadRecords,
     selectExistingRecord,
@@ -187,5 +227,6 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
     listRecords: loadRecords,
     upsertRecord,
     readRecord,
+    deleteRecord,
   };
 }

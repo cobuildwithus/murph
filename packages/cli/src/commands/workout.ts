@@ -14,7 +14,16 @@ import {
   saveWorkoutFormat,
   showWorkoutFormat,
 } from '../usecases/workout-format.js'
-import { addWorkoutRecord } from '../usecases/workout.js'
+import {
+  addWorkoutRecord,
+  deleteWorkoutRecord,
+  editWorkoutRecord,
+} from '../usecases/workout.js'
+import {
+  createDirectEntityDeleteCommandDefinition,
+  createDirectEntityEditCommandDefinition,
+  dayKeyPolicySchema,
+} from './record-mutation-command-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
@@ -115,6 +124,50 @@ export function registerWorkoutCommands(
       })
     },
   })
+
+  workout.command('edit', createDirectEntityEditCommandDefinition({
+    arg: {
+      name: 'id',
+      schema: z
+        .string()
+        .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical workout event id in evt_* form.')
+        .describe('Canonical workout event id such as evt_<ULID>.'),
+    },
+    description:
+      'Edit one workout session by merging a partial JSON patch or one or more path assignments into the saved activity event.',
+    hint:
+      'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved workout day stays explicit.',
+    options: {
+      dayKeyPolicy: dayKeyPolicySchema.optional(),
+    },
+    run(input) {
+      return editWorkoutRecord({
+        vault: input.vault,
+        lookup: input.lookup,
+        inputFile: input.inputFile,
+        set: input.set,
+        clear: input.clear,
+        dayKeyPolicy: input.dayKeyPolicy,
+      })
+    },
+  }))
+
+  workout.command('delete', createDirectEntityDeleteCommandDefinition({
+    arg: {
+      name: 'id',
+      schema: z
+        .string()
+        .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical workout event id in evt_* form.')
+        .describe('Canonical workout event id such as evt_<ULID>.'),
+    },
+    description: 'Delete one workout activity_session event.',
+    run(input) {
+      return deleteWorkoutRecord({
+        vault: input.vault,
+        lookup: input.lookup,
+      })
+    },
+  }))
 
   const format = Cli.create('format', {
     description:

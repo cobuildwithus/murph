@@ -7,6 +7,8 @@ import {
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import {
+  deleteMealRecord,
+  editMealRecord,
   listMealRecords,
   mealLookupSchema,
   rawImportManifestResultSchema,
@@ -16,6 +18,11 @@ import {
 import { loadImportersRuntimeModule } from '../usecases/runtime.js'
 import type { VaultCliServices } from '../vault-cli-services.js'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
+import {
+  createEntityDeleteCommandConfig,
+  createEntityEditCommandConfig,
+  dayKeyPolicySchema,
+} from './record-mutation-command-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
@@ -102,5 +109,44 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
         return showMealManifest(input.vault, input.id)
       },
     },
+    additionalCommands: [
+      createEntityEditCommandConfig({
+        arg: {
+          name: 'id',
+          schema: mealLookupSchema,
+        },
+        description:
+          'Edit one meal by merging a partial JSON patch or one or more path assignments into the saved event.',
+        hint:
+          'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved meal day stays explicit.',
+        options: {
+          dayKeyPolicy: dayKeyPolicySchema.optional(),
+        },
+        run(input) {
+          return editMealRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+            inputFile: input.inputFile,
+            set: input.set,
+            clear: input.clear,
+            dayKeyPolicy: input.dayKeyPolicy,
+          })
+        },
+      }),
+      createEntityDeleteCommandConfig({
+        arg: {
+          name: 'id',
+          schema: mealLookupSchema,
+        },
+        description:
+          'Delete one meal event while retaining any immutable raw artifacts and manifest files.',
+        run(input) {
+          return deleteMealRecord({
+            vault: input.vault,
+            lookup: input.lookup,
+          })
+        },
+      }),
+    ],
   })
 }

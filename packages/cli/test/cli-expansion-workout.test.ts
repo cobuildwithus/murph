@@ -74,6 +74,14 @@ interface WorkoutFormatListEnvelope {
   count: number
 }
 
+interface DeleteEnvelope {
+  entityId: string
+  lookupId: string
+  kind: string
+  deleted: true
+  retainedPaths: string[]
+}
+
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
     description: 'workout slice test cli',
@@ -128,6 +136,22 @@ test('workout add schema exposes the freeform workout capture surface', async ()
   assert.equal('occurredAt' in schema.options.properties, true)
   assert.equal('source' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
+})
+
+test('workout edit/delete schemas expose shared record mutation options', async () => {
+  const editSchema = JSON.parse(
+    await runSliceCliRaw(['workout', 'edit', '--schema']),
+  ) as SchemaEnvelope
+  const deleteSchema = JSON.parse(
+    await runSliceCliRaw(['workout', 'delete', '--schema']),
+  ) as SchemaEnvelope
+
+  assert.equal('input' in editSchema.options.properties, true)
+  assert.equal('set' in editSchema.options.properties, true)
+  assert.equal('clear' in editSchema.options.properties, true)
+  assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
+  assert.deepEqual(editSchema.options.required, ['vault'])
+  assert.deepEqual(deleteSchema.options.required, ['vault'])
 })
 
 test('workout add help uses a positional text argument', async () => {
@@ -589,6 +613,82 @@ test.sequential(
       assert.equal(invalidTimestamp.ok, false)
       assert.equal(invalidTimestamp.error.code, 'VALIDATION_ERROR')
       assert.match(invalidTimestamp.error.message ?? '', /Invalid ISO datetime/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'workout edit/delete mutate and remove the saved activity_session event',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-edit-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const created = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        'Went for a 45-minute ride.',
+        '--distance-km',
+        '15',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(created.ok, true)
+
+      const edited = await runCli<ShowEnvelope>([
+        'workout',
+        'edit',
+        requireData(created).eventId,
+        '--set',
+        'note=Easy recovery ride.',
+        '--set',
+        'durationMinutes=50',
+        '--set',
+        'title=50-minute ride',
+        '--clear',
+        'distanceKm',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(edited.ok, true)
+      assert.equal(edited.meta?.command, 'workout edit')
+      assert.equal(requireData(edited).entity.kind, 'activity_session')
+      assert.equal(requireData(edited).entity.data.note, 'Easy recovery ride.')
+      assert.equal(requireData(edited).entity.data.durationMinutes, 50)
+      assert.equal(requireData(edited).entity.data.distanceKm, undefined)
+      assert.equal(requireData(edited).entity.title, '50-minute ride')
+
+      const deleted = await runCli<DeleteEnvelope>([
+        'workout',
+        'delete',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(deleted.ok, true)
+      assert.equal(deleted.meta?.command, 'workout delete')
+      assert.equal(requireData(deleted).entityId, requireData(created).eventId)
+      assert.equal(requireData(deleted).kind, 'activity_session')
+      assert.equal(requireData(deleted).deleted, true)
+
+      const missing = await runCli([
+        'event',
+        'show',
+        requireData(created).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(missing.ok, false)
+      assert.equal(missing.error?.code, 'not_found')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

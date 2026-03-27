@@ -7,6 +7,9 @@ import { test } from "vitest";
 import { initializeVault, readJsonlRecords, VaultError } from "../src/index.js";
 import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.js";
 import {
+  deleteFood,
+  deleteProvider,
+  deleteRecipe,
   listAllergies,
   listConditions,
   listFoods,
@@ -284,7 +287,126 @@ test("providers and recipes use first-class markdown registry reads without chan
         title: "Labcorp West",
       }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "HB_PROVIDER_CONFLICT",
+      error instanceof VaultError && error.code === "PROVIDER_CONFLICT",
+  );
+});
+
+test("food, provider, and recipe deletes remove the markdown registry record cleanly", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-bank-deletes");
+  await initializeVault({ vaultRoot });
+
+  const provider = await upsertProvider({
+    vaultRoot,
+    title: "Labcorp",
+    slug: "labcorp",
+    status: "active",
+    body: "# Labcorp\n",
+  });
+  const food = await upsertFood({
+    vaultRoot,
+    title: "Regular Acai Bowl",
+    slug: "regular-acai-bowl",
+    status: "active",
+  });
+  const recipe = await upsertRecipe({
+    vaultRoot,
+    title: "Sheet Pan Salmon Bowls",
+    slug: "sheet-pan-salmon-bowls",
+    status: "saved",
+    ingredients: ["2 salmon fillets"],
+    steps: ["Roast the salmon."],
+  });
+
+  const deletedProvider = await deleteProvider({
+    vaultRoot,
+    providerId: provider.providerId,
+  });
+  const deletedFood = await deleteFood({
+    vaultRoot,
+    foodId: food.record.foodId,
+  });
+  const deletedRecipe = await deleteRecipe({
+    vaultRoot,
+    recipeId: recipe.record.recipeId,
+  });
+
+  assert.equal(deletedProvider.providerId, provider.providerId);
+  assert.equal(deletedProvider.deleted, true);
+  assert.equal(deletedFood.foodId, food.record.foodId);
+  assert.equal(deletedFood.deleted, true);
+  assert.equal(deletedRecipe.recipeId, recipe.record.recipeId);
+  assert.equal(deletedRecipe.deleted, true);
+
+  await assert.rejects(() =>
+    fs.access(path.join(vaultRoot, deletedProvider.relativePath)));
+  await assert.rejects(() =>
+    fs.access(path.join(vaultRoot, deletedFood.relativePath)));
+  await assert.rejects(() =>
+    fs.access(path.join(vaultRoot, deletedRecipe.relativePath)));
+
+  await assert.rejects(
+    () =>
+      readProvider({
+        vaultRoot,
+        providerId: provider.providerId,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "PROVIDER_MISSING",
+  );
+  await assert.rejects(
+    () =>
+      readFood({
+        vaultRoot,
+        foodId: food.record.foodId,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FOOD_MISSING",
+  );
+  await assert.rejects(
+    () =>
+      readRecipe({
+        vaultRoot,
+        recipeId: recipe.record.recipeId,
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RECIPE_MISSING",
+  );
+});
+
+test("providers surface renamed slug and frontmatter validation codes", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-provider-errors");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertProvider({
+        vaultRoot,
+        title: "Broken Provider",
+        slug: "!!!",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "PROVIDER_SLUG_INVALID",
+  );
+
+  await fs.mkdir(path.join(vaultRoot, "bank/providers"), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, "bank/providers/broken.md"),
+    [
+      "---",
+      "providerId: prov_01JNV422Y2M5ZBV64ZP4N1DRB1",
+      "slug: broken",
+      "---",
+      "# Broken Provider",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      readProvider({
+        vaultRoot,
+        slug: "broken",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "PROVIDER_FRONTMATTER_INVALID",
   );
 });
 

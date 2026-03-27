@@ -35,6 +35,7 @@ import {
   checkpointExperiment,
   copyRawArtifact,
   createExperiment,
+  deleteEvent,
   ensureJournalDay,
   importDocument,
   importAssessmentResponse,
@@ -211,7 +212,7 @@ test("initializeVault rejects invalid generated metadata before writing canonica
   await assert.rejects(() => fs.access(path.join(vaultRoot, "CORE.md")));
 });
 
-test("upsertEvent stores the vault-local dayKey and timezone when UTC crosses midnight", async () => {
+test("upsertEvent stores the vault-local dayKey without persisting the fallback timezone when UTC crosses midnight", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-event-local-day");
   await initializeVault({
     vaultRoot,
@@ -240,7 +241,228 @@ test("upsertEvent stores the vault-local dayKey and timezone when UTC crosses mi
 
   assert.ok(eventRecord);
   assert.equal(eventRecord.dayKey, "2026-03-27");
-  assert.equal(eventRecord.timeZone, "Australia/Melbourne");
+  assert.equal(eventRecord.timeZone, undefined);
+});
+
+test("upsertEvent rejects specialized event kinds on the generic public boundary", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-event-kind-guard");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertEvent({
+        vaultRoot,
+        payload: {
+          id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A9",
+          kind: "meal",
+          occurredAt: "2026-03-12T12:32:00.000Z",
+          title: "Lunch bowl",
+          note: "Chicken, rice, and avocado.",
+          mealId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
+          photoPaths: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
+          audioPaths: [],
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_KIND_INVALID",
+  );
+});
+
+test("upsertEvent appends new events without parsing unrelated invalid shards", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-event-fast-path");
+  await initializeVault({ vaultRoot });
+
+  const invalidShardPath = path.join(vaultRoot, "ledger/events/2026/2026-01.jsonl");
+  await fs.mkdir(path.dirname(invalidShardPath), { recursive: true });
+  await fs.writeFile(invalidShardPath, "{\"broken\":\n", "utf8");
+
+  const result = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-03-12T08:15:00.000Z",
+      title: "Morning note",
+      note: "Should still append successfully.",
+    },
+  });
+  const ledgerRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.ledgerFile,
+  });
+  const eventRecord = ledgerRecords.find(
+    (record) => expectRecord<{ id?: string }>(record).id === result.eventId,
+  ) as EventRecord | undefined;
+
+  assert.equal(result.created, true);
+  assert.ok(eventRecord);
+  assert.equal(eventRecord.note, "Should still append successfully.");
+});
+
+test("upsertEvent rewrites existing events into the correct shard and deleteEvent removes them", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-event-rewrite");
+  await initializeVault({ vaultRoot });
+
+  const eventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1A2";
+  const marchResult = await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: eventId,
+      kind: "note",
+      occurredAt: "2026-03-12T08:15:00.000Z",
+      title: "Morning note",
+      note: "Original note.",
+    },
+  });
+  const aprilResult = await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: eventId,
+      kind: "note",
+      occurredAt: "2026-04-02T07:00:00.000Z",
+      title: "Morning note",
+      note: "Updated note.",
+    },
+  });
+
+  assert.equal(marchResult.created, true);
+  assert.equal(aprilResult.created, false);
+  assert.notEqual(aprilResult.ledgerFile, marchResult.ledgerFile);
+
+  const aprilRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: aprilResult.ledgerFile,
+  });
+
+  await assert.rejects(
+    () =>
+      readJsonlRecords({
+        vaultRoot,
+        relativePath: marchResult.ledgerFile,
+      }),
+    (error: unknown) => {
+      if (!error || typeof error !== "object") {
+        return false;
+      }
+
+      return "code" in error && (error as { code?: unknown }).code === "VAULT_FILE_MISSING";
+    },
+  );
+  const updatedEvent = aprilRecords.find(
+    (record) => expectRecord<{ id?: string }>(record).id === eventId,
+  ) as EventRecord | undefined;
+  assert.ok(updatedEvent);
+  assert.equal(updatedEvent.note, "Updated note.");
+
+  const deleted = await deleteEvent({
+    vaultRoot,
+    eventId,
+  });
+  assert.equal(deleted.eventId, eventId);
+  assert.equal(deleted.kind, "note");
+  assert.deepEqual(deleted.retainedPaths, []);
+  assert.equal(deleted.deleted, true);
+
+  await assert.rejects(
+    () =>
+      readJsonlRecords({
+        vaultRoot,
+        relativePath: aprilResult.ledgerFile,
+      }),
+    (error: unknown) => {
+      if (!error || typeof error !== "object") {
+        return false;
+      }
+
+      return (
+        "code" in error &&
+        ((error as { code?: unknown }).code === "ENOENT" ||
+          (error as { code?: unknown }).code === "VAULT_FILE_MISSING")
+      );
+    },
+  );
+});
+
+test("deleteEvent removes duplicate stored event entries across shards while preserving other events", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-event-delete-duplicates");
+  const sourceRoot = await makeTempDirectory("healthybob-source");
+  await initializeVault({ vaultRoot });
+
+  const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-12T08:15:00.000Z",
+    photoPath,
+    note: "Meal that should be deleted.",
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+  const eventId = mealEvent.id;
+
+  const expectedRetainedPaths = [
+    ...(mealEvent.rawRefs ?? []),
+    ...(mealEvent.photoPaths ?? []),
+    ...(mealEvent.audioPaths ?? []),
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .reduce((acc, value) => acc.add(value), new Set<string>());
+
+  const aprilResult = await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1B1",
+      kind: "note",
+      occurredAt: "2026-04-03T08:00:00.000Z",
+      title: "Other note",
+      note: "This note should remain in April.",
+    },
+  });
+
+  await fs.appendFile(
+    path.join(vaultRoot, aprilResult.ledgerFile),
+    `${JSON.stringify(mealEvent)}\n`,
+  );
+
+  const deleted = await deleteEvent({ vaultRoot, eventId });
+  assert.equal(deleted.eventId, eventId);
+  assert.equal(deleted.kind, "meal");
+  assert.deepEqual(
+    deleted.retainedPaths,
+    [...expectedRetainedPaths].sort((left, right) => left.localeCompare(right)),
+  );
+  assert.equal(deleted.deleted, true);
+
+  await assert.rejects(
+    () =>
+      readJsonlRecords({
+        vaultRoot,
+        relativePath: meal.eventPath,
+      }),
+    (error: unknown) => {
+      if (!error || typeof error !== "object") {
+        return false;
+      }
+
+      return (
+        "code" in error &&
+        ((error as { code?: unknown }).code === "ENOENT" ||
+          (error as { code?: unknown }).code === "VAULT_FILE_MISSING")
+      );
+    },
+  );
+
+  const aprilRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: aprilResult.ledgerFile,
+  });
+  assert.equal(
+    aprilRecords.some((record) => expectRecord<{ id?: string }>(record).id === eventId),
+    false,
+  );
+  assert.equal(aprilRecords.length, 1);
 });
 
 test("loadVault backfills additive metadata defaults in memory and repairVault persists them", async () => {
@@ -832,7 +1054,7 @@ test("createExperiment rejects invalid or conflicting existing experiment docume
         startedOn: "2026-03-11T08:00:00.000Z",
       }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "HB_FRONTMATTER_INVALID",
+      error instanceof VaultError && error.code === "FRONTMATTER_INVALID",
   );
 
   await assert.rejects(
@@ -868,7 +1090,7 @@ test("append-only helpers block traversal and validateVault reports tampered cor
   assert.equal(validation.valid, false);
   assert.match(
     validation.issues.map((issue) => issue.code).join(","),
-    /HB_FRONTMATTER_INVALID/,
+    /FRONTMATTER_INVALID/,
   );
 });
 
@@ -936,12 +1158,12 @@ test("validateVault accumulates malformed journal and experiment frontmatter iss
 
   assert.equal(validation.valid, false);
   assert.equal(
-    validation.issues.filter((issue) => issue.code === "HB_FRONTMATTER_INVALID").length,
+    validation.issues.filter((issue) => issue.code === "FRONTMATTER_INVALID").length,
     2,
   );
   assert.deepEqual(
     validation.issues
-      .filter((issue) => issue.code === "HB_FRONTMATTER_INVALID")
+      .filter((issue) => issue.code === "FRONTMATTER_INVALID")
       .map((issue) => issue.path)
       .sort(),
     [
@@ -1065,7 +1287,7 @@ test("validateVault accumulates missing directory and malformed event issues", a
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_EVENT_INVALID" &&
+        issue.code === "EVENT_INVALID" &&
         issue.path === "ledger/events/2026/2026-03.jsonl",
     ),
   );
@@ -1164,21 +1386,21 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_REFERENCE_MISSING" &&
+        issue.code === "RAW_REFERENCE_MISSING" &&
         issue.path === documentImport.raw.relativePath,
     ),
   );
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.path === documentImport.manifestPath,
     ),
   );
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_PROFILE_CURRENT_STALE" &&
+        issue.code === "PROFILE_CURRENT_STALE" &&
         issue.path === "bank/profile/current.md",
     ),
   );
@@ -1503,6 +1725,47 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
   assert.equal(typeof operation.actions[2]?.committedPayloadBase64, "string");
 });
 
+test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE_EMPTY", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-empty-write-batch");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      applyCanonicalWriteBatch({
+        vaultRoot,
+        operationType: "test_empty_batch",
+        summary: "reject empty staged actions",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "CANONICAL_WRITE_EMPTY",
+  );
+});
+
+test("WriteBatch rejects further mutations after commit with OPERATION_STATE_INVALID", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-terminal-write-batch");
+  await initializeVault({ vaultRoot });
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_terminal_batch",
+    summary: "commit and then reject further mutations",
+  });
+
+  await batch.stageTextWrite("notes/terminal-batch.txt", "first\n", {
+    overwrite: false,
+  });
+  await batch.commit();
+
+  await assert.rejects(
+    () =>
+      batch.stageTextWrite("notes/terminal-batch.txt", "second\n", {
+        overwrite: true,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "OPERATION_STATE_INVALID",
+  );
+});
+
 test("direct and batched text writes keep no-overwrite and append semantics aligned", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-vault");
   await initializeVault({ vaultRoot });
@@ -1566,7 +1829,7 @@ test("validateVault reports unresolved write operations", async () => {
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_OPERATION_UNRESOLVED" &&
+        issue.code === "OPERATION_UNRESOLVED" &&
         issue.path === batch.metadataRelativePath,
     ),
   );
@@ -1593,7 +1856,7 @@ test("validateVault reports raw artifact directories that are missing manifest.j
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes('missing manifest.json') &&
         issue.path === imported.manifestPath,
     ),
@@ -1720,7 +1983,7 @@ test("validateVault reports inbox capture roots that have neither envelope nor r
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_REFERENCE_MISSING" &&
+        issue.code === "RAW_REFERENCE_MISSING" &&
         issue.path === expectedEnvelopePath &&
         issue.message.includes("attachment recovery manifest"),
     ),
@@ -2056,7 +2319,7 @@ test("validateVault reports malformed raw manifests while allowing zero-artifact
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes("missing a valid relativePath") &&
         issue.path === "raw/documents/2026/03/malformed/manifest.json",
     ),
@@ -2064,7 +2327,7 @@ test("validateVault reports malformed raw manifests while allowing zero-artifact
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes('must remain inside "raw/documents/2026/03/malformed"') &&
         issue.path === "raw/documents/2026/03/malformed/manifest.json",
     ),
@@ -2148,7 +2411,7 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes("must be a JSON object") &&
         issue.path === "raw/documents/2026/03/array/manifest.json",
     ),
@@ -2156,7 +2419,7 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes("must provide an artifacts array") &&
         issue.path === "raw/documents/2026/03/missing-artifacts/manifest.json",
     ),
@@ -2164,7 +2427,7 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes("missing schemaVersion") &&
         issue.path === "raw/documents/2026/03/mismatched/manifest.json",
     ),
@@ -2172,7 +2435,7 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_RAW_MANIFEST_INVALID" &&
+        issue.code === "RAW_MANIFEST_INVALID" &&
         issue.message.includes('rawDirectory must equal "raw/documents/2026/03/mismatched"') &&
         issue.path === "raw/documents/2026/03/mismatched/manifest.json",
     ),
@@ -2238,14 +2501,14 @@ test("validateVault reports unresolved and malformed write operation metadata", 
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_OPERATION_UNRESOLVED" &&
+        issue.code === "OPERATION_UNRESOLVED" &&
         issue.path === ".runtime/operations/op-unresolved.json",
     ),
   );
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_OPERATION_INVALID" &&
+        issue.code === "OPERATION_INVALID" &&
         issue.path === ".runtime/operations/op-invalid.json",
     ),
   );
@@ -2304,7 +2567,7 @@ test("validateVault preserves unresolved write-operation error messages and vaul
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_OPERATION_UNRESOLVED" &&
+        issue.code === "OPERATION_UNRESOLVED" &&
         issue.path === ".runtime/operations/op-error.json" &&
         issue.message.includes("Last error: Network timeout"),
     ),
@@ -2312,7 +2575,7 @@ test("validateVault preserves unresolved write-operation error messages and vaul
   assert.ok(
     validation.issues.some(
       (issue) =>
-        issue.code === "HB_OPERATION_INVALID" &&
+        issue.code === "OPERATION_INVALID" &&
         issue.path === ".runtime/operations/op-invalid-shape.json" &&
         issue.message === "Write operation metadata has an unexpected shape.",
     ),
@@ -2336,7 +2599,7 @@ test("validateVault covers current profile success, missing-file, and unreadable
   const validState = await validateVault({ vaultRoot });
   assert.equal(validState.valid, true);
   assert.ok(
-    validState.issues.every((issue) => issue.code !== "HB_PROFILE_CURRENT_STALE"),
+    validState.issues.every((issue) => issue.code !== "PROFILE_CURRENT_STALE"),
   );
 
   const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
@@ -2347,7 +2610,7 @@ test("validateVault covers current profile success, missing-file, and unreadable
   assert.ok(
     missingCurrent.issues.some(
       (issue) =>
-        issue.code === "HB_PROFILE_CURRENT_STALE" &&
+        issue.code === "PROFILE_CURRENT_STALE" &&
         issue.message.includes("Current profile is missing") &&
         issue.path === "bank/profile/current.md",
     ),
@@ -2360,7 +2623,7 @@ test("validateVault covers current profile success, missing-file, and unreadable
   assert.ok(
     unreadableCurrent.issues.some(
       (issue) =>
-        issue.code === "HB_PROFILE_CURRENT_STALE" &&
+        issue.code === "PROFILE_CURRENT_STALE" &&
         issue.path === "bank/profile/current.md",
     ),
   );
@@ -2921,4 +3184,42 @@ test("high-level canonical mutation ports own inbox journal and experiment-note 
   );
   assert.match(experimentMarkdown, /## Inbox Experiment Notes/u);
   assert.match(experimentMarkdown, /Breakfast note from inbox/u);
+});
+
+test("updateVaultSummary rejects invalid metadata and malformed CORE frontmatter with renamed codes", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault-summary-errors");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      updateVaultSummary({
+        vaultRoot,
+        timezone: "Mars/Olympus",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_METADATA_INVALID",
+  );
+
+  await fs.writeFile(
+    path.join(vaultRoot, "CORE.md"),
+    [
+      "---",
+      "schemaVersion: hb.frontmatter.core.v1",
+      "docType: core",
+      "---",
+      "# Broken Core",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      updateVaultSummary({
+        vaultRoot,
+        title: "Still Broken",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "CORE_FRONTMATTER_INVALID",
+  );
 });
