@@ -1,9 +1,9 @@
-import type { HostedExecutionBundleRef } from "@healthybob/runtime-state";
+import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 import {
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
   type HostedExecutionSideEffectRecord,
-} from "@healthybob/assistant-runtime";
+} from "@murph/assistant-runtime";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {

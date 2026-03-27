@@ -1,10 +1,10 @@
-# Deploying the Cloudflare-hosted Healthy Bob execution plane
+# Deploying the Cloudflare-hosted Murph execution plane
 
 This document is the concrete deploy path for the current hosted architecture:
 
 - `apps/web` stays the public onboarding, billing, auth, and webhook control plane.
 - `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and operator/internal control routes.
-- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, and per-run env injection before running the one-shot Healthy Bob job and calling back into the worker for commit/finalize/outbox durability.
+- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, and per-run env injection before running the one-shot Murph job and calling back into the worker for commit/finalize/outbox durability.
 
 This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same filesystem-oriented runtime instead of inventing a second persistence model.
 
@@ -160,9 +160,9 @@ pnpm --dir apps/cloudflare test:workers
 Render the generated deploy artifacts from your shell environment:
 
 ```bash
-export CF_WORKER_NAME=healthybob-hosted-staging
-export CF_BUNDLES_BUCKET=healthybob-hosted-bundles-staging
-export CF_BUNDLES_PREVIEW_BUCKET=healthybob-hosted-bundles-staging-preview
+export CF_WORKER_NAME=hosted-runner-staging
+export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
+export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_CONTAINER_INSTANCE_TYPE=basic
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
@@ -246,7 +246,7 @@ pnpm --dir apps/cloudflare deploy:rollout -- --config ./.deploy/wrangler.generat
 Then smoke test the deployed worker:
 
 ```bash
-export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL=https://healthybob-hosted-staging.example.workers.dev
+export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL=https://hosted-runner-staging.example.workers.dev
 export HOSTED_EXECUTION_SMOKE_USER_ID=member_test_123
 export HOSTED_EXECUTION_SMOKE_VERSION_ID=<candidate-version-id>
 pnpm --dir apps/cloudflare deploy:smoke

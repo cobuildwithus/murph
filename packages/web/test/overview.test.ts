@@ -58,7 +58,67 @@ test("buildSuggestedCommand keeps the package-local example for direct package r
 });
 
 test("resolveConfiguredVaultRoot falls back to the saved default vault when env is unset", async () => {
-  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "hb-web-home-"));
+  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "murph-web-home-"));
+
+  try {
+    const savedVaultRoot = path.join(operatorHome, "vault");
+    await mkdir(path.join(operatorHome, ".murph"), { recursive: true });
+    await writeFile(
+      path.join(operatorHome, ".murph", "config.json"),
+      `${JSON.stringify({
+        schema: "murph.operator-config.v1",
+        defaultVault: "~/vault",
+        assistant: null,
+        updatedAt: "2026-03-23T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+
+    assert.equal(
+      await resolveConfiguredVaultRoot({
+        HOME: operatorHome,
+      }, "/repo/packages/web"),
+      savedVaultRoot,
+    );
+  } finally {
+    await rm(operatorHome, { force: true, recursive: true });
+  }
+});
+
+test("resolveConfiguredVaultRoot keeps explicit env precedence over the saved default vault", async () => {
+  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "murph-web-home-"));
+
+  try {
+    await mkdir(path.join(operatorHome, ".murph"), { recursive: true });
+    await writeFile(
+      path.join(operatorHome, ".murph", "config.json"),
+      `${JSON.stringify({
+        schema: "murph.operator-config.v1",
+        defaultVault: "~/vault",
+        assistant: null,
+        updatedAt: "2026-03-23T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+
+    assert.equal(
+      await resolveConfiguredVaultRoot(
+        {
+          VAULT: "fixtures/demo-web-vault",
+          [WEB_LAUNCH_CWD_ENV]: "/repo",
+          HOME: operatorHome,
+        },
+        "/repo/packages/web",
+      ),
+      "/repo/fixtures/demo-web-vault",
+    );
+  } finally {
+    await rm(operatorHome, { force: true, recursive: true });
+  }
+});
+
+test("resolveConfiguredVaultRoot falls back to the legacy saved default vault path", async () => {
+  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "web-home-"));
 
   try {
     const savedVaultRoot = path.join(operatorHome, "vault");
@@ -85,44 +145,12 @@ test("resolveConfiguredVaultRoot falls back to the saved default vault when env 
   }
 });
 
-test("resolveConfiguredVaultRoot keeps explicit env precedence over the saved default vault", async () => {
-  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "hb-web-home-"));
-
-  try {
-    await mkdir(path.join(operatorHome, ".healthybob"), { recursive: true });
-    await writeFile(
-      path.join(operatorHome, ".healthybob", "config.json"),
-      `${JSON.stringify({
-        schema: "healthybob.operator-config.v1",
-        defaultVault: "~/vault",
-        assistant: null,
-        updatedAt: "2026-03-23T00:00:00.000Z",
-      })}\n`,
-      "utf8",
-    );
-
-    assert.equal(
-      await resolveConfiguredVaultRoot(
-        {
-          VAULT: "fixtures/demo-web-vault",
-          [WEB_LAUNCH_CWD_ENV]: "/repo",
-          HOME: operatorHome,
-        },
-        "/repo/packages/web",
-      ),
-      "/repo/fixtures/demo-web-vault",
-    );
-  } finally {
-    await rm(operatorHome, { force: true, recursive: true });
-  }
-});
-
 test("resolveConfiguredVaultRoot ignores invalid saved operator config", async () => {
-  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "hb-web-home-"));
+  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "murph-web-home-"));
 
   try {
-    await mkdir(path.join(operatorHome, ".healthybob"), { recursive: true });
-    await writeFile(path.join(operatorHome, ".healthybob", "config.json"), "{", "utf8");
+    await mkdir(path.join(operatorHome, ".murph"), { recursive: true });
+    await writeFile(path.join(operatorHome, ".murph", "config.json"), "{", "utf8");
 
     assert.equal(
       await resolveConfiguredVaultRoot({
@@ -350,7 +378,7 @@ test("loadVaultOverview keeps weekly stats separated by unit for the same stream
       "ledger/samples/sleep/2026/2026-03.jsonl",
       [
         {
-          schemaVersion: "hb.sample.v1",
+          schemaVersion: "murph.sample.v1",
           id: "smp_sleep_hours_current",
           stream: "sleep",
           occurredAt: "2026-03-24T07:00:00Z",
@@ -360,7 +388,7 @@ test("loadVaultOverview keeps weekly stats separated by unit for the same stream
           source: "manual",
         },
         {
-          schemaVersion: "hb.sample.v1",
+          schemaVersion: "murph.sample.v1",
           id: "smp_sleep_minutes_current",
           stream: "sleep",
           occurredAt: "2026-03-24T08:00:00Z",
@@ -370,7 +398,7 @@ test("loadVaultOverview keeps weekly stats separated by unit for the same stream
           source: "manual",
         },
         {
-          schemaVersion: "hb.sample.v1",
+          schemaVersion: "murph.sample.v1",
           id: "smp_sleep_hours_previous",
           stream: "sleep",
           occurredAt: "2026-03-17T07:00:00Z",
@@ -380,7 +408,7 @@ test("loadVaultOverview keeps weekly stats separated by unit for the same stream
           source: "manual",
         },
         {
-          schemaVersion: "hb.sample.v1",
+          schemaVersion: "murph.sample.v1",
           id: "smp_sleep_minutes_previous",
           stream: "sleep",
           occurredAt: "2026-03-17T08:00:00Z",
@@ -438,7 +466,7 @@ test("loadVaultOverview uses the vault timezone for week windows at UTC day boun
       "ledger/samples/sleep/2026/2026-03.jsonl",
       [
         {
-          schemaVersion: "hb.sample.v1",
+          schemaVersion: "murph.sample.v1",
           id: "smp_sleep_boundary_current",
           stream: "sleep",
           recordedAt: "2026-03-23T21:00:00.000Z",
@@ -448,7 +476,7 @@ test("loadVaultOverview uses the vault timezone for week windows at UTC day boun
           source: "manual",
         },
         {
-          schemaVersion: "hb.sample.v1",
+          schemaVersion: "murph.sample.v1",
           id: "smp_sleep_boundary_previous",
           stream: "sleep",
           recordedAt: "2026-03-16T21:00:00.000Z",

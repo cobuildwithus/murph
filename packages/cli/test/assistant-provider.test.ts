@@ -263,10 +263,10 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   const result = await executeAssistantProviderTurn({
     abortSignal: abortController.signal,
     provider: 'codex-cli',
-    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
+    configOverrides: ['mcp_servers.murph_memory.command="node"'],
     continuityContext: 'Recent local conversation transcript:\nUser: prior question',
     env: {
-      PATH: '/tmp/healthybob-bin',
+      PATH: '/tmp/murph-bin',
     },
     workingDirectory: '/tmp/vault',
     systemPrompt: 'system prompt',
@@ -298,9 +298,9 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.equal(call?.abortSignal, abortController.signal)
   assert.equal(call?.codexCommand, '/opt/homebrew/bin/codex')
-  assert.deepEqual(call?.configOverrides, ['mcp_servers.healthybob_memory.command="node"'])
+  assert.deepEqual(call?.configOverrides, ['mcp_servers.murph_memory.command="node"'])
   assert.deepEqual(call?.env, {
-    PATH: '/tmp/healthybob-bin',
+    PATH: '/tmp/murph-bin',
   })
   assert.equal(call?.workingDirectory, '/tmp/vault')
   assert.equal(call?.resumeSessionId, 'thread-existing')
@@ -533,7 +533,7 @@ test('executeAssistantProviderTurn enables reasoning summary traces when request
 
   await executeAssistantProviderTurn({
     provider: 'codex-cli',
-    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
+    configOverrides: ['mcp_servers.murph_memory.command="node"'],
     workingDirectory: '/tmp/vault',
     userPrompt: 'hello',
     showThinkingTraces: true,
@@ -542,7 +542,7 @@ test('executeAssistantProviderTurn enables reasoning summary traces when request
 
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.deepEqual(call?.configOverrides, [
-    'mcp_servers.healthybob_memory.command="node"',
+    'mcp_servers.murph_memory.command="node"',
     'model_reasoning_summary="auto"',
     'hide_agent_reasoning=false',
   ])

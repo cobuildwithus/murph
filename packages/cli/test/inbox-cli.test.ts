@@ -6,7 +6,7 @@ import { test } from 'vitest'
 import {
   openSqliteRuntimeDatabase,
   resolveRuntimePaths,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 import {
   createIntegratedInboxCliServices,
   type InboxRunEvent,
@@ -934,7 +934,7 @@ function createFakeImessageDriver(input: {
 test.sequential(
   'inbox services cover init, source config, doctor, backfill, list/show/search, and meal promotion',
   async () => {
-    const fixture = await makeVaultFixture('healthybob-inbox-cli')
+    const fixture = await makeVaultFixture('murph-inbox-cli')
     const driver = createFakeImessageDriver({ photoPath: fixture.photoPath })
     const services = createIntegratedInboxCliServices({
       getHomeDirectory: () => fixture.homeRoot,
@@ -1059,7 +1059,7 @@ test.sequential(
 test.sequential(
   'vault-cli inbox init/source/doctor/remove emit contract-shaped envelopes',
   async () => {
-    const fixture = await makeVaultFixture('healthybob-inbox-command-envelope')
+    const fixture = await makeVaultFixture('murph-inbox-command-envelope')
     const services = createIntegratedInboxCliServices({
       getHomeDirectory: () => fixture.homeRoot,
       getPlatform: () => 'darwin',
@@ -1195,7 +1195,7 @@ test.sequential(
 test.sequential(
   'vault-cli inbox bootstrap composes init and setup without cross-wiring options',
   async () => {
-    const fixture = await makeVaultFixture('healthybob-inbox-bootstrap-command')
+    const fixture = await makeVaultFixture('murph-inbox-bootstrap-command')
     const writes: Array<{
       tools?: Record<string, {
         command?: string | null
@@ -1306,8 +1306,8 @@ test.sequential(
 )
 
 test.sequential('inbox bootstrap strict mode rejects unavailable configured whisper model paths', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-bootstrap-strict')
-  const toolRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-bootstrap-strict-tool-'))
+  const fixture = await makeVaultFixture('murph-inbox-bootstrap-strict')
+  const toolRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-bootstrap-strict-tool-'))
   const whisperCommand = await writeExecutableFile(
     toolRoot,
     'fake-whisper-cli',
@@ -1368,7 +1368,7 @@ test.sequential('inbox bootstrap strict mode rejects unavailable configured whis
 test.sequential(
   'vault-cli inbox list/show/search emit contract-shaped envelopes from runtime data',
   async () => {
-    const fixture = await makeVaultFixture('healthybob-inbox-runtime-envelope')
+    const fixture = await makeVaultFixture('murph-inbox-runtime-envelope')
     const services = createIntegratedInboxCliServices({
       getHomeDirectory: () => fixture.homeRoot,
       getPlatform: () => 'darwin',
@@ -1476,7 +1476,7 @@ test.sequential(
 )
 
 test.sequential('source add defaults the iMessage account identity to self when omitted', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-default-account')
+  const fixture = await makeVaultFixture('murph-inbox-default-account')
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
@@ -1511,7 +1511,7 @@ test.sequential('source add defaults the iMessage account identity to self when 
 })
 
 test.sequential('source add rejects the iMessage connector on Linux hosts', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-imessage-linux-add')
+  const fixture = await makeVaultFixture('murph-inbox-imessage-linux-add')
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'linux',
@@ -1543,7 +1543,7 @@ test.sequential('source add rejects the iMessage connector on Linux hosts', asyn
 })
 
 test.sequential('source add defaults the Telegram account identity to bot when omitted', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-telegram-default-account')
+  const fixture = await makeVaultFixture('murph-inbox-telegram-default-account')
   const services = createIntegratedInboxCliServices({
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
@@ -1574,7 +1574,7 @@ test.sequential('source add defaults the Telegram account identity to bot when o
 })
 
 test.sequential('source add defaults the Linq account identity to default when omitted', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-linq-default-account-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-linq-default-account-'))
   const services = createIntegratedInboxCliServices({
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
@@ -1609,7 +1609,7 @@ test.sequential('source add defaults the Linq account identity to default when o
 })
 
 test.sequential('sourceSetEnabled updates the persisted enabled flag for an existing connector', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-toggle-source')
+  const fixture = await makeVaultFixture('murph-inbox-toggle-source')
   const services = createIntegratedInboxCliServices({
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
@@ -1649,7 +1649,7 @@ test.sequential('sourceSetEnabled updates the persisted enabled flag for an exis
 })
 
 test.sequential('sourceSetEnabled refuses to enable an existing iMessage connector on Linux hosts', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-toggle-imessage-linux')
+  const fixture = await makeVaultFixture('murph-inbox-toggle-imessage-linux')
   const darwinServices = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
@@ -1701,7 +1701,7 @@ test.sequential('sourceSetEnabled refuses to enable an existing iMessage connect
 })
 
 test.sequential('source add email --provision reuses the single discovered AgentMail inbox after create is forbidden', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-single')
+  const fixture = await makeVaultFixture('murph-inbox-email-reuse-single')
   const services = createIntegratedInboxCliServices({
     createAgentmailClient() {
       return {
@@ -1763,7 +1763,7 @@ test.sequential('source add email --provision reuses the single discovered Agent
 })
 
 test.sequential('source add email --provision requires --account when multiple discovered AgentMail inboxes are available', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-multiple')
+  const fixture = await makeVaultFixture('murph-inbox-email-reuse-multiple')
   const services = createIntegratedInboxCliServices({
     createAgentmailClient() {
       return {
@@ -1839,7 +1839,7 @@ test.sequential('source add email --provision requires --account when multiple d
 })
 
 test.sequential('source add email --provision honors --account when AgentMail create is forbidden', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-explicit-account')
+  const fixture = await makeVaultFixture('murph-inbox-email-reuse-explicit-account')
   const getInboxCalls: string[] = []
   const services = createIntegratedInboxCliServices({
     createAgentmailClient() {
@@ -1900,7 +1900,7 @@ test.sequential('source add email --provision honors --account when AgentMail cr
 })
 
 test.sequential('source add email --provision surfaces scoped-key recovery guidance when discovery is also forbidden', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-email-reuse-forbidden')
+  const fixture = await makeVaultFixture('murph-inbox-email-reuse-forbidden')
   const services = createIntegratedInboxCliServices({
     createAgentmailClient() {
       return {
@@ -1956,7 +1956,7 @@ test.sequential('source add email --provision surfaces scoped-key recovery guida
 })
 
 test.sequential('source add rejects connector ids that alias the same source/account namespace', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-namespace-alias')
+  const fixture = await makeVaultFixture('murph-inbox-namespace-alias')
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
@@ -1994,7 +1994,7 @@ test.sequential('source add rejects connector ids that alias the same source/acc
 })
 
 test.sequential('source add rejects Linq connectors that reuse the same webhook listener endpoint', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-linq-endpoint-conflict-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-linq-endpoint-conflict-'))
   const services = createIntegratedInboxCliServices({
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
@@ -2035,7 +2035,7 @@ test.sequential('source add rejects Linq connectors that reuse the same webhook 
 })
 
 test.sequential('inbox init rebuild reports the full indexed capture count without a 200-item cap', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-rebuild-count')
+  const fixture = await makeVaultFixture('murph-inbox-rebuild-count')
   const services = createIntegratedInboxCliServices({
     loadInboxModule: async () =>
       createFakeInboxRuntimeModule({
@@ -2057,7 +2057,7 @@ test.sequential('inbox init rebuild reports the full indexed capture count witho
 })
 
 test.sequential('run forwards the configured connector id and account namespace into the daemon contract', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-run-namespace')
+  const fixture = await makeVaultFixture('murph-inbox-run-namespace')
   let createdConnectorId: string | null = null
   let createdConnectorAccountId: string | null = null
   let seenDaemonConnectorId: string | null = null
@@ -2118,7 +2118,7 @@ test.sequential('run forwards the configured connector id and account namespace 
 })
 
 test.sequential('run emits foreground connector events for backfill summaries and new watch imports', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-run-events')
+  const fixture = await makeVaultFixture('murph-inbox-run-events')
   const events: Array<{
     type: string
     connectorId?: string
@@ -2304,7 +2304,7 @@ test.sequential('run emits foreground connector events for backfill summaries an
 })
 
 test.sequential('run surfaces iMessage permission failures before starting the daemon', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-run-imessage-permissions')
+  const fixture = await makeVaultFixture('murph-inbox-run-imessage-permissions')
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
@@ -2344,7 +2344,7 @@ test.sequential('run surfaces iMessage permission failures before starting the d
 })
 
 test.sequential('run on Linux skips unsupported iMessage connectors and continues with Telegram', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-run-linux-mixed')
+  const fixture = await makeVaultFixture('murph-inbox-run-linux-mixed')
   const events: Array<{
     type: string
     connectorId?: string
@@ -2550,7 +2550,7 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
 })
 
 test.sequential('run on Linux fails cleanly when only unsupported iMessage connectors are enabled', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-run-linux-imessage-only')
+  const fixture = await makeVaultFixture('murph-inbox-run-linux-imessage-only')
   const events: Array<{ type: string; connectorId?: string; phase?: string }> = []
   const baseInboxModule = createFakeInboxRuntimeModule()
   const darwinServices = createIntegratedInboxCliServices({
@@ -2606,7 +2606,7 @@ test.sequential('run on Linux fails cleanly when only unsupported iMessage conne
 })
 
 test.sequential('run writes daemon state and status updates after abort', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-run')
+  const fixture = await makeVaultFixture('murph-inbox-run')
   const fakeParsers = createFakeParsersRuntimeModule({
     async onRunInboxDaemonWithParsers({ signal }) {
       if (signal.aborted) {
@@ -2683,7 +2683,7 @@ test.sequential('run writes daemon state and status updates after abort', async 
 })
 
 test.sequential('run enables connector isolation and connector restarts for parser-backed daemon runs', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-run-isolated-connectors')
+  const fixture = await makeVaultFixture('murph-inbox-run-isolated-connectors')
   const observedSettings: Array<{
     continueOnConnectorFailure: boolean
     connectorRestartPolicyEnabled: boolean
@@ -2740,7 +2740,7 @@ test.sequential('run enables connector isolation and connector restarts for pars
 })
 
 test.sequential('stop signals the recorded pid and waits for state to settle', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-stop')
+  const fixture = await makeVaultFixture('murph-inbox-stop')
   const signals: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = []
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
@@ -2829,7 +2829,7 @@ test.sequential('stop signals the recorded pid and waits for state to settle', a
 test.sequential(
   'run rejects another live daemon, marks dead foreign pid stale, and persists failed runs',
   async () => {
-    const fixture = await makeVaultFixture('healthybob-inbox-run-edges')
+    const fixture = await makeVaultFixture('murph-inbox-run-edges')
     const paths = inboxPaths(fixture.vaultRoot)
     const driver = createFakeImessageDriver({ photoPath: fixture.photoPath })
 
@@ -2981,7 +2981,7 @@ test.sequential(
 )
 
 test.sequential('stop reports not-running and timeout edge cases', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-stop-edges')
+  const fixture = await makeVaultFixture('murph-inbox-stop-edges')
   const paths = inboxPaths(fixture.vaultRoot)
   const sentSignals: Array<NodeJS.Signals | number | undefined> = []
   const services = createIntegratedInboxCliServices({
@@ -3053,7 +3053,7 @@ test.sequential('stop reports not-running and timeout edge cases', async () => {
 })
 
 test.sequential('stop force-kills a stubborn live daemon and returns stale state', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-stop-kill')
+  const fixture = await makeVaultFixture('murph-inbox-stop-kill')
   const paths = inboxPaths(fixture.vaultRoot)
   const signals: Array<NodeJS.Signals | number | undefined> = []
   let killed = false
@@ -3132,7 +3132,7 @@ test.sequential('stop force-kills a stubborn live daemon and returns stale state
 })
 
 test.sequential('stop ignores missing suspended pid recovery signals and still returns stale state', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-stop-missing')
+  const fixture = await makeVaultFixture('murph-inbox-stop-missing')
   const paths = inboxPaths(fixture.vaultRoot)
   const signals: Array<NodeJS.Signals | number | undefined> = []
   let allowProbe = true
@@ -3205,7 +3205,7 @@ test.sequential('stop ignores missing suspended pid recovery signals and still r
 })
 
 test.sequential('doctor reports invalid config, missing source, and connector diagnostics', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-doctor')
+  const fixture = await makeVaultFixture('murph-inbox-doctor')
   const paths = inboxPaths(fixture.vaultRoot)
 
   try {
@@ -3364,7 +3364,7 @@ test.sequential('doctor reports invalid config, missing source, and connector di
 })
 
 test.sequential('doctor reports Telegram diagnostics without consuming updates', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-telegram-doctor')
+  const fixture = await makeVaultFixture('murph-inbox-telegram-doctor')
   let getMessagesCalls = 0
   let startWatchingCalls = 0
 
@@ -3374,7 +3374,7 @@ test.sequential('doctor reports Telegram diagnostics without consuming updates',
       async getMe() {
         return {
           id: 999,
-          username: 'healthybob_bot',
+          username: 'murph_bot',
         }
       },
       async getMessages() {
@@ -3444,7 +3444,7 @@ test.sequential('doctor reports Telegram diagnostics without consuming updates',
 })
 
 test.sequential('backfill dedupes repeats, honors limits, and stores cursor under the configured source account', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-backfill')
+  const fixture = await makeVaultFixture('murph-inbox-backfill')
   const getMessageCalls: Array<{
     limit?: number
     cursor?: Record<string, unknown> | null
@@ -3512,7 +3512,7 @@ test.sequential('backfill dedupes repeats, honors limits, and stores cursor unde
 })
 
 test.sequential('backfill can opt into parser drains while remaining queue-first by default', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-backfill-parse')
+  const fixture = await makeVaultFixture('murph-inbox-backfill-parse')
   const drainCalls: Array<{
     attachmentId?: string
     captureId?: string
@@ -3568,7 +3568,7 @@ test.sequential('backfill can opt into parser drains while remaining queue-first
     assert.equal(reparsed.parse?.attempted, 0)
     assert.equal(drainCalls.length, 0)
 
-    const freshFixture = await makeVaultFixture('healthybob-inbox-backfill-parse-fresh')
+    const freshFixture = await makeVaultFixture('murph-inbox-backfill-parse-fresh')
     const freshServices = createIntegratedInboxCliServices({
       getHomeDirectory: () => freshFixture.homeRoot,
       getPlatform: () => 'darwin',
@@ -3611,7 +3611,7 @@ test.sequential('backfill can opt into parser drains while remaining queue-first
 })
 
 test.sequential('inbox setup and doctor expose additive parser toolchain status', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-parser-setup')
+  const fixture = await makeVaultFixture('murph-inbox-parser-setup')
   const writes: Array<{
     tools?: Record<string, {
       command?: string | null
@@ -3686,7 +3686,7 @@ test.sequential('inbox setup and doctor expose additive parser toolchain status'
 })
 
 test.sequential('inbox parse and requeue drive parser queue controls without real tool binaries', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-parser-queue')
+  const fixture = await makeVaultFixture('murph-inbox-parser-queue')
   const drainCalls: Array<{
     attachmentId?: string
     captureId?: string
@@ -3793,7 +3793,7 @@ test.sequential('inbox parse and requeue drive parser queue controls without rea
 })
 
 test.sequential('attachment-specific inbox services preserve lookup and parse-status response shapes', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-attachment-services')
+  const fixture = await makeVaultFixture('murph-inbox-attachment-services')
   const drainCalls: Array<{
     attachmentId?: string
     captureId?: string
@@ -3952,7 +3952,7 @@ test.sequential('attachment-specific inbox services preserve lookup and parse-st
 })
 
 test.sequential('attachment parse helpers reject non-parseable attachments with stable status output', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-attachment-unsupported')
+  const fixture = await makeVaultFixture('murph-inbox-attachment-unsupported')
   const blobPath = path.join(fixture.vaultRoot, 'blob.bin')
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
@@ -4029,7 +4029,7 @@ test.sequential('attachment parse helpers reject non-parseable attachments with 
 })
 
 test.sequential('inbox requeue can reset running attachment parse jobs', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-requeue-running')
+  const fixture = await makeVaultFixture('murph-inbox-requeue-running')
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
@@ -4102,7 +4102,7 @@ test.sequential('inbox requeue can reset running attachment parse jobs', async (
 })
 
 test.sequential('status and stop reject corrupted daemon state, and inbox operations reject corrupted promotion state', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-corruption')
+  const fixture = await makeVaultFixture('murph-inbox-corruption')
   const paths = inboxPaths(fixture.vaultRoot)
   const driver = createFakeImessageDriver({ photoPath: fixture.photoPath })
   const services = createIntegratedInboxCliServices({
@@ -4186,7 +4186,7 @@ test.sequential('status and stop reject corrupted daemon state, and inbox operat
 })
 
 test.sequential('meal promotion remains idempotent after local promotion state is deleted', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-canonical-promotion')
+  const fixture = await makeVaultFixture('murph-inbox-canonical-promotion')
   const paths = inboxPaths(fixture.vaultRoot)
   const services = createIntegratedInboxCliServices({
     getHomeDirectory: () => fixture.homeRoot,
@@ -4238,7 +4238,7 @@ test.sequential('meal promotion remains idempotent after local promotion state i
 })
 
 test.sequential('document promotion remains idempotent after local promotion state is deleted', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-document-promotion')
+  const fixture = await makeVaultFixture('murph-inbox-document-promotion')
   const paths = inboxPaths(fixture.vaultRoot)
   const documentPath = path.join(fixture.vaultRoot, 'lab-note.pdf')
   const services = createIntegratedInboxCliServices({
@@ -4305,7 +4305,7 @@ test.sequential('document promotion remains idempotent after local promotion sta
 })
 
 test.sequential('meal promotion retries do not duplicate canonical meals after a local promotion-store write failure', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-promotion-write-failure')
+  const fixture = await makeVaultFixture('murph-inbox-promotion-write-failure')
   const paths = inboxPaths(fixture.vaultRoot)
   const inboxRuntimeRoot = path.dirname(paths.inboxPromotionsPath)
   const services = createIntegratedInboxCliServices({
@@ -4360,7 +4360,7 @@ test.sequential('meal promotion retries do not duplicate canonical meals after a
 })
 
 test.sequential('promotion safeguards cover missing photos, invalid stored ids, and unsupported targets', async () => {
-  const fixture = await makeVaultFixture('healthybob-inbox-promotion')
+  const fixture = await makeVaultFixture('murph-inbox-promotion')
   const paths = inboxPaths(fixture.vaultRoot)
   const photoFreeDriver = createFakeImessageDriver({
     photoPath: fixture.photoPath,
@@ -4406,7 +4406,7 @@ test.sequential('promotion safeguards cover missing photos, invalid stored ids, 
       'INBOX_PROMOTION_REQUIRES_DOCUMENT',
     )
 
-    const photoFixture = await makeVaultFixture('healthybob-inbox-promotion-state')
+    const photoFixture = await makeVaultFixture('murph-inbox-promotion-state')
     const photoServices = createIntegratedInboxCliServices({
       getHomeDirectory: () => photoFixture.homeRoot,
       getPlatform: () => 'darwin',

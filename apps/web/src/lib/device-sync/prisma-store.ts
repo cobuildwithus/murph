@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { Prisma, PrismaClient } from "@prisma/client";
-import { deviceSyncError } from "@healthybob/device-syncd";
+import { deviceSyncError } from "@murph/device-syncd";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -12,7 +12,7 @@ import type {
   OAuthStateRecord,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
-} from "@healthybob/device-syncd";
+} from "@murph/device-syncd";
 import type { HostedSecretCodec } from "./crypto";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import { generatePrefixedId, maybeIsoTimestamp, toIsoTimestamp, toJsonRecord } from "./shared";

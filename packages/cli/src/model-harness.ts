@@ -339,7 +339,7 @@ function normalizeAssistantProviderName(value: string | null | undefined): strin
     }
   }
 
-  return 'healthybob-assistant'
+  return 'murph-assistant'
 }
 
 function inferAssistantErrorCode(error: unknown): string {

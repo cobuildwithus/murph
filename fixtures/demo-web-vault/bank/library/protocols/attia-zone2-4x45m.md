@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.health-library.v1
+schemaVersion: murph.frontmatter.health-library.v1
 docType: health_library
 entityType: protocol_variant
 slug: attia-zone2-4x45m

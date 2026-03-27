@@ -1,4 +1,4 @@
-import type { ActivityStrengthExercise } from "@healthybob/contracts";
+import type { ActivityStrengthExercise } from "@murph/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";

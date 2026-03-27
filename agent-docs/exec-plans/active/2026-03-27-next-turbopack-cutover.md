@@ -47,7 +47,7 @@ Updated: 2026-03-27
 - Upgraded `apps/web` and `packages/web` from Next `16.1.6` to `16.2.1`.
 - Removed repo-owned `--webpack` usage from app scripts and the local `next-local` wrapper.
 - Added shared Turbopack source-resolution support for workspace packages, including a repo-owned loader that rewrites relative `.js` / `.mjs` / `.cjs` specifiers to on-disk TS-family sources during Turbopack builds.
-- Added the missing `@healthybob/hosted-execution` source mapping for the local web package and updated focused tests/docs to describe the default Turbopack path.
+- Added the missing `@murph/hosted-execution` source mapping for the local web package and updated focused tests/docs to describe the default Turbopack path.
 
 ## Verification
 

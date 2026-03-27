@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.family-member.v1"
+      "const": "murph.frontmatter.family-member.v1"
     },
     "docType": {
       "type": "string",
@@ -63,6 +63,6 @@
     "relationship"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-family-member.schema.json",
-  "title": "Healthy Bob Family Member Frontmatter"
+  "$id": "@murph/contracts/frontmatter-family-member.schema.json",
+  "title": "Murph Family Member Frontmatter"
 }

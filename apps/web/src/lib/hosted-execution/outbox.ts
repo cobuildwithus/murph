@@ -9,7 +9,7 @@ import {
 import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecutionStatus } from "./dispatch";

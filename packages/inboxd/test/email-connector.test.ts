@@ -3,7 +3,7 @@ import { test } from "vitest";
 import {
   createHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 import {
   createAgentmailApiPollDriver,
@@ -29,14 +29,14 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
 
 test("normalizeAgentmailMessage builds direct email captures and hydrates downloadable attachments", async () => {
   const capture = await normalizeAgentmailMessage({
-    accountAddress: "healthybob@example.test",
+    accountAddress: "murph@example.test",
     message: {
       inbox_id: "inbox_123",
       thread_id: "thread_123",
       message_id: "msg_123",
       timestamp: "2026-03-22T10:00:00.000Z",
       from: "Alice Example <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       subject: "Lunch summary",
       extracted_text: "See attached.",
       attachments: [
@@ -79,7 +79,7 @@ test("normalizeAgentmailMessage keeps direct-thread detection when the inbox add
       thread_id: "thread_123",
       message_id: "msg_direct",
       from: "Alice Example <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       cc: [],
       bcc: [],
       text: "Ping",
@@ -91,14 +91,14 @@ test("normalizeAgentmailMessage keeps direct-thread detection when the inbox add
 
 test("normalizeAgentmailMessage prefers extracted reply content over full-thread text fallbacks", async () => {
   const capture = await normalizeAgentmailMessage({
-    accountAddress: "healthybob@example.test",
+    accountAddress: "murph@example.test",
     message: {
       inbox_id: "inbox_123",
       thread_id: "thread_123",
       message_id: "msg_extracted",
       from: "Alice Example <alice@example.test>",
-      to: ["healthybob@example.test"],
-      text: "Newest reply\n\nOn Mon, Healthy Bob wrote: quoted history",
+      to: ["murph@example.test"],
+      text: "Newest reply\n\nOn Mon, Murph wrote: quoted history",
       extracted_html: "<p>Newest reply</p>",
       html: "<div>Newest reply</div><blockquote>quoted history</blockquote>",
     },
@@ -117,7 +117,7 @@ test("createEmailPollConnector backfills unread AgentMail messages and marks the
       message_id: "msg_1",
       timestamp: "2026-03-22T10:00:00.000Z",
       from: "Alice <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       extracted_text: "first message",
     },
     {
@@ -126,12 +126,12 @@ test("createEmailPollConnector backfills unread AgentMail messages and marks the
       message_id: "msg_2",
       timestamp: "2026-03-22T10:05:00.000Z",
       from: "Alice <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       extracted_text: "second message",
     },
   ];
   const connector = createEmailPollConnector({
-    accountAddress: "healthybob@example.test",
+    accountAddress: "murph@example.test",
     accountId: "inbox_123",
     backfillLimit: 10,
     driver: {
@@ -149,7 +149,7 @@ test("createEmailPollConnector backfills unread AgentMail messages and marks the
               ? "2026-03-22T10:00:00.000Z"
               : "2026-03-22T10:05:00.000Z",
           from: "Alice <alice@example.test>",
-          to: ["healthybob@example.test"],
+          to: ["murph@example.test"],
           extracted_text: `${messageId} body`,
         };
       },

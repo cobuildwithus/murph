@@ -13,8 +13,7 @@ import {
   type AssistantBindingPatch,
 } from './bindings.js'
 import {
-  mergeConversationRefs,
-  normalizeConversationRef,
+  conversationRefFromLocator,
 } from './conversation-ref.js'
 import {
   writeJsonFileAtomic,
@@ -64,7 +63,7 @@ import type {
   AssistantTranscriptEntryInput,
 } from './store/types.js'
 
-const ASSISTANT_STATE_SCHEMA = 'healthybob.assistant-session.v2'
+const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v2'
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
@@ -81,22 +80,7 @@ export async function resolveAssistantSession(
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantState(paths)
 
-  const conversation = normalizeConversationRef(
-    mergeConversationRefs(input.conversation, {
-      sessionId: input.sessionId,
-      alias: input.alias,
-      channel: input.channel,
-      identityId: input.identityId,
-      participantId: input.actorId ?? input.participantId,
-      threadId: input.threadId ?? input.sourceThreadId,
-      directness:
-        input.threadIsDirect === true
-          ? 'direct'
-          : input.threadIsDirect === false
-            ? 'group'
-            : null,
-    }),
-  )
+  const conversation = conversationRefFromLocator(input)
   const sessionId = normalizeNullableString(input.sessionId ?? conversation.sessionId)
   const manualAlias = normalizeNullableString(conversation.alias)
   const bindingPatch = bindingPatchFromLocator(input)
@@ -273,7 +257,7 @@ export async function appendAssistantTranscriptEntries(
 
   const parsed = entries.map((entry) =>
     assistantTranscriptEntrySchema.parse({
-      schema: 'healthybob.assistant-transcript-entry.v1',
+      schema: 'murph.assistant-transcript-entry.v1',
       kind: entry.kind,
       text: entry.text,
       createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),

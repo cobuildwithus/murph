@@ -38,7 +38,7 @@ Regression anchors to preserve:
   - large text/jsonl and delete-preservation cases
 
 Best-guess fix:
-1. Move the tolerant recoverable stored-write parsing into `@healthybob/core` and consume it from the guard.
+1. Move the tolerant recoverable stored-write parsing into `@murph/core` and consume it from the guard.
 2. Centralize the protected canonical path predicate so listing and checking share one rule source.
 3. Delete the duplicated local schema/policy logic without changing precedence rules.
 

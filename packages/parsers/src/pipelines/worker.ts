@@ -4,7 +4,7 @@ import type {
   AttachmentParseJobClaimFilters,
   AttachmentParseJobRecord,
   InboxRuntimeStore,
-} from "@healthybob/inboxd";
+} from "@murph/inboxd";
 
 import type { ParserArtifactKind } from "../contracts/artifact.js";
 import type { ParserRegistry } from "../registry/registry.js";

@@ -22,7 +22,7 @@ import {
 } from './provider-config.js'
 import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
 
-const ASSISTANT_FAILOVER_STATE_SCHEMA = 'healthybob.assistant-failover-state.v1'
+const ASSISTANT_FAILOVER_STATE_SCHEMA = 'murph.assistant-failover-state.v1'
 const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000
 const RATE_LIMIT_FAILOVER_COOLDOWN_MS = 5 * 60_000
 

@@ -6,11 +6,11 @@ Updated: 2026-03-17
 
 ## Goal
 
-- Add a one-command macOS setup path that can provision the local Healthy Bob runtime/toolchain, install external parser dependencies, and leave the vault ready for inbox bootstrap out of the box.
+- Add a one-command macOS setup path that can provision the local Murph runtime/toolchain, install external parser dependencies, and leave the vault ready for inbox bootstrap out of the box.
 
 ## Success criteria
 
-- The built CLI shape exposes a setup-first `healthybob` alias, with `healthybob`, `healthybob --help`, and `healthybob setup ...` routing to the setup surface while other commands continue through the main operator surface.
+- The built CLI shape exposes a setup-first `murph` alias, with `murph`, `murph --help`, and `murph setup ...` routing to the setup surface while other commands continue through the main operator surface.
 - `node packages/cli/dist/bin.js setup ...` works from a checked-out repo after build, so a shell wrapper can bootstrap the workspace and then delegate to the same installer logic.
 - The setup flow installs or reuses Homebrew-managed `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`, downloads a Whisper model, and configures the inbox parser toolchain through the existing bootstrap services.
 - Apple Silicon hosts can optionally install PaddleX OCR in a managed venv; unsupported macOS architectures skip OCR with a truthful note instead of failing the whole setup.
@@ -20,7 +20,7 @@ Updated: 2026-03-17
 
 - In scope:
 - CLI-local setup command/contracts/service logic
-- published `healthybob` bin alias plus bin routing for the special setup entrypoint
+- published `murph` bin alias plus bin routing for the special setup entrypoint
 - repo-local `scripts/setup-macos.sh` wrapper and root package script wiring
 - README/runtime-doc updates that explain the new setup path and its macOS assumptions
 - Out of scope:
@@ -47,7 +47,7 @@ Updated: 2026-03-17
 ## Tasks
 
 1. Add setup contracts and a macOS installer service with injected command runners for testability.
-2. Route `setup` through `packages/cli/src/bin.ts` and add the `healthybob` bin alias.
+2. Route `setup` through `packages/cli/src/bin.ts` and add the `murph` bin alias.
 3. Add a repo-level `scripts/setup-macos.sh` wrapper that hard-fails off macOS, keeps `--dryRun` wrapper-only and non-mutating, ensures Node/pnpm/workspace build prerequisites on real runs, then delegates to the built CLI setup entrypoint.
 4. Update README/runtime docs, add focused tests, run the completion-workflow audit prompts, and execute repo verification as far as the workspace allows.
 

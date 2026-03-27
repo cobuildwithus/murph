@@ -8,7 +8,7 @@ Add a Vercel-ready hosted device-sync control-plane app under `apps/web` that re
 
 - Create a new Next.js app at `apps/web` rather than mutating the existing local-only `packages/web` surface.
 - Add Prisma/Postgres wiring, schema, and migration files for hosted device-sync state only.
-- Reuse `@healthybob/device-syncd` provider/public-ingress logic in the hosted app.
+- Reuse `@murph/device-syncd` provider/public-ingress logic in the hosted app.
 - Implement authenticated browser routes for connection metadata, connect/disconnect, and agent pairing.
 - Implement public OAuth callback/webhook routes plus local-agent token/signal routes.
 - Add focused tests/docs/scripts/workspace wiring for the new app.
@@ -28,12 +28,12 @@ Add a Vercel-ready hosted device-sync control-plane app under `apps/web` that re
 
 ## Status
 
-Implemented in this branch. The hosted control plane now has a dedicated `apps/web` Next.js app, Prisma/Postgres schema + migration, shared-ingress reuse from `@healthybob/device-syncd`, browser/public/agent route handlers, and focused auth/crypto tests.
+Implemented in this branch. The hosted control plane now has a dedicated `apps/web` Next.js app, Prisma/Postgres schema + migration, shared-ingress reuse from `@murph/device-syncd`, browser/public/agent route handlers, and focused auth/crypto tests.
 
 ## Verification Notes
 
 - `pnpm --dir apps/web typecheck` passed after installing the workspace dependencies and generating the Prisma client.
 - `pnpm --dir apps/web test` passed, including the hosted app vitest suite and a production Next build.
 - `pnpm typecheck` passed at the repo root.
-- `pnpm test` currently fails outside this lane in `packages/web` because `packages/query` expects several `@healthybob/contracts` exports that are not present in the current worktree build.
+- `pnpm test` currently fails outside this lane in `packages/web` because `packages/query` expects several `@murph/contracts` exports that are not present in the current worktree build.
 - `pnpm test:coverage` currently fails outside this lane because the smoke harness is missing documented supplement command scenarios.

@@ -2,7 +2,7 @@ import {
   parseHostedExecutionDispatchRequest,
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import {

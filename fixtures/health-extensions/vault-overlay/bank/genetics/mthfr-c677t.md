@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.genetic-variant.v1
+schemaVersion: murph.frontmatter.genetic-variant.v1
 docType: genetic_variant
 variantId: var_01JNV44WS3W0R27XPTKFC3QFJA
 slug: mthfr-c677t

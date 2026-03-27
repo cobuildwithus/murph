@@ -31,7 +31,7 @@ Updated: 2026-03-27
 
 ## Plan
 
-1. Re-route the workout-format save write through `@healthybob/core`'s audited batch surface.
+1. Re-route the workout-format save write through `@murph/core`'s audited batch surface.
 2. Add a focused CLI regression proving the saved Markdown now lands through committed `text_write` operation metadata.
 3. Add a source-audit test that allowlists the few intentional non-core canonical/raw mutators and fails on new ones.
 

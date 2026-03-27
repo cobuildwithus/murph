@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { extractIsoDatePrefix } from '@healthybob/contracts'
+import { extractIsoDatePrefix } from '@murph/contracts'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,

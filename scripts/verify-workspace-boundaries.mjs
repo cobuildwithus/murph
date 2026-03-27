@@ -93,6 +93,9 @@ async function verifyTsconfigPathMappings() {
 
 async function verifyWorkspaceImports() {
   const exportedSpecifiersByPackage = await buildExportedSpecifiersByPackage();
+  const workspacePackageNames = [...exportedSpecifiersByPackage.keys()].sort(
+    (left, right) => right.length - left.length,
+  );
   const sourceLikeFiles = await findFiles(["packages", "apps", "e2e", "config"], (filePath) =>
     /\.[cm]?[jt]sx?$/u.test(filePath),
   );
@@ -114,11 +117,13 @@ async function verifyWorkspaceImports() {
         continue;
       }
 
-      if (!specifier.startsWith("@healthybob/")) {
+      const packageName = workspacePackageNames.find(
+        (name) => specifier === name || specifier.startsWith(`${name}/`),
+      );
+      if (!packageName) {
         continue;
       }
 
-      const packageName = specifier.split("/").slice(0, 2).join("/");
       const allowedPatterns = exportedSpecifiersByPackage.get(packageName);
 
       if (!allowedPatterns) {
@@ -146,7 +151,7 @@ async function buildExportedSpecifiersByPackage() {
   for (const packageJsonPath of packageJsonPaths) {
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 
-    if (typeof packageJson.name !== "string" || !packageJson.name.startsWith("@healthybob/")) {
+    if (typeof packageJson.name !== "string") {
       continue;
     }
 

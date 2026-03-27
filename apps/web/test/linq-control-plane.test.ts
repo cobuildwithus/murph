@@ -28,7 +28,7 @@ vi.mock("@/src/lib/linq/prisma-store", () => ({
   }),
 }));
 
-vi.mock("@healthybob/inboxd", () => ({
+vi.mock("@murph/inboxd", () => ({
   verifyAndParseLinqWebhookRequest: mocks.verifyAndParseLinqWebhookRequest,
   requireLinqMessageReceivedEvent: mocks.requireLinqMessageReceivedEvent,
 }));

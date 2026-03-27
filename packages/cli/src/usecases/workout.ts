@@ -1,4 +1,4 @@
-import { type ActivityStrengthExercise } from '@healthybob/contracts'
+import { type ActivityStrengthExercise } from '@murph/contracts'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   inferDurationMinutes,

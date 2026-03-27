@@ -263,8 +263,8 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
   const store = new InMemoryPublicIngressStore();
   const connectionEvents: Array<{ accountId: string; initialJobs: number }> = [];
   const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
-    allowedReturnOrigins: ["https://app.healthybob.test"],
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    allowedReturnOrigins: ["https://app.example.test"],
     registry: createDeviceSyncRegistry([createFakeProvider()]),
     store,
     hooks: {
@@ -279,10 +279,10 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
 
   const begin = await ingress.startConnection({
     provider: "demo",
-    returnTo: "https://app.healthybob.test/settings/devices",
+    returnTo: "https://app.example.test/settings/devices",
   });
   assert.match(begin.authorizationUrl, /^https:\/\/example\.test\/oauth\?state=/u);
-  assert.match(begin.authorizationUrl, /redirect_uri=https%3A%2F%2Fsync\.healthybob\.test%2Fdevice-sync%2Foauth%2Fdemo%2Fcallback/u);
+  assert.match(begin.authorizationUrl, /redirect_uri=https%3A%2F%2Fsync\.murph\.test%2Fdevice-sync%2Foauth%2Fdemo%2Fcallback/u);
 
   const connected = await ingress.handleOAuthCallback({
     provider: "demo",
@@ -292,7 +292,7 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
 
   assert.equal(connected.account.externalAccountId, "demo-abc");
   assert.equal(connected.account.provider, "demo");
-  assert.equal(connected.returnTo, "https://app.healthybob.test/settings/devices");
+  assert.equal(connected.returnTo, "https://app.example.test/settings/devices");
   assert.deepEqual(connectionEvents, [
     {
       accountId: connected.account.id,
@@ -306,7 +306,7 @@ test("public ingress processes an unknown-account retry exactly once after the a
   const acceptedWebhooks: string[] = [];
   const unknownWebhooks: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async verifyAndParseWebhook() {
@@ -359,7 +359,7 @@ test("public ingress processes an inactive-account retry exactly once after reac
   const store = new InMemoryPublicIngressStore();
   const acceptedWebhooks: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async verifyAndParseWebhook() {
@@ -412,7 +412,7 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
   let attempts = 0;
   let successes = 0;
   const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async verifyAndParseWebhook() {
@@ -477,7 +477,7 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
   });
 
   const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async verifyAndParseWebhook() {
@@ -536,15 +536,15 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
 test("public ingress preserves callback redirect context on OAuth callback failures", async () => {
   const store = new InMemoryPublicIngressStore();
   const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
-    allowedReturnOrigins: ["https://app.healthybob.test"],
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    allowedReturnOrigins: ["https://app.example.test"],
     registry: createDeviceSyncRegistry([createFakeProvider()]),
     store,
   });
 
   const begin = await ingress.startConnection({
     provider: "demo",
-    returnTo: "https://app.healthybob.test/settings/devices",
+    returnTo: "https://app.example.test/settings/devices",
   });
 
   await assert.rejects(
@@ -560,7 +560,7 @@ test("public ingress preserves callback redirect context on OAuth callback failu
       error.code === "OAUTH_CALLBACK_REJECTED" &&
       error.message === "OAuth authorization was denied or canceled." &&
       error.details?.provider === "demo" &&
-      error.details?.returnTo === "https://app.healthybob.test/settings/devices",
+      error.details?.returnTo === "https://app.example.test/settings/devices",
   );
 });
 
@@ -568,7 +568,7 @@ test("public ingress stores webhook receipt timestamps using ingestion time, not
   const store = new InMemoryPublicIngressStore();
   const observedAcceptedAt: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.healthybob.test/device-sync",
+    publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
       createFakeProvider({
         async verifyAndParseWebhook() {

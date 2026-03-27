@@ -6,7 +6,7 @@ import {
   type HealthEntityKind,
   type HealthEntityRegistryProjectionHelpers,
   type HealthEntitySortBehavior,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   applyLimit,
   asObject,

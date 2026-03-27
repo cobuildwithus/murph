@@ -81,7 +81,7 @@ Updated: 2026-03-27
 - `pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1 apps/cloudflare/test/deploy-automation.test.ts apps/cloudflare/test/deploy-worker-version.test.ts apps/cloudflare/test/smoke-hosted-deploy.test.ts apps/cloudflare/test/runner-container.test.ts`
 - `pnpm --dir apps/cloudflare test:workers`
 - Unrelated repo-wide failures observed after the scoped lane was green:
-- `pnpm typecheck` failed in `packages/importers` because `@healthybob/contracts` does not currently export `extractIsoDatePrefix` / `normalizeStrictIsoTimestamp`.
+- `pnpm typecheck` failed in `packages/importers` because `@murph/contracts` does not currently export `extractIsoDatePrefix` / `normalizeStrictIsoTimestamp`.
 - `pnpm test` failed in `packages/web` because another `next build` process was already running in the environment.
 - `pnpm test:coverage` failed in unrelated `apps/web` hosted-onboarding tests.
 - Audit note:
@@ -93,6 +93,6 @@ Updated: 2026-03-27
 - `pnpm --dir apps/cloudflare typecheck` passed.
 - `pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1 apps/cloudflare/test/deploy-automation.test.ts apps/cloudflare/test/deploy-worker-version.test.ts apps/cloudflare/test/smoke-hosted-deploy.test.ts apps/cloudflare/test/runner-container.test.ts` passed.
 - `pnpm --dir apps/cloudflare test:workers` passed.
-- `pnpm typecheck` still fails outside this lane in `packages/importers` because `@healthybob/contracts` is missing the `extractIsoDatePrefix` and `normalizeStrictIsoTimestamp` exports expected by `packages/importers`.
+- `pnpm typecheck` still fails outside this lane in `packages/importers` because `@murph/contracts` is missing the `extractIsoDatePrefix` and `normalizeStrictIsoTimestamp` exports expected by `packages/importers`.
 - `pnpm test` still fails outside this lane because `packages/web` hit `Another next build process is already running`.
 - `pnpm test:coverage` still fails outside this lane in unrelated `apps/web` hosted-onboarding tests.

@@ -16,7 +16,7 @@ import {
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation as readWriteOperationMetadata,
   resolveVaultPath,
-} from '@healthybob/core'
+} from '@murph/core'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { isMissingFileError } from './shared.js'
 
@@ -121,7 +121,7 @@ async function captureCanonicalWriteSnapshot(
   vaultRoot: string,
 ): Promise<GuardSnapshot> {
   const backupRoot = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-canonical-guard-'),
+    path.join(tmpdir(), 'murph-assistant-canonical-guard-'),
   )
   const protectedPaths = await listProtectedCanonicalPaths(vaultRoot)
   const expectedStates = new Map<string, ExpectedFileState>()

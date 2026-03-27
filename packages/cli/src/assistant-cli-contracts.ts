@@ -5,6 +5,15 @@ import {
   timeZoneSchema,
 } from './vault-cli-contracts.js'
 
+function legacyCompatibleSchemaLiteral<
+  TCurrent extends string,
+  TLegacy extends string,
+>(current: TCurrent, legacy: TLegacy) {
+  return z
+    .union([z.literal(current), z.literal(legacy)])
+    .transform(() => current)
+}
+
 export const assistantSandboxValues = [
   'read-only',
   'workspace-write',
@@ -231,7 +240,7 @@ export const assistantSessionBindingSchema = z.object({
 
 export const assistantSessionSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-session.v2'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-session.v2', 'healthybob.assistant-session.v2'),
     sessionId: z.string().min(1),
     provider: z.enum(assistantChatProviderValues),
     providerSessionId: z.string().min(1).nullable(),
@@ -247,7 +256,7 @@ export const assistantSessionSchema = z
   .strict()
 
 export const assistantTranscriptEntrySchema = z.object({
-  schema: z.literal('healthybob.assistant-transcript-entry.v1'),
+  schema: legacyCompatibleSchemaLiteral('murph.assistant-transcript-entry.v1', 'healthybob.assistant-transcript-entry.v1'),
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
@@ -319,7 +328,7 @@ export const assistantTurnTimelineEventSchema = z
 
 export const assistantTurnReceiptSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-turn-receipt.v1'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-turn-receipt.v1', 'healthybob.assistant-turn-receipt.v1'),
     turnId: z.string().min(1),
     sessionId: z.string().min(1),
     provider: z.enum(assistantChatProviderValues),
@@ -349,7 +358,7 @@ export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
 
 export const assistantOutboxIntentSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-outbox-intent.v1'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-outbox-intent.v1', 'healthybob.assistant-outbox-intent.v1'),
     intentId: z.string().min(1),
     sessionId: z.string().min(1),
     turnId: z.string().min(1),
@@ -377,7 +386,7 @@ export const assistantOutboxIntentSchema = z
 
 export const assistantDiagnosticEventSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-diagnostic-event.v1'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-diagnostic-event.v1', 'healthybob.assistant-diagnostic-event.v1'),
     at: isoTimestampSchema,
     level: z.enum(assistantDiagnosticLevelValues),
     component: z.enum(assistantDiagnosticComponentValues),
@@ -412,7 +421,7 @@ export const assistantDiagnosticsCountersSchema = z
 
 export const assistantDiagnosticsSnapshotSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-diagnostics.v1'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-diagnostics.v1', 'healthybob.assistant-diagnostics.v1'),
     updatedAt: isoTimestampSchema,
     lastEventAt: isoTimestampSchema.nullable(),
     lastErrorAt: isoTimestampSchema.nullable(),
@@ -439,7 +448,7 @@ export const assistantProviderRouteStateSchema = z
 
 export const assistantFailoverStateSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-failover-state.v1'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-failover-state.v1', 'healthybob.assistant-failover-state.v1'),
     updatedAt: isoTimestampSchema,
     routes: z.array(assistantProviderRouteStateSchema),
   })
@@ -630,7 +639,7 @@ export const assistantCronFoodAutoLogSchema = z
 
 export const assistantCronJobSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-cron-job.v1'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-cron-job.v1', 'healthybob.assistant-cron-job.v1'),
     jobId: z.string().min(1),
     name: z.string().min(1),
     enabled: z.boolean(),
@@ -648,7 +657,7 @@ export const assistantCronJobSchema = z
 
 export const assistantCronRunRecordSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-cron-run.v1'),
+    schema: legacyCompatibleSchemaLiteral('murph.assistant-cron-run.v1', 'healthybob.assistant-cron-run.v1'),
     runId: z.string().min(1),
     jobId: z.string().min(1),
     trigger: z.enum(assistantCronTriggerValues),

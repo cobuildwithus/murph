@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionEventKind,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 const HOSTED_EXECUTION_EVENT_KINDS = new Set<HostedExecutionEventKind>([
   "assistant.cron.tick",
@@ -12,7 +12,7 @@ const HOSTED_EXECUTION_EVENT_KINDS = new Set<HostedExecutionEventKind>([
   "vault.share.accepted",
 ]);
 
-const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "hb.execution-outbox.ref.v1";
+const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.ref.v1";
 
 export type HostedExecutionDispatchRef = Prisma.InputJsonObject & {
   eventId: string;

@@ -24,7 +24,7 @@ function auditsWithAction(records: unknown[], action: string): AuditRecordShape[
 }
 
 test("appendProfileSnapshot keeps current-profile rebuild audit details aligned with the materialized markdown change", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-profile-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-profile-"));
 
   try {
     await initializeVault({ vaultRoot });
@@ -80,7 +80,7 @@ test("appendProfileSnapshot keeps current-profile rebuild audit details aligned 
 });
 
 test("rebuildCurrentProfile removes stale current profile markdown when no snapshots remain", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-profile-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-profile-"));
   const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
 
   try {
@@ -144,7 +144,7 @@ test("rebuildCurrentProfile removes stale current profile markdown when no snaps
 });
 
 test("rebuildCurrentProfile keeps rebuild audit details aligned when refreshing an existing current profile", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-profile-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-profile-"));
   const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
 
   try {
@@ -187,7 +187,7 @@ test("rebuildCurrentProfile keeps rebuild audit details aligned when refreshing 
 });
 
 test("rebuildCurrentProfile records no current-profile file changes when the markdown is already current", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-profile-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-profile-"));
 
   try {
     await initializeVault({ vaultRoot });

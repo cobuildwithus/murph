@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.experiment.v1
+schemaVersion: murph.frontmatter.experiment.v1
 docType: experiment
 experimentId: exp_rhr_zone2_01
 slug: zone2-rhr-reset

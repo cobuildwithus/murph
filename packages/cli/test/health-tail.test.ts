@@ -6,7 +6,7 @@ import { test } from "vitest";
 import { requireData, runCli } from "./cli-test-helpers.js";
 
 test.sequential("intake show and intake list route assessment reads through the noun-specific commands", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -16,7 +16,7 @@ test.sequential("intake show and intake list route assessment reads through the 
     await writeFile(
       path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl"),
       `${JSON.stringify({
-        schemaVersion: "hb.assessment-response.v1",
+        schemaVersion: "murph.assessment-response.v1",
         id: "asmt_cli_01",
         assessmentType: "full-intake",
         recordedAt: "2026-03-12T13:00:00Z",
@@ -81,7 +81,7 @@ test.sequential("intake show and intake list route assessment reads through the 
 });
 
 test.sequential("intake list applies date bounds and echoes renamed filter keys", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -92,7 +92,7 @@ test.sequential("intake list applies date bounds and echoes renamed filter keys"
       path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl"),
       [
         JSON.stringify({
-          schemaVersion: "hb.assessment-response.v1",
+          schemaVersion: "murph.assessment-response.v1",
           id: "asmt_cli_out_of_range",
           assessmentType: "full-intake",
           recordedAt: "2026-03-10T13:00:00Z",
@@ -106,7 +106,7 @@ test.sequential("intake list applies date bounds and echoes renamed filter keys"
           },
         }),
         JSON.stringify({
-          schemaVersion: "hb.assessment-response.v1",
+          schemaVersion: "murph.assessment-response.v1",
           id: "asmt_cli_in_range",
           assessmentType: "full-intake",
           recordedAt: "2026-03-12T13:00:00Z",
@@ -157,7 +157,7 @@ test.sequential("intake list applies date bounds and echoes renamed filter keys"
 });
 
 test.sequential("goal descriptor wiring keeps noun-specific and generic reads aligned", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal.json");
 
   try {
@@ -287,8 +287,8 @@ test.sequential("goal descriptor wiring keeps noun-specific and generic reads al
 });
 
 test.sequential("goal upsert rejects reserved vault-root overrides from JSON payloads", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
-  const redirectVaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const redirectVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-override.json");
 
   try {
@@ -333,7 +333,7 @@ test.sequential("goal upsert rejects reserved vault-root overrides from JSON pay
 });
 
 test.sequential("family descriptor wiring keeps member-specific commands aligned with generic health reads", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "family.json");
 
   try {
@@ -440,7 +440,7 @@ test.sequential("family descriptor wiring keeps member-specific commands aligned
 });
 
 test.sequential("history descriptor wiring preserves the shared history-ledger upsert result shape", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "history.json");
 
   try {
@@ -519,7 +519,7 @@ test.sequential("history descriptor wiring preserves the shared history-ledger u
 });
 
 test.sequential("history list keeps canonical kind/data and echoes shared filters", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const encounterPayloadPath = path.join(vaultRoot, "history-encounter.json");
 
   try {
@@ -579,7 +579,7 @@ test.sequential("history list keeps canonical kind/data and echoes shared filter
 });
 
 test.sequential("blood-test descriptor wiring exposes a dedicated noun while preserving the shared event id", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "blood-test.json");
 
   try {
@@ -689,7 +689,7 @@ test.sequential("blood-test descriptor wiring exposes a dedicated noun while pre
 });
 
 test.sequential("blood-test list echoes shared filters and generic list kind routing", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "blood-test-list.json");
 
   try {
@@ -782,7 +782,7 @@ test.sequential("blood-test list echoes shared filters and generic list kind rou
 });
 
 test.sequential("profile current lookup stays wired for both noun-specific and generic show", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "profile.json");
 
   try {
@@ -846,7 +846,7 @@ test.sequential("profile current lookup stays wired for both noun-specific and g
 });
 
 test.sequential("profile list and current show preserve canonical links and strip reserved fields", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const goalPayloadPath = path.join(vaultRoot, "goal-linked.json");
   const profilePayloadPath = path.join(vaultRoot, "profile-linked.json");
   const assessmentId = "asmt_01JNY0B2W4VG5C2A0G9S8M7R6Q";
@@ -883,7 +883,7 @@ test.sequential("profile list and current show preserve canonical links and stri
     await writeFile(
       path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl"),
       `${JSON.stringify({
-        schemaVersion: "hb.assessment-response.v1",
+        schemaVersion: "murph.assessment-response.v1",
         id: assessmentId,
         assessmentType: "full-intake",
         recordedAt: "2026-03-12T13:00:00Z",
@@ -903,7 +903,7 @@ test.sequential("profile list and current show preserve canonical links and stri
     await writeFile(
       path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
       `${JSON.stringify({
-        schemaVersion: "hb.event.v1",
+        schemaVersion: "murph.event.v1",
         id: eventId,
         kind: "encounter",
         occurredAt: "2026-03-12T12:45:00Z",
@@ -1024,7 +1024,7 @@ test.sequential("profile list and current show preserve canonical links and stri
 });
 
 test.sequential("supplement commands expose product metadata and a rolled-up compound ledger", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const primaryPayloadPath = path.join(vaultRoot, "supplement-primary.json");
   const secondaryPayloadPath = path.join(vaultRoot, "supplement-secondary.json");
 
@@ -1296,7 +1296,7 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
 }, 60_000);
 
 test.sequential("supplement rename moves the product record to the new slug while preserving the id", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-supplement-rename-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-supplement-rename-"));
   const payloadPath = path.join(vaultRoot, "supplement.json");
 
   try {
@@ -1309,7 +1309,7 @@ test.sequential("supplement rename moves the product record to the new slug whil
         status: "active",
         startedOn: "2026-03-10",
         brand: "HB",
-        manufacturer: "Healthy Bob",
+        manufacturer: "Murph",
       }),
       "utf8",
     );
@@ -1380,7 +1380,7 @@ test.sequential("supplement rename moves the product record to the new slug whil
 });
 
 test.sequential("profile upsert rejects malformed profile payloads instead of coercing them to {}", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cli-health-"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "profile-invalid.json");
 
   try {

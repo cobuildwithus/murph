@@ -1,4 +1,4 @@
-import type { AssistantStatePaths } from '@healthybob/runtime-state'
+import type { AssistantStatePaths } from '@murph/runtime-state'
 import type {
   AssistantApprovalPolicy,
   AssistantBindingDeliveryKind,

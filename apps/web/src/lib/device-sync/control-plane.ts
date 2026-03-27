@@ -4,7 +4,7 @@ import {
   deviceSyncError,
   OURA_DEFAULT_WEBHOOK_TARGETS,
   resolveOuraWebhookVerificationChallenge,
-} from "@healthybob/device-syncd";
+} from "@murph/device-syncd";
 
 import type {
   BeginConnectionResult,
@@ -14,7 +14,7 @@ import type {
   OuraWebhookSubscriptionClient,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
-} from "@healthybob/device-syncd";
+} from "@murph/device-syncd";
 import { getPrisma } from "../prisma";
 import {
   assertBrowserMutationOrigin,

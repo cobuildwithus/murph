@@ -1,7 +1,7 @@
 import {
   writeJsonFileAtomic as writeRuntimeJsonFileAtomic,
   writeTextFileAtomic as writeRuntimeTextFileAtomic,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 import {
   errorMessage,
   formatStructuredErrorMessage,

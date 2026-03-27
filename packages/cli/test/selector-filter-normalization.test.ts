@@ -40,7 +40,7 @@ test('show help uses id selectors except for journal date keys', async () => {
 })
 
 test.sequential('generic list applies date bounds and echoes renamed filter keys', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-normalization-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-normalization-'))
 
   try {
     const initResult = await runSourceCli<{ created: boolean }>([
@@ -58,7 +58,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
       path.join(vaultRoot, 'ledger/events/2026/2026-03.jsonl'),
       [
         JSON.stringify({
-          schemaVersion: 'hb.event.v1',
+          schemaVersion: 'murph.event.v1',
           id: 'evt_selector_range_out',
           kind: 'note',
           occurredAt: '2026-03-10T08:00:00Z',
@@ -67,7 +67,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
           title: 'Outside the requested range',
         }),
         JSON.stringify({
-          schemaVersion: 'hb.event.v1',
+          schemaVersion: 'murph.event.v1',
           id: 'evt_selector_range_in',
           kind: 'note',
           occurredAt: '2026-03-12T09:00:00Z',
@@ -114,7 +114,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
 })
 
 test.sequential('intake list applies date bounds and echoes renamed filter keys', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-normalization-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-normalization-'))
 
   try {
     const initResult = await runSourceCli<{ created: boolean }>([
@@ -132,7 +132,7 @@ test.sequential('intake list applies date bounds and echoes renamed filter keys'
       path.join(vaultRoot, 'ledger/assessments/2026/2026-03.jsonl'),
       [
         JSON.stringify({
-          schemaVersion: 'hb.assessment-response.v1',
+          schemaVersion: 'murph.assessment-response.v1',
           id: 'asmt_selector_range_out',
           assessmentType: 'full-intake',
           recordedAt: '2026-03-10T13:00:00Z',
@@ -146,7 +146,7 @@ test.sequential('intake list applies date bounds and echoes renamed filter keys'
           },
         }),
         JSON.stringify({
-          schemaVersion: 'hb.assessment-response.v1',
+          schemaVersion: 'murph.assessment-response.v1',
           id: 'asmt_selector_range_in',
           assessmentType: 'full-intake',
           recordedAt: '2026-03-12T13:00:00Z',
@@ -197,7 +197,7 @@ test.sequential('intake list applies date bounds and echoes renamed filter keys'
 })
 
 test.sequential('search applies date bounds and echoes renamed filter keys', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-normalization-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-normalization-'))
 
   try {
     const initResult = await runSourceCli<{ created: boolean }>([

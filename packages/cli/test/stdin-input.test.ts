@@ -6,7 +6,7 @@ import { test } from 'vitest'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 test.sequential('payload-based commands accept stdin via --input -', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-stdin-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
   try {
     await runCli(['init', '--vault', vaultRoot])
@@ -267,7 +267,7 @@ test.sequential('payload-based commands accept stdin via --input -', async () =>
 })
 
 test.sequential('payload-based commands reject empty stdin with an actionable message', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-stdin-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
   try {
     await runCli(['init', '--vault', vaultRoot])
@@ -286,7 +286,7 @@ test.sequential('payload-based commands reject empty stdin with an actionable me
 })
 
 test.sequential('payload-based commands reject non-object stdin JSON', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-stdin-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
   try {
     await runCli(['init', '--vault', vaultRoot])

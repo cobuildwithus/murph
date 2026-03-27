@@ -308,7 +308,7 @@ export function registerInboxCommands(
         options: {
           id: 'email:agentmail',
           provision: true,
-          emailDisplayName: 'Healthy Bob',
+          emailDisplayName: 'Murph',
           enableAutoReply: true,
           vault: './vault',
         },
@@ -344,7 +344,7 @@ export function registerInboxCommands(
       provision: z
         .boolean()
         .optional()
-        .describe('Attempt to provision a new AgentMail inbox when adding an email connector. If create permission is unavailable but the API key can access exactly one existing inbox, Healthy Bob reuses that inbox automatically.'),
+        .describe('Attempt to provision a new AgentMail inbox when adding an email connector. If create permission is unavailable but the API key can access exactly one existing inbox, Murph reuses that inbox automatically.'),
       emailDisplayName: z
         .string()
         .min(1)
@@ -803,7 +803,7 @@ export function registerInboxCommands(
   inbox.command(attachment)
 
   const promote = Cli.create('promote', {
-    description: 'Promote captured inbox items into canonical Healthy Bob records.',
+    description: 'Promote captured inbox items into canonical Murph records.',
   })
 
   promote.command('meal', {

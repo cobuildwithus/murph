@@ -120,7 +120,7 @@ const assistantSessionOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe('Existing Healthy Bob assistant session id to resume.'),
+    .describe('Existing Murph assistant session id to resume.'),
   alias: z
     .string()
     .min(1)
@@ -467,7 +467,7 @@ function createAssistantStopCommandDefinition(input?: {
       'Stop the assistant automation loop for this vault and clear stale run-lock state when the recorded process is already gone.',
     hint:
       input?.hint ??
-      'Use this to recover from a stuck `assistant run` / `healthybob run`. Healthy Bob sends SIGTERM first, waits briefly, and only force-kills the recorded PID if it refuses to exit.',
+      'Use this to recover from a stuck `assistant run` / `murph run`. Murph sends SIGTERM first, waits briefly, and only force-kills the recorded PID if it refuses to exit.',
     options: withBaseOptions(),
     output: assistantStopResultSchema,
     async run(context: {
@@ -625,7 +625,7 @@ async function runAssistantChatCommand(context: {
 }
 
 function formatAssistantChatResumeCommand(sessionId: string): string {
-  return `healthybob chat --session "${sessionId}"`
+  return `murph chat --session "${sessionId}"`
 }
 
 function createAssistantChatCommandDefinition(input?: {
@@ -636,10 +636,10 @@ function createAssistantChatCommandDefinition(input?: {
     args: assistantChatArgsSchema,
     description:
       input?.description ??
-      'Open an Ink terminal chat UI backed by the chosen provider while Healthy Bob stores session metadata plus a local transcript outside the canonical vault.',
+      'Open an Ink terminal chat UI backed by the chosen provider while Murph stores session metadata plus a local transcript outside the canonical vault.',
     hint:
       input?.hint ??
-      'Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+      'Type /exit to close the chat loop or /session to print the current Murph session id.',
     options: assistantChatOptionsSchema,
     output: assistantChatResultSchema,
     outputPolicy: 'agent-only' as const,
@@ -698,7 +698,7 @@ const assistantRunOptionsSchema = withBaseOptions({
     .boolean()
     .optional()
     .describe(
-      'Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Healthy Bob.',
+      'Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Murph.',
     ),
   sessionRolloverHours: z
     .number()
@@ -707,7 +707,7 @@ const assistantRunOptionsSchema = withBaseOptions({
     .max(24 * 30)
     .optional()
     .describe(
-      'Optional maximum age for a reused assistant session in hours before Healthy Bob starts a new one for the same channel thread.',
+      'Optional maximum age for a reused assistant session in hours before Murph starts a new one for the same channel thread.',
     ),
   once: z
     .boolean()
@@ -822,7 +822,7 @@ export function registerAssistantCommands(
 ) {
   const assistant = Cli.create('assistant', {
     description:
-      'Healthy Bob-native assistant runtime with provider-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
+      'Murph-native assistant runtime with provider-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
   })
 
   const registerConversationCommands = () => {
@@ -833,7 +833,7 @@ export function registerAssistantCommands(
       description:
         'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
       hint:
-        'Healthy Bob persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
+        'Murph persists a local transcript plus per-session metadata under assistant-state/, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
       examples: [
         {
           args: {
@@ -1557,7 +1557,7 @@ export function registerAssistantCommands(
       }),
       description: 'Create one assistant cron job from a built-in preset template.',
       hint:
-        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule. Cron jobs require an explicit outbound channel route and always deliver their response. Add --state only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless digest/report jobs.',
+        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Murph uses the preset’s suggested schedule. Cron jobs require an explicit outbound channel route and always deliver their response. Add --state only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless digest/report jobs.',
       examples: [
         {
           args: {
@@ -1954,7 +1954,7 @@ export function registerAssistantCommands(
   const registerSessionCommands = () => {
     const session = Cli.create('session', {
       description:
-        'Inspect Healthy Bob assistant session metadata stored outside the canonical vault.',
+        'Inspect Murph assistant session metadata stored outside the canonical vault.',
     })
 
     session.command('list', {
@@ -1973,7 +1973,7 @@ export function registerAssistantCommands(
 
     session.command('show', {
       args: z.object({
-        sessionId: z.string().min(1).describe('Healthy Bob assistant session id to inspect.'),
+        sessionId: z.string().min(1).describe('Murph assistant session id to inspect.'),
       }),
       description: 'Show one assistant session metadata record.',
       options: withBaseOptions(),
@@ -2000,7 +2000,7 @@ export function registerAssistantCommands(
         description:
           'Open the same assistant chat UI as `assistant chat` directly from the CLI root.',
         hint:
-          'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Healthy Bob session id.',
+          'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Murph session id.',
       }),
     )
     cli.command(
@@ -2036,7 +2036,7 @@ export function registerAssistantCommands(
         description:
           'Stop the same assistant automation loop as `assistant stop` directly from the CLI root.',
         hint:
-          'Shorthand for `assistant stop`. Use this when `healthybob run` is already active for the same vault and you need a recovery command instead of manual lock cleanup.',
+          'Shorthand for `assistant stop`. Use this when `murph run` is already active for the same vault and you need a recovery command instead of manual lock cleanup.',
       }),
     )
   }

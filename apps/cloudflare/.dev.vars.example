@@ -33,7 +33,7 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 # HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=your-cloudflare-api-token-with-email-sending-access
 # HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL=https://api.cloudflare.com/client/v4
-# HOSTED_EMAIL_DEFAULT_SUBJECT=Healthy Bob update
+# HOSTED_EMAIL_DEFAULT_SUBJECT=Murph update
 
 # Optional allowlist extensions for encrypted per-user runner env overrides.
 # Keep these in sync with the native container runtime when you extend the allowlist.

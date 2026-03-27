@@ -4,14 +4,14 @@ Last verified: 2026-03-16
 
 ## Goal
 
-Add Telegram as a local-first inbox source without turning `@healthybob/inboxd` into a pile of per-channel special cases.
+Add Telegram as a local-first inbox source without turning `@murph/inboxd` into a pile of per-channel special cases.
 
 This migration follows the same overall direction as OpenClaw's Telegram channel:
 
 - long polling first
 - webhook optional later
 - normalize every inbound transport into one shared inbox envelope
-- keep canonical storage local to the Healthy Bob vault
+- keep canonical storage local to the Murph vault
 
 ## What changed
 
@@ -71,12 +71,12 @@ vault-cli inbox run --vault ./vault
 
 Instantiate a grammY `Api` object in app code and pass it to `createTelegramApiPollDriver({ api })`.
 
-That keeps grammY as the transport/runtime layer while `@healthybob/inboxd` stays the canonical sink.
+That keeps grammY as the transport/runtime layer while `@murph/inboxd` stays the canonical sink.
 
 ## Current wiring status
 
 - Telegram long-poll ingestion now plugs into the same assistant auto-reply loop as iMessage.
-- Assistant session reuse is keyed by the normalized Telegram thread id, so one bot chat or topic can keep reusing the same Healthy Bob assistant session.
+- Assistant session reuse is keyed by the normalized Telegram thread id, so one bot chat or topic can keep reusing the same Murph assistant session.
 - Outbound assistant delivery accepts either a plain Telegram chat id or `<chatId>:topic:<messageThreadId>` so replies can land back in the exact same chat topic.
 
 ## Environment variables
@@ -105,6 +105,6 @@ For any new message source, prefer this shape:
 1. transport-specific driver
 2. normalize into `ChatMessage` / `InboundCapture`
 3. emit source-native checkpoint when needed
-4. let `@healthybob/inboxd` own persistence, dedupe, search, and attachment jobs
+4. let `@murph/inboxd` own persistence, dedupe, search, and attachment jobs
 
 That keeps new channels thin and avoids duplicating vault-write logic across every connector.

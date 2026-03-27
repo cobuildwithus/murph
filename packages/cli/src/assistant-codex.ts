@@ -66,7 +66,7 @@ export async function executeCodexPrompt(
 ): Promise<CodexExecResult> {
   const codexCommand = input.codexCommand?.trim() || 'codex'
   const workingDirectory = path.resolve(input.workingDirectory)
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-codex-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const outputFile = path.join(tempRoot, 'last-message.txt')
   const args = buildCodexArgs({
     ...input,
@@ -1458,7 +1458,7 @@ function buildCodexInterruptedError(input: {
 
   if (input.providerSessionId) {
     parts.push(
-      `Healthy Bob preserved provider session ${input.providerSessionId}, so the next turn can resume it.`,
+      `Murph preserved provider session ${input.providerSessionId}, so the next turn can resume it.`,
     )
   }
 
@@ -1496,7 +1496,7 @@ function buildCodexConnectionFailureMessage(input: {
 
   parts.push(
     input.providerSessionId
-      ? 'Healthy Bob preserved the provider session and will try to resume it automatically on the next turn once connectivity returns.'
+      ? 'Murph preserved the provider session and will try to resume it automatically on the next turn once connectivity returns.'
       : 'Restore connectivity, then retry the request.',
   )
 
@@ -1534,7 +1534,7 @@ function buildCodexFailureMessage(input: {
 
     if (input.sessionId) {
       parts.push(
-        `Healthy Bob recovered provider session ${input.sessionId}, so the next chat turn can resume it.`,
+        `Murph recovered provider session ${input.sessionId}, so the next chat turn can resume it.`,
       )
     } else {
       parts.push('Send another message to retry the turn.')

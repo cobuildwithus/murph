@@ -3,7 +3,7 @@ import path from 'node:path'
 import {
   resolveAssistantStatePaths as resolveRuntimeAssistantStatePaths,
   type AssistantStatePaths,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 import {
   type AssistantApprovalPolicy,
   type AssistantProviderSessionOptions,
@@ -20,7 +20,7 @@ import {
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantSessionLocator } from './types.js'
 
-export { type AssistantStatePaths } from '@healthybob/runtime-state'
+export { type AssistantStatePaths } from '@murph/runtime-state'
 
 export function resolveAssistantStatePaths(
   vaultRoot: string,

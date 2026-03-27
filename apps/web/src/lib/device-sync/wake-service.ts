@@ -1,11 +1,11 @@
 import { Prisma } from "@prisma/client";
-import { deviceSyncError, isDeviceSyncError } from "@healthybob/device-syncd";
+import { deviceSyncError, isDeviceSyncError } from "@murph/device-syncd";
 
 import type {
   DeviceSyncRegistry,
   ProviderConnectionResult,
   PublicDeviceSyncAccount,
-} from "@healthybob/device-syncd";
+} from "@murph/device-syncd";
 import { getPrisma } from "../prisma";
 import {
   drainHostedExecutionOutboxBestEffort,

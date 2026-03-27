@@ -76,7 +76,7 @@ function normalizeParserOutput(input: {
   const markdown = input.result.markdown?.trim() || buildMarkdown(text, blocks);
 
   return {
-    schema: "healthybob.parser-output.v1",
+    schema: "murph.parser-output.v1",
     providerId: input.providerId,
     artifact: toArtifactSummary(input.artifact),
     text,

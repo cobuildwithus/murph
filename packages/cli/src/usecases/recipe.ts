@@ -1,4 +1,4 @@
-import { RECIPE_STATUSES } from '@healthybob/contracts'
+import { RECIPE_STATUSES } from '@murph/contracts'
 import { z } from 'incur'
 
 import { loadJsonInputObject } from '../json-input.js'
@@ -444,7 +444,7 @@ async function readRecipeEntries(vaultRoot: string) {
 }
 
 async function loadRecipeCoreRuntime(): Promise<RecipeCoreRuntime> {
-  return loadRuntimeModule<RecipeCoreRuntime>('@healthybob/core')
+  return loadRuntimeModule<RecipeCoreRuntime>('@murph/core')
 }
 
 function buildRecipeData(recipe: RecipeReadModel) {

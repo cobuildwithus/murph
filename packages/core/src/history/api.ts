@@ -5,12 +5,12 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
   eventRecordSchema,
   safeParseContract,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
 import { VaultError } from "../errors.ts";
@@ -115,7 +115,7 @@ function normalizeBaseEvent(
   const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
 
   return {
-    schemaVersion: "hb.event.v1" as const,
+    schemaVersion: "murph.event.v1" as const,
     id: eventId,
     kind: input.kind,
     occurredAt,
@@ -502,7 +502,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
   }
 
   const baseRecord = {
-    schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as "hb.event.v1",
+    schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as "murph.event.v1",
     id: requireString(value.id, "id", 64),
     kind: value.kind as HistoryEventKind,
     occurredAt: normalizeTimestamp(value.occurredAt as string, "occurredAt"),

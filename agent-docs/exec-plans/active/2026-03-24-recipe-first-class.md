@@ -29,6 +29,6 @@ Add recipes as first-class vault records under `bank/recipes` with a dedicated `
 - Recipe records are wired through contracts/core/CLI with focused recipe coverage and generated schema output.
 - Completion-workflow audit passes found no recipe-specific follow-up edits beyond the implemented focused tests.
 - Required verification is partially green and partially blocked by unrelated pre-existing repo failures:
-  - `pnpm typecheck`: fails in `packages/query` resolving `@healthybob/runtime-state`
+  - `pnpm typecheck`: fails in `packages/query` resolving `@murph/runtime-state`
   - `pnpm test`: root Vitest failure in `packages/cli/test/runtime.test.ts` (`importer-backed CLI commands return direct runtime payloads` timeout at 20s)
   - `pnpm test:coverage`: root covered Vitest failure in `packages/cli/test/runtime.test.ts` (`vault show, stats, and paths surface read-only vault metadata and counts` timeout at 15s)

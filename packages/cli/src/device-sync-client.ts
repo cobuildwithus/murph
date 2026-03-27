@@ -1,16 +1,16 @@
 import { spawn } from 'node:child_process'
 import {
+  createDeviceSyncJsonRequester as createSharedDeviceSyncJsonRequester,
   DEFAULT_DEVICE_SYNC_BASE_URL,
   DEVICE_SYNC_BASE_URL_ENV,
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
   isDeviceSyncLocalControlPlaneError,
   normalizeDeviceSyncBaseUrl,
-  requestDeviceSyncJson as requestSharedDeviceSyncJson,
-  resolveDeviceSyncBaseUrl as resolveSharedDeviceSyncBaseUrl,
+  resolveDeviceSyncControlPlane as resolveSharedDeviceSyncControlPlane,
   resolveDeviceSyncControlToken as resolveSharedDeviceSyncControlToken,
   type DeviceSyncAccountRecord,
   type DeviceSyncProviderDescriptor,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -56,30 +56,7 @@ export function resolveDeviceSyncBaseUrl(
   env: NodeJS.ProcessEnv = process.env,
   controlToken?: string | null,
 ): string {
-  const effectiveControlToken = resolveDeviceSyncControlToken(controlToken, env)
-
-  try {
-    return resolveSharedDeviceSyncBaseUrl({
-      value,
-      env,
-      controlToken: effectiveControlToken,
-    })
-  } catch (error) {
-    if (isDeviceSyncLocalControlPlaneError(error)) {
-      throw new VaultCliError(
-        'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
-        'Device sync control-plane bearer tokens may only target loopback base URLs. Set DEVICE_SYNC_BASE_URL to localhost/127.0.0.1/::1 or unset DEVICE_SYNC_CONTROL_TOKEN.',
-        {
-          baseUrl:
-            (typeof value === 'string' && value.trim()) ||
-            env[DEVICE_SYNC_BASE_URL_ENV] ||
-            DEFAULT_DEVICE_SYNC_BASE_URL,
-        },
-      )
-    }
-
-    throw error
-  }
+  return resolveDeviceSyncControlPlane(value, env, controlToken).baseUrl
 }
 
 export function resolveDeviceSyncControlToken(
@@ -90,62 +67,51 @@ export function resolveDeviceSyncControlToken(
 }
 
 export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
-  const controlToken = resolveDeviceSyncControlToken(
-    input.controlToken,
-    input.env,
-  )
-  const baseUrl = resolveDeviceSyncBaseUrl(
+  const { baseUrl, controlToken } = resolveDeviceSyncControlPlane(
     input.baseUrl,
     input.env,
-    controlToken,
+    input.controlToken,
   )
   const fetchImpl = input.fetchImpl ?? fetch
   const openBrowser = input.openBrowser ?? openExternalUrlInBrowser
 
-  async function requestJson<TResponse>(
-    path: string,
-    init?: RequestInit,
-  ): Promise<TResponse> {
-    return await requestSharedDeviceSyncJson<TResponse>({
-      baseUrl,
-      path,
-      fetchImpl,
-      controlToken,
-      request: init,
-      createUnavailableError: ({ cause }) =>
-        new VaultCliError(
-          'device_sync_unavailable',
-          `Device sync service is unavailable at ${baseUrl}. Run \`healthybob device daemon start --vault <path>\` or start \`healthybob-device-syncd\` manually and retry.`,
-          {
-            baseUrl,
-            cause: cause instanceof Error ? cause.message : String(cause),
-          },
-        ),
-      createHttpError: ({ status, errorPayload }) =>
-        new VaultCliError(
-          errorPayload.code ?? 'device_sync_request_failed',
-          status === 401 && !controlToken
-            ? 'Device sync control plane requires DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
-            : errorPayload.message ??
-                `Device sync request failed with HTTP ${status}.`,
-          {
-            baseUrl,
-            status,
-            details: errorPayload.details,
-            retryable: errorPayload.retryable,
-          },
-        ),
-      createInvalidResponseError: () =>
-        new VaultCliError(
-          'device_sync_invalid_response',
-          'Device sync service returned an invalid JSON payload.',
-          {
-            baseUrl,
-            path,
-          },
-        ),
-    })
-  }
+  const requestJson = createSharedDeviceSyncJsonRequester({
+    baseUrl,
+    fetchImpl,
+    controlToken,
+    createUnavailableError: ({ cause }) =>
+      new VaultCliError(
+        'device_sync_unavailable',
+        `Device sync service is unavailable at ${baseUrl}. Run \`murph device daemon start --vault <path>\` or start \`murph-device-syncd\` manually and retry.`,
+        {
+          baseUrl,
+          cause: cause instanceof Error ? cause.message : String(cause),
+        },
+      ),
+    createHttpError: ({ status, errorPayload }) =>
+      new VaultCliError(
+        errorPayload.code ?? 'device_sync_request_failed',
+        status === 401 && !controlToken
+          ? 'Device sync control plane requires DEVICE_SYNC_CONTROL_TOKEN when you target an explicit daemon.'
+          : errorPayload.message ??
+              `Device sync request failed with HTTP ${status}.`,
+        {
+          baseUrl,
+          status,
+          details: errorPayload.details,
+          retryable: errorPayload.retryable,
+        },
+      ),
+    createInvalidResponseError: ({ path }) =>
+      new VaultCliError(
+        'device_sync_invalid_response',
+        'Device sync service returned an invalid JSON payload.',
+        {
+          baseUrl,
+          path,
+        },
+      ),
+  })
 
   return {
     baseUrl,
@@ -223,6 +189,38 @@ export function createDeviceSyncClient(input: DeviceSyncClientOptions = {}) {
         },
       )
     },
+  }
+}
+
+function resolveDeviceSyncControlPlane(
+  value?: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+  controlToken?: string | null,
+): {
+  baseUrl: string
+  controlToken: string | null
+} {
+  try {
+    return resolveSharedDeviceSyncControlPlane({
+      baseUrl: value,
+      env,
+      controlToken,
+    })
+  } catch (error) {
+    if (isDeviceSyncLocalControlPlaneError(error)) {
+      throw new VaultCliError(
+        'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
+        'Device sync control-plane bearer tokens may only target loopback base URLs. Set DEVICE_SYNC_BASE_URL to localhost/127.0.0.1/::1 or unset DEVICE_SYNC_CONTROL_TOKEN.',
+        {
+          baseUrl:
+            (typeof value === 'string' && value.trim()) ||
+            env[DEVICE_SYNC_BASE_URL_ENV] ||
+            DEFAULT_DEVICE_SYNC_BASE_URL,
+        },
+      )
+    }
+
+    throw error
   }
 }
 

@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@healthybob/device-syncd", () => mocks);
+vi.mock("@murph/device-syncd", () => mocks);
 vi.mock("next/server", () => {
   class MockNextResponse extends Response {
     static redirect(url: string, init?: number | ResponseInit) {
@@ -217,7 +217,7 @@ describe("device sync callback redirect helpers", () => {
 
   it("keeps raw callback error text out of redirect query params", () => {
     const response = httpModule.errorToCallbackRedirect({
-      returnTo: "https://withmurph.ai/settings/devices?tab=wearables",
+      returnTo: "https://app.example.test/settings/devices?tab=wearables",
       provider: "demo",
       error: mocks.deviceSyncError({
         code: "OAUTH_CALLBACK_REJECTED",
@@ -234,7 +234,7 @@ describe("device sync callback redirect helpers", () => {
     expect(location).toBeTruthy();
 
     const destination = new URL(location!);
-    expect(destination.origin).toBe("https://withmurph.ai");
+    expect(destination.origin).toBe("https://app.example.test");
     expect(destination.pathname).toBe("/settings/devices");
     expect(destination.searchParams.get("tab")).toBe("wearables");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");

@@ -23,7 +23,7 @@ Updated: 2026-03-27
 - Prompt 2 is still valid. `packages/query/src/health/canonical-collector.ts` still contains separate strict/tolerant and sync/async pipelines plus cast-heavy `REGISTRY_COLLECTORS`.
 - Prompt 3 is still valid. `packages/core/src/history/api.ts` still uses `HistoryFieldDefinition<unknown>`, `HISTORY_KIND_DEFINITIONS`, and cast-heavy subtype normalization.
 - Prompt 4 is still valid. `packages/core/src/mutations.ts` still carries loose device/sample input types deep into `prepareDeviceBatchPlan`.
-- Prompt 5 is still valid. `packages/cli/src/assistant/canonical-write-guard.ts` still duplicates recoverable stored-write parsing and protected-path policy that `@healthybob/core` does not yet share.
+- Prompt 5 is still valid. `packages/cli/src/assistant/canonical-write-guard.ts` still duplicates recoverable stored-write parsing and protected-path policy that `@murph/core` does not yet share.
 - Prompt 6 is still valid. `packages/assistant-runtime/src/hosted-runtime.ts` still mixes restore/env/bootstrap/dispatch/commit/finalize concerns in `runHostedAssistantRuntimeJobInProcess`, and the primary caller remains `apps/cloudflare/src/node-runner.ts`.
 
 ## Scope

@@ -49,7 +49,7 @@ Updated: 2026-03-21
 ## Tasks
 
 1. Inspect hotspot modules and current tests to map duplicated local-state, lock, path, and write patterns.
-2. Extend `@healthybob/runtime-state` or introduce a focused sibling package only if the current package boundary becomes awkward.
+2. Extend `@murph/runtime-state` or introduce a focused sibling package only if the current package boundary becomes awkward.
 3. Extract shared helpers, then rewire inbox, assistant memory/store, setup, and device-daemon facades to use them.
 4. Add or update focused tests around locks, local-state paths, IO helpers, and the refactored feature entrypoints.
 5. Run required checks plus completion-workflow audit passes, then commit the exact touched files.
@@ -65,6 +65,6 @@ Updated: 2026-03-21
 
 ## Outcome
 
-- Extended `@healthybob/runtime-state` into the shared local-state substrate for path resolution, atomic writes, directory-lock semantics, and reusable SQLite/runtime helpers.
+- Extended `@murph/runtime-state` into the shared local-state substrate for path resolution, atomic writes, directory-lock semantics, and reusable SQLite/runtime helpers.
 - Split inbox, assistant memory/store, setup, and device-daemon orchestration into responsibility-scoped submodules while preserving the current assistant-state trust boundary outside the canonical vault and outside `.runtime/`.
 - Added focused inbox and assistant-memory boundary tests and completed simplify, coverage, and final review passes without finding additional actionable regressions.

@@ -18,7 +18,7 @@ test('experiment help uses generic id selectors while journal keeps date selecto
 test.sequential(
   'experiment create accepts richer frontmatter options and experiment reads resolve by slug or id',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-experiment-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-'))
 
     try {
       const initResult = await runCli<{ created: boolean }>(['init', '--vault', vaultRoot])
@@ -148,7 +148,7 @@ test.sequential(
 test.sequential(
   'journal show and list read journal pages by day and date range',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-journal-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-'))
 
     try {
       await runCli(['init', '--vault', vaultRoot])
@@ -236,7 +236,7 @@ test.sequential(
 test.sequential(
   'vault show, stats, and paths surface read-only vault metadata and counts',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-vault-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-'))
 
     try {
       await runCli(['init', '--vault', vaultRoot])

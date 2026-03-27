@@ -3,7 +3,7 @@ import {
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   safeParseContract,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { buildAuditRecord, resolveAuditShardPath } from "../audit.ts";
 import { stringifyFrontmatterDocument } from "../frontmatter.ts";

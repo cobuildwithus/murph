@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedBillingStatus } from "@prisma/client";
-import type { SharePack } from "@healthybob/contracts";
+import type { SharePack } from "@murph/contracts";
 
 const mocks = vi.hoisted(() => ({
   drainHostedExecutionOutbox: vi.fn(),
@@ -37,7 +37,7 @@ import { acceptHostedShareLink, buildHostedSharePageData, createHostedShareLink 
 
 function buildPack(): SharePack {
   return {
-    schemaVersion: "hb.share-pack.v1",
+    schemaVersion: "murph.share-pack.v1",
     title: "Morning Smoothie",
     createdAt: "2026-03-26T12:00:00.000Z",
     entities: [

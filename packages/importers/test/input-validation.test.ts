@@ -14,7 +14,7 @@ import {
 } from "../src/index.ts";
 
 async function createTempFile(name: string, contents: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "healthybob-importers-zod-"));
+  const directory = await mkdtemp(join(tmpdir(), "murph-importers-zod-"));
   const filePath = join(directory, name);
   await writeFile(filePath, contents);
   return filePath;

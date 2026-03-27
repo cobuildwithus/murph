@@ -22,7 +22,7 @@ let defaultCorePortPromise: Promise<unknown> | null = null
 
 async function loadDefaultCorePort() {
   if (!defaultCorePortPromise) {
-    defaultCorePortPromise = import("@healthybob/core")
+    defaultCorePortPromise = import("@murph/core")
   }
 
   return defaultCorePortPromise

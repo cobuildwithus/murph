@@ -77,7 +77,7 @@ afterEach(async () => {
 })
 
 test('sendAssistantMessage defers retryable delivery failures into the durable outbox and refreshes assistant status snapshots', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-robustness-outbox-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-robustness-outbox-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -170,7 +170,7 @@ test('sendAssistantMessage defers retryable delivery failures into the durable o
 })
 
 test('sendAssistantMessage can queue outbound delivery without attempting a pre-commit send', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-queue-only-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-queue-only-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -227,7 +227,7 @@ test('sendAssistantMessage can queue outbound delivery without attempting a pre-
 })
 
 test('drainAssistantOutbox reconciles a journaled delivery without re-sending it', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-outbox-reconcile-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-outbox-reconcile-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -298,7 +298,7 @@ test('drainAssistantOutbox reconciles a journaled delivery without re-sending it
 })
 
 test('drainAssistantOutbox keeps hosted journal failures retryable', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-outbox-retryable-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-outbox-retryable-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -372,7 +372,7 @@ test('drainAssistantOutbox keeps hosted journal failures retryable', async () =>
 })
 
 test('drainAssistantOutbox keeps post-send hosted journal persistence failures retryable', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-outbox-persist-retryable-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-outbox-persist-retryable-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -508,8 +508,46 @@ test('buildAssistantFailoverRoutes dedupes routes that only differ by null versu
   assert.equal(routes[1]?.providerOptions.providerName, undefined)
 })
 
+test('buildAssistantFailoverRoutes dedupes equivalent primary and backup routes when optional identifiers differ only by undefined versus null and labels match', () => {
+  const routes = buildAssistantFailoverRoutes({
+    provider: 'openai-compatible',
+    providerOptions: {
+      model: 'gpt-oss:20b',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+    },
+    backups: [
+      {
+        name: 'primary',
+        provider: 'openai-compatible',
+        codexCommand: null,
+        model: 'gpt-oss:20b',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: null,
+        providerName: null,
+        cooldownMs: null,
+      },
+    ],
+  })
+
+  assert.equal(routes.length, 1)
+  assert.equal(routes[0]?.provider, 'openai-compatible')
+  assert.equal(routes[0]?.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
+  assert.equal(routes[0]?.providerOptions.apiKeyEnv, undefined)
+  assert.equal(routes[0]?.providerOptions.providerName, undefined)
+})
+
 test('sendAssistantMessage fails over across provider routes and records cooldown and receipt state', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-robustness-failover-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-robustness-failover-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -786,7 +824,7 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
 })
 
 test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the derived default', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-failover-cooldown-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-failover-cooldown-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
   await mkdir(vaultRoot, { recursive: true })
@@ -839,7 +877,7 @@ test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the
 })
 
 test('runAssistantAutomation exposes active run-lock status and rejects concurrent vault automation loops', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-robustness-runlock-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-robustness-runlock-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
   await mkdir(vaultRoot, { recursive: true })
@@ -888,7 +926,7 @@ test('runAssistantAutomation exposes active run-lock status and rejects concurre
 })
 
 test('stopAssistantAutomation gracefully stops an active run lock', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-stop-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-stop-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
   await mkdir(vaultRoot, { recursive: true })
@@ -930,7 +968,7 @@ test('stopAssistantAutomation gracefully stops an active run lock', async () => 
 })
 
 test('stopAssistantAutomation force-kills a stubborn active run lock', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-stop-force-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-stop-force-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
   await mkdir(vaultRoot, { recursive: true })
@@ -972,7 +1010,7 @@ test('stopAssistantAutomation force-kills a stubborn active run lock', async () 
 })
 
 test('stopAssistantAutomation clears a stale run lock without signalling a process', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-stop-stale-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-stop-stale-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
   await mkdir(vaultRoot, { recursive: true })
@@ -1006,7 +1044,7 @@ test('stopAssistantAutomation clears a stale run lock without signalling a proce
 })
 
 test('delivery fault injection queues the outbox without performing a real outbound send', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-robustness-faults-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-robustness-faults-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)

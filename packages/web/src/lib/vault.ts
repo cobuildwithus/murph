@@ -10,7 +10,10 @@ export const WEB_LAUNCH_CWD_ENV_KEYS = [
 ] as const;
 export const FIXTURE_VAULT_EXAMPLE = "../../fixtures/demo-web-vault";
 const INIT_CWD_ENV = "INIT_CWD";
-const OPERATOR_CONFIG_RELATIVE_PATH = path.join(".healthybob", "config.json");
+const OPERATOR_CONFIG_RELATIVE_PATHS = [
+  path.join(".murph", "config.json"),
+  path.join(".healthybob", "config.json"),
+] as const;
 
 export function getConfiguredVaultRoot(
   env: Record<string, string | undefined> = process.env,
@@ -144,31 +147,35 @@ function expandConfiguredVaultPath(
 async function readOperatorConfig(
   homeDirectory: string,
 ): Promise<{ defaultVault: string | null } | null> {
-  try {
-    const raw = await readFile(path.join(homeDirectory, OPERATOR_CONFIG_RELATIVE_PATH), "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
+  for (const relativePath of OPERATOR_CONFIG_RELATIVE_PATHS) {
+    try {
+      const raw = await readFile(path.join(homeDirectory, relativePath), "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
 
-    const defaultVault = "defaultVault" in parsed ? parsed.defaultVault : null;
-    return {
-      defaultVault: typeof defaultVault === "string" && defaultVault.trim().length > 0 ? defaultVault : null,
-    };
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return null;
-    }
+      const defaultVault = "defaultVault" in parsed ? parsed.defaultVault : null;
+      return {
+        defaultVault: typeof defaultVault === "string" && defaultVault.trim().length > 0 ? defaultVault : null,
+      };
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        continue;
+      }
 
-    if (error instanceof SyntaxError) {
-      return null;
-    }
+      if (error instanceof SyntaxError) {
+        return null;
+      }
 
-    throw error;
+      throw error;
+    }
   }
+
+  return null;
 }

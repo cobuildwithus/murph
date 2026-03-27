@@ -1,7 +1,7 @@
 import {
   buildHostedExecutionLinqMessageReceivedDispatch,
   type HostedExecutionDispatchRequest,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 import { Prisma, type HostedMember, type HostedRevnetIssuance, type PrismaClient } from "@prisma/client";
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {

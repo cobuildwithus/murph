@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import type { AuditRecord, EventRecord, SampleRecord } from "@healthybob/contracts";
+import type { AuditRecord, EventRecord, SampleRecord } from "@murph/contracts";
 
 import {
   importDeviceBatch,
@@ -53,7 +53,7 @@ async function readDeviceImportManifest(
 }
 
 test("importDeviceBatch writes inline raw integration payloads and canonical records", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import");
+  const vaultRoot = await makeTempDirectory("murph-device-import");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const result = await importDeviceBatch({
@@ -179,7 +179,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
 
   assert.deepEqual(eventRecords, [
     {
-      schemaVersion: "hb.event.v1",
+      schemaVersion: "murph.event.v1",
       id: "evt_Q4EB9ZXH4DP9HNQFVJK9M3JCZD",
       kind: "sleep_session",
       occurredAt: "2026-03-15T22:00:00.000Z",
@@ -202,7 +202,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
       durationMinutes: 540,
     },
     {
-      schemaVersion: "hb.event.v1",
+      schemaVersion: "murph.event.v1",
       id: "evt_87GD6PEP1R7T5PAGT24YZN9BDW",
       kind: "observation",
       occurredAt: "2026-03-16T07:30:00.000Z",
@@ -228,7 +228,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   ]);
   assert.deepEqual(sampleRecords, [
     {
-      schemaVersion: "hb.sample.v1",
+      schemaVersion: "murph.sample.v1",
       id: "smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK",
       dayKey: "2026-03-16",
       timeZone: "UTC",
@@ -262,7 +262,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
 });
 
 test("importDeviceBatch keeps canonical manifest provenance authoritative over caller overrides", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-provenance");
+  const vaultRoot = await makeTempDirectory("murph-device-import-provenance");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attemptedOverrides = {
@@ -356,7 +356,7 @@ test("importDeviceBatch keeps canonical manifest provenance authoritative over c
 });
 
 test("importDeviceBatch retries reuse deterministic ids without duplicating ledgers", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-retry");
+  const vaultRoot = await makeTempDirectory("murph-device-import-retry");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const input = {
@@ -439,7 +439,7 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
 });
 
 test("importDeviceBatch falls back to the sole raw artifact when events omit explicit roles", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-single-raw");
+  const vaultRoot = await makeTempDirectory("murph-device-import-single-raw");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const result = await importDeviceBatch({
@@ -475,7 +475,7 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
   assert.deepEqual(eventRecords[0]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
   assert.deepEqual(eventRecords, [
     {
-      schemaVersion: "hb.event.v1",
+      schemaVersion: "murph.event.v1",
       id: "evt_PQ5N36XDAY9GEWX8DG8B6D9KKA",
       kind: "note",
       occurredAt: "2026-03-16T09:30:00.000Z",
@@ -493,7 +493,7 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
 });
 
 test("importDeviceBatch supports sample-only batches without raw artifacts", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-sample-only");
+  const vaultRoot = await makeTempDirectory("murph-device-import-sample-only");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const result = await importDeviceBatch({
@@ -523,7 +523,7 @@ test("importDeviceBatch supports sample-only batches without raw artifacts", asy
   assert.equal(result.rawArtifacts.length, 0);
   assert.deepEqual(sampleRecords, [
     {
-      schemaVersion: "hb.sample.v1",
+      schemaVersion: "murph.sample.v1",
       id: "smp_4MJE9FC8C4J9V2SQDNTAXXRYJ3",
       dayKey: "2026-03-16",
       timeZone: "UTC",
@@ -538,7 +538,7 @@ test("importDeviceBatch supports sample-only batches without raw artifacts", asy
 });
 
 test("importDeviceBatch rejects empty batches", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-empty");
+  const vaultRoot = await makeTempDirectory("murph-device-import-empty");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   await assert.rejects(
@@ -549,7 +549,7 @@ test("importDeviceBatch rejects empty batches", async () => {
 });
 
 test("importDeviceBatch rejects unsupported event kinds and invalid event fields", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-event-errors");
+  const vaultRoot = await makeTempDirectory("murph-device-import-event-errors");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   await assert.rejects(
@@ -588,7 +588,7 @@ test("importDeviceBatch rejects unsupported event kinds and invalid event fields
 });
 
 test("importDeviceBatch rejects unsupported sample streams and missing sample payloads", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-sample-errors");
+  const vaultRoot = await makeTempDirectory("murph-device-import-sample-errors");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   await assert.rejects(
@@ -630,7 +630,7 @@ test("importDeviceBatch rejects unsupported sample streams and missing sample pa
 });
 
 test("importDeviceBatch validates canonical payloads before raw artifact errors", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-validation-order");
+  const vaultRoot = await makeTempDirectory("murph-device-import-validation-order");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   await assert.rejects(
@@ -681,7 +681,7 @@ test("importDeviceBatch validates canonical payloads before raw artifact errors"
 });
 
 test("importDeviceBatch rejects duplicate raw roles and missing raw-role references", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-raw-errors");
+  const vaultRoot = await makeTempDirectory("murph-device-import-raw-errors");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   await assert.rejects(
@@ -721,7 +721,7 @@ test("importDeviceBatch rejects duplicate raw roles and missing raw-role referen
 });
 
 test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw content", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-import-metadata-errors");
+  const vaultRoot = await makeTempDirectory("murph-device-import-metadata-errors");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   await assert.rejects(

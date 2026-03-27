@@ -1,4 +1,4 @@
-Run a security audit for Healthy Bob.
+Run a security audit for Murph.
 
 Prioritize:
 - canonical vault trust boundaries, unintended writes, and corruption of human- or machine-facing source-of-truth data

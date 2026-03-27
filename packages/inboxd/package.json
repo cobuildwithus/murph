@@ -1,15 +1,15 @@
 {
-  "name": "@healthybob/inboxd",
+  "name": "@murph/inboxd",
   "version": "0.0.0",
   "private": false,
-  "description": "Local inbox ingestion runtime for Healthy Bob.",
+  "description": "Local inbox ingestion runtime for Murph.",
   "license": "GPL-3.0-only",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -41,9 +41,9 @@
     "test": "pnpm --dir ../.. exec vitest run --config packages/inboxd/vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@healthybob/contracts": "workspace:*",
-    "@healthybob/core": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*",
+    "@murph/contracts": "workspace:*",
+    "@murph/core": "workspace:*",
+    "@murph/runtime-state": "workspace:*",
     "@photon-ai/imessage-kit": "2.1.2",
     "grammy": "1.41.1"
   }

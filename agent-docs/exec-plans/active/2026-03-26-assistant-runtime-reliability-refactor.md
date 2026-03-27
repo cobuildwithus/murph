@@ -57,7 +57,7 @@ Land the reviewed assistant reliability fixes and finish the highest-value follo
   - `pnpm exec vitest run packages/cli/test/assistant-runtime.test.ts packages/cli/test/assistant-channel.test.ts packages/cli/test/assistant-observability.test.ts packages/cli/test/assistant-robustness.test.ts packages/cli/test/assistant-state.test.ts --no-coverage --maxWorkers 1`
 - Required checks:
   - `pnpm typecheck` ✅
-  - `pnpm test` ❌ unrelated pre-existing failure in `packages/cli/test/canonical-write-lock.test.ts` because the spawned child process imports `packages/core/dist/constants.js` and then fails to resolve `@healthybob/contracts/dist/index.js` under `packages/core/node_modules`
+  - `pnpm test` ❌ unrelated pre-existing failure in `packages/cli/test/canonical-write-lock.test.ts` because the spawned child process imports `packages/core/dist/constants.js` and then fails to resolve `@murph/contracts/dist/index.js` under `packages/core/node_modules`
   - `pnpm test:coverage` ✅
 - Direct scenario evidence:
   - Seeded one older session plus 55 newer receipts, then ran the built CLI command `node packages/cli/dist/bin.js assistant status --vault <tmp> --session <older-session-id> --format json`; the output still returned the older session receipt, proving the session-filter scan no longer truncates at the newest 50 global receipts.

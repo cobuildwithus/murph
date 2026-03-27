@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@healthybob/device-syncd", () => ({
+vi.mock("@murph/device-syncd", () => ({
   OURA_DEFAULT_WEBHOOK_TARGETS: [
     { eventType: "create", dataType: "daily_sleep" },
     { eventType: "update", dataType: "daily_sleep" },

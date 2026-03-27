@@ -2,7 +2,7 @@ import {
   contractIdMaxLength,
   FAMILY_MEMBER_LIMITS,
   ID_PREFIXES,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";

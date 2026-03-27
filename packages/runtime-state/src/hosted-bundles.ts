@@ -136,7 +136,9 @@ function buildHostedAgentStateRoots(input: {
 
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
   return (
-    relativePath === ".healthybob"
+    relativePath === ".murph"
+    || relativePath === ".murph/config.json"
+    || relativePath === ".healthybob"
     || relativePath === ".healthybob/config.json"
   );
 }

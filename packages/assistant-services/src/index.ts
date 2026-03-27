@@ -9,8 +9,8 @@ export {
   refreshAssistantStatusSnapshot,
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from "healthybob";
+} from "murph";
 export {
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-} from "healthybob";
+} from "murph";

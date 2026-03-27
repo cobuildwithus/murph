@@ -67,7 +67,7 @@ export async function writeAssistantChatResultArtifacts(input: {
       writeAssistantArtifactFile(
         artifactPath,
         {
-          schema: 'healthybob.assistant-chat-result.v1',
+          schema: 'murph.assistant-chat-result.v1',
           captureId: artifactPath.captureId,
           groupCaptureIds: [...normalizedCaptureIds],
           sessionId: input.result.session.sessionId,
@@ -103,7 +103,7 @@ export async function writeAssistantChatDeferredArtifacts(input: {
       writeAssistantArtifactFile(
         artifactPath,
         {
-          schema: 'healthybob.assistant-chat-deferred.v1',
+          schema: 'murph.assistant-chat-deferred.v1',
           captureId: artifactPath.captureId,
           groupCaptureIds: [...normalizedCaptureIds],
           sessionId: input.result.session.sessionId,
@@ -147,7 +147,7 @@ export async function writeAssistantChatErrorArtifacts(input: {
       writeAssistantArtifactFile(
         artifactPath,
         {
-          schema: 'healthybob.assistant-chat-error.v1',
+          schema: 'murph.assistant-chat-error.v1',
           captureId: artifactPath.captureId,
           groupCaptureIds: [...normalizedCaptureIds],
           code,

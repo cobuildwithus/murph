@@ -205,7 +205,7 @@ function createImageShowResult(vaultRoot: string, mime: string, fileName: string
 }
 
 test('routeInboxCaptureWithModel previews and applies text-only document plans without calling a live model backend', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-route-doc-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-doc-'))
   const promoteDocument = vi.fn(async () => ({
     vault: vaultRoot,
     captureId: 'cap_doc',
@@ -220,7 +220,7 @@ test('routeInboxCaptureWithModel previews and applies text-only document plans w
   })
 
   routeHarnessMocks.generateAssistantObject.mockResolvedValue({
-    schema: 'healthybob.assistant-plan.v1',
+    schema: 'murph.assistant-plan.v1',
     summary: 'Promote the capture as a document.',
     rationale: 'The capture contains a stored document attachment and no meal signals.',
     actions: [
@@ -260,7 +260,7 @@ test('routeInboxCaptureWithModel previews and applies text-only document plans w
     )
     assert.equal(
       JSON.parse(await readFile(path.join(vaultRoot, preview.planPath), 'utf8')).schema,
-      'healthybob.assistant-plan.v1',
+      'murph.assistant-plan.v1',
     )
     assert.equal(
       JSON.parse(await readFile(path.join(vaultRoot, preview.resultPath!), 'utf8')).apply,
@@ -268,7 +268,7 @@ test('routeInboxCaptureWithModel previews and applies text-only document plans w
     )
 
     routeHarnessMocks.generateAssistantObject.mockResolvedValueOnce({
-      schema: 'healthybob.assistant-plan.v1',
+      schema: 'murph.assistant-plan.v1',
       summary: 'Promote the capture as a document.',
       rationale: 'The capture contains a stored document attachment and no meal signals.',
       actions: [
@@ -307,7 +307,7 @@ test('routeInboxCaptureWithModel previews and applies text-only document plans w
 })
 
 test('routeInboxCaptureWithModel forwards supported image bytes as multimodal routing evidence', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-route-photo-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-photo-'))
   const imageDirectory = path.join(
     vaultRoot,
     'raw',
@@ -326,7 +326,7 @@ test('routeInboxCaptureWithModel forwards supported image bytes as multimodal ro
   })
 
   routeHarnessMocks.generateAssistantObject.mockResolvedValue({
-    schema: 'healthybob.assistant-plan.v1',
+    schema: 'murph.assistant-plan.v1',
     summary: 'Promote the capture as a meal.',
     rationale: 'The image is a self-authored meal photo.',
     actions: [
@@ -380,7 +380,7 @@ test('routeInboxCaptureWithModel forwards supported image bytes as multimodal ro
 })
 
 test('routeInboxCaptureWithModel falls back to text-only when a provider rejects multimodal image input', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-route-fallback-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-fallback-'))
   const imageDirectory = path.join(
     vaultRoot,
     'raw',
@@ -400,7 +400,7 @@ test('routeInboxCaptureWithModel falls back to text-only when a provider rejects
   routeHarnessMocks.generateAssistantObject
     .mockRejectedValueOnce(new Error('The selected model does not support image input.'))
     .mockResolvedValueOnce({
-      schema: 'healthybob.assistant-plan.v1',
+      schema: 'murph.assistant-plan.v1',
       summary: 'Promote the capture as a meal.',
       rationale: 'The capture text and metadata still indicate a meal photo.',
       actions: [
@@ -457,14 +457,14 @@ test('routeInboxCaptureWithModel falls back to text-only when a provider rejects
 })
 
 test('routeInboxCaptureWithModel falls back to text-only when eligible routing images cannot be loaded', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-route-missing-image-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-missing-image-'))
 
   const inboxServices = createStubInboxServices({
     showResult: createImageShowResult(vaultRoot, 'image/jpeg', 'missing.jpg'),
   })
 
   routeHarnessMocks.generateAssistantObject.mockResolvedValue({
-    schema: 'healthybob.assistant-plan.v1',
+    schema: 'murph.assistant-plan.v1',
     summary: 'Promote the capture as a meal.',
     rationale: 'The capture text still indicates a meal photo.',
     actions: [

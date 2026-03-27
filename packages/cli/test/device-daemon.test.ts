@@ -23,7 +23,7 @@ interface SpawnProcessInput {
 test.sequential(
   'startManagedDeviceSyncDaemon keeps launcher state non-secret and persists the managed bearer separately',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
     const livePids = new Set<number>()
     let healthy = false
     let spawned: SpawnProcessInput | null = null
@@ -132,7 +132,7 @@ test.sequential(
 test.sequential(
   'startManagedDeviceSyncDaemon preserves a distinct DEVICE_SYNC_SECRET when DEVICE_SYNC_CONTROL_TOKEN is also configured',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
     const livePids = new Set<number>()
     let healthy = false
     let spawned: SpawnProcessInput | null = null
@@ -227,7 +227,7 @@ test.sequential(
 test.sequential(
   'getManagedDeviceSyncDaemonStatus reports stale launcher state clearly',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
     let healthy = false
 
     try {
@@ -290,7 +290,7 @@ test.sequential(
 test.sequential(
   'stopManagedDeviceSyncDaemon stops the managed process and removes launcher state',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-daemon-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
     const livePids = new Set<number>()
     let signaledPid: number | null = null
     let healthy = false

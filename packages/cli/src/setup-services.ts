@@ -193,9 +193,15 @@ export function createSetupServices(
     const whisperModel = input.whisperModel ?? 'base.en'
     const homeDirectory = path.resolve(getHomeDirectory())
     const cliBinPath = path.resolve(resolveCliBinPath())
+    const defaultToolchainRoot = path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY)
+    const legacyToolchainRoot = path.join(homeDirectory, '.healthybob', 'toolchain')
     const toolchainRoot = path.resolve(
       getCwd(),
-      input.toolchainRoot ?? path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY),
+      input.toolchainRoot ?? (
+        !(await fileExists(defaultToolchainRoot)) && await fileExists(legacyToolchainRoot)
+          ? legacyToolchainRoot
+          : defaultToolchainRoot
+      ),
     )
     const notes: string[] = []
     const steps: SetupStepResult[] = []
@@ -205,7 +211,7 @@ export function createSetupServices(
     }
 
     log(
-      `Healthy Bob setup targeting ${redactHomePathInText(vault, homeDirectory)} on ${describeSetupHost(platform)} (${arch}).`,
+      `Murph setup targeting ${redactHomePathInText(vault, homeDirectory)} on ${describeSetupHost(platform)} (${arch}).`,
     )
 
     await ensureDirectoryStep({
@@ -426,7 +432,7 @@ export function createSetupServices(
   async function setupMacos(input: SetupInput): Promise<SetupResult> {
     const platform = getPlatform()
     if (platform !== 'darwin') {
-      throw unsupportedSetupPlatform(platform, 'Healthy Bob setup currently supports macOS only through setupMacos(). Use setupHost() for Linux support.')
+      throw unsupportedSetupPlatform(platform, 'Murph setup currently supports macOS only through setupMacos(). Use setupHost() for Linux support.')
     }
 
     return await setupHost(input)
@@ -1051,7 +1057,7 @@ function summarizeCommandFailure(
 
 function unsupportedSetupPlatform(
   platform: NodeJS.Platform,
-  message = 'Healthy Bob setup currently supports macOS and Linux only.',
+  message = 'Murph setup currently supports macOS and Linux only.',
 ): VaultCliError {
   return new VaultCliError('unsupported_platform', message, {
     platform,
@@ -1062,9 +1068,17 @@ function describeSetupHost(platform: NodeJS.Platform): string {
   return platform === 'darwin' ? 'macOS' : platform
 }
 
-export function detectSetupProgramName(argv0: string | undefined): string {
-  const baseName = path.basename(argv0 ?? '')
-  return baseName === 'healthybob' ? 'healthybob' : 'vault-cli'
+export function detectSetupProgramName(
+  argv0: string | undefined,
+  shimProgramName = process.env.SETUP_PROGRAM_NAME,
+): string {
+  const normalizedShimProgramName = shimProgramName?.trim().toLowerCase()
+  if (normalizedShimProgramName === 'murph' || normalizedShimProgramName === 'healthybob') {
+    return 'murph'
+  }
+
+  const baseName = path.basename(argv0 ?? '').toLowerCase()
+  return baseName === 'murph' || baseName === 'healthybob' ? 'murph' : 'vault-cli'
 }
 
 export function isSetupInvocation(
@@ -1076,7 +1090,7 @@ export function isSetupInvocation(
     return true
   }
 
-  if (programName !== 'healthybob') {
+  if (programName !== 'murph') {
     return false
   }
 
@@ -1153,10 +1167,10 @@ async function ensureDefaultVaultSelection(input: {
         : 'completed'
   const detail =
     existingDefaultVault === nextDefaultVault
-      ? `Reusing ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
+      ? `Reusing ${nextDefaultVault} as the default Murph vault for future CLI commands.`
       : input.dryRun
-        ? `Would save ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
-        : `Saved ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
+        ? `Would save ${nextDefaultVault} as the default Murph vault for future CLI commands.`
+        : `Saved ${nextDefaultVault} as the default Murph vault for future CLI commands.`
 
   if (!input.dryRun && existingDefaultVault !== nextDefaultVault) {
     await saveDefaultVaultConfig(input.vault, input.homeDirectory)

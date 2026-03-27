@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import type { HostedExecutionDispatchRequest } from "@healthybob/hosted-execution";
+import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";

@@ -24,7 +24,7 @@ const CODEX_APP_SERVER_ARGS = [
   'app-server',
 ] as const
 const CODEX_APP_SERVER_TIMEOUT_MS = 3_000
-const CODEX_RPC_CLIENT_NAME = 'healthybob'
+const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 
 interface SetupAssistantAccountResolverDependencies {

@@ -7,12 +7,19 @@ import { createAssistantStateWriteLock } from './state-write-lock.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from './store.js'
 
 const assistantOnboardingSlotValues = ['name', 'tone', 'goals'] as const
+const ASSISTANT_ONBOARDING_SCHEMA = 'murph.assistant-onboarding.v1'
+const LEGACY_ASSISTANT_ONBOARDING_SCHEMA = 'healthybob.assistant-onboarding.v1'
 
 type AssistantOnboardingSlot = (typeof assistantOnboardingSlotValues)[number]
 
 const assistantOnboardingProfileSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-onboarding.v1'),
+    schema: z
+      .union([
+        z.literal(ASSISTANT_ONBOARDING_SCHEMA),
+        z.literal(LEGACY_ASSISTANT_ONBOARDING_SCHEMA),
+      ])
+      .transform(() => ASSISTANT_ONBOARDING_SCHEMA),
     name: z.string().min(1).nullable(),
     nameAsked: z.boolean().optional().default(false),
     tone: z.string().min(1).nullable(),
@@ -56,7 +63,7 @@ export async function updateAssistantOnboardingSummary(input: {
   const extracted = extractAssistantOnboardingAnswers(input.prompt)
 
   return assistantOnboardingWriteLock.withWriteLock(paths, async () => {
-    const current = await readAssistantOnboardingProfile(paths)
+    const { profile: current, usedLegacySchema } = await readAssistantOnboardingProfile(paths)
     const summary = await buildAssistantOnboardingSummary({
       paths,
       current,
@@ -66,7 +73,7 @@ export async function updateAssistantOnboardingSummary(input: {
       markNameAsked: summary.missingSlots.includes('name'),
       markToneAsked: summary.missingSlots.includes('tone'),
     })
-    if (JSON.stringify(next) !== JSON.stringify(current)) {
+    if (usedLegacySchema || JSON.stringify(next) !== JSON.stringify(current)) {
       await mkdir(paths.assistantStateRoot, { recursive: true })
       await writeJsonFileAtomic(resolveAssistantOnboardingPath(paths), next)
     }
@@ -86,10 +93,23 @@ async function readAssistantOnboardingProfile(
 ) {
   try {
     const raw = await readFile(resolveAssistantOnboardingPath(paths), 'utf8')
-    return assistantOnboardingProfileSchema.parse(JSON.parse(raw) as unknown)
+    const parsed = JSON.parse(raw) as unknown
+    const usedLegacySchema =
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'schema' in parsed &&
+      parsed.schema === LEGACY_ASSISTANT_ONBOARDING_SCHEMA
+
+    return {
+      profile: assistantOnboardingProfileSchema.parse(parsed),
+      usedLegacySchema,
+    }
   } catch (error) {
     if (isMissingFileError(error)) {
-      return createEmptyAssistantOnboardingProfile()
+      return {
+        profile: createEmptyAssistantOnboardingProfile(),
+        usedLegacySchema: false,
+      }
     }
 
     throw error
@@ -98,7 +118,7 @@ async function readAssistantOnboardingProfile(
 
 function createEmptyAssistantOnboardingProfile() {
   return assistantOnboardingProfileSchema.parse({
-    schema: 'healthybob.assistant-onboarding.v1',
+    schema: ASSISTANT_ONBOARDING_SCHEMA,
     name: null,
     nameAsked: false,
     tone: null,

@@ -17,8 +17,8 @@ describe("readHostedDeviceSyncEnvironment", () => {
 
     expect(environment.publicBaseUrl).toBe("https://example.test/device-sync");
     expect(environment.devUserId).toBe("dev-user");
-    expect(environment.trustedUserAssertionHeader).toBe("x-healthybob-user-assertion");
-    expect(environment.trustedUserSignatureHeader).toBe("x-healthybob-user-signature");
+    expect(environment.trustedUserAssertionHeader).toBe("x-hosted-user-assertion");
+    expect(environment.trustedUserSignatureHeader).toBe("x-hosted-user-signature");
     expect(environment.providers.whoop).toEqual({
       clientId: "whoop-client",
       clientSecret: "whoop-secret",

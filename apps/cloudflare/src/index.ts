@@ -4,7 +4,7 @@ import {
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
@@ -24,7 +24,7 @@ import {
   writeHostedEmailRawMessage,
   type HostedEmailWorkerRequest,
 } from "./hosted-email.ts";
-import { serializeHostedEmailThreadTarget } from "@healthybob/runtime-state";
+import { serializeHostedEmailThreadTarget } from "@murph/runtime-state";
 import { parseHostedUserEnvUpdate, type HostedUserEnvUpdate } from "./user-env.ts";
 import {
   HostedUserRunner,

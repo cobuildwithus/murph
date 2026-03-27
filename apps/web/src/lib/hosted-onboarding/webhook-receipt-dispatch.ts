@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { HostedExecutionDispatchRequest } from "@healthybob/hosted-execution";
+import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
 
 import { readLegacyHostedExecutionDispatch } from "../hosted-execution/outbox-payload";
 

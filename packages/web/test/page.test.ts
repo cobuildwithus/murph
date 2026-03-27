@@ -151,7 +151,7 @@ test("HomePage renders the ready state", async () => {
     sampleLimit: 6,
     timelineLimit: 8,
   });
-  assert.match(markup, /Healthy Bob/);
+  assert.match(markup, /Murph/);
   assert.match(markup, /Weekly compass/);
   assert.match(markup, /What changed, what stayed steady, and what can stay simple/);
   assert.match(markup, /Not enough prior-week data yet to call a meaningful shift\./);
@@ -279,15 +279,15 @@ test("HomePage renders the setup state when no vault is configured", async () =>
     status: "unavailable",
     baseUrl: "http://127.0.0.1:8788",
     message: "Device sync is offline.",
-    hint: "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
-    suggestedCommand: "healthybob device daemon start --vault <your-vault>",
+    hint: "Start the Murph-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+    suggestedCommand: "murph device daemon start --vault <your-vault>",
   });
 
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /No vault configured/);
   assert.match(markup, /VAULT/);
-  assert.match(markup, /save a default Healthy Bob vault first/);
+  assert.match(markup, /save a default Murph vault first/);
 });
 
 function escapeRegExp(value: string): string {
@@ -303,7 +303,7 @@ test("HomePage renders the unreadable-vault error state", async () => {
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
     envVar: "VAULT",
-    hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
+    hint: "Confirm the configured vault path points at a Murph vault root, then restart the local app.",
     message: "The configured vault could not be read.",
     recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
     status: "error",
@@ -312,12 +312,12 @@ test("HomePage renders the unreadable-vault error state", async () => {
     status: "unavailable",
     baseUrl: "http://127.0.0.1:8788",
     message: "Device sync is offline.",
-    hint: "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
-    suggestedCommand: "healthybob device daemon start --vault <your-vault>",
+    hint: "Start the Murph-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+    suggestedCommand: "murph device daemon start --vault <your-vault>",
   });
 
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /The configured vault could not be read\./);
-  assert.match(markup, /Confirm the configured vault path points at a Healthy Bob vault root/);
+  assert.match(markup, /Confirm the configured vault path points at a Murph vault root/);
 });

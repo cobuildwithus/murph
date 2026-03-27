@@ -1,7 +1,7 @@
-import type { SharePack } from "@healthybob/contracts";
+import type { SharePack } from "@murph/contracts";
 
-export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hb-execution-signature";
-export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hb-execution-timestamp";
+export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
+export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 
 export type HostedExecutionEventKind =
   | "member.activated"

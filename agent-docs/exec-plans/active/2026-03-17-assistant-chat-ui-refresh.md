@@ -62,7 +62,7 @@ Updated: 2026-03-17
 
 ## Decisions
 
-- Healthy Bob reads the existing Codex config for display/defaults rather than introducing a separate assistant-owned Codex config.
+- Murph reads the existing Codex config for display/defaults rather than introducing a separate assistant-owned Codex config.
 - The in-chat selector is a two-step picker: model first, reasoning effort second.
 - Sent user turns use the same pale-gray full-width block as the composer instead of right-aligned colored text.
 - Slash suggestions are passive hints filtered by the current `/...` prefix rather than a second navigable command palette.

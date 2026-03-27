@@ -1,7 +1,7 @@
-# Murph Rename Migration Plan
+# Healthy Bob -> murph Migration Plan
 
 Last updated: 2026-03-27
-Status: planning only
+Status: in progress
 
 ## Goal
 
@@ -14,20 +14,22 @@ Rename the live Healthy Bob product/repo/runtime surface to `murph` with a migra
 - Parallel workers can take disjoint rename slices with minimal merge conflict risk.
 - Immutable historical records are left alone unless we explicitly choose to annotate or archive them.
 
-## Decision Gates To Resolve Before Implementation
+## Frozen Implementation Assumptions
+
+This implementation pass proceeds with the following decisions:
 
 1. Package namespace:
-   Keep `@healthybob/*` temporarily with new display copy, or hard-cut to `@murph/*` now?
+   hard-cut live workspace packages and imports from `@healthybob/*` to `@murph/*`.
 2. CLI install/binary surface:
-   Rename unscoped package/bin from `healthybob` to `murph`, or keep `healthybob` as a compatibility alias for one release?
+   rename the primary published package/bin to `murph`, but keep `healthybob` as a compatibility alias for one release where the package shape permits it.
 3. Operator-home path:
-   Migrate `~/.healthybob` to `~/.murph`, or move to a neutral path and keep `murph` only for display/package identity?
+   dual-read `~/.murph` and `~/.healthybob`, migrate forward opportunistically, and write new state to the Murph path unless a legacy path must be preserved in place.
 4. Persisted schema ids:
-   Hard-cut `healthybob.*` ids, or dual-read old ids and rewrite on next write?
+   dual-read durable user-owned ids and envelopes where practical, write new `murph.*` ids on fresh output, and hard-cut rebuildable or non-canonical artifacts that can be regenerated safely.
 5. External hosted names:
-   For cookies/headers/env/config keys, prefer neutral names where possible instead of introducing `MURPH_*` or `x-murph-*`.
+   prefer neutral cookie/header/env/config names rather than inventing branded `MURPH_*` or `x-murph-*` replacements when the surface is external.
 6. Historical docs:
-   Completed execution plans and release notes are historical snapshots. Default recommendation: do not rewrite them.
+   leave completed execution plans and other immutable historical records untouched; document the exception once instead of rewriting snapshots.
 
 ## Repo Inventory Summary
 
@@ -38,7 +40,7 @@ This pass found the following rename-heavy surfaces in the live tree:
 - `103` files with runtime-path/operator-home/toolchain prefixes such as `.healthybob` or `healthybob-*`.
 - `32` files with hosted/external surface references such as `hb_hosted_session`, `x-healthybob-*`, `healthybob-hosted-*`, or `*.healthybob.test`.
 - `74` live docs/readme/copy files with current-brand text outside completed plans.
-- `78` completed execution-plan files still containing historical `healthybob` references; these should remain immutable unless policy changes.
+- `78` completed execution-plan files still containing historical `murph` references; these should remain immutable unless policy changes.
 
 Highest-density code areas from the sweep:
 
@@ -187,7 +189,7 @@ Representative files:
 Notes:
 
 - Treat persisted canonical-adjacent or local durable state carefully.
-- `hb_search_*` SQLite tables are local and rebuildable; those are good hard-cut candidates.
+- `murph_search_*` SQLite tables are local and rebuildable; those are good hard-cut candidates.
 - Assistant-state files, operator config, hosted bundle/user-env, and hosted cipher envelopes likely need dual-read or an explicit migration step.
 
 ### Scope E: Hosted Web, Headers, Cookies, And Infrastructure Names
@@ -259,7 +261,7 @@ Owner boundary:
 
 Primary work:
 
-- Update temp-dir prefixes like `healthybob-*`, sample email addresses, command snapshots, and fixture text after the owning scopes land.
+- Update temp-dir prefixes like `murph-*`, sample email addresses, command snapshots, and fixture text after the owning scopes land.
 - Regenerate generated JSON schemas and doc inventory/doc gardening outputs.
 - Rebaseline any tests that intentionally assert brand strings or package names.
 
@@ -293,9 +295,17 @@ Default recommendation:
 - Leave historical release notes untouched unless there is a product reason to annotate them.
 - Do not spend implementation time rewriting audit zips, `.codex-runs`, or vault evidence/history for branding.
 
+Scope H decision for this migration pass:
+
+- Treat `agent-docs/exec-plans/completed/**` as permanently historical rename exceptions for this rollout; do not reopen completed snapshots just to replace legacy branding.
+- Treat historical release notes and similar archival changelog material as intentionally unrenamed unless a later product-facing annotation is explicitly requested.
+- Treat archived run artifacts such as audit zips and `.codex-runs/**` as historical records; leave them as-is rather than spending migration time on non-live branding cleanup.
+- Treat vault evidence/history and other user-owned historical records as out of scope for branding rewrites; preserve the recorded past rather than normalizing it to the new name.
+- Use this section as the single active-plan exception note so future rename workers can leave those historical references in place without opening follow-up cleanup scopes.
+
 Notes:
 
-- If desired, add one short top-level note elsewhere explaining that historical docs may still reference Healthy Bob pre-rename.
+- No additional top-level note is required for this pass unless a later maintainer wants a broader reader-facing archive disclaimer.
 
 ## Suggested Parallelization
 

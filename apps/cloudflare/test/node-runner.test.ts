@@ -6,13 +6,13 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@healthybob/core";
+import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murph/core";
 import {
   resolveAssistantStatePaths,
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
-} from "@healthybob/runtime-state";
-import { assistantOutboxIntentSchema } from "healthybob";
+} from "@murph/runtime-state";
+import { assistantOutboxIntentSchema } from "murph";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
@@ -20,8 +20,8 @@ const hostedCliMocks = vi.hoisted(() => ({
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("healthybob", async () => {
-  const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
+vi.mock("murph", async () => {
+  const actual = await vi.importActual<typeof import("murph")>("murph");
   return {
     ...actual,
     dispatchAssistantOutboxIntent: (...args: Parameters<typeof actual.dispatchAssistantOutboxIntent>) =>
@@ -47,7 +47,7 @@ describe("runHostedExecutionJob", () => {
     vi.restoreAllMocks();
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
-    const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
+    const actual = await vi.importActual<typeof import("murph")>("murph");
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
       actual.dispatchAssistantOutboxIntent(input));
     hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actual.runAssistantAutomation(input));
@@ -76,7 +76,7 @@ describe("runHostedExecutionJob", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
       },
     });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-test-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -93,10 +93,10 @@ describe("runHostedExecutionJob", () => {
     expect(result.result.summary).toContain("Parser jobs: 0.");
     expect(automationState.autoReplyChannels).toContain("linq");
     await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "config.json"), "utf8"),
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
     ).rejects.toThrow();
     await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     ).rejects.toThrow();
     await expect(readFile(path.join(restored.vaultRoot, "vault.json"), "utf8")).resolves.toContain("{");
   });
@@ -159,7 +159,7 @@ describe("runHostedExecutionJob", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       });
-      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-email-bootstrap-"));
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
         agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -314,7 +314,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("imports a shared food bundle with attached supplement protocols", async () => {
-    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-source-"));
+    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-source-"));
     cleanupPaths.push(sourceVaultRoot);
     await initializeVault({ vaultRoot: sourceVaultRoot });
 
@@ -369,7 +369,7 @@ describe("runHostedExecutionJob", () => {
         occurredAt: "2026-03-26T12:30:00.000Z",
       },
     });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-share-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -405,7 +405,7 @@ describe("runHostedExecutionJob", () => {
         TELEGRAM_BOT_TOKEN: "bot-token",
       },
     });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-test-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -414,7 +414,7 @@ describe("runHostedExecutionJob", () => {
     });
 
     await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     ).rejects.toThrow();
   });
 
@@ -595,7 +595,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("reconciles journaled hosted assistant deliveries only after the durable commit callback", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
     cleanupPaths.push(parent);
@@ -609,7 +609,7 @@ describe("runHostedExecutionJob", () => {
     await writeFile(
       path.join(statePaths.outboxDirectory, `${intentId}.json`),
       `${JSON.stringify(assistantOutboxIntentSchema.parse({
-        schema: "healthybob.assistant-outbox-intent.v1",
+        schema: "murph.assistant-outbox-intent.v1",
         intentId,
         sessionId: "sess_hosted",
         turnId: "turn_hosted",
@@ -707,7 +707,7 @@ describe("runHostedExecutionJob", () => {
       "POST http://commit.worker/events/evt_outbox/finalize",
     ]);
 
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-restored-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -735,7 +735,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
     const intentId = "outbox_hosted_send";
     const createdAt = "2026-03-26T12:00:00.000Z";
@@ -753,7 +753,7 @@ describe("runHostedExecutionJob", () => {
       await writeFile(
         path.join(statePaths.outboxDirectory, `${intentId}.json`),
         `${JSON.stringify(assistantOutboxIntentSchema.parse({
-          schema: "healthybob.assistant-outbox-intent.v1",
+          schema: "murph.assistant-outbox-intent.v1",
           intentId,
           sessionId: "sess_hosted",
           turnId: "turn_hosted",
@@ -916,7 +916,7 @@ describe("runHostedExecutionJob", () => {
       "POST http://commit.worker/events/evt_outbox_send/finalize",
     ]);
 
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-restored-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -946,7 +946,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("replays committed side effects on resume without rerunning compute or recommitting", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-resume-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
     cleanupPaths.push(parent);
@@ -968,7 +968,7 @@ describe("runHostedExecutionJob", () => {
     await writeFile(
       path.join(statePaths.outboxDirectory, `${intentId}.json`),
       `${JSON.stringify(assistantOutboxIntentSchema.parse({
-        schema: "healthybob.assistant-outbox-intent.v1",
+        schema: "murph.assistant-outbox-intent.v1",
         intentId,
         sessionId: "sess_hosted",
         turnId: "turn_hosted",
@@ -1140,7 +1140,7 @@ describe("runHostedExecutionJob", () => {
       summary: "committed",
     });
 
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-resume-restored-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),

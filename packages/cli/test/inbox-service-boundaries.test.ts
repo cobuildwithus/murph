@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { resolveRuntimePaths } from '@healthybob/runtime-state'
+import { resolveRuntimePaths } from '@murph/runtime-state'
 import { test } from 'vitest'
 
 import { instantiateConnector } from '../src/inbox-services/connectors.js'
@@ -155,7 +155,7 @@ test('instantiateConnector delegates Linq webhook options through the connector 
 })
 
 test.sequential('normalizeDaemonState rewrites stale daemon state records', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-daemon-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-daemon-'))
 
   try {
     const paths = resolveRuntimePaths(vaultRoot)
@@ -207,7 +207,7 @@ test.sequential('normalizeDaemonState rewrites stale daemon state records', asyn
 })
 
 test.sequential('readPromotionsByCapture groups promotion entries by capture id', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-inbox-promo-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-promo-'))
 
   try {
     const paths = resolveRuntimePaths(vaultRoot)

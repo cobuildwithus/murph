@@ -1,6 +1,6 @@
-# `@healthybob/importers`
+# `@murph/importers`
 
-Owns ingestion adapters for documents, meals, and sample streams. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@healthybob/core`.
+Owns ingestion adapters for documents, meals, and sample streams. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@murph/core`.
 
 ## Baseline Scope
 

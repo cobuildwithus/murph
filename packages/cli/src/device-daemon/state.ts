@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { toVaultRelativePath } from '@healthybob/runtime-state'
+import { toVaultRelativePath } from '@murph/runtime-state'
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {
   DeviceDaemonDependencies,

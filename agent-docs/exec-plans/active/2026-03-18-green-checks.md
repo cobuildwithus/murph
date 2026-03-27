@@ -34,7 +34,7 @@ Updated: 2026-03-18
 
 ## Outcome
 
-- Restored the web runtime alias closure so built `@healthybob/query` output resolves its built workspace dependencies during Next.js production builds.
+- Restored the web runtime alias closure so built `@murph/query` output resolves its built workspace dependencies during Next.js production builds.
 - Fixed default-vault auto-injection so non-executing built-ins such as `--help` and `--schema` do not corrupt group-help routing.
 - Hardened CLI test helpers against transient workspace dist-module rebuild gaps and aligned stale validation assertions with the current Incur validation envelope.
 - Confirmed the setup alias test path prebuilds the same CLI runtime artifacts as other CLI integration tests.

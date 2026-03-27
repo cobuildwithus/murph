@@ -4,7 +4,7 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   verifyHostedExecutionSignature,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import {
   dispatchHostedExecutionStatus,

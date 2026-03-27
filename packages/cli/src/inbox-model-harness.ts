@@ -40,7 +40,7 @@ const DEFAULT_MAX_FRAGMENT_CHARS = 6000
 const DEFAULT_MAX_ROUTING_CHARS = 24000
 
 const parserManifestSchema = z.object({
-  schema: z.literal('healthybob.parser-manifest.v1'),
+  schema: z.literal('murph.parser-manifest.v1'),
   paths: z.object({
     plainTextPath: z.string().min(1),
     markdownPath: z.string().min(1),
@@ -132,7 +132,7 @@ export async function routeInboxCaptureWithModel(
       rawPlan = await generateAssistantObject({
         model,
         schema: assistantExecutionPlanSchema,
-        schemaName: 'healthybob_assistant_plan',
+        schemaName: 'murph_assistant_plan',
         system: buildInboxPlacementSystemPrompt(),
         prompt: preparedInput.prompt,
       })
@@ -158,7 +158,7 @@ export async function routeInboxCaptureWithModel(
     input.captureId,
     'result.json',
     {
-      schema: 'healthybob.assistant-plan-result.v1',
+      schema: 'murph.assistant-plan-result.v1',
       apply: input.apply ?? false,
       preparedInputMode: bundle.preparedInputMode,
       inputMode,
@@ -224,7 +224,7 @@ async function prepareInboxModelSession(
   return {
     toolCatalog,
     bundle: inboxModelBundleSchema.parse({
-      schema: 'healthybob.inbox-model-bundle.v1',
+      schema: 'murph.inbox-model-bundle.v1',
       captureId: shown.capture.captureId,
       eventId: shown.capture.eventId,
       source: shown.capture.source,
@@ -248,7 +248,7 @@ async function prepareInboxModelSession(
 
 function buildInboxPlacementSystemPrompt(): string {
   return [
-    'You are the Healthy Bob assistant routing model.',
+    'You are the Murph assistant routing model.',
     'Choose the smallest safe set of CLI tool calls needed to place the capture into canonical storage.',
     'Prefer inbox.promote.* tools when a single capture-level promotion fits the evidence.',
     'Use broader vault.* tools only when the capture clearly contains structured data that should be written directly.',
@@ -261,7 +261,7 @@ function buildInboxPlacementSystemPrompt(): string {
 
 function buildInboxPlacementPrompt(bundle: InboxModelBundle): string {
   const responseShape = {
-    schema: 'healthybob.assistant-plan.v1',
+    schema: 'murph.assistant-plan.v1',
     summary: 'one-sentence routing summary',
     rationale: 'brief explanation grounded in the bundle',
     actions: [
@@ -298,7 +298,7 @@ function buildInboxPlacementGenerationInput(
   return {
     model,
     schema: assistantExecutionPlanSchema,
-    schemaName: 'healthybob_assistant_plan',
+    schemaName: 'murph_assistant_plan',
     system: buildInboxPlacementSystemPrompt(),
     ...(preparedInput.inputMode === 'multimodal' && preparedInput.messages
       ? {

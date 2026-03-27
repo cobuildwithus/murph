@@ -1,4 +1,4 @@
-# `@healthybob/query`
+# `@murph/query`
 
 Owns read helpers, filters, derived retrieval state, and export-pack generation over canonical vault state. Query code must not mutate canonical vault data. It may rebuild local `.runtime/` artifacts such as the optional SQLite search index at `.runtime/search.sqlite`.
 

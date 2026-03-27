@@ -1,5 +1,5 @@
 Goal (incl. success criteria):
-- Keep installed `healthybob` and `vault-cli` shims usable when a local workspace package `dist/index.js` is temporarily missing during or after a package rebuild.
+- Keep installed `murph` and `vault-cli` shims usable when a local workspace package `dist/index.js` is temporarily missing during or after a package rebuild.
 - Success means the generated shim rebuilds missing local runtime package outputs before launching the built CLI, focused CLI tests pass, and the local shell launcher can recover from a missing runtime package build.
 
 Constraints/Assumptions:
@@ -19,7 +19,7 @@ Done:
 - Diagnosed `ERR_MODULE_NOT_FOUND` failures as missing workspace package `dist` outputs behind the installed shell shim.
 - Updated generated shim logic to rebuild missing runtime package outputs before launching the built CLI.
 - Added focused shim behavior coverage plus existing inbox coverage reruns.
-- Patched the currently installed local `healthybob` and `vault-cli` shims with the same self-heal logic.
+- Patched the currently installed local `murph` and `vault-cli` shims with the same self-heal logic.
 
 Now:
 - Verification complete; broad workspace failures remain unrelated to this shim repair.
@@ -38,4 +38,4 @@ Working set (files/ids/commands):
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `agent-docs/exec-plans/active/2026-03-23-cli-shim-runtime-repair.md`
 - `pnpm exec vitest run packages/cli/test/setup-cli.test.ts packages/cli/test/inbox-cli.test.ts --no-coverage --maxWorkers 1`
-- `healthybob run --once`
+- `murph run --once`

@@ -6,14 +6,14 @@ Updated: 2026-03-27
 
 ## Goal
 
-Integrate the supplied `healthybob-architecture-refactor-full.patch` on top of the current dirty tree without discarding newer branch work that already overlaps the same hosted-execution, Cloudflare, hosted-share, and runtime-boundary surfaces.
+Integrate the supplied `murph-architecture-refactor-full.patch` on top of the current dirty tree without discarding newer branch work that already overlaps the same hosted-execution, Cloudflare, hosted-share, and runtime-boundary surfaces.
 
 ## Scope
 
 - Compare the supplied patch against the current worktree and identify which hunks are already present versus still missing.
 - Land the remaining patch behavior across:
   - `packages/hosted-execution` canonical builders, parsers, side-effect contracts, and slimmer event payload contracts
-  - the new `@healthybob/assistant-services` hosted service boundary plus the narrower CLI/assistant-runtime packaging changes it requires
+  - the new `@murph/assistant-services` hosted service boundary plus the narrower CLI/assistant-runtime packaging changes it requires
   - `apps/cloudflare` per-user runner queue/env/ref handling, parser-backed hydration, and direct control-path updates
   - `apps/web` async hosted share acceptance, internal payload hydration, and hosted-execution outbox drain wiring
 - Update directly affected docs and tests only when required to keep the landed behavior truthful.

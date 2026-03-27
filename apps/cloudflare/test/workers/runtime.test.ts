@@ -11,7 +11,7 @@ import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionUserStatus,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 interface UserRunnerRpcStub {
   clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
@@ -243,8 +243,8 @@ async function createSignedDispatchRequest(
     body: payload,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "x-hb-execution-signature": signature,
-      "x-hb-execution-timestamp": timestamp,
+      "x-hosted-execution-signature": signature,
+      "x-hosted-execution-timestamp": timestamp,
     },
     method: "POST",
   });

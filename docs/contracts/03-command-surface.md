@@ -6,7 +6,7 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 
 - The only public baseline namespace is `vault-cli`.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
-- `device` commands delegate to the local `@healthybob/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
+- `device` commands delegate to the local `@murph/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 
@@ -218,12 +218,12 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `audit` is a readable noun with `tail` as its stream-style follow-up.
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
 - `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, scheduled assistant cron prompts, and always-on inbox triage; it stores only minimal assistant metadata outside the canonical vault, uses explicit conversation bindings for session reuse, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due cron jobs while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
-- Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `healthybob chat` discovery stays truthful.
-- Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `healthybob status` discovery stays truthful.
-- Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `healthybob doctor` discovery stays truthful.
-- Top-level `run` is a shorthand alias for `assistant run`; it shares the same option/output contract so installed `healthybob run` discovery stays truthful while keeping automation explicit.
-- Top-level `stop` is a shorthand alias for `assistant stop`; it shares the same option/output contract so installed `healthybob stop` discovery stays truthful while giving operators a supported recovery path for stuck assistant automation locks.
-- `device` is a local control-plane noun backed by `@healthybob/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Healthy Bob-managed local daemon for the selected vault.
+- Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
+- Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
+- Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.
+- Top-level `run` is a shorthand alias for `assistant run`; it shares the same option/output contract so installed `murph run` discovery stays truthful while keeping automation explicit.
+- Top-level `stop` is a shorthand alias for `assistant stop`; it shares the same option/output contract so installed `murph stop` discovery stays truthful while giving operators a supported recovery path for stuck assistant automation locks.
+- `device` is a local control-plane noun backed by `@murph/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault.
 
 These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 
@@ -256,8 +256,8 @@ Every command now uses native `incur` command definitions directly:
 
 ## Shared Option Rules
 
-- `--vault <path>` is required for canonical vault commands so the target vault is explicit. `device` commands also require it so Healthy Bob can manage the local daemon and its launcher state for that vault, even when callers override the control-plane endpoint with `--baseUrl`.
-- `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `DEVICE_SYNC_BASE_URL` and then the Healthy Bob-managed local daemon default.
+- `--vault <path>` is required for canonical vault commands so the target vault is explicit. `device` commands also require it so Murph can manage the local daemon and its launcher state for that vault, even when callers override the control-plane endpoint with `--baseUrl`.
+- `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `DEVICE_SYNC_BASE_URL` and then the Murph-managed local daemon default.
 - `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
 - Machine-stable callers that need metadata or CTA suggestions should prefer `--verbose --format json`. The payload examples below describe the `data` body emitted by non-verbose JSON mode.
@@ -625,7 +625,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
   "backend": "sqlite",
   "dbPath": ".runtime/search.sqlite",
   "exists": true,
-  "schemaVersion": "hb.search.v1",
+  "schemaVersion": "murph.search.v1",
   "indexedAt": "2026-03-13T03:55:00.000Z",
   "documentCount": 42
 }
@@ -641,7 +641,7 @@ The freeform note is preserved verbatim in `note`. The structured fields stay in
   "backend": "sqlite",
   "dbPath": ".runtime/search.sqlite",
   "exists": true,
-  "schemaVersion": "hb.search.v1",
+  "schemaVersion": "murph.search.v1",
   "indexedAt": "2026-03-13T03:55:00.000Z",
   "documentCount": 42,
   "rebuilt": true

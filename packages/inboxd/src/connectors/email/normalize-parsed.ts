@@ -3,7 +3,7 @@ import {
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
   type HostedEmailThreadTarget,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
 import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.ts";

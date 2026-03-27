@@ -1,49 +1,57 @@
 {
-  "repositoryUrl": "https://github.com/cobuildwithus/healthybob",
-  "primaryPackage": "healthybob",
+  "repositoryUrl": "https://github.com/cobuildwithus/murph",
+  "primaryPackage": "murph",
   "releaseArtifacts": {
     "changelogPath": "packages/cli/CHANGELOG.md",
     "releaseNotesDir": "packages/cli/release-notes"
   },
   "packages": [
     {
-      "name": "@healthybob/contracts",
+      "name": "@murph/contracts",
       "path": "packages/contracts"
     },
     {
-      "name": "@healthybob/hosted-execution",
+      "name": "@murph/hosted-execution",
       "path": "packages/hosted-execution"
     },
     {
-      "name": "@healthybob/runtime-state",
+      "name": "@murph/runtime-state",
       "path": "packages/runtime-state"
     },
     {
-      "name": "@healthybob/core",
+      "name": "@murph/core",
       "path": "packages/core"
     },
     {
-      "name": "@healthybob/query",
+      "name": "@murph/query",
       "path": "packages/query"
     },
     {
-      "name": "@healthybob/importers",
+      "name": "@murph/importers",
       "path": "packages/importers"
     },
     {
-      "name": "@healthybob/device-syncd",
+      "name": "@murph/device-syncd",
       "path": "packages/device-syncd"
     },
     {
-      "name": "@healthybob/inboxd",
+      "name": "@murph/inboxd",
       "path": "packages/inboxd"
     },
     {
-      "name": "@healthybob/parsers",
+      "name": "@murph/parsers",
       "path": "packages/parsers"
     },
     {
-      "name": "healthybob",
+      "name": "@murph/assistant-runtime",
+      "path": "packages/assistant-runtime"
+    },
+    {
+      "name": "@murph/assistant-services",
+      "path": "packages/assistant-services"
+    },
+    {
+      "name": "murph",
       "path": "packages/cli"
     }
   ]

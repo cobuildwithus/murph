@@ -1,5 +1,5 @@
-import type { ConnectorRestartPolicy } from '@healthybob/inboxd'
-import type { RuntimePaths } from '@healthybob/runtime-state'
+import type { ConnectorRestartPolicy } from '@murph/inboxd'
+import type { RuntimePaths } from '@murph/runtime-state'
 import { z } from 'incur'
 import type { AgentmailApiClient } from '../agentmail-runtime.js'
 import { inboxPromotionStoreSchema } from '../inbox-cli-contracts.js'

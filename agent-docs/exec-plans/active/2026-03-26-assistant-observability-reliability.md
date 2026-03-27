@@ -8,7 +8,7 @@ Integrate the supplied assistant resilience patch on top of the current assistan
 2. file-backed idempotent outbox intents with deferred, retryable, and replay-safe drain behavior
 3. persisted diagnostics and provider/model failover state with cooldown tracking
 4. env-driven assistant fault injection for robustness coverage
-5. read-only `healthybob status` / `healthybob doctor` surfaces for assistant-state visibility and integrity checks
+5. read-only `murph status` / `murph doctor` surfaces for assistant-state visibility and integrity checks
 
 ## Constraints
 

@@ -13,14 +13,14 @@ import type {
   SampleRecord,
   SampleSource,
   SampleStream,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   experimentFrontmatterSchema,
   journalDayFrontmatterSchema,
   eventRecordSchema,
   safeParseContract,
   sampleRecordSchema,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import {
   BASELINE_EVENT_KINDS,

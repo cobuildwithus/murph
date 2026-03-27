@@ -99,7 +99,7 @@ test('resolveAssistantAliasKey merges conversation refs with explicit locator ov
 })
 
 test('assistant sessions live outside the vault, omit redundant path metadata, and reuse alias mappings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -191,7 +191,7 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
 })
 
 test('assistant state documents support show put patch list and delete with JSON merge patch semantics', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-state-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-state-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -266,7 +266,7 @@ test('assistant state documents support show put patch list and delete with JSON
 })
 
 test('assistant state patch creates missing documents and replaces arrays', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-patch-create-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-patch-create-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -318,7 +318,7 @@ test('assistant state patch creates missing documents and replaces arrays', asyn
 })
 
 test('assistant state documents reject invalid document ids', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-invalid-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-invalid-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -334,7 +334,7 @@ test('assistant state documents reject invalid document ids', async () => {
 })
 
 test('assistant state document listing ignores invalid on-disk filenames', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-invalid-list-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-doc-invalid-list-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -371,7 +371,7 @@ test('assistant state document listing ignores invalid on-disk filenames', async
 })
 
 test('resolveAssistantSession prefers explicit sessionId over conversation-key matches', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-id-precedence-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-id-precedence-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -415,7 +415,7 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
 })
 
 test('resolveAssistantSession does not clear bindings when conversation only carries lookup metadata', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-lookup-conversation-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-lookup-conversation-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -454,7 +454,7 @@ test('resolveAssistantSession does not clear bindings when conversation only car
 })
 
 test('resolveAssistantSession ignores primitive conversation payloads when patching bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-primitive-conversation-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-primitive-conversation-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -484,7 +484,7 @@ test('resolveAssistantSession ignores primitive conversation payloads when patch
 })
 
 test('resolveAssistantSession only patches nested conversation fields that were explicitly provided', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-partial-conversation-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-partial-conversation-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -523,7 +523,7 @@ test('resolveAssistantSession only patches nested conversation fields that were 
 })
 
 test('resolveAssistantSession ignores alias-only nested conversation payloads when patching bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-alias-only-conversation-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-alias-only-conversation-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -563,7 +563,7 @@ test('resolveAssistantSession ignores alias-only nested conversation payloads wh
 })
 
 test('resolveAssistantSession retargets participant delivery when actorId overrides an existing participant binding', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-participant-retarget-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-participant-retarget-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -593,7 +593,7 @@ test('resolveAssistantSession retargets participant delivery when actorId overri
 })
 
 test('resolveAssistantSession clears thread delivery targets when nested conversation explicitly nulls threadId', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-clear-thread-target-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-thread-target-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -626,7 +626,7 @@ test('resolveAssistantSession clears thread delivery targets when nested convers
 })
 
 test('resolveAssistantSession clears participant delivery targets when nested conversation explicitly nulls participantId', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-clear-participant-target-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-participant-target-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -656,7 +656,7 @@ test('resolveAssistantSession clears participant delivery targets when nested co
 })
 
 test('resolveAssistantSession prefers alias matches over conversation-key matches', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-alias-precedence-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-precedence-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -705,7 +705,7 @@ test('resolveAssistantSession prefers alias matches over conversation-key matche
 })
 
 test('resolveAssistantSession rotates conversation-key sessions after the max age threshold', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-rotate-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-rotate-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -758,7 +758,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
 })
 
 test('resolveAssistantSession merges conversation refs with explicit locator overrides when creating bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-conversation-ref-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-conversation-ref-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -790,7 +790,7 @@ test('resolveAssistantSession merges conversation refs with explicit locator ove
 })
 
 test('assistant memory write locks allow nested reentry while serializing concurrent same-root callers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-lock-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-lock-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -844,7 +844,7 @@ test('assistant memory write locks allow nested reentry while serializing concur
 })
 
 test('assistant runtime write locks allow nested reentry while serializing concurrent same-root callers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-runtime-lock-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-lock-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -897,7 +897,7 @@ test('assistant runtime write locks allow nested reentry while serializing concu
 })
 
 test('assistant transcripts are stored separately from session metadata', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-transcript-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-transcript-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -971,7 +971,7 @@ function createDeferred<T>() {
 }
 
 test('getAssistantSession explains vault-scoped session drift when only a transcript remains', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-missing-session-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-missing-session-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1004,7 +1004,7 @@ test('getAssistantSession explains vault-scoped session drift when only a transc
 })
 
 test('getAssistantSession rejects non-canonical assistant state payloads with legacy excerpt fields', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-migrate-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-migrate-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1019,7 +1019,7 @@ test('getAssistantSession rejects non-canonical assistant state payloads with le
     path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
     `${JSON.stringify(
       {
-        schema: 'healthybob.assistant-session.v2',
+        schema: 'murph.assistant-session.v2',
         sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-legacy',
@@ -1061,7 +1061,7 @@ test('getAssistantSession rejects non-canonical assistant state payloads with le
 })
 
 test('resolveAssistantSession ignores legacy aliases.json fallback state', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-alias-hard-cut-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-hard-cut-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1074,7 +1074,7 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
     path.join(statePaths.sessionsDirectory, 'asst_existing.json'),
     `${JSON.stringify(
       {
-        schema: 'healthybob.assistant-session.v2',
+        schema: 'murph.assistant-session.v2',
         sessionId: 'asst_existing',
         provider: 'codex-cli',
         providerSessionId: null,
@@ -1131,7 +1131,7 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
 })
 
 test('readAssistantAutomationState rejects legacy automation v1 payloads', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-automation-hard-cut-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-automation-hard-cut-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1158,7 +1158,7 @@ test('readAssistantAutomationState rejects legacy automation v1 payloads', async
 })
 
 test('redactAssistantDisplayPath hides HOME-prefixed paths and leaves external paths untouched', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-redact-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-redact-'))
   const homeRoot = path.join(parent, 'home')
   const nestedPath = path.join(homeRoot, 'vault', 'sessions')
   const outsidePath = path.join(parent, 'outside')
@@ -1198,7 +1198,7 @@ function restoreEnvironmentVariable(
 }
 
 test('upsertAssistantMemory writes vault-scoped Markdown memory with provenance metadata and forget removes targeted records', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1226,8 +1226,8 @@ test('upsertAssistantMemory writes vault-scoped Markdown memory with provenance 
   assert.equal(dailyRecord?.provenance?.writtenBy, 'operator')
   assert.match(longTermMemory, /Call the user Alex\./u)
   assert.match(dailyMemory, /Call the user Alex\./u)
-  assert.match(longTermMemory, /healthybob-assistant-memory:/u)
-  assert.match(dailyMemory, /healthybob-assistant-memory:/u)
+  assert.match(longTermMemory, /murph-assistant-memory:/u)
+  assert.match(dailyMemory, /murph-assistant-memory:/u)
   assert.equal(longTermMemory.includes(vaultRoot), false)
   assert.equal(dailyMemory.includes(vaultRoot), false)
 
@@ -1320,7 +1320,7 @@ test('extractAssistantMemory only keeps durable health context by default', () =
 })
 
 test('upsertAssistantMemory binds assistant writes to the active turn context', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-turn-context-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-turn-context-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1381,7 +1381,7 @@ test('upsertAssistantMemory binds assistant writes to the active turn context', 
 })
 
 test('upsertAssistantMemory accepts canonical identity and tone writes from a compound bound user turn', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-compound-turn-context-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-compound-turn-context-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1421,7 +1421,7 @@ test('upsertAssistantMemory accepts canonical identity and tone writes from a co
 })
 
 test('upsertAssistantMemory replaces mutable long-term identity and response-style memory', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-upsert-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-upsert-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1501,7 +1501,7 @@ test('upsertAssistantMemory replaces mutable long-term identity and response-sty
 })
 
 test('upsertAssistantMemory exposes typed search/get results with cited file locations', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-search-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-search-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1542,7 +1542,7 @@ test('upsertAssistantMemory exposes typed search/get results with cited file loc
 })
 
 test('loadAssistantMemoryPromptBlock keeps daily notes out of the core bootstrap prompt and gates health memory by privacy', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-core-prompt-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-core-prompt-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1588,7 +1588,7 @@ test('loadAssistantMemoryPromptBlock keeps daily notes out of the core bootstrap
 })
 
 test('upsertAssistantMemory requires explicit remember intent for health context', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-health-policy-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-health-policy-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)

@@ -1,4 +1,4 @@
-import { assertContract, sharePackSchema } from "@healthybob/contracts";
+import { assertContract, sharePackSchema } from "@murph/contracts";
 
 import { createHostedShareLink, requireHostedShareInternalToken } from "@/src/lib/hosted-share/service";
 import { jsonError, jsonOk, readJsonObject } from "@/src/lib/hosted-onboarding/http";

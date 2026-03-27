@@ -81,7 +81,7 @@ export async function writeParserArtifacts(input: {
       await resolveVaultRelativePath(input.vaultRoot, manifestPath),
       `${JSON.stringify(
         {
-          schema: "healthybob.parser-manifest.v1",
+          schema: "murph.parser-manifest.v1",
           providerId: input.output.providerId,
           createdAt: input.output.createdAt,
           artifact,

@@ -26,9 +26,12 @@ export {
   resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
 
-const OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
-const OPERATOR_CONFIG_DIRECTORY = '.healthybob'
+const OPERATOR_CONFIG_SCHEMA = 'murph.operator-config.v1'
+const LEGACY_OPERATOR_CONFIG_SCHEMA = 'healthybob.operator-config.v1'
+const OPERATOR_CONFIG_DIRECTORY = '.murph'
+const LEGACY_OPERATOR_CONFIG_DIRECTORY = '.healthybob'
 const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
+const LEGACY_OPERATOR_CONFIG_PATH = path.join(LEGACY_OPERATOR_CONFIG_DIRECTORY, 'config.json')
 export const VAULT_ENV = 'VAULT'
 export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
@@ -251,6 +254,12 @@ export function resolveOperatorConfigPath(
   return path.join(homeDirectory, OPERATOR_CONFIG_PATH)
 }
 
+function resolveLegacyOperatorConfigPath(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): string {
+  return path.join(homeDirectory, LEGACY_OPERATOR_CONFIG_PATH)
+}
+
 export function normalizeVaultForConfig(
   vault: string,
   homeDirectory = resolveOperatorHomeDirectory(),
@@ -287,25 +296,34 @@ export function expandConfiguredVaultPath(
 export async function readOperatorConfig(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig | null> {
-  try {
-    const raw = await readFile(resolveOperatorConfigPath(homeDirectory), 'utf8')
-    return operatorConfigSchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
-      return null
-    }
+  for (const configPath of [
+    resolveOperatorConfigPath(homeDirectory),
+    resolveLegacyOperatorConfigPath(homeDirectory),
+  ]) {
+    try {
+      const raw = await readFile(configPath, 'utf8')
+      return operatorConfigSchema.parse(
+        normalizeOperatorConfigRecord(JSON.parse(raw) as unknown),
+      )
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
+        continue
+      }
 
-    if (error instanceof z.ZodError || error instanceof SyntaxError) {
-      return null
-    }
+      if (error instanceof z.ZodError || error instanceof SyntaxError) {
+        return null
+      }
 
-    throw error
+      throw error
+    }
   }
+
+  return null
 }
 
 export async function saveDefaultVaultConfig(
@@ -365,6 +383,23 @@ function buildOperatorConfig(
         : existing?.assistant ?? null,
     updatedAt: new Date().toISOString(),
   })
+}
+
+function normalizeOperatorConfigRecord(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+
+  const record = value as Record<string, unknown>
+
+  if (record.schema === LEGACY_OPERATOR_CONFIG_SCHEMA) {
+    return {
+      ...record,
+      schema: OPERATOR_CONFIG_SCHEMA,
+    }
+  }
+
+  return record
 }
 
 export async function resolveDefaultVault(

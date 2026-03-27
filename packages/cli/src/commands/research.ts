@@ -11,7 +11,7 @@ const researchArgsSchema = z.object({
     .string()
     .min(1)
     .describe(
-      'Prompt to send through review:gpt before Healthy Bob saves the captured response into research/ inside the vault.',
+      'Prompt to send through review:gpt before Murph saves the captured response into research/ inside the vault.',
     ),
 })
 
@@ -38,7 +38,7 @@ const researchOptionsSchema = withBaseOptions({
     .min(1)
     .optional()
     .describe(
-      'Optional overall browser automation timeout such as 10m or 40m. Healthy Bob defaults this to 40m when omitted.',
+      'Optional overall browser automation timeout such as 10m or 40m. Murph defaults this to 40m when omitted.',
     ),
   waitTimeout: z
     .string()
@@ -86,7 +86,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       description:
         'Run ChatGPT Deep Research through review:gpt, auto-send the staged prompt, wait for the result, and save the captured markdown note under research/ in the selected vault.',
       hint:
-        'Use this when you need a deeper current-evidence scan that should leave a durable markdown note in the vault. Deep Research commonly takes 10 to 60 minutes, so keep the command running unless it errors. Healthy Bob defaults the overall timeout to 40m; raise `--timeout` for longer runs, and only use `--wait-timeout` when you want a different response-wait cap. Free-tier access may be more limited.',
+        'Use this when you need a deeper current-evidence scan that should leave a durable markdown note in the vault. Deep Research commonly takes 10 to 60 minutes, so keep the command running unless it errors. Murph defaults the overall timeout to 40m; raise `--timeout` for longer runs, and only use `--wait-timeout` when you want a different response-wait cap. Free-tier access may be more limited.',
       examples: [
         {
           args: {
@@ -123,7 +123,7 @@ export function registerResearchCommands(cli: Cli.Cli) {
       description:
         'Run GPT Pro through review:gpt, auto-send the staged prompt, wait for the result, and save the captured markdown note under research/ in the selected vault.',
       hint:
-        'Use this when you want a durable GPT Pro synthesis saved into the vault without switching into Deep Research mode. Healthy Bob still defaults the overall timeout to 40m here; `--wait-timeout` is only for the uncommon case where you want the response-wait cap different from the overall timeout. Healthy Bob will warn when the saved assistant account is not Pro.',
+        'Use this when you want a durable GPT Pro synthesis saved into the vault without switching into Deep Research mode. Murph still defaults the overall timeout to 40m here; `--wait-timeout` is only for the uncommon case where you want the response-wait cap different from the overall timeout. Murph will warn when the saved assistant account is not Pro.',
       examples: [
         {
           args: {

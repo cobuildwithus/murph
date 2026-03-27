@@ -23,7 +23,7 @@ afterEach(async () => {
 })
 
 test('assistant status surfaces recent receipts and doctor passes on healthy local state', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-observability-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -67,7 +67,7 @@ test('assistant status surfaces recent receipts and doctor passes on healthy loc
 })
 
 test('assistant doctor flags malformed transcript lines without breaking status', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-observability-bad-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-bad-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -96,7 +96,7 @@ test('assistant doctor flags malformed transcript lines without breaking status'
 })
 
 test('assistant automation ignores legacy outbox records after the outbox cutover', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-observability-legacy-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-legacy-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -106,7 +106,7 @@ test('assistant automation ignores legacy outbox records after the outbox cutove
   await writeFile(
     path.join(statePaths.outboxDirectory, 'legacy-intent.json'),
     JSON.stringify({
-      schema: 'healthybob.assistant-outbox-intent.v1',
+      schema: 'murph.assistant-outbox-intent.v1',
       intentId: 'outbox_legacy_sent',
       idempotencyKey: 'turn_legacy_sent',
       sessionId: 'asst_legacy_sent',
@@ -154,7 +154,7 @@ test('assistant automation ignores legacy outbox records after the outbox cutove
 })
 
 test('assistant status ignores expired cooldown warnings and can find an older requested session beyond the global recent-turn window', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-observability-status-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-status-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -191,7 +191,7 @@ test('assistant status ignores expired cooldown warnings and can find an older r
   await writeFile(
     statePaths.failoverStatePath,
     JSON.stringify({
-      schema: 'healthybob.assistant-failover-state.v1',
+      schema: 'murph.assistant-failover-state.v1',
       updatedAt: '2026-03-26T12:00:00.000Z',
       routes: [
         {

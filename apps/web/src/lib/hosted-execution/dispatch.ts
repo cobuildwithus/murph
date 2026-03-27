@@ -4,7 +4,7 @@ import {
   type HostedExecutionDispatchEnvironment,
   readHostedExecutionDispatchEnvironment,
   type HostedExecutionUserStatus,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,

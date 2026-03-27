@@ -7,7 +7,7 @@ import { test } from 'vitest'
 import {
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
-} from '@healthybob/core'
+} from '@murph/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
@@ -172,7 +172,7 @@ test('workout format save help uses positional name and text arguments', async (
 test.sequential(
   'workout format save, show, list, and log stay thin while feeding the same canonical event path',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-format-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
     try {
       const initResult = await runCli<{ created: boolean }>([
@@ -324,7 +324,7 @@ test.sequential(
 test.sequential(
   'workout format save validates future loggability up front',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-format-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
     try {
       const initResult = await runCli<{ created: boolean }>([
@@ -360,7 +360,7 @@ test.sequential(
 test.sequential(
   'workout format save updates an existing saved format through the audited write path',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-format-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
     try {
       const initResult = await runCli<{ created: boolean }>([
@@ -431,7 +431,7 @@ test.sequential(
 test.sequential(
   'workout add captures activity_session events and fails fast on ambiguous durations',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
 
     try {
       const initResult = await runSliceCli<{ created: boolean }>([
@@ -589,7 +589,7 @@ test.sequential(
 test.sequential(
   'workout add surfaces invalid timestamps without needing a custom workout read surface',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
 
     try {
       const initResult = await runCli<{ created: boolean }>([
@@ -622,7 +622,7 @@ test.sequential(
 test.sequential(
   'workout edit/delete mutate and remove the saved activity_session event',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-workout-edit-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-edit-'))
 
     try {
       const initResult = await runCli<{ created: boolean }>([

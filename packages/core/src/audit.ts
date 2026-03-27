@@ -5,7 +5,7 @@ import type {
   AuditStatus,
   ErrorCodeValue,
   FileChangeOperation,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import {
   AUDIT_ACTORS,
@@ -163,7 +163,7 @@ export function buildAuditRecord({
   const normalizedChanges = normalizeChanges(changes, files);
 
   return {
-    schemaVersion: "hb.audit.v1",
+    schemaVersion: "murph.audit.v1",
     id: generateRecordId(ID_PREFIXES.audit),
     action,
     status: normalizeStatus(status),

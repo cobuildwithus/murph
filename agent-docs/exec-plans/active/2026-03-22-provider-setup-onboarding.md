@@ -10,7 +10,7 @@ Updated: 2026-03-22
 
 ## Success criteria
 
-- Interactive `healthybob onboard|setup` asks for the assistant backend before channel selection and supports Codex CLI, Codex OSS/local-model, OpenAI-compatible, and skip.
+- Interactive `murph onboard|setup` asks for the assistant backend before channel selection and supports Codex CLI, Codex OSS/local-model, OpenAI-compatible, and skip.
 - Operator config persists safe assistant backend defaults such as provider, model, base URL, provider label, and API-key env-var name without storing raw API keys.
 - `assistant ask`, `assistant chat`, and root `chat` accept and propagate provider/base URL/API-key-env/provider-name overrides.
 - OpenAI-compatible chat turns execute through the existing AI SDK harness, replay recent local transcript context, and reset provider session ids when switching backends.
@@ -51,6 +51,6 @@ Updated: 2026-03-22
 - Outcome:
   - `pnpm typecheck` passed.
   - `pnpm exec vitest run --coverage.enabled=false packages/cli/test/assistant-service.test.ts packages/cli/test/assistant-state.test.ts packages/cli/test/assistant-runtime.test.ts --maxWorkers 1` passed.
-  - `pnpm exec vitest run --coverage.enabled=false packages/cli/test/assistant-provider.test.ts packages/cli/test/assistant-cli.test.ts packages/cli/test/setup-cli.test.ts --maxWorkers 1` remains blocked by unrelated workspace build failures outside this change (for example `packages/core/src/operations/canonical-write-lock.ts` missing `@healthybob/runtime-state` exports and `packages/web/src/lib/overview.ts` unresolved `@healthybob/query` imports when the repo runs the broader build/test pipeline).
+  - `pnpm exec vitest run --coverage.enabled=false packages/cli/test/assistant-provider.test.ts packages/cli/test/assistant-cli.test.ts packages/cli/test/setup-cli.test.ts --maxWorkers 1` remains blocked by unrelated workspace build failures outside this change (for example `packages/core/src/operations/canonical-write-lock.ts` missing `@murph/runtime-state` exports and `packages/web/src/lib/overview.ts` unresolved `@murph/query` imports when the repo runs the broader build/test pipeline).
   - `pnpm test` failed for the same unrelated workspace/build breakages outside the touched provider/setup files.
-  - `pnpm test:coverage` failed early in the pre-existing web build step because `packages/web/src/lib/overview.ts` cannot resolve `@healthybob/query` and `@healthybob/query/search`.
+  - `pnpm test:coverage` failed early in the pre-existing web build step because `packages/web/src/lib/overview.ts` cannot resolve `@murph/query` and `@murph/query/search`.

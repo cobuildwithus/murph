@@ -237,7 +237,7 @@ export function resolveReviewGptWorkspaceRoot(input: {
 
   throw new VaultCliError(
     'research_tool_unavailable',
-    'Could not locate a Healthy Bob workspace root containing the `review:gpt` script.',
+    'Could not locate a Murph workspace root containing the `review:gpt` script.',
     {
       searchedFrom: candidates.map((candidate) => path.resolve(candidate)),
     },
@@ -299,7 +299,7 @@ async function runResearchLikePrompt(
     defaults: assistantDefaults,
   })
 
-  const temporaryDirectory = await createTempDirectory('healthybob-research-')
+  const temporaryDirectory = await createTempDirectory('murph-research-')
   const responseFile = path.join(temporaryDirectory, 'response.md')
 
   try {
@@ -388,7 +388,7 @@ function buildResearchWarnings(input: {
     }
 
     return [
-      'Deepthink targets GPT Pro and may fail because Healthy Bob could not verify a saved Pro assistant account on this machine.',
+      'Deepthink targets GPT Pro and may fail because Murph could not verify a saved Pro assistant account on this machine.',
     ]
   }
 

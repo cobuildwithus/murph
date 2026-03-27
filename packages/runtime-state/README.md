@@ -1,6 +1,6 @@
-# `@healthybob/runtime-state`
+# `@murph/runtime-state`
 
-Shared runtime-state helpers for Healthy Bob packages that need rebuildable
+Shared runtime-state helpers for Murph packages that need rebuildable
 machine-local storage next to a vault.
 
 ## Scope

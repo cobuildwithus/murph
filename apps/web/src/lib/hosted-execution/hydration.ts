@@ -1,5 +1,5 @@
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
-import { type HostedExecutionDispatchRequest } from "@healthybob/hosted-execution";
+import { type HostedExecutionDispatchRequest } from "@murph/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";

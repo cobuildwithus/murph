@@ -74,7 +74,7 @@ Updated: 2026-03-24
     - `assistant-cron.test.ts` is not currently included by the repo Vitest config filter and does not run under direct file targeting
 - Required commands failed for unrelated pre-existing issues outside this lock refactor:
   - `pnpm typecheck`
-    - fails in `packages/inboxd/src/indexing/persist.ts` with `TS2307: Cannot find module '@healthybob/contracts'`
+    - fails in `packages/inboxd/src/indexing/persist.ts` with `TS2307: Cannot find module '@murph/contracts'`
   - `pnpm test`
     - fails during workspace build in `packages/cli/src/chat-provider.ts` because `abortSignal` is not in `CodexExecInput`
   - `pnpm test:coverage`

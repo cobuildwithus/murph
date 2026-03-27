@@ -4,7 +4,7 @@ Last verified: 2026-03-23
 
 ## Non-Negotiable Rules
 
-- Treat `.env` and `.env.*` files as secret inputs. Healthy Bob's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
+- Treat `.env` and `.env.*` files as secret inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
 - Do not share raw filesystem archives of a repo clone for review or support. Ignored local `.env` files and build output such as `.next/` can leak through a clone/archive even when git has no tracked secret diff; use the guarded `scripts/package-audit-context.sh` / `pnpm zip:src` path instead, because it stages git-visible files and filters blocked local residue from the bundle.
 - Redact sensitive identifiers from logs, fixtures, examples, and screenshots.
 - Treat all auth, wallet, payment, and health-related data flows as high-sensitivity until documented otherwise.

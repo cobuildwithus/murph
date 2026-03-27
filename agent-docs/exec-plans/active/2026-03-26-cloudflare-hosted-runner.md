@@ -6,12 +6,12 @@ Updated: 2026-03-26
 
 ## Goal
 
-Add the first hosted execution layer for the SaaS shape: keep `apps/web` as the public onboarding/billing/auth control plane, and add a separate Cloudflare-hosted per-user runner that can hydrate hosted state, process active Linq messages plus scheduled assistant work with existing one-shot Healthy Bob runtime APIs, then write encrypted state back out.
+Add the first hosted execution layer for the SaaS shape: keep `apps/web` as the public onboarding/billing/auth control plane, and add a separate Cloudflare-hosted per-user runner that can hydrate hosted state, process active Linq messages plus scheduled assistant work with existing one-shot Murph runtime APIs, then write encrypted state back out.
 
 ## Scope
 
 - Add a new `apps/cloudflare` workspace app for signed internal dispatch, per-user coordination, encrypted bundle storage, and one-shot runner contracts.
-- Reuse existing `@healthybob/cli`, `@healthybob/inboxd`, and `@healthybob/runtime-state` seams instead of introducing a second assistant or inbox runtime model.
+- Reuse existing `@murph/cli`, `@murph/inboxd`, and `@murph/runtime-state` seams instead of introducing a second assistant or inbox runtime model.
 - Add bundle snapshot/restore helpers for the hosted execution context, including the canonical vault plus sibling assistant-state, with room for a future broader hosted agent-state bundle.
 - Wire `apps/web` hosted onboarding to dispatch member-activation and active-member Linq events into the Cloudflare layer.
 - Add focused tests, package wiring, and the minimum docs/env updates needed to keep verification and runtime docs truthful.
@@ -57,7 +57,7 @@ Add the first hosted execution layer for the SaaS shape: keep `apps/web` as the 
   - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage --maxWorkers 1 apps/web/test/hosted-execution-env.test.ts apps/web/test/hosted-onboarding-linq-dispatch.test.ts`
   - `pnpm --dir apps/cloudflare test`
 - Required repo checks were run and exposed pre-existing failures outside this lane:
-  - `pnpm typecheck` failed in `packages/contracts/scripts/{generate-json-schema.ts,verify.ts}` with unresolved `@healthybob/contracts` imports and implicit-`any` script errors.
+  - `pnpm typecheck` failed in `packages/contracts/scripts/{generate-json-schema.ts,verify.ts}` with unresolved `@murph/contracts` imports and implicit-`any` script errors.
   - `pnpm test` surfaced failures in `packages/cli/test/incur-smoke.test.ts` and did not produce a clean repo-wide green result.
   - `pnpm test:coverage` surfaced failures in `packages/cli/test/incur-smoke.test.ts` and did not produce a clean repo-wide green result.
-- Manual direct-scenario gap: a standalone source-level worker smoke was attempted, but running `apps/cloudflare/src/*` outside the Vitest alias context could not resolve the workspace `@healthybob/runtime-state` package from raw source. Focused app-boundary tests are green, but a live/manual hosted runtime proof is still outstanding.
+- Manual direct-scenario gap: a standalone source-level worker smoke was attempted, but running `apps/cloudflare/src/*` outside the Vitest alias context could not resolve the workspace `@murph/runtime-state` package from raw source. Focused app-boundary tests are green, but a live/manual hosted runtime proof is still outstanding.

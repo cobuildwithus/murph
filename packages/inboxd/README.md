@@ -1,6 +1,6 @@
-# `@healthybob/inboxd`
+# `@murph/inboxd`
 
-Source-agnostic inbox ingestion for Healthy Bob.
+Source-agnostic inbox ingestion for Murph.
 
 This package keeps canonical inbox evidence in the vault and uses a local SQLite
 runtime database for cursors, transient dedupe caches, capture-local search
@@ -9,8 +9,8 @@ tables, and attachment job state.
 ## Runtime expectations
 
 - Run on Node.js `>=22.16.0`.
-- `@healthybob/inboxd` resolves runtime paths and opens its SQLite runtime
-  database through `@healthybob/runtime-state`, storing machine-local state
+- `@murph/inboxd` resolves runtime paths and opens its SQLite runtime
+  database through `@murph/runtime-state`, storing machine-local state
   under `<vault>/.runtime/inboxd.sqlite`.
 - Query-owned lexical search state lives separately under
   `<vault>/.runtime/search.sqlite`.
@@ -47,7 +47,7 @@ The inbox runtime exposes attachment-job primitives that stay safely outside can
 
 These methods mutate only inbox-local runtime state such as `.runtime/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
 
-When combined with `@healthybob/parsers`, operators can drive those queues through `vault-cli inbox setup|doctor|parse|requeue` without mixing parser state into canonical health records.
+When combined with `@murph/parsers`, operators can drive those queues through `vault-cli inbox setup|doctor|parse|requeue` without mixing parser state into canonical health records.
 
 ## Telegram adapter contract
 
@@ -63,11 +63,11 @@ The Telegram connector is local-first and poll-first by default.
 
 ## iMessage adapter contract
 
-The iMessage connector is macOS-only. `@healthybob/inboxd` now depends directly
+The iMessage connector is macOS-only. `@murph/inboxd` now depends directly
 on `@photon-ai/imessage-kit`, and `loadImessageKitDriver()` adapts its
 `IMessageSDK` surface onto the inboxd polling driver contract.
 
-- Any workspace that runs `@healthybob/inboxd` or `vault-cli` must install the
+- Any workspace that runs `@murph/inboxd` or `vault-cli` must install the
   package dependency tree, including the native SQLite dependency chain that
   `@photon-ai/imessage-kit` expects at runtime.
 - `vault-cli inbox doctor` still separates adapter wiring from the live probe:

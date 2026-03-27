@@ -6,16 +6,16 @@ import {
   extractIsoDatePrefix,
   formatTimeZoneDateTimeParts,
   normalizeIanaTimeZone,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   scoreSearchDocuments,
   type SearchableDocument,
-} from "@healthybob/query/search";
+} from "@murph/query/search";
 import {
   buildTimeline,
   readVaultTolerant,
   summarizeDailySamples,
-} from "@healthybob/query";
+} from "@murph/query";
 
 import {
   buildExampleVaultPath,
@@ -232,7 +232,7 @@ export async function loadVaultOverview(
   } catch {
     return {
       envVar: VAULT_ENV,
-      hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
+      hint: "Confirm the configured vault path points at a Murph vault root, then restart the local app.",
       message: "The configured vault could not be read.",
       recoveryCommand: buildSuggestedCommand(),
       status: "error",

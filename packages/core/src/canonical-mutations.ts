@@ -1,8 +1,8 @@
-import type { JournalDayFrontmatter } from "@healthybob/contracts";
+import type { JournalDayFrontmatter } from "@murph/contracts";
 import {
   journalDayFrontmatterSchema,
   safeParseContract,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";

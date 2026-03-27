@@ -3,7 +3,7 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
   HostedExecutionUserStatus,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";

@@ -1,12 +1,12 @@
 import type {
   ExperimentFrontmatter,
   ExperimentStatus,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   EXPERIMENT_STATUSES,
   experimentFrontmatterSchema,
   safeParseContract,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
@@ -30,7 +30,7 @@ import {
   validateContract,
 } from "./shared.ts";
 
-import type { ExperimentEventRecord } from "@healthybob/contracts";
+import type { ExperimentEventRecord } from "@murph/contracts";
 import type { DateInput, FrontmatterObject, UnknownRecord } from "../types.ts";
 
 export interface CreateExperimentInput {

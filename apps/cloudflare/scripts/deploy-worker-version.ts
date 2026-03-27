@@ -54,7 +54,7 @@ const result = await runHostedWorkerDeployment({
     readRenderedDeployConfig,
     async uploadVersion(input) {
       const outputFilePath = path.join(
-        await mkdtemp(path.join(tmpdir(), "hb-cloudflare-upload-")),
+        await mkdtemp(path.join(tmpdir(), "hosted-cloudflare-upload-")),
         "wrangler-output.jsonl",
       );
 

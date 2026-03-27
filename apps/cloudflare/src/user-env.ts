@@ -1,4 +1,5 @@
-export const HOSTED_USER_ENV_SCHEMA = "healthybob.hosted-user-env.v1";
+export const HOSTED_USER_ENV_SCHEMA = "murph.hosted-user-env.v1";
+const LEGACY_HOSTED_USER_ENV_SCHEMA = "healthybob.hosted-user-env.v1";
 
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "AGENTMAIL_API_BASE_URL",
@@ -233,7 +234,11 @@ function parseHostedUserEnvConfig(
 ): HostedUserEnvConfig {
   const parsed = JSON.parse(text) as Partial<HostedUserEnvConfig>;
 
-  if (parsed.schema !== HOSTED_USER_ENV_SCHEMA || !parsed.env || typeof parsed.env !== "object") {
+  if (
+    (parsed.schema !== HOSTED_USER_ENV_SCHEMA && parsed.schema !== LEGACY_HOSTED_USER_ENV_SCHEMA)
+    || !parsed.env
+    || typeof parsed.env !== "object"
+  ) {
     throw new Error("Hosted user env config is invalid.");
   }
 

@@ -454,7 +454,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       if (!grantedScopes.includes("personal")) {
         throw deviceSyncError({
           code: "OURA_PERSONAL_SCOPE_REQUIRED",
-          message: "Oura connections require the personal scope so Healthy Bob can identify the account.",
+          message: "Oura connections require the personal scope so Murph can identify the account.",
           retryable: false,
           httpStatus: 400,
         });

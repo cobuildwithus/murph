@@ -2,7 +2,7 @@ import type {
   AttachmentParseJobClaimFilters,
   InboxRuntimeStore,
   RequeueAttachmentParseJobsInput,
-} from "@healthybob/inboxd";
+} from "@murph/inboxd";
 
 import type { FfmpegToolOptions } from "./adapters/ffmpeg.js";
 import type { ParserRegistry } from "./registry/registry.js";

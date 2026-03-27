@@ -2,12 +2,12 @@ import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   sha256HostedBundleHex,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionBundleKind,
   HostedExecutionRunnerResult,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import {
   createHostedBundleStore,
@@ -43,8 +43,8 @@ export class RunnerBundleSync {
     const store = this.createBundleStore();
     const bundleState = await this.queueStore.readBundleState();
     return {
-      agentState: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.agentState)),
-      vault: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.vault)),
+      agentState: encodeHostedBundleBase64(await store.readBundle(userId, "agent-state")),
+      vault: encodeHostedBundleBase64(await store.readBundle(userId, "vault")),
     };
   }
 

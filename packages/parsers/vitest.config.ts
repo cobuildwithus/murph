@@ -10,10 +10,10 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@healthybob/contracts": "../contracts/src/index.ts",
-  "@healthybob/core": "../core/src/index.ts",
-  "@healthybob/inboxd": "../inboxd/src/index.ts",
-  "@healthybob/parsers": "./src/index.ts",
+  "@murph/contracts": "../contracts/src/index.ts",
+  "@murph/core": "../core/src/index.ts",
+  "@murph/inboxd": "../inboxd/src/index.ts",
+  "@murph/parsers": "./src/index.ts",
 } as const;
 
 export default defineConfig({

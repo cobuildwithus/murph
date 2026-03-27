@@ -18,16 +18,16 @@ if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
 fi
 
 log() {
-  printf '[healthybob-setup] %s\n' "$*"
+  printf '[murph-setup] %s\n' "$*"
 }
 
 print_install_summary() {
-  log 'Healthy Bob macOS setup will install or reuse:'
+  log 'Murph macOS setup will install or reuse:'
   printf '  - Homebrew, Node >= %s, and pnpm@%s via corepack\n' "$required_node" "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model'
   printf '%s\n' '  - PaddleX OCR on Apple Silicon unless you pass --skip-ocr'
-  printf '%s\n' '  - the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob/vault-cli shims, onboarding channel selection, and assistant automation/chat handoff'
+  printf '%s\n' '  - the final Murph setup flow: vault bootstrap, default vault config, user-level murph/vault-cli shims, onboarding channel selection, and assistant automation/chat handoff'
 }
 
 has_dry_run_flag() {
@@ -144,7 +144,7 @@ ensure_node() {
   fi
 
   ensure_brew_shellenv
-  log "Installing node@22 so the repo can build Healthy Bob..."
+  log "Installing node@22 so the repo can build Murph..."
   brew install node@22
   export PATH="$(brew --prefix node@22)/bin:$PATH"
   log "Using Node $(node -p 'process.versions.node')"
@@ -163,8 +163,8 @@ ensure_pnpm
 log 'Installing workspace dependencies...'
 corepack pnpm install
 
-log 'Building Healthy Bob packages...'
+log 'Building Murph packages...'
 corepack pnpm build
 
-log 'Running Healthy Bob macOS setup...'
+log 'Running Murph macOS setup...'
 node packages/cli/dist/bin.js onboard "$@"

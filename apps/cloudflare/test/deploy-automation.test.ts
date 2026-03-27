@@ -18,14 +18,14 @@ describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
     const environment = readHostedDeployAutomationEnvironment({
       AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
-      CF_BUNDLES_BUCKET: "hb-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
-      CF_WORKER_NAME: "hb-worker",
+      CF_WORKER_NAME: "hosted-worker",
       INSTALL_PADDLEOCR: "1",
-      TELEGRAM_BOT_USERNAME: "hb_bot",
+      TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
@@ -64,7 +64,7 @@ describe("hosted deploy automation helpers", () => {
       secrets?: { required?: string[] };
     };
 
-    expect(config.name).toBe("hb-worker");
+    expect(config.name).toBe("hosted-worker");
     expect(config.main).toBe("../src/index.ts");
     expect(config.containers).toEqual([
       {
@@ -108,17 +108,17 @@ describe("hosted deploy automation helpers", () => {
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
     expect(config.vars.AGENTMAIL_BASE_URL).toBe("https://mail.example.test/v0");
-    expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hb_bot");
+    expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets).toBeUndefined();
   });
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hb-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048,\"disk_mb\":8192}",
-      CF_WORKER_NAME: "hb-worker",
+      CF_WORKER_NAME: "hosted-worker",
     });
 
     expect(environment.containerInstanceType).toEqual({
@@ -131,10 +131,10 @@ describe("hosted deploy automation helpers", () => {
   it("rejects invalid custom container instance JSON", () => {
     expect(() =>
       readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hb-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
         CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048}",
-        CF_WORKER_NAME: "hb-worker",
+        CF_WORKER_NAME: "hosted-worker",
       }),
     ).toThrowError(/CF_CONTAINER_INSTANCE_TYPE\.disk_mb must be a positive number\./u);
   });
@@ -159,9 +159,9 @@ describe("hosted deploy automation helpers", () => {
 
   it("accepts the legacy runtime commit-timeout input when the deploy alias is unset", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hb-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
-      CF_WORKER_NAME: "hb-worker",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
     });
 
@@ -170,10 +170,10 @@ describe("hosted deploy automation helpers", () => {
 
   it("treats a blank CF runner commit-timeout as unset and falls back to the runtime input", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hb-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "   ",
-      CF_WORKER_NAME: "hb-worker",
+      CF_WORKER_NAME: "hosted-worker",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
     });
 
@@ -183,9 +183,9 @@ describe("hosted deploy automation helpers", () => {
   it("does not accept legacy HB_CF deploy variable names", () => {
     expect(() =>
       readHostedDeployAutomationEnvironment({
-        HB_CF_BUNDLES_BUCKET: "hb-bundles",
-        HB_CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
-        HB_CF_WORKER_NAME: "hb-worker",
+        HB_CF_BUNDLES_BUCKET: "hosted-bundles",
+        HB_CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        HB_CF_WORKER_NAME: "hosted-worker",
       }),
     ).toThrowError(/CF_BUNDLES_BUCKET must be configured\./u);
   });
@@ -273,9 +273,9 @@ describe("hosted deploy automation helpers", () => {
 
   it("allows gradual deployments for the current checked-in Durable Object migration set", () => {
     const config = buildHostedWranglerDeployConfig(readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hb-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
-      CF_WORKER_NAME: "hb-worker",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
     })) as Record<string, unknown>;
 
     expect(resolveHostedWorkerGradualDeploymentSupport(config)).toEqual({
@@ -287,9 +287,9 @@ describe("hosted deploy automation helpers", () => {
 
   it("requires a direct deploy when the rendered config introduces a new Durable Object migration tag", () => {
     const config = buildHostedWranglerDeployConfig(readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hb-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
-      CF_WORKER_NAME: "hb-worker",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
     })) as {
       migrations: Array<Record<string, unknown>>;
     };
@@ -313,12 +313,12 @@ describe("hosted deploy automation helpers", () => {
   it("parses wrangler container image JSON output and drops digest tags", () => {
     expect(parseHostedContainerImageListOutput(JSON.stringify([
       {
-        name: "healthybob-hosted",
+        name: "hosted-runner",
         tags: ["manual-2026-03-27T00-00-00-000Z", "sha256-deadbeef", "manual-2026-03-26T00-00-00-000Z"],
       },
     ]))).toEqual([
       {
-        name: "healthybob-hosted",
+        name: "hosted-runner",
         tags: ["manual-2026-03-27T00-00-00-000Z", "manual-2026-03-26T00-00-00-000Z"],
       },
     ]);
@@ -328,7 +328,7 @@ describe("hosted deploy automation helpers", () => {
     expect(selectHostedContainerImageTagsForCleanup({
       images: [
         {
-          name: "healthybob-hosted",
+          name: "hosted-runner",
           tags: [
             "manual-2026-03-27T00-00-00-000Z",
             "manual-2026-03-26T00-00-00-000Z",
@@ -336,7 +336,7 @@ describe("hosted deploy automation helpers", () => {
           ],
         },
         {
-          name: "healthybob-preview",
+          name: "murph-preview",
           tags: [
             "manual-2026-03-27T10-00-00-000Z",
             "manual-2026-03-26T10-00-00-000Z",
@@ -346,18 +346,18 @@ describe("hosted deploy automation helpers", () => {
       keepPerRepository: 1,
     })).toEqual([
       {
-        image: "healthybob-hosted:manual-2026-03-26T00-00-00-000Z",
-        repository: "healthybob-hosted",
+        image: "hosted-runner:manual-2026-03-26T00-00-00-000Z",
+        repository: "hosted-runner",
         tag: "manual-2026-03-26T00-00-00-000Z",
       },
       {
-        image: "healthybob-hosted:manual-2026-03-25T00-00-00-000Z",
-        repository: "healthybob-hosted",
+        image: "hosted-runner:manual-2026-03-25T00-00-00-000Z",
+        repository: "hosted-runner",
         tag: "manual-2026-03-25T00-00-00-000Z",
       },
       {
-        image: "healthybob-preview:manual-2026-03-26T10-00-00-000Z",
-        repository: "healthybob-preview",
+        image: "murph-preview:manual-2026-03-26T10-00-00-000Z",
+        repository: "murph-preview",
         tag: "manual-2026-03-26T10-00-00-000Z",
       },
     ]);

@@ -6,7 +6,7 @@ import {
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
   type HostedEmailThreadTarget,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
@@ -30,7 +30,7 @@ export interface HostedEmailConfig {
 interface HostedEmailUserRouteRecord {
   aliasKey: string;
   identityId: string;
-  schema: "healthybob.hosted-email-user-route.v1";
+  schema: "murph.hosted-email-user-route.v1";
   updatedAt: string;
   userId: string;
 }
@@ -38,7 +38,7 @@ interface HostedEmailUserRouteRecord {
 interface HostedEmailThreadRouteRecord {
   identityId: string;
   replyKey: string;
-  schema: "healthybob.hosted-email-thread-route.v1";
+  schema: "murph.hosted-email-thread-route.v1";
   target: HostedEmailThreadTarget;
   updatedAt: string;
   userId: string;
@@ -67,8 +67,10 @@ export interface HostedEmailSendRequest {
   targetKind: "explicit" | "participant" | "thread";
 }
 
-const HOSTED_EMAIL_THREAD_ROUTE_SCHEMA = "healthybob.hosted-email-thread-route.v1";
-const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "healthybob.hosted-email-user-route.v1";
+const HOSTED_EMAIL_THREAD_ROUTE_SCHEMA = "murph.hosted-email-thread-route.v1";
+const LEGACY_HOSTED_EMAIL_THREAD_ROUTE_SCHEMA = "healthybob.hosted-email-thread-route.v1";
+const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v1";
+const LEGACY_HOSTED_EMAIL_USER_ROUTE_SCHEMA = "healthybob.hosted-email-user-route.v1";
 
 export function readHostedEmailConfig(
   source: Readonly<Record<string, string | undefined>> = process.env,
@@ -86,7 +88,7 @@ export function readHostedEmailConfig(
     cloudflareApiToken: normalizeHostedEmailAddressComponent(
       source.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN,
     ),
-    defaultSubject: normalizeHostedEmailSubject(source.HOSTED_EMAIL_DEFAULT_SUBJECT) ?? "Healthy Bob update",
+    defaultSubject: normalizeHostedEmailSubject(source.HOSTED_EMAIL_DEFAULT_SUBJECT) ?? "Murph update",
     domain,
     fromAddress,
     localPart,
@@ -598,7 +600,7 @@ function formatHostedEmailAddress(config: HostedEmailConfig, detail: string): st
 
 function createHostedEmailMessageId(fromAddress: string): string {
   const domain = fromAddress.split("@")[1] ?? "localhost";
-  return `<hb.${Date.now().toString(36)}.${randomHostedEmailKey()}@${domain}>`;
+  return `<hosted.${Date.now().toString(36)}.${randomHostedEmailKey()}@${domain}>`;
 }
 
 function wrapMimeBase64(value: string): string {
@@ -675,7 +677,10 @@ function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRe
   }
 
   const record = value as Partial<HostedEmailUserRouteRecord>;
-  if (record.schema !== HOSTED_EMAIL_USER_ROUTE_SCHEMA) {
+  if (
+    record.schema !== HOSTED_EMAIL_USER_ROUTE_SCHEMA
+    && record.schema !== LEGACY_HOSTED_EMAIL_USER_ROUTE_SCHEMA
+  ) {
     throw new TypeError("Hosted email user route schema is invalid.");
   }
   if (!record.aliasKey || !record.identityId || !record.userId) {
@@ -697,7 +702,10 @@ function parseHostedEmailThreadRouteRecord(value: unknown): HostedEmailThreadRou
   }
 
   const record = value as Partial<HostedEmailThreadRouteRecord>;
-  if (record.schema !== HOSTED_EMAIL_THREAD_ROUTE_SCHEMA) {
+  if (
+    record.schema !== HOSTED_EMAIL_THREAD_ROUTE_SCHEMA
+    && record.schema !== LEGACY_HOSTED_EMAIL_THREAD_ROUTE_SCHEMA
+  ) {
     throw new TypeError("Hosted email thread route schema is invalid.");
   }
   if (!record.identityId || !record.replyKey || !record.userId) {

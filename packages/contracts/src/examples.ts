@@ -42,10 +42,10 @@ type HealthFrontmatterExamples = {
 };
 
 export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<VaultMetadata>({
-  schemaVersion: "hb.vault.v1",
+  schemaVersion: "murph.vault.v1",
   vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
   createdAt: "2026-03-12T14:00:00Z",
-  title: "Healthy Bob Vault",
+  title: "Murph Vault",
   timezone: "America/New_York",
   idPolicy: {
     format: "prefix_ulid",
@@ -109,7 +109,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
 
 export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.freeze([
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YQ",
     kind: "encounter",
     occurredAt: "2026-03-09T14:15:00Z",
@@ -121,7 +121,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     location: "Downtown Urgent Care",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV41B483QH9GQ1Y08D7RMTA",
     kind: "document",
     occurredAt: "2026-03-12T08:15:00Z",
@@ -138,7 +138,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     providerId: "prov_01JNV422Y2M5ZBV64ZP4N1DRB1",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV42F34M22V2PE9Q4KQ7H1X",
     kind: "meal",
     occurredAt: "2026-03-12T12:32:00Z",
@@ -155,7 +155,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     audioPaths: [],
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV4303N61Y40QAHGM4ZHPD7",
     kind: "symptom",
     occurredAt: "2026-03-12T13:05:00Z",
@@ -169,7 +169,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     bodySite: "temples",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV4628FSM6B5NQ8VJSEW415",
     kind: "procedure",
     occurredAt: "2026-03-10T10:00:00Z",
@@ -181,7 +181,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     status: "completed",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV43AK9SK58T6GX3DWRZH9Q",
     kind: "note",
     occurredAt: "2026-03-12T14:10:00Z",
@@ -193,7 +193,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     tags: ["note"],
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV46CSWT0AKB5D1PKR4F1S6",
     kind: "test",
     occurredAt: "2026-03-11T08:00:00Z",
@@ -206,7 +206,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     summary: "LDL elevated above target range.",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV43NDX1N7BX08NQ19MJ4DK",
     kind: "observation",
     occurredAt: "2026-03-12T15:00:00Z",
@@ -219,7 +219,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     unit: "mmHg",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV46VFEV8Q05M8NSEJ2MZXG",
     kind: "adverse_effect",
     occurredAt: "2026-03-12T09:00:00Z",
@@ -232,7 +232,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     severity: "mild",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV43Y9ZV6EY1K9J7ZT4B9SC",
     kind: "experiment_event",
     occurredAt: "2026-03-12T06:00:00Z",
@@ -246,7 +246,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     phase: "start",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV447V6K3SW1Q9NJ7XVQZ7P",
     kind: "medication_intake",
     occurredAt: "2026-03-12T07:00:00Z",
@@ -259,7 +259,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     unit: "mg",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV44J4HH2F9H5S0VRZ4QJEB",
     kind: "supplement_intake",
     occurredAt: "2026-03-12T21:00:00Z",
@@ -272,7 +272,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     unit: "mg",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV475C8F69A9D4G4H5WWEZR",
     kind: "exposure",
     occurredAt: "2026-03-12T19:00:00Z",
@@ -285,7 +285,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     duration: "45 minutes",
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV44WS3W0R27XPTKFC3QFJA",
     kind: "activity_session",
     occurredAt: "2026-03-12T17:30:00Z",
@@ -298,7 +298,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     distanceKm: 3.4,
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV44WS3W0R27XPTKFC3QFJB",
     kind: "activity_session",
     occurredAt: "2026-03-12T17:55:00Z",
@@ -326,7 +326,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     ],
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV456CT4G36RE0B1VRCZ1M3",
     kind: "sleep_session",
     occurredAt: "2026-03-12T05:55:00Z",
@@ -339,7 +339,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     durationMinutes: 435,
   },
   {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: "evt_01JNV45XJ4M22V2PE9Q4KQ7H1X",
     kind: "intervention_session",
     occurredAt: "2026-03-12T19:30:00Z",
@@ -357,7 +357,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
 
 export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.freeze([
   {
-    schemaVersion: "hb.sample.v1",
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV45RHN0TQ9ZXE0A7YSE1YQ",
     stream: "heart_rate",
     recordedAt: "2026-03-12T17:32:00Z",
@@ -368,7 +368,7 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
     unit: "bpm",
   },
   {
-    schemaVersion: "hb.sample.v1",
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV4628FSM6B5NQ8VJSEW415",
     stream: "hrv",
     recordedAt: "2026-03-12T06:01:00Z",
@@ -379,7 +379,7 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
     unit: "ms",
   },
   {
-    schemaVersion: "hb.sample.v1",
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV46CSWT0AKB5D1PKR4F1S6",
     stream: "steps",
     recordedAt: "2026-03-12T23:59:00Z",
@@ -390,7 +390,7 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
     unit: "count",
   },
   {
-    schemaVersion: "hb.sample.v1",
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV46VFEV8Q05M8NSEJ2MZXG",
     stream: "sleep_stage",
     recordedAt: "2026-03-12T03:10:00Z",
@@ -404,7 +404,7 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
     unit: "stage",
   },
   {
-    schemaVersion: "hb.sample.v1",
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV475C8F69A9D4G4H5WWEZR",
     stream: "respiratory_rate",
     recordedAt: "2026-03-12T06:01:00Z",
@@ -415,7 +415,7 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
     unit: "breaths_per_minute",
   },
   {
-    schemaVersion: "hb.sample.v1",
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV47DWWHKJ9RN0MM7R6FBF8",
     stream: "temperature",
     recordedAt: "2026-03-12T06:01:00Z",
@@ -426,7 +426,7 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
     unit: "celsius",
   },
   {
-    schemaVersion: "hb.sample.v1",
+    schemaVersion: "murph.sample.v1",
     id: "smp_01JNV47Q7KJ8Y6JAZ2RW1H7MYN",
     stream: "glucose",
     recordedAt: "2026-03-12T08:00:00Z",
@@ -440,7 +440,7 @@ export const exampleSampleRecords: readonly Readonly<SampleRecord>[] = Object.fr
 
 export const exampleAuditRecords: readonly Readonly<AuditRecord>[] = Object.freeze([
   {
-    schemaVersion: "hb.audit.v1",
+    schemaVersion: "murph.audit.v1",
     id: "aud_01JNV480C4MP7R7QX3T2Q1XMD1",
     action: "meal_add",
     status: "success",
@@ -461,7 +461,7 @@ export const exampleAuditRecords: readonly Readonly<AuditRecord>[] = Object.free
     ],
   },
   {
-    schemaVersion: "hb.audit.v1",
+    schemaVersion: "murph.audit.v1",
     id: "aud_01JNV48RFKQE89MG73CSDM3M6G",
     action: "validate",
     status: "failure",
@@ -476,7 +476,7 @@ export const exampleAuditRecords: readonly Readonly<AuditRecord>[] = Object.free
 
 export const exampleAssessmentResponses: readonly Readonly<AssessmentResponseRecord>[] = Object.freeze([
   {
-    schemaVersion: "hb.assessment-response.v1",
+    schemaVersion: "murph.assessment-response.v1",
     id: "asmt_01JNV40W8VFYQ2H7CMJY5A9R4K",
     assessmentType: "full-intake",
     recordedAt: "2026-03-12T13:00:00Z",
@@ -500,7 +500,7 @@ export const exampleAssessmentResponses: readonly Readonly<AssessmentResponseRec
 
 export const exampleProfileSnapshots: readonly Readonly<ProfileSnapshotRecord>[] = Object.freeze([
   {
-    schemaVersion: "hb.profile-snapshot.v1",
+    schemaVersion: "murph.profile-snapshot.v1",
     id: "psnap_01JNV42F34M22V2PE9Q4KQ7H1X",
     recordedAt: "2026-03-12T13:05:00Z",
     source: "assessment_projection",
@@ -525,23 +525,23 @@ export const exampleProfileSnapshots: readonly Readonly<ProfileSnapshotRecord>[]
 
 export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.freeze({
   core: {
-    schemaVersion: "hb.frontmatter.core.v1",
+    schemaVersion: "murph.frontmatter.core.v1",
     docType: "core",
     vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
-    title: "Healthy Bob Vault",
+    title: "Murph Vault",
     timezone: "America/New_York",
     updatedAt: "2026-03-12T20:00:00Z",
     activeExperimentSlugs: ["magnesium-sleep"],
   },
   journalDay: {
-    schemaVersion: "hb.frontmatter.journal-day.v1",
+    schemaVersion: "murph.frontmatter.journal-day.v1",
     docType: "journal_day",
     dayKey: "2026-03-12",
     eventIds: ["evt_01JNV42F34M22V2PE9Q4KQ7H1X", "evt_01JNV43AK9SK58T6GX3DWRZH9Q"],
     sampleStreams: ["heart_rate", "steps", "glucose"],
   },
   experiment: {
-    schemaVersion: "hb.frontmatter.experiment.v1",
+    schemaVersion: "murph.frontmatter.experiment.v1",
     docType: "experiment",
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
     slug: "magnesium-sleep",
@@ -552,7 +552,7 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     tags: ["sleep", "supplement"],
   },
   food: {
-    schemaVersion: "hb.frontmatter.food.v1",
+    schemaVersion: "murph.frontmatter.food.v1",
     docType: "food",
     foodId: "food_01JNV422Y2M5ZBV64ZP4N1DRB1",
     slug: "regular-acai-bowl",
@@ -578,14 +578,14 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     },
   },
   provider: {
-    schemaVersion: "hb.frontmatter.provider.v1",
+    schemaVersion: "murph.frontmatter.provider.v1",
     docType: "provider",
     providerId: "prov_01JNV422Y2M5ZBV64ZP4N1DRB1",
     slug: "primary-care-clinic",
     title: "Primary Care Clinic",
     status: "active",
     specialty: "primary-care",
-    organization: "Healthy Bob Medical Group",
+    organization: "Murph Medical Group",
     location: "New York, NY",
     website: "https://example.com/providers/primary-care-clinic",
     phone: "+1-555-0100",
@@ -593,7 +593,7 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     aliases: ["HBC Primary Care"],
   },
   recipe: {
-    schemaVersion: "hb.frontmatter.recipe.v1",
+    schemaVersion: "murph.frontmatter.recipe.v1",
     docType: "recipe",
     recipeId: "rcp_01JNV422Y2M5ZBV64ZP4N1DRB1",
     slug: "sheet-pan-salmon-bowls",
@@ -625,7 +625,7 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
   },
   workoutFormat: {
-    schemaVersion: "hb.frontmatter.workout-format.v1",
+    schemaVersion: "murph.frontmatter.workout-format.v1",
     docType: "workout_format",
     workoutFormatId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
     slug: "upper-body-a",
@@ -656,7 +656,7 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
 
 export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples> = Object.freeze({
   profileCurrent: {
-    schemaVersion: "hb.frontmatter.profile-current.v1",
+    schemaVersion: "murph.frontmatter.profile-current.v1",
     docType: "profile_current",
     snapshotId: "psnap_01JNV42F34M22V2PE9Q4KQ7H1X",
     updatedAt: "2026-03-12T13:05:00Z",
@@ -665,7 +665,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
   },
   goal: {
-    schemaVersion: "hb.frontmatter.goal.v1",
+    schemaVersion: "murph.frontmatter.goal.v1",
     docType: "goal",
     goalId: "goal_01JNV43AK9SK58T6GX3DWRZH9Q",
     slug: "improve-sleep",
@@ -683,7 +683,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     domains: ["sleep", "energy"],
   },
   condition: {
-    schemaVersion: "hb.frontmatter.condition.v1",
+    schemaVersion: "murph.frontmatter.condition.v1",
     docType: "condition",
     conditionId: "cond_01JNV43NDX1N7BX08NQ19MJ4DK",
     slug: "insomnia-symptoms",
@@ -698,7 +698,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     note: "Self-reported difficulty falling asleep at least four nights per week.",
   },
   allergy: {
-    schemaVersion: "hb.frontmatter.allergy.v1",
+    schemaVersion: "murph.frontmatter.allergy.v1",
     docType: "allergy",
     allergyId: "alg_01JNV43Y9ZV6EY1K9J7ZT4B9SC",
     slug: "penicillin",
@@ -712,7 +712,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     note: "Historical reaction reported during intake.",
   },
   protocol: {
-    schemaVersion: "hb.frontmatter.protocol.v1",
+    schemaVersion: "murph.frontmatter.protocol.v1",
     docType: "protocol",
     protocolId: "prot_01JNV447V6K3SW1Q9NJ7XVQZ7P",
     slug: "magnesium-glycinate",
@@ -745,7 +745,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
   },
   familyMember: {
-    schemaVersion: "hb.frontmatter.family-member.v1",
+    schemaVersion: "murph.frontmatter.family-member.v1",
     docType: "family_member",
     familyMemberId: "fam_01JNV44J4HH2F9H5S0VRZ4QJEB",
     slug: "mother",
@@ -757,7 +757,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     relatedVariantIds: ["var_01JNV44WS3W0R27XPTKFC3QFJA"],
   },
   geneticVariant: {
-    schemaVersion: "hb.frontmatter.genetic-variant.v1",
+    schemaVersion: "murph.frontmatter.genetic-variant.v1",
     docType: "genetic_variant",
     variantId: "var_01JNV44WS3W0R27XPTKFC3QFJA",
     slug: "mthfr-c677t",
@@ -773,10 +773,10 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
 
 export const exampleFrontmatterMarkdown: Readonly<Record<keyof FrontmatterExamples, string>> = Object.freeze({
   core: `---
-schemaVersion: hb.frontmatter.core.v1
+schemaVersion: murph.frontmatter.core.v1
 docType: core
 vaultId: vault_01JNV40W8VFYQ2H7CMJY5A9R4K
-title: Healthy Bob Vault
+title: Murph Vault
 timezone: America/New_York
 updatedAt: 2026-03-12T20:00:00Z
 activeExperimentSlugs:
@@ -786,7 +786,7 @@ activeExperimentSlugs:
 # Core Summary
 `,
   journalDay: `---
-schemaVersion: hb.frontmatter.journal-day.v1
+schemaVersion: murph.frontmatter.journal-day.v1
 docType: journal_day
 dayKey: 2026-03-12
 eventIds:
@@ -801,7 +801,7 @@ sampleStreams:
 # 2026-03-12
 `,
   experiment: `---
-schemaVersion: hb.frontmatter.experiment.v1
+schemaVersion: murph.frontmatter.experiment.v1
 docType: experiment
 experimentId: exp_01JNV4458HYPP53JDQCBP1QJFM
 slug: magnesium-sleep
@@ -817,7 +817,7 @@ tags:
 # Magnesium For Sleep Onset
 `,
   food: `---
-schemaVersion: hb.frontmatter.food.v1
+schemaVersion: murph.frontmatter.food.v1
 docType: food
 foodId: food_01JNV422Y2M5ZBV64ZP4N1DRB1
 slug: regular-acai-bowl
@@ -848,14 +848,14 @@ autoLogDaily:
 # Regular Acai Bowl
 `,
   provider: `---
-schemaVersion: hb.frontmatter.provider.v1
+schemaVersion: murph.frontmatter.provider.v1
 docType: provider
 providerId: prov_01JNV422Y2M5ZBV64ZP4N1DRB1
 slug: primary-care-clinic
 title: Primary Care Clinic
 status: active
 specialty: primary-care
-organization: Healthy Bob Medical Group
+organization: Murph Medical Group
 location: New York, NY
 website: https://example.com/providers/primary-care-clinic
 phone: +1-555-0100
@@ -867,7 +867,7 @@ aliases:
 # Primary Care Clinic
 `,
   recipe: `---
-schemaVersion: hb.frontmatter.recipe.v1
+schemaVersion: murph.frontmatter.recipe.v1
 docType: recipe
 recipeId: rcp_01JNV422Y2M5ZBV64ZP4N1DRB1
 slug: sheet-pan-salmon-bowls
@@ -904,7 +904,7 @@ relatedConditionIds:
 # Sheet Pan Salmon Bowls
 `,
   workoutFormat: `---
-schemaVersion: hb.frontmatter.workout-format.v1
+schemaVersion: murph.frontmatter.workout-format.v1
 docType: workout_format
 workoutFormatId: wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1
 slug: upper-body-a

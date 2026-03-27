@@ -1,5 +1,7 @@
-export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "healthybob.hosted-email-thread-target.v1";
-export const HOSTED_EMAIL_THREAD_TARGET_PREFIX = "hbmail:";
+export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "murph.hosted-email-thread-target.v1";
+const LEGACY_HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "healthybob.hosted-email-thread-target.v1";
+export const HOSTED_EMAIL_THREAD_TARGET_PREFIX = "hostedmail:";
+const LEGACY_HOSTED_EMAIL_THREAD_TARGET_PREFIX = "hostedmail:";
 
 export interface HostedEmailThreadTarget {
   cc: string[];
@@ -51,14 +53,23 @@ export function parseHostedEmailThreadTarget(
   value: string | null | undefined,
 ): HostedEmailThreadTarget | null {
   const normalized = value?.trim() ?? "";
-  if (!normalized || !normalized.startsWith(HOSTED_EMAIL_THREAD_TARGET_PREFIX)) {
+  if (
+    !normalized
+    || (
+      !normalized.startsWith(HOSTED_EMAIL_THREAD_TARGET_PREFIX)
+      && !normalized.startsWith(LEGACY_HOSTED_EMAIL_THREAD_TARGET_PREFIX)
+    )
+  ) {
     return null;
   }
 
   try {
+    const prefix = normalized.startsWith(HOSTED_EMAIL_THREAD_TARGET_PREFIX)
+      ? HOSTED_EMAIL_THREAD_TARGET_PREFIX
+      : LEGACY_HOSTED_EMAIL_THREAD_TARGET_PREFIX;
     const parsed = JSON.parse(
       decodeHostedEmailTargetPayload(
-        normalized.slice(HOSTED_EMAIL_THREAD_TARGET_PREFIX.length),
+        normalized.slice(prefix.length),
       ),
     ) as unknown;
 
@@ -67,7 +78,10 @@ export function parseHostedEmailThreadTarget(
     }
 
     const record = parsed as Partial<HostedEmailThreadTarget>;
-    if (record.schema !== HOSTED_EMAIL_THREAD_TARGET_SCHEMA) {
+    if (
+      record.schema !== HOSTED_EMAIL_THREAD_TARGET_SCHEMA
+      && record.schema !== LEGACY_HOSTED_EMAIL_THREAD_TARGET_SCHEMA
+    ) {
       return null;
     }
 
@@ -100,11 +114,11 @@ export function appendHostedEmailReferenceChain(input: {
 
 export function ensureHostedEmailReplySubject(
   subject: string | null | undefined,
-  fallback = "Healthy Bob update",
+  fallback = "Murph update",
 ): string {
   const normalized = normalizeHostedEmailSubject(subject) ?? normalizeHostedEmailSubject(fallback);
   if (!normalized) {
-    return "Healthy Bob update";
+    return "Murph update";
   }
 
   return /^re\s*:/iu.test(normalized) ? normalized : `Re: ${normalized}`;

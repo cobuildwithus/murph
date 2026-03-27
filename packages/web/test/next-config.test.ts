@@ -11,15 +11,15 @@ import nextConfig from "../next.config";
 
 test("resolveWorkspaceSourceEntries points at source package entries", () => {
   assert.equal(
-    resolveWorkspaceSourceEntries("/repo/packages/web")["@healthybob/query"],
+    resolveWorkspaceSourceEntries("/repo/packages/web")["@murph/query"],
     path.resolve("/repo/packages/query/src/index.ts"),
   );
   assert.equal(
-    resolveWorkspaceSourceEntries("/repo/packages/web")["@healthybob/contracts"],
+    resolveWorkspaceSourceEntries("/repo/packages/web")["@murph/contracts"],
     path.resolve("/repo/packages/contracts/src/index.ts"),
   );
   assert.equal(
-    resolveWorkspaceSourceEntries("/repo/packages/web")["@healthybob/hosted-execution"],
+    resolveWorkspaceSourceEntries("/repo/packages/web")["@murph/hosted-execution"],
     path.resolve("/repo/packages/hosted-execution/src/index.ts"),
   );
 });

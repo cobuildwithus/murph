@@ -1,12 +1,12 @@
 import {
   type HostedExecutionRunnerResult,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 import {
   readHostedRunnerCommitTimeoutMs,
   runHostedAssistantRuntimeJobInProcess,
   runHostedAssistantRuntimeJobIsolated,
   type HostedAssistantRuntimeJobRequest,
-} from "@healthybob/assistant-runtime";
+} from "@murph/assistant-runtime";
 
 import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
 import { normalizeHostedUserEnv } from "./user-env.ts";

@@ -24,7 +24,7 @@ import { acquireCanonicalWriteLock } from "./canonical-write-lock.ts";
 
 import type { DateInput } from "../types.ts";
 
-export const WRITE_OPERATION_SCHEMA_VERSION = "hb.write-operation.v1";
+export const WRITE_OPERATION_SCHEMA_VERSION = "murph.write-operation.v1";
 export const WRITE_OPERATION_DIRECTORY = ".runtime/operations";
 
 type WriteOperationStatus = "staged" | "committing" | "committed" | "rolled_back" | "failed";

@@ -6,7 +6,7 @@ import { afterEach, test, vi } from 'vitest'
 import {
   createHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 import {
   sendEmailMessage,
   sendImessageMessage,
@@ -119,7 +119,7 @@ test(
 )
 
 test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps assistant state metadata-only', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -155,7 +155,7 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps
 
 
 test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbox intent', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-receipts-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-receipts-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -211,7 +211,7 @@ test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbo
 })
 
 test('deliverAssistantMessage preserves a deferred receipt when outbound delivery fails retryably', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-deferred-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-deferred-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -275,7 +275,7 @@ test('deliverAssistantMessage preserves a deferred receipt when outbound deliver
 })
 
 test('deliverAssistantMessage uses one-off targets only for the current send and does not rewrite the stored binding', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-override-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-override-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -301,7 +301,7 @@ test('deliverAssistantMessage uses one-off targets only for the current send and
 
 
 test('deliverAssistantMessage uses stored Telegram thread bindings so one assistant session can reply back into the same chat', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-telegram-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-telegram-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -340,7 +340,7 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
 })
 
 test('deliverAssistantMessage persists canonical Telegram thread targets returned by the sender', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-telegram-migrate-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-telegram-migrate-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -380,7 +380,7 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
 })
 
 test('deliverAssistantMessage preserves explicit locator overrides over nested conversation refs when resuming a session', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-conversation-overrides-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-conversation-overrides-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -440,7 +440,7 @@ test('deliverAssistantMessage preserves explicit locator overrides over nested c
 })
 
 test('deliverAssistantMessage ignores lookup-only nested conversation metadata when resuming a session', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-lookup-conversation-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-lookup-conversation-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -492,7 +492,7 @@ test('deliverAssistantMessage ignores lookup-only nested conversation metadata w
 })
 
 test('deliverAssistantMessage uses stored Linq thread bindings so one assistant session can reply back into the same chat', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-linq-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-linq-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -533,7 +533,7 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
 })
 
 test('deliverAssistantMessage uses stored email thread bindings so one assistant session can reply back into the same email thread', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-email-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-email-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -580,7 +580,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
 
 
 test('deliverAssistantMessage persists canonical email thread targets returned by hosted senders', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-email-canonical-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-email-canonical-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -682,7 +682,7 @@ test('sendEmailMessage sends new outbound email through the configured AgentMail
   assert.equal(requests[0]?.headers?.['content-type'], 'application/json')
   assert.deepEqual(requests[0]?.body, {
     to: 'user@example.com',
-    subject: 'Healthy Bob update',
+    subject: 'Murph update',
     text: 'Daily summary',
   })
 })
@@ -1535,7 +1535,7 @@ test('sendTelegramMessage requires a bot token before attempting delivery', asyn
 })
 
 test('deliverAssistantMessage redacts HOME-based vault paths in its result payload', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-home-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-home-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(homeRoot, 'vault')
   await mkdir(vaultRoot, {

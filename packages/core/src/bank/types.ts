@@ -1,13 +1,13 @@
-import type { ActivityStrengthExercise } from "@healthybob/contracts";
+import type { ActivityStrengthExercise } from "@murph/contracts";
 
 import type { DateInput } from "../types.ts";
 
-export const GOAL_SCHEMA_VERSION = "hb.frontmatter.goal.v1";
+export const GOAL_SCHEMA_VERSION = "murph.frontmatter.goal.v1";
 export const GOAL_DOC_TYPE = "goal";
 export const GOAL_STATUSES = ["active", "paused", "completed", "abandoned"] as const;
 export const GOAL_HORIZONS = ["short_term", "medium_term", "long_term", "ongoing"] as const;
 
-export const CONDITION_SCHEMA_VERSION = "hb.frontmatter.condition.v1";
+export const CONDITION_SCHEMA_VERSION = "murph.frontmatter.condition.v1";
 export const CONDITION_DOC_TYPE = "condition";
 export const CONDITION_CLINICAL_STATUSES = ["active", "inactive", "resolved"] as const;
 export const CONDITION_VERIFICATION_STATUSES = [
@@ -18,25 +18,25 @@ export const CONDITION_VERIFICATION_STATUSES = [
 ] as const;
 export const CONDITION_SEVERITIES = ["mild", "moderate", "severe"] as const;
 
-export const ALLERGY_SCHEMA_VERSION = "hb.frontmatter.allergy.v1";
+export const ALLERGY_SCHEMA_VERSION = "murph.frontmatter.allergy.v1";
 export const ALLERGY_DOC_TYPE = "allergy";
 export const ALLERGY_STATUSES = ["active", "inactive", "resolved"] as const;
 export const ALLERGY_CRITICALITIES = ["low", "high", "unable_to_assess"] as const;
 
-export const PROTOCOL_SCHEMA_VERSION = "hb.frontmatter.protocol.v1";
+export const PROTOCOL_SCHEMA_VERSION = "murph.frontmatter.protocol.v1";
 export const PROTOCOL_DOC_TYPE = "protocol";
 export const PROTOCOL_KINDS = ["medication", "supplement", "therapy", "habit"] as const;
 export const PROTOCOL_STATUSES = ["active", "paused", "completed", "stopped"] as const;
 
-export const RECIPE_SCHEMA_VERSION = "hb.frontmatter.recipe.v1";
+export const RECIPE_SCHEMA_VERSION = "murph.frontmatter.recipe.v1";
 export const RECIPE_DOC_TYPE = "recipe";
 export const RECIPE_STATUSES = ["draft", "saved", "archived"] as const;
 
-export const FOOD_SCHEMA_VERSION = "hb.frontmatter.food.v1";
+export const FOOD_SCHEMA_VERSION = "murph.frontmatter.food.v1";
 export const FOOD_DOC_TYPE = "food";
 export const FOOD_STATUSES = ["active", "archived"] as const;
 
-export const WORKOUT_FORMAT_SCHEMA_VERSION = "hb.frontmatter.workout-format.v1";
+export const WORKOUT_FORMAT_SCHEMA_VERSION = "murph.frontmatter.workout-format.v1";
 export const WORKOUT_FORMAT_DOC_TYPE = "workout_format";
 export const WORKOUT_FORMAT_STATUSES = ["active", "archived"] as const;
 

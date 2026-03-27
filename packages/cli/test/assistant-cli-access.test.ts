@@ -6,8 +6,8 @@ import {
   resolveAssistantCliAccessContext,
 } from '../src/assistant-cli-access.js'
 
-test('resolveAssistantCliAccessContext prepends the Healthy Bob shim directory to PATH once', () => {
-  const homeRoot = path.join('/tmp', 'healthybob-assistant-cli-access-home')
+test('resolveAssistantCliAccessContext prepends the Murph shim directory to PATH once', () => {
+  const homeRoot = path.join('/tmp', 'murph-assistant-cli-access-home')
   const userBinDirectory = path.join(homeRoot, '.local', 'bin')
   const access = resolveAssistantCliAccessContext({
     HOME: homeRoot,
@@ -15,7 +15,7 @@ test('resolveAssistantCliAccessContext prepends the Healthy Bob shim directory t
   })
 
   assert.equal(access.rawCommand, 'vault-cli')
-  assert.equal(access.setupCommand, 'healthybob')
+  assert.equal(access.setupCommand, 'murph')
   assert.equal(
     access.env.PATH,
     `${userBinDirectory}${path.delimiter}/opt/homebrew/bin`,
@@ -25,12 +25,12 @@ test('resolveAssistantCliAccessContext prepends the Healthy Bob shim directory t
 test('buildAssistantCliGuidanceText tells the assistant to escalate from help to schema to llms discovery', () => {
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
-    setupCommand: 'healthybob',
+    setupCommand: 'murph',
   }, {
     supportsDirectCliExecution: true,
   })
 
-  assert.match(guidance, /Direct Healthy Bob CLI execution is available in this session/u)
+  assert.match(guidance, /Direct Murph CLI execution is available in this session/u)
   assert.match(guidance, /vault-cli <command> --help/u)
   assert.match(guidance, /vault-cli <command> --schema --format json/u)
   assert.match(guidance, /vault-cli --llms/u)
@@ -43,8 +43,8 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /phone number, Telegram chat\/thread, email address, or AgentMail identity/u)
   assert.match(guidance, /ask the user explicitly for the missing details instead of guessing/u)
   assert.match(guidance, /assistant self-target set <channel>/u)
-  assert.match(guidance, /healthybob chat/u)
-  assert.match(guidance, /healthybob run/u)
+  assert.match(guidance, /murph chat/u)
+  assert.match(guidance, /murph run/u)
   assert.match(guidance, /meal photo, audio note, or a text-only description/u)
   assert.match(guidance, /vault-cli meal add/u)
   assert.match(guidance, /Log the meal without asking whether they want it logged first/u)
@@ -89,13 +89,13 @@ test('buildAssistantCliGuidanceText tells the assistant to escalate from help to
   assert.match(guidance, /`--timeout` is the normal knob/u)
   assert.match(guidance, /`--wait-timeout` is the advanced override/u)
   assert.match(guidance, /vault-cli deepthink <prompt>/u)
-  assert.match(guidance, /healthybob/u)
+  assert.match(guidance, /murph/u)
 })
 
 test('buildAssistantCliGuidanceText falls back to exact command suggestions when the provider path is prompt-only', () => {
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
-    setupCommand: 'healthybob',
+    setupCommand: 'murph',
   }, {
     supportsDirectCliExecution: false,
   })
@@ -106,7 +106,7 @@ test('buildAssistantCliGuidanceText falls back to exact command suggestions when
   )
   assert.match(
     guidance,
-    /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Healthy Bob chat session/u,
+    /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Murph chat session/u,
   )
   assert.match(
     guidance,

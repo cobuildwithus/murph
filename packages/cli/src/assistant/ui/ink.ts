@@ -612,7 +612,7 @@ export function resolveAssistantTurnErrorPresentation(input: {
     status: canonicalWriteBlocked
       ? {
           kind: 'info',
-          text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Healthy Bob tools.${queuedFollowUpSuffix}`,
+          text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Murph tools.${queuedFollowUpSuffix}`,
         }
       : connectionLost
         ? {
@@ -1195,7 +1195,7 @@ const ChatHeader = React.memo(function ChatHeader(
         },
         createElement(Text, { color: theme.accentColor }, '●'),
         ' ',
-        createElement(Text, { bold: true }, 'Healthy Bob'),
+        createElement(Text, { bold: true }, 'Murph'),
       ),
       props.bindingSummary
         ? createElement(
@@ -1230,7 +1230,7 @@ const ChatHeader = React.memo(function ChatHeader(
         },
         createElement(Text, { color: theme.accentColor }, '●'),
         ' ',
-        createElement(Text, { bold: true }, 'Healthy Bob'),
+        createElement(Text, { bold: true }, 'Murph'),
         ' ',
         createElement(Text, { color: theme.mutedColor }, 'interactive chat'),
       ),
@@ -2771,7 +2771,7 @@ export async function runAssistantChatWithInk(
 
   if (!inkInput.stdin) {
     throw new Error(
-      'Healthy Bob chat requires interactive terminal input. process.stdin does not support raw mode, and Healthy Bob could not open the controlling terminal for Ink input.',
+      'Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.',
     )
   }
   const inkStdin = inkInput.stdin

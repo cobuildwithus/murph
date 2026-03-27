@@ -5,7 +5,7 @@ import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_SPECIMEN_TYPES,
   healthEntityDefinitions,
-} from "@healthybob/contracts"
+} from "@murph/contracts"
 
 import { VaultCliError } from "../vault-cli-errors.js"
 import {

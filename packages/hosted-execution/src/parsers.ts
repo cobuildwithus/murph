@@ -1,4 +1,4 @@
-import { assertContract, sharePackSchema } from "@healthybob/contracts";
+import { assertContract, sharePackSchema } from "@murph/contracts";
 
 import type {
   HostedExecutionAssistantCronTickEvent,

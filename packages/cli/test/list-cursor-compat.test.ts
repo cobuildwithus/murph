@@ -56,7 +56,7 @@ test('list help and schemas no longer expose cursor pagination options', async (
 }, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('list commands still run after cursor removal', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
 
   try {
     const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
@@ -119,7 +119,7 @@ test.sequential('list commands still run after cursor removal', async () => {
 }, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('generic list applies date bounds and echoes renamed filter keys', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
 
   try {
     const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
@@ -133,7 +133,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
       path.join(vaultRoot, 'ledger/events/2026/2026-03.jsonl'),
       [
         JSON.stringify({
-          schemaVersion: 'hb.event.v1',
+          schemaVersion: 'murph.event.v1',
           id: 'evt_range_out',
           kind: 'note',
           occurredAt: '2026-03-10T08:00:00Z',
@@ -142,7 +142,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
           title: 'Outside the requested range',
         }),
         JSON.stringify({
-          schemaVersion: 'hb.event.v1',
+          schemaVersion: 'murph.event.v1',
           id: 'evt_range_in',
           kind: 'note',
           occurredAt: '2026-03-12T09:00:00Z',
@@ -189,7 +189,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
 }, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('goal list keeps status-only filters canonical', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const activeGoalPath = path.join(vaultRoot, 'goal-active.json')
   const pausedGoalPath = path.join(vaultRoot, 'goal-paused.json')
 
@@ -284,7 +284,7 @@ test.sequential('goal list keeps status-only filters canonical', async () => {
 }, CLI_LIST_TIMEOUT_MS)
 
 test.sequential('generic list exposes record-type, status, stream, and tag filter parity', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-list-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const csvPath = path.join(vaultRoot, 'samples.csv')
   const experimentPath = path.join(
     vaultRoot,

@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { extractIsoDatePrefix } from "@healthybob/contracts";
+import { extractIsoDatePrefix } from "@murph/contracts";
 import {
   SEARCH_DB_RELATIVE_PATH,
   openSqliteRuntimeDatabase,
   resolveRuntimePaths,
   tableExists,
   withImmediateTransaction,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 import { readVault } from "./model.ts";
 import {
@@ -21,7 +21,7 @@ import {
   type SearchResult,
 } from "./search-shared.ts";
 
-const SEARCH_SCHEMA_VERSION = "hb.search.v1";
+const SEARCH_SCHEMA_VERSION = "murph.search.v1";
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;
 const DEFAULT_MIN_CANDIDATES = 50;
 const MAX_CANDIDATES = 1_000;
@@ -81,10 +81,10 @@ export async function rebuildSqliteSearchIndex(
   try {
     ensureSearchSchema(database);
     const indexedAt = withImmediateTransaction(database, () => {
-      database.exec("DELETE FROM hb_search_document; DELETE FROM hb_search_fts;");
+      database.exec("DELETE FROM murph_search_document; DELETE FROM murph_search_fts;");
 
       const insertDocument = database.prepare(`
-        INSERT INTO hb_search_document (
+        INSERT INTO murph_search_document (
           record_id,
           alias_ids_json,
           record_type,
@@ -103,7 +103,7 @@ export async function rebuildSqliteSearchIndex(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const insertFts = database.prepare(`
-        INSERT INTO hb_search_fts (
+        INSERT INTO murph_search_fts (
           record_id,
           title_text,
           body_text,
@@ -208,7 +208,7 @@ async function searchVaultSqliteWithStatus(
 
   if (terms.length === 0) {
     return {
-      format: "healthybob.search.v1",
+      format: "murph.search.v1",
       query: normalizedQuery,
       total: 0,
       hits: [],
@@ -237,7 +237,7 @@ async function searchVaultSqliteWithStatus(
   );
 
   try {
-    const whereClauses: string[] = ["hb_search_fts MATCH ?"];
+    const whereClauses: string[] = ["murph_search_fts MATCH ?"];
     const parameters: Array<string | number> = [buildFtsQuery(terms)];
 
     appendEqualityFilters(
@@ -250,14 +250,14 @@ async function searchVaultSqliteWithStatus(
     appendEqualityFilters(whereClauses, parameters, "stream", filters.streams);
 
     if (filters.experimentSlug) {
-      whereClauses.push("hb_search_document.experiment_slug = ?");
+      whereClauses.push("murph_search_document.experiment_slug = ?");
       parameters.push(filters.experimentSlug);
     }
 
     if (filters.from) {
       const from = extractIsoDatePrefix(filters.from) ?? filters.from;
       whereClauses.push(
-        "substr(COALESCE(hb_search_document.date, hb_search_document.occurred_at), 1, 10) >= ?",
+        "substr(COALESCE(murph_search_document.date, murph_search_document.occurred_at), 1, 10) >= ?",
       );
       parameters.push(from);
     }
@@ -265,7 +265,7 @@ async function searchVaultSqliteWithStatus(
     if (filters.to) {
       const to = extractIsoDatePrefix(filters.to) ?? filters.to;
       whereClauses.push(
-        "substr(COALESCE(hb_search_document.date, hb_search_document.occurred_at), 1, 10) <= ?",
+        "substr(COALESCE(murph_search_document.date, murph_search_document.occurred_at), 1, 10) <= ?",
       );
       parameters.push(to);
     }
@@ -281,25 +281,25 @@ async function searchVaultSqliteWithStatus(
 
     const rows = database.prepare(`
       SELECT
-        hb_search_document.record_id,
-        hb_search_document.alias_ids_json,
-        hb_search_document.record_type,
-        hb_search_document.kind,
-        hb_search_document.stream,
-        hb_search_document.title,
-        hb_search_document.occurred_at,
-        hb_search_document.date,
-        hb_search_document.experiment_slug,
-        hb_search_document.tags_json,
-        hb_search_document.path,
-        hb_search_document.title_text,
-        hb_search_document.body_text,
-        hb_search_document.tags_text,
-        hb_search_document.structured_text
-      FROM hb_search_fts
-      JOIN hb_search_document ON hb_search_document.record_id = hb_search_fts.record_id
+        murph_search_document.record_id,
+        murph_search_document.alias_ids_json,
+        murph_search_document.record_type,
+        murph_search_document.kind,
+        murph_search_document.stream,
+        murph_search_document.title,
+        murph_search_document.occurred_at,
+        murph_search_document.date,
+        murph_search_document.experiment_slug,
+        murph_search_document.tags_json,
+        murph_search_document.path,
+        murph_search_document.title_text,
+        murph_search_document.body_text,
+        murph_search_document.tags_text,
+        murph_search_document.structured_text
+      FROM murph_search_fts
+      JOIN murph_search_document ON murph_search_document.record_id = murph_search_fts.record_id
       WHERE ${whereClauses.join(" AND ")}
-      ORDER BY bm25(hb_search_fts) ASC, hb_search_document.record_id ASC
+      ORDER BY bm25(murph_search_fts) ASC, murph_search_document.record_id ASC
       LIMIT ?
     `).all(...parameters) as unknown as SearchDocumentRow[];
 
@@ -368,7 +368,7 @@ function readSearchStatus(location: SearchDatabaseLocation): ResolvedSqliteSearc
       return null;
     }
 
-    const hasMeta = tableExists(database, "hb_search_meta");
+    const hasMeta = tableExists(database, "murph_search_meta");
 
     return {
       backend: "sqlite",
@@ -395,12 +395,12 @@ function currentSearchDatabaseLocation(vaultRoot: string): SearchDatabaseLocatio
 
 function ensureSearchSchema(database: DatabaseSync): void {
   database.exec(`
-    CREATE TABLE IF NOT EXISTS hb_search_meta (
+    CREATE TABLE IF NOT EXISTS murph_search_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS hb_search_document (
+    CREATE TABLE IF NOT EXISTS murph_search_document (
       record_id TEXT PRIMARY KEY,
       alias_ids_json TEXT NOT NULL,
       record_type TEXT NOT NULL,
@@ -418,14 +418,14 @@ function ensureSearchSchema(database: DatabaseSync): void {
       structured_text TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS hb_search_document_record_type_idx ON hb_search_document(record_type);
-    CREATE INDEX IF NOT EXISTS hb_search_document_kind_idx ON hb_search_document(kind);
-    CREATE INDEX IF NOT EXISTS hb_search_document_stream_idx ON hb_search_document(stream);
-    CREATE INDEX IF NOT EXISTS hb_search_document_experiment_idx ON hb_search_document(experiment_slug);
-    CREATE INDEX IF NOT EXISTS hb_search_document_date_idx ON hb_search_document(date);
-    CREATE INDEX IF NOT EXISTS hb_search_document_occurred_at_idx ON hb_search_document(occurred_at);
+    CREATE INDEX IF NOT EXISTS murph_search_document_record_type_idx ON murph_search_document(record_type);
+    CREATE INDEX IF NOT EXISTS murph_search_document_kind_idx ON murph_search_document(kind);
+    CREATE INDEX IF NOT EXISTS murph_search_document_stream_idx ON murph_search_document(stream);
+    CREATE INDEX IF NOT EXISTS murph_search_document_experiment_idx ON murph_search_document(experiment_slug);
+    CREATE INDEX IF NOT EXISTS murph_search_document_date_idx ON murph_search_document(date);
+    CREATE INDEX IF NOT EXISTS murph_search_document_occurred_at_idx ON murph_search_document(occurred_at);
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS hb_search_fts USING fts5(
+    CREATE VIRTUAL TABLE IF NOT EXISTS murph_search_fts USING fts5(
       record_id UNINDEXED,
       title_text,
       body_text,
@@ -438,8 +438,8 @@ function ensureSearchSchema(database: DatabaseSync): void {
 
 function hasIndexedSearchTables(database: DatabaseSync): boolean {
   return (
-    tableExists(database, "hb_search_document") &&
-    tableExists(database, "hb_search_fts")
+    tableExists(database, "murph_search_document") &&
+    tableExists(database, "murph_search_fts")
   );
 }
 
@@ -454,7 +454,7 @@ function appendEqualityFilters(
   }
 
   const placeholders = values.map(() => "?").join(", ");
-  whereClauses.push(`hb_search_document.${column} IN (${placeholders})`);
+  whereClauses.push(`murph_search_document.${column} IN (${placeholders})`);
   parameters.push(...values);
 }
 
@@ -495,14 +495,14 @@ function buildFtsQuery(terms: readonly string[]): string {
 
 function countIndexedDocuments(database: DatabaseSync): number {
   const row = database
-    .prepare("SELECT COUNT(*) AS count FROM hb_search_document")
+    .prepare("SELECT COUNT(*) AS count FROM murph_search_document")
     .get() as { count: number } | undefined;
 
   return row?.count ?? 0;
 }
 
 function readMeta(database: DatabaseSync, key: string): string | null {
-  const row = database.prepare("SELECT value FROM hb_search_meta WHERE key = ?").get(key) as
+  const row = database.prepare("SELECT value FROM murph_search_meta WHERE key = ?").get(key) as
     | { value: string }
     | undefined;
   return row?.value ?? null;
@@ -511,7 +511,7 @@ function readMeta(database: DatabaseSync, key: string): string | null {
 function writeMeta(database: DatabaseSync, key: string, value: string): void {
   database
     .prepare(`
-      INSERT INTO hb_search_meta (key, value)
+      INSERT INTO murph_search_meta (key, value)
       VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `)

@@ -162,7 +162,7 @@ export const setupCommandOptionsSchema = z.object({
     .describe('Fail if the final inbox bootstrap doctor still reports blocking local runtime issues.'),
   toolchainRoot: pathSchema
     .optional()
-    .describe('Override the local machine toolchain root. Defaults to ~/.healthybob/toolchain.'),
+    .describe('Override the local machine toolchain root. Defaults to ~/.murph/toolchain.'),
   whisperModel: whisperModelSchema
     .default('base.en')
     .describe('whisper.cpp model to download for local transcription.'),

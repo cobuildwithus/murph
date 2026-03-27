@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.audit.v1"
+      "const": "murph.audit.v1"
     },
     "id": {
       "type": "string",
@@ -135,6 +135,6 @@
     "changes"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/audit-record.schema.json",
-  "title": "Healthy Bob Audit Record"
+  "$id": "@murph/contracts/audit-record.schema.json",
+  "title": "Murph Audit Record"
 }

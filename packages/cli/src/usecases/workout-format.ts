@@ -4,7 +4,7 @@ import {
   parseFrontmatterDocument,
   resolveVaultPathOnDisk,
   stringifyFrontmatterDocument,
-} from '@healthybob/core'
+} from '@murph/core'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { asListEnvelope } from './shared.js'
 import { resolveWorkoutCapture, type AddWorkoutRecordInput, addWorkoutRecord } from './workout.js'
@@ -14,7 +14,7 @@ import {
 } from './vault-usecase-helpers.js'
 
 const WORKOUT_FORMATS_DIRECTORY = 'bank/workout-formats'
-const WORKOUT_FORMAT_SCHEMA_VERSION = 'hb.frontmatter.workout-format.v1'
+const WORKOUT_FORMAT_SCHEMA_VERSION = 'murph.frontmatter.workout-format.v1'
 const WORKOUT_FORMAT_DOC_TYPE = 'workout_format'
 const WORKOUT_FORMAT_ID_PREFIX = 'workout-format:'
 type WorkoutFormatFrontmatter = NonNullable<

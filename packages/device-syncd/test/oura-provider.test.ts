@@ -95,7 +95,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
 
   const connection = await provider.exchangeAuthorizationCode(
     {
-      callbackUrl: "https://healthybob.test/device-sync/oauth/oura/callback",
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
       now: "2026-03-16T10:00:00.000Z",
       grantedScopes: ["personal", "daily", "heartrate"],
     },
@@ -377,7 +377,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
 test("Oura webhook verification challenge helper returns the challenge only for the configured token", () => {
   const challenge = resolveOuraWebhookVerificationChallenge({
     url: new URL(
-      "https://sync.healthybob.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
+      "https://sync.example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
     ),
     verificationToken: "verify-token",
   });
@@ -387,7 +387,7 @@ test("Oura webhook verification challenge helper returns the challenge only for 
     () =>
       resolveOuraWebhookVerificationChallenge({
         url: new URL(
-          "https://sync.healthybob.test/api/device-sync/webhooks/oura?verification_token=wrong&challenge=random-challenge",
+          "https://sync.example.test/api/device-sync/webhooks/oura?verification_token=wrong&challenge=random-challenge",
         ),
         verificationToken: "verify-token",
       }),

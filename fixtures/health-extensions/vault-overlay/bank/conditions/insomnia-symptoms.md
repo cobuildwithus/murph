@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.condition.v1
+schemaVersion: murph.frontmatter.condition.v1
 docType: condition
 conditionId: cond_01JNV43NDX1N7BX08NQ19MJ4DK
 slug: insomnia-symptoms

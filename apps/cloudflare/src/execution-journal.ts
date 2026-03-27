@@ -3,11 +3,11 @@ import {
   sha256HostedBundleHex,
   type HostedExecutionBundleRef,
   type HostedExecutionRunnerResult,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 import {
   parseHostedExecutionSideEffects,
   type HostedExecutionSideEffect,
-} from "@healthybob/assistant-runtime";
+} from "@murph/assistant-runtime";
 
 import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";

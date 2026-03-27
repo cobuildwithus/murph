@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.condition.v1"
+      "const": "murph.frontmatter.condition.v1"
     },
     "docType": {
       "type": "string",
@@ -96,6 +96,6 @@
     "clinicalStatus"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-condition.schema.json",
-  "title": "Healthy Bob Condition Frontmatter"
+  "$id": "@murph/contracts/frontmatter-condition.schema.json",
+  "title": "Murph Condition Frontmatter"
 }

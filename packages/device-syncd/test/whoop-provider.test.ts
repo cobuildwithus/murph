@@ -137,16 +137,16 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
   assert.equal(
     provider.buildConnectUrl({
       state: "state-1",
-      callbackUrl: "https://healthybob.test/device-sync/oauth/whoop/callback",
+      callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
       scopes: ["offline", "read:profile"],
       now: "2026-03-16T10:00:00.000Z",
     }),
-    "https://api.prod.whoop.com/oauth/oauth2/auth?client_id=whoop-client-id&response_type=code&redirect_uri=https%3A%2F%2Fhealthybob.test%2Fdevice-sync%2Foauth%2Fwhoop%2Fcallback&scope=offline+read%3Aprofile&state=state-1",
+    "https://api.prod.whoop.com/oauth/oauth2/auth?client_id=whoop-client-id&response_type=code&redirect_uri=https%3A%2F%2Fsync.example.test%2Fdevice-sync%2Foauth%2Fwhoop%2Fcallback&scope=offline+read%3Aprofile&state=state-1",
   );
 
   const connection = await provider.exchangeAuthorizationCode(
     {
-      callbackUrl: "https://healthybob.test/device-sync/oauth/whoop/callback",
+      callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
       now: "2026-03-16T10:00:00.000Z",
       grantedScopes: [],
     },

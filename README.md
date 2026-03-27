@@ -1,6 +1,6 @@
-# Healthy Bob
+# Murph
 
-Healthy Bob is a file-native health vault. It keeps human-reviewable truth in Markdown, machine-readable truth in append-only JSONL ledgers, and exposes a typed `vault-cli` surface over a shared TypeScript workspace.
+Murph is a file-native health vault. It keeps human-reviewable truth in Markdown, machine-readable truth in append-only JSONL ledgers, and exposes a typed `vault-cli` surface over a shared TypeScript workspace.
 
 The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, a local-only Next.js web surface, a hosted Next.js control plane, a hosted Cloudflare execution plane, and the CLI, along with deterministic fixtures and repo-level verification.
 
@@ -8,7 +8,7 @@ The workspace includes buildable packages for contracts, shared runtime-state he
 
 Runtime: Node >= 22.16.0. One-command setup supports macOS and Linux. iMessage remains macOS-only.
 
-Healthy Bob now has a fixed-version monorepo release flow that packs `healthybob` plus the supporting runtime packages, including `@healthybob/device-syncd`, for npm publication. Until a public version is actually cut, the recommended install path is still from this repo root:
+Murph now has a fixed-version monorepo release flow that packs `murph` plus the supporting runtime packages, including `@murph/device-syncd`, for npm publication. Until a public version is actually cut, the recommended install path is still from this repo root:
 
 ```bash
 pnpm onboard --vault ./vault
@@ -16,20 +16,20 @@ pnpm onboard --vault ./vault
 ./scripts/setup-host.sh --vault ./vault
 ```
 
-`pnpm onboard` is the repo-local installer entrypoint. It runs the cross-platform setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `healthybob` and `vault-cli` shims for future shells, and then launches the interactive Healthy Bob onboarding wizard. That wizard now uses a compact assistant/channel/wearable stepper: it saves a default assistant backend such as Codex CLI, Codex OSS/local model, or an OpenAI-compatible endpoint, shows inline readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP, can prompt for missing runtime credentials for the current onboarding run only, can discover and reuse existing AgentMail inboxes before attempting to provision a new one, and can open ready wearable connect flows before the assistant handoff continues. On macOS, iMessage remains enabled by default there; on Linux, setup defaults to the cross-platform channels instead. Telegram and email can be enabled from the same surface, optional Oura/WHOOP connect handoff can be selected at the same time, and if at least one selected auto-reply channel is fully configured the command will drop into `assistant run` after any ready wearable connect flows open in the browser.
+`pnpm onboard` is the repo-local installer entrypoint. It runs the cross-platform setup wrapper, provisions or reuses the local parser/runtime dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `murph` and `vault-cli` shims for future shells, and then launches the interactive Murph onboarding wizard. That wizard now uses a compact assistant/channel/wearable stepper: it saves a default assistant backend such as Codex CLI, Codex OSS/local model, or an OpenAI-compatible endpoint, shows inline readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP, can prompt for missing runtime credentials for the current onboarding run only, can discover and reuse existing AgentMail inboxes before attempting to provision a new one, and can open ready wearable connect flows before the assistant handoff continues. On macOS, iMessage remains enabled by default there; on Linux, setup defaults to the cross-platform channels instead. Telegram and email can be enabled from the same surface, optional Oura/WHOOP connect handoff can be selected at the same time, and if at least one selected auto-reply channel is fully configured the command will drop into `assistant run` after any ready wearable connect flows open in the browser.
 
 Plain `pnpm setup` is not available here because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
 
-After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout, and installed shims can use `healthybob chat` or `vault-cli chat`. For the always-on automation loop, installed shims can now also use `healthybob run` or `vault-cli run`.
+After setup, `pnpm chat` is the shortest repo-local way to reopen the assistant chat from a checkout, and installed shims can use `murph chat` or `vault-cli chat`. For the always-on automation loop, installed shims can now also use `murph run` or `vault-cli run`.
 
-Device sync is also packaged as part of the overall Healthy Bob release. The normal operator path is:
+Device sync is also packaged as part of the overall Murph release. The normal operator path is:
 
 ```bash
-healthybob device daemon start --vault ./vault
-healthybob device provider list --vault ./vault
+murph device daemon start --vault ./vault
+murph device provider list --vault ./vault
 ```
 
-For ordinary `healthybob device ...` usage, the CLI can start and reuse that local daemon automatically when it owns the selected vault context.
+For ordinary `murph device ...` usage, the CLI can start and reuse that local daemon automatically when it owns the selected vault context.
 
 ## Quick Start (TL;DR)
 
@@ -41,7 +41,7 @@ pnpm onboard --vault ./vault
 VAULT=./vault pnpm web:dev
 
 pnpm chat
-healthybob chat
+murph chat
 vault-cli inbox doctor
 vault-cli vault stats
 ```
@@ -61,13 +61,13 @@ The repo now has two separate ChatGPT upload paths:
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
   packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
 
-`review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Healthy Bob precedence order: explicit `--vault`, then `VAULT`, then the saved default vault.
+`review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Murph precedence order: explicit `--vault`, then `VAULT`, then the saved default vault.
 
 The data bundle intentionally excludes `.runtime/**`, `.env*`, archive files, and `exports/packs/**` so machine-local runtime/auth material and already-derived export packs are not uploaded by default. Generated ZIPs are written under `output-packages/`.
 
-## What Healthy Bob Is
+## What Murph Is
 
-Healthy Bob is built around a few hard rules:
+Murph is built around a few hard rules:
 
 - Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journal pages, experiments, profile state, and health registries.
 - JSONL ledgers are the machine-facing source of truth for append-only records such as events, samples, audit entries, assessments, and profile snapshots.
@@ -100,7 +100,7 @@ The hosted apps define an initial deployment shape, and the repo now includes ge
 
 ## Mental Model
 
-Healthy Bob splits the overall system into seven kinds of state:
+Murph splits the overall system into seven kinds of state:
 
 1. Human-readable canonical docs
    `CORE.md`, journal pages, experiments, current profile, goals, conditions, allergies, protocols, family records, and genetics records.
@@ -127,7 +127,7 @@ Every CLI command follows the same shape:
 2. Root middleware normalizes `vault`, `format`, and optional `requestId`.
 3. The handler delegates exactly one boundary call into `core`, `importers`, `inboxd`, or `query`, with parser-toolchain queue control layered through the inbox CLI services.
 4. Write commands copy raw artifacts first; inbox ingestion flows persist capture evidence under `raw/inbox/...` and enqueue attachment parse jobs in `.runtime/`.
-5. Parser-capable product flows may use `@healthybob/parsers` to drain those jobs and publish only derived artifacts under `derived/inbox/...`.
+5. Parser-capable product flows may use `@murph/parsers` to drain those jobs and publish only derived artifacts under `derived/inbox/...`.
 6. Provider-backed assistant chat flows may reuse external transcript/session storage while also persisting local alias/session metadata, local chat transcripts, and distilled Markdown memory under `assistant-state/`.
 7. For `--format json`, successful commands return the command-specific payload directly and failures return a direct error object.
 
@@ -229,7 +229,7 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | `packages/runtime-state` | Canonical `.runtime` path resolution and shared SQLite defaults for rebuildable local state. |
 | `packages/core` | Canonical vault initialization, filesystem rules, audit emission, raw-copy rules, and all write mutations. |
 | `packages/importers` | Adapters that normalize external inputs and then call `core`. |
-| `packages/device-syncd` | Local wearable OAuth/webhook/reconcile daemon that Healthy Bob can launch and manage for a vault. |
+| `packages/device-syncd` | Local wearable OAuth/webhook/reconcile daemon that Murph can launch and manage for a vault. |
 | `packages/inboxd` | Source-agnostic inbox capture, raw evidence persistence, runtime indexing, and attachment parse-job orchestration. |
 | `packages/parsers` | Local-first attachment parsing, provider selection, and derived artifact publication under `derived/inbox/**`. |
 | `packages/query` | Read model assembly, lookups, list filters, summaries, and export-pack generation. |
@@ -306,7 +306,7 @@ The repo also includes local-first inbox parser controls:
 
 ### Assistant Commands
 
-The repo also includes a Healthy Bob-native assistant layer:
+The repo also includes a Murph-native assistant layer:
 
 - `vault-cli chat [prompt]` is a root-level shorthand for `vault-cli assistant chat [prompt]`
 - `vault-cli run` is a root-level shorthand for `vault-cli assistant run`
@@ -321,7 +321,7 @@ Fresh assistant sessions bootstrap from a small core block in `assistant-state/<
 
 The first installed chat provider adapter is still Codex CLI, but the assistant runtime is intentionally provider-backed rather than Codex-shaped. Setup can now persist either Codex CLI/Codex OSS defaults or an OpenAI-compatible endpoint plus model/base URL/env-var metadata for local chat and channel auto-reply. Outbound channel delivery is also adapter-backed, with iMessage and Telegram both flowing through the same stored binding abstraction. Inbox triage remains separate and uses the existing AI SDK routing harness, so chat and ingestion can target different backends.
 
-When you intentionally use a dedicated iMessage self-chat thread, `assistant run --allowSelfAuthored --sessionRolloverHours 48` lets self-authored captures drive the assistant, builds prompts from parsed attachment transcripts/OCR when message text is empty, and rolls the session every couple of days to keep that thread fresh. Healthy Bob still requires Full Disk Access for the terminal app that reads `~/Library/Messages/chat.db`, and the CLI now surfaces that requirement as an operator-facing error instead of a raw database-open stack trace.
+When you intentionally use a dedicated iMessage self-chat thread, `assistant run --allowSelfAuthored --sessionRolloverHours 48` lets self-authored captures drive the assistant, builds prompts from parsed attachment transcripts/OCR when message text is empty, and rolls the session every couple of days to keep that thread fresh. Murph still requires Full Disk Access for the terminal app that reads `~/Library/Messages/chat.db`, and the CLI now surfaces that requirement as an operator-facing error instead of a raw database-open stack trace.
 
 ### Health Extension Commands
 
@@ -374,27 +374,27 @@ Noun-specific filters still exist where the underlying records justify them: `hi
 
 ## One-Command Host Setup
 
-Healthy Bob now has a dedicated host setup surface for the local parser/runtime stack on macOS and Linux:
+Murph now has a dedicated host setup surface for the local parser/runtime stack on macOS and Linux:
 
 ```bash
-healthybob onboard
+murph onboard
 # or:
-healthybob setup
+murph setup
 ```
 
-That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. The built CLI shape already includes a setup-first `healthybob` alias: `healthybob`, `healthybob --help`, `healthybob onboard ...`, and `healthybob setup ...` route to that setup surface, while other commands continue through the main operator surface. Across supported hosts it will:
+That setup entrypoint is intentionally separate from the main `vault-cli` manifest so it can act more like an installer than a data-plane command. The built CLI shape already includes a setup-first `murph` alias: `murph`, `murph --help`, `murph onboard ...`, and `murph setup ...` route to that setup surface, while other commands continue through the main operator surface. Across supported hosts it will:
 
 - on macOS, install or reuse Homebrew; on Linux, reuse system tools from PATH when available and otherwise attempt apt-based installs for the parser stack
 - install or reuse `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`
-- download a local whisper.cpp model into `~/.healthybob/toolchain/models/whisper/`
-- install PaddleX OCR into `~/.healthybob/toolchain/venvs/paddlex-ocr` on Apple Silicon, and attempt the same Linux OCR setup on x86_64 unless you pass `--skipOcr`
+- download a local whisper.cpp model into `~/.murph/toolchain/models/whisper/`
+- install PaddleX OCR into `~/.murph/toolchain/venvs/paddlex-ocr` on Apple Silicon, and attempt the same Linux OCR setup on x86_64 unless you pass `--skipOcr`
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
 - open an interactive onboarding wizard that steps through assistant defaults, message channels, optional wearable connect targets, and a final review with compact inline summaries instead of one long text wall
 - offer Codex CLI, Codex OSS/local-model, OpenAI-compatible endpoint, or skip-for-now assistant presets during that wizard, with provider-specific follow-up prompts such as model ids, base URLs, and API-key environment variable names
 - show readiness badges for iMessage, Telegram, AgentMail email, Oura, and WHOOP directly inside that wizard, including current-run-only prompts for missing runtime credentials when you want to continue without restarting setup
 - enable iMessage by default in that wizard on macOS, keep Linux defaults focused on Telegram, Linq, and email, and let Oura/WHOOP be selected for immediate post-setup connect handoff when their client credentials are available
-- save that vault as the default Healthy Bob CLI vault for future commands on the same machine
-- install user-level `healthybob` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
+- save that vault as the default Murph CLI vault for future commands on the same machine
+- install user-level `murph` and `vault-cli` shims into `~/.local/bin`, adding a managed PATH block to the active shell profile when needed
 - configure the local iMessage connector plus assistant auto-reply state when iMessage stays enabled on macOS, and do the same for Telegram, Linq, or AgentMail email when their runtime credentials are available in the current environment
 - open selected Oura or WHOOP browser connect flows automatically after setup when their client credentials are ready, while clearly reporting any selected wearable that still needs env vars before connect can begin
 - automatically launch `assistant run` after a successful interactive onboarding when at least one selected channel is fully configured for auto-reply, or `assistant chat` when no auto-reply channel is ready yet
@@ -406,7 +406,7 @@ Common options:
 - `--dry-run` shows the plan without mutating the machine or vault
 - `--skipOcr` disables the PaddleX OCR step even on Apple Silicon
 
-The existing operator/data-plane surface remains under `vault-cli`. Published installs are expected to use the unscoped `healthybob` package plus the internal scoped runtime packages released from the same git tag, but the supported checkout bootstrap path today is still the repo-local wrapper below.
+The existing operator/data-plane surface remains under `vault-cli`. Published installs are expected to use the unscoped `murph` package plus the internal scoped runtime packages released from the same git tag, but the supported checkout bootstrap path today is still the repo-local wrapper below.
 
 ### Repo-local host bootstrap
 
@@ -418,9 +418,9 @@ pnpm onboard --vault ./vault
 
 `pnpm onboard` is a thin alias for the host wrapper. `pnpm run setup --vault ./vault` works too. Plain `pnpm setup` cannot be claimed by this repo because `pnpm` reserves `setup` as its own built-in command.
 
-On macOS, that wrapper delegates to the existing Homebrew-based bootstrap path. On Linux, it can reuse an existing Node 22+ runtime or download an isolated Node build under `~/.healthybob/bootstrap`, activate pnpm through corepack, install workspace dependencies, build the packages, and then delegate to `node packages/cli/dist/bin.js onboard ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
+On macOS, that wrapper delegates to the existing Homebrew-based bootstrap path. On Linux, it can reuse an existing Node 22+ runtime or download an isolated Node build under `~/.murph/bootstrap`, activate pnpm through corepack, install workspace dependencies, build the packages, and then delegate to `node packages/cli/dist/bin.js onboard ...` so the same installer logic is reused for both built-alias and local-checkout flows. With `--dry-run`, the wrapper now prints that bootstrap plan without mutating the machine or workspace; use the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview too.
 
-Successful setup now also installs user-level `healthybob` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, stores the selected assistant backend defaults for later `healthybob chat` and channel auto-reply, and a normal interactive `healthybob onboard` or `healthybob setup` run now walks through assistant defaults, message channels, optional Oura/WHOOP connect targets, inline readiness badges, and any current-run runtime-env prompts before it drops into the right assistant surface. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
+Successful setup now also installs user-level `murph` and `vault-cli` shims under `~/.local/bin`. It saves the selected vault as the default CLI vault, stores the selected assistant backend defaults for later `murph chat` and channel auto-reply, and a normal interactive `murph onboard` or `murph setup` run now walks through assistant defaults, message channels, optional Oura/WHOOP connect targets, inline readiness badges, and any current-run runtime-env prompts before it drops into the right assistant surface. If `~/.local/bin` is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells you to reload your shell.
 
 ## Local Inbox Parser Bootstrap
 
@@ -430,9 +430,9 @@ For a local-first parser setup, the repo exposes one bootstrap command:
 pnpm setup:inbox --vault ./vault
 ```
 
-That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. Use this lower-level wrapper when you already manage the external parser tools yourself; use `healthybob setup`, `pnpm onboard`, or `./scripts/setup-host.sh` when you also want the host dependency/toolchain provisioning step.
+That command installs workspace dependencies, builds the packages, and runs `vault-cli inbox bootstrap` against the target vault so the inbox runtime is created, the parser toolchain config is written, and doctor runs without hand-editing runtime files. Add `--strict` if you want bootstrap to fail when explicitly configured parser tools are still unavailable. Use this lower-level wrapper when you already manage the external parser tools yourself; use `murph setup`, `pnpm onboard`, or `./scripts/setup-host.sh` when you also want the host dependency/toolchain provisioning step.
 
-For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@healthybob/parsers` so pending parser jobs drain once on startup and new captures continue auto-draining without a separate manual worker step.
+For product integration code, prefer `createParsedInboxPipeline(...)` or `runInboxDaemonWithParsers(...)` from `@murph/parsers` so pending parser jobs drain once on startup and new captures continue auto-draining without a separate manual worker step.
 
 ## Lookup Rules That Matter
 

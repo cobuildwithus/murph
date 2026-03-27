@@ -37,11 +37,11 @@ test('parseAssistantMemoryRecords preserves provenance metadata and privacy-gate
     '',
     '## Identity',
     '',
-    '- 2026-03-18 09:30 — Call the user Sam. <!-- healthybob-assistant-memory:{"writtenBy":"assistant","sessionId":"sess-1","turnId":"turn-1"} -->',
+    '- 2026-03-18 09:30 — Call the user Sam. <!-- murph-assistant-memory:{"writtenBy":"assistant","sessionId":"sess-1","turnId":"turn-1"} -->',
     '',
     '## Health context',
     '',
-    '- 2026-03-18 09:31 — User takes magnesium daily. <!-- healthybob-assistant-memory:{"writtenBy":"operator","sessionId":null,"turnId":null} -->',
+    '- 2026-03-18 09:31 — User takes magnesium daily. <!-- murph-assistant-memory:{"writtenBy":"operator","sessionId":null,"turnId":null} -->',
     '',
   ].join('\n')
 

@@ -1,7 +1,7 @@
 import {
   parseFrontmatterDocument as parseSharedFrontmatterDocument,
   type FrontmatterParseProblem,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { VaultError } from "./errors.ts";
 

@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/core",
+  "name": "@murph/core",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,7 +29,7 @@
     "test": "pnpm --dir ../.. exec vitest run packages/core/test/canonical-mutations-boundary.test.ts packages/core/test/core.test.ts packages/core/test/device-import.test.ts packages/core/test/profile.test.ts packages/core/test/health-bank.test.ts packages/core/test/share-pack.test.ts packages/core/test/health-history-family.test.ts --no-coverage"
   },
   "dependencies": {
-    "@healthybob/contracts": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*"
+    "@murph/contracts": "workspace:*",
+    "@murph/runtime-state": "workspace:*"
   }
 }

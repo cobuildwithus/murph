@@ -6,12 +6,12 @@ Updated: 2026-03-27
 
 ## Goal
 
-Extract a headless `@healthybob/assistant-runtime` workspace package so hosted execution no longer imports its runtime surface from the published `healthybob` CLI package, while also removing the current Cloudflare `@ts-nocheck` seam and the container-level job serialization that exists only because hosted runs mutate global `process.env`.
+Extract a headless `@murph/assistant-runtime` workspace package so hosted execution no longer imports its runtime surface from the published `murph` CLI package, while also removing the current Cloudflare `@ts-nocheck` seam and the container-level job serialization that exists only because hosted runs mutate global `process.env`.
 
 ## Scope
 
 - Add a new runtime package that exposes typed hosted-runtime helpers behind an explicit runtime context/config object.
-- Move `apps/cloudflare` off the direct `healthybob` hosted-runtime imports and onto the new package.
+- Move `apps/cloudflare` off the direct `murph` hosted-runtime imports and onto the new package.
 - Replace process-wide hosted env mutation with isolated per-job execution so the container HTTP bridge can accept overlapping requests safely.
 - Remove the Cloudflare bridge-file typecheck exclusions that only existed for the current CLI-coupled seam.
 - Keep docs and verification truthful for the new package/runtime boundary.

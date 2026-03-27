@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { writeHostedBundleTextFile } from "@healthybob/runtime-state";
+import { writeHostedBundleTextFile } from "@murph/runtime-state";
 
 import { createHostedBundleStore } from "../src/bundle-store.js";
 import { encryptHostedBundle } from "../src/crypto.js";

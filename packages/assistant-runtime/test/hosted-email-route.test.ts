@@ -12,7 +12,7 @@ import {
 import { reconcileHostedVerifiedEmailSelfTarget } from "../src/hosted-email-route.ts";
 
 test("hosted email route reconciliation saves the email self-target and prefers the AgentMail connector", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-route-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
 
   try {
     const operatorHomeRoot = path.join(workspaceRoot, "home");
@@ -83,7 +83,7 @@ test("hosted email route reconciliation saves the email self-target and prefers 
 });
 
 test("hosted email route reconciliation becomes a no-op when the saved target already matches", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-route-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
 
   try {
     const operatorHomeRoot = path.join(workspaceRoot, "home");
@@ -135,7 +135,7 @@ test("hosted email route reconciliation becomes a no-op when the saved target al
 });
 
 test("hosted email route reconciliation stays private when no usable email connector exists", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-route-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
 
   try {
     const operatorHomeRoot = path.join(workspaceRoot, "home");
@@ -181,7 +181,7 @@ test("hosted email route reconciliation stays private when no usable email conne
 });
 
 test("hosted email route reconciliation stays private when multiple enabled email connectors exist without the hosted preferred id", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-route-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-email-route-"));
 
   try {
     const operatorHomeRoot = path.join(workspaceRoot, "home");

@@ -1,4 +1,4 @@
-import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "@healthybob/contracts";
+import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "@murph/contracts";
 
 export const FAMILY_MEMBER_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.familyMemberFrontmatter;
 export const FAMILY_MEMBER_DOC_TYPE = FRONTMATTER_DOC_TYPES.familyMember;

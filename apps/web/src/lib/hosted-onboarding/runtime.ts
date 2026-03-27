@@ -5,19 +5,19 @@ import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
 
 const globalForHostedOnboarding = globalThis as typeof globalThis & {
-  __healthybobHostedOnboardingEnv?: HostedOnboardingEnvironment;
-  __healthybobHostedOnboardingStripe?: Stripe | null;
+  __murphHostedOnboardingEnv?: HostedOnboardingEnvironment;
+  __murphHostedOnboardingStripe?: Stripe | null;
 };
 
 export function getHostedOnboardingEnvironment(): HostedOnboardingEnvironment {
-  if (globalForHostedOnboarding.__healthybobHostedOnboardingEnv) {
-    return globalForHostedOnboarding.__healthybobHostedOnboardingEnv;
+  if (globalForHostedOnboarding.__murphHostedOnboardingEnv) {
+    return globalForHostedOnboarding.__murphHostedOnboardingEnv;
   }
 
   const environment = readHostedOnboardingEnvironment(process.env);
 
   if (process.env.NODE_ENV !== "production") {
-    globalForHostedOnboarding.__healthybobHostedOnboardingEnv = environment;
+    globalForHostedOnboarding.__murphHostedOnboardingEnv = environment;
   }
 
   return environment;
@@ -32,15 +32,15 @@ export function getHostedOnboardingSecretCodec() {
 }
 
 export function getHostedOnboardingStripe(): Stripe | null {
-  if (globalForHostedOnboarding.__healthybobHostedOnboardingStripe !== undefined) {
-    return globalForHostedOnboarding.__healthybobHostedOnboardingStripe;
+  if (globalForHostedOnboarding.__murphHostedOnboardingStripe !== undefined) {
+    return globalForHostedOnboarding.__murphHostedOnboardingStripe;
   }
 
   const environment = getHostedOnboardingEnvironment();
   const stripe = environment.stripeSecretKey ? new Stripe(environment.stripeSecretKey) : null;
 
   if (process.env.NODE_ENV !== "production") {
-    globalForHostedOnboarding.__healthybobHostedOnboardingStripe = stripe;
+    globalForHostedOnboarding.__murphHostedOnboardingStripe = stripe;
   }
 
   return stripe;

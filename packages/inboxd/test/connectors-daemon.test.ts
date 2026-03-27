@@ -243,7 +243,7 @@ test("createImessageConnector preserves an explicit null account scope while def
 });
 
 test("createImessageConnector snapshots ephemeral temp-file attachments during backfill when they are small enough", async () => {
-  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "healthybob-imessage-ephemeral-"));
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "murph-imessage-ephemeral-"));
   const attachmentPath = path.join(
     sourceRoot,
     "TemporaryItems",
@@ -295,7 +295,7 @@ test("createImessageConnector snapshots ephemeral temp-file attachments during b
 test("createImessageConnector downgrades missing ephemeral temp-file attachments instead of failing backfill", async () => {
   const missingPath = path.join(
     os.tmpdir(),
-    "healthybob-imessage-missing",
+    "murph-imessage-missing",
     "TemporaryItems",
     "com.apple.imagent",
     "missing.jpg",

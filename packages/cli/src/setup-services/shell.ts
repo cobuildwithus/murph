@@ -4,8 +4,10 @@ import type { SetupStepResult } from '../setup-cli-contracts.js'
 import { createStep, DEFAULT_USER_BIN_DIRECTORY } from './steps.js'
 import { defaultFileExists, isExecutable } from './process.js'
 
-const PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
-const PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
+const PATH_BLOCK_BEGIN = '# >>> Murph PATH >>>'
+const PATH_BLOCK_END = '# <<< Murph PATH <<<'
+const LEGACY_PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
+const LEGACY_PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
 
 export async function ensureCliShims(input: {
   cliBinPath: string
@@ -19,6 +21,10 @@ export async function ensureCliShims(input: {
   const userBinDirectory = path.join(input.homeDirectory, DEFAULT_USER_BIN_DIRECTORY)
   const shellProfilePath = resolveShellProfilePath(input.homeDirectory, input.env)
   const shimSpecs = [
+    {
+      name: 'murph',
+      path: path.join(userBinDirectory, 'murph'),
+    },
     {
       name: 'healthybob',
       path: path.join(userBinDirectory, 'healthybob'),
@@ -37,6 +43,7 @@ export async function ensureCliShims(input: {
       return await hasInstalledShim({
         cliBinPath: input.cliBinPath,
         fileExists: input.fileExists,
+        shimName: shim.name,
         shimPath: shim.path,
       })
     }),
@@ -49,10 +56,10 @@ export async function ensureCliShims(input: {
         ? 'reused'
         : 'planned'
     const detail = hasAllShims && (pathPresent || pathBlockStatus === 'reused')
-      ? `Reusing Healthy Bob CLI shims from ${userBinDirectory}.`
+      ? `Reusing Murph CLI shims from ${userBinDirectory}.`
       : pathPresent
-        ? `Would install Healthy Bob CLI shims in ${userBinDirectory}.`
-        : `Would install Healthy Bob CLI shims in ${userBinDirectory} and add ${userBinDirectory} to PATH via ${shellProfilePath}.`
+        ? `Would install Murph CLI shims in ${userBinDirectory}.`
+        : `Would install Murph CLI shims in ${userBinDirectory} and add ${userBinDirectory} to PATH via ${shellProfilePath}.`
 
     input.steps.push(
       createStep({
@@ -72,6 +79,7 @@ export async function ensureCliShims(input: {
   for (const shim of shimSpecs) {
     const changed = await writeCliShim({
       cliBinPath: input.cliBinPath,
+      shimName: shim.name,
       shimPath: shim.path,
     })
     wroteShim = wroteShim || changed
@@ -87,8 +95,8 @@ export async function ensureCliShims(input: {
 
   const status = wroteShim || pathUpdated ? 'completed' : 'reused'
   const detail = pathPresent
-    ? `${status === 'completed' ? 'Installed' : 'Reusing'} Healthy Bob CLI shims from ${userBinDirectory}.`
-    : `${status === 'completed' ? 'Installed' : 'Reusing'} Healthy Bob CLI shims from ${userBinDirectory} and ${pathUpdated ? 'added that directory to' : 'confirmed it is managed in'} ${shellProfilePath}.`
+    ? `${status === 'completed' ? 'Installed' : 'Reusing'} Murph CLI shims from ${userBinDirectory}.`
+    : `${status === 'completed' ? 'Installed' : 'Reusing'} Murph CLI shims from ${userBinDirectory} and ${pathUpdated ? 'added that directory to' : 'confirmed it is managed in'} ${shellProfilePath}.`
 
   input.steps.push(
     createStep({
@@ -196,12 +204,13 @@ async function readPathBlockStatus(
   }
 
   const contents = await readFile(profilePath, 'utf8')
-  return hasHealthyBobPathBlock(contents) ? 'reused' : 'missing'
+  return hasManagedPathBlock(contents) ? 'reused' : 'missing'
 }
 
 async function hasInstalledShim(input: {
   cliBinPath: string
   fileExists: (absolutePath: string) => Promise<boolean>
+  shimName: string
   shimPath: string
 }): Promise<boolean> {
   if (!(await input.fileExists(input.shimPath))) {
@@ -209,7 +218,7 @@ async function hasInstalledShim(input: {
   }
 
   const contents = await readFile(input.shimPath, 'utf8')
-  if (contents !== buildCliShimScript(input.cliBinPath)) {
+  if (contents !== buildCliShimScript(input.cliBinPath, input.shimName)) {
     return false
   }
 
@@ -218,9 +227,10 @@ async function hasInstalledShim(input: {
 
 async function writeCliShim(input: {
   cliBinPath: string
+  shimName: string
   shimPath: string
 }): Promise<boolean> {
-  const nextContents = buildCliShimScript(input.cliBinPath)
+  const nextContents = buildCliShimScript(input.cliBinPath, input.shimName)
   const exists = await defaultFileExists(input.shimPath)
 
   if (exists) {
@@ -241,31 +251,36 @@ async function ensurePathBlock(profilePath: string): Promise<boolean> {
 
   if (await defaultFileExists(profilePath)) {
     existing = await readFile(profilePath, 'utf8')
-    if (hasHealthyBobPathBlock(existing)) {
+    if (hasManagedPathBlock(existing)) {
       return false
     }
   }
 
-  const nextContents = `${existing}${existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''}${buildHealthyBobPathBlock()}`
+  const nextContents = `${existing}${existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''}${buildManagedPathBlock()}`
   await writeFile(profilePath, nextContents, 'utf8')
   return true
 }
 
-function hasHealthyBobPathBlock(contents: string): boolean {
+function hasManagedPathBlock(contents: string): boolean {
   return (
-    contents.includes(PATH_BLOCK_BEGIN) &&
-    contents.includes(PATH_BLOCK_END)
+    (
+      contents.includes(PATH_BLOCK_BEGIN) &&
+      contents.includes(PATH_BLOCK_END)
+    ) || (
+      contents.includes(LEGACY_PATH_BLOCK_BEGIN) &&
+      contents.includes(LEGACY_PATH_BLOCK_END)
+    )
   )
 }
 
-function buildHealthyBobPathBlock(): string {
+function buildManagedPathBlock(): string {
   return `${PATH_BLOCK_BEGIN}
 export PATH="$HOME/.local/bin:$PATH"
 ${PATH_BLOCK_END}
 `
 }
 
-function buildCliShimScript(cliBinPath: string): string {
+function buildCliShimScript(cliBinPath: string, shimName: string): string {
   const cliSourceBinPath = resolveRepoCliSourceBinPath(cliBinPath)
   const cliPackageRoot = path.resolve(path.dirname(cliBinPath), '..')
   const repoRoot = resolveRepoRootFromCliBinPath(cliBinPath)
@@ -365,18 +380,18 @@ is_discovery_invocation() {
 
 if is_discovery_invocation "$@"; then
   if [ "$cli_dist_ready" = true ]; then
-    run_supervised node ${quoteShellArgument(cliBinPath)} "$@"
+    run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} node ${quoteShellArgument(cliBinPath)} "$@"
     exit $?
   fi
 
   if [ -f ${quoteShellArgument(cliSourceBinPath)} ]; then
     if command -v pnpm >/dev/null 2>&1; then
-      run_supervised pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+      run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
       exit $?
     fi
 
     if command -v corepack >/dev/null 2>&1; then
-      run_supervised corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+      run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
       exit $?
     fi
   fi
@@ -405,23 +420,23 @@ cli_dist_ready=true
 ${cliDistCheckLines}
 
 if [ "$cli_dist_ready" = true ]; then
-  run_supervised node ${quoteShellArgument(cliBinPath)} "$@"
+  run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} node ${quoteShellArgument(cliBinPath)} "$@"
   exit $?
 fi
 
 if [ -f ${quoteShellArgument(cliSourceBinPath)} ]; then
   if command -v pnpm >/dev/null 2>&1; then
-    run_supervised pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+    run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
     exit $?
   fi
 
   if command -v corepack >/dev/null 2>&1; then
-    run_supervised corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
+    run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} corepack pnpm --dir ${quoteShellArgument(repoRoot)} exec tsx ${quoteShellArgument(cliSourceBinPath)} "$@"
     exit $?
   fi
 fi
 
-printf '%s\n' 'Healthy Bob CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
+printf '%s\n' 'Murph CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
 exit 1
 `
 }

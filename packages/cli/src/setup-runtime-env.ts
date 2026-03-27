@@ -19,7 +19,7 @@ const OURA_CLIENT_SECRET_KEYS = ['OURA_CLIENT_SECRET'] as const
 const OURA_CLIENT_KEY_GROUPS = [OURA_CLIENT_ID_KEYS, OURA_CLIENT_SECRET_KEYS] as const
 
 export const SETUP_RUNTIME_ENV_NOTICE =
-  'Healthy Bob uses the current process environment for this run, including shell exports and any CLI-loaded .env.local/.env values. Prompts here are current-run only and do not write env files.'
+  'Murph uses the current process environment for this run, including shell exports and any CLI-loaded .env.local/.env values. Prompts here are current-run only and do not write env files.'
 
 export interface SetupWizardRuntimeStatus {
   badge: string
@@ -242,7 +242,7 @@ export function describeSelectedSetupWearables(input: {
     const status = describeSetupWearableStatus(wearable, input.env)
     configured.push({
       detail: status.ready
-        ? `Selected ${formatSetupWearableName(wearable)}. Healthy Bob can open the connect flow after setup.`
+        ? `Selected ${formatSetupWearableName(wearable)}. Murph can open the connect flow after setup.`
         : `Selected ${formatSetupWearableName(wearable)}, but it still needs ${formatSetupMissingEnvList(status.missingEnv)} before the connect flow can open.`,
       enabled: true,
       missingEnv: status.missingEnv,
@@ -314,7 +314,7 @@ async function promptForRuntimeEnvValue(question: string): Promise<string> {
     const cancel = () => {
       readline.close()
       reject(
-        new VaultCliError('setup_cancelled', 'Healthy Bob setup was cancelled.'),
+        new VaultCliError('setup_cancelled', 'Murph setup was cancelled.'),
       )
     }
 

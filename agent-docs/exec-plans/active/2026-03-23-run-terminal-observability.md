@@ -1,5 +1,5 @@
 Goal (incl. success criteria):
-- Make foreground `healthybob run` / `vault-cli run` terminal output useful for live monitoring by surfacing connector startup, newly imported inbox messages, and daemon/runtime failures as they happen.
+- Make foreground `murph run` / `vault-cli run` terminal output useful for live monitoring by surfacing connector startup, newly imported inbox messages, and daemon/runtime failures as they happen.
 - Success means the assistant foreground loop can print concise message-arrival summaries for email/iMessage/Telegram captures, surface daemon failures immediately, and keep existing command schemas/result payloads unchanged.
 
 Constraints/Assumptions:
@@ -8,7 +8,7 @@ Constraints/Assumptions:
 - Avoid broad cross-package refactors if local connector instrumentation inside the CLI layer is enough.
 
 Key decisions:
-- Instrument connector `backfill` / `watch` activity in `packages/cli/src/inbox-services.ts` instead of changing the lower-level `@healthybob/inboxd` package API unless testing proves that insufficient.
+- Instrument connector `backfill` / `watch` activity in `packages/cli/src/inbox-services.ts` instead of changing the lower-level `@murph/inboxd` package API unless testing proves that insufficient.
 - Thread inbox-daemon events into the assistant run loop through a dedicated callback rather than overloading the existing assistant scan event type.
 - Add focused tests for inbox event emission and assistant daemon-event forwarding/output behavior.
 

@@ -269,7 +269,7 @@ export default function HomePage() {
                 <p className="text-stone-500"># Start chatting</p>
                 <p>
                   <span className="text-olive-light">$</span>{" "}
-                  <span className="text-white">healthybob chat</span>
+                  <span className="text-white">murph chat</span>
                 </p>
               </div>
             </div>

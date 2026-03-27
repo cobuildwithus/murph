@@ -61,7 +61,7 @@ test("Oura webhook subscription ensure creates missing subscriptions with client
   });
 
   const result = await client.ensure({
-    callbackUrl: "https://healthybob.test/api/device-sync/webhooks/oura",
+    callbackUrl: "https://sync.example.test/api/device-sync/webhooks/oura",
     verificationToken: "verify-token-for-tests",
     desired: [
       { eventType: "create", dataType: "daily_sleep" },
@@ -82,13 +82,13 @@ test("Oura webhook subscription ensure creates missing subscriptions with client
     [
       {
         id: "sub-1",
-        callbackUrl: "https://healthybob.test/api/device-sync/webhooks/oura",
+        callbackUrl: "https://sync.example.test/api/device-sync/webhooks/oura",
         dataType: "daily_sleep",
         eventType: "create",
       },
       {
         id: "sub-2",
-        callbackUrl: "https://healthybob.test/api/device-sync/webhooks/oura",
+        callbackUrl: "https://sync.example.test/api/device-sync/webhooks/oura",
         dataType: "daily_sleep",
         eventType: "update",
       },
@@ -110,13 +110,13 @@ test("Oura webhook subscription ensure creates missing subscriptions with client
     requests.slice(1).map((request) => JSON.parse(request.body ?? "{}")),
     [
       {
-        callback_url: "https://healthybob.test/api/device-sync/webhooks/oura",
+        callback_url: "https://sync.example.test/api/device-sync/webhooks/oura",
         verification_token: "verify-token-for-tests",
         event_type: "create",
         data_type: "daily_sleep",
       },
       {
-        callback_url: "https://healthybob.test/api/device-sync/webhooks/oura",
+        callback_url: "https://sync.example.test/api/device-sync/webhooks/oura",
         verification_token: "verify-token-for-tests",
         event_type: "update",
         data_type: "daily_sleep",
@@ -126,8 +126,8 @@ test("Oura webhook subscription ensure creates missing subscriptions with client
 });
 
 test("Oura webhook subscription ensure renews expiring subscriptions and prunes duplicates per callback URL", async () => {
-  const callbackUrl = "https://healthybob.test/api/device-sync/webhooks/oura";
-  const otherCallbackUrl = "https://local.healthybob.test/device-sync/webhooks/oura";
+  const callbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura";
+  const otherCallbackUrl = "https://local.example.test/device-sync/webhooks/oura";
   const soon = new Date(Date.now() + 60_000).toISOString();
   const later = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
   const operations: string[] = [];

@@ -152,7 +152,7 @@ export function createSetupAssistantResolver(
             oss: null,
             account: null,
             detail:
-              'Skipped saving assistant defaults during setup. Healthy Bob will keep any existing assistant config unchanged.',
+              'Skipped saving assistant defaults during setup. Murph will keep any existing assistant config unchanged.',
           }
           break
 

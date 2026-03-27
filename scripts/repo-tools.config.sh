@@ -59,9 +59,9 @@ export COBUILD_DRIFT_CHANGED_COUNT_EXCLUDE_PATTERN='^agent-docs/generated/|^agen
 export COBUILD_DRIFT_ALLOW_RELEASE_ARTIFACTS_ONLY='0'
 export COBUILD_COMMITTER_EXAMPLE='feat(bootstrap): add repo harness'
 export COBUILD_DOC_GARDENING_EXTRA_TRACKED_PATHS=ARCHITECTURE.md$'\n'
-export COBUILD_AUDIT_CONTEXT_PREFIX='healthybob-audit'
-export COBUILD_AUDIT_CONTEXT_TITLE='Healthy Bob Audit Bundle'
-export COBUILD_AUDIT_CONTEXT_REPO_LABEL='healthybob'
+export COBUILD_AUDIT_CONTEXT_PREFIX='murph-audit'
+export COBUILD_AUDIT_CONTEXT_TITLE='Murph Audit Bundle'
+export COBUILD_AUDIT_CONTEXT_REPO_LABEL='murph'
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "AGENTS.md" \
   "ARCHITECTURE.md" \

@@ -7,7 +7,7 @@ import {
   readJsonlRecords,
   toMonthlyShardRelativePath,
   upsertFood,
-} from '@healthybob/core'
+} from '@murph/core'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 // This file is intentionally excluded from the default root Vitest include list.
@@ -70,7 +70,7 @@ const testCronDeliveryTarget = {
 }
 
 test('assistant cron presets stay separate from scheduler state until installed', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-list-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-preset-list-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -97,7 +97,7 @@ test('assistant cron presets stay separate from scheduler state until installed'
 })
 
 test('assistant cron preset install rejects unknown preset variables', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-invalid-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-preset-invalid-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -118,7 +118,7 @@ test('assistant cron preset install rejects unknown preset variables', async () 
 })
 
 test('assistant cron preset installs materialize regular cron jobs with resolved variables', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-preset-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -164,7 +164,7 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
 })
 
 test('assistant cron jobs reuse the sole saved self-delivery target when no route flags are provided', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-saved-target-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-saved-target-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -203,7 +203,7 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
 })
 
 test('assistant cron job creation preserves required-text validation errors', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-invalid-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-invalid-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -247,7 +247,7 @@ test('assistant cron job creation preserves required-text validation errors', as
 })
 
 test('assistant cron jobs require explicit outbound delivery routing', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-delivery-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-delivery-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -307,7 +307,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
 })
 
 test('assistant cron jobs persist cleanly and can be enabled, disabled, and removed', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-store-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-store-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -358,7 +358,7 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
 })
 
 test('assistant cron jobs only bind assistant state when configured', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-state-doc-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-state-doc-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -401,7 +401,7 @@ test('assistant cron jobs only bind assistant state when configured', async () =
 })
 
 test('assistant cron rejects invalid stateDocId bindings', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-invalid-state-doc-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-invalid-state-doc-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -424,7 +424,7 @@ test('assistant cron rejects invalid stateDocId bindings', async () => {
 })
 
 test('assistant cron assigns vault timezones to cron schedules and computes next runs in local time', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-timezone-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-timezone-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -455,7 +455,7 @@ test('assistant cron re-enable normalizes legacy cron schedules to the vault tim
   try {
     vi.setSystemTime(new Date('2026-03-26T21:30:00.000Z'))
 
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-legacy-timezone-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-legacy-timezone-'))
     const vaultRoot = path.join(parent, 'vault')
     cleanupPaths.push(parent)
 
@@ -507,7 +507,7 @@ test('assistant cron re-enable normalizes legacy cron schedules to the vault tim
 })
 
 test('assistant cron daily-local schedules stay pinned to local time across DST changes', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-daily-local-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-daily-local-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -536,7 +536,7 @@ test('assistant cron daily-local schedules stay pinned to local time across DST 
 })
 
 test('assistant cron manual runs record history and remove completed one-shot jobs by default', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-run-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-run-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -548,7 +548,7 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     prompt: 'Remind me to drink water.',
     response: 'Drink water now.',
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: 'asst_cron_manual',
       provider: 'codex-cli',
       providerSessionId: null,
@@ -634,7 +634,7 @@ test('assistant cron manual runs record history and remove completed one-shot jo
 })
 
 test('assistant cron recurring food jobs auto-log derived note-only meals without invoking the assistant', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-food-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-food-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -702,7 +702,7 @@ test('assistant cron recurring food jobs auto-log derived note-only meals withou
 })
 
 test('assistant cron scheduler processes due jobs and backs off failed runs', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-due-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-due-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 

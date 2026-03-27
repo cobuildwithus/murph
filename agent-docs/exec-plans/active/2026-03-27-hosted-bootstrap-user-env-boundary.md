@@ -12,7 +12,7 @@ Make hosted bootstrap an explicit event-driven operation instead of a hidden sid
 
 - Remove the current unconditional hosted bootstrap mutation from the generic hosted runtime path.
 - Handle bootstrap only for the explicit activation/bootstrap event lane and record the result through the normal hosted execution summary/bundle flow.
-- Move hosted per-user env persistence from embedded `.healthybob/hosted/user-env.json` files inside `agent-state` snapshots to a separately encrypted hosted object keyed per user.
+- Move hosted per-user env persistence from embedded `.murph/hosted/user-env.json` files inside `agent-state` snapshots to a separately encrypted hosted object keyed per user.
 - Keep runner startup injection behavior by loading the separately stored hosted user env and passing it into the one-shot runtime before execution.
 - Update bundle/runtime docs and focused tests so the new bootstrap and storage contract is explicit.
 
@@ -43,7 +43,7 @@ Make hosted bootstrap an explicit event-driven operation instead of a hidden sid
 
 - Explicit hosted bootstrap now runs only on `member.activated`; non-activation empty-bundle runs fail fast instead of silently mutating config.
 - Hosted per-user env overrides now live in a dedicated encrypted R2 object and are injected at runner start instead of being embedded in `agent-state`.
-- Hosted `agent-state` no longer snapshots `.healthybob/hosted/user-env.json`.
+- Hosted `agent-state` no longer snapshots `.murph/hosted/user-env.json`.
 
 ## Verification Results
 

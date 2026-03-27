@@ -5,8 +5,8 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchRequest,
   type HostedExecutionSharePackResponse,
-} from "@healthybob/hosted-execution";
-import { assertContract, sharePackSchema, type SharePack } from "@healthybob/contracts";
+} from "@murph/hosted-execution";
+import { assertContract, sharePackSchema, type SharePack } from "@murph/contracts";
 
 import {
   getHostedOnboardingSecretCodec,

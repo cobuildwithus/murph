@@ -6,7 +6,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -147,7 +147,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -283,7 +283,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -435,7 +435,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -573,7 +573,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -695,7 +695,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -830,7 +830,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -970,7 +970,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -1107,7 +1107,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -1240,7 +1240,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -1377,7 +1377,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -1638,7 +1638,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -1853,7 +1853,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -1989,7 +1989,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -2123,7 +2123,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -2265,7 +2265,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.event.v1"
+          "const": "murph.event.v1"
         },
         "id": {
           "type": "string",
@@ -2399,6 +2399,6 @@
       "additionalProperties": false
     }
   ],
-  "$id": "@healthybob/contracts/event-record.schema.json",
-  "title": "Healthy Bob Event Record"
+  "$id": "@murph/contracts/event-record.schema.json",
+  "title": "Murph Event Record"
 }

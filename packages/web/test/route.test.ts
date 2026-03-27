@@ -82,7 +82,7 @@ test("overview route maps unreadable vaults to 500", async () => {
 
   mockedLoadVaultOverviewFromEnv.mockResolvedValue({
     envVar: "VAULT",
-    hint: "Confirm the configured vault path points at a Healthy Bob vault root, then restart the local app.",
+    hint: "Confirm the configured vault path points at a Murph vault root, then restart the local app.",
     message: "The configured vault could not be read.",
     recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
     status: "error",

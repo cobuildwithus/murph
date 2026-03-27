@@ -12,8 +12,8 @@ import {
   listWriteOperationMetadataPaths,
   readJsonlRecords,
   readStoredWriteOperation,
-} from "@healthybob/core";
-import { resolveRuntimePaths } from "@healthybob/runtime-state";
+} from "@murph/core";
+import { resolveRuntimePaths } from "@murph/runtime-state";
 
 import {
   appendImportAudit,
@@ -120,8 +120,8 @@ async function findOperationByType(vaultRoot: string, operationType: string) {
 }
 
 test("processCapture recovers from a crash after vault persistence without duplicating vault artifacts", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-idempotent-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-idempotent-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-idempotent-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-idempotent-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "receipt.txt", "attachment");
@@ -198,7 +198,7 @@ test("processCapture recovers from a crash after vault persistence without dupli
 });
 
 test("persistRawCapture stores in-memory attachment bytes through audited raw operations without inlining payload metadata", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-inline-bytes-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-inline-bytes-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentBytes = Buffer.from("raw-image-bytes");
@@ -268,7 +268,7 @@ test("persistRawCapture stores in-memory attachment bytes through audited raw op
 });
 
 test("processCapture repairs a raw-only stored envelope by appending missing event and audit rows", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-replay-raw-only-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-replay-raw-only-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const inbound = createCapture({
@@ -322,7 +322,7 @@ test("processCapture repairs a raw-only stored envelope by appending missing eve
 });
 
 test("processCapture repairs a stored envelope when only the audit append was lost", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-replay-missing-audit-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-replay-missing-audit-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const inbound = createCapture({
@@ -364,8 +364,8 @@ test("processCapture repairs a stored envelope when only the audit append was lo
 });
 
 test("processCapture keeps importing a capture when one local attachment file disappears before persistence", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-missing-attachment-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-missing-attachment-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-missing-attachment-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-missing-attachment-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const keptAttachmentPath = await writeExternalFile(sourceRoot, "kept.jpg", "kept");
@@ -434,8 +434,8 @@ test("processCapture keeps importing a capture when one local attachment file di
 });
 
 test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent across repeated runs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-rebuild-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-rebuild-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "photo.jpg", "image");
@@ -480,8 +480,8 @@ test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent a
 });
 
 test("rebuildRuntimeFromVault canonicalizes safe stored capture ids back to the deterministic runtime id", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-canonicalize-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-rebuild-canonicalize-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-rebuild-canonicalize-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-canonicalize-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "canonicalize.jpg", "image");
@@ -540,7 +540,7 @@ test("rebuildRuntimeFromVault canonicalizes safe stored capture ids back to the 
 });
 
 test("rebuildRuntimeFromVault quarantines stored envelopes with malicious capture ids", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-quarantine-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-rebuild-quarantine-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const inbound = createCapture({
@@ -593,8 +593,8 @@ test("rebuildRuntimeFromVault quarantines stored envelopes with malicious captur
 });
 
 test("persistRawCapture rejects attachment writes that traverse vault symlinks", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-symlink-write-vault");
-  const outsideRoot = await makeTempDirectory("healthybob-inbox-symlink-write-outside");
+  const vaultRoot = await makeTempDirectory("murph-inbox-symlink-write-vault");
+  const outsideRoot = await makeTempDirectory("murph-inbox-symlink-write-outside");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const inbound = createCapture({
@@ -629,8 +629,8 @@ test("persistRawCapture rejects attachment writes that traverse vault symlinks",
 });
 
 test("findStoredCaptureEnvelope rejects symlinked envelope files", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-symlink-envelope-vault");
-  const outsideRoot = await makeTempDirectory("healthybob-inbox-symlink-envelope-outside");
+  const vaultRoot = await makeTempDirectory("murph-inbox-symlink-envelope-vault");
+  const outsideRoot = await makeTempDirectory("murph-inbox-symlink-envelope-outside");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const inbound = createCapture({
@@ -667,8 +667,8 @@ test("findStoredCaptureEnvelope rejects symlinked envelope files", async () => {
 });
 
 test("rebuildRuntimeFromVault rejects symlinked inbox roots", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-symlink-rebuild-vault");
-  const outsideRoot = await makeTempDirectory("healthybob-inbox-symlink-rebuild-outside");
+  const vaultRoot = await makeTempDirectory("murph-inbox-symlink-rebuild-vault");
+  const outsideRoot = await makeTempDirectory("murph-inbox-symlink-rebuild-outside");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
   const runtime = await openInboxRuntime({ vaultRoot });
   await fs.mkdir(path.join(vaultRoot, "raw"), { recursive: true });
@@ -692,7 +692,7 @@ test("rebuildRuntimeFromVault rejects symlinked inbox roots", async () => {
 });
 
 test("rebuildRuntimeFromVault repairs captures missing only the audit record", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-rebuild-missing-audit-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-rebuild-missing-audit-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const inbound = createCapture({
@@ -733,8 +733,8 @@ test("rebuildRuntimeFromVault repairs captures missing only the audit record", a
 });
 
 test("rebuildRuntimeFromVault rejects envelopes missing canonical attachment metadata", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-invalid-envelope-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-invalid-envelope-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-invalid-envelope-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-invalid-envelope-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "voice-note.wav", "audio");
@@ -785,7 +785,7 @@ test("rebuildRuntimeFromVault rejects envelopes missing canonical attachment met
 });
 
 test("openInboxRuntime rejects runtime rows missing canonical attachment ids", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-legacy-runtime-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-legacy-runtime-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const databasePath = resolveRuntimePaths(vaultRoot).inboxDbPath;
@@ -925,7 +925,7 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
 });
 
 test("rebuildRuntimeFromVault chooses one canonical envelope for duplicate external ids", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-duplicate-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-duplicate-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const canonicalInput = createCapture({

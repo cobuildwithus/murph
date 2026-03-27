@@ -147,7 +147,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
   input: HostedAssistantRuntimeJobInput,
 ): Promise<HostedExecutionRunnerResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime);
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-runner-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-"));
 
   try {
     const restored = await restoreHostedExecutionContext({

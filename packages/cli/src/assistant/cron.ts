@@ -1,5 +1,5 @@
-import { resolveSystemTimeZone } from '@healthybob/contracts'
-import { loadVault } from '@healthybob/core'
+import { resolveSystemTimeZone } from '@murph/contracts'
+import { loadVault } from '@murph/core'
 import {
   assistantCronJobSchema,
   assistantCronRunRecordSchema,
@@ -58,8 +58,8 @@ import {
   buildDefaultAssistantCronStateDocId,
 } from './state.ts'
 
-const ASSISTANT_CRON_JOB_SCHEMA = 'healthybob.assistant-cron-job.v1'
-const ASSISTANT_CRON_RUN_SCHEMA = 'healthybob.assistant-cron-run.v1'
+const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
+const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 
 interface FoodAutoLogRecord {
@@ -961,7 +961,7 @@ async function runFoodAutoLogCronJob(input: {
   foodId: string
 }) {
   const [core, importers] = await Promise.all([
-    loadRuntimeModule<FoodAutoLogCoreRuntime>('@healthybob/core'),
+    loadRuntimeModule<FoodAutoLogCoreRuntime>('@murph/core'),
     loadImporterRuntime(),
   ])
   const food = await core.readFood({

@@ -1,12 +1,12 @@
 import { Prisma } from "@prisma/client";
-import { deviceSyncError, isDeviceSyncError } from "@healthybob/device-syncd";
+import { deviceSyncError, isDeviceSyncError } from "@murph/device-syncd";
 
 import type {
   DeviceSyncProvider,
   DeviceSyncRegistry,
   ProviderAuthTokens,
   PublicDeviceSyncAccount,
-} from "@healthybob/device-syncd";
+} from "@murph/device-syncd";
 import type { HostedSecretCodec } from "./crypto";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {

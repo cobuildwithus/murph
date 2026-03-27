@@ -432,7 +432,7 @@ export async function sendEmailMessage(
   await client.sendMessage({
     inboxId: identityId,
     to: target,
-    subject: input.subject?.trim() ? input.subject.trim() : 'Healthy Bob update',
+    subject: input.subject?.trim() ? input.subject.trim() : 'Murph update',
     text: input.message,
   })
 }

@@ -4,7 +4,7 @@ import { createHostedExecutionSignature } from "../src/auth.ts";
 import {
   parseHostedEmailThreadTarget,
   type HostedExecutionDispatchRequest,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 import { encryptHostedBundle } from "../src/crypto.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
@@ -716,7 +716,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv(createUserRunnerStub(), {
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
-      HOSTED_EMAIL_DEFAULT_SUBJECT: "Healthy Bob update",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
@@ -775,8 +775,8 @@ describe("cloudflare worker routes", () => {
     expect(threadTarget?.to).toEqual(["user@example.test"]);
     expect(threadTarget?.replyAliasAddress).toContain("assistant+t-");
     expect(threadTarget?.replyAliasAddress?.endsWith("@mail.example.test")).toBe(true);
-    expect(threadTarget?.lastMessageId).toMatch(/^<hb\./u);
-    expect(threadTarget?.subject).toBe("Healthy Bob update");
+    expect(threadTarget?.lastMessageId).toMatch(/^<hosted\./u);
+    expect(threadTarget?.subject).toBe("Murph update");
   });
 
   it("returns method and auth errors on protected routes in the same order as before", async () => {
@@ -1322,8 +1322,8 @@ async function createSignedDispatchRequest(
     body: payload,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "x-hb-execution-signature": signature,
-      "x-hb-execution-timestamp": timestamp,
+      "x-hosted-execution-signature": signature,
+      "x-hosted-execution-timestamp": timestamp,
     },
     method: "POST",
   });

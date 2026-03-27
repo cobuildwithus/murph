@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import {
   parseHostedExecutionSideEffectRecord,
   type HostedExecutionSideEffectRecord,
-} from "@healthybob/assistant-runtime";
+} from "@murph/assistant-runtime";
 
 import {
   readEncryptedR2Json,

@@ -4,13 +4,13 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { initializeVault } from "@healthybob/core";
+import { initializeVault } from "@murph/core";
 import {
   createInboxPipeline,
   openInboxRuntime,
   rebuildRuntimeFromVault,
   type InboxRuntimeStore,
-} from "@healthybob/inboxd";
+} from "@murph/inboxd";
 
 import {
   createConfiguredParserRegistry,
@@ -57,7 +57,7 @@ async function writeExecutableFile(directory: string, fileName: string, content:
 }
 
 test("audio preparation accepts WAV directly and requires ffmpeg for other audio formats", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-audio");
+  const directory = await makeTempDirectory("murph-parser-audio");
   const wavPath = await writeExternalFile(directory, "note.wav", "wav-bytes-placeholder");
   const wavPrepared = await prepareAudioInput({
     artifact: {
@@ -96,7 +96,7 @@ test("audio preparation accepts WAV directly and requires ffmpeg for other audio
 });
 
 test("shared executable helpers preserve lazy resolution, availability, and missing-tool errors", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-executable");
+  const directory = await makeTempDirectory("murph-parser-executable");
   const executablePath = await writeExternalFile(directory, "fake-tool", "tool-placeholder");
   const previousCommand = process.env.TEST_COMMAND;
 
@@ -151,8 +151,8 @@ test("shared executable helpers preserve lazy resolution, availability, and miss
 });
 
 test("parser toolchain config writes, reads, and drives local discovery", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-toolchain");
-  const toolsDirectory = await makeTempDirectory("healthybob-parser-toolchain-bin");
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain");
+  const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-bin");
   await fs.mkdir(path.join(vaultRoot, "models"), { recursive: true });
   await fs.writeFile(path.join(vaultRoot, "models", "fake.bin"), "model", "utf8");
   const fakeToolPath = await writeExecutableFile(
@@ -216,8 +216,8 @@ test("parser toolchain config writes, reads, and drives local discovery", async 
 });
 
 test("parser toolchain doctor reports missing whisper model files clearly", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-toolchain-missing-model");
-  const toolsDirectory = await makeTempDirectory("healthybob-parser-toolchain-missing-model-bin");
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-missing-model");
+  const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-missing-model-bin");
   const fakeToolPath = await writeExecutableFile(
     toolsDirectory,
     "fake-parser-tool",
@@ -253,9 +253,9 @@ test("parser toolchain doctor reports missing whisper model files clearly", asyn
 });
 
 test("configured parser registry resolves config-relative whisper model paths against the vault root", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-toolchain-runtime-model");
-  const toolsDirectory = await makeTempDirectory("healthybob-parser-toolchain-runtime-bin");
-  const outsideDirectory = await makeTempDirectory("healthybob-parser-toolchain-runtime-cwd");
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-runtime-model");
+  const toolsDirectory = await makeTempDirectory("murph-parser-toolchain-runtime-bin");
+  const outsideDirectory = await makeTempDirectory("murph-parser-toolchain-runtime-cwd");
   const modelPath = path.join(vaultRoot, "models", "runtime.bin");
   await fs.mkdir(path.dirname(modelPath), { recursive: true });
   await fs.writeFile(modelPath, "model", "utf8");
@@ -320,7 +320,7 @@ test("configured parser registry resolves config-relative whisper model paths ag
 });
 
 test("pdftotext provider discovers explicit executables and parses PDF text output", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-pdftotext");
+  const directory = await makeTempDirectory("murph-parser-pdftotext");
   const executablePath = await writeExecutableFile(
     directory,
     "fake-pdftotext",
@@ -392,7 +392,7 @@ test("pdftotext provider discovers explicit executables and parses PDF text outp
 });
 
 test("whisper.cpp provider reports missing model paths and parses transcript artifacts", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-whisper");
+  const directory = await makeTempDirectory("murph-parser-whisper");
   const executablePath = await writeExecutableFile(
     directory,
     "fake-whisper",
@@ -458,7 +458,7 @@ test("whisper.cpp provider reports missing model paths and parses transcript art
 });
 
 test("whisper.cpp provider derives transcript text from SRT artifacts when TXT is absent", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-whisper-srt-only");
+  const directory = await makeTempDirectory("murph-parser-whisper-srt-only");
   const executablePath = await writeExecutableFile(
     directory,
     "fake-whisper-srt-only",
@@ -507,7 +507,7 @@ test("whisper.cpp provider derives transcript text from SRT artifacts when TXT i
 });
 
 test("whisper.cpp provider rejects stdout-only logs when no transcript artifact is written", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-whisper-logs");
+  const directory = await makeTempDirectory("murph-parser-whisper-logs");
   const audioPath = await writeExternalFile(directory, "note.wav", "wav-bytes-placeholder");
   const modelPath = await writeExternalFile(directory, "ggml-base.en.bin", "model-placeholder");
   const commandPath = await writeExecutableFile(
@@ -540,7 +540,7 @@ test("whisper.cpp provider rejects stdout-only logs when no transcript artifact 
 });
 
 test("PaddleOCR provider discovers explicit executables and harvests OCR artifacts", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-paddleocr");
+  const directory = await makeTempDirectory("murph-parser-paddleocr");
   const executablePath = await writeExecutableFile(
     directory,
     "fake-paddleocr",
@@ -633,7 +633,7 @@ test("PaddleOCR provider discovers explicit executables and harvests OCR artifac
 });
 
 test("PaddleOCR provider rejects stdout-only logs when no structured output files are written", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-paddle-logs");
+  const directory = await makeTempDirectory("murph-parser-paddle-logs");
   const imagePath = await writeExternalFile(directory, "scan.png", "image-placeholder");
   const commandPath = await writeExecutableFile(
     directory,
@@ -664,7 +664,7 @@ test("PaddleOCR provider rejects stdout-only logs when no structured output file
 });
 
 test("PaddleOCR treats MIME-only PDFs as PDF-mode inputs", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-paddle-mime-pdf");
+  const directory = await makeTempDirectory("murph-parser-paddle-mime-pdf");
   const executablePath = await writeExecutableFile(
     directory,
     "fake-paddleocr-mime-pdf",
@@ -725,7 +725,7 @@ test("PaddleOCR treats MIME-only PDFs as PDF-mode inputs", async () => {
 });
 
 test("registry prefers built-in text parsing for markdown documents", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-registry");
+  const directory = await makeTempDirectory("murph-parser-registry");
   const filePath = await writeExternalFile(directory, "note.md", "# Breakfast\n\nEggs and toast");
   const registry = createParserRegistry([
     {
@@ -771,7 +771,7 @@ test("registry prefers built-in text parsing for markdown documents", async () =
 });
 
 test("registry falls through to the next available provider when a higher-ranked provider fails", async () => {
-  const directory = await makeTempDirectory("healthybob-parser-fallback");
+  const directory = await makeTempDirectory("murph-parser-fallback");
   const filePath = await writeExternalFile(directory, "scan.pdf", "pdf-placeholder");
   const registry = createParserRegistry([
     {
@@ -828,8 +828,8 @@ test("registry falls through to the next available provider when a higher-ranked
 });
 
 test("parseAttachment uses isolated scratch directories across reruns", async () => {
-  const scratchRoot = await makeTempDirectory("healthybob-parser-scratch-rerun");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-scratch-source");
+  const scratchRoot = await makeTempDirectory("murph-parser-scratch-rerun");
+  const sourceRoot = await makeTempDirectory("murph-parser-scratch-source");
   const inputPath = await writeExternalFile(sourceRoot, "scan.png", "png-placeholder");
   let runCount = 0;
 
@@ -895,8 +895,8 @@ test("parseAttachment uses isolated scratch directories across reruns", async ()
 });
 
 test("parseAttachment rejects unsafe or malformed attachment IDs before using scratch paths", async () => {
-  const scratchRoot = await makeTempDirectory("healthybob-parser-scratch-unsafe-id");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-scratch-unsafe-id-source");
+  const scratchRoot = await makeTempDirectory("murph-parser-scratch-unsafe-id");
+  const sourceRoot = await makeTempDirectory("murph-parser-scratch-unsafe-id-source");
   const inputPath = await writeExternalFile(sourceRoot, "scan.png", "image-bytes-placeholder");
   let runCount = 0;
   const registry = createParserRegistry([
@@ -982,7 +982,7 @@ test("parseAttachment rejects unsafe or malformed attachment IDs before using sc
 });
 
 test("writeParserArtifacts removes stale optional files on rerun", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-publish-rerun");
+  const vaultRoot = await makeTempDirectory("murph-parser-publish-rerun");
   await initializeVault({
     vaultRoot,
     createdAt: "2026-03-13T12:00:00.000Z",
@@ -992,7 +992,7 @@ test("writeParserArtifacts removes stale optional files on rerun", async () => {
     attempt: 1,
     vaultRoot,
     output: {
-      schema: "healthybob.parser-output.v1",
+      schema: "murph.parser-output.v1",
       providerId: "fake-provider",
       artifact: {
         captureId: "cap_publish_rerun",
@@ -1022,7 +1022,7 @@ test("writeParserArtifacts removes stale optional files on rerun", async () => {
     attempt: 2,
     vaultRoot,
     output: {
-      schema: "healthybob.parser-output.v1",
+      schema: "murph.parser-output.v1",
       providerId: "fake-provider",
       artifact: {
         captureId: "cap_publish_rerun",
@@ -1048,7 +1048,7 @@ test("writeParserArtifacts removes stale optional files on rerun", async () => {
 });
 
 test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publishing outside derived inbox", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-publish-unsafe-ids");
+  const vaultRoot = await makeTempDirectory("murph-parser-publish-unsafe-ids");
   await initializeVault({
     vaultRoot,
     createdAt: "2026-03-13T12:00:00.000Z",
@@ -1060,7 +1060,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
         attempt: 1,
         vaultRoot,
         output: {
-          schema: "healthybob.parser-output.v1",
+          schema: "murph.parser-output.v1",
           providerId: "fake-provider",
           artifact: {
             captureId: "../../raw/inbox/foo",
@@ -1088,7 +1088,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
         attempt: 1,
         vaultRoot,
         output: {
-          schema: "healthybob.parser-output.v1",
+          schema: "murph.parser-output.v1",
           providerId: "fake-provider",
           artifact: {
             captureId: " cap_publish_space ",
@@ -1115,7 +1115,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
         attempt: 1,
         vaultRoot,
         output: {
-          schema: "healthybob.parser-output.v1",
+          schema: "murph.parser-output.v1",
           providerId: "fake-provider",
           artifact: {
             captureId: "cap_publish_alias",
@@ -1145,7 +1145,7 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
         attempt: 1,
         vaultRoot,
         output: {
-          schema: "healthybob.parser-output.v1",
+          schema: "murph.parser-output.v1",
           providerId: "fake-provider",
           artifact: {
             captureId: "cap_publish_type",
@@ -1168,8 +1168,8 @@ test("writeParserArtifacts rejects unsafe or malformed artifact IDs before publi
 });
 
 test("writeParserArtifacts rejects derived attempt paths that traverse symlinks", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-publish-symlink");
-  const outsideRoot = await makeTempDirectory("healthybob-parser-publish-symlink-outside");
+  const vaultRoot = await makeTempDirectory("murph-parser-publish-symlink");
+  const outsideRoot = await makeTempDirectory("murph-parser-publish-symlink-outside");
   await initializeVault({
     vaultRoot,
     createdAt: "2026-03-13T12:00:00.000Z",
@@ -1193,7 +1193,7 @@ test("writeParserArtifacts rejects derived attempt paths that traverse symlinks"
         attempt: 1,
         vaultRoot,
         output: {
-          schema: "healthybob.parser-output.v1",
+          schema: "murph.parser-output.v1",
           providerId: "fake-provider",
           artifact: {
             captureId: "cap_publish_symlink",
@@ -1221,8 +1221,8 @@ test("writeParserArtifacts rejects derived attempt paths that traverse symlinks"
 });
 
 test("parser cleanup helper rejects attempt directories that traverse symlinks", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-cleanup-symlink");
-  const outsideRoot = await makeTempDirectory("healthybob-parser-cleanup-symlink-outside");
+  const vaultRoot = await makeTempDirectory("murph-parser-cleanup-symlink");
+  const outsideRoot = await makeTempDirectory("murph-parser-cleanup-symlink-outside");
   await initializeVault({
     vaultRoot,
     createdAt: "2026-03-13T12:00:00.000Z",
@@ -1247,8 +1247,8 @@ test("parser cleanup helper rejects attempt directories that traverse symlinks",
 });
 
 test("attachment parse worker fails closed on malformed attachment IDs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-malformed-id-vault");
-  const scratchRoot = await makeTempDirectory("healthybob-parser-worker-malformed-id-scratch");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-malformed-id-vault");
+  const scratchRoot = await makeTempDirectory("murph-parser-worker-malformed-id-scratch");
   const storedPath = "raw/inbox/example/malformed-id.png";
   await initializeVault({
     vaultRoot,
@@ -1391,8 +1391,8 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
 });
 
 test("attachment parse worker consumes inbox jobs, writes derived artifacts, and updates runtime search", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "meal-photo.png", "image-bytes-placeholder");
@@ -1507,8 +1507,8 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
 });
 
 test("stale running parser attempts do not overwrite a requeued rerun", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-race-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-race-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-race-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-race-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "race.png", "image-bytes-placeholder");
@@ -1697,8 +1697,8 @@ test("parser service forwards scoped drain and requeue filters to the runtime", 
 });
 
 test("attachment parse worker marks jobs failed when no provider is available", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-fail-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-fail-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-fail-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-fail-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "scan.png", "image-bytes-placeholder");
@@ -1752,8 +1752,8 @@ test("attachment parse worker marks jobs failed when no provider is available", 
 });
 
 test("attachment parse worker can drain jobs scoped to a single capture", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-scoped-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-scoped-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-scoped-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-scoped-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const firstPath = await writeExternalFile(sourceRoot, "first.png", "first-image");
@@ -1848,8 +1848,8 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
 });
 
 test("parsed inbox pipeline auto-drains parser jobs for each processed capture", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parsed-pipeline-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parsed-pipeline-source");
+  const vaultRoot = await makeTempDirectory("murph-parsed-pipeline-vault");
+  const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "auto-parse.png", "image-bytes-placeholder");
@@ -1920,8 +1920,8 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
 });
 
 test("daemon with parsers drains pending jobs before connector watch work begins", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parsed-daemon-startup-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parsed-daemon-startup-source");
+  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-startup-vault");
+  const sourceRoot = await makeTempDirectory("murph-parsed-daemon-startup-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "startup.png", "image-bytes-placeholder");
@@ -2023,8 +2023,8 @@ test("daemon with parsers drains pending jobs before connector watch work begins
 });
 
 test("daemon with parsers skips startup drain when the signal is already aborted", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parsed-daemon-aborted-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parsed-daemon-aborted-source");
+  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-aborted-vault");
+  const sourceRoot = await makeTempDirectory("murph-parsed-daemon-aborted-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "aborted.png", "image-bytes-placeholder");
@@ -2096,8 +2096,8 @@ test("daemon with parsers skips startup drain when the signal is already aborted
 });
 
 test("daemon with parsers stops startup drain after abort between jobs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parsed-daemon-abort-mid-drain-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parsed-daemon-abort-mid-drain-source");
+  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-vault");
+  const sourceRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const firstPath = await writeExternalFile(sourceRoot, "first.png", "first-image");
@@ -2198,7 +2198,7 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
 });
 
 test("daemon with parsers still rejects connector failures after cleanup", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parsed-daemon-failure-vault");
+  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-failure-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
@@ -2234,7 +2234,7 @@ test("daemon with parsers still rejects connector failures after cleanup", async
 });
 
 test("daemon with parsers can keep healthy connectors running after one connector fails", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parsed-daemon-isolated-failure-vault");
+  const vaultRoot = await makeTempDirectory("murph-parsed-daemon-isolated-failure-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
@@ -2322,8 +2322,8 @@ test("daemon with parsers can keep healthy connectors running after one connecto
 });
 
 test("parsed inbox pipeline stores captures even when auto-drain parsing fails", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parsed-pipeline-failure-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parsed-pipeline-failure-source");
+  const vaultRoot = await makeTempDirectory("murph-parsed-pipeline-failure-vault");
+  const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "auto-fail.png", "image-bytes-placeholder");
@@ -2380,8 +2380,8 @@ test("parsed inbox pipeline stores captures even when auto-drain parsing fails",
 });
 
 test("attachment parse worker marks jobs failed when no provider can handle the attachment", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-failure-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-failure-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-failure-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "unknown-image.png", "image-bytes-placeholder");
@@ -2438,8 +2438,8 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
 });
 
 test("attachment parse worker stores audio output as transcript text", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-audio-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-audio-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-audio-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-audio-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const audioPath = await writeExternalFile(sourceRoot, "voice-note.wav", "wav-bytes-placeholder");
@@ -2520,8 +2520,8 @@ test("attachment parse worker stores audio output as transcript text", async () 
 });
 
 test("successful parser results stay derived-only and rebuild re-enqueues work from raw evidence", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-rebuild-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-rebuild-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-rebuild-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-rebuild-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "receipt.png", "image-bytes-placeholder");
@@ -2630,8 +2630,8 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
 });
 
 test("attachment parse worker redacts local paths from stored failure messages", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-parser-worker-failure-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-parser-worker-failure-source");
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-failure-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "failure-image.png", "image-bytes-placeholder");

@@ -6,7 +6,7 @@ import {
   DirectoryLockHeldError,
   inspectDirectoryLock,
   isProcessRunning,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 import type { AssistantStatusRunLock } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 import type { AssistantStatePaths } from '../store/paths.js'
@@ -164,7 +164,7 @@ function createAssistantAlreadyRunningError(input: {
     'ASSISTANT_AUTOMATION_ALREADY_RUNNING',
     input.sameProcess
       ? 'Assistant automation is already running for this vault in the current process.'
-      : `Assistant automation is already running for this vault: ${detail}. Use \`healthybob stop --vault <path>\` to recover or \`healthybob status --vault <path>\` to inspect it.`,
+      : `Assistant automation is already running for this vault: ${detail}. Use \`murph stop --vault <path>\` to recover or \`murph status --vault <path>\` to inspect it.`,
     {
       sameProcess: input.sameProcess,
       ...input.metadata,

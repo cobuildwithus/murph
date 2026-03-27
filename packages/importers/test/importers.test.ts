@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
-import * as coreRuntime from "@healthybob/core";
+import * as coreRuntime from "@murph/core";
 import type {
   DocumentImportPayload,
   MealImportPayload,
@@ -21,7 +21,7 @@ import {
 } from "../src/index.ts";
 
 async function createTempFile(name: string, contents: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "healthybob-importers-"));
+  const directory = await mkdtemp(join(tmpdir(), "murph-importers-"));
   const filePath = join(directory, name);
   await writeFile(filePath, contents);
   return filePath;
@@ -221,7 +221,7 @@ test("parseDelimitedRows handles quoted commas", () => {
 
 test("importMeal accepts vault aliases and rejects directory photo paths", async () => {
   const photoPath = await createTempFile("breakfast.jpg", "image-placeholder");
-  const photoDirectory = await mkdtemp(join(tmpdir(), "healthybob-importers-photo-"));
+  const photoDirectory = await mkdtemp(join(tmpdir(), "murph-importers-photo-"));
   const { calls, corePort } = createCorePortSpy();
 
   await importMeal(
@@ -449,7 +449,7 @@ test("parseDelimitedRows rejects malformed delimiters and unterminated quoted fi
 });
 
 test("importDocument with the real core runtime writes an immutable raw manifest sidecar", async () => {
-  const vaultRoot = await mkdtemp(join(tmpdir(), "healthybob-vault-"));
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-"));
   const filePath = await createTempFile("labs.pdf", "pdf-placeholder");
 
   await coreRuntime.initializeVault({ vaultRoot });
@@ -489,7 +489,7 @@ test("importDocument with the real core runtime writes an immutable raw manifest
 });
 
 test("importCsvSamples with the real core runtime writes a batch manifest with row provenance", async () => {
-  const vaultRoot = await mkdtemp(join(tmpdir(), "healthybob-vault-"));
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-"));
   const filePath = await createTempFile(
     "heart-rate.csv",
     [

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ExecutionOutboxStatus } from "@prisma/client";
-import type { SharePack } from "@healthybob/contracts";
+import type { SharePack } from "@murph/contracts";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingSecretCodec: () => ({
@@ -17,7 +17,7 @@ import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-executio
 
 function buildSharePack(): SharePack {
   return {
-    schemaVersion: "hb.share-pack.v1",
+    schemaVersion: "murph.share-pack.v1",
     title: "Morning Smoothie",
     createdAt: "2026-03-26T12:00:00.000Z",
     entities: [
