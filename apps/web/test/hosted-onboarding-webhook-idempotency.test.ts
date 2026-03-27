@@ -2415,6 +2415,7 @@ function buildDispatchSideEffect(input: {
       dispatch: {
         event: {
           kind: "linq.message.received",
+          linqChatId: "chat_123",
           linqEvent: {
             api_version: "v1",
             created_at: "2026-03-26T12:00:00.000Z",
@@ -2460,7 +2461,9 @@ function buildMemberActivationDispatchSideEffect(input: {
   effectId?: unknown;
   lastAttemptAt?: unknown;
   lastError?: unknown;
+  linqChatId?: string;
   memberId?: string;
+  normalizedPhoneNumber?: string;
   occurredAt?: unknown;
   sentAt?: unknown;
   sourceEventId: string;
@@ -2482,6 +2485,9 @@ function buildMemberActivationDispatchSideEffect(input: {
       dispatch: {
         event: {
           kind: "member.activated",
+          linqChatId: input.linqChatId ?? "chat_123",
+          normalizedPhoneNumber:
+            input.normalizedPhoneNumber ?? "+15551234567",
           userId: memberId,
         },
         eventId: String(eventId).replace(/^dispatch:/u, ""),
