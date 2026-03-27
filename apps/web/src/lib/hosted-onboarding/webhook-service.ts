@@ -336,7 +336,6 @@ async function planHostedOnboardingLinqWebhook(input: {
           dispatch: {
             event: {
               kind: "linq.message.received",
-              linqChatId: summary.chatId,
               linqEvent: input.event as unknown as Record<string, unknown>,
               normalizedPhoneNumber,
               userId: existingMember.id,
@@ -2026,9 +2025,7 @@ async function applyStripeCheckoutCompleted(
       desiredSideEffects.push(
         createHostedWebhookDispatchSideEffect({
           dispatch: buildHostedMemberActivationDispatch({
-            linqChatId: updatedMember.linqChatId,
             memberId: updatedMember.id,
-            normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
             occurredAt: dispatchContext.occurredAt,
             sourceEventId: dispatchContext.sourceEventId,
             sourceType: "stripe.checkout.session.completed",
@@ -2150,9 +2147,7 @@ async function applyStripeSubscriptionUpdated(
     desiredSideEffects.push(
       createHostedWebhookDispatchSideEffect({
         dispatch: buildHostedMemberActivationDispatch({
-          linqChatId: updatedMember.linqChatId,
           memberId: updatedMember.id,
-          normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
           occurredAt: dispatchContext.occurredAt,
           sourceEventId: dispatchContext.sourceEventId,
           sourceType: dispatchContext.sourceType,
@@ -2228,9 +2223,7 @@ async function applyStripeInvoicePaid(
   desiredSideEffects.push(
     createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedMemberActivationDispatch({
-        linqChatId: updatedMember.linqChatId,
         memberId: updatedMember.id,
-        normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
         occurredAt: dispatchContext.occurredAt,
         sourceEventId: dispatchContext.sourceEventId,
         sourceType: "stripe.invoice.paid",

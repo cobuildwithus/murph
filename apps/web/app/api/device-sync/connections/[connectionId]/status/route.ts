@@ -1,16 +1,12 @@
 import { createHostedDeviceSyncControlPlane } from "../../../../../../src/lib/device-sync/control-plane";
-import { jsonError, jsonOk, resolveRouteParams } from "../../../../../../src/lib/device-sync/http";
+import { jsonOk, resolveRouteParams, withJsonError } from "../../../../../../src/lib/device-sync/http";
 
-export async function GET(
+export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ connectionId: string }> },
-) {
-  try {
-    const { connectionId } = await resolveRouteParams(context.params);
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    const user = await controlPlane.requireAuthenticatedUser();
-    return jsonOk(await controlPlane.getConnectionStatus(user.id, decodeURIComponent(connectionId)));
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+) => {
+  const { connectionId } = await resolveRouteParams(context.params);
+  const controlPlane = createHostedDeviceSyncControlPlane(request);
+  const user = await controlPlane.requireAuthenticatedUser();
+  return jsonOk(await controlPlane.getConnectionStatus(user.id, decodeURIComponent(connectionId)));
+});

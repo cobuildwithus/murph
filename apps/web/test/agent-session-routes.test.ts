@@ -4,9 +4,10 @@ import { deviceSyncError } from "@healthybob/device-syncd";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  requireAgentSession: vi.fn(),
   exportTokenBundle: vi.fn(),
   refreshTokenBundle: vi.fn(),
+  requireAgentSession: vi.fn(),
+  revokeAgentSession: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -15,9 +16,11 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
 type RefreshRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
+type RevokeRouteModule = typeof import("../app/api/device-sync/agent/session/revoke/route");
 
 let exportRoute: ExportRouteModule;
 let refreshRoute: RefreshRouteModule;
+let revokeRoute: RevokeRouteModule;
 
 function createRouteContext(connectionId: string) {
   return {
@@ -42,6 +45,7 @@ describe("hosted device-sync agent token routes", () => {
   beforeAll(async () => {
     exportRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
     refreshRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
+    revokeRoute = await import("../app/api/device-sync/agent/session/revoke/route");
   });
 
   beforeEach(() => {
@@ -50,6 +54,7 @@ describe("hosted device-sync agent token routes", () => {
       requireAgentSession: mocks.requireAgentSession,
       exportTokenBundle: mocks.exportTokenBundle,
       refreshTokenBundle: mocks.refreshTokenBundle,
+      revokeAgentSession: mocks.revokeAgentSession,
     });
     mocks.requireAgentSession.mockResolvedValue(session);
     mocks.exportTokenBundle.mockResolvedValue({
@@ -94,6 +99,13 @@ describe("hosted device-sync agent token routes", () => {
         createdAt: "2026-03-25T01:00:00.000Z",
         expiresAt: "2026-03-26T01:00:00.000Z",
         bearerToken: "hbds_agent_rotated",
+      },
+    });
+    mocks.revokeAgentSession.mockResolvedValue({
+      agentSession: {
+        id: "dsa_active",
+        revokedAt: "2026-03-25T01:30:00.000Z",
+        revokeReason: "agent_request",
       },
     });
   });
@@ -210,6 +222,27 @@ describe("hosted device-sync agent token routes", () => {
       agentSession: {
         id: "dsa_rotated",
         bearerToken: "hbds_agent_rotated",
+      },
+    });
+  });
+
+  it("passes the authenticated session into revoke so the handler can invalidate it", async () => {
+    const response = await revokeRoute.POST(
+      new Request("https://example.test/api/device-sync/agent/session/revoke", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer hbds_agent_active",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.revokeAgentSession).toHaveBeenCalledWith(session);
+    await expect(response.json()).resolves.toEqual({
+      agentSession: {
+        id: "dsa_active",
+        revokedAt: "2026-03-25T01:30:00.000Z",
+        revokeReason: "agent_request",
       },
     });
   });

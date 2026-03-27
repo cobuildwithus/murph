@@ -1,4 +1,12 @@
 import type { Metadata } from "next";
+import { Outfit } from "next/font/google";
+
+import "./globals.css";
+
+const outfit = Outfit({
+  subsets: ["latin"],
+  display: "swap",
+});
 
 const metadataBase = resolveMetadataBase();
 
@@ -11,7 +19,7 @@ export const metadata: Metadata = metadataBase
 export default function RootLayout(input: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{input.children}</body>
+      <body className={outfit.className}>{input.children}</body>
     </html>
   );
 }

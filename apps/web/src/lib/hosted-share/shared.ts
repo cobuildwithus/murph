@@ -192,17 +192,13 @@ export function buildHostedShareAcceptanceDispatch(input: {
   acceptedAt: string;
   eventId: string;
   memberId: string;
-  previewTitle: string | null;
-  shareCode: string;
-  shareId: string;
+  pack: SharePack;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionVaultShareAcceptedDispatch({
-    acceptedAt: input.acceptedAt,
     eventId: input.eventId,
     memberId: input.memberId,
-    previewTitle: input.previewTitle,
-    shareCode: input.shareCode,
-    shareId: input.shareId,
+    occurredAt: input.acceptedAt,
+    pack: input.pack,
   });
 }
 

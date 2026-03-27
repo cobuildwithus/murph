@@ -4,7 +4,10 @@ import {
   HostedInviteStatus,
   HostedMemberStatus,
 } from "@prisma/client";
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
+import {
+  buildHostedExecutionMemberActivatedDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@healthybob/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
@@ -582,14 +585,11 @@ export function buildHostedMemberActivationDispatch(input: {
   sourceEventId: string;
   sourceType: string;
 }): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "member.activated",
-      userId: input.memberId,
-    },
+  return buildHostedExecutionMemberActivatedDispatch({
     eventId: buildHostedMemberActivationEventId(input),
+    memberId: input.memberId,
     occurredAt: input.occurredAt,
-  };
+  });
 }
 
 function buildHostedMemberActivationEventId(input: {

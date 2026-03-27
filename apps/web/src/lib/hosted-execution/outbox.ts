@@ -6,10 +6,11 @@ import {
   type ExecutionOutbox,
   type PrismaClient,
 } from "@prisma/client";
-import type {
-  HostedExecutionDispatchRequest,
-  HostedExecutionUserStatus,
-} from "@healthybob/runtime-state";
+import {
+  parseHostedExecutionDispatchRequest,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionUserStatus,
+} from "@healthybob/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecutionStatus } from "./dispatch";
@@ -248,7 +249,7 @@ async function processHostedExecutionOutboxRecord(
   let dispatch: HostedExecutionDispatchRequest | null = null;
 
   try {
-    dispatch = await hydrateHostedExecutionDispatch(record, prisma);
+    dispatch = await readHostedExecutionDispatch(record, prisma);
     const status = await dispatchHostedExecutionStatus(dispatch);
     const lifecycle = resolveHostedExecutionLifecycle({
       eventId: record.eventId,
@@ -350,6 +351,17 @@ async function finalizeHostedExecutionOutboxAttempt(
   }
 
   return latest;
+}
+
+function readHostedExecutionDispatch(
+  record: ExecutionOutbox,
+  prisma: PrismaClient,
+): Promise<HostedExecutionDispatchRequest> {
+  try {
+    return Promise.resolve(parseHostedExecutionDispatchRequest(record.payloadJson));
+  } catch {
+    return hydrateHostedExecutionDispatch(record, prisma);
+  }
 }
 
 function resolveHostedExecutionLifecycle(input: {

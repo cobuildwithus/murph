@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #FEFDF8;
+  --color-cream-dark: #F9F5E8;
+  --color-olive: #4A5D3A;
+  --color-olive-light: #6B7F5A;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-stone-900);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-fade-up {
+  animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@utility animate-marquee {
+  animation: marquee 30s linear infinite;
+}

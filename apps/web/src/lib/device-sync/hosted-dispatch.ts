@@ -1,4 +1,7 @@
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
+import {
+  buildHostedExecutionDeviceSyncWakeDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@healthybob/hosted-execution";
 
 export type HostedDeviceSyncWakeSource = "connection-established" | "disconnect" | "webhook-accepted";
 
@@ -10,15 +13,12 @@ export function buildHostedDeviceSyncWakeDispatch(input: {
   traceId?: string | null;
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "device-sync.wake",
-      reason: mapHostedDeviceSyncWakeReason(input.source),
-      userId: input.userId,
-    },
+  return buildHostedExecutionDeviceSyncWakeDispatch({
     eventId: buildHostedDeviceSyncWakeEventId(input),
     occurredAt: input.occurredAt,
-  };
+    reason: mapHostedDeviceSyncWakeReason(input.source),
+    userId: input.userId,
+  });
 }
 
 export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
@@ -27,15 +27,12 @@ export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
   signalKind: string;
   userId: string;
 }): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "device-sync.wake",
-      reason: mapHostedDeviceSyncWakeReasonFromSignalKind(input.signalKind),
-      userId: input.userId,
-    },
+  return buildHostedExecutionDeviceSyncWakeDispatch({
     eventId: input.eventId,
     occurredAt: input.occurredAt,
-  };
+    reason: mapHostedDeviceSyncWakeReasonFromSignalKind(input.signalKind),
+    userId: input.userId,
+  });
 }
 
 export function buildHostedDeviceSyncWakeEventId(input: {

@@ -1,9 +1,9 @@
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import {
-  jsonError,
   jsonOk,
   readOptionalJsonObject,
   resolveRouteParams,
+  withJsonError,
 } from "@/src/lib/device-sync/http";
 
 interface HostedDeviceSyncProviderRouteParams extends Record<string, string> {
@@ -34,25 +34,21 @@ export async function hostedDeviceSyncConnectStartGet(
   );
 }
 
-export async function hostedDeviceSyncConnectStartPost(
+export const hostedDeviceSyncConnectStartPost = withJsonError(async (
   request: Request,
   context: HostedDeviceSyncProviderRouteContext,
-) {
-  try {
-    const { provider } = await resolveRouteParams(context.params);
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    controlPlane.assertBrowserMutationOrigin();
-    const user = await controlPlane.requireAuthenticatedUser();
-    const body = await readOptionalJsonObject(request);
-    const returnTo = typeof body.returnTo === "string" ? body.returnTo : null;
-    return jsonOk(
-      await controlPlane.startConnection(
-        user.id,
-        decodeURIComponent(provider),
-        returnTo,
-      ),
-    );
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+) => {
+  const { provider } = await resolveRouteParams(context.params);
+  const controlPlane = createHostedDeviceSyncControlPlane(request);
+  controlPlane.assertBrowserMutationOrigin();
+  const user = await controlPlane.requireAuthenticatedUser();
+  const body = await readOptionalJsonObject(request);
+  const returnTo = typeof body.returnTo === "string" ? body.returnTo : null;
+  return jsonOk(
+    await controlPlane.startConnection(
+      user.id,
+      decodeURIComponent(provider),
+      returnTo,
+    ),
+  );
+});

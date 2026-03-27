@@ -42,7 +42,8 @@ export async function acceptHostedShareLink(input: {
   }
 
   let record = await requireHostedShareLink(shareCode, prisma);
-  const preview = readHostedSharePreview(record.previewJson, readHostedSharePack(record).pack);
+  const pack = readHostedSharePack(record).pack;
+  const preview = readHostedSharePreview(record.previewJson, pack);
   const acceptedAt = record.acceptedAt ?? now;
   const eventId = record.lastEventId ?? buildHostedShareAcceptanceEventId({
     acceptedAt,
@@ -109,9 +110,7 @@ export async function acceptHostedShareLink(input: {
           acceptedAt: acceptedAt.toISOString(),
           eventId: dispatchEventId,
           memberId: input.sessionRecord.member.id,
-          previewTitle: preview.title,
-          shareCode,
-          shareId: latest.id,
+          pack,
         }),
         sourceId: latest.id,
         sourceType: "hosted_share_link",

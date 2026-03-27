@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-export type HostedSharePageStage = "invalid" | "expired" | "signin" | "ready" | "consumed";
+export type HostedSharePageStage = "invalid" | "expired" | "signin" | "ready" | "processing" | "consumed";
 
 export interface HostedSharePreview {
   counts: {
@@ -43,6 +43,7 @@ export interface CreateHostedShareLinkResult {
 export interface AcceptHostedShareResult {
   alreadyImported: boolean;
   imported: boolean;
+  pending: boolean;
   preview: HostedSharePreview;
   shareCode: string;
 }

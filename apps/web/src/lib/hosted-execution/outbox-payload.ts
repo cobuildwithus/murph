@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionEventKind,
-} from "@healthybob/runtime-state";
+} from "@healthybob/hosted-execution";
 
 const HOSTED_EXECUTION_EVENT_KINDS = new Set<HostedExecutionEventKind>([
   "assistant.cron.tick",

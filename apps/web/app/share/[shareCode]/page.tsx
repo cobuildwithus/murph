@@ -21,15 +21,7 @@ export default async function HostedSharePage(input: {
   });
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "clamp(1.25rem, 4vw, 2.5rem)",
-        background:
-          "radial-gradient(circle at top, rgba(191, 219, 254, 0.55) 0%, rgba(248, 250, 252, 1) 38%, rgba(226, 232, 240, 0.96) 100%)",
-        color: "rgb(15 23 42)",
-      }}
-    >
+    <main className="min-h-screen px-5 py-12 md:px-8">
       <ShareLinkClient initialData={initialData} shareCode={decodeURIComponent(shareCode)} />
     </main>
   );

@@ -35,7 +35,7 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
       });
       const payload = await response.json();
 
-      if (!response.ok || !payload?.imported) {
+      if (!response.ok) {
         throw new Error(payload?.error?.message ?? "Could not import the shared bundle.");
       }
 
@@ -45,10 +45,10 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
           ? {
               ...current.share,
               acceptedByCurrentMember: true,
-              consumed: true,
+              consumed: Boolean(payload?.imported),
             }
           : current.share,
-        stage: "consumed",
+        stage: payload?.pending ? "processing" : "consumed",
       }));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -95,6 +95,12 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
       {errorMessage ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {data.stage === "processing" && data.share?.acceptedByCurrentMember ? (
+        <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
+          Import queued. Refresh this page in a few seconds if it does not update automatically.
         </div>
       ) : null}
 
@@ -152,6 +158,8 @@ function resolveTitle(data: HostedSharePageData): string {
       return "That share link expired";
     case "signin":
       return "Import a shared bundle";
+    case "processing":
+      return "Import in progress";
     case "consumed":
       return "Bundle already imported";
     case "ready":
@@ -170,6 +178,8 @@ function resolveSubtitle(data: HostedSharePageData): string {
       return data.inviteCode
         ? "This link will keep the shared smoothie bundle attached while you finish hosted setup."
         : "Finish hosted setup on this device, then return here to import the bundle.";
+    case "processing":
+      return "The shared bundle has been queued for import into your hosted vault.";
     case "consumed":
       return "This one-time bundle has already been added.";
     case "ready":

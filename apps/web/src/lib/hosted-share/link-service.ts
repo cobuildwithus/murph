@@ -146,11 +146,13 @@ export async function buildHostedSharePageData(input: {
     || record.acceptedByMemberId === input.sessionRecord?.member.id;
   const stage = consumed
     ? "consumed"
-    : record.expiresAt <= now
-      ? "expired"
-      : sessionActive
-        ? "ready"
-        : "signin";
+    : acceptedByCurrentMember
+      ? "processing"
+      : record.expiresAt <= now
+        ? "expired"
+        : sessionActive
+          ? "ready"
+          : "signin";
 
   return {
     inviteCode: normalizeOptionalString(input.inviteCode) ?? null,

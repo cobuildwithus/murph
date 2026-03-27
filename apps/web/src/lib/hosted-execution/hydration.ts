@@ -1,10 +1,9 @@
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
+import { type HostedExecutionDispatchRequest } from "@healthybob/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
 import { readHostedSharePack } from "../hosted-share/shared";
-
 import {
   readHostedExecutionDispatchRef,
   readLegacyHostedExecutionDispatch,
@@ -18,7 +17,7 @@ export async function hydrateHostedExecutionDispatch(
 ): Promise<HostedExecutionDispatchRequest> {
   const legacyDispatch = readLegacyHostedExecutionDispatch(record.payloadJson);
 
-  if (legacyDispatch) {
+  if (legacyDispatch && (record.eventKind !== "vault.share.accepted" || hasHydratableSharePack(legacyDispatch))) {
     return validateHydratedHostedExecutionDispatch(legacyDispatch, record);
   }
 
@@ -227,4 +226,8 @@ function validateHydratedHostedExecutionDispatch(
   }
 
   return dispatch;
+}
+
+function hasHydratableSharePack(dispatch: HostedExecutionDispatchRequest): boolean {
+  return dispatch.event.kind === "vault.share.accepted" && "pack" in dispatch.event;
 }

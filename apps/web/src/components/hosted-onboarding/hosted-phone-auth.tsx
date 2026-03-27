@@ -82,7 +82,7 @@ function HostedPhoneAuthInner({
     return () => {
       cancelled = true;
     };
-  }, [authenticated, ready, refreshUser, user]);
+  }, [authenticated, ready]);
 
   async function handleSendCode() {
     setErrorMessage(null);
@@ -167,13 +167,13 @@ function HostedPhoneAuthInner({
   return (
     <div className="space-y-4">
       {errorMessage ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
+        <div className="rounded border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
           {errorMessage}
         </div>
       ) : null}
 
       {authenticated ? (
-        <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
+        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
           <strong className="text-stone-900">Verified Privy session found.</strong>
           <p className="mt-1">
             {checkingAuthenticatedSession
@@ -194,13 +194,13 @@ function HostedPhoneAuthInner({
             placeholder="+1 415 555 2671"
             value={phoneNumber}
             onChange={(event) => setPhoneNumber(event.currentTarget.value)}
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-100"
+            className={inputClasses}
           />
-          <p className="text-sm text-stone-500">
-            {mode === "invite"
-              ? `Use the same number we texted${phoneHint ? ` (${phoneHint})` : ""}.`
-              : "We verify your number with SMS, then create your rewards wallet automatically."}
-          </p>
+          {mode === "invite" ? (
+            <p className="text-sm text-stone-500">
+              {`Use the same number we texted${phoneHint ? ` (${phoneHint})` : ""}.`}
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -216,7 +216,7 @@ function HostedPhoneAuthInner({
             placeholder="123456"
             value={code}
             onChange={(event) => setCode(event.currentTarget.value)}
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-100"
+            className={inputClasses}
           />
           <p className="text-sm text-stone-500">Enter the code we just texted you.</p>
         </div>
@@ -230,7 +230,7 @@ function HostedPhoneAuthInner({
                 type="button"
                 onClick={handleContinueAuthenticated}
                 disabled={!ready || pendingAction !== null}
-                className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pendingAction === "continue"
                   ? mode === "invite"
@@ -243,7 +243,7 @@ function HostedPhoneAuthInner({
               type="button"
               onClick={handleLogout}
               disabled={pendingAction !== null}
-              className="rounded-full border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
             </button>
@@ -253,7 +253,7 @@ function HostedPhoneAuthInner({
             type="button"
             onClick={handleSendCode}
             disabled={!ready || pendingAction !== null}
-            className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
           </button>
@@ -263,7 +263,7 @@ function HostedPhoneAuthInner({
               type="button"
               onClick={handleVerifyCode}
               disabled={!ready || pendingAction !== null}
-              className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pendingAction === "verify-code"
                 ? mode === "invite"
@@ -280,7 +280,7 @@ function HostedPhoneAuthInner({
                 setStep("phone");
               }}
               disabled={pendingAction !== null}
-              className="rounded-full border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Change number
             </button>
@@ -288,9 +288,6 @@ function HostedPhoneAuthInner({
         )}
       </div>
 
-      <p className="text-sm leading-relaxed text-stone-500">
-        Healthy Bob uses your verified phone number for sign-in and provisions a self-custodial rewards wallet before checkout.
-      </p>
     </div>
   );
 }
@@ -364,6 +361,9 @@ async function readHostedPrivyClientSessionState(input: {
 function toErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
+
+const inputClasses =
+  "w-full rounded border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-olive-light focus:outline-none focus:ring-2 focus:ring-olive-light/20";
 
 function describeHostedPrivySessionIssue(sessionState: HostedPrivyLinkedAccountState): string | null {
   if (!sessionState.phone) {

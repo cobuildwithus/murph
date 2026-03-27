@@ -10,45 +10,23 @@ export default async function JoinInviteCancelPage(input: {
   const href = `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}${shareCode ? `?share=${encodeURIComponent(shareCode)}` : ""}`;
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "clamp(1.25rem, 4vw, 2.5rem)",
-        display: "grid",
-        placeItems: "center",
-        background: "linear-gradient(180deg, rgba(255, 247, 237, 1) 0%, rgba(248, 250, 252, 1) 100%)",
-      }}
-    >
-      <section
-        style={{
-          width: "100%",
-          maxWidth: "36rem",
-          borderRadius: "1.5rem",
-          background: "white",
-          boxShadow: "0 20px 50px rgba(15, 23, 42, 0.12)",
-          padding: "clamp(1.5rem, 4vw, 2rem)",
-          display: "grid",
-          gap: "1rem",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "clamp(2rem, 6vw, 3rem)", letterSpacing: "-0.04em" }}>
+    <main className="grid min-h-screen place-items-center px-5 py-12">
+      <section className="w-full max-w-xl space-y-5 rounded-lg bg-white p-8 shadow-sm md:p-10">
+        <div className="flex h-12 w-12 items-center justify-center rounded bg-amber-50">
+          <svg className="h-6 w-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+        </div>
+        <h1 className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
           Checkout paused
         </h1>
-        <p style={{ margin: 0, color: "rgb(71 85 105)", lineHeight: 1.6 }}>
-          Your verified phone session is still ready. Jump back to the invite page whenever you want to finish checkout.
+        <p className="leading-relaxed text-stone-500">
+          Your verified phone session is still ready. Jump back to the invite page whenever you want to finish
+          checkout.
         </p>
         <a
           href={href}
-          style={{
-            display: "inline-flex",
-            width: "fit-content",
-            borderRadius: "999px",
-            background: "rgb(15 23 42)",
-            color: "white",
-            fontWeight: 700,
-            textDecoration: "none",
-            padding: "0.9rem 1.15rem",
-          }}
+          className="inline-flex rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light"
         >
           Return to invite
         </a>
