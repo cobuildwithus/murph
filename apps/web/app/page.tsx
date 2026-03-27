@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 
 import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone-auth";
-import { hasHostedPrivyPhoneAuthConfig, resolveHostedSignupPhoneNumber } from "@/src/lib/hosted-onboarding/landing";
+import { resolveHostedSignupPhoneNumber } from "@/src/lib/hosted-onboarding/landing";
+import { hasHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
 
 export const metadata: Metadata = {
   title: "Healthy Bob",
