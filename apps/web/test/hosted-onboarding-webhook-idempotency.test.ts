@@ -349,6 +349,12 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      context: "hosted-onboarding linq event=evt_123",
+      eventIds: ["evt_123"],
+      prisma,
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("completes a Stripe invoice webhook after durable updates queue activation dispatch", async () => {
@@ -1002,6 +1008,14 @@ describe("hosted onboarding webhook retry safety", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
   });
 
   it("does not resend an already-sent Linq invite reply when reclaiming a failed receipt", async () => {

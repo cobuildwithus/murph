@@ -15,7 +15,6 @@ import { getPrisma } from "../prisma";
 import { dispatchHostedExecutionStatus } from "./dispatch";
 import { hydrateHostedExecutionDispatch } from "./hydration";
 import {
-  readLegacyHostedExecutionDispatch,
   serializeHostedExecutionOutboxPayload,
 } from "./outbox-payload";
 
@@ -359,12 +358,6 @@ function readHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: PrismaClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  const legacyDispatch = readLegacyHostedExecutionDispatch(record.payloadJson);
-
-  if (legacyDispatch) {
-    return Promise.resolve(legacyDispatch);
-  }
-
   return hydrateHostedExecutionDispatch(record, prisma);
 }
 

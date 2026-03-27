@@ -51,6 +51,12 @@ export function readHostedExecutionDispatchRef(
   },
 ): HostedExecutionDispatchRef | null {
   const payloadObject = toHostedExecutionObject(payloadJson);
+  const schemaVersion = readHostedExecutionText(payloadObject.schemaVersion);
+
+  if (schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION) {
+    return null;
+  }
+
   const nestedRef = toHostedExecutionObject(payloadObject.dispatchRef);
   const eventId = readHostedExecutionText(nestedRef.eventId) ?? fallback.eventId;
   const eventKind = readHostedExecutionEventKind(nestedRef.eventKind) ?? readHostedExecutionEventKind(fallback.eventKind);
@@ -58,9 +64,7 @@ export function readHostedExecutionDispatchRef(
   const userId = readHostedExecutionText(nestedRef.userId) ?? fallback.userId;
 
   if (!eventId || !eventKind || !occurredAt || !userId) {
-    const legacyDispatch = readLegacyHostedExecutionDispatch(payloadJson);
-
-    return legacyDispatch ? buildHostedExecutionDispatchRef(legacyDispatch) : null;
+    return null;
   }
 
   return {

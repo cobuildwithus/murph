@@ -3,10 +3,8 @@ import { type HostedExecutionDispatchRequest } from "@healthybob/hosted-executio
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
-import {
-  readHostedExecutionDispatchRef,
-  readLegacyHostedExecutionDispatch,
-} from "./outbox-payload";
+import { readHostedSharePack } from "../hosted-share/shared";
+import { readHostedExecutionDispatchRef } from "./outbox-payload";
 
 type HostedExecutionHydrationClient = PrismaClient;
 
@@ -14,12 +12,6 @@ export async function hydrateHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: HostedExecutionHydrationClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  const legacyDispatch = readLegacyHostedExecutionDispatch(record.payloadJson);
-
-  if (legacyDispatch && (record.eventKind !== "vault.share.accepted" || hasHydratableSharePack(legacyDispatch))) {
-    return validateHydratedHostedExecutionDispatch(legacyDispatch, record);
-  }
-
   const dispatchRef = readHostedExecutionDispatchRef(record.payloadJson, {
     eventId: record.eventId,
     eventKind: record.eventKind,
@@ -110,14 +102,37 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
 
 async function hydrateHostedExecutionDispatchFromHostedShareLink(
   record: ExecutionOutbox,
-  _prisma: HostedExecutionHydrationClient,
-  _occurredAt: string,
+  prisma: HostedExecutionHydrationClient,
+  occurredAt: string,
 ): Promise<HostedExecutionDispatchRequest> {
   if (!record.sourceId) {
     throw new Error(`Hosted share outbox record ${record.eventId} is missing sourceId.`);
   }
-  throw new Error(
-    `Hosted share outbox record ${record.eventId} requires the full dispatch payload; minimized legacy share rows cannot reconstruct shareCode/shareId from sourceId ${record.sourceId}.`,
+
+  const shareLink = await prisma.hostedShareLink.findUnique({
+    where: {
+      id: record.sourceId,
+    },
+    select: {
+      encryptedPayload: true,
+    },
+  });
+
+  if (!shareLink) {
+    throw new Error(`Hosted share source ${record.sourceId} was not found for ${record.eventId}.`);
+  }
+
+  return validateHydratedHostedExecutionDispatch(
+    {
+      event: {
+        kind: "vault.share.accepted",
+        pack: readHostedSharePack(shareLink).pack,
+        userId: record.userId,
+      },
+      eventId: record.eventId,
+      occurredAt,
+    },
+    record,
   );
 }
 
@@ -131,10 +146,8 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
       id: signalId,
     },
     select: {
-      connectionId: true,
       createdAt: true,
       kind: true,
-      provider: true,
       userId: true,
     },
   });
@@ -204,8 +217,4 @@ function validateHydratedHostedExecutionDispatch(
   }
 
   return dispatch;
-}
-
-function hasHydratableSharePack(dispatch: HostedExecutionDispatchRequest): boolean {
-  return dispatch.event.kind === "vault.share.accepted" && "pack" in dispatch.event;
 }
