@@ -28,7 +28,11 @@ interface GuardInput<TResult> {
 interface GuardSnapshot {
   backupRoot: string
   expectedStates: Map<string, ExpectedFileState>
-  operationMetadataPaths: Set<string>
+  operationMetadataStates: Map<string, GuardOperationSnapshot>
+}
+
+interface GuardOperationSnapshot {
+  status: string | null
 }
 
 interface GuardAuditStateFailure {
@@ -69,6 +73,7 @@ interface GuardOperationEntry {
   guardFailure: GuardAuditStateFailure | null
   operation: GuardRecoveredOperation | null
   relativePath: string
+  snapshotStatus: string | null
 }
 const PROTECTED_ROOT_FILES = new Set<string>([
   VAULT_LAYOUT.metadata,
@@ -145,8 +150,24 @@ async function captureCanonicalWriteSnapshot(
   return {
     backupRoot,
     expectedStates,
-    operationMetadataPaths: new Set(await listWriteOperationMetadataPaths(vaultRoot)),
+    operationMetadataStates: await captureOperationMetadataSnapshot(vaultRoot),
   }
+}
+
+async function captureOperationMetadataSnapshot(
+  vaultRoot: string,
+): Promise<Map<string, GuardOperationSnapshot>> {
+  const relativePaths = await listWriteOperationMetadataPaths(vaultRoot)
+  const snapshots = await Promise.all(
+    relativePaths.map(async (relativePath) => [
+      relativePath,
+      {
+        status: await readStoredWriteOperationStatusForGuard(vaultRoot, relativePath),
+      },
+    ] as const),
+  )
+
+  return new Map(snapshots)
 }
 
 async function restoreUnexpectedCanonicalWrites(input: {
@@ -208,17 +229,18 @@ async function applyCommittedOperationEffects(input: {
   vaultRoot: string
 }): Promise<GuardAuditStateFailure | null> {
   const operationMetadataPaths = await listWriteOperationMetadataPaths(input.vaultRoot)
-  const newOperationPaths = operationMetadataPaths
-    .filter((relativePath) => !input.snapshot.operationMetadataPaths.has(relativePath))
-    .sort()
   let guardFailure: GuardAuditStateFailure | null = null
   const operations: GuardOperationEntry[] = await Promise.all(
-    newOperationPaths.map(async (relativePath) => {
+    operationMetadataPaths.sort().map(async (relativePath) => {
+      const snapshotStatus =
+        input.snapshot.operationMetadataStates.get(relativePath)?.status ?? null
+
       try {
         return {
           guardFailure: null,
           operation: await readStoredWriteOperationIfPresent(input.vaultRoot, relativePath),
           relativePath,
+          snapshotStatus,
         }
       } catch (error) {
         const failure = createGuardAuditStateFailure({
@@ -231,31 +253,37 @@ async function applyCommittedOperationEffects(input: {
           guardFailure: failure,
           operation: recovered,
           relativePath,
+          snapshotStatus,
         }
       }
     }),
   )
 
   for (const operationEntry of operations) {
-    if (operationEntry.guardFailure && !guardFailure) {
+    if (
+      operationEntry.snapshotStatus !== 'committed' &&
+      operationEntry.operation?.status === 'committed' &&
+      operationEntry.guardFailure &&
+      !guardFailure
+    ) {
       guardFailure = operationEntry.guardFailure
     }
   }
 
   const committedOperations = operations
     .filter(
-      (entry): entry is GuardOperationEntry & { operation: GuardRecoveredOperation } =>
-        entry.operation !== null,
+      (
+        entry,
+      ): entry is GuardOperationEntry & { operation: GuardRecoveredOperation } =>
+        entry.operation !== null &&
+        entry.operation.status === 'committed' &&
+        entry.snapshotStatus !== 'committed',
     )
     .sort((left, right) =>
       compareOperationOrder(left.operation, right.operation, left.relativePath, right.relativePath),
     )
 
   for (const { operation, relativePath } of committedOperations) {
-    if (operation.status !== 'committed') {
-      continue
-    }
-
     for (const action of operation.actions) {
       if (!isProtectedCanonicalPath(action.targetRelativePath)) {
         continue
@@ -384,6 +412,17 @@ async function walkProtectedDirectory(
     if (entry.isFile() && include(childRelativePath)) {
       matches.add(childRelativePath)
     }
+  }
+}
+
+async function readStoredWriteOperationStatusForGuard(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<string | null> {
+  try {
+    return (await readStoredWriteOperationIfPresent(vaultRoot, relativePath))?.status ?? null
+  } catch {
+    return (await recoverStoredWriteOperationForGuard(vaultRoot, relativePath))?.status ?? null
   }
 }
 

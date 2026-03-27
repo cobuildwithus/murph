@@ -79,11 +79,13 @@ import {
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import { executeWithCanonicalWriteGuard } from './canonical-write-guard.js'
+import { resolveAssistantProviderWorkingDirectory } from './provider-workspace.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
+import { withAssistantTurnLock } from './turn-lock.js'
 
 // Bump this when changing the durable Codex bootstrap prompt text so existing
 // Codex provider sessions re-bootstrap cleanly on their next turn.
-export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-27.1'
+export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-27.2'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -269,125 +271,131 @@ export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
   const defaults = await resolveAssistantOperatorDefaults()
-  const resolved = await resolveAssistantSessionForMessage(input, defaults)
-  const sharedPlan = await resolveAssistantTurnSharedPlan(input, resolved)
-  const routes = resolveAssistantTurnRoutes(input, defaults, resolved)
-  const primaryRoute = routes[0] ?? null
-  const receipt = await createAssistantTurnReceipt({
+  return withAssistantTurnLock({
+    abortSignal: input.abortSignal,
     vault: input.vault,
-    sessionId: resolved.session.sessionId,
-    provider: primaryRoute?.provider ?? resolved.session.provider,
-    providerModel: primaryRoute?.providerOptions.model ?? null,
-    prompt: input.prompt,
-    deliveryRequested: input.deliverResponse === true,
-  })
-
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'assistant',
-    kind: 'turn.started',
-    message: `Started assistant turn for session ${resolved.session.sessionId}.`,
-    sessionId: resolved.session.sessionId,
-    turnId: receipt.turnId,
-    counterDeltas: {
-      turnsStarted: 1,
-    },
-  })
-
-  let responseText: string | null = null
-
-  try {
-    const userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
-    const providerResult = await executeProviderTurnWithRecovery({
-      defaults,
-      input,
-      routes,
-      plan: sharedPlan,
-      resolvedSession: resolved.session,
-      turnCreatedAt: userTurn.turnCreatedAt,
-      turnId: userTurn.turnId,
-    })
-    responseText = providerResult.response
-    const session = await persistAssistantTurnAndSession({
-      input,
-      plan: sharedPlan,
-      providerResult,
-      session: providerResult.session,
-      turnCreatedAt: userTurn.turnCreatedAt,
-      turnId: userTurn.turnId,
-    })
-    const deliveryOutcome = await deliverAssistantReply({
-      input,
-      response: providerResult.response,
-      session,
-      turnId: userTurn.turnId,
-    })
-
-    await finalizeAssistantTurnFromDeliveryOutcome({
-      outcome: deliveryOutcome,
-      response: providerResult.response,
-      turnId: userTurn.turnId,
-      vault: input.vault,
-    })
-
-    return assistantAskResultSchema.parse({
-      vault: redactAssistantDisplayPath(input.vault),
-      prompt: input.prompt,
-      response: providerResult.response,
-      session: deliveryOutcome.session,
-      delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
-      deliveryDeferred: deliveryOutcome.kind === 'queued',
-      deliveryIntentId:
-        deliveryOutcome.kind === 'sent' ||
-        deliveryOutcome.kind === 'queued' ||
-        deliveryOutcome.kind === 'failed'
-          ? deliveryOutcome.intentId
-          : null,
-      deliveryError:
-        deliveryOutcome.kind === 'queued' || deliveryOutcome.kind === 'failed'
-          ? deliveryOutcome.error
-          : null,
-    })
-  } catch (error) {
-    const normalizedError = normalizeAssistantDeliveryError(error)
-    const failedAt = new Date().toISOString()
-
-    await runAssistantTurnBestEffort(() =>
-      finalizeAssistantTurnReceipt({
+    run: async () => {
+      const resolved = await resolveAssistantSessionForMessage(input, defaults)
+      const sharedPlan = await resolveAssistantTurnSharedPlan(input, resolved)
+      const routes = resolveAssistantTurnRoutes(input, defaults, resolved)
+      const primaryRoute = routes[0] ?? null
+      const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
-        turnId: receipt.turnId,
-        status: 'failed',
-        deliveryDisposition:
-          input.deliverResponse === true ? 'failed' : 'not-requested',
-        error: normalizedError,
-        response: responseText,
-        completedAt: failedAt,
-      }),
-    )
+        sessionId: resolved.session.sessionId,
+        provider: primaryRoute?.provider ?? resolved.session.provider,
+        providerModel: primaryRoute?.providerOptions.model ?? null,
+        prompt: input.prompt,
+        deliveryRequested: input.deliverResponse === true,
+      })
 
-    await runAssistantTurnBestEffort(() =>
-      recordAssistantDiagnosticEvent({
+      await recordAssistantDiagnosticEvent({
         vault: input.vault,
         component: 'assistant',
-        kind: 'turn.failed',
-        level: 'error',
-        message: normalizedError.message,
-        code: normalizedError.code,
+        kind: 'turn.started',
+        message: `Started assistant turn for session ${resolved.session.sessionId}.`,
         sessionId: resolved.session.sessionId,
         turnId: receipt.turnId,
         counterDeltas: {
-          turnsFailed: 1,
+          turnsStarted: 1,
         },
-        at: failedAt,
-      }),
-    )
+      })
 
-    throw error
-  } finally {
-    await runAssistantTurnBestEffort(() =>
-      refreshAssistantStatusSnapshot(input.vault),
-    )
-  }
+      let responseText: string | null = null
+
+      try {
+        const userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
+        const providerResult = await executeProviderTurnWithRecovery({
+          defaults,
+          input,
+          routes,
+          plan: sharedPlan,
+          resolvedSession: resolved.session,
+          turnCreatedAt: userTurn.turnCreatedAt,
+          turnId: userTurn.turnId,
+        })
+        responseText = providerResult.response
+        const session = await persistAssistantTurnAndSession({
+          input,
+          plan: sharedPlan,
+          providerResult,
+          session: providerResult.session,
+          turnCreatedAt: userTurn.turnCreatedAt,
+          turnId: userTurn.turnId,
+        })
+        const deliveryOutcome = await deliverAssistantReply({
+          input,
+          response: providerResult.response,
+          session,
+          turnId: userTurn.turnId,
+        })
+
+        await finalizeAssistantTurnFromDeliveryOutcome({
+          outcome: deliveryOutcome,
+          response: providerResult.response,
+          turnId: userTurn.turnId,
+          vault: input.vault,
+        })
+
+        return assistantAskResultSchema.parse({
+          vault: redactAssistantDisplayPath(input.vault),
+          prompt: input.prompt,
+          response: providerResult.response,
+          session: deliveryOutcome.session,
+          delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
+          deliveryDeferred: deliveryOutcome.kind === 'queued',
+          deliveryIntentId:
+            deliveryOutcome.kind === 'sent' ||
+            deliveryOutcome.kind === 'queued' ||
+            deliveryOutcome.kind === 'failed'
+              ? deliveryOutcome.intentId
+              : null,
+          deliveryError:
+            deliveryOutcome.kind === 'queued' || deliveryOutcome.kind === 'failed'
+              ? deliveryOutcome.error
+              : null,
+        })
+      } catch (error) {
+        const normalizedError = normalizeAssistantDeliveryError(error)
+        const failedAt = new Date().toISOString()
+
+        await runAssistantTurnBestEffort(() =>
+          finalizeAssistantTurnReceipt({
+            vault: input.vault,
+            turnId: receipt.turnId,
+            status: 'failed',
+            deliveryDisposition:
+              input.deliverResponse === true ? 'failed' : 'not-requested',
+            error: normalizedError,
+            response: responseText,
+            completedAt: failedAt,
+          }),
+        )
+
+        await runAssistantTurnBestEffort(() =>
+          recordAssistantDiagnosticEvent({
+            vault: input.vault,
+            component: 'assistant',
+            kind: 'turn.failed',
+            level: 'error',
+            message: normalizedError.message,
+            code: normalizedError.code,
+            sessionId: resolved.session.sessionId,
+            turnId: receipt.turnId,
+            counterDeltas: {
+              turnsFailed: 1,
+            },
+            at: failedAt,
+          }),
+        )
+
+        throw error
+      } finally {
+        await runAssistantTurnBestEffort(() =>
+          refreshAssistantStatusSnapshot(input.vault),
+        )
+      }
+    },
+  })
 }
 
 export async function updateAssistantSessionOptions(input: {
@@ -418,6 +426,7 @@ async function resolveAssistantTurnSharedPlan(
   resolved: ResolvedAssistantSession,
 ): Promise<AssistantTurnSharedPlan> {
   const cliAccess = resolveAssistantCliAccessContext()
+  const requestedWorkingDirectory = input.workingDirectory ?? input.vault
   return {
     allowSensitiveHealthContext: shouldExposeSensitiveHealthContext(
       resolved.session.binding,
@@ -431,7 +440,11 @@ async function resolveAssistantTurnSharedPlan(
           })
         : null,
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
-    workingDirectory: input.workingDirectory ?? input.vault,
+    workingDirectory: await resolveAssistantProviderWorkingDirectory({
+      requestedWorkingDirectory,
+      sessionId: resolved.session.sessionId,
+      vault: input.vault,
+    }),
   }
 }
 
@@ -1521,7 +1534,7 @@ function buildAssistantSystemPrompt(input: {
 }): string {
   return [
     'You are Healthy Bob, a local-first health assistant bound to one active vault for this session.',
-    'The active vault is already selected for this turn. The shell working directory and `VAULT` environment variable both point at it. Unless the user explicitly targets another vault, operate on this bound vault only.',
+    'The active vault is already selected for this turn through the `VAULT` environment variable and Healthy Bob tools. The shell may start in an isolated assistant workspace instead of the live vault, so use `vault-cli` or assistant tools for vault work and do not treat direct file edits as the canonical path. Unless the user explicitly targets another vault, operate on this bound vault only.',
     [
       'Healthy Bob philosophy:',
       '- Healthy Bob is a calm, observant companion for understanding the body in the context of a life.',
@@ -1691,7 +1704,7 @@ function buildAssistantMemoryGuidanceText(
     return [
       'Assistant memory MCP tools are exposed in this session. Prefer `assistant memory ...` tools over shelling out, and do not edit `assistant-state/` files directly.',
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
-      'When a Healthy Bob memory tool asks for `vault`, pass the current working directory unless the user explicitly targets a different vault.',
+      'When a Healthy Bob memory tool asks for `vault`, pass the bound vault from the `VAULT` environment variable unless the user explicitly targets a different vault.',
       `Use \`${input.rawCommand} assistant memory ...\` only as a fallback when the MCP tools are unavailable in this session.`,
       'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
       'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',

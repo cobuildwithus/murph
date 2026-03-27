@@ -3174,6 +3174,7 @@ export async function runAssistantChatWithInk(
 
             const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
             const errorText = error instanceof Error ? error.message : String(error)
+            const canonicalWriteBlocked = isAssistantCanonicalWriteBlockedError(error)
             const connectionLost = isAssistantProviderConnectionLostError(error)
             const missingSession = isAssistantSessionNotFoundError(error)
             const queuedFollowUpSuffix =
@@ -3183,12 +3184,17 @@ export async function runAssistantChatWithInk(
             setEntries((previous: InkChatEntry[]) => [
               ...previous,
               {
-                kind: 'error',
+                kind: canonicalWriteBlocked ? 'status' : 'error',
                 text: errorText,
               },
             ])
             setStatus(
-              connectionLost
+              canonicalWriteBlocked
+                ? {
+                    kind: 'info',
+                    text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Healthy Bob tools.${queuedFollowUpSuffix}`,
+                  }
+                : connectionLost
                 ? {
                     kind: 'error',
                     text: `The assistant lost its provider connection. Restore connectivity, then keep chatting to resume.${queuedFollowUpSuffix}`,
@@ -3203,7 +3209,7 @@ export async function runAssistantChatWithInk(
                       text: `The assistant hit an error. Fix it or keep chatting.${queuedFollowUpSuffix}`,
                     },
             )
-            if (!missingSession) {
+            if (!missingSession && !canonicalWriteBlocked) {
               void appendAssistantTranscriptEntries(
                 input.vault,
                 latestSessionRef.current.sessionId,
@@ -3439,4 +3445,14 @@ export async function runAssistantChatWithInk(
       rejectOnce(new Error('Ink chat failed to initialize.'))
     }
   })
+}
+
+function isAssistantCanonicalWriteBlockedError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code ===
+        'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
+  )
 }

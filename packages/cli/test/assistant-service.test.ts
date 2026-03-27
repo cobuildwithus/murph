@@ -95,6 +95,21 @@ async function findNewOperationMetadataPath(
   return operationRelativePath
 }
 
+async function waitForPredicate(
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const startedAt = Date.now()
+
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('Timed out waiting for test predicate.')
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
 test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
   const defaults = {
     provider: 'codex-cli' as const,
@@ -249,6 +264,8 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   const originalHome = process.env.HOME
   process.env.HOME = homeRoot
 
+  let result: Awaited<ReturnType<typeof sendAssistantMessage>> | null = null
+
   serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
     provider: 'codex-cli',
     providerSessionId: 'thread-123',
@@ -259,7 +276,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   })
 
   try {
-    await sendAssistantMessage({
+    result = await sendAssistantMessage({
       vault: vaultRoot,
       prompt: 'Inspect the vault with the CLI.',
     })
@@ -269,6 +286,12 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const expectedUserBinDirectory = path.join(homeRoot, '.local', 'bin')
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const expectedWorkspace = path.join(
+    statePaths.assistantStateRoot,
+    'workspaces',
+    result?.session.sessionId ?? '',
+  )
   const turnContext = resolveAssistantMemoryTurnContext(firstCall?.env)
   const stateMcpExposed =
     firstCall?.configOverrides?.some((value: string) =>
@@ -283,8 +306,11 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
       value.includes('"assistant","cron","--mcp"'),
     ) ?? false
 
-  assert.equal(firstCall?.workingDirectory, vaultRoot)
+  assert.equal(firstCall?.workingDirectory, expectedWorkspace)
+  assert.notEqual(firstCall?.workingDirectory, vaultRoot)
+  assert.match(path.relative(vaultRoot, expectedWorkspace), /^\.\.(?:[\\/]|$)/u)
   assert.match(firstCall?.systemPrompt ?? '', /bound to one active vault/u)
+  assert.match(firstCall?.systemPrompt ?? '', /isolated assistant workspace/u)
   assert.match(firstCall?.systemPrompt ?? '', /Healthy Bob philosophy:/u)
   assert.match(firstCall?.systemPrompt ?? '', /calm, observant companion/u)
   assert.match(firstCall?.systemPrompt ?? '', /Support the user's judgment; do not replace it/u)
@@ -375,6 +401,14 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
+  assert.match(
+    await readFile(path.join(expectedWorkspace, 'README.md'), 'utf8'),
+    /isolated assistant workspace/u,
+  )
+  assert.match(
+    await readFile(path.join(expectedWorkspace, 'README.md'), 'utf8'),
+    /`VAULT` environment variable/u,
+  )
   if (stateMcpExposed) {
     assert.match(
       firstCall?.systemPrompt ?? '',
@@ -420,6 +454,128 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.doesNotMatch(
     firstCall?.systemPrompt ?? '',
     /optional onboarding check-in/u,
+  )
+})
+
+test('sendAssistantMessage reuses the same isolated provider workspace across repeated turns in one session', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-workspace-reuse-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-workspace-1',
+      response: 'first reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-workspace-1',
+      response: 'second reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  const first = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:workspace-reuse',
+    prompt: 'First turn.',
+  })
+  const second = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:workspace-reuse',
+    prompt: 'Second turn.',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
+  const expectedWorkspace = path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    'workspaces',
+    first.session.sessionId,
+  )
+
+  assert.equal(second.session.sessionId, first.session.sessionId)
+  assert.equal(firstCall?.workingDirectory, expectedWorkspace)
+  assert.equal(secondCall?.workingDirectory, expectedWorkspace)
+  assert.notEqual(firstCall?.workingDirectory, vaultRoot)
+  assert.match(path.relative(vaultRoot, expectedWorkspace), /^\.\.(?:[\\/]|$)/u)
+})
+
+test('sendAssistantMessage serializes concurrent provider turns per vault', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  let releaseFirstTurn!: () => void
+  const firstTurnGate = new Promise<void>((resolve) => {
+    releaseFirstTurn = resolve
+  })
+  let firstTurnStarted = false
+  let secondTurnStarted = false
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async (call: any) => {
+    const prompt = call.userPrompt ?? call.prompt
+    if (prompt === 'First turn.') {
+      firstTurnStarted = true
+      await firstTurnGate
+      return {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-turn-lock',
+        response: 'first reply',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      }
+    }
+
+    secondTurnStarted = true
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-turn-lock',
+      response: 'second reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const firstTurn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock:first',
+    prompt: 'First turn.',
+  })
+
+  await waitForPredicate(() => firstTurnStarted)
+
+  const secondTurn = sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:turn-lock:second',
+    prompt: 'Second turn.',
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(secondTurnStarted, false)
+
+  releaseFirstTurn()
+
+  const [firstResult, secondResult] = await Promise.all([firstTurn, secondTurn])
+  assert.equal(firstResult.response, 'first reply')
+  assert.equal(secondResult.response, 'second reply')
+  assert.deepEqual(
+    serviceMocks.executeAssistantProviderTurn.mock.calls.map(
+      ([call]) => call.userPrompt ?? call.prompt,
+    ),
+    ['First turn.', 'Second turn.'],
   )
 })
 
@@ -1725,6 +1881,103 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
   assert.equal(eventRecords.filter((record) => record.id === persisted.eventId).length, 1)
   assert.equal(auditRecords.filter((record) => record.id === persisted.auditId).length, 1)
   assert.match(persisted.envelopePath, /^raw\/inbox\/telegram\/bot\/2026\/03\/cap_/u)
+})
+
+test('sendAssistantMessage preserves canonical writes from operations staged before the guard snapshot and committed during the provider turn', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-staged-before-snapshot-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-staged-before-snapshot.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const committedContent = '# Guarded staged-before-snapshot write\n'
+  const operationId = 'op_guard_staged_before_snapshot'
+  const metadataRelativePath = `.runtime/operations/${operationId}.json`
+  const metadataPath = path.join(vaultRoot, metadataRelativePath)
+
+  await mkdir(path.dirname(metadataPath), { recursive: true })
+  await writeFile(
+    metadataPath,
+    `${JSON.stringify(
+      {
+        schemaVersion: 'hb.write-operation.v1',
+        operationId,
+        operationType: 'assistant_guard_staged_before_snapshot_test',
+        summary: 'Commit a pre-staged canonical write during the guarded provider turn',
+        status: 'staged',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+        occurredAt: '2026-03-27T00:00:00.000Z',
+        actions: [
+          {
+            kind: 'text_write',
+            state: 'staged',
+            targetRelativePath,
+            stageRelativePath: `.runtime/operations/${operationId}/payloads/0000.txt`,
+            overwrite: true,
+            allowExistingMatch: false,
+            allowRaw: false,
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await writeFile(targetPath, committedContent)
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'hb.write-operation.v1',
+          operationId,
+          operationType: 'assistant_guard_staged_before_snapshot_test',
+          summary: 'Commit a pre-staged canonical write during the guarded provider turn',
+          status: 'committed',
+          createdAt: '2026-03-27T00:00:00.000Z',
+          updatedAt: '2026-03-27T00:00:01.000Z',
+          occurredAt: '2026-03-27T00:00:00.000Z',
+          actions: [
+            {
+              kind: 'text_write',
+              state: 'applied',
+              targetRelativePath,
+              stageRelativePath: `.runtime/operations/${operationId}/payloads/0000.txt`,
+              overwrite: true,
+              allowExistingMatch: false,
+              allowRaw: false,
+              committedPayloadBase64: Buffer.from(committedContent).toString('base64'),
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-prestaged-write',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-prestaged-write',
+    prompt: 'Commit the pre-staged canonical write.',
+  })
+
+  assert.equal(result.response, 'assistant reply')
+  assert.equal(result.session.turnCount, 1)
+  assert.equal(await readFile(targetPath, 'utf8'), committedContent)
 })
 
 test('sendAssistantMessage restores the committed canonical content when a provider tampers with the same file after an audited write', async () => {
