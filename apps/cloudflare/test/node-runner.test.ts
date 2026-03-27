@@ -543,7 +543,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url).startsWith(
-            "http://outbox.worker/intents/",
+            "http://side-effects.worker/effects/",
           )
         ) {
           return new Response(JSON.stringify({
@@ -594,7 +594,7 @@ describe("runHostedExecutionJob", () => {
 
     expect(fetchCalls).toEqual([
       "POST http://commit.worker/events/evt_outbox/commit",
-      "GET http://outbox.worker/intents/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
+      "GET http://side-effects.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
       "POST http://commit.worker/events/evt_outbox/finalize",
     ]);
 
@@ -748,7 +748,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
           && (init?.method ?? "GET") === "GET"
         ) {
           return new Response(JSON.stringify({
@@ -759,7 +759,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
           && init?.method === "PUT"
         ) {
           return new Response(JSON.stringify({
@@ -804,12 +804,236 @@ describe("runHostedExecutionJob", () => {
 
     expect(fetchCalls).toEqual([
       "POST http://commit.worker/events/evt_outbox_send/commit",
-      "GET http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-      "PUT http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+      "GET http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+      "PUT http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
       "POST http://commit.worker/events/evt_outbox_send/finalize",
     ]);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-restored-"));
+    cleanupPaths.push(workspaceRoot);
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+      workspaceRoot,
+    });
+    const savedIntent = assistantOutboxIntentSchema.parse(
+      JSON.parse(
+        await readFile(
+          path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
+          "utf8",
+        ),
+      ),
+    );
+    const statusSnapshot = JSON.parse(
+      await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
+    ) as {
+      outbox: { pending: number; sent: number };
+      recentTurns: Array<{ deliveryDisposition: string; status: string }>;
+    };
+
+    expect(savedIntent.status).toBe("sent");
+    expect(savedIntent.delivery).toEqual(delivery);
+    expect(statusSnapshot.outbox.pending).toBe(0);
+    expect(statusSnapshot.outbox.sent).toBe(1);
+    expect(statusSnapshot.recentTurns).toEqual([]);
+  });
+
+  it("replays committed side effects on resume without rerunning compute or recommitting", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-resume-"));
+    const operatorHomeRoot = path.join(parent, "home");
+    const vaultRoot = path.join(parent, "vault");
+    cleanupPaths.push(parent);
+    await mkdir(operatorHomeRoot, { recursive: true });
+    await mkdir(vaultRoot, { recursive: true });
+
+    const statePaths = resolveAssistantStatePaths(vaultRoot);
+    await mkdir(statePaths.outboxDirectory, { recursive: true });
+    const intentId = "outbox_hosted_resume";
+    const createdAt = "2026-03-26T12:00:00.000Z";
+    const sentAt = "2026-03-26T12:00:05.000Z";
+    const delivery = {
+      channel: "linq" as const,
+      sentAt,
+      target: "chat_123",
+      targetKind: "thread" as const,
+      messageLength: "Queued the Linq reply.".length,
+    };
+    await writeFile(
+      path.join(statePaths.outboxDirectory, `${intentId}.json`),
+      `${JSON.stringify(assistantOutboxIntentSchema.parse({
+        schema: "healthybob.assistant-outbox-intent.v1",
+        intentId,
+        sessionId: "sess_hosted",
+        turnId: "turn_hosted",
+        createdAt,
+        updatedAt: createdAt,
+        lastAttemptAt: null,
+        nextAttemptAt: createdAt,
+        sentAt: null,
+        attemptCount: 0,
+        status: "pending",
+        message: "Queued the Linq reply.",
+        dedupeKey: "dedupe_hosted_resume",
+        targetFingerprint: "target_hosted_resume",
+        channel: "linq",
+        identityId: null,
+        actorId: null,
+        threadId: "chat_123",
+        threadIsDirect: true,
+        bindingDelivery: {
+          kind: "thread",
+          target: "chat_123",
+        },
+        explicitTarget: null,
+        delivery: null,
+        lastError: null,
+      }))}\n`,
+    );
+    const initialSnapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    setHostedExecutionCallbackBaseUrlsForTests({
+      sideEffectsBaseUrl: "http://side-effects.worker",
+    });
+    hostedCliMocks.runAssistantAutomation.mockImplementation(() => {
+      throw new Error("resume path should not rerun hosted automation");
+    });
+    hostedCliMocks.runAssistantAutomation.mockClear();
+    hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dispatchHooks, intentId: nextIntentId, vault }) => {
+      expect(nextIntentId).toBe(intentId);
+      const nextStatePaths = resolveAssistantStatePaths(vault);
+      const intentPath = path.join(nextStatePaths.outboxDirectory, `${intentId}.json`);
+      const pendingIntent = assistantOutboxIntentSchema.parse(
+        JSON.parse(await readFile(intentPath, "utf8")),
+      );
+
+      await expect(
+        dispatchHooks?.resolveDeliveredIntent?.({
+          intent: pendingIntent,
+          vault,
+        }),
+      ).resolves.toBeNull();
+      await dispatchHooks?.persistDeliveredIntent?.({
+        delivery,
+        intent: pendingIntent,
+        vault,
+      });
+      await writeFile(
+        intentPath,
+        `${JSON.stringify({
+          ...pendingIntent,
+          updatedAt: sentAt,
+          nextAttemptAt: null,
+          sentAt,
+          status: "sent",
+          delivery,
+          lastError: null,
+        })}\n`,
+      );
+
+      return {
+        deliveryError: null,
+        intent: assistantOutboxIntentSchema.parse({
+          ...pendingIntent,
+          updatedAt: sentAt,
+          nextAttemptAt: null,
+          sentAt,
+          status: "sent",
+          delivery,
+          lastError: null,
+        }),
+        session: null,
+      };
+    });
+    const fetchCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
+
+        if (
+          String(url)
+          === "http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          && (init?.method ?? "GET") === "GET"
+        ) {
+          return new Response(JSON.stringify({
+            effectId: intentId,
+            record: null,
+          }), { status: 200 });
+        }
+
+        if (
+          String(url)
+          === "http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          && init?.method === "PUT"
+        ) {
+          return new Response(JSON.stringify({
+            effectId: intentId,
+            record: JSON.parse(String(init?.body)),
+          }), { status: 200 });
+        }
+
+        if (String(url) === "http://commit.worker/events/evt_outbox_resume/finalize") {
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+
+        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+      }),
+    );
+
+    const result = await runHostedExecutionJob({
+      bundles: {
+        agentState: Buffer.from(initialSnapshot.agentStateBundle).toString("base64"),
+        vault: Buffer.from(initialSnapshot.vaultBundle).toString("base64"),
+      },
+      commit: {
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_outbox_resume",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+      resume: {
+        committedResult: {
+          result: {
+            eventsHandled: 1,
+            summary: "committed",
+          },
+          sideEffects: [
+            {
+              effectId: intentId,
+              fingerprint: "dedupe_hosted_resume",
+              intentId,
+              kind: "assistant.delivery",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
+    expect(fetchCalls).toEqual([
+      "GET http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
+      "PUT http://side-effects.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
+      "POST http://commit.worker/events/evt_outbox_resume/finalize",
+    ]);
+    expect(fetchCalls).not.toContain("POST http://commit.worker/events/evt_outbox_resume/commit");
+    expect(result.result).toEqual({
+      eventsHandled: 1,
+      summary: "committed",
+    });
+
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-resume-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),

@@ -59,7 +59,7 @@ const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_COMMITTED_SIDE_EFFECTS = 20;
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 const HOSTED_RUNNER_COMMIT_BASE_URL = "http://commit.worker";
-const HOSTED_RUNNER_OUTBOX_BASE_URL = "http://outbox.worker";
+const HOSTED_RUNNER_SIDE_EFFECTS_BASE_URL = "http://side-effects.worker";
 
 export interface HostedExecutionCommitCallback {
   bundleRefs: {
@@ -73,6 +73,7 @@ export interface HostedAssistantRuntimeConfig {
   commitTimeoutMs?: number | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   outboxBaseUrl?: string | null;
+  sideEffectsBaseUrl?: string | null;
   userEnv?: Readonly<Record<string, string>>;
 }
 
@@ -143,11 +144,11 @@ export async function runHostedAssistantRuntimeJobInProcess(
             input.request.resume.committedResult.sideEffects,
           );
 
-          await drainHostedAssistantOutboxAfterCommit({
+          await drainHostedCommittedSideEffectsAfterCommit({
             commit: input.request.commit ?? null,
             commitTimeoutMs: runtime.commitTimeoutMs,
             dispatch: input.request.dispatch,
-            outboxBaseUrl: runtime.outboxBaseUrl,
+            sideEffectsBaseUrl: runtime.sideEffectsBaseUrl,
             sideEffects: committedSideEffects,
             vaultRoot: restored.vaultRoot,
           });
@@ -242,11 +243,11 @@ export async function runHostedAssistantRuntimeJobInProcess(
           runtime,
         });
 
-        await drainHostedAssistantOutboxAfterCommit({
+        await drainHostedCommittedSideEffectsAfterCommit({
           commit: input.request.commit ?? null,
           commitTimeoutMs: runtime.commitTimeoutMs,
           dispatch: input.request.dispatch,
-          outboxBaseUrl: runtime.outboxBaseUrl,
+          sideEffectsBaseUrl: runtime.sideEffectsBaseUrl,
           sideEffects: committedSideEffects,
           vaultRoot: restored.vaultRoot,
         });
@@ -404,7 +405,7 @@ function normalizeHostedAssistantRuntimeConfig(
 ): Required<Pick<HostedAssistantRuntimeConfig, "forwardedEnv" | "userEnv">> & {
   commitBaseUrl: string;
   commitTimeoutMs: number | null;
-  outboxBaseUrl: string;
+  sideEffectsBaseUrl: string;
 } {
   return {
     commitBaseUrl: normalizeCallbackBaseUrl(
@@ -413,9 +414,9 @@ function normalizeHostedAssistantRuntimeConfig(
     ),
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
     forwardedEnv: { ...(input?.forwardedEnv ?? {}) },
-    outboxBaseUrl: normalizeCallbackBaseUrl(
-      input?.outboxBaseUrl,
-      HOSTED_RUNNER_OUTBOX_BASE_URL,
+    sideEffectsBaseUrl: normalizeCallbackBaseUrl(
+      input?.sideEffectsBaseUrl ?? input?.outboxBaseUrl,
+      HOSTED_RUNNER_SIDE_EFFECTS_BASE_URL,
     ),
     userEnv: { ...(input?.userEnv ?? {}) },
   };
@@ -674,21 +675,21 @@ async function collectHostedExecutionSideEffects(
     );
 }
 
-async function drainHostedAssistantOutboxAfterCommit(input: {
+async function drainHostedCommittedSideEffectsAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   commitTimeoutMs: number | null;
   dispatch: HostedExecutionDispatchRequest;
-  outboxBaseUrl: string;
+  sideEffectsBaseUrl: string;
   sideEffects: HostedExecutionSideEffect[];
   vaultRoot: string;
 }): Promise<void> {
   for (const sideEffect of input.sideEffects) {
     await dispatchAssistantOutboxIntent({
       dispatchHooks: input.commit
-        ? createHostedAssistantOutboxDispatchHooks({
+        ? createHostedAssistantSideEffectDispatchHooks({
             commit: input.commit,
             commitTimeoutMs: input.commitTimeoutMs,
-            outboxBaseUrl: input.outboxBaseUrl,
+            sideEffectsBaseUrl: input.sideEffectsBaseUrl,
             userId: input.dispatch.event.userId,
           })
         : undefined,
@@ -698,10 +699,10 @@ async function drainHostedAssistantOutboxAfterCommit(input: {
   }
 }
 
-function createHostedAssistantOutboxDispatchHooks(input: {
+function createHostedAssistantSideEffectDispatchHooks(input: {
   commit: HostedExecutionCommitCallback;
   commitTimeoutMs: number | null;
-  outboxBaseUrl: string;
+  sideEffectsBaseUrl: string;
   userId: string;
 }): AssistantOutboxDispatchHooks {
   return {
@@ -713,7 +714,7 @@ function createHostedAssistantOutboxDispatchHooks(input: {
       };
       vault: string;
     }) => {
-      await callHostedRunnerOutboxJournal({
+      await callHostedRunnerSideEffectJournal({
         commit: input.commit,
         commitTimeoutMs: input.commitTimeoutMs,
         method: "PUT",
@@ -725,7 +726,7 @@ function createHostedAssistantOutboxDispatchHooks(input: {
           kind: "assistant.delivery",
           recordedAt: delivery.sentAt,
         },
-        outboxBaseUrl: input.outboxBaseUrl,
+        sideEffectsBaseUrl: input.sideEffectsBaseUrl,
         userId: input.userId,
       });
     },
@@ -736,7 +737,7 @@ function createHostedAssistantOutboxDispatchHooks(input: {
       };
       vault: string;
     }) => {
-      const record = await callHostedRunnerOutboxJournal({
+      const record = await callHostedRunnerSideEffectJournal({
         commit: input.commit,
         commitTimeoutMs: input.commitTimeoutMs,
         method: "GET",
@@ -744,7 +745,7 @@ function createHostedAssistantOutboxDispatchHooks(input: {
           dedupeKey: intent.dedupeKey,
           intentId: intent.intentId,
         }),
-        outboxBaseUrl: input.outboxBaseUrl,
+        sideEffectsBaseUrl: input.sideEffectsBaseUrl,
         userId: input.userId,
       });
 
@@ -753,13 +754,13 @@ function createHostedAssistantOutboxDispatchHooks(input: {
   };
 }
 
-async function callHostedRunnerOutboxJournal(input:
+async function callHostedRunnerSideEffectJournal(input:
   | {
       commit: HostedExecutionCommitCallback;
       commitTimeoutMs: number | null;
       method: "GET";
       sideEffect: HostedExecutionSideEffect;
-      outboxBaseUrl: string;
+      sideEffectsBaseUrl: string;
       userId: string;
     }
   | {
@@ -767,7 +768,7 @@ async function callHostedRunnerOutboxJournal(input:
       commitTimeoutMs: number | null;
       method: "PUT";
       record: HostedExecutionSideEffectRecord;
-      outboxBaseUrl: string;
+      sideEffectsBaseUrl: string;
       userId: string;
     }): Promise<HostedExecutionSideEffectRecord | null> {
   const sideEffect = input.method === "GET"
@@ -776,7 +777,7 @@ async function callHostedRunnerOutboxJournal(input:
         dedupeKey: input.record.fingerprint,
         intentId: input.record.intentId,
       });
-  const url = buildHostedRunnerOutboxUrl(input.outboxBaseUrl, sideEffect.effectId);
+  const url = buildHostedRunnerSideEffectUrl(input.sideEffectsBaseUrl, sideEffect.effectId);
   url.searchParams.set("fingerprint", sideEffect.fingerprint);
   url.searchParams.set("kind", sideEffect.kind);
 
@@ -795,11 +796,11 @@ async function callHostedRunnerOutboxJournal(input:
       signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs)),
     });
   } catch (error) {
-    throw createHostedRunnerOutboxJournalError(input, null, error);
+    throw createHostedRunnerSideEffectJournalError(input, null, error);
   }
 
   if (!response.ok) {
-    throw createHostedRunnerOutboxJournalError(input, response.status);
+    throw createHostedRunnerSideEffectJournalError(input, response.status);
   }
 
   const payload = (await response.json()) as {
@@ -823,8 +824,8 @@ function buildHostedRunnerCommitUrl(
   return new URL(`/events/${encodeURIComponent(eventId)}/${action}`, baseUrl);
 }
 
-function buildHostedRunnerOutboxUrl(baseUrl: string, intentId: string): URL {
-  return new URL(`/intents/${encodeURIComponent(intentId)}`, baseUrl);
+function buildHostedRunnerSideEffectUrl(baseUrl: string, effectId: string): URL {
+  return new URL(`/effects/${encodeURIComponent(effectId)}`, baseUrl);
 }
 
 async function drainHostedParserQueue(vaultRoot: string): Promise<{ processedJobs: number }> {
@@ -1024,7 +1025,7 @@ export function readHostedRunnerCommitTimeoutMs(timeoutMs: number | null): numbe
   return 30_000;
 }
 
-function createHostedRunnerOutboxJournalError(
+function createHostedRunnerSideEffectJournalError(
   input:
     | {
         method: "GET";
@@ -1049,8 +1050,8 @@ function createHostedRunnerOutboxJournalError(
   const effectId = input.method === "GET" ? input.sideEffect.effectId : input.record.effectId;
   const error = new Error(
     status === null
-      ? `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${effectId}.`
-      : `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${effectId} with HTTP ${status}.`,
+      ? `Hosted runner side-effect journal ${input.method} failed for ${input.userId}/${effectId}.`
+      : `Hosted runner side-effect journal ${input.method} failed for ${input.userId}/${effectId} with HTTP ${status}.`,
   ) as Error & {
     code: string;
     context: {
@@ -1061,7 +1062,7 @@ function createHostedRunnerOutboxJournalError(
     retryable: true;
   };
 
-  error.code = "HOSTED_OUTBOX_JOURNAL_FAILED";
+  error.code = "HOSTED_SIDE_EFFECT_JOURNAL_FAILED";
   error.context = {
     retryable: true,
     status,

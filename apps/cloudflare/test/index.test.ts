@@ -163,6 +163,14 @@ describe("cloudflare worker routes", () => {
 
   it("persists runner commits through the outbound commit.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
+    const sideEffects = [
+      {
+        effectId: "outbox_123",
+        fingerprint: "dedupe_123",
+        intentId: "outbox_123",
+        kind: "assistant.delivery" as const,
+      },
+    ];
 
     const response = await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_commit/commit", {
@@ -179,6 +187,7 @@ describe("cloudflare worker routes", () => {
             eventsHandled: 1,
             summary: "ok",
           },
+          sideEffects,
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -203,6 +212,14 @@ describe("cloudflare worker routes", () => {
       "users/member_123/execution-journal/evt_commit.json",
       "users/member_123/vault.bundle.json",
     ]);
+    const journalStore = createHostedExecutionJournalStore({
+      bucket: harness.bucket.api,
+      key: Buffer.alloc(32, 9),
+      keyId: "v1",
+    });
+    await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
+      sideEffects,
+    });
   });
 
   it("persists finalized runner bundles through the outbound commit.worker handler", async () => {
@@ -376,10 +393,10 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("persists and reads hosted outbox journal records through the outbound outbox.worker handler", async () => {
+  it("persists side-effect journal records through the canonical route and reads them back through the legacy alias", async () => {
     const env = createWorkerEnv();
     const response = await callRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://side-effects.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
           delivery: createOutboxDelivery(),
           effectId: "outbox_123",
@@ -420,7 +437,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("falls back to fingerprint side-effect records when the outbound effect id changes", async () => {
+  it("falls back to fingerprint side-effect records across the legacy alias and canonical route", async () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
@@ -442,7 +459,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const readResponse = await callRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_b?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://side-effects.worker/effects/outbox_b?kind=assistant.delivery&fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,

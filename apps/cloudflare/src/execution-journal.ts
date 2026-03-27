@@ -1,22 +1,22 @@
-import { Buffer } from "node:buffer";
-
 import {
   decodeHostedBundleBase64,
   sha256HostedBundleHex,
   type HostedExecutionBundleRef,
   type HostedExecutionRunnerResult,
 } from "@healthybob/runtime-state";
+import {
+  parseHostedExecutionSideEffects,
+  type HostedExecutionSideEffect,
+} from "@healthybob/assistant-runtime";
 
 import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
-import { decryptHostedBundle, encryptHostedBundle } from "./crypto.js";
+import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 export interface HostedExecutionRunnerCommitRequest {
   bundleRefs: {
     agentState: HostedExecutionBundleRef | null;
     vault: HostedExecutionBundleRef | null;
   };
-  token: string | null;
-  url: string;
 }
 
 export interface HostedExecutionCommittedResult {
@@ -28,11 +28,13 @@ export interface HostedExecutionCommittedResult {
   eventId: string;
   finalizedAt: string | null;
   result: HostedExecutionRunnerResult["result"];
+  sideEffects: HostedExecutionSideEffect[];
 }
 
 export interface HostedExecutionCommitPayload {
   bundles: HostedExecutionRunnerResult["bundles"];
   result: HostedExecutionRunnerResult["result"];
+  sideEffects?: HostedExecutionSideEffect[];
 }
 
 export interface HostedExecutionFinalizePayload {
@@ -56,34 +58,24 @@ export function createHostedExecutionJournalStore(input: {
     },
 
     async readCommittedResult(userId, eventId) {
-      const object = await input.bucket.get(committedResultObjectKey(userId, eventId));
-
-      if (!object) {
-        return null;
-      }
-
-      const plaintext = await decryptHostedBundle({
-        envelope: JSON.parse(Buffer.from(await object.arrayBuffer()).toString("utf8")),
-        key: input.key,
+      return readEncryptedR2Json({
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key: committedResultObjectKey(userId, eventId),
+        parse(value) {
+          return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
+        },
       });
-
-      return normalizeHostedExecutionCommittedResult(
-        JSON.parse(Buffer.from(plaintext).toString("utf8")) as HostedExecutionCommittedResult,
-      );
     },
 
     async writeCommittedResult(userId, eventId, value) {
-      const plaintext = Buffer.from(JSON.stringify(value), "utf8");
-      const envelope = await encryptHostedBundle({
-        key: input.key,
+      await writeEncryptedR2Json({
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key: committedResultObjectKey(userId, eventId),
         keyId: input.keyId,
-        plaintext,
+        value,
       });
-
-      await input.bucket.put(
-        committedResultObjectKey(userId, eventId),
-        JSON.stringify(envelope),
-      );
     },
   };
 }
@@ -134,6 +126,7 @@ export async function persistHostedExecutionCommit(input: {
     eventId: input.eventId,
     finalizedAt: null,
     result: input.payload.result,
+    sideEffects: parseHostedExecutionSideEffects(input.payload.sideEffects),
   };
 
   await createHostedExecutionJournalStore({
@@ -245,6 +238,7 @@ function normalizeHostedExecutionCommittedResult(
   return {
     ...value,
     finalizedAt: value.finalizedAt ?? null,
+    sideEffects: parseHostedExecutionSideEffects((value as { sideEffects?: unknown }).sideEffects),
   };
 }
 

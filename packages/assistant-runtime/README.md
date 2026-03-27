@@ -8,6 +8,7 @@ Current responsibilities:
 
 - expose typed hosted-runtime contracts used by the Cloudflare runner
 - run one-shot hosted assistant/inbox/parser/device-sync/share-import passes behind an explicit runtime context object
+- collect due hosted side effects before the durable commit, then resume their post-commit delivery from committed state
 - provide an isolated child-process execution helper so per-user env overrides do not force container-wide request serialization
 
 Current non-goals:

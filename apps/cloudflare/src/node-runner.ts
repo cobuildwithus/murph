@@ -16,6 +16,7 @@ let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
 let hostedExecutionCallbackBaseUrlsForTests: {
   commitBaseUrl?: string | null;
   outboxBaseUrl?: string | null;
+  sideEffectsBaseUrl?: string | null;
 } | null = null;
 
 export interface HostedExecutionRunnerJobRequest extends HostedAssistantRuntimeJobRequest {
@@ -35,6 +36,7 @@ export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null
 export function setHostedExecutionCallbackBaseUrlsForTests(input: {
   commitBaseUrl?: string | null;
   outboxBaseUrl?: string | null;
+  sideEffectsBaseUrl?: string | null;
 } | null): void {
   hostedExecutionCallbackBaseUrlsForTests = input;
 }

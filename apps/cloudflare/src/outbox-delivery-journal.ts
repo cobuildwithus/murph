@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
 import {
-  assistantChannelDeliverySchema,
-  type AssistantChannelDelivery,
+  parseHostedExecutionSideEffectRecord,
+  type HostedExecutionSideEffectRecord,
 } from "@healthybob/assistant-runtime";
 
 import {
@@ -11,104 +11,128 @@ import {
   type EncryptedR2BucketLike,
 } from "./crypto.js";
 
-export interface HostedAssistantOutboxDeliveryRecord {
-  dedupeKey: string;
-  delivery: AssistantChannelDelivery;
-  intentId: string;
-  recordedAt: string;
-}
-
-export interface HostedAssistantOutboxDeliveryJournalStore {
+export interface HostedExecutionSideEffectJournalStore {
   read(input: {
-    dedupeKey: string;
-    intentId: string;
+    effectId: string;
+    fingerprint: string;
+    kind: HostedExecutionSideEffectRecord["kind"];
     userId: string;
-  }): Promise<HostedAssistantOutboxDeliveryRecord | null>;
+  }): Promise<HostedExecutionSideEffectRecord | null>;
   write(input: {
-    dedupeKey: string;
-    delivery: AssistantChannelDelivery;
-    intentId: string;
+    record: HostedExecutionSideEffectRecord;
     userId: string;
-  }): Promise<HostedAssistantOutboxDeliveryRecord>;
+  }): Promise<HostedExecutionSideEffectRecord>;
 }
 
-export function createHostedAssistantOutboxDeliveryJournalStore(input: {
+export function createHostedExecutionSideEffectJournalStore(input: {
   bucket: EncryptedR2BucketLike;
   key: Uint8Array;
   keyId: string;
-}): HostedAssistantOutboxDeliveryJournalStore {
+}): HostedExecutionSideEffectJournalStore {
   return {
     async read(query) {
-      const byIntent = await readRecordAtKey(input, intentRecordObjectKey(query.userId, query.intentId));
+      const byEffect = await readRecordAtKeys(input, effectRecordObjectKeys(query.userId, query.effectId));
 
-      if (byIntent) {
-        return byIntent;
+      if (byEffect) {
+        return byEffect;
       }
 
-      return readRecordAtKey(input, dedupeRecordObjectKey(query.userId, query.dedupeKey));
+      return readRecordAtKeys(
+        input,
+        fingerprintRecordObjectKeys(query.userId, query.kind, query.fingerprint),
+      );
     },
 
     async write(writeInput) {
-      const record: HostedAssistantOutboxDeliveryRecord = {
-        dedupeKey: writeInput.dedupeKey,
-        delivery: assistantChannelDeliverySchema.parse(writeInput.delivery),
-        intentId: writeInput.intentId,
-        recordedAt: new Date().toISOString(),
-      };
-      await writeRecordAtKey(input, intentRecordObjectKey(writeInput.userId, writeInput.intentId), record);
-      await writeRecordAtKey(input, dedupeRecordObjectKey(writeInput.userId, writeInput.dedupeKey), record);
+      const record = parseHostedExecutionSideEffectRecord(writeInput.record);
+      await writeRecordAtKeys(
+        input,
+        effectRecordObjectKeys(writeInput.userId, record.effectId),
+        record,
+      );
+      await writeRecordAtKeys(
+        input,
+        fingerprintRecordObjectKeys(writeInput.userId, record.kind, record.fingerprint),
+        record,
+      );
       return record;
     },
   };
 }
 
-async function readRecordAtKey(
+async function readRecordAtKeys(
   input: {
     bucket: EncryptedR2BucketLike;
     key: Uint8Array;
   },
-  key: string,
-): Promise<HostedAssistantOutboxDeliveryRecord | null> {
-  return readEncryptedR2Json({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    key,
-    parse(value) {
-      const parsed = value as HostedAssistantOutboxDeliveryRecord;
-      return {
-        ...parsed,
-        delivery: assistantChannelDeliverySchema.parse(parsed.delivery),
-      };
-    },
-  });
+  keys: readonly string[],
+): Promise<HostedExecutionSideEffectRecord | null> {
+  for (const key of keys) {
+    const record = await readEncryptedR2Json({
+      bucket: input.bucket,
+      cryptoKey: input.key,
+      key,
+      parse(value) {
+        return parseHostedExecutionSideEffectRecord(value);
+      },
+    });
+
+    if (record) {
+      return record;
+    }
+  }
+
+  return null;
 }
 
-async function writeRecordAtKey(
+async function writeRecordAtKeys(
   input: {
     bucket: EncryptedR2BucketLike;
     key: Uint8Array;
     keyId: string;
   },
-  key: string,
-  value: HostedAssistantOutboxDeliveryRecord,
+  keys: readonly string[],
+  value: HostedExecutionSideEffectRecord,
 ): Promise<void> {
-  await writeEncryptedR2Json({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    key,
-    keyId: input.keyId,
-    value,
-  });
+  for (const key of keys) {
+    await writeEncryptedR2Json({
+      bucket: input.bucket,
+      cryptoKey: input.key,
+      key,
+      keyId: input.keyId,
+      value,
+    });
+  }
 }
 
-function intentRecordObjectKey(userId: string, intentId: string): string {
+function effectRecordObjectKeys(userId: string, effectId: string): string[] {
+  return [
+    `users/${encodeURIComponent(userId)}/side-effects/by-effect/${encodeURIComponent(effectId)}.json`,
+    legacyIntentRecordObjectKey(userId, effectId),
+  ];
+}
+
+function fingerprintRecordObjectKeys(
+  userId: string,
+  kind: HostedExecutionSideEffectRecord["kind"],
+  fingerprint: string,
+): string[] {
+  return [
+    `users/${encodeURIComponent(userId)}/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}.json`,
+    ...(kind === "assistant.delivery"
+      ? [legacyDedupeRecordObjectKey(userId, fingerprint)]
+      : []),
+  ];
+}
+
+function hashFingerprint(kind: string, fingerprint: string): string {
+  return createHash("sha256").update(`${kind}:${fingerprint}`).digest("hex");
+}
+
+function legacyIntentRecordObjectKey(userId: string, intentId: string): string {
   return `users/${encodeURIComponent(userId)}/outbox-deliveries/by-intent/${encodeURIComponent(intentId)}.json`;
 }
 
-function dedupeRecordObjectKey(userId: string, dedupeKey: string): string {
-  return `users/${encodeURIComponent(userId)}/outbox-deliveries/by-dedupe/${hashDedupeKey(dedupeKey)}.json`;
-}
-
-function hashDedupeKey(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+function legacyDedupeRecordObjectKey(userId: string, dedupeKey: string): string {
+  return `users/${encodeURIComponent(userId)}/outbox-deliveries/by-dedupe/${createHash("sha256").update(dedupeKey).digest("hex")}.json`;
 }
