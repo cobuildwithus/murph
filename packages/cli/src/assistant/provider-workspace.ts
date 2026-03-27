@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { resolveAssistantStatePaths } from './store.js'
 
@@ -23,13 +23,13 @@ export async function resolveAssistantProviderWorkingDirectory(input: {
     ASSISTANT_PROVIDER_WORKSPACE_DIRECTORY,
     input.sessionId,
   )
+  const readmePath = path.join(workspaceRoot, ASSISTANT_PROVIDER_WORKSPACE_README)
+  const readme = buildAssistantProviderWorkspaceReadme()
 
   await mkdir(workspaceRoot, { recursive: true })
-  await writeFile(
-    path.join(workspaceRoot, ASSISTANT_PROVIDER_WORKSPACE_README),
-    buildAssistantProviderWorkspaceReadme(),
-    'utf8',
-  )
+  if ((await readExistingWorkspaceReadme(readmePath)) !== readme) {
+    await writeFile(readmePath, readme, 'utf8')
+  }
 
   return workspaceRoot
 }
@@ -51,4 +51,14 @@ function isPathWithinDirectory(parentDirectory: string, candidatePath: string): 
     candidatePath === parentDirectory ||
     candidatePath.startsWith(`${parentDirectory}${path.sep}`)
   )
+}
+
+async function readExistingWorkspaceReadme(
+  readmePath: string,
+): Promise<string | null> {
+  try {
+    return await readFile(readmePath, 'utf8')
+  } catch {
+    return null
+  }
 }

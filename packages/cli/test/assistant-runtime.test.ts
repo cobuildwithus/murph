@@ -102,6 +102,7 @@ import {
   renderComposerValue,
   renderWrappedPlainTextBlock,
   renderWrappedTextBlock,
+  resolveAssistantTurnErrorPresentation,
   resolveAssistantChatViewportWidth,
   resolveAssistantInkInputAdapter,
   resolveAssistantPlainTextWrapColumns,
@@ -3947,6 +3948,31 @@ test('assistant Ink view-model replays persisted local transcript entries', () =
       text: 'boom',
     },
   ])
+})
+
+test('assistant Ink error presentation treats canonical write blocks as informational status only', () => {
+  const presentation = resolveAssistantTurnErrorPresentation({
+    error: new VaultCliError(
+      'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
+      'Direct canonical vault writes are blocked.',
+    ),
+    restoredQueuedPromptCount: 1,
+  })
+
+  assert.deepEqual(presentation.entry, {
+    kind: 'status',
+    text: 'Direct canonical vault writes are blocked.',
+  })
+  assert.equal(presentation.persistTranscriptError, false)
+  assert.deepEqual(presentation.status.kind, 'info')
+  assert.match(
+    presentation.status.text,
+    /Blocked a direct canonical vault write and kept the live vault unchanged\./u,
+  )
+  assert.match(
+    presentation.status.text,
+    /Queued follow-ups are back in the composer\./u,
+  )
 })
 
 

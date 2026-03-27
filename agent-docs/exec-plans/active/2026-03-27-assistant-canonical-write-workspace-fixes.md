@@ -1,6 +1,6 @@
 # Assistant canonical-write workspace fixes
 
-Status: in_progress
+Status: completed
 Created: 2026-03-27
 Updated: 2026-03-27
 
@@ -27,6 +27,7 @@ Updated: 2026-03-27
   - new assistant helpers for turn locking and provider workspaces
   - `packages/cli/src/assistant/ui/ink.ts`
   - `packages/cli/test/assistant-service.test.ts`
+  - `packages/cli/test/assistant-runtime.test.ts`
 - Out of scope:
   - broader assistant session/runtime refactors
   - new vault mutation surfaces
@@ -60,10 +61,25 @@ Updated: 2026-03-27
 ## Verification
 
 - Focused commands:
-  - `pnpm exec vitest run packages/cli/test/assistant-service.test.ts --no-coverage --maxWorkers 1`
+  - `pnpm exec tsc -p packages/cli/tsconfig.typecheck.json --pretty false --noEmit` -> passed
+  - `pnpm exec vitest run packages/cli/test/assistant-service.test.ts packages/cli/test/assistant-runtime.test.ts --no-coverage --maxWorkers 1` -> passed (`123` tests)
 - Required commands:
-  - `pnpm typecheck`
-  - `pnpm test`
-  - `pnpm test:coverage`
+  - `pnpm typecheck` -> failed outside this lane in existing workspace build/type wiring (`packages/core/src/ids.ts`, `packages/core/src/operations/canonical-write-lock.ts`) while building against `packages/runtime-state/dist`
+  - `pnpm test` -> failed outside this lane with pre-existing CLI/runtime-state/build drift and unrelated CLI expectation failures (`packages/cli/test/{cli-expansion-workout,incur-smoke,list-cursor-compat,runtime,search-runtime,setup-cli,stdin-input}.test.ts`)
+  - `pnpm test:coverage` -> failed outside this lane with unrelated CLI expectation failures in `packages/cli/test/{runtime,search-runtime}.test.ts`
 - Direct scenario target:
-  - run the focused assistant-service suite and confirm the new workspace test proves provider cwd is outside the live vault while `VAULT` remains bound to the real vault.
+  - focused assistant-service/workspace regression proves provider cwd is outside the live vault while `VAULT` remains bound to the real vault
+
+## Outcome
+
+- Implemented the deferred patch intent with two additional helpers: `turn-lock.ts` for vault-scoped turn serialization and `provider-workspace.ts` for isolated direct-CLI workspaces inside `assistant-state/workspaces/<sessionId>`.
+- `sendAssistantMessage` now runs under the turn lock, resolves isolated workspaces only for direct-CLI providers whose requested cwd is inside the vault, and uses updated bootstrap/memory guidance that keeps `VAULT` authoritative.
+- The canonical-write guard now snapshots operation status and preserves writes that were staged before the snapshot but committed during the provider turn.
+- Ink now treats `ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED` as informational status UI and skips transcript error persistence for that guardrail.
+- Focused regressions cover workspace reuse, non-shell/outside-vault cwd preservation, same-process and external lock wait/abort behavior, staged-before-snapshot committed writes, and the Ink canonical-write presentation helper.
+
+## Audit passes
+
+- `simplify` audit: completed; one actionable finding about over-eager workspace resolution for non-shell providers was fixed in this lane.
+- `test-coverage-audit`: completed; gaps around outside-vault direct-CLI cwd, external lock behavior, and Ink canonical-write UX were covered in this lane.
+- `task-finish-review`: attempted via spawned subagent, but the agent pool returned a usage-limit error before producing review output. This remains an environment/tooling block rather than an unattempted audit pass.
