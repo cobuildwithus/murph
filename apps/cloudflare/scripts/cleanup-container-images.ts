@@ -138,6 +138,10 @@ function parseCliArgs(argv: string[]): {
     const current = argv[index];
     const next = argv[index + 1];
 
+    if (current === "--") {
+      continue;
+    }
+
     if (current === "--help" || current === "-h") {
       showHelp = true;
       continue;
