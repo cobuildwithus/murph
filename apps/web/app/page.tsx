@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 
 import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone-auth";
-import { resolveHostedPrivyClientAppId, resolveHostedSignupPhoneNumber } from "@/src/lib/hosted-onboarding/landing";
+import {
+  resolveHostedInstallScriptUrl,
+  resolveHostedPrivyClientAppId,
+  resolveHostedSignupPhoneNumber,
+} from "@/src/lib/hosted-onboarding/landing";
 import { hasHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
 
 export const metadata: Metadata = {
@@ -85,6 +89,8 @@ const faqItems = [
 ] as const;
 
 export default function HomePage() {
+  const installScriptUrl = resolveHostedInstallScriptUrl();
+  const installCommandUrl = installScriptUrl ?? "https://YOUR_DOMAIN/install.sh";
   const privyAppId = resolveHostedPrivyClientAppId();
   const signupPhone = resolveHostedSignupPhoneNumber();
   const signupHref = signupPhone ? `sms:${signupPhone.smsValue}` : null;
@@ -255,15 +261,19 @@ export default function HomePage() {
             </div>
             {/* Terminal body */}
             <div className="space-y-4 p-6 font-mono text-sm leading-relaxed md:p-8">
-              <p className="text-stone-500"># Install and set up your vault</p>
-              <p>
+              <p className="text-stone-500"># Install Murph and launch setup</p>
+              <p className="break-all">
                 <span className="text-olive-light">$</span>{" "}
-                <span className="text-white">pnpm onboard --vault ./vault</span>
+                <span className="text-white">
+                  curl -fsSL --proto &apos;=https&apos; --tlsv1.2 {installCommandUrl} | bash
+                </span>
               </p>
-              <p className="text-stone-500"># Or use the setup script</p>
-              <p>
+              <p className="text-stone-500"># Skip onboarding if you want the install only</p>
+              <p className="break-all">
                 <span className="text-olive-light">$</span>{" "}
-                <span className="text-white">./scripts/setup-host.sh --vault ./vault</span>
+                <span className="text-white">
+                  curl -fsSL --proto &apos;=https&apos; --tlsv1.2 {installCommandUrl} | bash -s -- --no-onboard --vault ./vault
+                </span>
               </p>
               <div className="border-t border-stone-800 pt-4">
                 <p className="text-stone-500"># Start chatting</p>
@@ -275,8 +285,20 @@ export default function HomePage() {
             </div>
           </div>
           <p className="mt-4 text-sm text-stone-400">
-            Works on macOS and Linux. Provisions parsers, builds the workspace,
-            and launches interactive onboarding.
+            Works on macOS and Linux. The installer detects local checkouts,
+            bootstraps Node 22 when needed, and then hands off to Murph&apos;s
+            own setup flow for parsers, shims, vault bootstrap, and interactive
+            onboarding.
+          </p>
+          <p className="mt-3 text-sm text-stone-400">
+            Prefer to inspect it first?{" "}
+            <a
+              href="/install.sh"
+              className="font-medium text-olive transition-colors hover:text-stone-900"
+            >
+              View the raw installer
+            </a>
+            .
           </p>
         </div>
       </section>
