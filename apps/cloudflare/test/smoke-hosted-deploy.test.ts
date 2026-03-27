@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveSmokeWorkerBaseUrl } from "../scripts/smoke-hosted-deploy.shared.js";
+import {
+  buildVersionOverrideHeaders,
+  resolveSmokeWorkerBaseUrl,
+  runSmokeHostedDeploy,
+} from "../scripts/smoke-hosted-deploy.shared.js";
 
 describe("resolveSmokeWorkerBaseUrl", () => {
   it("prefers the explicit smoke worker base URL over the other envs", () => {
@@ -34,5 +38,215 @@ describe("resolveSmokeWorkerBaseUrl", () => {
     expect(() => resolveSmokeWorkerBaseUrl({})).toThrow(
       "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL or HOSTED_EXECUTION_DISPATCH_URL must be configured.",
     );
+  });
+});
+
+describe("buildVersionOverrideHeaders", () => {
+  it("formats the Cloudflare version override header when the worker name and version id are present", () => {
+    expect(buildVersionOverrideHeaders({
+      CF_WORKER_NAME: "hb-worker",
+      HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+    })).toEqual({
+      "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+    });
+  });
+
+  it("returns undefined when no candidate version id is configured", () => {
+    expect(buildVersionOverrideHeaders({
+      CF_WORKER_NAME: "hb-worker",
+    })).toBeUndefined();
+  });
+
+  it("fails fast when a version id is configured without a worker name", () => {
+    expect(() => buildVersionOverrideHeaders({
+      HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+    })).toThrow("HOSTED_EXECUTION_SMOKE_WORKER_NAME or CF_WORKER_NAME must be configured.");
+  });
+});
+
+describe("runSmokeHostedDeploy", () => {
+  it("pins the candidate-version header and waits for manual-run completion status", async () => {
+    const fetchCalls: Array<{
+      body: string | undefined;
+      headers: HeadersInit | undefined;
+      method: string | undefined;
+      url: string;
+    }> = [];
+    let statusReadCount = 0;
+    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({
+        body: typeof init?.body === "string" ? init.body : undefined,
+        headers: init?.headers,
+        method: init?.method,
+        url: String(url),
+      });
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/status")) {
+        statusReadCount += 1;
+
+        return new Response(JSON.stringify({
+          bundleRefs: {
+            agentState: statusReadCount >= 2
+              ? {
+                  hash: "agent-hash",
+                  key: "bundles/agent",
+                  size: 11,
+                  updatedAt: "2026-03-27T01:00:00.000Z",
+                }
+              : null,
+            vault: statusReadCount >= 2
+              ? {
+                  hash: "vault-hash",
+                  key: "bundles/vault",
+                  size: 7,
+                  updatedAt: "2026-03-27T01:00:00.000Z",
+                }
+              : null,
+          },
+          inFlight: statusReadCount < 2,
+          lastError: null,
+          lastRunAt: statusReadCount >= 2 ? "2026-03-27T01:00:00.000Z" : "2026-03-27T00:59:00.000Z",
+          pendingEventCount: statusReadCount < 2 ? 1 : 0,
+          poisonedEventIds: [],
+          retryingEventId: null,
+        }), { status: 200 });
+      }
+
+      return new Response(null, { status: 204 });
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        CF_WORKER_NAME: "hb-worker",
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+        HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
+        HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "100",
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
+        HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    });
+
+    expect(fetchCalls).toEqual([
+      {
+        body: undefined,
+        headers: {
+          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+        },
+        method: undefined,
+        url: "https://worker.example.test/health",
+      },
+      {
+        body: undefined,
+        headers: {
+          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+          authorization: "Bearer control-token",
+        },
+        method: undefined,
+        url: "https://worker.example.test/internal/users/member_123/status",
+      },
+      {
+        body: "{}",
+        headers: {
+          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+        url: "https://worker.example.test/internal/users/member_123/run",
+      },
+      {
+        body: undefined,
+        headers: {
+          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+          authorization: "Bearer control-token",
+        },
+        method: undefined,
+        url: "https://worker.example.test/internal/users/member_123/status",
+      },
+    ]);
+  });
+
+  it("omits the override header when no candidate version id is configured", async () => {
+    const fetchCalls: Array<{ headers: HeadersInit | undefined; url: string }> = [];
+    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({
+        headers: init?.headers,
+        url: String(url),
+      });
+
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    });
+
+    expect(fetchCalls).toEqual([
+      {
+        headers: undefined,
+        url: "https://worker.example.test/health",
+      },
+    ]);
+  });
+
+  it("fails when the manual smoke run does not finish before the timeout", async () => {
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/run")) {
+        return new Response(null, { status: 204 });
+      }
+
+      return new Response(JSON.stringify({
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        inFlight: false,
+        lastError: "runner stalled",
+        lastRunAt: null,
+        pendingEventCount: 1,
+        poisonedEventIds: [],
+        retryingEventId: "evt_stalled",
+      }), { status: 200 });
+    };
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+        HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
+        HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "5",
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow(/Timed out waiting for manual smoke run completion/u);
+  });
+
+  it("fails before issuing requests when a candidate version id is configured without a worker name", async () => {
+    const fetchImpl = async () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow("HOSTED_EXECUTION_SMOKE_WORKER_NAME or CF_WORKER_NAME must be configured.");
   });
 });

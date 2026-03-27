@@ -1,8 +1,9 @@
 import { env, exports } from "cloudflare:workers";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionSignature } from "../../src/auth.js";
+import { createHostedBundleStore } from "../../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../../src/execution-journal.js";
 import { readHostedExecutionEnvironment } from "../../src/env.js";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
@@ -58,12 +59,6 @@ describe("cloudflare worker runtime suite", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      lastEventId: "evt_signed_runtime",
-      pendingEventCount: 0,
-      retryingEventId: null,
-      userId: dispatch.event.userId,
-    });
-    await expect(createJournalStore().readCommittedResult(dispatch.event.userId, dispatch.eventId)).resolves.toMatchObject({
       bundleRefs: {
         agentState: expect.objectContaining({
           key: `users/${dispatch.event.userId}/agent-state.bundle.json`,
@@ -72,11 +67,18 @@ describe("cloudflare worker runtime suite", () => {
           key: `users/${dispatch.event.userId}/vault.bundle.json`,
         }),
       },
-      eventId: dispatch.eventId,
-      result: {
-        nextWakeAt: "2026-03-26T12:01:00.000Z",
-      },
+      lastEventId: "evt_signed_runtime",
+      nextWakeAt: "2026-03-26T12:01:00.000Z",
+      pendingEventCount: 0,
+      retryingEventId: null,
+      userId: dispatch.event.userId,
     });
+    await expect(readBundleText(dispatch.event.userId, "agent-state")).resolves.toBe(
+      `agent-state:${dispatch.eventId}`,
+    );
+    await expect(readBundleText(dispatch.event.userId, "vault")).resolves.toBe(
+      `vault:${dispatch.eventId}`,
+    );
   });
 
   it("supports direct Durable Object RPC and alarm execution inside the Workers runtime", async () => {
@@ -88,10 +90,6 @@ describe("cloudflare worker runtime suite", () => {
     const initialStatus = await stub.dispatch(createDispatch("evt_alarm_seed", userId));
 
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
-    await runInDurableObject(stub as never, async (_instance, state) => {
-      await expect(state.storage.getAlarm()).resolves.not.toBeNull();
-    });
-
     await expect(runDurableObjectAlarm(stub as never)).resolves.toBe(true);
     await expect(stub.status(userId)).resolves.toMatchObject({
       lastEventId: expect.stringMatching(/^alarm:/u),
@@ -261,6 +259,27 @@ function createJournalStore() {
     key: environment.bundleEncryptionKey,
     keyId: environment.bundleEncryptionKeyId,
   });
+}
+
+function createBundleStore() {
+  const environment = readHostedExecutionEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  return createHostedBundleStore({
+    bucket: (env as { BUNDLES: never }).BUNDLES,
+    key: environment.bundleEncryptionKey,
+    keyId: environment.bundleEncryptionKeyId,
+  });
+}
+
+async function readBundleText(userId: string, kind: "agent-state" | "vault"): Promise<string | null> {
+  const bundle = await createBundleStore().readBundle(userId, kind);
+
+  if (!bundle) {
+    return null;
+  }
+
+  return new TextDecoder().decode(bundle);
 }
 
 function callRunnerOutbound(request: Request, userId: string): Promise<Response> {
