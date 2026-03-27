@@ -72,7 +72,8 @@ The primary production path uses Cloudflare's native container support through a
 That means:
 
 - the Worker receives signed internal dispatch
-- the per-user Durable Object serializes queue/state mutations
+- the per-user Durable Object keeps queue/process state in its SQLite storage tables (`runner_meta`, `pending_events`, `consumed_events`, and `poisoned_events`) instead of one serialized record blob
+- the Worker's internal control routes call direct Durable Object methods such as `dispatch`, `commit`, `finalizeCommit`, `status`, and per-user env updates instead of routing those control hops back through worker-local `fetch()` URLs
 - the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
 - the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, and per-run env injection before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
 - the runner process calls back to the worker's internal commit/finalize/outbox routes so the existing durable hosted assistant outbox and bundle-journal flow remains intact
@@ -122,6 +123,7 @@ For the end-to-end deployment path, including the GitHub Actions workflow and ge
 ## Operational notes
 
 - The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references.
+- Hosted bundle reads/writes and per-user env bundle updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
 - `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` includes sibling `assistant-state`, the minimal operator-home config needed for bootstrap, and the encrypted per-user runner env file when one is configured. Vault `.runtime/**` stays local-only and is not bundled into hosted `agent-state`.
 - Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.
 - Hosted assistant replies still queue during the one-shot run, the committed hosted bundles are durably recorded first, and only then does the runner drain the assistant outbox with the hosted delivery journal for reconciliation.

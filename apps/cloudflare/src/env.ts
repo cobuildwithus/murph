@@ -1,3 +1,5 @@
+import { readHostedExecutionWorkerEnvironment } from "@healthybob/hosted-execution";
+
 import { decodeBase64Key } from "./base64.js";
 
 export interface HostedExecutionEnvironment {
@@ -20,90 +22,20 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export function readHostedExecutionEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionEnvironment {
-  const dispatchSigningSecret = requireString(
-    source.HOSTED_EXECUTION_SIGNING_SECRET
-      ?? source.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET,
-    "HOSTED_EXECUTION_SIGNING_SECRET",
-  );
-  const bundleEncryptionKey = requireString(
-    source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY,
-    "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
-  );
+  const environment = readHostedExecutionWorkerEnvironment(source);
 
   return {
-    allowedUserEnvKeys: normalizeString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
-    allowedUserEnvPrefixes: normalizeString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
-    bundleEncryptionKey: decodeBase64Key(bundleEncryptionKey),
-    bundleEncryptionKeyId: normalizeString(source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID) ?? "v1",
-    cloudflareBaseUrl: normalizeBaseUrl(source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL),
-    controlToken: normalizeString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
-    defaultAlarmDelayMs: parsePositiveInteger(
-      normalizeString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),
-      15 * 60 * 1000,
-      "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS",
-    ),
-    dispatchSigningSecret,
-    maxEventAttempts: parsePositiveInteger(
-      normalizeString(source.HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS),
-      3,
-      "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
-    ),
-    retryDelayMs: parsePositiveInteger(
-      normalizeString(source.HOSTED_EXECUTION_RETRY_DELAY_MS),
-      30_000,
-      "HOSTED_EXECUTION_RETRY_DELAY_MS",
-    ),
-    runnerControlToken: normalizeString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN),
-    runnerTimeoutMs: parsePositiveInteger(
-      normalizeString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
-      60_000,
-      "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
-    ),
+    allowedUserEnvKeys: environment.allowedUserEnvKeys,
+    allowedUserEnvPrefixes: environment.allowedUserEnvPrefixes,
+    bundleEncryptionKey: decodeBase64Key(environment.bundleEncryptionKeyBase64),
+    bundleEncryptionKeyId: environment.bundleEncryptionKeyId,
+    cloudflareBaseUrl: environment.cloudflareBaseUrl,
+    controlToken: environment.controlToken,
+    defaultAlarmDelayMs: environment.defaultAlarmDelayMs,
+    dispatchSigningSecret: environment.dispatchSigningSecret,
+    maxEventAttempts: environment.maxEventAttempts,
+    retryDelayMs: environment.retryDelayMs,
+    runnerControlToken: environment.runnerControlToken,
+    runnerTimeoutMs: environment.runnerTimeoutMs,
   };
-}
-
-function requireString(value: string | undefined, label: string): string {
-  const normalized = normalizeString(value);
-
-  if (!normalized) {
-    throw new TypeError(`${label} is required.`);
-  }
-
-  return normalized;
-}
-
-function normalizeBaseUrl(value: string | undefined): string | null {
-  const normalized = normalizeString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const url = new URL(normalized);
-  url.hash = "";
-  url.search = "";
-  return url.toString().replace(/\/$/u, "");
-}
-
-function normalizeString(value: string | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function parsePositiveInteger(value: string | null, fallback: number, label: string): number {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new RangeError(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
 }

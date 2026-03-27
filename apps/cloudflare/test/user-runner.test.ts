@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { writeHostedBundleTextFile } from "@healthybob/runtime-state";
 
+import { createHostedBundleStore } from "../src/bundle-store.js";
+import { encryptHostedBundle } from "../src/crypto.js";
 import {
+  createHostedExecutionJournalStore,
   persistHostedExecutionCommit,
   persistHostedExecutionFinalBundles,
 } from "../src/execution-journal.js";
 import { HostedUserRunner } from "../src/user-runner.js";
+import { createTestSqlStorage } from "./sql-storage.js";
 
 describe("HostedUserRunner", () => {
   const bucket = createBucket();
@@ -31,6 +35,90 @@ describe("HostedUserRunner", () => {
     storage.clear();
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("roundtrips encrypted bundle payloads through object storage", async () => {
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+    });
+    const plaintext = new TextEncoder().encode("vault bundle");
+
+    const ref = await bundleStore.writeBundle("member_123", "vault", plaintext);
+
+    expect(ref.key).toBe("users/member_123/vault.bundle.json");
+    await expect(bundleStore.readBundle("member_123", "vault")).resolves.toEqual(plaintext);
+  });
+
+  it("roundtrips committed execution journal records through object storage", async () => {
+    const journalStore = createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+    });
+    const committedResult = {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-27T00:00:00.000Z",
+      eventId: "evt_roundtrip",
+      finalizedAt: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+    };
+
+    await journalStore.writeCommittedResult("member_123", "evt_roundtrip", committedResult);
+
+    await expect(journalStore.readCommittedResult("member_123", "evt_roundtrip")).resolves.toEqual(
+      committedResult,
+    );
+  });
+
+  it("normalizes legacy committed execution journal records missing finalizedAt", async () => {
+    const journalStore = createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+    });
+    const envelope = await encryptHostedBundle({
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      plaintext: new TextEncoder().encode(JSON.stringify({
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        committedAt: "2026-03-27T00:00:00.000Z",
+        eventId: "evt_legacy",
+        result: {
+          eventsHandled: 1,
+          summary: "legacy",
+        },
+      })),
+    });
+
+    await bucket.api.put(
+      "users/member_123/execution-journal/evt_legacy.json",
+      JSON.stringify(envelope),
+    );
+
+    await expect(journalStore.readCommittedResult("member_123", "evt_legacy")).resolves.toEqual({
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-27T00:00:00.000Z",
+      eventId: "evt_legacy",
+      finalizedAt: null,
+      result: {
+        eventsHandled: 1,
+        summary: "legacy",
+      },
+    });
   });
 
   it("dispatches work through the runner endpoint and persists encrypted bundles", async () => {
@@ -119,12 +207,64 @@ describe("HostedUserRunner", () => {
 
     const status = await runner.dispatch(createDispatch("evt_native_container"));
 
-    expect(storage.container.start).toHaveBeenCalledTimes(1);
-    expect(storage.container.destroy).toHaveBeenCalledTimes(1);
-    expect(storage.container.running).toBe(false);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(1);
     expect(status.lastEventId).toBe("evt_native_container");
     expect(status.nextWakeAt).toBe("2026-03-27T18:00:00.000Z");
     expect(bucket.keys()).toContain("users/member_123/vault.bundle.json");
+  });
+
+  it("passes the worker commit callback metadata through the runner container invoke request", async () => {
+    const resultPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state").toString("base64"),
+      summary: "ok",
+      vault: Buffer.from("vault").toString("base64"),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: resultPayload,
+          requestBody: JSON.parse(String(init?.body)),
+        });
+
+        return new Response(JSON.stringify(resultPayload), {
+          status: 200,
+        });
+      }),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    await runner.dispatch(createDispatch("evt_commit_callback"));
+
+    const invokeCall = storage.runnerContainerFetch.mock.calls.find(([input]) => {
+      const request = input instanceof Request ? input : new Request(input);
+      return new URL(request.url).pathname === "/internal/invoke";
+    });
+    expect(invokeCall).toBeDefined();
+    const invokeInput = invokeCall?.[0] as Request | string | URL;
+    const invokeRequest = invokeInput instanceof Request
+      ? invokeInput
+      : new Request(invokeInput);
+    const invokePayload = JSON.parse(await invokeRequest.text()) as {
+      userId: string;
+      request: {
+        commit: {
+          bundleRefs: {
+            agentState: null | { hash: string; key: string; size: number; updatedAt: string };
+            vault: null | { hash: string; key: string; size: number; updatedAt: string };
+          };
+        };
+      };
+    };
+
+    expect(invokePayload.userId).toBe("member_123");
+    expect(invokePayload.request.commit.bundleRefs).toEqual({
+      agentState: null,
+      vault: null,
+    });
   });
 
   it("reconciles final runner bundles after the durable commit path advances earlier bundle refs", async () => {
@@ -279,8 +419,7 @@ describe("HostedUserRunner", () => {
     expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
     expect(firstStatus.bundleRefs.agentState?.size).toBe("agent-state-committed".length);
     expect(firstStatus.bundleRefs.vault?.size).toBe("vault-committed".length);
-    expect(storage.container.destroy).toHaveBeenCalledTimes(1);
-    expect(storage.container.running).toBe(false);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(1);
 
     vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
     await runner.alarm();
@@ -290,8 +429,7 @@ describe("HostedUserRunner", () => {
     expect(finalStatus.retryingEventId).toBeNull();
     expect(finalStatus.bundleRefs.agentState?.size).toBe("agent-state-final".length);
     expect(finalStatus.bundleRefs.vault?.size).toBe("vault-final".length);
-    expect(storage.container.destroy).toHaveBeenCalledTimes(2);
-    expect(storage.container.running).toBe(false);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(2);
   });
 
 
@@ -1345,35 +1483,40 @@ function createBucket() {
 
 function createStorage() {
   const values = new Map<string, unknown>();
-  let transition = Promise.resolve();
-  const portFetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-    if (String(url) === "http://container/health") {
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  const sql = createTestSqlStorage();
+  const runnerContainerFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+
+    if (url.pathname === "/internal/invoke") {
+      const payload = JSON.parse(await request.clone().text()) as {
+        request: Record<string, unknown>;
+      };
+
+      return globalThis.fetch("https://runner-container.internal/__internal/run", {
+        body: JSON.stringify(payload.request),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
     }
 
-    return globalThis.fetch(url, init);
+    if (url.pathname === "/internal/destroy") {
+      return new Response(null, { status: 204 });
+    }
+
+    return new Response("Not found", { status: 404 });
   });
-  const container = {
-    running: false,
-    start: vi.fn(async () => {
-      container.running = true;
-    }),
-    getTcpPort() {
+  const runnerContainerNamespace = {
+    getByName() {
       return {
-        fetch: portFetch,
+        fetch: runnerContainerFetch,
       };
     },
-    destroy: vi.fn(async () => {
-      container.running = false;
-    }),
   };
   const state = {
-    async blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
-      const result = transition.then(callback, callback);
-      transition = result.then(() => undefined, () => undefined);
-      return result;
-    },
-    container,
+    runnerContainerNamespace,
     storage: {
       async get<T>(key: string): Promise<T | undefined> {
         return values.get(key) as T | undefined;
@@ -1390,24 +1533,33 @@ function createStorage() {
       async setAlarm(value: number | Date): Promise<void> {
         storage.lastAlarm = value instanceof Date ? value.getTime() : value;
       },
+      sql,
     },
   };
   const storage = {
     clear() {
       values.clear();
       storage.lastAlarm = null;
-      container.running = false;
-      portFetch.mockClear();
-      container.start.mockClear();
-      container.destroy.mockClear();
+      sql.reset();
+      runnerContainerFetch.mockClear();
     },
-    container,
     lastAlarm: null as number | null,
-    portFetch,
+    runnerContainerFetch,
+    runnerContainerNamespace,
     state,
   };
 
   return storage;
+}
+
+function countRunnerContainerCalls(
+  fetchMock: ReturnType<typeof vi.fn>,
+  pathname: string,
+): number {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const request = input instanceof Request ? input : new Request(String(input));
+    return new URL(request.url).pathname === pathname;
+  }).length;
 }
 
 function createDispatch(eventId: string) {

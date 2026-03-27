@@ -1,29 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionSignature } from "../src/auth.js";
+import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.js";
-import worker, { UserRunnerDurableObject } from "../src/index.js";
+import worker, { HostedRunnerOutbound, UserRunnerDurableObject } from "../src/index.js";
+import { createTestSqlStorage } from "./sql-storage.js";
 
 describe("cloudflare worker routes", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("serves a health endpoint even before secrets are configured", async () => {
     const response = await worker.fetch(
       new Request("https://runner.example.test/health"),
       {
-        BUNDLES: {
-          async get() {
-            return null;
-          },
-          async put() {},
-        },
+        BUNDLES: createBucketStore().api,
+        RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
         USER_RUNNER: {
           getByName() {
-            return {
-              fetch: vi.fn(),
-            };
+            return createUserRunnerStub();
           },
         },
       } as never,
@@ -37,13 +34,13 @@ describe("cloudflare worker routes", () => {
   });
 
   it("returns the service banner for / but 404s unknown worker routes", async () => {
-    const rootResponse = await worker.fetch(
+    const response = await worker.fetch(
       new Request("https://runner.example.test/"),
       createWorkerEnv(),
     );
 
-    expect(rootResponse.status).toBe(200);
-    await expect(rootResponse.json()).resolves.toMatchObject({
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
       ok: true,
       service: "cloudflare-hosted-runner",
     });
@@ -59,9 +56,8 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-
-  it("injects the path user id into manual run requests", async () => {
-    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+  it("injects the path user id into manual run requests through direct RPC", async () => {
+    const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/run", {
@@ -72,20 +68,25 @@ describe("cloudflare worker routes", () => {
         },
         method: "POST",
       }),
-      createWorkerEnv(stubFetch, {
+      createWorkerEnv(stub, {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
     );
 
     expect(response.status).toBe(200);
-    expect(stubFetch).toHaveBeenCalledTimes(1);
-    const request = stubFetch.mock.calls[0]?.[0] as Request;
-    expect(request.url).toBe("https://runner.internal/run");
-    await expect(request.text()).resolves.toContain('"userId":"member_123"');
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: expect.stringMatching(/^manual:/u),
+    }));
   });
 
   it("accepts an empty manual run body and still injects the path user id", async () => {
-    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const stub = createUserRunnerStub();
 
     const response = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/run", {
@@ -96,197 +97,74 @@ describe("cloudflare worker routes", () => {
         },
         method: "POST",
       }),
-      createWorkerEnv(stubFetch, {
+      createWorkerEnv(stub, {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
     );
 
     expect(response.status).toBe(200);
-    expect(stubFetch).toHaveBeenCalledTimes(1);
-    const request = stubFetch.mock.calls[0]?.[0] as Request;
-    await expect(request.text()).resolves.toBe('{"userId":"member_123"}');
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        userId: "member_123",
+      }),
+    }));
   });
 
   it("accepts signed dispatch through the /internal/events alias", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const timestamp = "2026-03-26T12:00:00.000Z";
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_123",
-      occurredAt: "2026-03-20T12:00:00.000Z",
-    };
-    const payload = JSON.stringify(dispatch);
-    const signature = await createHostedExecutionSignature({
-      payload,
-      secret: "dispatch-secret",
-      timestamp,
-    });
-    const stubFetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-        }),
-      ),
-    );
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_123");
+    const request = await createSignedDispatchRequest("/internal/events", dispatch);
 
     const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/events", {
-        body: payload,
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "x-hb-execution-signature": signature,
-          "x-hb-execution-timestamp": timestamp,
-        },
-        method: "POST",
-      }),
-      createWorkerEnv(stubFetch),
+      request,
+      createWorkerEnv(stub),
     );
 
     expect(response.status).toBe(200);
-    expect(stubFetch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(dispatch);
   });
 
-  it("rejects stale signed dispatch requests", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:10:00.000Z"));
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_stale",
-      occurredAt: "2026-03-26T11:00:00.000Z",
-    };
-    const payload = JSON.stringify(dispatch);
-    const staleTimestamp = "2026-03-26T12:00:00.000Z";
-    const signature = await createHostedExecutionSignature({
-      payload,
-      secret: "dispatch-secret",
-      timestamp: staleTimestamp,
-    });
-    const stubFetch = vi.fn();
-
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/dispatch", {
-        body: payload,
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "x-hb-execution-signature": signature,
-          "x-hb-execution-timestamp": staleTimestamp,
-        },
-        method: "POST",
-      }),
-      createWorkerEnv(stubFetch),
-    );
-
-    expect(response.status).toBe(401);
-    expect(stubFetch).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed signed dispatch timestamps", async () => {
+  it("rejects stale, malformed, and future signed dispatch requests", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_malformed",
-      occurredAt: "2026-03-20T11:00:00.000Z",
-    };
-    const payload = JSON.stringify(dispatch);
-    const malformedTimestamp = "2026-03-26T12:00:00Z";
-    const signature = await createHostedExecutionSignature({
-      payload,
-      secret: "dispatch-secret",
-      timestamp: malformedTimestamp,
-    });
-    const stubFetch = vi.fn();
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_signed");
 
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/dispatch", {
-        body: payload,
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "x-hb-execution-signature": signature,
-          "x-hb-execution-timestamp": malformedTimestamp,
-        },
-        method: "POST",
+    const staleResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, {
+        timestamp: "2026-03-26T11:50:00.000Z",
       }),
-      createWorkerEnv(stubFetch),
+      createWorkerEnv(stub),
     );
+    expect(staleResponse.status).toBe(401);
 
-    expect(response.status).toBe(401);
-    expect(stubFetch).not.toHaveBeenCalled();
+    const malformedResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, {
+        timestamp: "2026-03-26T12:00:00Z",
+      }),
+      createWorkerEnv(stub),
+    );
+    expect(malformedResponse.status).toBe(401);
+
+    const futureResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, {
+        timestamp: "2026-03-26T12:06:00.000Z",
+      }),
+      createWorkerEnv(stub),
+    );
+    expect(futureResponse.status).toBe(401);
+    expect(stub.dispatch).not.toHaveBeenCalled();
   });
 
-  it("rejects future signed dispatch requests beyond the skew window", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_future",
-      occurredAt: "2026-03-20T11:00:00.000Z",
-    };
-    const payload = JSON.stringify(dispatch);
-    const futureTimestamp = "2026-03-26T12:06:00.000Z";
-    const signature = await createHostedExecutionSignature({
-      payload,
-      secret: "dispatch-secret",
-      timestamp: futureTimestamp,
-    });
-    const stubFetch = vi.fn();
+  it("persists runner commits through the outbound commit.worker handler", async () => {
+    const harness = createUserRunnerDurableObject();
 
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/dispatch", {
-        body: payload,
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "x-hb-execution-signature": signature,
-          "x-hb-execution-timestamp": futureTimestamp,
-        },
-        method: "POST",
-      }),
-      createWorkerEnv(stubFetch),
-    );
-
-    expect(response.status).toBe(401);
-    expect(stubFetch).not.toHaveBeenCalled();
-  });
-
-  it("persists runner commits through the internal commit route", async () => {
-    const bucket = createBucketStore();
-    const storage = createStorage();
-    const env = {
-      BUNDLES: bucket.api,
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      USER_RUNNER: {
-        getByName() {
-          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
-          return {
-            fetch(request: Request) {
-              return durableObject.fetch(request);
-            },
-          };
-        },
-      },
-    };
-
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
+    const response = await callHostedRunnerOutbound(
+      new Request("http://commit.worker/events/evt_commit/commit", {
         body: JSON.stringify({
           bundles: {
             agentState: Buffer.from("agent-state").toString("base64"),
@@ -302,12 +180,11 @@ describe("cloudflare worker routes", () => {
           },
         }),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       }),
-      env as never,
+      harness.env,
     );
 
     expect(response.status).toBe(200);
@@ -320,35 +197,18 @@ describe("cloudflare worker routes", () => {
       },
       ok: true,
     });
-    expect(bucket.keys()).toEqual([
+    expect(harness.bucket.keys()).toEqual([
       "users/member_123/agent-state.bundle.json",
       "users/member_123/execution-journal/evt_commit.json",
       "users/member_123/vault.bundle.json",
     ]);
   });
 
-  it("persists finalized runner bundles through the internal finalize route", async () => {
-    const bucket = createBucketStore();
-    const storage = createStorage();
-    const env = {
-      BUNDLES: bucket.api,
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      USER_RUNNER: {
-        getByName() {
-          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
-          return {
-            fetch(request: Request) {
-              return durableObject.fetch(request);
-            },
-          };
-        },
-      },
-    };
+  it("persists finalized runner bundles through the outbound commit.worker handler", async () => {
+    const harness = createUserRunnerDurableObject();
 
-    await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize/commit", {
+    await callHostedRunnerOutbound(
+      new Request("http://commit.worker/events/evt_finalize/commit", {
         body: JSON.stringify({
           bundles: {
             agentState: Buffer.from("agent-state-committed").toString("base64"),
@@ -364,16 +224,15 @@ describe("cloudflare worker routes", () => {
           },
         }),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       }),
-      env as never,
+      harness.env,
     );
 
-    const finalizeResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize/finalize", {
+    const finalizeResponse = await callHostedRunnerOutbound(
+      new Request("http://commit.worker/events/evt_finalize/finalize", {
         body: JSON.stringify({
           bundles: {
             agentState: Buffer.from("agent-state-final").toString("base64"),
@@ -381,15 +240,14 @@ describe("cloudflare worker routes", () => {
           },
         }),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       }),
-      env as never,
+      harness.env,
     );
     const journalStore = createHostedExecutionJournalStore({
-      bucket: bucket.api,
+      bucket: harness.bucket.api,
       key: Buffer.alloc(32, 9),
       keyId: "v1",
     });
@@ -421,33 +279,16 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("rejects unauthorized runner finalization without mutating durable state", async () => {
-    const bucket = createBucketStore();
-    const storage = createStorage();
-    const env = {
-      BUNDLES: bucket.api,
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      USER_RUNNER: {
-        getByName() {
-          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
-          return {
-            fetch(request: Request) {
-              return durableObject.fetch(request);
-            },
-          };
-        },
-      },
-    };
+  it("keeps malformed outbound callbacks from mutating journal state and removes the public callback routes", async () => {
+    const harness = createUserRunnerDurableObject();
     const journalStore = createHostedExecutionJournalStore({
-      bucket: bucket.api,
+      bucket: harness.bucket.api,
       key: Buffer.alloc(32, 9),
       keyId: "v1",
     });
 
-    await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_auth/commit", {
+    await callHostedRunnerOutbound(
+      new Request("http://commit.worker/events/evt_finalize_auth/commit", {
         body: JSON.stringify({
           bundles: {
             agentState: Buffer.from("agent-state-committed").toString("base64"),
@@ -463,99 +304,15 @@ describe("cloudflare worker routes", () => {
           },
         }),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       }),
-      env as never,
+      harness.env,
     );
 
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_auth/finalize", {
-        body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state-final").toString("base64"),
-            vault: Buffer.from("vault-final").toString("base64"),
-          },
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      env as never,
-    );
-
-    expect(response.status).toBe(401);
-    await expect(journalStore.readCommittedResult("member_123", "evt_finalize_auth")).resolves.toMatchObject({
-      bundleRefs: {
-        agentState: {
-          size: "agent-state-committed".length,
-        },
-        vault: {
-          size: "vault-committed".length,
-        },
-      },
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
-  });
-
-  it("rejects malformed runner finalization without mutating durable state", async () => {
-    const bucket = createBucketStore();
-    const storage = createStorage();
-    const env = {
-      BUNDLES: bucket.api,
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      USER_RUNNER: {
-        getByName() {
-          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
-          return {
-            fetch(request: Request) {
-              return durableObject.fetch(request);
-            },
-          };
-        },
-      },
-    };
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: Buffer.alloc(32, 9),
-      keyId: "v1",
-    });
-
-    await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_bad/commit", {
-        body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state-committed").toString("base64"),
-            vault: Buffer.from("vault-committed").toString("base64"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-        }),
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      env as never,
-    );
-
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_bad/finalize", {
+    const malformedFinalizeResponse = await callHostedRunnerOutbound(
+      new Request("http://commit.worker/events/evt_finalize_auth/finalize", {
         body: JSON.stringify({
           bundles: {
             agentState: 42,
@@ -563,53 +320,16 @@ describe("cloudflare worker routes", () => {
           },
         }),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       }),
-      env as never,
+      harness.env,
     );
+    expect(malformedFinalizeResponse.status).toBe(500);
 
-    expect(response.status).toBe(500);
-    await expect(journalStore.readCommittedResult("member_123", "evt_finalize_bad")).resolves.toMatchObject({
-      bundleRefs: {
-        agentState: {
-          size: "agent-state-committed".length,
-        },
-        vault: {
-          size: "vault-committed".length,
-        },
-      },
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
-  });
-
-  it("rejects malformed runner commits without writing durable state", async () => {
-    const bucket = createBucketStore();
-    const storage = createStorage();
-    const env = {
-      BUNDLES: bucket.api,
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      USER_RUNNER: {
-        getByName() {
-          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
-          return {
-            fetch(request: Request) {
-              return durableObject.fetch(request);
-            },
-          };
-        },
-      },
-    };
-
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_bad_commit/commit", {
+    const malformedCommitResponse = await callHostedRunnerOutbound(
+      new Request("http://commit.worker/events/evt_bad_commit/commit", {
         body: JSON.stringify({
           bundles: {
             agentState: Buffer.from("agent-state").toString("base64"),
@@ -621,220 +341,121 @@ describe("cloudflare worker routes", () => {
           },
           result: {
             eventsHandled: 1,
-            summary: "ok",
+            summary: "bad",
           },
         }),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
       }),
-      env as never,
+      harness.env,
     );
+    expect(malformedCommitResponse.status).toBe(500);
 
-    expect(response.status).toBe(500);
-    expect(bucket.keys()).toEqual([]);
-  });
-
-  it("keeps the first durable commit for an event when duplicate callbacks arrive", async () => {
-    const journalWriteStarted = createDeferred<void>();
-    const releaseJournalWrite = createDeferred<void>();
-    let journalWrites = 0;
-    const bucket = createBucketStore({
-      async onPut(key) {
-        if (!key.includes("/execution-journal/")) {
-          return;
-        }
-
-        journalWrites += 1;
-        if (journalWrites === 1) {
-          journalWriteStarted.resolve();
-          await releaseJournalWrite.promise;
-        }
-      },
-    });
-    const storage = createStorage();
-    const env = {
-      BUNDLES: bucket.api,
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      USER_RUNNER: {
-        getByName() {
-          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
-          return {
-            fetch(request: Request) {
-              return durableObject.fetch(request);
-            },
-          };
-        },
-      },
-    };
-
-    const first = worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_first_wins/commit", {
-        body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state-a").toString("base64"),
-            vault: Buffer.from("vault-a").toString("base64"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          result: {
-            eventsHandled: 1,
-            summary: "first",
-          },
-        }),
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
+    const publicCommitResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
         method: "POST",
       }),
-      env as never,
+      createWorkerEnv(),
     );
-    await journalWriteStarted.promise;
-    const second = worker.fetch(
-      new Request("https://runner.example.test/internal/runner-events/member_123/evt_first_wins/commit", {
-        body: JSON.stringify({
-          bundles: {
-            agentState: Buffer.from("agent-state-b").toString("base64"),
-            vault: Buffer.from("vault-b").toString("base64"),
-          },
-          currentBundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          result: {
-            eventsHandled: 1,
-            summary: "second",
-          },
-        }),
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      env as never,
-    );
-    releaseJournalWrite.resolve();
-    const [firstResponse, secondResponse] = await Promise.all([first, second]);
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: Buffer.alloc(32, 9),
-      keyId: "v1",
-    });
+    expect(publicCommitResponse.status).toBe(404);
 
-    await expect(firstResponse.json()).resolves.toMatchObject({
-      committed: {
-        result: {
-          summary: "first",
-        },
-      },
-      ok: true,
-    });
-    await expect(secondResponse.json()).resolves.toMatchObject({
-      committed: {
-        result: {
-          summary: "first",
-        },
-      },
-      ok: true,
-    });
-    expect(journalWrites).toBe(1);
-    await expect(journalStore.readCommittedResult("member_123", "evt_first_wins")).resolves.toMatchObject({
-      result: {
-        summary: "first",
-      },
-    });
-  });
-
-  it("persists and reads hosted outbox delivery journal records through the runner route", async () => {
-    const bucket = createBucketStore();
-    const env = {
-      BUNDLES: bucket.api,
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-      USER_RUNNER: {
-        getByName() {
-          return {
-            fetch: vi.fn(),
-          };
-        },
-      },
-    };
-
-    const putResponse = await worker.fetch(
+    const publicOutboxResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
+        method: "GET",
+      }),
+      createWorkerEnv(),
+    );
+    expect(publicOutboxResponse.status).toBe(404);
+
+    await expect(journalStore.readCommittedResult("member_123", "evt_finalize_auth")).resolves.toMatchObject({
+      finalizedAt: null,
+      result: {
+        summary: "committed",
+      },
+    });
+  });
+
+  it("persists and reads hosted outbox delivery journal records through the outbound outbox.worker handler", async () => {
+    const env = createWorkerEnv();
+    const response = await callHostedRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_123", {
         body: JSON.stringify({
           dedupeKey: "dedupe_123",
-          delivery: {
-            channel: "linq",
-            sentAt: "2026-03-26T12:00:00.000Z",
-            target: "chat_123",
-            targetKind: "thread",
-            messageLength: 21,
-          },
+          delivery: createOutboxDelivery(),
         }),
         headers: {
-          authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
         method: "PUT",
       }),
-      env as never,
+      env,
     );
 
-    expect(putResponse.status).toBe(200);
-    await expect(putResponse.json()).resolves.toMatchObject({
-      delivery: {
-        channel: "linq",
-        target: "chat_123",
-      },
-      intentId: "outbox_123",
-    });
+    expect(response.status).toBe(200);
 
-    const getResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123?dedupeKey=dedupe_123", {
-        headers: {
-          authorization: "Bearer runner-token",
-        },
+    const readResponse = await callHostedRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_123?dedupeKey=dedupe_123", {
         method: "GET",
       }),
-      env as never,
+      env,
     );
 
-    expect(getResponse.status).toBe(200);
-    await expect(getResponse.json()).resolves.toMatchObject({
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
       delivery: {
-        channel: "linq",
-        target: "chat_123",
+        channel: "telegram",
+        target: "thread_123",
       },
       intentId: "outbox_123",
     });
-    expect(bucket.keys()).toHaveLength(2);
-    expect(bucket.keys()).toContain("users/member_123/outbox-deliveries/by-intent/outbox_123.json");
-    expect(
-      bucket.keys().some((key) => key.startsWith("users/member_123/outbox-deliveries/by-dedupe/")),
-    ).toBe(true);
   });
 
-  it("forwards operator env config updates to the durable object", async () => {
-    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+  it("falls back to dedupe delivery records when the outbound outbox intent id changes", async () => {
+    const env = createWorkerEnv();
 
-    const response = await worker.fetch(
+    await callHostedRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_a", {
+        body: JSON.stringify({
+          dedupeKey: "dedupe_123",
+          delivery: createOutboxDelivery(),
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    const readResponse = await callHostedRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_b?dedupeKey=dedupe_123", {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
+      delivery: {
+        channel: "telegram",
+      },
+      intentId: "outbox_a",
+    });
+  });
+
+  it("forwards operator env and status routes to direct durable-object methods", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const updateResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/env", {
         body: JSON.stringify({
-          env: {
-            OPENAI_API_KEY: "sk-user",
-            TELEGRAM_BOT_TOKEN: "bot-token",
-          },
-          mode: "replace",
+          mode: "merge",
+          OPENAI_API_KEY: "sk-test",
         }),
         headers: {
           authorization: "Bearer control-token",
@@ -842,147 +463,83 @@ describe("cloudflare worker routes", () => {
         },
         method: "PUT",
       }),
-      createWorkerEnv(stubFetch, {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
+      env,
     );
+    expect(updateResponse.status).toBe(200);
+    expect(stub.updateUserEnv).toHaveBeenCalledWith("member_123", {
+      env: {
+        OPENAI_API_KEY: "sk-test",
+      },
+      mode: "merge",
+    });
 
-    expect(response.status).toBe(200);
-    expect(stubFetch).toHaveBeenCalledTimes(1);
-    const request = stubFetch.mock.calls[0]?.[0] as Request;
-    expect(request.url).toBe("https://runner.internal/env?userId=member_123");
-    await expect(request.text()).resolves.toContain("\"OPENAI_API_KEY\":\"sk-user\"");
-  });
-
-  it("forwards operator env status reads to the durable object", async () => {
-    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
-
-    const response = await worker.fetch(
+    const envStatusResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/env", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
       }),
-      createWorkerEnv(stubFetch, {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
+      env,
     );
+    expect(envStatusResponse.status).toBe(200);
+    expect(stub.getUserEnvStatus).toHaveBeenCalledWith("member_123");
 
-    expect(response.status).toBe(200);
-    expect(stubFetch).toHaveBeenCalledTimes(1);
-    const request = stubFetch.mock.calls[0]?.[0] as Request;
-    expect(request.url).toBe("https://runner.internal/env?userId=member_123");
-    expect(request.method).toBe("GET");
-  });
-
-  it("forwards operator status reads to the durable object", async () => {
-    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
-
-    const response = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/status", {
-        headers: {
-          authorization: "Bearer control-token",
-        },
-        method: "GET",
-      }),
-      createWorkerEnv(stubFetch, {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(stubFetch).toHaveBeenCalledTimes(1);
-    const request = stubFetch.mock.calls[0]?.[0] as Request;
-    expect(request.url).toBe("https://runner.internal/status?userId=member_123");
-    expect(request.method).toBe("GET");
-  });
-
-  it("forwards operator env clears to the durable object", async () => {
-    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
-
-    const response = await worker.fetch(
+    const clearResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/env", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "DELETE",
       }),
-      createWorkerEnv(stubFetch, {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
+      env,
     );
+    expect(clearResponse.status).toBe(200);
+    expect(stub.clearUserEnv).toHaveBeenCalledWith("member_123");
 
-    expect(response.status).toBe(200);
-    expect(stubFetch).toHaveBeenCalledTimes(1);
-    const request = stubFetch.mock.calls[0]?.[0] as Request;
-    expect(request.url).toBe("https://runner.internal/env?userId=member_123");
-    expect(request.method).toBe("DELETE");
-  });
-
-  it("returns HTTP 405 for unsupported methods on matched worker routes", async () => {
-    const runResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/run", {
+    const statusResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/status", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "GET",
       }),
-      createWorkerEnv(vi.fn(), {
+      env,
+    );
+    expect(statusResponse.status).toBe(200);
+    expect(stub.status).toHaveBeenCalledWith("member_123");
+  });
+
+  it("returns method and auth errors on protected routes in the same order as before", async () => {
+    const unauthorizedRunResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "GET",
+      }),
+      createWorkerEnv(undefined, {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
     );
 
-    expect(runResponse.status).toBe(405);
-    await expect(runResponse.json()).resolves.toEqual({
-      error: "Method not allowed.",
+    expect(unauthorizedRunResponse.status).toBe(401);
+    await expect(unauthorizedRunResponse.json()).resolves.toEqual({
+      error: "Unauthorized",
     });
 
-    const outboxResponse = await worker.fetch(
+    const wrongMethodOutboxResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
         headers: {
           authorization: "Bearer runner-token",
         },
         method: "POST",
       }),
-      createWorkerEnv(vi.fn(), {
+      createWorkerEnv(undefined, {
         HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
       }),
     );
 
-    expect(outboxResponse.status).toBe(405);
-    await expect(outboxResponse.json()).resolves.toEqual({
+    expect(wrongMethodOutboxResponse.status).toBe(405);
+    await expect(wrongMethodOutboxResponse.json()).resolves.toEqual({
       error: "Method not allowed.",
-    });
-  });
-
-  it("keeps auth checks ahead of wrong-method responses on protected worker routes", async () => {
-    const runResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/users/member_123/run", {
-        method: "GET",
-      }),
-      createWorkerEnv(vi.fn(), {
-        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
-      }),
-    );
-
-    expect(runResponse.status).toBe(401);
-    await expect(runResponse.json()).resolves.toEqual({
-      error: "Unauthorized",
-    });
-
-    const outboxResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
-        method: "POST",
-      }),
-      createWorkerEnv(vi.fn(), {
-        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      }),
-    );
-
-    expect(outboxResponse.status).toBe(401);
-    await expect(outboxResponse.json()).resolves.toEqual({
-      error: "Unauthorized",
     });
   });
 
@@ -991,7 +548,7 @@ describe("cloudflare worker routes", () => {
       new Request("https://runner.example.test/internal/users/%E0%A4%A/run", {
         method: "GET",
       }),
-      createWorkerEnv(vi.fn(), {
+      createWorkerEnv(undefined, {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
     );
@@ -1005,7 +562,7 @@ describe("cloudflare worker routes", () => {
       new Request("https://runner.example.test/internal/runner-events/%E0%A4%A/evt_commit/commit", {
         method: "GET",
       }),
-      createWorkerEnv(vi.fn(), {
+      createWorkerEnv(undefined, {
         HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
       }),
     );
@@ -1030,213 +587,124 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("preserves not-found responses for unsupported durable-object methods", async () => {
-    const durableObject = createUserRunnerDurableObject();
-
-    const envResponse = await durableObject.durableObject.fetch(
-      new Request("https://runner.internal/env?userId=member_123", {
-        method: "POST",
-      }),
-    );
-
-    expect(envResponse.status).toBe(404);
-    await expect(envResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-
-    const statusResponse = await durableObject.durableObject.fetch(
-      new Request("https://runner.internal/status?userId=member_123", {
-        method: "POST",
-      }),
-    );
-
-    expect(statusResponse.status).toBe(404);
-    await expect(statusResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-  });
-
-  it("preserves durable-object env validation ahead of wrong-method not-found responses", async () => {
-    const durableObject = createUserRunnerDurableObject();
-
-    const response = await durableObject.durableObject.fetch(
-      new Request("https://runner.internal/env", {
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "userId is required.",
-    });
-  });
-
-  it("keeps durable-object commit and finalize parameter validation ahead of body parsing", async () => {
-    const durableObject = createUserRunnerDurableObject();
-
-    const commitResponse = await durableObject.durableObject.fetch(
-      new Request("https://runner.internal/commit?userId=member_123", {
-        body: "{",
-        method: "POST",
-      }),
-    );
-
-    expect(commitResponse.status).toBe(400);
-    await expect(commitResponse.json()).resolves.toEqual({
-      error: "userId and eventId are required.",
-    });
-
-    const finalizeResponse = await durableObject.durableObject.fetch(
-      new Request("https://runner.internal/finalize?eventId=evt_123", {
-        body: "{",
-        method: "POST",
-      }),
-    );
-
-    expect(finalizeResponse.status).toBe(400);
-    await expect(finalizeResponse.json()).resolves.toEqual({
-      error: "userId and eventId are required.",
-    });
-  });
-
-  it("returns HTTP 429 when dispatch backpressures a full per-user queue", async () => {
+  it("returns HTTP 429 when signed dispatch backpressures a full per-user queue", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const harness = createUserRunnerDurableObject();
     const firstRun = createDeferred<void>();
-    const durableObject = createUserRunnerDurableObject();
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
-        await firstRun.promise;
-        return createCommittedRunnerSuccessResponse({
-          bucket: durableObject.bucket,
-          payload: createRunnerSuccessPayload(),
-          requestBody: JSON.parse(String(init?.body)),
-        });
-      })
-      .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket: durableObject.bucket,
+    harness.storage.runnerContainerFetch.mockImplementationOnce(async (input: RequestInfo | URL, init?: RequestInit) => {
+      await firstRun.promise;
+      return createRunnerContainerInvokeSuccessResponse({
+        bucket: harness.bucket,
         payload: createRunnerSuccessPayload(),
-        requestBody: JSON.parse(String(init?.body)),
-      }));
-    const originalFetch = global.fetch;
-    vi.stubGlobal("fetch", fetchMock);
-
-    try {
-      const firstResponse = durableObject.durableObject.fetch(createDispatchRequest("evt_000"));
-      await vi.waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(1);
+        request: input instanceof Request ? input : new Request(input, init),
       });
+    }).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => (
+      createRunnerContainerInvokeSuccessResponse({
+        bucket: harness.bucket,
+        payload: createRunnerSuccessPayload(),
+        request: input instanceof Request ? input : new Request(input, init),
+      })
+    ));
 
-      for (let index = 1; index < 64; index += 1) {
-        await durableObject.durableObject.fetch(createDispatchRequest(`evt_${index.toString().padStart(3, "0")}`));
-      }
+    const firstResponse = worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_000")),
+      harness.env as never,
+    );
+    await vi.waitFor(() => {
+      expect(harness.storage.runnerContainerFetch).toHaveBeenCalledTimes(1);
+    });
 
-      const overflowResponse = await durableObject.durableObject.fetch(createDispatchRequest("evt_overflow"));
-
-      expect(overflowResponse.status).toBe(429);
-      await expect(overflowResponse.json()).resolves.toMatchObject({
-        backpressuredEventIds: ["evt_overflow"],
-        poisonedEventIds: [],
-      });
-
-      firstRun.resolve();
-      await firstResponse;
-    } finally {
-      global.fetch = originalFetch;
+    for (let index = 1; index < 64; index += 1) {
+      await harness.durableObject.dispatch(createDispatch(`evt_${index.toString().padStart(3, "0")}`));
     }
+
+    const overflowResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_overflow")),
+      harness.env as never,
+    );
+
+    expect(overflowResponse.status).toBe(429);
+    await expect(overflowResponse.json()).resolves.toMatchObject({
+      backpressuredEventIds: ["evt_overflow"],
+      poisonedEventIds: [],
+    });
+
+    firstRun.resolve();
+    await firstResponse;
   });
 
   it("returns HTTP 429 for manual runs when the queue is already full", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const harness = createUserRunnerDurableObject({
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
     const firstRun = createDeferred<void>();
-    const durableObject = createUserRunnerDurableObject();
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(async (_url, init) => {
-        await firstRun.promise;
-        return createCommittedRunnerSuccessResponse({
-          bucket: durableObject.bucket,
-          payload: createRunnerSuccessPayload(),
-          requestBody: JSON.parse(String(init?.body)),
-        });
-      })
-      .mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket: durableObject.bucket,
+    harness.storage.runnerContainerFetch.mockImplementationOnce(async (input: RequestInfo | URL, init?: RequestInit) => {
+      await firstRun.promise;
+      return createRunnerContainerInvokeSuccessResponse({
+        bucket: harness.bucket,
         payload: createRunnerSuccessPayload(),
-        requestBody: JSON.parse(String(init?.body)),
-      }));
-    const originalFetch = global.fetch;
-    vi.stubGlobal("fetch", fetchMock);
-
-    try {
-      const firstResponse = durableObject.durableObject.fetch(createDispatchRequest("evt_000"));
-      await vi.waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(1);
+        request: input instanceof Request ? input : new Request(input, init),
       });
+    }).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => (
+      createRunnerContainerInvokeSuccessResponse({
+        bucket: harness.bucket,
+        payload: createRunnerSuccessPayload(),
+        request: input instanceof Request ? input : new Request(input, init),
+      })
+    ));
 
-      for (let index = 1; index < 64; index += 1) {
-        await durableObject.durableObject.fetch(createDispatchRequest(`evt_${index.toString().padStart(3, "0")}`));
-      }
+    const firstResponse = harness.durableObject.dispatch(createDispatch("evt_000"));
+    await vi.waitFor(() => {
+      expect(harness.storage.runnerContainerFetch).toHaveBeenCalledTimes(1);
+    });
 
-      const manualEventId = `manual:${Date.now()}`;
-      const runResponse = await durableObject.durableObject.fetch(
-        new Request("https://runner.internal/run", {
-          body: JSON.stringify({
-            userId: "member_123",
-          }),
-          method: "POST",
-        }),
-      );
-
-      expect(runResponse.status).toBe(429);
-      await expect(runResponse.json()).resolves.toMatchObject({
-        backpressuredEventIds: [manualEventId],
-        poisonedEventIds: [],
-      });
-
-      firstRun.resolve();
-      await firstResponse;
-    } finally {
-      global.fetch = originalFetch;
+    for (let index = 1; index < 64; index += 1) {
+      await harness.durableObject.dispatch(createDispatch(`evt_${index.toString().padStart(3, "0")}`));
     }
+
+    const runResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/run", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "POST",
+      }),
+      harness.env as never,
+    );
+
+    expect(runResponse.status).toBe(429);
+    await expect(runResponse.json()).resolves.toMatchObject({
+      backpressuredEventIds: [expect.stringMatching(/^manual:/u)],
+    });
+
+    firstRun.resolve();
+    await firstResponse;
   });
 });
 
 function createWorkerEnv(
-  stubFetch = vi.fn(),
-  overrides: Partial<{
-    HOSTED_EXECUTION_CONTROL_TOKEN: string;
-    HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: string;
-  }> = {},
-): {
-  BUNDLES: { delete?: () => Promise<void>; get: () => Promise<null>; put: () => Promise<void> };
-  HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: string;
-  HOSTED_EXECUTION_CONTROL_TOKEN?: string;
-  HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
-  HOSTED_EXECUTION_SIGNING_SECRET: string;
-  USER_RUNNER: { getByName: () => { fetch: typeof stubFetch } };
-} {
+  userRunnerStub: UserRunnerStub = createUserRunnerStub(),
+  overrides: Partial<Record<string, unknown>> = {},
+) {
   return {
-    BUNDLES: {
-      async get() {
-        return null;
-      },
-      async put() {},
-    },
+    BUNDLES: createBucketStore().api,
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-    HOSTED_EXECUTION_CONTROL_TOKEN: overrides.HOSTED_EXECUTION_CONTROL_TOKEN,
-    HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: overrides.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN,
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+    RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
     USER_RUNNER: {
       getByName() {
-        return {
-          fetch: stubFetch,
-        };
+        return userRunnerStub;
       },
     },
+    ...overrides,
   };
 }
 
 function createBucketStore(input: {
-  onPut?: (key: string, value: string) => Promise<void> | void;
+  onPut?(key: string, value: string): Promise<void> | void;
 } = {}) {
   const values = new Map<string, string>();
 
@@ -1271,35 +739,40 @@ function createBucketStore(input: {
 
 function createStorage() {
   const values = new Map<string, unknown>();
-  let transition = Promise.resolve();
-  const portFetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-    if (String(url) === "http://container/health") {
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  const sql = createTestSqlStorage();
+  const runnerContainerFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+
+    if (url.pathname === "/internal/invoke") {
+      const payload = JSON.parse(await request.clone().text()) as {
+        request: Record<string, unknown>;
+      };
+
+      return globalThis.fetch("https://runner-container.internal/__internal/run", {
+        body: JSON.stringify(payload.request),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
     }
 
-    return globalThis.fetch(url, init);
+    if (url.pathname === "/internal/destroy") {
+      return new Response(null, { status: 204 });
+    }
+
+    return new Response("Not found", { status: 404 });
   });
-  const container = {
-    running: false,
-    start: vi.fn(async () => {
-      container.running = true;
-    }),
-    getTcpPort() {
+  const runnerContainerNamespace = {
+    getByName() {
       return {
-        fetch: portFetch,
+        fetch: runnerContainerFetch,
       };
     },
-    destroy: vi.fn(async () => {
-      container.running = false;
-    }),
   };
   const state = {
-    async blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
-      const result = transition.then(callback, callback);
-      transition = result.then(() => undefined, () => undefined);
-      return result;
-    },
-    container,
+    runnerContainerNamespace,
     storage: {
       async get<T>(key: string): Promise<T | undefined> {
         return values.get(key) as T | undefined;
@@ -1312,12 +785,18 @@ function createStorage() {
         return null;
       },
       async setAlarm(): Promise<void> {},
+      sql,
     },
   };
 
   return {
-    container,
-    portFetch,
+    clear() {
+      values.clear();
+      sql.reset();
+      runnerContainerFetch.mockClear();
+    },
+    runnerContainerFetch,
+    runnerContainerNamespace,
     state,
   };
 }
@@ -1337,19 +816,16 @@ function createDeferred<T>() {
   };
 }
 
-function createDispatchRequest(eventId: string): Request {
-  return new Request("https://runner.internal/dispatch", {
-    body: JSON.stringify({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId,
-      occurredAt: "2026-03-26T12:00:00.000Z",
-    }),
-    method: "POST",
-  });
+function createDispatch(eventId: string): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      kind: "assistant.cron.tick",
+      reason: "manual",
+      userId: "member_123",
+    },
+    eventId,
+    occurredAt: "2026-03-26T12:00:00.000Z",
+  };
 }
 
 function createRunnerSuccessPayload() {
@@ -1362,6 +838,16 @@ function createRunnerSuccessPayload() {
       eventsHandled: 1,
       summary: "ok",
     },
+  };
+}
+
+function createOutboxDelivery() {
+  return {
+    channel: "telegram",
+    messageLength: "Queued reply".length,
+    sentAt: "2026-03-26T12:00:00.000Z",
+    target: "thread_123",
+    targetKind: "thread" as const,
   };
 }
 
@@ -1398,21 +884,179 @@ async function createCommittedRunnerSuccessResponse(input: {
   });
 }
 
-function createUserRunnerDurableObject() {
+async function createRunnerContainerInvokeSuccessResponse(input: {
+  bucket: ReturnType<typeof createBucketStore>;
+  payload: ReturnType<typeof createRunnerSuccessPayload>;
+  request: Request;
+}): Promise<Response> {
+  const url = new URL(input.request.url);
+
+  if (url.pathname === "/internal/destroy") {
+    return new Response(null, { status: 204 });
+  }
+
+  if (url.pathname !== "/internal/invoke") {
+    return new Response("Not found", { status: 404 });
+  }
+
+  const requestBody = JSON.parse(await input.request.clone().text()) as {
+    request: {
+      commit: {
+        bundleRefs: {
+          agentState: { hash: string; key: string; size: number; updatedAt: string } | null;
+          vault: { hash: string; key: string; size: number; updatedAt: string } | null;
+        };
+      };
+      dispatch: {
+        event: {
+          userId: string;
+        };
+        eventId: string;
+      };
+    };
+  };
+
+  return createCommittedRunnerSuccessResponse({
+    bucket: input.bucket,
+    payload: input.payload,
+    requestBody: requestBody.request,
+  });
+}
+
+function createUserRunnerDurableObject(
+  overrides: Partial<Record<string, unknown>> = {},
+) {
   const bucket = createBucketStore();
   const storage = createStorage();
   const env = {
     BUNDLES: bucket.api,
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-    HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://worker.example.test",
+    HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://runner.example.test",
     HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+    RUNNER_CONTAINER: storage.runnerContainerNamespace,
+    ...overrides,
   };
+  const durableObject = new UserRunnerDurableObject(storage.state, env as never);
 
   return {
     bucket,
-    durableObject: new UserRunnerDurableObject(storage.state, env as never),
-    env,
+    durableObject,
+    env: {
+      ...env,
+      USER_RUNNER: {
+        getByName() {
+          return durableObject;
+        },
+      },
+    },
     storage,
   };
+}
+
+type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
+
+function createUserRunnerStub() {
+  return {
+    clearUserEnv: vi.fn(async (userId: string) => ({
+      configuredUserEnvKeys: [],
+      userId,
+    })),
+    commit: vi.fn(async (input: {
+      eventId: string;
+    }) => ({
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: input.eventId,
+      finalizedAt: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+    })),
+    dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
+      backpressuredEventIds: [],
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: input.eventId,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId: input.event.userId,
+    })),
+    finalizeCommit: vi.fn(async (input: {
+      eventId: string;
+    }) => ({
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-26T12:00:00.000Z",
+      eventId: input.eventId,
+      finalizedAt: "2026-03-26T12:00:01.000Z",
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+    })),
+    getUserEnvStatus: vi.fn(async (userId: string) => ({
+      configuredUserEnvKeys: [],
+      userId,
+    })),
+    status: vi.fn(async (userId: string) => ({
+      backpressuredEventIds: [],
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: null,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId,
+    })),
+    updateUserEnv: vi.fn(async (userId: string, update: { env: Record<string, string | null> }) => ({
+      configuredUserEnvKeys: Object.keys(update.env).sort(),
+      userId,
+    })),
+  };
+}
+
+async function createSignedDispatchRequest(
+  path: string,
+  dispatch: HostedExecutionDispatchRequest,
+  input: {
+    timestamp?: string;
+  } = {},
+): Promise<Request> {
+  const payload = JSON.stringify(dispatch);
+  const timestamp = input.timestamp ?? "2026-03-26T12:00:00.000Z";
+  const signature = await createHostedExecutionSignature({
+    payload,
+    secret: "dispatch-secret",
+    timestamp,
+  });
+
+  return new Request(`https://runner.example.test${path}`, {
+    body: payload,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-hb-execution-signature": signature,
+      "x-hb-execution-timestamp": timestamp,
+    },
+    method: "POST",
+  });
 }

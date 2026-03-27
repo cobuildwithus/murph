@@ -1,0 +1,153 @@
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionDispatchRequest,
+  HostedExecutionUserStatus,
+} from "@healthybob/runtime-state";
+
+import type { HostedExecutionContainerStateLike } from "../runner-container.js";
+
+export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
+
+export interface DurableObjectSqlCursorLike<
+  T extends Record<string, DurableObjectSqlValue>,
+> extends Iterable<T> {
+  next(): IteratorResult<T>;
+  one(): T;
+  raw<U extends DurableObjectSqlValue[]>(): IterableIterator<U>;
+  readonly columnNames: string[];
+  readonly rowsRead: number;
+  readonly rowsWritten: number;
+  toArray(): T[];
+}
+
+export interface DurableObjectSqlStorageLike {
+  exec<T extends Record<string, DurableObjectSqlValue>>(
+    query: string,
+    ...bindings: unknown[]
+  ): DurableObjectSqlCursorLike<T>;
+}
+
+export interface DurableObjectStorageLike {
+  deleteAlarm?(): Promise<void>;
+  get<T>(key: string): Promise<T | undefined>;
+  getAlarm(): Promise<number | null>;
+  put<T>(key: string, value: T): Promise<void>;
+  setAlarm(scheduledTime: number | Date): Promise<void>;
+  sql?: DurableObjectSqlStorageLike;
+}
+
+export interface DurableObjectStateLike extends HostedExecutionContainerStateLike {
+  storage: DurableObjectStorageLike;
+}
+
+export interface PendingDispatchRecord {
+  attempts: number;
+  availableAt: string;
+  dispatch: HostedExecutionDispatchRequest;
+  enqueuedAt: string;
+  eventId: string;
+  lastError: string | null;
+}
+
+export interface RunnerBundleVersions {
+  agentState: number;
+  vault: number;
+}
+
+export interface RunnerStateRecord {
+  activated: boolean;
+  backpressuredEventIds: string[];
+  bundleRefs: {
+    agentState: HostedExecutionBundleRef | null;
+    vault: HostedExecutionBundleRef | null;
+  };
+  bundleVersions: RunnerBundleVersions;
+  inFlight: boolean;
+  lastError: string | null;
+  lastEventId: string | null;
+  lastRunAt: string | null;
+  nextPendingAvailableAt: string | null;
+  nextWakeAt: string | null;
+  pendingEventCount: number;
+  poisonedEventIds: string[];
+  retryingEventId: string | null;
+  userId: string;
+}
+
+export interface LegacyPendingDispatchRecord {
+  attempts: number;
+  availableAt: string;
+  dispatch: HostedExecutionDispatchRequest;
+  enqueuedAt: string;
+  lastError: string | null;
+}
+
+export interface LegacyUserRunnerRecord {
+  activated: boolean;
+  backpressuredEventIds: string[];
+  bundleRefs: {
+    agentState: HostedExecutionBundleRef | null;
+    vault: HostedExecutionBundleRef | null;
+  };
+  consumedEventExpirations: Record<string, string>;
+  inFlight: boolean;
+  lastError: string | null;
+  lastEventId: string | null;
+  lastRunAt: string | null;
+  nextWakeAt: string | null;
+  pendingEvents: LegacyPendingDispatchRecord[];
+  poisonedEventIds: string[];
+  recentEventIds: string[];
+  retryingEventId: string | null;
+  userId: string;
+}
+
+export const LEGACY_STATE_STORAGE_KEY = "state";
+export const CONSUMED_EVENT_TTL_MS = 7 * 24 * 60 * 60_000;
+export const MAX_BACKPRESSURED_EVENT_IDS = 16;
+export const MAX_PENDING_EVENTS = 64;
+export const MAX_POISONED_EVENT_IDS = 16;
+export const RETRY_MAX_DELAY_MS = 5 * 60_000;
+
+export function computeRetryDelayMs(baseDelayMs: number, attempts: number): number {
+  return Math.min(RETRY_MAX_DELAY_MS, baseDelayMs * (2 ** Math.max(0, attempts - 1)));
+}
+
+export function earliestIsoTimestamp(
+  ...values: Array<string | null | undefined>
+): string | null {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+}
+
+export function sameBundleRef(
+  left: HostedExecutionBundleRef | null,
+  right: HostedExecutionBundleRef | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.hash === right.hash && left.key === right.key && left.size === right.size;
+}
+
+export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStatus {
+  return {
+    backpressuredEventIds: record.backpressuredEventIds,
+    bundleRefs: record.bundleRefs,
+    inFlight: record.inFlight,
+    lastError: record.lastError,
+    lastEventId: record.lastEventId,
+    lastRunAt: record.lastRunAt,
+    nextWakeAt: record.nextWakeAt,
+    pendingEventCount: record.pendingEventCount,
+    poisonedEventIds: record.poisonedEventIds,
+    retryingEventId: record.retryingEventId,
+    userId: record.userId,
+  };
+}
