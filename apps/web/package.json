@@ -8,7 +8,8 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "dev:turbopack:plain": "NEXT_DISABLE_WORKSPACE_SOURCE_REWRITE=1 next dev",
     "build": "rimraf .next && prisma generate && next build",
     "start": "next start",
     "typecheck": "prisma generate && tsc -p tsconfig.json --pretty false",
