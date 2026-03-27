@@ -14,7 +14,7 @@ import {
   type HostedExecutionFinalizePayload,
 } from "./execution-journal.js";
 import {
-  destroyHostedExecutionContainer,
+  HostedExecutionConfigurationError,
   type HostedExecutionContainerNamespaceLike,
   invokeHostedExecutionContainerRunner,
 } from "./runner-container.js";
@@ -32,6 +32,7 @@ import {
   computeRetryDelayMs,
   toUserStatus,
   type DurableObjectStateLike,
+  type RunnerStateRecord,
 } from "./user-runner/types.js";
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
@@ -92,8 +93,8 @@ export class HostedUserRunner {
 
         return toUserStatus(
           presence.pending
-            ? await this.commitRecovery.applyCommittedDispatch(input.event.userId, committed)
-            : await this.queueStore.rememberCommittedEvent(input.event.userId, input.eventId),
+            ? await this.applyCommittedDispatchAndCleanup(input.event.userId, committed)
+            : await this.rememberCommittedEventAndCleanup(input.event.userId, input.eventId),
         );
       }
 
@@ -116,6 +117,7 @@ export class HostedUserRunner {
 
   async alarm(): Promise<void> {
     let record = await this.queueStore.readState(null);
+    record = await this.queueStore.clearNextWakeIfDue(record.userId, Date.now());
     if (!record.activated && record.pendingEventCount === 0) {
       return;
     }
@@ -211,92 +213,104 @@ export class HostedUserRunner {
 
   private async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
     let record = await this.queueStore.readState(userId);
-    const recovered = await this.commitRecovery.recoverCommittedPendingDispatch(record);
+    let processedDispatch = false;
+    const recovered = await this.recoverCommittedPendingDispatchAndCleanup(record);
     if (recovered) {
       record = recovered;
+      processedDispatch = true;
     }
 
-    try {
-      while (true) {
-        const recoveredPending = await this.commitRecovery.recoverCommittedPendingDispatch(record);
-        if (recoveredPending) {
-          record = recoveredPending;
-          continue;
-        }
+    while (true) {
+      const recoveredPending = await this.recoverCommittedPendingDispatchAndCleanup(record);
+      if (recoveredPending) {
+        record = recoveredPending;
+        continue;
+      }
 
-        const claim = await this.queueStore.claimNextDuePendingDispatch(userId, Date.now());
-        const nextPending = claim.pendingDispatch;
-        record = claim.record;
+      const claim = await this.queueStore.claimNextDuePendingDispatch(userId, Date.now());
+      const nextPending = claim.pendingDispatch;
+      record = claim.record;
 
-        if (!nextPending) {
-          return toUserStatus(await this.scheduler.syncNextWake(userId));
-        }
+      if (!nextPending) {
+        return toUserStatus(processedDispatch ? record : await this.scheduler.syncNextWake(userId));
+      }
 
-        try {
-          const committed = await this.commitRecovery.readCommittedDispatch(
-            record.userId,
-            nextPending.dispatch.eventId,
-          );
-          const runnerResult = await this.invokeRunner(
-            record.userId,
-            nextPending.dispatch,
-            committed && !isCommittedResultFinalized(committed)
-              ? {
-                  committedResult: {
-                    result: committed.result,
-                    sideEffects: committed.sideEffects,
-                  },
-                }
-              : null,
-          );
-          record = await this.commitRecovery.requireCommittedDispatch(
-            record.userId,
-            nextPending.dispatch.eventId,
-          );
-          record = await this.bundleSync.applyRunnerResultBundles(
-            record.userId,
-            record.bundleVersions,
-            runnerResult.bundles,
-          );
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          const committed = await this.commitRecovery.readCommittedDispatch(
-            record.userId,
-            nextPending.dispatch.eventId,
-          );
+      try {
+        const committed = await this.commitRecovery.readCommittedDispatch(
+          record.userId,
+          nextPending.dispatch.eventId,
+        );
+        const runnerResult = await this.invokeRunner(
+          record.userId,
+          nextPending.dispatch,
+          committed && !isCommittedResultFinalized(committed)
+            ? {
+                committedResult: {
+                  result: committed.result,
+                  sideEffects: committed.sideEffects,
+                },
+              }
+            : null,
+        );
+        record = await this.commitRecovery.requireCommittedDispatch(
+          record.userId,
+          nextPending.dispatch.eventId,
+        );
+        record = await this.bundleSync.applyRunnerResultBundles(
+          record.userId,
+          record.bundleVersions,
+          runnerResult.bundles,
+        );
+        record = await this.scheduler.syncNextWake(
+          record.userId,
+          runnerResult.result.nextWakeAt ?? null,
+        );
+        await this.deleteCommittedDispatchBestEffort(record.userId, nextPending.dispatch.eventId);
+        processedDispatch = true;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const committed = await this.commitRecovery.readCommittedDispatch(
+          record.userId,
+          nextPending.dispatch.eventId,
+        );
 
-          if (committed) {
-            if (isCommittedResultFinalized(committed)) {
-              record = await this.commitRecovery.applyCommittedDispatch(record.userId, committed);
-              continue;
-            }
-
-            record = await this.commitRecovery.rescheduleCommittedFinalizeRetry({
-              attempts: nextPending.attempts + 1,
-              committed,
-              errorMessage,
-              retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
-              userId: record.userId,
-            });
-            return toUserStatus(record);
+        if (committed) {
+          if (isCommittedResultFinalized(committed)) {
+            record = await this.applyCommittedDispatchAndCleanup(record.userId, committed);
+            continue;
           }
 
-          record = await this.queueStore.reschedulePendingFailure({
+          record = await this.commitRecovery.rescheduleCommittedFinalizeRetry({
+            attempts: nextPending.attempts + 1,
+            committed,
+            errorMessage,
+            retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
+            userId: record.userId,
+          });
+          return toUserStatus(record);
+        }
+
+        if (error instanceof HostedExecutionConfigurationError) {
+          record = await this.queueStore.deferPendingConfigurationFailure({
             errorMessage,
             eventId: nextPending.dispatch.eventId,
-            maxEventAttempts: this.env.maxEventAttempts,
-            retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
+            retryDelayMs: this.env.retryDelayMs,
             userIdHint: record.userId,
           });
           record = await this.scheduler.syncNextWake(record.userId);
           return toUserStatus(record);
         }
+
+        record = await this.queueStore.reschedulePendingFailure({
+          errorMessage,
+          eventId: nextPending.dispatch.eventId,
+          maxEventAttempts: this.env.maxEventAttempts,
+          retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
+          userIdHint: record.userId,
+        });
+        record = await this.scheduler.syncNextWake(record.userId);
+        return toUserStatus(record);
       }
-    } finally {
-      await destroyHostedExecutionContainer({
-        runnerContainerNamespace: this.runnerContainerNamespace,
-        userId,
-      });
     }
   }
 
@@ -344,6 +358,47 @@ export class HostedUserRunner {
       timeoutMs: this.env.runnerTimeoutMs,
       userId,
     });
+  }
+
+  private async recoverCommittedPendingDispatchAndCleanup(
+    record: RunnerStateRecord,
+  ): Promise<RunnerStateRecord | null> {
+    const recovered = await this.commitRecovery.recoverCommittedPendingDispatch(record);
+    if (!recovered) {
+      return null;
+    }
+
+    if (recovered.committedEventId) {
+      await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
+    }
+
+    return recovered.record;
+  }
+
+  private async applyCommittedDispatchAndCleanup(
+    userId: string,
+    committed: HostedExecutionCommittedResult,
+  ): Promise<RunnerStateRecord> {
+    const record = await this.commitRecovery.applyCommittedDispatch(userId, committed);
+    await this.deleteCommittedDispatchBestEffort(userId, committed.eventId);
+    return record;
+  }
+
+  private async rememberCommittedEventAndCleanup(
+    userId: string,
+    eventId: string,
+  ): Promise<RunnerStateRecord> {
+    const record = await this.queueStore.rememberCommittedEvent(userId, eventId);
+    await this.deleteCommittedDispatchBestEffort(userId, eventId);
+    return record;
+  }
+
+  private async deleteCommittedDispatchBestEffort(userId: string, eventId: string): Promise<void> {
+    try {
+      await this.commitRecovery.deleteCommittedDispatch(userId, eventId);
+    } catch {
+      // Leaving the transient journal behind is preferable to failing a successful hosted run.
+    }
   }
 
   private async commitOnce(input: {

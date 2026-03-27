@@ -36,6 +36,39 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("fails closed when the runner control token is missing", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: null,
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      body: JSON.stringify({
+        bundles: { agentState: null, vault: null },
+        dispatch: {
+          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          eventId: "evt_missing_token",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted runner control token is not configured.",
+    });
+  });
+
   it("allows concurrent hosted jobs inside one container process", async () => {
     const started: string[] = [];
     const finished: string[] = [];
@@ -61,7 +94,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     try {
-      const server = await startHostedContainerEntrypoint({ controlToken: null, port: 0 });
+      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
       servers.push(server);
       const address = server.address();
 
@@ -73,7 +106,10 @@ describe("startHostedContainerEntrypoint", () => {
       await Promise.all([
         fetch(url, {
           method: "POST",
-          headers: { "content-type": "application/json; charset=utf-8" },
+          headers: {
+            authorization: "Bearer runner-token",
+            "content-type": "application/json; charset=utf-8",
+          },
           body: JSON.stringify({
             bundles: { agentState: null, vault: null },
             dispatch: {
@@ -85,7 +121,10 @@ describe("startHostedContainerEntrypoint", () => {
         }),
         fetch(url, {
           method: "POST",
-          headers: { "content-type": "application/json; charset=utf-8" },
+          headers: {
+            authorization: "Bearer runner-token",
+            "content-type": "application/json; charset=utf-8",
+          },
           body: JSON.stringify({
             bundles: { agentState: null, vault: null },
             dispatch: {
@@ -134,7 +173,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     try {
-      const server = await startHostedContainerEntrypoint({ controlToken: null, port: 0 });
+      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
       servers.push(server);
       const address = server.address();
 
@@ -145,7 +184,10 @@ describe("startHostedContainerEntrypoint", () => {
       const url = `http://127.0.0.1:${address.port}/__internal/run`;
       const firstResponsePromise = fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json; charset=utf-8" },
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
         body: JSON.stringify({
           bundles: { agentState: null, vault: null },
           dispatch: {
@@ -157,7 +199,10 @@ describe("startHostedContainerEntrypoint", () => {
       });
       const secondResponsePromise = fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json; charset=utf-8" },
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
         body: JSON.stringify({
           bundles: { agentState: null, vault: null },
           dispatch: {

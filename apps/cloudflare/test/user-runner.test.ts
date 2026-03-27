@@ -172,12 +172,18 @@ describe("HostedUserRunner", () => {
     expect(storage.lastAlarm).not.toBeNull();
     expect(bucket.keys()).toEqual([
       "users/member_123/agent-state.bundle.json",
-      "users/member_123/execution-journal/evt_123.json",
       "users/member_123/vault.bundle.json",
     ]);
+    await expect(createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+    }).readCommittedResult("member_123", "evt_123")).resolves.toBeNull();
   });
 
   it("starts the native container runner and applies the next wake hint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const resultPayload = {
       bundles: {
         agentState: Buffer.from("agent-state").toString("base64"),
@@ -206,13 +212,80 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    const status = await runner.dispatch(createDispatch("evt_native_container"));
+    const status = await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        linqChatId: "chat_123",
+        normalizedPhoneNumber: "+15551234567",
+        userId: "member_123",
+      },
+      eventId: "evt_native_container",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
 
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(1);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
     expect(status.lastEventId).toBe("evt_native_container");
     expect(status.nextWakeAt).toBe("2026-03-27T18:00:00.000Z");
     expect(bucket.keys()).toContain("users/member_123/vault.bundle.json");
+  });
+
+  it("does not reuse stale past nextWakeAt values after an alarm run returns no next wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        const payload = {
+          bundles: {
+            agentState: Buffer.from("agent-state").toString("base64"),
+            vault: Buffer.from("vault").toString("base64"),
+          },
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "alarm",
+          },
+        };
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload,
+          requestBody: JSON.parse(String(init?.body)),
+        });
+
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+        });
+      }),
+    );
+    await storage.state.storage.put("state", {
+      activated: true,
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: "evt_seed_wake",
+      lastRunAt: "2026-03-26T11:59:00.000Z",
+      nextWakeAt: "2026-03-26T12:00:05.000Z",
+      pendingEvents: [],
+      poisonedEventIds: [],
+      recentEventIds: [],
+      retryingEventId: null,
+      userId: "member_123",
+    });
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
+    await runner.alarm();
+
+    const status = await runner.status("member_123");
+    expect(status.lastEventId).toMatch(/^alarm:/u);
+    expect(status.nextWakeAt).not.toBe("2026-03-26T12:00:05.000Z");
+    expect(status.nextWakeAt).toBe("2026-03-26T12:01:10.000Z");
+    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:01:10.000Z"));
   });
 
   it("passes the worker commit callback metadata through the runner container invoke request", async () => {
@@ -505,7 +578,7 @@ describe("HostedUserRunner", () => {
     expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
     expect(firstStatus.bundleRefs.agentState?.size).toBe("agent-state-committed".length);
     expect(firstStatus.bundleRefs.vault?.size).toBe("vault-committed".length);
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(1);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
 
     vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
     await runner.alarm();
@@ -515,7 +588,7 @@ describe("HostedUserRunner", () => {
     expect(finalStatus.retryingEventId).toBeNull();
     expect(finalStatus.bundleRefs.agentState?.size).toBe("agent-state-final".length);
     expect(finalStatus.bundleRefs.vault?.size).toBe("vault-final".length);
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(2);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
 
 
@@ -1128,6 +1201,52 @@ describe("HostedUserRunner", () => {
     expect(status.retryingEventId).toBeNull();
     expect(status.lastError).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+    await expect(
+      createHostedExecutionJournalStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+      }).readCommittedResult(dispatch.event.userId, dispatch.eventId),
+    ).resolves.toBeNull();
+  });
+
+  it("keeps pending work retryable when the runner control token is missing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const misconfiguredRunner = new HostedUserRunner(storage.state, {
+      ...environment,
+      maxEventAttempts: 1,
+      runnerControlToken: null,
+    }, bucket.api);
+
+    const firstStatus = await misconfiguredRunner.dispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_missing_runner_token",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(firstStatus.pendingEventCount).toBe(1);
+    expect(firstStatus.poisonedEventIds).toEqual([]);
+    expect(firstStatus.retryingEventId).toBe("evt_missing_runner_token");
+    expect(firstStatus.lastError).toBe(
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
+    );
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
+
+    vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
+    await misconfiguredRunner.alarm();
+
+    const retryStatus = await misconfiguredRunner.status("member_123");
+    expect(retryStatus.pendingEventCount).toBe(1);
+    expect(retryStatus.poisonedEventIds).toEqual([]);
+    expect(retryStatus.retryingEventId).toBe("evt_missing_runner_token");
+    expect(retryStatus.lastError).toBe(
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
+    );
   });
 
   it("treats a committed journal entry as authoritative even after recent-event cache rollover", async () => {
@@ -1446,7 +1565,6 @@ describe("HostedUserRunner", () => {
     expect(bucket.putCount()).toBe(writesAfterBootstrap + 1);
     expect(bucket.keys()).toEqual([
       "users/member_123/agent-state.bundle.json",
-      "users/member_123/execution-journal/evt_bootstrap.json",
       "users/member_123/user-env.json",
       "users/member_123/vault.bundle.json",
     ]);
@@ -1456,7 +1574,6 @@ describe("HostedUserRunner", () => {
     expect(cleared.configuredUserEnvKeys).toEqual([]);
     expect(bucket.keys()).toEqual([
       "users/member_123/agent-state.bundle.json",
-      "users/member_123/execution-journal/evt_bootstrap.json",
       "users/member_123/vault.bundle.json",
     ]);
   });

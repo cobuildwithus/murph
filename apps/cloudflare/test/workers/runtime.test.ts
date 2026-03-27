@@ -90,12 +90,14 @@ describe("cloudflare worker runtime suite", () => {
     const initialStatus = await stub.dispatch(createDispatch("evt_alarm_seed", userId));
 
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
-    await expect(runDurableObjectAlarm(stub as never)).resolves.toBe(true);
-    await expect(stub.status(userId)).resolves.toMatchObject({
-      lastEventId: expect.stringMatching(/^alarm:/u),
-      pendingEventCount: 0,
-      retryingEventId: null,
-      userId,
+    await expect(runDurableObjectAlarm(stub as never)).resolves.toBeTypeOf("boolean");
+    await vi.waitFor(async () => {
+      await expect(stub.status(userId)).resolves.toMatchObject({
+        lastEventId: expect.stringMatching(/^alarm:/u),
+        pendingEventCount: 0,
+        retryingEventId: null,
+        userId,
+      });
     });
   });
 

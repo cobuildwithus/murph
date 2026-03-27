@@ -98,6 +98,21 @@ export class RunnerQueueStore {
     return this.readNextDuePendingDispatchSync(nowMs) !== null;
   }
 
+  async clearNextWakeIfDue(userIdHint: string | null, nowMs: number): Promise<RunnerStateRecord> {
+    await this.ensureHydrated(userIdHint);
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.readMetaRowSync(userIdHint);
+    const parsedMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;
+
+    if (Number.isFinite(parsedMs) && parsedMs <= nowMs) {
+      meta.next_wake_at = null;
+      this.writeMetaRowSync(meta);
+    }
+
+    return this.readStateFromMetaSync(meta);
+  }
+
   async enqueueDispatch(
     dispatch: HostedExecutionDispatchRequest,
   ): Promise<{ accepted: boolean; alreadySeen: boolean; record: RunnerStateRecord }> {
@@ -295,6 +310,42 @@ export class RunnerQueueStore {
     return this.readStateFromMetaSync(meta);
   }
 
+  async deferPendingConfigurationFailure(input: {
+    errorMessage: string;
+    eventId: string;
+    retryDelayMs: number;
+    userIdHint: string | null;
+  }): Promise<RunnerStateRecord> {
+    await this.ensureHydrated(input.userIdHint);
+    this.pruneExpiredConsumedEventsSync();
+
+    const pending = this.readPendingDispatchByEventIdSync(input.eventId);
+    const meta = this.readMetaRowSync(input.userIdHint);
+
+    meta.in_flight = 0;
+    meta.last_error = input.errorMessage;
+    meta.last_event_id = input.eventId;
+
+    if (!pending) {
+      meta.retrying_event_id = this.readRetryingEventIdSync();
+      this.writeMetaRowSync(meta);
+      return this.readStateFromMetaSync(meta);
+    }
+
+    this.sql.exec(
+      `UPDATE pending_events
+        SET available_at = ?, last_error = ?
+        WHERE event_id = ?`,
+      new Date(Date.now() + input.retryDelayMs).toISOString(),
+      input.errorMessage,
+      input.eventId,
+    );
+    meta.retrying_event_id = input.eventId;
+    this.writeMetaRowSync(meta);
+
+    return this.readStateFromMetaSync(meta);
+  }
+
   async rescheduleCommittedFinalizeRetry(input: {
     attempts: number;
     committed: HostedExecutionCommittedResult;
@@ -387,14 +438,17 @@ export class RunnerQueueStore {
 
     const meta = this.readMetaRowSync(input.userIdHint);
     const nextPendingAvailableAt = this.readNextPendingAvailableAtSync();
+    const preferredWakeAt = input.preferredWakeAt === undefined
+      ? meta.next_wake_at
+      : input.preferredWakeAt;
+    const scheduledWakeAt = earliestIsoTimestamp(
+      nextPendingAvailableAt,
+      preferredWakeAt,
+    );
     const fallbackWakeAt = meta.activated
       ? new Date(Date.now() + input.defaultAlarmDelayMs).toISOString()
       : null;
-    meta.next_wake_at = earliestIsoTimestamp(
-      nextPendingAvailableAt,
-      input.preferredWakeAt ?? meta.next_wake_at,
-      fallbackWakeAt,
-    );
+    meta.next_wake_at = scheduledWakeAt ?? fallbackWakeAt;
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta, nextPendingAvailableAt);

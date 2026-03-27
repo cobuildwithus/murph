@@ -4,6 +4,11 @@ import { RunnerQueueStore } from "./runner-queue-store.js";
 import { RunnerScheduler } from "./runner-scheduler.js";
 import type { RunnerStateRecord } from "./types.js";
 
+export interface RecoveredCommittedPendingDispatch {
+  committedEventId: string | null;
+  record: RunnerStateRecord;
+}
+
 export class RunnerCommitRecovery {
   constructor(
     private readonly queueStore: RunnerQueueStore,
@@ -22,7 +27,9 @@ export class RunnerCommitRecovery {
     await this.journalStore.deleteCommittedResult(userId, eventId);
   }
 
-  async recoverCommittedPendingDispatch(record: RunnerStateRecord): Promise<RunnerStateRecord | null> {
+  async recoverCommittedPendingDispatch(
+    record: RunnerStateRecord,
+  ): Promise<RecoveredCommittedPendingDispatch | null> {
     const pendingDispatches = await this.queueStore.listPendingDispatches(record.userId);
 
     for (const pending of pendingDispatches) {
@@ -32,7 +39,10 @@ export class RunnerCommitRecovery {
       }
 
       if (isCommittedResultFinalized(committed)) {
-        return this.applyCommittedDispatch(record.userId, committed);
+        return {
+          committedEventId: pending.eventId,
+          record: await this.applyCommittedDispatch(record.userId, committed),
+        };
       }
 
       await this.syncCommittedBundlesWithoutConsuming(record.userId, committed);

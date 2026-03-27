@@ -453,7 +453,7 @@ function requireBearerAuthorization(
   token: string | null | undefined,
 ): Response | null {
   if (!token) {
-    return null;
+    return json({ error: "Hosted execution control token is not configured." }, 503);
   }
 
   return request.headers.get("authorization") === `Bearer ${token}`

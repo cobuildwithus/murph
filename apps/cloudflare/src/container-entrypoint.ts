@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
 import { runHostedExecutionJob, type HostedExecutionRunnerJobRequest } from "./node-runner.js";
@@ -22,14 +22,20 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      if (input.controlToken) {
-        const authorization = request.headers.authorization ?? "";
+      if (!input.controlToken) {
+        writeJsonResponse(response, 503, {
+          error: "Hosted runner control token is not configured.",
+        });
+        return;
+      }
 
-        if (authorization !== `Bearer ${input.controlToken}`) {
-          response.statusCode = 401;
-          response.end("Unauthorized");
-          return;
-        }
+      const authorization = request.headers.authorization ?? "";
+
+      if (authorization !== `Bearer ${input.controlToken}`) {
+        writeJsonResponse(response, 401, {
+          error: "Unauthorized",
+        });
+        return;
       }
 
       const chunks: Buffer[] = [];
@@ -47,13 +53,9 @@ export async function startHostedContainerEntrypoint(input: {
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
     } catch (error) {
-      response.statusCode = 500;
-      response.setHeader("content-type", "application/json; charset=utf-8");
-      response.end(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      writeJsonResponse(response, 500, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   });
 
@@ -74,4 +76,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 
   await new Promise(() => {});
+}
+
+function writeJsonResponse(
+  response: ServerResponse,
+  statusCode: number,
+  payload: Record<string, unknown>,
+): void {
+  response.statusCode = statusCode;
+  response.setHeader("content-type", "application/json; charset=utf-8");
+  response.end(JSON.stringify(payload));
 }

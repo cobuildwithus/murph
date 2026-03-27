@@ -15,9 +15,16 @@ const RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_INVOKE_URL = "https://runner.internal/internal/invoke";
 const RUNNER_DESTROY_URL = "https://runner.internal/internal/destroy";
 
+export class HostedExecutionConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostedExecutionConfigurationError";
+  }
+}
+
 interface HostedExecutionContainerInvokeRequest<TRequest extends HostedExecutionRunnerRequest> {
   request: TRequest;
-  runnerControlToken: string | null;
+  runnerControlToken: string;
   runnerEnvironment: Record<string, string>;
   timeoutMs: number;
   userId: string;
@@ -62,7 +69,7 @@ export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
-  // The queue DO explicitly destroys drained runner instances, so keep idle retention short.
+  // Keep idle retention short so drained runner instances do not linger between bursts.
   sleepAfter = "1m";
 
   override async fetch(request: Request): Promise<Response> {
@@ -127,12 +134,8 @@ export class RunnerContainer extends Container {
         enableInternet: true,
         envVars: {
           ...input.runnerEnvironment,
+          HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
           PORT: String(RUNNER_PORT),
-          ...(input.runnerControlToken
-            ? {
-                HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
-              }
-            : {}),
         },
       },
     });
@@ -142,11 +145,7 @@ export class RunnerContainer extends Container {
     const response = await this.containerFetch(RUNNER_EXECUTE_URL, {
       body: JSON.stringify(input.request),
       headers: {
-        ...(input.runnerControlToken
-          ? {
-              authorization: `Bearer ${input.runnerControlToken}`,
-            }
-          : {}),
+        authorization: `Bearer ${input.runnerControlToken}`,
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -208,6 +207,12 @@ export async function invokeHostedExecutionContainerRunner<
   timeoutMs: number;
   userId: string;
 }): Promise<HostedExecutionRunnerResult> {
+  if (!input.runnerControlToken) {
+    throw new HostedExecutionConfigurationError(
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
+    );
+  }
+
   const response = await input.runnerContainerNamespace.getByName(input.userId).fetch(
     new Request(RUNNER_INVOKE_URL, {
       body: JSON.stringify({
@@ -266,13 +271,9 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
-function readRunnerControlToken(value: unknown): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError("runnerControlToken must be a string when provided.");
+function readRunnerControlToken(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError("runnerControlToken must be a non-empty string.");
   }
 
   return value;

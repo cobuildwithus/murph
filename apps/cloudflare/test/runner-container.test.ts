@@ -93,7 +93,7 @@ describe("RunnerContainer", () => {
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
         request: createRunnerRequest("evt_short_budget"),
-        runnerControlToken: null,
+        runnerControlToken: "runner-token",
         runnerEnvironment: {},
         timeoutMs: 1_000,
         userId: "member_123",
@@ -113,7 +113,7 @@ describe("RunnerContainer", () => {
     }));
   });
 
-  it("omits runner control token forwarding when none is configured", async () => {
+  it("rejects invoke requests when the runner control token is missing", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
@@ -130,24 +130,12 @@ describe("RunnerContainer", () => {
       method: "POST",
     }));
 
-    expect(response.status).toBe(200);
-    expect(startAndWaitForPorts).toHaveBeenCalledWith(expect.objectContaining({
-      startOptions: {
-        enableInternet: true,
-        envVars: {
-          PORT: "8080",
-        },
-      },
-    }));
-    expect(containerFetch).toHaveBeenCalledWith(
-      "http://container/__internal/run",
-      expect.objectContaining({
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-      }),
-      8080,
-    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "runnerControlToken must be a non-empty string.",
+    });
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
   });
 
   it("returns 405 for unsupported internal methods", async () => {
@@ -252,6 +240,27 @@ describe("RunnerContainer", () => {
       timeoutMs: 45_000,
       userId: "member_123",
     });
+  });
+
+  it("fails before invoking the namespace when the runner control token is missing", async () => {
+    const fetch = vi.fn();
+    const getByName = vi.fn(() => ({ fetch }));
+
+    await expect(
+      invokeHostedExecutionContainerRunner({
+        request: createRunnerRequest("evt_missing_token"),
+        runnerContainerNamespace: { getByName },
+        runnerControlToken: null,
+        runnerEnvironment: {},
+        timeoutMs: 45_000,
+        userId: "member_123",
+      }),
+    ).rejects.toThrow(
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
+    );
+
+    expect(getByName).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("posts destroy without a request body and skips null namespaces", async () => {

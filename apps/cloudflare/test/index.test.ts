@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionSignature } from "../src/auth.js";
 import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
+import { encryptHostedBundle } from "../src/crypto.js";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.js";
 import worker, { UserRunnerDurableObject } from "../src/index.js";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.js";
@@ -208,8 +209,8 @@ describe("cloudflare worker routes", () => {
       ok: true,
     });
     expect(harness.bucket.keys()).toEqual([
+      "transient/execution-journal/member_123/evt_commit.json",
       "users/member_123/agent-state.bundle.json",
-      "users/member_123/execution-journal/evt_commit.json",
       "users/member_123/vault.bundle.json",
     ]);
     const journalStore = createHostedExecutionJournalStore({
@@ -479,6 +480,45 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("reads legacy side-effect journal objects through the canonical route after the transient prefix move", async () => {
+    const env = createWorkerEnv();
+    const legacyRecord = {
+      delivery: createOutboxDelivery(),
+      effectId: "outbox_legacy",
+      fingerprint: "dedupe_legacy",
+      intentId: "outbox_legacy",
+      kind: "assistant.delivery" as const,
+      recordedAt: "2026-03-26T12:00:05.000Z",
+    };
+    const envelope = await encryptHostedBundle({
+      key: Buffer.alloc(32, 9),
+      keyId: "v1",
+      plaintext: new TextEncoder().encode(JSON.stringify(legacyRecord)),
+    });
+
+    await env.BUNDLES.put(
+      "users/member_123/outbox-deliveries/by-intent/outbox_legacy.json",
+      JSON.stringify(envelope),
+    );
+
+    const response = await callRunnerOutbound(
+      new Request("http://side-effects.worker/effects/outbox_legacy?kind=assistant.delivery&fingerprint=dedupe_legacy", {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      effectId: "outbox_legacy",
+      record: {
+        effectId: "outbox_legacy",
+        fingerprint: "dedupe_legacy",
+        kind: "assistant.delivery",
+      },
+    });
+  });
+
   it("forwards operator env and status routes to direct durable-object methods", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
@@ -542,6 +582,23 @@ describe("cloudflare worker routes", () => {
     );
     expect(statusResponse.status).toBe(200);
     expect(stub.status).toHaveBeenCalledWith("member_123");
+  });
+
+  it("fails closed on control routes when the worker control token is missing", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/status", {
+        method: "GET",
+      }),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted execution control token is not configured.",
+    });
+    expect(stub.status).not.toHaveBeenCalled();
   });
 
   it("returns method and auth errors on protected routes in the same order as before", async () => {
