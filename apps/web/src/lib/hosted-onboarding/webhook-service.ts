@@ -1,9 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import {
-  buildHostedExecutionLinqMessageReceivedDispatch,
-  type HostedExecutionDispatchRequest,
-} from "@healthybob/hosted-execution";
+import type { HostedExecutionDispatchRequest } from "@healthybob/hosted-execution";
 import { Prisma, type HostedMember, type HostedRevnetIssuance, type PrismaClient } from "@prisma/client";
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {
@@ -180,17 +177,14 @@ type HostedOnboardingLinqWebhookResponse = {
 type HostedOnboardingLinqWebhookPlan =
   | {
     desiredSideEffects: [];
-    kind: "ignore";
     response: HostedOnboardingLinqWebhookResponse;
   }
   | {
     desiredSideEffects: [HostedWebhookDispatchSideEffect];
-    kind: "active-member-dispatch";
     response: HostedOnboardingLinqWebhookResponse;
   }
   | {
     desiredSideEffects: [HostedWebhookLinqMessageSideEffect];
-    kind: "invite-reply";
     response: HostedOnboardingLinqWebhookResponse;
   };
 
@@ -285,7 +279,6 @@ async function planHostedOnboardingLinqWebhook(input: {
 }): Promise<HostedOnboardingLinqWebhookPlan> {
   if (input.event.event_type !== "message.received") {
     return {
-      kind: "ignore",
       desiredSideEffects: [],
       response: {
         ok: true,
@@ -300,7 +293,6 @@ async function planHostedOnboardingLinqWebhook(input: {
 
   if (summary.isFromMe) {
     return {
-      kind: "ignore",
       desiredSideEffects: [],
       response: {
         ok: true,
@@ -314,7 +306,6 @@ async function planHostedOnboardingLinqWebhook(input: {
 
   if (!normalizedPhoneNumber) {
     return {
-      kind: "ignore",
       desiredSideEffects: [],
       response: {
         ok: true,
@@ -340,17 +331,19 @@ async function planHostedOnboardingLinqWebhook(input: {
 
   if (existingMember?.billingStatus === HostedBillingStatus.active) {
     return {
-      kind: "active-member-dispatch",
       desiredSideEffects: [
         createHostedWebhookDispatchSideEffect({
-          dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
+          dispatch: {
+            event: {
+              kind: "linq.message.received",
+              linqChatId: summary.chatId,
+              linqEvent: input.event as unknown as Record<string, unknown>,
+              normalizedPhoneNumber,
+              userId: existingMember.id,
+            },
             eventId: input.event.event_id,
-            linqChatId: summary.chatId,
-            linqEvent: input.event as unknown as Record<string, unknown>,
-            normalizedPhoneNumber,
             occurredAt: input.event.created_at,
-            userId: existingMember.id,
-          }),
+          },
         }),
       ],
       response: {
@@ -363,7 +356,6 @@ async function planHostedOnboardingLinqWebhook(input: {
 
   if (existingMember && !shouldStartHostedOnboarding(summary.text)) {
     return {
-      kind: "ignore",
       desiredSideEffects: [],
       response: {
         ok: true,
@@ -390,7 +382,6 @@ async function planHostedOnboardingLinqWebhook(input: {
   const joinUrl = buildHostedInviteUrl(invite.inviteCode);
 
   return {
-    kind: "invite-reply",
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: summary.chatId,
