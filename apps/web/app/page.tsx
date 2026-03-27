@@ -268,13 +268,6 @@ export default function HomePage() {
                   curl -fsSL --proto &apos;=https&apos; --tlsv1.2 {installCommandUrl} | bash
                 </span>
               </p>
-              <p className="text-stone-500"># Skip onboarding if you want the install only</p>
-              <p className="break-all">
-                <span className="text-olive-light">$</span>{" "}
-                <span className="text-white">
-                  curl -fsSL --proto &apos;=https&apos; --tlsv1.2 {installCommandUrl} | bash -s -- --no-onboard --vault ./vault
-                </span>
-              </p>
               <div className="border-t border-stone-800 pt-4">
                 <p className="text-stone-500"># Start chatting</p>
                 <p>

@@ -58,6 +58,7 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
   assert.match(markup, /Phone signup is not configured for this environment yet\./);
   assert.match(markup, /curl -fsSL --proto &#x27;=https&#x27; --tlsv1\.2 https:\/\/YOUR_DOMAIN\/install\.sh \| bash/u);
   assert.match(markup, /View the raw installer/);
+  assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
 });
 
@@ -83,6 +84,7 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
   assert.match(markup, /Hosted phone auth/);
   assert.match(markup, /curl -fsSL --proto &#x27;=https&#x27; --tlsv1\.2 https:\/\/murph\.example\.test\/install\.sh \| bash/u);
+  assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /Phone signup is not configured for this environment yet\./);
 });
 
@@ -106,5 +108,6 @@ test("HomePage keeps the fallback copy when the server auth config is ready but 
 
   assert.match(markup, /Phone signup is not configured for this environment yet\./);
   assert.match(markup, /https:\/\/murph\.example\.test\/install\.sh/u);
+  assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
 });
