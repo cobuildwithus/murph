@@ -171,6 +171,53 @@ test('setup scheduled updates keep returning deferred recommendations on repeate
   assert.equal(steps[0]?.status, 'skipped')
 })
 
+test('setup scheduled updates surface deferred recommendation details without prompt templates and keep dry-run wording', () => {
+  const steps: SetupResult['steps'] = []
+  const scheduledUpdates = configureSetupScheduledUpdates({
+    dryRun: true,
+    presetIds: ['weekly-health-snapshot'],
+    steps,
+  })
+
+  assert.equal(scheduledUpdates.length, 1)
+  assert.equal(scheduledUpdates[0]?.jobName, scheduledUpdates[0]?.preset.suggestedName)
+  assert.equal(
+    'promptTemplate' in (scheduledUpdates[0]?.preset as Record<string, unknown>),
+    false,
+  )
+  assert.equal(steps[0]?.status, 'skipped')
+  assert.match(steps[0]?.detail ?? '', /^Would defer 1 assistant scheduled update:/u)
+  assert.match(
+    steps[0]?.detail ?? '',
+    /assistant cron preset install --channel \.\.\./u,
+  )
+})
+
+test('setup scheduled updates propagate unknown preset errors without mutating steps', () => {
+  const steps: SetupResult['steps'] = []
+
+  assert.throws(
+    () =>
+      configureSetupScheduledUpdates({
+        dryRun: false,
+        presetIds: ['missing-preset'],
+        steps,
+      }),
+    (error: unknown) => {
+      assert.equal(
+        typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code?: unknown }).code === 'ASSISTANT_CRON_PRESET_NOT_FOUND',
+        true,
+      )
+      assert.match(String(error), /missing-preset/u)
+      return true
+    },
+  )
+  assert.deepEqual(steps, [])
+})
+
 test('setup scheduled updates can be fully opted out during onboarding', async () => {
   const steps: SetupResult['steps'] = []
 

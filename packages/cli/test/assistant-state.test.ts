@@ -5,9 +5,14 @@ import path from 'node:path'
 import { afterEach, test } from 'vitest'
 import {
   appendAssistantTranscriptEntries,
+  deleteAssistantStateDocument,
+  getAssistantStateDocument,
   getAssistantSession,
+  listAssistantStateDocuments,
   listAssistantTranscriptEntries,
   listAssistantSessions,
+  patchAssistantStateDocument,
+  putAssistantStateDocument,
   readAssistantAutomationState,
   redactAssistantDisplayPath,
   resolveAssistantAliasKey,
@@ -64,6 +69,35 @@ test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a st
   assert.equal(resolveAssistantAliasKey({}), null)
 })
 
+test('resolveAssistantAliasKey merges conversation refs with explicit locator overrides', () => {
+  assert.equal(
+    resolveAssistantAliasKey({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'assistant:primary',
+        participantId: 'contact:base',
+        directness: 'group',
+      },
+      actorId: 'contact:override',
+    }),
+    'channel:telegram|identity:assistant%3Aprimary|actor:contact%3Aoverride',
+  )
+  assert.equal(
+    resolveAssistantAliasKey({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'assistant:primary',
+        participantId: 'contact:base',
+        threadId: 'chat-base',
+        directness: 'group',
+      },
+      sourceThreadId: 'chat-override',
+      threadIsDirect: true,
+    }),
+    'channel:telegram|identity:assistant%3Aprimary|thread:chat-override',
+  )
+})
+
 test('assistant sessions live outside the vault, omit redundant path metadata, and reuse alias mappings', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -83,6 +117,7 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(statePaths.cronDirectory, path.join(statePaths.assistantStateRoot, 'cron'))
   assert.equal(statePaths.cronJobsPath, path.join(statePaths.cronDirectory, 'jobs.json'))
   assert.equal(statePaths.cronRunsDirectory, path.join(statePaths.cronDirectory, 'runs'))
+  assert.equal(statePaths.stateDirectory, path.join(statePaths.assistantStateRoot, 'state'))
   assert.equal(statePaths.receiptsDirectory, path.join(statePaths.assistantStateRoot, 'receipts'))
   assert.equal(statePaths.outboxDirectory, path.join(statePaths.assistantStateRoot, 'outbox'))
 
@@ -152,6 +187,97 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal('lastAssistantMessage' in fetched, false)
 })
 
+test('assistant state documents support show put patch list and delete with JSON merge patch semantics', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-state-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const missing = await getAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_123',
+  })
+  assert.equal(missing.exists, false)
+  assert.equal(missing.updatedAt, null)
+  assert.equal(missing.value, null)
+  assert.equal(
+    missing.documentPath,
+    path.join(resolveAssistantStatePaths(vaultRoot).stateDirectory, 'cron', 'job_123.json'),
+  )
+
+  const created = await putAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_123',
+    value: {
+      pending: {
+        signal: 'sleep_drop',
+      },
+      status: 'awaiting_user_context',
+      stale: true,
+    },
+  })
+  assert.equal(created.exists, true)
+  assert.equal(created.value?.status, 'awaiting_user_context')
+  assert.deepEqual(created.value?.pending, {
+    signal: 'sleep_drop',
+  })
+
+  const patched = await patchAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_123',
+    patch: {
+      pending: {
+        cooldownUntil: '2026-03-29T10:00:00.000Z',
+      },
+      stale: null,
+    },
+  })
+  assert.equal(patched.exists, true)
+  assert.deepEqual(patched.value, {
+    pending: {
+      signal: 'sleep_drop',
+      cooldownUntil: '2026-03-29T10:00:00.000Z',
+    },
+    status: 'awaiting_user_context',
+  })
+
+  const listed = await listAssistantStateDocuments({
+    vault: vaultRoot,
+    prefix: 'cron',
+  })
+  assert.equal(listed.length, 1)
+  assert.equal(listed[0]?.docId, 'cron/job_123')
+
+  const deleted = await deleteAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_123',
+  })
+  assert.equal(deleted.existed, true)
+
+  const afterDelete = await getAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_123',
+  })
+  assert.equal(afterDelete.exists, false)
+  assert.equal(afterDelete.value, null)
+})
+
+test('assistant state documents reject invalid document ids', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-invalid-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  await assert.rejects(
+    () =>
+      getAssistantStateDocument({
+        vault: vaultRoot,
+        docId: '../escape',
+      }),
+    /slash-delimited segments/u,
+  )
+})
+
 test('resolveAssistantSession prefers explicit sessionId over conversation-key matches', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-id-precedence-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -194,6 +320,247 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
 
   const persisted = await getAssistantSession(vaultRoot, sessionIdMatch.session.sessionId)
   assert.equal(persisted.binding.threadId, 'thread-conversation')
+})
+
+test('resolveAssistantSession does not clear bindings when conversation only carries lookup metadata', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-lookup-conversation-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    threadIsDirect: true,
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    conversation: {
+      sessionId: created.session.sessionId,
+    },
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.channel, 'telegram')
+  assert.equal(resolved.session.binding.identityId, 'assistant:primary')
+  assert.equal(resolved.session.binding.actorId, 'contact:bob')
+  assert.equal(resolved.session.binding.threadId, 'chat-1')
+  assert.equal(resolved.session.binding.threadIsDirect, true)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.channel, 'telegram')
+  assert.equal(persisted.binding.identityId, 'assistant:primary')
+  assert.equal(persisted.binding.actorId, 'contact:bob')
+  assert.equal(persisted.binding.threadId, 'chat-1')
+  assert.equal(persisted.binding.threadIsDirect, true)
+})
+
+test('resolveAssistantSession ignores primitive conversation payloads when patching bindings', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-primitive-conversation-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    threadIsDirect: true,
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    conversation: 'lookup-only' as any,
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.channel, 'telegram')
+  assert.equal(resolved.session.binding.identityId, 'assistant:primary')
+  assert.equal(resolved.session.binding.actorId, 'contact:bob')
+  assert.equal(resolved.session.binding.threadId, 'chat-1')
+  assert.equal(resolved.session.binding.threadIsDirect, true)
+})
+
+test('resolveAssistantSession only patches nested conversation fields that were explicitly provided', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-partial-conversation-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    threadIsDirect: true,
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    conversation: {
+      channel: 'linq',
+    },
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.channel, 'linq')
+  assert.equal(resolved.session.binding.identityId, 'assistant:primary')
+  assert.equal(resolved.session.binding.actorId, 'contact:bob')
+  assert.equal(resolved.session.binding.threadId, 'chat-1')
+  assert.equal(resolved.session.binding.threadIsDirect, true)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.channel, 'linq')
+  assert.equal(persisted.binding.identityId, 'assistant:primary')
+  assert.equal(persisted.binding.actorId, 'contact:bob')
+  assert.equal(persisted.binding.threadId, 'chat-1')
+  assert.equal(persisted.binding.threadIsDirect, true)
+})
+
+test('resolveAssistantSession ignores alias-only nested conversation payloads when patching bindings', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-alias-only-conversation-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:seed',
+    channel: 'telegram',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    threadIsDirect: true,
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    conversation: {
+      alias: 'chat:lookup',
+    },
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.channel, 'telegram')
+  assert.equal(resolved.session.binding.identityId, 'assistant:primary')
+  assert.equal(resolved.session.binding.actorId, 'contact:bob')
+  assert.equal(resolved.session.binding.threadId, 'chat-1')
+  assert.equal(resolved.session.binding.threadIsDirect, true)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.channel, 'telegram')
+  assert.equal(persisted.binding.identityId, 'assistant:primary')
+  assert.equal(persisted.binding.actorId, 'contact:bob')
+  assert.equal(persisted.binding.threadId, 'chat-1')
+  assert.equal(persisted.binding.threadIsDirect, true)
+})
+
+test('resolveAssistantSession retargets participant delivery when actorId overrides an existing participant binding', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-participant-retarget-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'imessage',
+    participantId: '+15551234567',
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    actorId: '+15557654321',
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.actorId, '+15557654321')
+  assert.equal(resolved.session.binding.delivery?.kind, 'participant')
+  assert.equal(resolved.session.binding.delivery?.target, '+15557654321')
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.actorId, '+15557654321')
+  assert.equal(persisted.binding.delivery?.kind, 'participant')
+  assert.equal(persisted.binding.delivery?.target, '+15557654321')
+})
+
+test('resolveAssistantSession clears thread delivery targets when nested conversation explicitly nulls threadId', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-clear-thread-target-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    conversation: {
+      channel: 'telegram',
+      threadId: 'chat-1',
+      directness: 'group',
+    },
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    conversation: {
+      threadId: null,
+    },
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.threadId, null)
+  assert.equal(resolved.session.binding.delivery, null)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.threadId, null)
+  assert.equal(persisted.binding.delivery, null)
+})
+
+test('resolveAssistantSession clears participant delivery targets when nested conversation explicitly nulls participantId', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-clear-participant-target-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'imessage',
+    participantId: '+15551234567',
+  })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    conversation: {
+      participantId: null,
+    },
+    createIfMissing: false,
+  })
+
+  assert.equal(resolved.created, false)
+  assert.equal(resolved.session.binding.actorId, null)
+  assert.equal(resolved.session.binding.delivery, null)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.actorId, null)
+  assert.equal(persisted.binding.delivery, null)
 })
 
 test('resolveAssistantSession prefers alias matches over conversation-key matches', async () => {
@@ -296,6 +663,38 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
 
   const listed = await listAssistantSessions(vaultRoot)
   assert.equal(listed.length, 2)
+})
+
+test('resolveAssistantSession merges conversation refs with explicit locator overrides when creating bindings', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-session-conversation-ref-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    conversation: {
+      channel: 'telegram',
+      identityId: 'assistant:primary',
+      participantId: 'contact:base',
+      threadId: 'chat-base',
+      directness: 'group',
+    },
+    actorId: 'contact:override',
+    sourceThreadId: 'chat-override',
+    threadIsDirect: true,
+  })
+
+  assert.equal(resolved.created, true)
+  assert.equal(resolved.session.binding.channel, 'telegram')
+  assert.equal(resolved.session.binding.identityId, 'assistant:primary')
+  assert.equal(resolved.session.binding.actorId, 'contact:override')
+  assert.equal(resolved.session.binding.threadId, 'chat-override')
+  assert.equal(resolved.session.binding.threadIsDirect, true)
+  assert.equal(
+    resolved.session.binding.conversationKey,
+    'channel:telegram|identity:assistant%3Aprimary|thread:chat-override',
+  )
 })
 
 test('assistant memory write locks allow nested reentry while serializing concurrent same-root callers', async () => {

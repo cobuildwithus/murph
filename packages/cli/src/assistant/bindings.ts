@@ -97,6 +97,8 @@ export function mergeAssistantBinding(
   binding: AssistantSessionBinding,
   patch: AssistantBindingPatch,
 ): AssistantSessionBinding {
+  const hasExplicitDeliveryPatch =
+    'deliveryKind' in patch || 'deliveryTarget' in patch
   const next = {
     actorId: binding.actorId,
     channel: binding.channel,
@@ -128,6 +130,35 @@ export function mergeAssistantBinding(
   }
   if ('deliveryTarget' in patch) {
     next.deliveryTarget = normalizeNullableString(patch.deliveryTarget)
+  }
+
+  if (
+    !hasExplicitDeliveryPatch &&
+    'threadId' in patch &&
+    binding.delivery?.kind === 'thread'
+  ) {
+    if (next.threadId) {
+      next.deliveryKind = 'thread'
+      next.deliveryTarget = next.threadId
+    } else {
+      next.deliveryKind = null
+      next.deliveryTarget = null
+    }
+  }
+
+  if (
+    !hasExplicitDeliveryPatch &&
+    'actorId' in patch &&
+    binding.delivery?.kind === 'participant' &&
+    binding.delivery.target === binding.actorId
+  ) {
+    if (next.actorId) {
+      next.deliveryKind = 'participant'
+      next.deliveryTarget = next.actorId
+    } else {
+      next.deliveryKind = null
+      next.deliveryTarget = null
+    }
   }
 
   return createAssistantBinding(next)

@@ -15,8 +15,7 @@ import {
   type AssistantBindingPatch,
 } from '../bindings.js'
 import {
-  conversationRefFromLocator,
-  conversationRefToBindingFields,
+  resolveConversationLocator,
 } from '../conversation-ref.js'
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantSessionLocator } from './types.js'
@@ -51,14 +50,14 @@ export function redactAssistantDisplayPath(filePath: string): string {
 export function resolveAssistantAliasKey(
   input: AssistantSessionLocator,
 ): string | null {
-  const explicitAlias =
-    normalizeNullableString(input.conversation?.alias) ??
-    normalizeNullableString(input.alias)
-  if (explicitAlias) {
-    return explicitAlias
+  const locator = resolveConversationLocator(input)
+  if (locator.explicitAlias) {
+    return locator.explicitAlias
   }
 
-  return resolveAssistantConversationKey(bindingInputFromLocator(input))
+  return resolveAssistantConversationKey(
+    bindingInputFromResolvedLocator(locator, input),
+  )
 }
 
 export function resolveAssistantConversationLookupKey(
@@ -70,31 +69,29 @@ export function resolveAssistantConversationLookupKey(
 export function bindingInputFromLocator(
   input: AssistantSessionLocator,
 ): AssistantBindingPatch {
-  const conversation = conversationRefFromLocator(input)
-  const bindingFields = conversationRefToBindingFields(conversation)
+  return bindingInputFromResolvedLocator(resolveConversationLocator(input), input)
+}
+
+function bindingInputFromResolvedLocator(
+  locator: ReturnType<typeof resolveConversationLocator>,
+  input: AssistantSessionLocator,
+): AssistantBindingPatch {
   return {
-    actorId: bindingFields.actorId,
-    channel: conversation.channel ?? null,
+    actorId: locator.bindingFields.actorId,
+    channel: locator.conversation.channel ?? null,
     deliveryKind: input.deliveryKind ?? null,
-    identityId: conversation.identityId ?? null,
-    threadId: conversation.threadId ?? null,
-    threadIsDirect: bindingFields.threadIsDirect,
+    identityId: locator.conversation.identityId ?? null,
+    threadId: locator.conversation.threadId ?? null,
+    threadIsDirect: locator.bindingFields.threadIsDirect,
   }
 }
 
 export function bindingPatchFromLocator(
   input: AssistantSessionLocator,
 ): AssistantBindingPatch {
-  const conversation = conversationRefFromLocator(input)
-  const bindingFields = conversationRefToBindingFields(conversation)
-  const patch: AssistantBindingPatch = {}
-
-  if (hasConversationLocatorFields(input)) {
-    patch.actorId = bindingFields.actorId
-    patch.channel = conversation.channel ?? null
-    patch.identityId = conversation.identityId ?? null
-    patch.threadId = conversation.threadId ?? null
-    patch.threadIsDirect = bindingFields.threadIsDirect
+  const locator = resolveConversationLocator(input)
+  const patch: AssistantBindingPatch = {
+    ...locator.bindingPatch,
   }
   if ('deliveryKind' in input) {
     patch.deliveryKind = input.deliveryKind ?? null
@@ -119,19 +116,4 @@ export function normalizeProviderOptions(input: {
 
 export function createAssistantSessionId(): string {
   return `asst_${randomUUID().replace(/-/gu, '')}`
-}
-
-function hasConversationLocatorFields(
-  input: AssistantSessionLocator,
-): boolean {
-  return (
-    'conversation' in input ||
-    'actorId' in input ||
-    'participantId' in input ||
-    'channel' in input ||
-    'identityId' in input ||
-    'threadId' in input ||
-    'sourceThreadId' in input ||
-    'threadIsDirect' in input
-  )
 }

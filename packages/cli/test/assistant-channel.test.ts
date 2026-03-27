@@ -11,7 +11,11 @@ import {
   sendLinqMessage,
   sendTelegramMessage,
 } from '../src/outbound-channel.js'
-import { resolveAssistantStatePaths } from '../src/assistant-state.js'
+import {
+  getAssistantSession,
+  resolveAssistantSession,
+  resolveAssistantStatePaths,
+} from '../src/assistant-state.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
@@ -334,6 +338,118 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
     result.session.binding.conversationKey,
     'channel:telegram|thread:-1009876543210%3Atopic%3A42',
   )
+})
+
+test('deliverAssistantMessage preserves explicit locator overrides over nested conversation refs when resuming a session', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-conversation-overrides-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    conversation: {
+      channel: 'telegram',
+      identityId: 'assistant:primary',
+      participantId: 'contact:base',
+      threadId: 'chat-base',
+      directness: 'group',
+    },
+  })
+
+  const sent: Array<{ message: string; target: string }> = []
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      sessionId: created.session.sessionId,
+      conversation: {
+        channel: 'telegram',
+        identityId: 'assistant:primary',
+        participantId: 'contact:base',
+        threadId: 'chat-base',
+        directness: 'group',
+      },
+      actorId: 'contact:override',
+      sourceThreadId: 'chat-override',
+      threadIsDirect: true,
+      message: 'Telegram thread override.',
+    },
+    {
+      sendTelegram: async (input: { message: string; target: string }) => {
+        sent.push(input)
+      },
+    },
+  )
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0], {
+    target: 'chat-override',
+    message: 'Telegram thread override.',
+  })
+  assert.equal(result.session.binding.channel, 'telegram')
+  assert.equal(result.session.binding.identityId, 'assistant:primary')
+  assert.equal(result.session.binding.actorId, 'contact:override')
+  assert.equal(result.session.binding.threadId, 'chat-override')
+  assert.equal(result.session.binding.threadIsDirect, true)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.channel, 'telegram')
+  assert.equal(persisted.binding.identityId, 'assistant:primary')
+  assert.equal(persisted.binding.actorId, 'contact:override')
+  assert.equal(persisted.binding.threadId, 'chat-override')
+  assert.equal(persisted.binding.threadIsDirect, true)
+})
+
+test('deliverAssistantMessage ignores lookup-only nested conversation metadata when resuming a session', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-lookup-conversation-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:seed',
+    channel: 'telegram',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    threadIsDirect: true,
+  })
+
+  const sent: Array<{ message: string; target: string }> = []
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      sessionId: created.session.sessionId,
+      conversation: {
+        alias: 'chat:lookup',
+      },
+      message: 'Reuse the stored thread.',
+    },
+    {
+      sendTelegram: async (input: { message: string; target: string }) => {
+        sent.push(input)
+      },
+    },
+  )
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0], {
+    target: 'chat-1',
+    message: 'Reuse the stored thread.',
+  })
+  assert.equal(result.session.binding.channel, 'telegram')
+  assert.equal(result.session.binding.identityId, 'assistant:primary')
+  assert.equal(result.session.binding.actorId, 'contact:bob')
+  assert.equal(result.session.binding.threadId, 'chat-1')
+  assert.equal(result.session.binding.threadIsDirect, true)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.channel, 'telegram')
+  assert.equal(persisted.binding.identityId, 'assistant:primary')
+  assert.equal(persisted.binding.actorId, 'contact:bob')
+  assert.equal(persisted.binding.threadId, 'chat-1')
+  assert.equal(persisted.binding.threadIsDirect, true)
 })
 
 test('deliverAssistantMessage uses stored Linq thread bindings so one assistant session can reply back into the same chat', async () => {

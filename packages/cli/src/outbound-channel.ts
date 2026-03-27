@@ -20,10 +20,6 @@ import {
 } from './assistant/bindings.js'
 import type { ConversationRef } from './assistant/conversation-ref.js'
 import {
-  mergeConversationRefs,
-  normalizeConversationRef,
-} from './assistant/conversation-ref.js'
-import {
   deliverAssistantOutboxMessage,
   normalizeAssistantDeliveryError,
 } from './assistant/outbox.js'
@@ -75,33 +71,9 @@ export async function deliverAssistantMessage(
 ): Promise<AssistantDeliverResult> {
   const normalizedMessage = normalizeRequiredText(input.message, 'message')
   const explicitTarget = input.target?.trim() ? input.target.trim() : null
-  const conversation = normalizeConversationRef(
-    mergeConversationRefs(input.conversation, {
-      sessionId: input.sessionId,
-      alias: input.alias,
-      channel: input.channel,
-      identityId: input.identityId,
-      participantId: input.actorId ?? input.participantId,
-      threadId: input.threadId ?? input.sourceThreadId,
-      directness:
-        input.threadIsDirect === true
-          ? 'direct'
-          : input.threadIsDirect === false
-            ? 'group'
-            : null,
-    }),
+  const resolved = await resolveAssistantSession(
+    buildDeliverAssistantSessionInput(input),
   )
-  const resolved = await resolveAssistantSession({
-    vault: input.vault,
-    sessionId: input.sessionId,
-    alias: input.alias,
-    channel: input.channel,
-    identityId: input.identityId,
-    actorId: input.actorId ?? input.participantId,
-    threadId: input.threadId ?? input.sourceThreadId,
-    threadIsDirect: input.threadIsDirect,
-    conversation,
-  })
   const receipt = await createAssistantTurnReceipt({
     vault: input.vault,
     sessionId: resolved.session.sessionId,
@@ -169,6 +141,47 @@ export async function deliverAssistantMessage(
     })
     throw error
   }
+}
+
+function buildDeliverAssistantSessionInput(
+  input: DeliverAssistantMessageInput,
+): Parameters<typeof resolveAssistantSession>[0] {
+  const sessionInput = {
+    vault: input.vault,
+  } as Parameters<typeof resolveAssistantSession>[0]
+
+  if ('sessionId' in input) {
+    sessionInput.sessionId = input.sessionId
+  }
+  if ('alias' in input) {
+    sessionInput.alias = input.alias
+  }
+  if ('channel' in input) {
+    sessionInput.channel = input.channel
+  }
+  if ('identityId' in input) {
+    sessionInput.identityId = input.identityId
+  }
+  if ('actorId' in input) {
+    sessionInput.actorId = input.actorId
+  }
+  if ('participantId' in input) {
+    sessionInput.participantId = input.participantId
+  }
+  if ('threadId' in input) {
+    sessionInput.threadId = input.threadId
+  }
+  if ('sourceThreadId' in input) {
+    sessionInput.sourceThreadId = input.sourceThreadId
+  }
+  if ('threadIsDirect' in input) {
+    sessionInput.threadIsDirect = input.threadIsDirect
+  }
+  if ('conversation' in input) {
+    sessionInput.conversation = input.conversation
+  }
+
+  return sessionInput
 }
 
 function resolvePersistedBinding(

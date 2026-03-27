@@ -20,9 +20,37 @@ export interface ConversationRef {
   threadId?: string | null
 }
 
+export interface ConversationRefLocatorInput {
+  actorId?: string | null
+  alias?: string | null
+  channel?: string | null
+  conversation?: ConversationRef | null
+  identityId?: string | null
+  participantId?: string | null
+  sessionId?: string | null
+  sourceThreadId?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}
+
 export interface ConversationBindingFields {
   actorId: string | null
   threadIsDirect: boolean | null
+}
+
+export interface ConversationLocatorBindingPatch {
+  actorId?: string | null
+  channel?: string | null
+  identityId?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}
+
+export interface ConversationLocatorResolution {
+  bindingFields: ConversationBindingFields
+  bindingPatch: ConversationLocatorBindingPatch
+  conversation: ConversationRef
+  explicitAlias: string | null
 }
 
 export function normalizeConversationRef(
@@ -53,6 +81,81 @@ export function conversationRefToBindingFields(
       normalized.directness,
     ),
   }
+}
+
+export function conversationRefFromLocator(
+  input: ConversationRefLocatorInput,
+): ConversationRef {
+  return resolveConversationLocator(input).conversation
+}
+
+export function resolveConversationLocator(
+  input: ConversationRefLocatorInput,
+): ConversationLocatorResolution {
+  const nestedConversation = asConversationRef(input.conversation)
+  const conversation = mergeConversationRefs(nestedConversation, {
+    sessionId: input.sessionId,
+    alias: input.alias,
+    channel: input.channel,
+    identityId: input.identityId,
+    participantId: input.actorId ?? input.participantId,
+    threadId: input.threadId ?? input.sourceThreadId,
+    directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
+  })
+  const bindingFields = conversationRefToBindingFields(conversation)
+  const bindingPatch: ConversationLocatorBindingPatch = {}
+
+  if (
+    'actorId' in input ||
+    'participantId' in input ||
+    hasConversationRefField(nestedConversation, 'participantId')
+  ) {
+    bindingPatch.actorId = bindingFields.actorId
+  }
+  if ('channel' in input || hasConversationRefField(nestedConversation, 'channel')) {
+    bindingPatch.channel = conversation.channel ?? null
+  }
+  if (
+    'identityId' in input ||
+    hasConversationRefField(nestedConversation, 'identityId')
+  ) {
+    bindingPatch.identityId = conversation.identityId ?? null
+  }
+  if (
+    'threadId' in input ||
+    'sourceThreadId' in input ||
+    hasConversationRefField(nestedConversation, 'threadId')
+  ) {
+    bindingPatch.threadId = conversation.threadId ?? null
+  }
+  if (
+    'threadIsDirect' in input ||
+    hasConversationRefField(nestedConversation, 'directness')
+  ) {
+    bindingPatch.threadIsDirect = bindingFields.threadIsDirect
+  }
+
+  return {
+    bindingFields,
+    bindingPatch,
+    conversation,
+    explicitAlias:
+      normalizeNullableString(nestedConversation?.alias) ??
+      normalizeNullableString(input.alias),
+  }
+}
+
+function asConversationRef(
+  input: ConversationRef | null | undefined,
+): ConversationRef | null {
+  return typeof input === 'object' && input !== null ? input : null
+}
+
+function hasConversationRefField(
+  input: ConversationRef | null,
+  field: keyof ConversationRef,
+): boolean {
+  return input !== null && field in input
 }
 
 export function conversationRefFromBinding(
