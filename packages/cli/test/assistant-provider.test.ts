@@ -24,12 +24,16 @@ import {
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderOptions,
 } from '../src/chat-provider.js'
-import { resolveAssistantModelCatalog } from '../src/assistant/provider-catalog.js'
+import {
+  defaultDiscoverOpenAICompatibleModels,
+  resolveAssistantModelCatalog,
+} from '../src/assistant/provider-catalog.js'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
   providerMocks.generateText.mockReset()
   providerMocks.resolveAssistantLanguageModel.mockReset()
+  vi.unstubAllGlobals()
 })
 
 test('resolveAssistantProviderOptions normalizes provider session settings', () => {
@@ -103,6 +107,44 @@ test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and 
   )
   assert.equal(catalog.providerLabel, 'ollama')
   assert.deepEqual(catalog.reasoningOptions, [])
+})
+
+test('resolveAssistantModelCatalog falls back to a local-model entry for undiscovered OpenAI-compatible endpoints', () => {
+  const catalog = resolveAssistantModelCatalog({
+    provider: 'openai-compatible',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+  })
+
+  assert.deepEqual(
+    catalog.modelOptions.map((option) => option.value),
+    ['local-model'],
+  )
+  assert.deepEqual(catalog.reasoningOptions, [])
+})
+
+test('defaultDiscoverOpenAICompatibleModels normalizes and dedupes model ids from the models endpoint', async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      data: [
+        { id: ' gpt-oss:20b ' },
+        { id: 'llama3.3:70b' },
+        { id: 'gpt-oss:20b' },
+        { id: null },
+      ],
+    }),
+  } as Response)
+  vi.stubGlobal('fetch', fetchMock)
+
+  const models = await defaultDiscoverOpenAICompatibleModels(
+    ' http://127.0.0.1:11434/v1 ',
+  )
+
+  assert.deepEqual(models, ['gpt-oss:20b', 'llama3.3:70b'])
+  assert.equal(
+    String(fetchMock.mock.calls[0]?.[0]),
+    'http://127.0.0.1:11434/v1/models',
+  )
 })
 
 test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefined', async () => {
