@@ -4,32 +4,36 @@ import path from "node:path";
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
 import { test } from "vitest";
 
+import { resolveHostedWebWorkspaceSourceEntries } from "../../../config/workspace-source-resolution";
 import {
   HOSTED_WEB_BUILD_DIST_DIR,
   HOSTED_WEB_DEV_DIST_DIR,
+  HOSTED_WEB_SMOKE_DIST_DIR,
+  createHostedWebSmokeEnvironment,
+  resolveHostedWebDistDir,
+} from "../next-artifacts";
+import {
   WORKSPACE_SOURCE_PACKAGE_NAMES,
   buildHostedWebNextConfig,
   buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
-  resolveHostedWebDistDir,
   resolvePrivyBaseDomainOrigin,
-  resolveWorkspaceSourceEntries,
 } from "../next.config";
 
 const productionNextConfig = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD);
 
-test("resolveWorkspaceSourceEntries points at hosted source package entries", () => {
+test("resolveHostedWebWorkspaceSourceEntries points at hosted source package entries", () => {
   assert.equal(
-    resolveWorkspaceSourceEntries("/repo/apps/web")["@murph/device-syncd"],
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murph/device-syncd"],
     path.resolve("/repo/packages/device-syncd/src/index.ts"),
   );
   assert.equal(
-    resolveWorkspaceSourceEntries("/repo/apps/web")["@murph/core"],
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murph/core"],
     path.resolve("/repo/packages/core/src/index.ts"),
   );
   assert.equal(
-    resolveWorkspaceSourceEntries("/repo/apps/web")["@murph/hosted-execution"],
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murph/hosted-execution"],
     path.resolve("/repo/packages/hosted-execution/src/index.ts"),
   );
 });
@@ -42,6 +46,23 @@ test("hosted web dist-dir selection reserves a dedicated artifact directory for 
   assert.equal(resolveHostedWebDistDir(PHASE_DEVELOPMENT_SERVER), HOSTED_WEB_DEV_DIST_DIR);
   assert.equal(resolveHostedWebDistDir(PHASE_PRODUCTION_BUILD), HOSTED_WEB_BUILD_DIST_DIR);
   assert.equal(productionNextConfig.distDir, HOSTED_WEB_BUILD_DIST_DIR);
+});
+
+test("hosted web dev smoke uses its own Next artifact directory", () => {
+  assert.equal(
+    resolveHostedWebDistDir(
+      PHASE_DEVELOPMENT_SERVER,
+      createHostedWebSmokeEnvironment({ NODE_ENV: "test" } as NodeJS.ProcessEnv),
+    ),
+    HOSTED_WEB_SMOKE_DIST_DIR,
+  );
+  assert.equal(
+    resolveHostedWebDistDir(
+      PHASE_PRODUCTION_BUILD,
+      createHostedWebSmokeEnvironment({ NODE_ENV: "test" } as NodeJS.ProcessEnv),
+    ),
+    HOSTED_WEB_BUILD_DIST_DIR,
+  );
 });
 
 test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {

@@ -73,6 +73,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "tsconfig.tools.json" \
   ".gitignore"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+  "config" \
   "packages" \
   "src" \
   "app" \
@@ -95,6 +96,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_PRUNE_DIR_NAMES \
   "dist" \
   ".next" \
   ".next-dev" \
+  ".next-smoke" \
   ".test-dist" \
   ".turbo" \
   ".vercel" \

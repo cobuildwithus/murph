@@ -3,11 +3,10 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
-import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import {
   HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
-  resolveHostedWebWorkspaceSourceEntries,
 } from "../../config/workspace-source-resolution";
+import { resolveHostedWebDistDir } from "./next-artifacts";
 
 interface StaticHeader {
   key: string;
@@ -32,13 +31,7 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-export const HOSTED_WEB_BUILD_DIST_DIR = ".next";
-export const HOSTED_WEB_DEV_DIST_DIR = ".next-dev";
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
-
-export function resolveWorkspaceSourceEntries(appDir: string): Record<string, string> {
-  return resolveHostedWebWorkspaceSourceEntries(appDir);
-}
 
 export function resolvePrivyBaseDomainOrigin(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -161,13 +154,9 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
   };
 }
 
-export function resolveHostedWebDistDir(phase: string): string {
-  return phase === PHASE_DEVELOPMENT_SERVER ? HOSTED_WEB_DEV_DIST_DIR : HOSTED_WEB_BUILD_DIST_DIR;
-}
-
 export function buildHostedWebNextConfig(phase: string): NextConfig {
   return {
-    distDir: resolveHostedWebDistDir(phase),
+    distDir: resolveHostedWebDistDir(phase, process.env),
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
