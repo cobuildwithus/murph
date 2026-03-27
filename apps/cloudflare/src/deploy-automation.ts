@@ -8,51 +8,53 @@ export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
   "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
 ] as const;
 
-const RUNNER_REQUIRED_ENV_NAMES = [
-  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
+const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
+  "AGENTMAIL_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "DEVICE_SYNC_SECRET",
+  "GOOGLE_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GROQ_API_KEY",
+  "LINQ_API_TOKEN",
+  "LINQ_WEBHOOK_SECRET",
+  "MISTRAL_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "OURA_CLIENT_ID",
+  "OURA_CLIENT_SECRET",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_WEBHOOK_SECRET",
+  "TOGETHER_API_KEY",
+  "WHOOP_CLIENT_ID",
+  "WHOOP_CLIENT_SECRET",
+  "XAI_API_KEY",
 ] as const;
 
-const RUNNER_DEFAULT_ENV: Readonly<Record<string, string>> = {
-  HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000",
-  NODE_ENV: "production",
-  PADDLEOCR_MODEL_DIR: "/root/.healthybob/models/paddleocr",
-  PARSER_FFMPEG_PATH: "/usr/bin/ffmpeg",
-  PORT: "8080",
-  WHISPER_MODEL: "base",
-  WHISPER_MODEL_DIR: "/root/.healthybob/models/whisper",
-};
-
-const RUNNER_PASSTHROUGH_KEYS = [
+const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
+  "AGENTMAIL_API_BASE_URL",
+  "AGENTMAIL_BASE_URL",
+  "DEVICE_SYNC_PUBLIC_BASE_URL",
+  "FFMPEG_COMMAND",
+  "LINQ_API_BASE_URL",
+  "PADDLEOCR_COMMAND",
+  "PADDLEOCR_MODEL_DIR",
   "PARSER_FFMPEG_PATH",
-  "PORT",
+  "PDFTOTEXT_COMMAND",
+  "TELEGRAM_API_BASE_URL",
+  "TELEGRAM_BOT_USERNAME",
+  "TELEGRAM_FILE_BASE_URL",
+  "WHISPER_COMMAND",
   "WHISPER_MODEL",
   "WHISPER_MODEL_DIR",
-  "PADDLEOCR_MODEL_DIR",
+  "WHISPER_MODEL_PATH",
 ] as const;
 
-const RUNNER_PASSTHROUGH_PREFIXES = [
-  "AGENTMAIL_",
-  "ANTHROPIC_",
-  "DEVICE_SYNC_",
-  "GOOGLE_",
-  "GOOGLE_GENERATIVE_AI_",
-  "GROQ_",
-  "HB_USER_",
-  "HEALTHYBOB_LINQ_",
-  "LINQ_",
-  "MISTRAL_",
-  "OPENAI_",
-  "OPENROUTER_",
-  "OURA_",
-  "PADDLEOCR_",
-  "TELEGRAM_",
-  "TOGETHER_",
-  "WHISPER_",
-  "WHOOP_",
-  "XAI_",
+const HOSTED_CONTAINER_IMAGE_VAR_NAMES = [
+  "INSTALL_PADDLEOCR",
 ] as const;
 
 const DEFAULT_DEPLOY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 
 export interface HostedDeployAutomationEnvironment {
   allowedUserEnvKeys: string | null;
@@ -62,12 +64,15 @@ export interface HostedDeployAutomationEnvironment {
   bundleEncryptionKeyId: string;
   cloudflareBaseUrl: string;
   compatibilityDate: string;
+  containerMaxInstances: number;
   defaultAlarmDelayMs: string;
+  imageVars: Record<string, string>;
   maxEventAttempts: string;
   retryDelayMs: string;
-  runnerBaseUrl: string;
+  runnerCommitTimeoutMs: string;
   runnerTimeoutMs: string;
   workerName: string;
+  workerVars: Record<string, string>;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -88,12 +93,18 @@ export function readHostedDeployAutomationEnvironment(
       requireString(source.CF_PUBLIC_BASE_URL, "CF_PUBLIC_BASE_URL"),
       "CF_PUBLIC_BASE_URL",
     ),
-    compatibilityDate: normalizeString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-26",
+    compatibilityDate: normalizeString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
+    containerMaxInstances: normalizePositiveInteger(
+      source.CF_CONTAINER_MAX_INSTANCES,
+      DEFAULT_CONTAINER_MAX_INSTANCES,
+      "CF_CONTAINER_MAX_INSTANCES",
+    ),
     defaultAlarmDelayMs: normalizePositiveIntegerString(
       source.CF_DEFAULT_ALARM_DELAY_MS,
-      "900000",
+      "21600000",
       "CF_DEFAULT_ALARM_DELAY_MS",
     ),
+    imageVars: readPresentStringMap(source, HOSTED_CONTAINER_IMAGE_VAR_NAMES),
     maxEventAttempts: normalizePositiveIntegerString(
       source.CF_MAX_EVENT_ATTEMPTS,
       "3",
@@ -104,9 +115,12 @@ export function readHostedDeployAutomationEnvironment(
       "30000",
       "CF_RETRY_DELAY_MS",
     ),
-    runnerBaseUrl: normalizeBaseUrl(
-      requireString(source.CF_RUNNER_BASE_URL, "CF_RUNNER_BASE_URL"),
-      "CF_RUNNER_BASE_URL",
+    runnerCommitTimeoutMs: normalizePositiveIntegerString(
+      normalizeString(source.CF_RUNNER_COMMIT_TIMEOUT_MS)
+        ?? normalizeString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS)
+        ?? "30000",
+      "30000",
+      "CF_RUNNER_COMMIT_TIMEOUT_MS or HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
     ),
     runnerTimeoutMs: normalizePositiveIntegerString(
       source.CF_RUNNER_TIMEOUT_MS,
@@ -114,6 +128,7 @@ export function readHostedDeployAutomationEnvironment(
       "CF_RUNNER_TIMEOUT_MS",
     ),
     workerName: requireString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
+    workerVars: readPresentStringMap(source, HOSTED_WORKER_OPTIONAL_VAR_NAMES),
   };
 }
 
@@ -126,8 +141,9 @@ export function buildHostedWranglerDeployConfig(
     HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS: environment.defaultAlarmDelayMs,
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
-    HOSTED_EXECUTION_RUNNER_BASE_URL: environment.runnerBaseUrl,
+    HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: environment.runnerCommitTimeoutMs,
     HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: environment.runnerTimeoutMs,
+    ...environment.workerVars,
   };
 
   if (environment.allowedUserEnvKeys) {
@@ -144,6 +160,18 @@ export function buildHostedWranglerDeployConfig(
     main: "../src/index.ts",
     compatibility_date: environment.compatibilityDate,
     compatibility_flags: ["nodejs_compat"],
+    containers: [
+      {
+        class_name: "UserRunnerDurableObject",
+        image: "../../../Dockerfile.cloudflare-hosted-runner",
+        ...(Object.keys(environment.imageVars).length > 0
+          ? {
+              image_vars: environment.imageVars,
+            }
+          : {}),
+        max_instances: environment.containerMaxInstances,
+      },
+    ],
     durable_objects: {
       bindings: [
         {
@@ -175,68 +203,14 @@ export function buildHostedWranglerDeployConfig(
 export function buildHostedWorkerSecretsPayload(
   source: EnvSource = process.env,
 ): Record<string, string> {
-  return readRequiredStringMap(source, HOSTED_WORKER_REQUIRED_SECRET_NAMES);
-}
-
-export function buildHostedRunnerEnvironment(
-  source: EnvSource = process.env,
-): Record<string, string> {
-  const allowedUserEnvKeys = normalizeString(source.CF_ALLOWED_USER_ENV_KEYS);
-  const allowedUserEnvPrefixes = normalizeString(source.CF_ALLOWED_USER_ENV_PREFIXES);
-  const runnerCommitTimeoutMs =
-    normalizeString(source.CF_RUNNER_COMMIT_TIMEOUT_MS) ??
-    normalizeString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS) ??
-    undefined;
-  const base = {
-    ...RUNNER_DEFAULT_ENV,
-    ...readRequiredStringMap(source, RUNNER_REQUIRED_ENV_NAMES),
+  return {
+    ...readRequiredStringMap(source, HOSTED_WORKER_REQUIRED_SECRET_NAMES),
+    ...readPresentStringMap(source, HOSTED_WORKER_OPTIONAL_SECRET_NAMES),
   };
-  const next: Record<string, string> = { ...base };
-
-  for (const key of RUNNER_PASSTHROUGH_KEYS) {
-    const value = normalizeString(source[key]);
-
-    if (value) {
-      next[key] = value;
-    }
-  }
-
-  for (const [key, rawValue] of Object.entries(source)) {
-    const value = normalizeString(rawValue);
-
-    if (!value) {
-      continue;
-    }
-
-    if (RUNNER_PASSTHROUGH_PREFIXES.some((prefix) => key.startsWith(prefix))) {
-      next[key] = value;
-    }
-  }
-
-  next.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = normalizePositiveIntegerString(
-    runnerCommitTimeoutMs,
-    RUNNER_DEFAULT_ENV.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS,
-    "CF_RUNNER_COMMIT_TIMEOUT_MS or HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
-  );
-
-  if (allowedUserEnvKeys) {
-    next.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = allowedUserEnvKeys;
-  }
-
-  if (allowedUserEnvPrefixes) {
-    next.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES = allowedUserEnvPrefixes;
-  }
-
-  return sortRecord(next);
-}
-
-export function formatEnvFile(input: Readonly<Record<string, string>>): string {
-  return `${Object.entries(sortRecord(input)).map(([key, value]) => `${key}=${escapeEnvValue(value)}`).join("\n")}\n`;
 }
 
 export function resolveCloudflareDeployPaths(baseDir = DEFAULT_DEPLOY_ROOT): {
   deployDir: string;
-  runnerEnvPath: string;
   workerSecretsPath: string;
   wranglerConfigPath: string;
 } {
@@ -244,30 +218,41 @@ export function resolveCloudflareDeployPaths(baseDir = DEFAULT_DEPLOY_ROOT): {
 
   return {
     deployDir,
-    runnerEnvPath: path.join(deployDir, "runner.env"),
     workerSecretsPath: path.join(deployDir, "worker-secrets.json"),
     wranglerConfigPath: path.join(deployDir, "wrangler.generated.jsonc"),
   };
 }
 
-function escapeEnvValue(value: string): string {
-  if (/^[A-Za-z0-9_./:@+=,-]+$/u.test(value)) {
-    return value;
-  }
-
-  return JSON.stringify(value);
-}
-
 function normalizeBaseUrl(value: string, label: string): string {
   const url = new URL(value.trim());
-  url.hash = "";
-  url.search = "";
 
   if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
-    throw new TypeError(`${label} must be an https URL.`);
+    throw new Error(`${label} must be an https URL.`);
   }
 
+  url.hash = "";
+  url.search = "";
   return url.toString().replace(/\/$/u, "");
+}
+
+function normalizePositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  label: string,
+): number {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
 }
 
 function normalizePositiveIntegerString(
@@ -276,12 +261,13 @@ function normalizePositiveIntegerString(
   label: string,
 ): string {
   const normalized = normalizeString(value) ?? fallback;
+  const parsed = Number.parseInt(normalized, 10);
 
-  if (!/^\d+$/u.test(normalized) || Number.parseInt(normalized, 10) <= 0) {
-    throw new TypeError(`${label} must be a positive integer string.`);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer string.`);
   }
 
-  return normalized;
+  return String(parsed);
 }
 
 function normalizeString(value: string | undefined): string | null {
@@ -293,27 +279,33 @@ function normalizeString(value: string | undefined): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function readRequiredStringMap<TKeys extends readonly string[]>(
-  source: EnvSource,
-  keys: TKeys,
-): Record<TKeys[number], string> {
-  const entries = keys.map((key) => [key, requireString(source[key], key)]);
-
-  return Object.fromEntries(entries) as Record<TKeys[number], string>;
-}
-
 function requireString(value: string | undefined, label: string): string {
   const normalized = normalizeString(value);
 
   if (!normalized) {
-    throw new TypeError(`${label} must be configured.`);
+    throw new Error(`${label} must be configured.`);
   }
 
   return normalized;
 }
 
-function sortRecord<TValue>(value: Readonly<Record<string, TValue>>): Record<string, TValue> {
+function readPresentStringMap(
+  source: EnvSource,
+  keys: readonly string[],
+): Record<string, string> {
+  const entries = keys.flatMap((key) => {
+    const value = normalizeString(source[key]);
+    return value ? [[key, value] as const] : [];
+  });
+
+  return Object.fromEntries(entries);
+}
+
+function readRequiredStringMap(
+  source: EnvSource,
+  keys: readonly string[],
+): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(value).sort(([left], [right]) => left.localeCompare(right)),
+    keys.map((key) => [key, requireString(source[key], key)]),
   );
 }

@@ -515,7 +515,7 @@ function createVaultWriteToolDefinitions(
           expiresInHours,
           inviteCode,
           recipientPhoneNumber,
-          senderMemberId: process.env.HEALTHYBOB_HOSTED_MEMBER_ID ?? null,
+          senderMemberId: process.env.HOSTED_MEMBER_ID ?? null,
         })
       },
     }),

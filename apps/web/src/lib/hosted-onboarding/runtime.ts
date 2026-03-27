@@ -95,7 +95,7 @@ export function requireHostedOnboardingLinqConfig(): {
   if (!environment.linqApiToken) {
     throw hostedOnboardingError({
       code: "LINQ_CONFIG_REQUIRED",
-      message: "LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN must be configured for Linq replies.",
+      message: "LINQ_API_TOKEN must be configured for Linq replies.",
       httpStatus: 500,
     });
   }

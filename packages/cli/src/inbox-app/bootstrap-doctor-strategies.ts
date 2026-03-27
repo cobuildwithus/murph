@@ -346,7 +346,7 @@ const runLinqDoctorChecks: DoctorStrategy = async (
     context.checks.push(
       failCheck(
         'token',
-        `Linq API token is missing from LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        `Linq API token is missing from LINQ_API_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
       ),
     )
   } else {
@@ -364,7 +364,7 @@ const runLinqDoctorChecks: DoctorStrategy = async (
         )
       : warnCheck(
           'webhook-secret',
-          'No Linq webhook signing secret is configured; unsigned webhooks will be accepted until LINQ_WEBHOOK_SECRET or HEALTHYBOB_LINQ_WEBHOOK_SECRET is set.',
+          'No Linq webhook signing secret is configured; unsigned webhooks will be accepted until LINQ_WEBHOOK_SECRET is set.',
         ),
   )
 

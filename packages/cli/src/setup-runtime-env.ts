@@ -10,7 +10,7 @@ import {
 
 const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
 const EMAIL_API_KEY_KEYS = ['AGENTMAIL_API_KEY'] as const
-const LINQ_TOKEN_KEYS = ['LINQ_API_TOKEN', 'HEALTHYBOB_LINQ_API_TOKEN'] as const
+const LINQ_TOKEN_KEYS = ['LINQ_API_TOKEN'] as const
 const WHOOP_CLIENT_ID_KEYS = ['WHOOP_CLIENT_ID'] as const
 const WHOOP_CLIENT_SECRET_KEYS = ['WHOOP_CLIENT_SECRET'] as const
 const WHOOP_CLIENT_KEY_GROUPS = [WHOOP_CLIENT_ID_KEYS, WHOOP_CLIENT_SECRET_KEYS] as const
@@ -164,7 +164,7 @@ export function describeSetupChannelStatus(
         : {
             badge: 'needs token',
             detail:
-              'Add LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN to the current environment to enable the Linq channel.',
+              'Add LINQ_API_TOKEN to the current environment to enable the Linq channel.',
             missingEnv,
             ready: false,
           }

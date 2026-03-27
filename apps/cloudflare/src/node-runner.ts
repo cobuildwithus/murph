@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { importSharePackIntoVault } from "@healthybob/core";
+import type { AssistantChannelDelivery, AssistantOutboxDispatchHooks } from "healthybob";
 
 import {
   decodeHostedBundleBase64,
@@ -25,6 +26,7 @@ import { loadHostedUserEnvForRunner } from "./user-env.js";
 
 const HOSTED_MAX_PARSER_JOBS = 50;
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
+const HOSTED_MAX_OUTBOX_DRAIN = 20;
 let hostedExecutionRunQueue: Promise<void> = Promise.resolve();
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 
@@ -87,19 +89,21 @@ export async function runHostedExecutionJob(
 
           const parserResult = await drainHostedParserQueue(restored.vaultRoot);
           await runHostedAssistantAutomation(restored.vaultRoot, requestId, cli);
+          const assistantCronStatus = await cli.getAssistantCronStatus(restored.vaultRoot);
           const deviceSyncResult = await runHostedDeviceSyncPass(restored.vaultRoot);
-          const bundles = await snapshotHostedExecutionContext({
+          const committedSnapshot = await snapshotHostedExecutionContext({
             operatorHomeRoot: restored.operatorHomeRoot,
             vaultRoot: restored.vaultRoot,
           });
 
-          const result: HostedExecutionRunnerResult = {
+          const committedResult: HostedExecutionRunnerResult = {
             bundles: {
-              agentState: encodeHostedBundleBase64(bundles.agentStateBundle),
-              vault: encodeHostedBundleBase64(bundles.vaultBundle),
+              agentState: encodeHostedBundleBase64(committedSnapshot.agentStateBundle),
+              vault: encodeHostedBundleBase64(committedSnapshot.vaultBundle),
             },
             result: {
               eventsHandled: 1,
+              nextWakeAt: assistantCronStatus.nextRunAt,
               summary: summarizeDispatch(input.dispatch, {
                 deviceSyncProcessed: deviceSyncResult.processedJobs,
                 deviceSyncSkipped: deviceSyncResult.skipped,
@@ -112,10 +116,37 @@ export async function runHostedExecutionJob(
           await commitHostedExecutionResult({
             commit: input.commit ?? null,
             dispatch: input.dispatch,
-            result,
+            result: committedResult,
           });
 
-          return result;
+          await drainHostedAssistantOutboxAfterCommit({
+            cli,
+            commit: input.commit ?? null,
+            dispatch: input.dispatch,
+            vaultRoot: restored.vaultRoot,
+          });
+          await cli.refreshAssistantStatusSnapshot(restored.vaultRoot);
+
+          const finalSnapshot = await snapshotHostedExecutionContext({
+            operatorHomeRoot: restored.operatorHomeRoot,
+            vaultRoot: restored.vaultRoot,
+          });
+          const finalResult: HostedExecutionRunnerResult = {
+            bundles: {
+              agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),
+              vault: encodeHostedBundleBase64(finalSnapshot.vaultBundle),
+            },
+            result: committedResult.result,
+          };
+
+          await finalizeHostedExecutionResult({
+            commit: input.commit ?? null,
+            dispatch: input.dispatch,
+            committedResult,
+            finalResult,
+          });
+
+          return finalResult;
         },
       );
     } finally {
@@ -171,6 +202,41 @@ async function commitHostedExecutionResult(input: {
   if (!response.ok) {
     throw new Error(
       `Hosted runner durable commit failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
+    );
+  }
+}
+
+async function finalizeHostedExecutionResult(input: {
+  commit: HostedExecutionRunnerCommitRequest | null;
+  committedResult: HostedExecutionRunnerResult;
+  dispatch: HostedExecutionDispatchRequest;
+  finalResult: HostedExecutionRunnerResult;
+}): Promise<void> {
+  if (!input.commit || sameHostedExecutionBundles(input.committedResult, input.finalResult)) {
+    return;
+  }
+
+  const finalizeUrl = new URL(input.commit.url);
+  finalizeUrl.pathname = finalizeUrl.pathname.replace(/\/commit$/u, "/finalize");
+  const response = await fetch(finalizeUrl, {
+    body: JSON.stringify({
+      bundles: input.finalResult.bundles,
+    }),
+    headers: {
+      ...(input.commit.token
+        ? {
+            authorization: `Bearer ${input.commit.token}`,
+          }
+        : {}),
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+    signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs()),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Hosted runner durable finalize failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
     );
   }
 }
@@ -251,6 +317,8 @@ async function runHostedAssistantAutomation(
 
   try {
     await cli.runAssistantAutomation({
+      deliveryDispatchMode: "queue-only",
+      drainOutbox: false,
       inboxServices,
       once: true,
       requestId,
@@ -270,6 +338,106 @@ async function runHostedAssistantAutomation(
 
     throw error;
   }
+}
+
+async function drainHostedAssistantOutboxAfterCommit(input: {
+  cli: ReturnType<typeof createHostedCliRuntime>;
+  commit: HostedExecutionRunnerCommitRequest | null;
+  dispatch: HostedExecutionDispatchRequest;
+  vaultRoot: string;
+}): Promise<void> {
+  await input.cli.drainAssistantOutbox({
+    dispatchHooks: input.commit
+      ? createHostedAssistantOutboxDispatchHooks({
+          commit: input.commit,
+          userId: input.dispatch.event.userId,
+        })
+      : undefined,
+    limit: HOSTED_MAX_OUTBOX_DRAIN,
+    vault: input.vaultRoot,
+  });
+}
+
+function createHostedAssistantOutboxDispatchHooks(input: {
+  commit: HostedExecutionRunnerCommitRequest;
+  userId: string;
+}): AssistantOutboxDispatchHooks {
+  return {
+    persistDeliveredIntent: async ({ delivery, intent }) => {
+      await callHostedRunnerOutboxJournal({
+        commit: input.commit,
+        delivery,
+        intent,
+        method: "PUT",
+        userId: input.userId,
+      });
+    },
+    resolveDeliveredIntent: async ({ intent }) => {
+      const payload = await callHostedRunnerOutboxJournal({
+        commit: input.commit,
+        intent,
+        method: "GET",
+        userId: input.userId,
+      });
+
+      return payload.delivery;
+    },
+  };
+}
+
+async function callHostedRunnerOutboxJournal(input: {
+  commit: HostedExecutionRunnerCommitRequest;
+  delivery?: AssistantChannelDelivery;
+  intent: {
+    dedupeKey: string;
+    intentId: string;
+  };
+  method: "GET" | "PUT";
+  userId: string;
+}): Promise<{ delivery: AssistantChannelDelivery | null; intentId: string }> {
+  const commitUrl = new URL(input.commit.url);
+  const url = new URL(
+    `/internal/runner-outbox/${encodeURIComponent(input.userId)}/${encodeURIComponent(input.intent.intentId)}`,
+    `${commitUrl.protocol}//${commitUrl.host}`,
+  );
+  url.searchParams.set("dedupeKey", input.intent.dedupeKey);
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      body: input.method === "PUT"
+        ? JSON.stringify({
+            dedupeKey: input.intent.dedupeKey,
+            delivery: input.delivery,
+          })
+        : undefined,
+      headers: {
+        ...(input.commit.token
+          ? {
+              authorization: `Bearer ${input.commit.token}`,
+            }
+          : {}),
+        ...(input.method === "PUT"
+          ? {
+              "content-type": "application/json; charset=utf-8",
+            }
+          : {}),
+      },
+      method: input.method,
+      signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs()),
+    });
+  } catch (error) {
+    throw createHostedRunnerOutboxJournalError(input, null, error);
+  }
+
+  if (!response.ok) {
+    throw createHostedRunnerOutboxJournalError(input, response.status);
+  }
+
+  return (await response.json()) as {
+    delivery: AssistantChannelDelivery | null;
+    intentId: string;
+  };
 }
 
 async function drainHostedParserQueue(vaultRoot: string): Promise<{ processedJobs: number }> {
@@ -374,7 +542,7 @@ async function withHostedProcessEnvironment<T>(
   const previousValues = new Map<string, string | undefined>();
   const nextValues: Record<string, string> = {
     ...input.envOverrides,
-    HEALTHYBOB_HOSTED_MEMBER_ID: input.hostedMemberId,
+    HOSTED_MEMBER_ID: input.hostedMemberId,
     HOME: input.operatorHomeRoot,
     VAULT: input.vaultRoot,
   };
@@ -401,6 +569,61 @@ function assertNever(value: never): never {
   throw new Error(`Unexpected hosted execution event: ${JSON.stringify(value)}`);
 }
 
+function sameHostedExecutionBundles(
+  left: HostedExecutionRunnerResult,
+  right: HostedExecutionRunnerResult,
+): boolean {
+  return (
+    left.bundles.agentState === right.bundles.agentState
+    && left.bundles.vault === right.bundles.vault
+  );
+}
+
+function createHostedRunnerOutboxJournalError(
+  input: {
+    intent: {
+      intentId: string;
+    };
+    method: "GET" | "PUT";
+    userId: string;
+  },
+  status: number | null,
+  cause?: unknown,
+): Error & {
+  code: string;
+  context: {
+    retryable: true;
+    status: number | null;
+  };
+  retryable: true;
+} {
+  const error = new Error(
+    status === null
+      ? `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${input.intent.intentId}.`
+      : `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${input.intent.intentId} with HTTP ${status}.`,
+  ) as Error & {
+    code: string;
+    context: {
+      retryable: true;
+      status: number | null;
+    };
+    cause?: unknown;
+    retryable: true;
+  };
+
+  error.code = "HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED";
+  error.context = {
+    retryable: true,
+    status,
+  };
+  error.retryable = true;
+  if (cause !== undefined) {
+    error.cause = cause;
+  }
+
+  return error;
+}
+
 function readHostedRunnerCommitTimeoutMs(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): number {
@@ -419,7 +642,7 @@ function parsePositiveInteger(value: string | undefined, fallback: number, label
   const parsed = Number.parseInt(value, 10);
 
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new RangeError(`${label} must be a positive integer.`);
   }
 
   return parsed;

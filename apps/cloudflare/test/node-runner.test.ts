@@ -1,11 +1,38 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildSharePackFromVault, initializeVault, readFood, upsertFood, upsertProtocolItem } from "@healthybob/core";
-import { restoreHostedExecutionContext } from "@healthybob/runtime-state";
+import { buildSharePackFromVault, initializeVault, listFoods, readFood, upsertFood, upsertProtocolItem } from "@healthybob/core";
+import { restoreHostedExecutionContext, snapshotHostedExecutionContext } from "@healthybob/runtime-state";
+import { assistantOutboxIntentSchema, resolveAssistantStatePaths } from "healthybob";
+
+const hostedCliMocks = vi.hoisted(() => ({
+  drainAssistantOutbox: vi.fn(),
+  runAssistantAutomation: vi.fn(),
+}));
+
+vi.mock("../src/runtime-adapter.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/runtime-adapter.js")>(
+    "../src/runtime-adapter.js",
+  );
+
+  return {
+    ...actual,
+    createHostedCliRuntime: () => {
+      const runtime = actual.createHostedCliRuntime();
+
+      return {
+        ...runtime,
+        drainAssistantOutbox: (...args: Parameters<typeof runtime.drainAssistantOutbox>) =>
+          hostedCliMocks.drainAssistantOutbox(...args),
+        runAssistantAutomation: (...args: Parameters<typeof runtime.runAssistantAutomation>) =>
+          hostedCliMocks.runAssistantAutomation(...args),
+      };
+    },
+  };
+});
 
 import { runHostedExecutionJob, setHostedExecutionRunStartHookForTests } from "../src/node-runner.js";
 import { writeHostedUserEnvToAgentStateBundle } from "../src/user-env.js";
@@ -13,8 +40,14 @@ import { writeHostedUserEnvToAgentStateBundle } from "../src/user-env.js";
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks();
+    const actual = await vi.importActual<typeof import("../src/runtime-adapter.js")>(
+      "../src/runtime-adapter.js",
+    );
+    const runtime = actual.createHostedCliRuntime();
+    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => runtime.runAssistantAutomation(input));
+    hostedCliMocks.drainAssistantOutbox.mockImplementation((input) => runtime.drainAssistantOutbox(input));
   });
 
   afterEach(async () => {
@@ -111,12 +144,10 @@ describe("runHostedExecutionJob", () => {
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
-    const importedFood = await readFood({
-      vaultRoot: restored.vaultRoot,
-      slug: "morning-smoothie",
-    });
+    const importedFood = (await listFoods(restored.vaultRoot)).find((food) => food.title === "Morning Smoothie");
 
     expect(result.result.summary).toContain('Imported share pack');
+    expect(importedFood).toBeDefined();
     expect(importedFood.attachedProtocolIds?.length).toBe(1);
     expect(importedFood.autoLogDaily?.time).toBe("08:00");
   });
@@ -171,13 +202,13 @@ describe("runHostedExecutionJob", () => {
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     const previousCustomApiKey = process.env.CUSTOM_API_KEY;
     const previousHome = process.env.HOME;
-    const previousHostedMemberId = process.env.HEALTHYBOB_HOSTED_MEMBER_ID;
+    const previousHostedMemberId = process.env.HOSTED_MEMBER_ID;
     const previousVault = process.env.VAULT;
 
     process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
     process.env.CUSTOM_API_KEY = "custom-original-key";
     process.env.HOME = "/tmp/original-home";
-    process.env.HEALTHYBOB_HOSTED_MEMBER_ID = "original-member";
+    process.env.HOSTED_MEMBER_ID = "original-member";
     process.env.VAULT = "/tmp/original-vault";
 
     try {
@@ -201,13 +232,13 @@ describe("runHostedExecutionJob", () => {
       expect(process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS).toBe("CUSTOM_API_KEY");
       expect(process.env.CUSTOM_API_KEY).toBe("custom-original-key");
       expect(process.env.HOME).toBe("/tmp/original-home");
-      expect(process.env.HEALTHYBOB_HOSTED_MEMBER_ID).toBe("original-member");
+      expect(process.env.HOSTED_MEMBER_ID).toBe("original-member");
       expect(process.env.VAULT).toBe("/tmp/original-vault");
 
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
       restoreEnvVar("CUSTOM_API_KEY", previousCustomApiKey);
       restoreEnvVar("HOME", previousHome);
-      restoreEnvVar("HEALTHYBOB_HOSTED_MEMBER_ID", previousHostedMemberId);
+      restoreEnvVar("HOSTED_MEMBER_ID", previousHostedMemberId);
       restoreEnvVar("VAULT", previousVault);
     }
   });
@@ -235,16 +266,23 @@ describe("runHostedExecutionJob", () => {
     let startedRunCount = 0;
     const releaseFirstCommit = createDeferred<void>();
     const seenValues: string[] = [];
-    const commitFetch = vi.fn()
-      .mockImplementationOnce(async () => {
+    let commitCallCount = 0;
+    const commitFetch = vi.fn(async (url: string | URL) => {
+      if (String(url).includes("/commit")) {
+        commitCallCount += 1;
         seenValues.push(process.env.CUSTOM_API_KEY ?? "missing");
-        await releaseFirstCommit.promise;
+        if (commitCallCount === 1) {
+          await releaseFirstCommit.promise;
+        }
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      })
-      .mockImplementationOnce(async () => {
-        seenValues.push(process.env.CUSTOM_API_KEY ?? "missing");
+      }
+
+      if (String(url).includes("/finalize")) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${String(url)}`);
+    });
     vi.stubGlobal("fetch", commitFetch);
     setHostedExecutionRunStartHookForTests(() => {
       startedRunCount += 1;
@@ -315,12 +353,326 @@ describe("runHostedExecutionJob", () => {
       await secondRun;
 
       expect(startedRunCount).toBe(2);
-      expect(commitFetch).toHaveBeenCalledTimes(2);
+      expect(commitCallCount).toBe(2);
       expect(seenValues).toEqual(["user-one-key", "user-two-key"]);
     } finally {
       setHostedExecutionRunStartHookForTests(null);
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
     }
+  });
+
+  it("reconciles journaled hosted assistant deliveries only after the durable commit callback", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-"));
+    const operatorHomeRoot = path.join(parent, "home");
+    const vaultRoot = path.join(parent, "vault");
+    cleanupPaths.push(parent);
+    await mkdir(operatorHomeRoot, { recursive: true });
+    await mkdir(vaultRoot, { recursive: true });
+
+    const statePaths = resolveAssistantStatePaths(vaultRoot);
+    await mkdir(statePaths.outboxDirectory, { recursive: true });
+    const intentId = "outbox_hosted_reconcile";
+    const createdAt = "2026-03-26T12:00:00.000Z";
+    await writeFile(
+      path.join(statePaths.outboxDirectory, `${intentId}.json`),
+      `${JSON.stringify(assistantOutboxIntentSchema.parse({
+        schema: "healthybob.assistant-outbox-intent.v1",
+        intentId,
+        sessionId: "sess_hosted",
+        turnId: "turn_hosted",
+        createdAt,
+        updatedAt: createdAt,
+        lastAttemptAt: null,
+        nextAttemptAt: createdAt,
+        sentAt: null,
+        attemptCount: 0,
+        status: "pending",
+        message: "Queued the Linq reply.",
+        dedupeKey: "dedupe_hosted",
+        targetFingerprint: "target_hosted",
+        channel: "linq",
+        identityId: null,
+        actorId: null,
+        threadId: "chat_123",
+        threadIsDirect: true,
+        bindingDelivery: {
+          kind: "thread",
+          target: "chat_123",
+        },
+        explicitTarget: null,
+        delivery: null,
+        lastError: null,
+      }))}\n`,
+    );
+    const initialSnapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    const fetchCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
+
+        if (String(url).includes("/internal/runner-events/")) {
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+
+        if (String(url).includes("/internal/runner-outbox/")) {
+          return new Response(JSON.stringify({
+            delivery: {
+              channel: "linq",
+              sentAt: "2026-03-26T12:00:05.000Z",
+              target: "chat_123",
+              targetKind: "thread",
+              messageLength: "Queued the Linq reply.".length,
+            },
+            intentId,
+          }), { status: 200 });
+        }
+
+        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+      }),
+    );
+
+    const result = await runHostedExecutionJob({
+      bundles: {
+        agentState: Buffer.from(initialSnapshot.agentStateBundle).toString("base64"),
+        vault: Buffer.from(initialSnapshot.vaultBundle).toString("base64"),
+      },
+      commit: {
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        token: "runner-token",
+        url: "https://worker.example.test/internal/runner-events/member_123/evt_outbox/commit",
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          userId: "member_123",
+        },
+        eventId: "evt_outbox",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    expect(fetchCalls).toEqual([
+      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox/commit",
+      "GET https://worker.example.test/internal/runner-outbox/member_123/outbox_hosted_reconcile?dedupeKey=dedupe_hosted",
+      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox/finalize",
+    ]);
+
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-restored-"));
+    cleanupPaths.push(workspaceRoot);
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+      workspaceRoot,
+    });
+    const savedIntent = JSON.parse(
+      await readFile(path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`), "utf8"),
+    ) as {
+      delivery: { target: string } | null;
+      status: string;
+    };
+    const statusSnapshot = JSON.parse(
+      await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
+    ) as {
+      outbox: { pending: number; sent: number };
+      recentTurns: Array<{ deliveryDisposition: string; status: string }>;
+    };
+
+    expect(savedIntent.status).toBe("sent");
+    expect(savedIntent.delivery?.target).toBe("chat_123");
+    expect(statusSnapshot.outbox.pending).toBe(0);
+    expect(statusSnapshot.outbox.sent).toBe(1);
+    expect(statusSnapshot.recentTurns).toEqual([]);
+  });
+
+  it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-"));
+    cleanupPaths.push(parent);
+    const intentId = "outbox_hosted_send";
+    const createdAt = "2026-03-26T12:00:00.000Z";
+    const sentAt = "2026-03-26T12:00:05.000Z";
+    const delivery = {
+      channel: "linq" as const,
+      sentAt,
+      target: "chat_123",
+      targetKind: "thread" as const,
+      messageLength: "Queued the Linq reply.".length,
+    };
+    const writePendingIntent = async (vaultRoot: string) => {
+      const statePaths = resolveAssistantStatePaths(vaultRoot);
+      await mkdir(statePaths.outboxDirectory, { recursive: true });
+      await writeFile(
+        path.join(statePaths.outboxDirectory, `${intentId}.json`),
+        `${JSON.stringify(assistantOutboxIntentSchema.parse({
+          schema: "healthybob.assistant-outbox-intent.v1",
+          intentId,
+          sessionId: "sess_hosted",
+          turnId: "turn_hosted",
+          createdAt,
+          updatedAt: createdAt,
+          lastAttemptAt: null,
+          nextAttemptAt: createdAt,
+          sentAt: null,
+          attemptCount: 0,
+          status: "pending",
+          message: "Queued the Linq reply.",
+          dedupeKey: "dedupe_hosted_send",
+          targetFingerprint: "target_hosted_send",
+          channel: "linq",
+          identityId: null,
+          actorId: null,
+          threadId: "chat_123",
+          threadIsDirect: true,
+          bindingDelivery: {
+            kind: "thread",
+            target: "chat_123",
+          },
+          explicitTarget: null,
+          delivery: null,
+          lastError: null,
+        }))}\n`,
+      );
+    };
+
+    hostedCliMocks.runAssistantAutomation.mockImplementationOnce(async ({ vault }) => {
+      await writePendingIntent(vault);
+    });
+    hostedCliMocks.drainAssistantOutbox.mockImplementationOnce(async ({ dispatchHooks, vault }) => {
+      const statePaths = resolveAssistantStatePaths(vault);
+      const intentPath = path.join(statePaths.outboxDirectory, `${intentId}.json`);
+      const pendingIntent = assistantOutboxIntentSchema.parse(
+        JSON.parse(await readFile(intentPath, "utf8")),
+      );
+
+      await expect(
+        dispatchHooks?.resolveDeliveredIntent?.({
+          intent: pendingIntent,
+          vault,
+        }),
+      ).resolves.toBeNull();
+      await dispatchHooks?.persistDeliveredIntent?.({
+        delivery,
+        intent: pendingIntent,
+        vault,
+      });
+      await writeFile(
+        intentPath,
+        `${JSON.stringify({
+          ...pendingIntent,
+          updatedAt: sentAt,
+          nextAttemptAt: null,
+          sentAt,
+          status: "sent",
+          delivery,
+          lastError: null,
+        })}\n`,
+      );
+
+      return {
+        attempted: 1,
+        failed: 0,
+        queued: 0,
+        sent: 1,
+      };
+    });
+
+    const fetchCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
+
+        if (String(url).includes("/internal/runner-events/") && String(url).includes("/commit")) {
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+
+        if (String(url).includes("/internal/runner-outbox/") && (init?.method ?? "GET") === "GET") {
+          return new Response(JSON.stringify({
+            delivery: null,
+            intentId,
+          }), { status: 200 });
+        }
+
+        if (String(url).includes("/internal/runner-outbox/") && init?.method === "PUT") {
+          return new Response(String(init?.body), { status: 200 });
+        }
+
+        if (String(url).includes("/internal/runner-events/") && String(url).includes("/finalize")) {
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+
+        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+      }),
+    );
+
+    const result = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      commit: {
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        token: "runner-token",
+        url: "https://worker.example.test/internal/runner-events/member_123/evt_outbox_send/commit",
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          userId: "member_123",
+        },
+        eventId: "evt_outbox_send",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    expect(fetchCalls).toEqual([
+      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox_send/commit",
+      "GET https://worker.example.test/internal/runner-outbox/member_123/outbox_hosted_send?dedupeKey=dedupe_hosted_send",
+      "PUT https://worker.example.test/internal/runner-outbox/member_123/outbox_hosted_send?dedupeKey=dedupe_hosted_send",
+      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox_send/finalize",
+    ]);
+
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-restored-"));
+    cleanupPaths.push(workspaceRoot);
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+      workspaceRoot,
+    });
+    const savedIntent = assistantOutboxIntentSchema.parse(
+      JSON.parse(
+        await readFile(
+          path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
+          "utf8",
+        ),
+      ),
+    );
+    const statusSnapshot = JSON.parse(
+      await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
+    ) as {
+      outbox: { pending: number; sent: number };
+      recentTurns: Array<{ deliveryDisposition: string; status: string }>;
+    };
+
+    expect(savedIntent.status).toBe("sent");
+    expect(savedIntent.delivery).toEqual(delivery);
+    expect(statusSnapshot.outbox.pending).toBe(0);
+    expect(statusSnapshot.outbox.sent).toBe(1);
+    expect(statusSnapshot.recentTurns).toEqual([]);
   });
 
   it("posts a durable commit before returning when a commit callback is configured", async () => {
@@ -360,21 +712,29 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      expect(commitFetch).toHaveBeenCalledTimes(1);
+      expect(commitFetch).toHaveBeenCalledTimes(2);
       expect(timeoutSpy).toHaveBeenCalledWith(15_000);
-      const [url, init] = commitFetch.mock.calls[0] ?? [];
-      expect(url).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/commit");
-      expect(init?.headers).toMatchObject({
+      const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
+      const [finalizeUrl, finalizeInit] = commitFetch.mock.calls[1] ?? [];
+      expect(commitUrl).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/commit");
+      expect(commitInit?.headers).toMatchObject({
         authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       });
-      expect(JSON.parse(String(init?.body))).toMatchObject({
-        bundles: result.bundles,
+      expect(JSON.parse(String(commitInit?.body))).toMatchObject({
         currentBundleRefs: {
           agentState: null,
           vault: null,
         },
         result: result.result,
+      });
+      expect(String(finalizeUrl)).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/finalize");
+      expect(finalizeInit?.headers).toMatchObject({
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      });
+      expect(JSON.parse(String(finalizeInit?.body))).toEqual({
+        bundles: result.bundles,
       });
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);

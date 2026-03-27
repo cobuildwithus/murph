@@ -1,6 +1,6 @@
 import { VaultCliError } from '../vault-cli-errors.js'
 
-const ASSISTANT_FAULTS_ENV = 'HEALTHYBOB_ASSISTANT_FAULTS'
+const ASSISTANT_FAULTS_ENV = 'ASSISTANT_FAULTS'
 const consumedFaults = new Map<string, number>()
 
 const RETRYABLE_ASSISTANT_FAULTS = new Set([

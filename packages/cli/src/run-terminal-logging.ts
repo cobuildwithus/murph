@@ -8,7 +8,7 @@ import { normalizeNullableString as normalizeLabel } from './text/shared.js'
 export type ForegroundLogScope = 'assistant' | 'inbox'
 
 export const UNSAFE_FOREGROUND_LOG_DETAILS_ENV =
-  'HEALTHYBOB_UNSAFE_FOREGROUND_LOG_DETAILS'
+  'UNSAFE_FOREGROUND_LOG_DETAILS'
 
 export interface ForegroundTerminalLogOptions {
   unsafeDetails?: boolean

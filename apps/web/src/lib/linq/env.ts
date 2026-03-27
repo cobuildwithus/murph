@@ -18,10 +18,7 @@ function readEnv(source: NodeJS.ProcessEnv, keys: readonly string[]): string | n
   return null;
 }
 
-const LINQ_WEBHOOK_SECRET_ENV_KEYS = [
-  "LINQ_WEBHOOK_SECRET",
-  "HEALTHYBOB_LINQ_WEBHOOK_SECRET",
-] as const;
+const LINQ_WEBHOOK_SECRET_ENV_KEYS = ["LINQ_WEBHOOK_SECRET"] as const;
 
 export interface HostedLinqEnvironment {
   webhookSecret: string | null;

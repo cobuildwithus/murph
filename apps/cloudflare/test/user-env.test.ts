@@ -6,6 +6,8 @@ import {
   writeHostedUserEnvToAgentStateBundle,
 } from "../src/user-env.js";
 
+const REMOVED_HOSTED_USER_PREFIX_KEY = "HB_USER_SAMPLE_FLAG";
+
 describe("hosted user env helpers", () => {
   it("merges allowlisted keys and removes null values", () => {
     const result = applyHostedUserEnvUpdate({
@@ -24,6 +26,30 @@ describe("hosted user env helpers", () => {
     expect(result).toEqual({
       OPENAI_API_KEY: "sk-user",
     });
+  });
+
+  it("accepts HOSTED_USER_ overrides but rejects the removed HB_USER_ prefix", () => {
+    expect(applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          HOSTED_USER_SAMPLE_FLAG: "enabled",
+        },
+        mode: "merge",
+      },
+    })).toEqual({
+      HOSTED_USER_SAMPLE_FLAG: "enabled",
+    });
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          [REMOVED_HOSTED_USER_PREFIX_KEY]: "enabled",
+        },
+        mode: "merge",
+      },
+    })).toThrow(/not allowed/u);
   });
 
   it("rejects dangerous env names", () => {

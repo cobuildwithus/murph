@@ -11,7 +11,6 @@ export interface HostedExecutionEnvironment {
   dispatchSigningSecret: string;
   maxEventAttempts: number;
   retryDelayMs: number;
-  runnerBaseUrl: string | null;
   runnerControlToken: string | null;
   runnerTimeoutMs: number;
 }
@@ -27,7 +26,7 @@ export function readHostedExecutionEnvironment(
     "HOSTED_EXECUTION_SIGNING_SECRET",
   );
   const bundleEncryptionKey = requireString(
-    source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY ?? source.HB_HOSTED_BUNDLE_KEY,
+    source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY,
     "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
   );
 
@@ -54,7 +53,6 @@ export function readHostedExecutionEnvironment(
       30_000,
       "HOSTED_EXECUTION_RETRY_DELAY_MS",
     ),
-    runnerBaseUrl: normalizeBaseUrl(source.HOSTED_EXECUTION_RUNNER_BASE_URL),
     runnerControlToken: normalizeString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN),
     runnerTimeoutMs: parsePositiveInteger(
       normalizeString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),

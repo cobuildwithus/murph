@@ -11,11 +11,6 @@ on:
         options:
           - staging
           - production
-      publish_runner_image:
-        description: Build and push the hosted runner image to GHCR
-        required: true
-        default: true
-        type: boolean
       sync_worker_secrets:
         description: Upload the Worker secret set before deploy
         required: true
@@ -34,7 +29,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   deploy:
@@ -54,11 +48,11 @@ jobs:
       CF_BUNDLES_PREVIEW_BUCKET: ${{ vars.CF_BUNDLES_PREVIEW_BUCKET }}
       CF_BUNDLE_KEY_ID: ${{ vars.CF_BUNDLE_KEY_ID }}
       CF_COMPATIBILITY_DATE: ${{ vars.CF_COMPATIBILITY_DATE }}
+      CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES }}
       CF_DEFAULT_ALARM_DELAY_MS: ${{ vars.CF_DEFAULT_ALARM_DELAY_MS }}
       CF_MAX_EVENT_ATTEMPTS: ${{ vars.CF_MAX_EVENT_ATTEMPTS }}
       CF_PUBLIC_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       CF_RETRY_DELAY_MS: ${{ vars.CF_RETRY_DELAY_MS }}
-      CF_RUNNER_BASE_URL: ${{ vars.CF_RUNNER_BASE_URL }}
       CF_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.CF_RUNNER_COMMIT_TIMEOUT_MS }}
       CF_RUNNER_TIMEOUT_MS: ${{ vars.CF_RUNNER_TIMEOUT_MS }}
       CF_WORKER_NAME: ${{ vars.CF_WORKER_NAME }}
@@ -74,14 +68,14 @@ jobs:
       OURA_CLIENT_SECRET: ${{ secrets.OURA_CLIENT_SECRET }}
       LINQ_API_BASE_URL: ${{ vars.LINQ_API_BASE_URL }}
       LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
-      HEALTHYBOB_LINQ_API_BASE_URL: ${{ vars.HEALTHYBOB_LINQ_API_BASE_URL }}
-      HEALTHYBOB_LINQ_API_TOKEN: ${{ secrets.HEALTHYBOB_LINQ_API_TOKEN }}
       LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
-      HEALTHYBOB_LINQ_WEBHOOK_SECRET: ${{ secrets.HEALTHYBOB_LINQ_WEBHOOK_SECRET }}
       AGENTMAIL_API_BASE_URL: ${{ vars.AGENTMAIL_API_BASE_URL }}
+      AGENTMAIL_BASE_URL: ${{ vars.AGENTMAIL_BASE_URL }}
       AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_BOT_USERNAME: ${{ vars.TELEGRAM_BOT_USERNAME }}
+      TELEGRAM_API_BASE_URL: ${{ vars.TELEGRAM_API_BASE_URL }}
+      TELEGRAM_FILE_BASE_URL: ${{ vars.TELEGRAM_FILE_BASE_URL }}
       TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -94,11 +88,15 @@ jobs:
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       WHISPER_MODEL: ${{ vars.WHISPER_MODEL }}
       WHISPER_MODEL_DIR: ${{ vars.WHISPER_MODEL_DIR }}
+      WHISPER_MODEL_PATH: ${{ vars.WHISPER_MODEL_PATH }}
+      WHISPER_COMMAND: ${{ vars.WHISPER_COMMAND }}
       PADDLEOCR_MODEL_DIR: ${{ vars.PADDLEOCR_MODEL_DIR }}
+      PADDLEOCR_COMMAND: ${{ vars.PADDLEOCR_COMMAND }}
       PARSER_FFMPEG_PATH: ${{ vars.PARSER_FFMPEG_PATH }}
+      FFMPEG_COMMAND: ${{ vars.FFMPEG_COMMAND }}
+      PDFTOTEXT_COMMAND: ${{ vars.PDFTOTEXT_COMMAND }}
       INSTALL_PADDLEOCR: ${{ vars.INSTALL_PADDLEOCR || '0' }}
       HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
-      HOSTED_EXECUTION_SMOKE_RUNNER_BASE_URL: ${{ vars.CF_RUNNER_BASE_URL }}
       HOSTED_EXECUTION_SMOKE_USER_ID: ${{ inputs.smoke_user_id }}
     steps:
       - uses: actions/checkout@v6
@@ -122,42 +120,9 @@ jobs:
         run: |
           pnpm --dir apps/cloudflare deploy:config:render
           pnpm --dir apps/cloudflare deploy:secrets:render
-          pnpm --dir apps/cloudflare deploy:runner-env:render
 
       - name: Show generated artifact paths
         run: ls -lah apps/cloudflare/.deploy
-
-      - name: Resolve runner image coordinates
-        id: image
-        shell: bash
-        run: |
-          set -euo pipefail
-          owner="${GITHUB_REPOSITORY_OWNER,,}"
-          image_repo="ghcr.io/${owner}/healthybob-cloudflare-runner"
-          echo "repo=${image_repo}" >> "$GITHUB_OUTPUT"
-          echo "sha_tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "env_tag=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        if: ${{ inputs.publish_runner_image }}
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push hosted runner image
-        if: ${{ inputs.publish_runner_image }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.cloudflare-hosted-runner
-          push: true
-          build-args: |
-            INSTALL_PADDLEOCR=${{ env.INSTALL_PADDLEOCR || '0' }}
-          tags: |
-            ${{ steps.image.outputs.repo }}:${{ steps.image.outputs.sha_tag }}
-            ${{ steps.image.outputs.repo }}:${{ steps.image.outputs.env_tag }}
 
       - name: Sync Worker secrets
         if: ${{ inputs.sync_worker_secrets }}
@@ -180,7 +145,6 @@ jobs:
             echo "- Environment: \`${{ inputs.environment }}\`"
             echo "- Worker name: \`${CF_WORKER_NAME}\`"
             echo "- Worker URL: \`${CF_PUBLIC_BASE_URL}\`"
-            echo "- Runner URL: \`${CF_RUNNER_BASE_URL}\`"
-            echo "- Runner image: \`${{ steps.image.outputs.repo }}:${{ steps.image.outputs.env_tag }}\`"
+            echo "- Native container image: Wrangler-built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
             echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

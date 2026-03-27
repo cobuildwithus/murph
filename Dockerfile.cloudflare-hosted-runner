@@ -8,8 +8,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PORT=8080 \
     WHISPER_MODEL=base \
     XDG_CACHE_HOME=/root/.cache \
-    HB_HOSTED_HOME=/root/.healthybob \
-    HB_HOSTED_MODELS_ROOT=/root/.healthybob/models \
+    HOSTED_HOME=/root/.healthybob \
+    HOSTED_MODELS_ROOT=/root/.healthybob/models \
     WHISPER_MODEL_DIR=/root/.healthybob/models/whisper \
     PADDLEOCR_MODEL_DIR=/root/.healthybob/models/paddleocr \
     PARSER_FFMPEG_PATH=/usr/bin/ffmpeg \
@@ -53,7 +53,7 @@ RUN if [ "$INSTALL_PADDLEOCR" = "1" ]; then pip3 install --no-cache-dir paddleoc
 
 EXPOSE 8080
 
-# This image intentionally keeps the current source-based runner startup path.
+# This image intentionally keeps the current source-based hosted execution path.
 # Provider credentials, parser-toolchain paths, and model directories are supplied
 # through environment variables or pre-baked under /root/.healthybob.
-CMD ["bash", "-lc", "corepack pnpm --dir apps/cloudflare runner:local"]
+CMD ["bash", "-lc", "corepack pnpm exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/src/container-entrypoint.ts"]

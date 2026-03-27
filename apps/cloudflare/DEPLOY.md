@@ -2,11 +2,11 @@
 
 This document is the concrete deploy path for the current hosted architecture:
 
-- `apps/web` stays the public onboarding, billing, passkey, and webhook control plane.
-- `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and manual/operator control routes.
-- the separate hosted runner container materializes the encrypted `vault` + `agent-state` bundles, runs one-shot Healthy Bob work, and commits the next encrypted bundle versions back through the Worker.
+- `apps/web` stays the public onboarding, billing, auth, and webhook control plane.
+- `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and operator/internal control routes.
+- the same `UserRunnerDurableObject` now launches its native Cloudflare container to materialize the encrypted `vault` + `agent-state` bundles, run one-shot Healthy Bob work, call back into the worker for commit/finalize/outbox durability, and return the final hosted bundle state.
 
-This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same local filesystem-oriented runtime instead of inventing a second persistence model.
+This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same filesystem-oriented runtime instead of inventing a second persistence model.
 
 ## What the deploy automation covers
 
@@ -19,32 +19,32 @@ This repo now includes:
 - scripts to render:
   - `wrangler.generated.jsonc`
   - `worker-secrets.json`
-  - `runner.env`
-- a smoke-test script that verifies the Worker and runner health endpoints and optionally triggers a manual hosted run
+- a smoke-test script that verifies worker health and optionally triggers one manual hosted run
 
 ## What it does not automate yet
 
-The workflow publishes the runner image to GHCR and deploys the Worker, but it does not roll your runner service on Railway, Fly, Cloud Run, or another container host for you. That part still depends on the runner platform you choose.
-
-That split is deliberate: the current architecture still uses a separate Node runner service, and the long-term runner platform is still operator-chosen.
+- real Cloudflare account provisioning
+- bucket creation
+- post-deploy application-level smoke scenarios beyond one manual `/run`
+- broader hosted side-effect hardening beyond the current hosted assistant outbox path
 
 ## Prerequisites
 
 Before your first deploy, you still need to do three one-time setup tasks in Cloudflare:
 
 1. Create a Workers Paid account.
-2. Create the R2 buckets that will hold the encrypted bundles.
+2. Create the R2 buckets that will hold the encrypted hosted bundles.
 3. Decide the public Worker URL you want to use:
    - a `*.workers.dev` URL, or
    - a custom domain.
 
-The current Worker stores only encrypted bundle blobs in R2 and only tiny coordination state in the Durable Object.
+The current worker stores only encrypted bundle blobs in R2 and only small coordination state in Durable Object storage.
 
 ## Required GitHub environment variables and secrets
 
 Use GitHub Environments such as `staging` and `production`.
 
-The workflow is parameterized by `workflow_dispatch.environment`, and the deploy job is attached to that GitHub environment. That means you can keep staging and production values isolated without editing the workflow.
+The workflow is parameterized by `workflow_dispatch.environment`, and the deploy job is attached to that GitHub environment so staging and production values can stay isolated.
 
 ### Required environment variables
 
@@ -54,24 +54,39 @@ Set these in the selected GitHub environment as variables:
 - `CF_BUNDLES_BUCKET`
 - `CF_BUNDLES_PREVIEW_BUCKET`
 - `CF_PUBLIC_BASE_URL`
-- `CF_RUNNER_BASE_URL`
 
 Optional tuning variables:
 
 - `CF_BUNDLE_KEY_ID` (default `v1`)
-- `CF_COMPATIBILITY_DATE` (default `2026-03-26`)
-- `CF_DEFAULT_ALARM_DELAY_MS` (default `900000`)
+- `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
+- `CF_CONTAINER_MAX_INSTANCES` (default `1000`)
+- `INSTALL_PADDLEOCR` (default `0`, passed to Wrangler as a container `image_vars` build-time input)
+- `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
 - `CF_MAX_EVENT_ATTEMPTS` (default `3`)
 - `CF_RETRY_DELAY_MS` (default `30000`)
 - `CF_RUNNER_TIMEOUT_MS` (default `60000`)
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
 - `CF_ALLOWED_USER_ENV_KEYS`
 - `CF_ALLOWED_USER_ENV_PREFIXES`
-- `INSTALL_PADDLEOCR` (`0` or `1`)
+
+Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
+
+- `DEVICE_SYNC_PUBLIC_BASE_URL`
+- `LINQ_API_BASE_URL`
+- `AGENTMAIL_API_BASE_URL`
+- `AGENTMAIL_BASE_URL`
+- `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_API_BASE_URL`
+- `TELEGRAM_FILE_BASE_URL`
 - `WHISPER_MODEL`
 - `WHISPER_MODEL_DIR`
+- `WHISPER_MODEL_PATH`
 - `PADDLEOCR_MODEL_DIR`
 - `PARSER_FFMPEG_PATH`
+- `FFMPEG_COMMAND`
+- `PDFTOTEXT_COMMAND`
+- `PADDLEOCR_COMMAND`
+- `WHISPER_COMMAND`
 
 ### Required environment secrets
 
@@ -84,11 +99,9 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN`
 
-Those are the minimum secrets that the generated deploy config expects.
+### Optional provider/runtime secrets
 
-### Optional runner and provider secrets
-
-Add whichever hosted features you actually want the runner to support globally:
+Add whichever hosted features you actually want the containerized runner to support globally:
 
 - `DEVICE_SYNC_SECRET`
 - `WHOOP_CLIENT_ID`
@@ -96,9 +109,7 @@ Add whichever hosted features you actually want the runner to support globally:
 - `OURA_CLIENT_ID`
 - `OURA_CLIENT_SECRET`
 - `LINQ_API_TOKEN`
-- `HEALTHYBOB_LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`
-- `HEALTHYBOB_LINQ_WEBHOOK_SECRET`
 - `AGENTMAIL_API_KEY`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
@@ -112,14 +123,6 @@ Add whichever hosted features you actually want the runner to support globally:
 - `XAI_API_KEY`
 - `MISTRAL_API_KEY`
 
-Optional runner and provider variables:
-
-- `DEVICE_SYNC_PUBLIC_BASE_URL`
-- `LINQ_API_BASE_URL`
-- `HEALTHYBOB_LINQ_API_BASE_URL`
-- `AGENTMAIL_API_BASE_URL`
-- `TELEGRAM_BOT_USERNAME`
-
 ## Local dry run before touching production
 
 From the repo root:
@@ -129,6 +132,12 @@ pnpm install
 pnpm --dir apps/cloudflare test
 ```
 
+If the package-local typecheck is blocked by unrelated in-flight workspace errors, the app-local runtime signal is:
+
+```bash
+pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1
+```
+
 Render the generated deploy artifacts from your shell environment:
 
 ```bash
@@ -136,7 +145,6 @@ export CF_WORKER_NAME=healthybob-hosted-staging
 export CF_BUNDLES_BUCKET=healthybob-hosted-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=healthybob-hosted-bundles-staging-preview
 export CF_PUBLIC_BASE_URL=https://healthybob-hosted-staging.example.workers.dev
-export CF_RUNNER_BASE_URL=https://healthybob-runner-staging.internal.example.com
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...
@@ -144,28 +152,14 @@ export HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=...
 
 pnpm --dir apps/cloudflare deploy:config:render
 pnpm --dir apps/cloudflare deploy:secrets:render
-pnpm --dir apps/cloudflare deploy:runner-env:render
 ```
 
 You should now have:
 
 - `apps/cloudflare/.deploy/wrangler.generated.jsonc`
 - `apps/cloudflare/.deploy/worker-secrets.json`
-- `apps/cloudflare/.deploy/runner.env`
 
-## Running the hosted runner locally
-
-Build and run the local runner image:
-
-```bash
-pnpm --dir apps/cloudflare runner:docker:build
-cp apps/cloudflare/.deploy/runner.env apps/cloudflare/.runner.env
-pnpm --dir apps/cloudflare runner:docker:run
-```
-
-The runner listens on port `8080` by default.
-
-## Deploying the Worker manually
+## Deploying the worker manually
 
 If you want to stage manually before GitHub Actions:
 
@@ -174,11 +168,12 @@ pnpm --dir apps/cloudflare worker:secret:bulk -- ./.deploy/worker-secrets.json -
 pnpm --dir apps/cloudflare worker:deploy -- --config ./.deploy/wrangler.generated.jsonc
 ```
 
-Then smoke test the Worker and the runner:
+`wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. Docker needs to be available on the machine running that command.
+
+Then smoke test the deployed worker:
 
 ```bash
 export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL="$CF_PUBLIC_BASE_URL"
-export HOSTED_EXECUTION_SMOKE_RUNNER_BASE_URL="$CF_RUNNER_BASE_URL"
 export HOSTED_EXECUTION_SMOKE_USER_ID=member_test_123
 pnpm --dir apps/cloudflare deploy:smoke
 ```
@@ -189,10 +184,9 @@ If you do not want the script to trigger a manual hosted run, omit `HOSTED_EXECU
 
 The workflow is intentionally manual (`workflow_dispatch`) so you do not accidentally push a half-configured deploy.
 
-Open Actions, then Deploy Cloudflare Hosted Execution, and choose:
+Open Actions, then `Deploy Cloudflare Hosted Execution`, and choose:
 
 - `environment`: `staging` or `production`
-- `publish_runner_image`: whether to build and push the runner image to GHCR
 - `sync_worker_secrets`: whether to upload Worker secrets with Wrangler before deploy
 - `deploy_worker`: whether to actually deploy the Worker
 - `smoke_user_id`: optional hosted user id to trigger one manual `/run` smoke test
@@ -202,39 +196,22 @@ The workflow does this in order:
 1. checks out the repo
 2. installs pnpm and Node 22
 3. installs workspace dependencies
-4. runs the focused `apps/cloudflare` test suite
+4. runs the focused `apps/cloudflare` verification path
 5. renders the generated deploy artifacts
-6. optionally builds and pushes `ghcr.io/<owner>/healthybob-cloudflare-runner:<environment>`
-7. optionally uploads Worker secrets with `wrangler secret bulk`
-8. optionally deploys the Worker with `wrangler deploy`
-9. runs the health and smoke checks
-10. writes a deployment summary into the GitHub Actions step summary
-
-## Pointing a runner host at the published image
-
-The workflow pushes the runner image to GHCR, but you still need your runner host to pull that image.
-
-Use the environment tag for the long-lived service:
-
-- `ghcr.io/<owner>/healthybob-cloudflare-runner:staging`
-- `ghcr.io/<owner>/healthybob-cloudflare-runner:production`
-
-Use the generated `apps/cloudflare/.deploy/runner.env` file contents as the runner service env set.
-
-If your runner platform cannot pull private GHCR images, either:
-
-- grant that platform permission to read GHCR, or
-- switch the workflow's image push target to a registry it can pull from more easily.
+6. optionally uploads Worker secrets with `wrangler secret bulk`
+7. optionally deploys the Worker with `wrangler deploy`, which also builds the native container image from `Dockerfile.cloudflare-hosted-runner`
+8. runs the worker health and smoke checks
+9. writes a deployment summary into the GitHub Actions step summary
 
 ## First production deploy checklist
 
 Before the first real production deploy, confirm all of these are true:
 
-- the Worker and runner each answer `GET /health`
-- `CF_PUBLIC_BASE_URL` is the exact URL the runner can call back to
-- the runner is reachable from Cloudflare over HTTPS
+- Docker is running wherever `wrangler deploy` will execute
+- the Worker answers `GET /health`
+- `CF_PUBLIC_BASE_URL` is the exact externally reachable URL the container can call for commit/finalize/outbox durability
 - `HOSTED_EXECUTION_CONTROL_TOKEN` is set
-- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` is set and matches both sides
+- `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` is set and stable
 - the R2 bucket names in the generated config are correct
 - the bundle encryption key is present and stable
 - one seeded hosted user can complete:
@@ -243,11 +220,13 @@ Before the first real production deploy, confirm all of these are true:
   - a cron tick
   - a device-sync wake
 
+The first deploy can take a few minutes before native container starts succeed reliably, because Cloudflare has to provision the image the first time.
+
 ## What to do right after first deploy
 
-This deploy automation gets you to a reliable staging or canary posture, but two production-hardening items still matter:
+This deploy automation gets you to a real native-container staging posture, but two production-hardening items still matter:
 
-1. add an outbound action outbox and idempotency layer so retries cannot duplicate side effects
-2. decide whether you want to keep the separate runner service or later collapse into Cloudflare's native container-backed Durable Object flow
+1. keep widening direct scenario coverage for the hosted execution lane, especially real Cloudflare deploy smoke paths
+2. extend the current durable assistant outbox approach if other externally visible hosted side effects need the same replay-safe treatment
 
-Until the outbox exists, treat this as suitable for canaries and controlled rollout rather than a giant blind production launch.
+Until those broader guarantees exist, treat the current lane as controlled rollout infrastructure rather than an excuse to skip operational caution.

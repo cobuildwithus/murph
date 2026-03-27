@@ -295,7 +295,7 @@ export async function sendLinqMessage(
   if (!token) {
     throw new VaultCliError(
       'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
-      'Outbound Linq delivery requires LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN.',
+      'Outbound Linq delivery requires LINQ_API_TOKEN.',
     )
   }
 

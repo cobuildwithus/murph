@@ -3,10 +3,13 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerResult,
 } from "@healthybob/runtime-state";
+import { assistantChannelDeliverySchema } from "healthybob";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.js";
 import { readHostedExecutionEnvironment } from "./env.js";
 import { json, readJsonObject } from "./json.js";
+import { createHostedAssistantOutboxDeliveryJournalStore } from "./outbox-delivery-journal.js";
+import { buildHostedRunnerContainerEnv } from "./runner-env.js";
 import { parseHostedUserEnvUpdate } from "./user-env.js";
 import {
   HostedUserRunner,
@@ -21,9 +24,8 @@ interface DurableObjectNamespaceLike {
   getByName(name: string): DurableObjectStubLike;
 }
 
-interface WorkerEnvironmentSource {
+interface WorkerEnvironmentSource extends Readonly<Record<string, unknown>> {
   BUNDLES: import("./bundle-store.js").R2BucketLike;
-  HB_HOSTED_BUNDLE_KEY?: string;
   HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
   HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
@@ -33,13 +35,14 @@ interface WorkerEnvironmentSource {
   HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
-  HOSTED_EXECUTION_RUNNER_BASE_URL?: string;
   HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_SIGNING_SECRET?: string;
   HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET?: string;
   USER_RUNNER: DurableObjectNamespaceLike;
 }
+
+type HostedExecutionBundles = HostedExecutionRunnerResult["bundles"];
 
 export default {
   async fetch(request: Request, env: WorkerEnvironmentSource): Promise<Response> {
@@ -67,14 +70,72 @@ export default {
       const runnerCommitMatch = url.pathname.match(
         /^\/internal\/runner-events\/([^/]+)\/([^/]+)\/commit$/u,
       );
+      const runnerFinalizeMatch = url.pathname.match(
+        /^\/internal\/runner-events\/([^/]+)\/([^/]+)\/finalize$/u,
+      );
+      const runnerOutboxMatch = url.pathname.match(
+        /^\/internal\/runner-outbox\/([^/]+)\/([^/]+)$/u,
+      );
+
+      if (runnerOutboxMatch) {
+        const unauthorized = requireBearerAuthorization(
+          request,
+          environment.runnerControlToken,
+        );
+        if (unauthorized) {
+          return unauthorized;
+        }
+
+        const [, userId, intentId] = runnerOutboxMatch;
+        const journalStore = createHostedAssistantOutboxDeliveryJournalStore({
+          bucket: env.BUNDLES,
+          key: environment.bundleEncryptionKey,
+          keyId: environment.bundleEncryptionKeyId,
+        });
+        const decodedUserId = decodeURIComponent(userId);
+        const decodedIntentId = decodeURIComponent(intentId);
+
+        if (request.method === "GET") {
+          const dedupeKey = url.searchParams.get("dedupeKey") ?? "";
+          const record = await journalStore.read({
+            dedupeKey,
+            intentId: decodedIntentId,
+            userId: decodedUserId,
+          });
+
+          return json({
+            delivery: record?.delivery ?? null,
+            intentId: record?.intentId ?? decodedIntentId,
+          });
+        }
+
+        if (request.method === "PUT") {
+          const payload = await readJsonObject(request);
+          const dedupeKey = requireString(payload.dedupeKey, "dedupeKey");
+          const delivery = assistantChannelDeliverySchema.parse(payload.delivery);
+          const record = await journalStore.write({
+            dedupeKey,
+            delivery,
+            intentId: decodedIntentId,
+            userId: decodedUserId,
+          });
+
+          return json({
+            delivery: record.delivery,
+            intentId: record.intentId,
+          });
+        }
+
+        return json({ error: "Method not allowed." }, 405);
+      }
 
       if (runnerCommitMatch && request.method === "POST") {
-        if (environment.runnerControlToken) {
-          const authorization = request.headers.get("authorization");
-
-          if (authorization !== `Bearer ${environment.runnerControlToken}`) {
-            return json({ error: "Unauthorized" }, 401);
-          }
+        const unauthorized = requireBearerAuthorization(
+          request,
+          environment.runnerControlToken,
+        );
+        if (unauthorized) {
+          return unauthorized;
         }
 
         const [, userId, eventId] = runnerCommitMatch;
@@ -82,6 +143,28 @@ export default {
         return env.USER_RUNNER.getByName(decodeURIComponent(userId)).fetch(
           new Request(
             `https://runner.internal/commit?eventId=${encodeURIComponent(decodeURIComponent(eventId))}&userId=${encodeURIComponent(decodeURIComponent(userId))}`,
+            {
+              body: JSON.stringify(payload),
+              method: "POST",
+            },
+          ),
+        );
+      }
+
+      if (runnerFinalizeMatch && request.method === "POST") {
+        const unauthorized = requireBearerAuthorization(
+          request,
+          environment.runnerControlToken,
+        );
+        if (unauthorized) {
+          return unauthorized;
+        }
+
+        const [, userId, eventId] = runnerFinalizeMatch;
+        const payload = parseHostedExecutionFinalizeRequest(await readJsonObject(request));
+        return env.USER_RUNNER.getByName(decodeURIComponent(userId)).fetch(
+          new Request(
+            `https://runner.internal/finalize?eventId=${encodeURIComponent(decodeURIComponent(eventId))}&userId=${encodeURIComponent(decodeURIComponent(userId))}`,
             {
               body: JSON.stringify(payload),
               method: "POST",
@@ -121,12 +204,12 @@ export default {
       const match = url.pathname.match(/^\/internal\/users\/([^/]+)\/(run|status|env)$/u);
 
       if (match) {
-        if (environment.controlToken) {
-          const authorization = request.headers.get("authorization");
-
-          if (authorization !== `Bearer ${environment.controlToken}`) {
-            return json({ error: "Unauthorized" }, 401);
-          }
+        const unauthorized = requireBearerAuthorization(
+          request,
+          environment.controlToken,
+        );
+        if (unauthorized) {
+          return unauthorized;
         }
 
         const [, userId, action] = match;
@@ -166,6 +249,7 @@ export class UserRunnerDurableObject {
         env as unknown as Readonly<Record<string, string | undefined>>,
       ),
       env.BUNDLES,
+      buildHostedRunnerContainerEnv(env),
     );
   }
 
@@ -193,6 +277,24 @@ export class UserRunnerDurableObject {
         committed: await this.runner.commit({
           eventId,
           payload: parseHostedExecutionCommitRequest(await readJsonObject(request)),
+          userId,
+        }),
+        ok: true,
+      });
+    }
+
+    if (request.method === "POST" && url.pathname === "/finalize") {
+      const userId = url.searchParams.get("userId");
+      const eventId = url.searchParams.get("eventId");
+
+      if (!userId || !eventId) {
+        return json({ error: "userId and eventId are required." }, 400);
+      }
+
+      return json({
+        finalized: await this.runner.finalizeCommit({
+          eventId,
+          payload: parseHostedExecutionFinalizeRequest(await readJsonObject(request)),
           userId,
         }),
         ok: true,
@@ -330,7 +432,21 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
     currentBundleRefs: readCommittedBundleRefs(payload.currentBundleRefs),
     result: {
       eventsHandled: requireNumber(result.eventsHandled, "result.eventsHandled"),
+      nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
       summary: requireString(result.summary, "result.summary"),
+    },
+  };
+}
+
+function parseHostedExecutionFinalizeRequest(
+  payload: Record<string, unknown>,
+): { bundles: HostedExecutionBundles } {
+  const bundles = requireRecord(payload.bundles, "bundles");
+
+  return {
+    bundles: {
+      agentState: readHostedBundleBase64Value(bundles.agentState, "bundles.agentState"),
+      vault: readHostedBundleBase64Value(bundles.vault, "bundles.vault"),
     },
   };
 }
@@ -412,6 +528,22 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   return value;
 }
 
+function readOptionalString(value: unknown, label: string): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string, null, or undefined.`);
+  }
+
+  return value;
+}
+
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string") {
     throw new TypeError(`${label} must be a string.`);
@@ -420,6 +552,18 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function requireBearerAuthorization(
+  request: Request,
+  token: string | null | undefined,
+): Response | null {
+  if (!token) {
+    return null;
+  }
+
+  return request.headers.get("authorization") === `Bearer ${token}`
+    ? null
+    : json({ error: "Unauthorized" }, 401);
+}
 
 async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
   const payload = await request.text();

@@ -40,24 +40,15 @@ export interface ProbeLinqApiResult {
 }
 
 export function resolveLinqApiToken(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.LINQ_API_TOKEN) ??
-    normalizeNullableString(env.HEALTHYBOB_LINQ_API_TOKEN)
-  )
+  return normalizeNullableString(env.LINQ_API_TOKEN)
 }
 
 export function resolveLinqApiBaseUrl(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.LINQ_API_BASE_URL) ??
-    normalizeNullableString(env.HEALTHYBOB_LINQ_API_BASE_URL)
-  )
+  return normalizeNullableString(env.LINQ_API_BASE_URL)
 }
 
 export function resolveLinqWebhookSecret(env: NodeJS.ProcessEnv): string | null {
-  return (
-    normalizeNullableString(env.LINQ_WEBHOOK_SECRET) ??
-    normalizeNullableString(env.HEALTHYBOB_LINQ_WEBHOOK_SECRET)
-  )
+  return normalizeNullableString(env.LINQ_WEBHOOK_SECRET)
 }
 
 export async function probeLinqApi(
@@ -138,7 +129,7 @@ async function requestLinqJson<T>(input: {
   if (!token) {
     throw new VaultCliError(
       'LINQ_API_TOKEN_REQUIRED',
-      'Linq access requires LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN.',
+      'Linq access requires LINQ_API_TOKEN.',
     )
   }
 

@@ -10,9 +10,11 @@ export const HOSTED_USER_ENV_RELATIVE_PATH = ".healthybob/hosted/user-env.json";
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "AGENTMAIL_API_BASE_URL",
   "AGENTMAIL_API_KEY",
+  "AGENTMAIL_BASE_URL",
   "ANTHROPIC_API_KEY",
   "DEVICE_SYNC_PUBLIC_BASE_URL",
   "DEVICE_SYNC_SECRET",
+  "FFMPEG_COMMAND",
   "GOOGLE_API_KEY",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "GROQ_API_KEY",
@@ -23,14 +25,20 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "OURA_CLIENT_ID",
   "OURA_CLIENT_SECRET",
+  "PADDLEOCR_COMMAND",
   "PADDLEOCR_MODEL_DIR",
   "PARSER_FFMPEG_PATH",
+  "PDFTOTEXT_COMMAND",
+  "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_BOT_USERNAME",
+  "TELEGRAM_FILE_BASE_URL",
   "TELEGRAM_WEBHOOK_SECRET",
   "TOGETHER_API_KEY",
+  "WHISPER_COMMAND",
   "WHISPER_MODEL",
   "WHISPER_MODEL_DIR",
+  "WHISPER_MODEL_PATH",
   "WHOOP_CLIENT_ID",
   "WHOOP_CLIENT_SECRET",
   "XAI_API_KEY",
@@ -40,16 +48,18 @@ const DEFAULT_ALLOWED_USER_ENV_PREFIXES = [
   "AGENTMAIL_",
   "ANTHROPIC_",
   "DEVICE_SYNC_",
+  "FFMPEG_",
   "GOOGLE_",
   "GOOGLE_GENERATIVE_AI_",
   "GROQ_",
-  "HB_USER_",
+  "HOSTED_USER_",
   "LINQ_",
   "MISTRAL_",
   "OPENAI_",
   "OPENROUTER_",
   "OURA_",
   "PADDLEOCR_",
+  "PDFTOTEXT_",
   "TELEGRAM_",
   "TOGETHER_",
   "WHISPER_",
@@ -258,15 +268,15 @@ function parseHostedUserEnvConfig(
   return {
     env,
     schema: HOSTED_USER_ENV_SCHEMA,
-    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
+    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
   };
 }
 
-function normalizeHostedUserEnvKey(value: string): string {
-  const normalized = value.trim().toUpperCase();
+function normalizeHostedUserEnvKey(key: string): string {
+  const normalized = key.trim().toUpperCase();
 
-  if (!normalized || !/^[A-Z][A-Z0-9_]*$/u.test(normalized)) {
-    throw new Error(`Hosted user env key is invalid: ${value}`);
+  if (!normalized || !/^[A-Z0-9_]+$/u.test(normalized)) {
+    throw new Error(`Hosted user env key is invalid: ${key}`);
   }
 
   return normalized;
@@ -300,14 +310,18 @@ function isHostedUserEnvKeyAllowed(
 
   const allowedKeys = new Set([
     ...DEFAULT_ALLOWED_USER_ENV_KEYS,
-    ...splitCsv(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
+    ...parseCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
   ]);
+  if (allowedKeys.has(key)) {
+    return true;
+  }
+
   const allowedPrefixes = [
     ...DEFAULT_ALLOWED_USER_ENV_PREFIXES,
-    ...splitCsv(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
+    ...parseCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
   ];
 
-  return allowedKeys.has(key) || allowedPrefixes.some((prefix) => key.startsWith(prefix));
+  return allowedPrefixes.some((prefix) => key.startsWith(prefix));
 }
 
 function sortHostedUserEnv(env: Record<string, string>): Record<string, string> {
@@ -317,11 +331,10 @@ function sortHostedUserEnv(env: Record<string, string>): Record<string, string> 
   );
 }
 
-function splitCsv(value: string | undefined): string[] {
-  return typeof value === "string"
-    ? value
-      .split(",")
-      .map((entry) => entry.trim().toUpperCase())
-      .filter((entry) => entry.length > 0)
-    : [];
+function parseCsvList(value: string | undefined): string[] {
+  return String(value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => entry.toUpperCase());
 }

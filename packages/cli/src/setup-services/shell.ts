@@ -4,8 +4,8 @@ import type { SetupStepResult } from '../setup-cli-contracts.js'
 import { createStep, DEFAULT_USER_BIN_DIRECTORY } from './steps.js'
 import { defaultFileExists, isExecutable } from './process.js'
 
-const HEALTHYBOB_PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
-const HEALTHYBOB_PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
+const PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
+const PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
 
 export async function ensureCliShims(input: {
   cliBinPath: string
@@ -253,15 +253,15 @@ async function ensurePathBlock(profilePath: string): Promise<boolean> {
 
 function hasHealthyBobPathBlock(contents: string): boolean {
   return (
-    contents.includes(HEALTHYBOB_PATH_BLOCK_BEGIN) &&
-    contents.includes(HEALTHYBOB_PATH_BLOCK_END)
+    contents.includes(PATH_BLOCK_BEGIN) &&
+    contents.includes(PATH_BLOCK_END)
   )
 }
 
 function buildHealthyBobPathBlock(): string {
-  return `${HEALTHYBOB_PATH_BLOCK_BEGIN}
+  return `${PATH_BLOCK_BEGIN}
 export PATH="$HOME/.local/bin:$PATH"
-${HEALTHYBOB_PATH_BLOCK_END}
+${PATH_BLOCK_END}
 `
 }
 

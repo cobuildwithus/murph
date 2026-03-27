@@ -992,7 +992,7 @@ test('sendLinqMessage requires an API token before attempting delivery', async (
       assert.equal((error as VaultCliError).code, 'ASSISTANT_LINQ_API_TOKEN_REQUIRED')
       assert.match(
         (error as VaultCliError).message,
-        /LINQ_API_TOKEN|HEALTHYBOB_LINQ_API_TOKEN/iu,
+        /LINQ_API_TOKEN/iu,
       )
       return true
     },

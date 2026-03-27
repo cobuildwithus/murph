@@ -63,7 +63,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  delete process.env.HEALTHYBOB_ASSISTANT_FAULTS
+  delete process.env.ASSISTANT_FAULTS
   resetInjectedAssistantFaults()
   await Promise.all(
     cleanupPaths.splice(0).map(async (target) => {
@@ -164,6 +164,296 @@ test('sendAssistantMessage defers retryable delivery failures into the durable o
     assert.equal(status.outbox.sent, 1)
     assert.equal(status.recentTurns[0]?.status, 'completed')
     assert.equal(status.recentTurns[0]?.deliveryDisposition, 'sent')
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('sendAssistantMessage can queue outbound delivery without attempting a pre-commit send', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-queue-only-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  robustnessMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-queue-only',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      channel: 'telegram',
+      participantId: 'contact:alice',
+      sourceThreadId: 'chat-1',
+      threadIsDirect: true,
+      prompt: 'hello there',
+      deliverResponse: true,
+      deliveryDispatchMode: 'queue-only',
+    })
+
+    assert.equal(result.deliveryDeferred, true)
+    assert.equal(result.delivery?.channel ?? null, null)
+    assert.equal(result.deliveryError, null)
+    assert.equal(typeof result.deliveryIntentId, 'string')
+    assert.equal(
+      robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
+      0,
+    )
+
+    const snapshot = await readAssistantStatusSnapshot(vaultRoot)
+    assert.equal(snapshot?.outbox.pending, 1)
+    assert.equal(snapshot?.outbox.sent, 0)
+    assert.equal(snapshot?.recentTurns[0]?.status, 'deferred')
+    assert.equal(snapshot?.recentTurns[0]?.deliveryDisposition, 'queued')
+
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    assert.equal(intents.length, 1)
+    assert.equal(intents[0]?.status, 'pending')
+    assert.equal(intents[0]?.intentId, result.deliveryIntentId)
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('drainAssistantOutbox reconciles a journaled delivery without re-sending it', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-outbox-reconcile-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  robustnessMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-outbox-reconcile',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      channel: 'telegram',
+      participantId: 'contact:alice',
+      sourceThreadId: 'chat-1',
+      threadIsDirect: true,
+      prompt: 'hello there',
+      deliverResponse: true,
+      deliveryDispatchMode: 'queue-only',
+    })
+
+    const drained = await drainAssistantOutbox({
+      dispatchHooks: {
+        async resolveDeliveredIntent({ intent }) {
+          assert.equal(intent.intentId, result.deliveryIntentId)
+          return {
+            channel: 'telegram',
+            sentAt: new Date().toISOString(),
+            target: 'chat-1',
+            targetKind: 'thread',
+            messageLength: 'assistant reply'.length,
+          }
+        },
+      },
+      vault: vaultRoot,
+    })
+
+    assert.equal(drained.attempted, 1)
+    assert.equal(drained.sent, 1)
+    assert.equal(drained.failed, 0)
+    assert.equal(
+      robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
+      0,
+    )
+
+    const status = await getAssistantStatus(vaultRoot)
+    assert.equal(status.outbox.pending, 0)
+    assert.equal(status.outbox.sent, 1)
+    assert.equal(status.recentTurns[0]?.status, 'completed')
+    assert.equal(status.recentTurns[0]?.deliveryDisposition, 'sent')
+
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    assert.equal(intents[0]?.attemptCount, 0)
+    assert.equal(intents[0]?.lastAttemptAt, null)
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('drainAssistantOutbox keeps hosted journal failures retryable', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-outbox-retryable-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  robustnessMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-outbox-retryable',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      channel: 'telegram',
+      participantId: 'contact:alice',
+      sourceThreadId: 'chat-1',
+      threadIsDirect: true,
+      prompt: 'hello there',
+      deliverResponse: true,
+      deliveryDispatchMode: 'queue-only',
+    })
+
+    const drained = await drainAssistantOutbox({
+      dispatchHooks: {
+        async resolveDeliveredIntent({ intent }) {
+          assert.equal(intent.intentId, result.deliveryIntentId)
+          throw Object.assign(
+            new Error('Hosted runner outbox journal GET failed with HTTP 503.'),
+            {
+              code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+              context: {
+                retryable: true,
+                status: 503,
+              },
+              retryable: true,
+            },
+          )
+        },
+      },
+      vault: vaultRoot,
+    })
+
+    assert.equal(drained.attempted, 1)
+    assert.equal(drained.sent, 0)
+    assert.equal(drained.failed, 0)
+    assert.equal(drained.queued, 1)
+    assert.equal(
+      robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
+      0,
+    )
+
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    assert.equal(intents[0]?.status, 'retryable')
+
+    const status = await getAssistantStatus(vaultRoot)
+    assert.equal(status.outbox.retryable, 1)
+    assert.equal(status.outbox.failed, 0)
+    assert.equal(status.recentTurns[0]?.deliveryDisposition, 'retryable')
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('drainAssistantOutbox keeps post-send hosted journal persistence failures retryable', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-outbox-persist-retryable-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  robustnessMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-outbox-persist-retryable',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  robustnessMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
+    delivery: {
+      channel: 'telegram',
+      sentAt: new Date().toISOString(),
+      target: 'chat-1',
+      targetKind: 'thread',
+      messageLength: 'assistant reply'.length,
+    },
+    deliveryDeduplicated: false,
+    outboxIntentId: null,
+    session: null,
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      channel: 'telegram',
+      participantId: 'contact:alice',
+      sourceThreadId: 'chat-1',
+      threadIsDirect: true,
+      prompt: 'hello there',
+      deliverResponse: true,
+      deliveryDispatchMode: 'queue-only',
+    })
+
+    const drained = await drainAssistantOutbox({
+      dispatchHooks: {
+        async persistDeliveredIntent({ intent }) {
+          assert.equal(intent.intentId, result.deliveryIntentId)
+          throw Object.assign(
+            new Error('Hosted runner outbox journal PUT failed with HTTP 503.'),
+            {
+              code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+              context: {
+                retryable: true,
+                status: 503,
+              },
+              retryable: true,
+            },
+          )
+        },
+      },
+      vault: vaultRoot,
+    })
+
+    assert.equal(drained.attempted, 1)
+    assert.equal(drained.sent, 0)
+    assert.equal(drained.failed, 0)
+    assert.equal(drained.queued, 1)
+    assert.equal(
+      robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
+      1,
+    )
+
+    const intents = await listAssistantOutboxIntents(vaultRoot)
+    assert.equal(intents[0]?.status, 'retryable')
+    assert.equal(intents[0]?.delivery, null)
+
+    const status = await getAssistantStatus(vaultRoot)
+    assert.equal(status.outbox.retryable, 1)
+    assert.equal(status.outbox.sent, 0)
+    assert.equal(status.outbox.failed, 0)
+    assert.equal(status.recentTurns[0]?.deliveryDisposition, 'retryable')
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
@@ -677,7 +967,7 @@ test('delivery fault injection queues the outbox without performing a real outbo
 
   const originalHome = process.env.HOME
   process.env.HOME = homeRoot
-  process.env.HEALTHYBOB_ASSISTANT_FAULTS = 'delivery'
+  process.env.ASSISTANT_FAULTS = 'delivery'
 
   robustnessMocks.executeAssistantProviderTurn.mockResolvedValue({
     provider: 'codex-cli',

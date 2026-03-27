@@ -36,6 +36,7 @@ vi.mock("@healthybob/inboxd", () => ({
 type LinqControlPlaneModule = typeof import("../src/lib/linq/control-plane");
 
 let linqControlPlane: LinqControlPlaneModule;
+const REMOVED_LINQ_WEBHOOK_SECRET_ALIAS = ["HEALTHY", "BOB", "LINQ", "WEBHOOK", "SECRET"].join("_");
 
 describe("HostedLinqControlPlane", () => {
   beforeAll(async () => {
@@ -45,9 +46,27 @@ describe("HostedLinqControlPlane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.LINQ_WEBHOOK_SECRET;
-    delete process.env.HEALTHYBOB_LINQ_WEBHOOK_SECRET;
+    delete process.env[REMOVED_LINQ_WEBHOOK_SECRET_ALIAS];
     mocks.getPrisma.mockReturnValue({});
     mocks.store.getBindingByRecipientPhone.mockResolvedValue(null);
+  });
+
+  it("requires LINQ_WEBHOOK_SECRET and ignores the removed branded alias", async () => {
+    process.env[REMOVED_LINQ_WEBHOOK_SECRET_ALIAS] = "linq-secret";
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook()).rejects.toMatchObject({
+      code: "LINQ_WEBHOOK_SECRET_MISSING",
+      httpStatus: 500,
+    });
+    expect(mocks.verifyAndParseLinqWebhookRequest).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   });
 
   it("handles public webhook ingestion without constructing the hosted device-sync auth control plane", async () => {

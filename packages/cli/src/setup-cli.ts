@@ -390,7 +390,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       command:
         'inbox source add linq --id linq:default --account default --linqWebhookPort 8789 --linqWebhookPath /linq-webhook',
       description:
-        'Add the Linq webhook connector after setting LINQ_API_TOKEN or HEALTHYBOB_LINQ_API_TOKEN in the shell or local `.env`, then point Linq at the local listener or a tunnel that forwards to it.',
+        'Add the Linq webhook connector after setting LINQ_API_TOKEN in the shell or local `.env`, then point Linq at the local listener or a tunnel that forwards to it.',
     })
   }
 
