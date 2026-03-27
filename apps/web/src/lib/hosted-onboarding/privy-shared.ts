@@ -5,6 +5,11 @@ export interface HostedPrivyPhoneAccount {
   verifiedAt: number;
 }
 
+export interface HostedPrivyEmailAccount {
+  address: string;
+  verifiedAt: number | null;
+}
+
 export interface HostedPrivyWalletAccount {
   address: string;
   chainType: string | null;
@@ -77,6 +82,36 @@ export function extractHostedPrivyPhoneAccount(
     return {
       number: normalizedNumber,
       verifiedAt,
+    };
+  }
+
+  return null;
+}
+
+export function extractHostedPrivyEmailAccount(
+  linkedAccounts: readonly PrivyLinkedAccountLike[],
+): HostedPrivyEmailAccount | null {
+  for (const account of linkedAccounts) {
+    if (!account || account.type !== "email") {
+      continue;
+    }
+
+    const address = firstString(account, ["address", "email_address", "emailAddress", "email"]);
+
+    if (!address) {
+      continue;
+    }
+
+    return {
+      address,
+      verifiedAt: firstTimestamp(account, [
+        "latest_verified_at",
+        "verified_at",
+        "first_verified_at",
+        "latestVerifiedAt",
+        "verifiedAt",
+        "firstVerifiedAt",
+      ]),
     };
   }
 

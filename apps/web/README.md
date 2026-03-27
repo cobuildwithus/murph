@@ -63,6 +63,7 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `PRIVY_VERIFICATION_KEY`
+- enable Privy email login/linking in the dashboard so `/settings` can verify account email addresses
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
 - set a Privy base domain so the hosted app receives the `privy-id-token` HttpOnly cookie
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`

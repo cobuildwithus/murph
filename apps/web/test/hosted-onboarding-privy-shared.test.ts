@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  extractHostedPrivyEmailAccount,
   extractHostedPrivyPhoneAccount,
   extractHostedPrivyWalletAccount,
   resolveHostedPrivyLinkedAccountState,
@@ -81,7 +82,7 @@ describe("hosted Privy identity helpers", () => {
   it("returns null when a required linked account is absent", () => {
     const linkedAccounts = [
       {
-        address: "[email protected]",
+        address: "user@example.com",
         type: "email",
       },
     ];
@@ -99,6 +100,34 @@ describe("hosted Privy identity helpers", () => {
         },
       ]),
     ).toBeNull();
+  });
+
+  it("extracts a verified email account from either SDK or token linked-account shapes", () => {
+    expect(
+      extractHostedPrivyEmailAccount([
+        {
+          address: "user@example.com",
+          latestVerifiedAt: new Date(1741194420 * 1000),
+          type: "email",
+        },
+      ]),
+    ).toEqual({
+      address: "user@example.com",
+      verifiedAt: 1741194420,
+    });
+
+    expect(
+      extractHostedPrivyEmailAccount([
+        {
+          address: "user@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ]),
+    ).toEqual({
+      address: "user@example.com",
+      verifiedAt: 1741194420,
+    });
   });
 
   it("accepts the compact Privy identity-token verification timestamp field", () => {

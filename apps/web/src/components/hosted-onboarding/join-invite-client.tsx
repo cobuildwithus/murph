@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
@@ -29,43 +29,8 @@ export function JoinInviteClient({
   const [shareImported, setShareImported] = useState(false);
   const phoneAuthReady = status.capabilities.phoneAuthReady && Boolean(privyAppId);
 
-  const title = useMemo(() => {
-    switch (status.stage) {
-      case "invalid":
-        return "That invite link is not valid";
-      case "expired":
-        return "That invite link expired";
-      case "register":
-        return "Verify your phone";
-      case "authenticate":
-        return "Continue with your phone";
-      case "checkout":
-        return "Finish checkout";
-      case "active":
-        return "You\u2019re in";
-      default:
-        return "Healthy Bob";
-    }
-  }, [status.stage]);
-
-  const subtitle = useMemo(() => {
-    switch (status.stage) {
-      case "invalid":
-        return "Text the Healthy Bob number again and we\u2019ll send you a fresh hosted link.";
-      case "expired":
-        return "Text the Healthy Bob number again and we\u2019ll send you a fresh link.";
-      case "register":
-        return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we\u2019ll create your rewards wallet and hand you off to Apple Pay.`;
-      case "authenticate":
-        return `Continue with the verified phone already linked to ${status.invite?.phoneHint ?? "this number"}.`;
-      case "checkout":
-        return "Your phone is verified, your wallet is ready, and one more tap finishes hosted access.";
-      case "active":
-        return "Your hosted Healthy Bob access is active for this number.";
-      default:
-        return "Healthy Bob hosted onboarding";
-    }
-  }, [status.invite?.phoneHint, status.stage]);
+  const title = resolveTitle(status);
+  const subtitle = resolveSubtitle(status);
 
   useEffect(() => {
     if (!shareCode || shareImported || status.stage !== "active") {
@@ -164,9 +129,9 @@ export function JoinInviteClient({
 
   return (
     <div className="space-y-5">
-      <section className="rounded-3xl bg-white p-6 shadow-sm md:p-8">
+      <section className="rounded-lg bg-white p-6 shadow-sm md:p-8">
         <div className="space-y-3">
-          <span className="inline-block rounded-full bg-green-50 px-3.5 py-1.5 text-sm font-semibold text-green-700">
+          <span className="inline-block rounded bg-olive/10 px-3.5 py-1.5 text-sm font-semibold text-olive">
             Hosted access for {status.invite?.phoneHint ?? "your number"}
           </span>
           <h1 className="text-4xl font-bold leading-none tracking-tight text-stone-900 md:text-5xl">
@@ -179,20 +144,20 @@ export function JoinInviteClient({
 
         <div className="mt-6 space-y-4">
           {errorMessage ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
+            <div className="rounded border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
               {errorMessage}
             </div>
           ) : null}
 
           {sharePreview ? (
-            <div className="space-y-1.5 rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-snug">
+            <div className="space-y-1.5 rounded border border-green-200 bg-green-50 p-4 text-sm leading-snug">
               <strong className="text-green-800">Add after signup: {sharePreview.title}</strong>
               <p className="text-green-700">
                 {[
                   sharePreview.counts.foods ? `${sharePreview.counts.foods} foods` : null,
                   sharePreview.counts.protocols ? `${sharePreview.counts.protocols} protocols` : null,
                   sharePreview.counts.recipes ? `${sharePreview.counts.recipes} recipes` : null,
-                ].filter(Boolean).join(" \u00B7 ")}
+                ].filter(Boolean).join(" · ")}
               </p>
               {sharePreview.protocolTitles.length > 0 ? (
                 <p className="text-green-700">Protocols: {sharePreview.protocolTitles.join(", ")}</p>
@@ -204,7 +169,7 @@ export function JoinInviteClient({
           ) : null}
 
           {status.session.authenticated && !status.session.matchesInvite ? (
-            <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <div className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               <p>
                 This browser is currently signed in to a different hosted member. Continuing below will switch the
                 browser session to {status.invite?.phoneHint ?? "this invite"}.
@@ -213,7 +178,7 @@ export function JoinInviteClient({
                 type="button"
                 onClick={handleClearHostedSession}
                 disabled={pendingAction !== null}
-                className="rounded-full border border-stone-200 bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded border border-stone-200 bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pendingAction === "logout" ? "Signing out..." : "Sign out current browser session"}
               </button>
@@ -222,7 +187,7 @@ export function JoinInviteClient({
 
           {(status.stage === "register" || status.stage === "authenticate") ? (
             phoneAuthReady && privyAppId ? (
-              <div className="rounded-2xl border border-stone-200/60 bg-stone-50/60 p-5">
+              <div className="rounded border border-stone-200/60 bg-stone-50/60 p-5">
                 <HostedPhoneAuth
                   inviteCode={inviteCode}
                   mode="invite"
@@ -233,7 +198,7 @@ export function JoinInviteClient({
                 />
               </div>
             ) : (
-              <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
+              <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
                 Phone signup is not configured for this environment yet.
               </div>
             )
@@ -244,7 +209,7 @@ export function JoinInviteClient({
               type="button"
               onClick={handleCheckout}
               disabled={pendingAction !== null || !status.capabilities.billingReady}
-              className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pendingAction === "checkout"
                 ? "Opening checkout..."
@@ -255,10 +220,16 @@ export function JoinInviteClient({
           ) : null}
 
           {status.stage === "active" ? (
-            <div className="space-y-3 rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
+            <div className="space-y-3 rounded border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
               <p>
                 Your hosted identity is active. Your phone-verified account, rewards wallet, and hosted session are all ready.
               </p>
+              <a
+                href="/settings"
+                className="inline-flex rounded border border-green-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50"
+              >
+                Manage email settings
+              </a>
               {sharePreview ? (
                 shareImported ? (
                   <p>{sharePreview.title} has been added to this hosted vault.</p>
@@ -267,7 +238,7 @@ export function JoinInviteClient({
                     type="button"
                     onClick={handleAcceptShare}
                     disabled={pendingAction !== null}
-                    className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {pendingAction === "share" ? "Adding shared bundle..." : `Add ${sharePreview.title}`}
                   </button>
@@ -278,7 +249,7 @@ export function JoinInviteClient({
         </div>
       </section>
 
-      <section className="space-y-2.5 rounded-2xl border border-stone-200/60 bg-white/80 p-5 text-sm leading-relaxed text-stone-500">
+      <section className="space-y-2.5 rounded border border-stone-200/60 bg-white/80 p-5 text-sm leading-relaxed text-stone-500">
         <strong className="text-stone-800">What happens here</strong>
         <p>1. We verify the phone number that received this invite.</p>
         <p>2. We create or reconnect your Healthy Bob account in Postgres.</p>
@@ -287,4 +258,42 @@ export function JoinInviteClient({
       </section>
     </div>
   );
+}
+
+function resolveTitle(status: HostedInviteStatusPayload): string {
+  switch (status.stage) {
+    case "invalid":
+      return "That invite link is not valid";
+    case "expired":
+      return "That invite link expired";
+    case "register":
+      return "Verify your phone";
+    case "authenticate":
+      return "Continue with your phone";
+    case "checkout":
+      return "Finish checkout";
+    case "active":
+      return "You\u2019re in";
+    default:
+      return "Healthy Bob";
+  }
+}
+
+function resolveSubtitle(status: HostedInviteStatusPayload): string {
+  switch (status.stage) {
+    case "invalid":
+      return "Text the Healthy Bob number again and we\u2019ll send you a fresh hosted link.";
+    case "expired":
+      return "Text the Healthy Bob number again and we\u2019ll send you a fresh link.";
+    case "register":
+      return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we\u2019ll create your rewards wallet and hand you off to Apple Pay.`;
+    case "authenticate":
+      return `Continue with the verified phone already linked to ${status.invite?.phoneHint ?? "this number"}.`;
+    case "checkout":
+      return "Your phone is verified, your wallet is ready, and one more tap finishes hosted access.";
+    case "active":
+      return "Your hosted Healthy Bob access is active for this number.";
+    default:
+      return "Healthy Bob hosted onboarding";
+  }
 }
