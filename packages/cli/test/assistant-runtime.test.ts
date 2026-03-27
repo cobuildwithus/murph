@@ -4292,6 +4292,39 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     ],
   )
   assert.equal(
+    formatChatMetadata(
+      {
+        provider: 'openai-compatible',
+        model: 'gpt-oss:20b',
+        reasoningEffort: 'xhigh',
+      },
+      '~/vault',
+    ),
+    'gpt-oss:20b · ~/vault',
+  )
+  assert.deepEqual(
+    resolveChatMetadataBadges(
+      {
+        provider: 'openai-compatible',
+        model: 'gpt-oss:20b',
+        reasoningEffort: 'xhigh',
+      },
+      '~/vault',
+    ),
+    [
+      {
+        key: 'model',
+        label: 'model',
+        value: 'gpt-oss:20b',
+      },
+      {
+        key: 'vault',
+        label: 'vault',
+        value: '~/vault',
+      },
+    ],
+  )
+  assert.equal(
     formatSessionBinding(session),
     'imessage · contact:bob · thread-123',
   )

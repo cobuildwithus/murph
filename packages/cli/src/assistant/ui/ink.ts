@@ -18,6 +18,10 @@ import {
   assistantChatResultSchema,
 } from '../../assistant-cli-contracts.js'
 import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
+import {
+  discoverAssistantProviderModels,
+  resolveAssistantModelCatalog,
+} from '../provider-catalog.js'
 import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
@@ -47,8 +51,6 @@ import {
 import { normalizeNullableString } from '../shared.js'
 import {
   CHAT_COMPOSER_HINT,
-  CHAT_MODEL_OPTIONS,
-  CHAT_REASONING_OPTIONS,
   CHAT_SLASH_COMMANDS,
   CHAT_STARTER_SUGGESTIONS,
   applyProviderProgressEventToEntries,
@@ -62,6 +64,8 @@ import {
   resolveChatSubmitAction,
   shouldShowChatComposerGuidance,
   shouldClearComposerForSubmitAction,
+  type AssistantModelOption,
+  type AssistantReasoningOption,
   type ChatMetadataBadge,
   type InkChatEntry,
   seedChatEntries,
@@ -91,10 +95,12 @@ interface ModelSwitcherProps {
   currentReasoningEffort: string | null
   mode: 'model' | 'reasoning'
   modelIndex: number
+  modelOptions: readonly AssistantModelOption[]
   onCancel: () => void
   onConfirm: () => void
   onMove: (delta: number) => void
   reasoningIndex: number
+  reasoningOptions: readonly AssistantReasoningOption[]
 }
 
 interface ModelSwitcherState {
@@ -2420,21 +2426,30 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
 
   useInput(handleModelSwitcherInput)
 
+  const selectedModelLabel =
+    props.modelOptions[props.modelIndex]?.value ??
+    props.currentModel ??
+    'the current model'
+  const canChooseReasoning = props.reasoningOptions.length > 0
   const title =
     props.mode === 'model'
       ? 'Choose a model'
-      : `Choose reasoning for ${CHAT_MODEL_OPTIONS[props.modelIndex]?.value ?? 'the current model'}`
+      : `Choose reasoning for ${selectedModelLabel}`
   const subtitle =
     props.mode === 'model'
-      ? 'Step 1 of 2. Enter continues to reasoning depth.'
+      ? canChooseReasoning
+        ? 'Step 1 of 2. Enter continues to reasoning depth.'
+        : 'Enter confirms the active model.'
       : 'Step 2 of 2. Enter confirms the active reasoning depth.'
   const helpText =
     props.mode === 'model'
-      ? '↑/↓ move · Enter next · Esc close'
+      ? canChooseReasoning
+        ? '↑/↓ move · Enter next · Esc close'
+        : '↑/↓ move · Enter confirm · Esc close'
       : '↑/↓ move · Enter confirm · Esc back'
   const options =
     props.mode === 'model'
-      ? CHAT_MODEL_OPTIONS.map((option, index) =>
+      ? props.modelOptions.map((option, index) =>
           renderSwitcherRow({
             current:
               normalizeNullableString(option.value) ===
@@ -2446,7 +2461,7 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
             theme,
           }),
         )
-      : CHAT_REASONING_OPTIONS.map((option, index) =>
+      : props.reasoningOptions.map((option, index) =>
           renderSwitcherRow({
             current: isCurrentReasoningOption(option.value, props.currentReasoningEffort),
             description: option.description,
@@ -2467,43 +2482,32 @@ function ModelSwitcher(props: ModelSwitcherProps): React.ReactElement {
       marginBottom: 1,
     },
     createElement(
-      Text,
-      {
-        color: theme.switcherMutedColor,
-      },
-      props.mode === 'model' ? 'step 1/2' : 'step 2/2',
-    ),
-    createElement(
-      Text,
-      {
-        bold: true,
-        color: theme.switcherTextColor,
-        wrap: 'wrap',
-      },
-      title,
-    ),
-    createElement(
-      Text,
-      {
-        color: theme.switcherMutedColor,
-        wrap: 'wrap',
-      },
-      subtitle,
-    ),
-    createElement(
       Box,
       {
         flexDirection: 'column',
-        marginTop: 1,
-        width: '100%',
       },
+      createElement(
+        Text,
+        {
+          bold: true,
+          color: theme.switcherTextColor,
+        },
+        title,
+      ),
+      createElement(
+        Text,
+        {
+          color: theme.switcherMutedColor,
+        },
+        subtitle,
+      ),
+      createElement(Box, {
+        height: 1,
+      }),
       ...options,
-    ),
-    createElement(
-      Box,
-      {
-        marginTop: 1,
-      },
+      createElement(Box, {
+        height: 1,
+      }),
       createElement(
         Text,
         {
@@ -2737,18 +2741,23 @@ export async function runAssistantChatWithInk(
       const [queuedPromptCount, setQueuedPromptCount] = React.useState(0)
       const [lastQueuedPrompt, setLastQueuedPrompt] = React.useState<string | null>(null)
       const [composerValue, setComposerValue] = React.useState('')
-      const [activeModel, setActiveModel] = React.useState<string | null>(
+      const initialActiveModel =
         normalizeNullableString(input.model) ??
-          normalizeNullableString(defaults?.model) ??
-          normalizeNullableString(resolved.session.providerOptions.model) ??
-          normalizeNullableString(codexDisplay.model),
+        normalizeNullableString(defaults?.model) ??
+        normalizeNullableString(resolved.session.providerOptions.model) ??
+        normalizeNullableString(codexDisplay.model)
+      const initialActiveReasoningEffort =
+        normalizeNullableString(input.reasoningEffort) ??
+        normalizeNullableString(defaults?.reasoningEffort) ??
+        normalizeNullableString(resolved.session.providerOptions.reasoningEffort) ??
+        normalizeNullableString(codexDisplay.reasoningEffort)
+      const [activeModel, setActiveModel] = React.useState<string | null>(
+        initialActiveModel,
       )
       const [activeReasoningEffort, setActiveReasoningEffort] = React.useState<string | null>(
-        normalizeNullableString(input.reasoningEffort) ??
-          normalizeNullableString(defaults?.reasoningEffort) ??
-          normalizeNullableString(resolved.session.providerOptions.reasoningEffort) ??
-        normalizeNullableString(codexDisplay.reasoningEffort),
+        initialActiveReasoningEffort,
       )
+      const [discoveredModels, setDiscoveredModels] = React.useState<readonly string[]>([])
       const [modelSwitcherState, setModelSwitcherState] =
         React.useState<ModelSwitcherState | null>(null)
       const latestSessionRef = React.useRef(resolved.session)
@@ -2758,6 +2767,15 @@ export async function runAssistantChatWithInk(
       const queuedPromptsRef = React.useRef<string[]>([])
       const activeTurnAbortControllerRef = React.useRef<AbortController | null>(null)
       const pauseRequestedRef = React.useRef(false)
+      const modelCatalog = resolveAssistantModelCatalog({
+        provider: session.provider,
+        baseUrl: session.providerOptions.baseUrl,
+        currentModel: activeModel,
+        currentReasoningEffort: activeReasoningEffort,
+        discoveredModels,
+        oss: session.providerOptions.oss,
+        providerName: session.providerOptions.providerName,
+      })
 
       const syncQueuedPromptState = React.useCallback((queuedPrompts: readonly string[]) => {
         setQueuedPromptCount(queuedPrompts.length)
@@ -2773,6 +2791,44 @@ export async function runAssistantChatWithInk(
       React.useEffect(() => {
         latestTurnsRef.current = turns
       }, [turns])
+
+      React.useEffect(() => {
+        let cancelled = false
+        const baseUrl = normalizeNullableString(session.providerOptions.baseUrl)
+
+        if (!modelCatalog.capabilities.supportsModelDiscovery || !baseUrl) {
+          setDiscoveredModels((existing) => (existing.length === 0 ? existing : []))
+          return () => {
+            cancelled = true
+          }
+        }
+
+        void (async () => {
+          const nextDiscoveredModels = await discoverAssistantProviderModels({
+            provider: session.provider,
+            baseUrl,
+          })
+
+          if (cancelled) {
+            return
+          }
+
+          setDiscoveredModels((existing) =>
+            existing.length === nextDiscoveredModels.length &&
+            existing.every((value, index) => value === nextDiscoveredModels[index])
+              ? existing
+              : nextDiscoveredModels,
+          )
+        })()
+
+        return () => {
+          cancelled = true
+        }
+      }, [
+        modelCatalog.capabilities.supportsModelDiscovery,
+        session.provider,
+        session.providerOptions.baseUrl,
+      ])
 
       React.useEffect(() => {
         if (process.platform !== 'darwin') {
@@ -2816,8 +2872,14 @@ export async function runAssistantChatWithInk(
       const openModelSwitcher = () => {
         setModelSwitcherState({
           mode: 'model',
-          modelIndex: findAssistantModelOptionIndex(activeModel),
-          reasoningIndex: findAssistantReasoningOptionIndex(activeReasoningEffort),
+          modelIndex: findAssistantModelOptionIndex(
+            activeModel,
+            modelCatalog.modelOptions,
+          ),
+          reasoningIndex: findAssistantReasoningOptionIndex(
+            activeReasoningEffort,
+            modelCatalog.reasoningOptions,
+          ),
         })
       }
 
@@ -2832,7 +2894,7 @@ export async function runAssistantChatWithInk(
               ...previous,
               modelIndex: wrapPickerIndex(
                 previous.modelIndex + delta,
-                CHAT_MODEL_OPTIONS.length,
+                modelCatalog.modelOptions.length,
               ),
             }
           }
@@ -2841,7 +2903,7 @@ export async function runAssistantChatWithInk(
             ...previous,
             reasoningIndex: wrapPickerIndex(
               previous.reasoningIndex + delta,
-              CHAT_REASONING_OPTIONS.length,
+              modelCatalog.reasoningOptions.length,
             ),
           }
         })
@@ -2864,34 +2926,30 @@ export async function runAssistantChatWithInk(
         })
       }
 
-      const confirmModelSwitcher = () => {
-        if (!modelSwitcherState) {
-          return
-        }
-
-        if (modelSwitcherState.mode === 'model') {
-          setModelSwitcherState({
-            ...modelSwitcherState,
-            mode: 'reasoning',
-          })
-          return
-        }
-
+      const applyModelSwitcherSelection = (selection: ModelSwitcherState) => {
         const nextModel =
-          CHAT_MODEL_OPTIONS[modelSwitcherState.modelIndex]?.value ??
+          modelCatalog.modelOptions[selection.modelIndex]?.value ??
           activeModel ??
           null
         const nextReasoningEffort =
-          CHAT_REASONING_OPTIONS[modelSwitcherState.reasoningIndex]?.value ??
-          activeReasoningEffort ??
-          'medium'
+          modelCatalog.reasoningOptions.length > 0
+            ? modelCatalog.reasoningOptions[selection.reasoningIndex]?.value ??
+              activeReasoningEffort ??
+              'medium'
+            : null
+        const selectedLabel = [
+          nextModel ?? 'the configured model',
+          normalizeNullableString(nextReasoningEffort),
+        ]
+          .filter((value): value is string => Boolean(value))
+          .join(' ')
 
         setActiveModel(nextModel)
         setActiveReasoningEffort(nextReasoningEffort)
         setModelSwitcherState(null)
         setStatus({
           kind: 'info',
-          text: `Using ${nextModel ?? 'the configured model'} ${nextReasoningEffort}.`,
+          text: `Using ${selectedLabel}.`,
         })
 
         void (async () => {
@@ -2917,11 +2975,30 @@ export async function runAssistantChatWithInk(
               kind: 'error',
               text:
                 error instanceof Error && error.message.trim().length > 0
-                  ? `Using ${nextModel ?? 'the configured model'} ${nextReasoningEffort} for now, but failed to save it for later chats: ${error.message}`
-                  : `Using ${nextModel ?? 'the configured model'} ${nextReasoningEffort} for now, but failed to save it for later chats.`,
+                  ? `Using ${selectedLabel} for now, but failed to save it for later chats: ${error.message}`
+                  : `Using ${selectedLabel} for now, but failed to save it for later chats.`,
             })
           }
         })()
+      }
+
+      const confirmModelSwitcher = () => {
+        if (!modelSwitcherState) {
+          return
+        }
+
+        if (
+          modelSwitcherState.mode === 'model' &&
+          modelCatalog.reasoningOptions.length > 0
+        ) {
+          setModelSwitcherState({
+            ...modelSwitcherState,
+            mode: 'reasoning',
+          })
+          return
+        }
+
+        applyModelSwitcherSelection(modelSwitcherState)
       }
 
       const queuePrompt = (prompt: string) => {
@@ -3321,10 +3398,12 @@ export async function runAssistantChatWithInk(
                   currentReasoningEffort: activeReasoningEffort,
                   mode: modelSwitcherState.mode,
                   modelIndex: modelSwitcherState.modelIndex,
+                  modelOptions: modelCatalog.modelOptions,
                   onCancel: cancelModelSwitcher,
                   onConfirm: confirmModelSwitcher,
                   onMove: moveModelSwitcherSelection,
                   reasoningIndex: modelSwitcherState.reasoningIndex,
+                  reasoningOptions: modelCatalog.reasoningOptions,
                 })
               : null,
             createElement(ChatComposer, {

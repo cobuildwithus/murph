@@ -2,6 +2,15 @@ import type {
   AssistantSession,
   AssistantTranscriptEntry,
 } from '../../assistant-cli-contracts.js'
+import {
+  DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
+  DEFAULT_ASSISTANT_REASONING_OPTIONS,
+  findAssistantCatalogModelOptionIndex,
+  findAssistantCatalogReasoningOptionIndex,
+  resolveAssistantProviderCapabilities,
+  type AssistantModelOption,
+  type AssistantReasoningOption,
+} from '../provider-catalog.js'
 import { normalizeNullableString } from '../shared.js'
 
 export type InkChatTraceKind =
@@ -42,16 +51,10 @@ export interface InkChatTraceUpdate {
   text: string
 }
 
-export interface AssistantModelOption {
-  description: string
-  value: string
-}
-
-export interface AssistantReasoningOption {
-  description: string
-  label: string
-  value: string
-}
+export type {
+  AssistantModelOption,
+  AssistantReasoningOption,
+} from '../provider-catalog.js'
 
 export interface AssistantSlashCommand {
   command: string
@@ -104,47 +107,11 @@ export function shouldShowChatComposerGuidance(entryCount: number): boolean {
   return entryCount === 0
 }
 
-export const CHAT_MODEL_OPTIONS: readonly AssistantModelOption[] = [
-  {
-    value: 'gpt-5.4',
-    description: 'Latest frontier agentic coding model.',
-  },
-  {
-    value: 'gpt-5.4-mini',
-    description: 'Smaller frontier agentic coding model.',
-  },
-  {
-    value: 'gpt-5.3-codex',
-    description: 'Frontier Codex-optimized agentic coding model.',
-  },
-  {
-    value: 'gpt-5.3-codex-spark',
-    description: 'Ultra-fast coding model.',
-  },
-] as const
+export const CHAT_MODEL_OPTIONS: readonly AssistantModelOption[] =
+  DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS
 
-export const CHAT_REASONING_OPTIONS: readonly AssistantReasoningOption[] = [
-  {
-    value: 'low',
-    label: 'Low',
-    description: 'Fast responses with lighter reasoning',
-  },
-  {
-    value: 'medium',
-    label: 'Medium',
-    description: 'Balances speed and reasoning depth for everyday tasks',
-  },
-  {
-    value: 'high',
-    label: 'High',
-    description: 'Greater reasoning depth for complex problems',
-  },
-  {
-    value: 'xhigh',
-    label: 'Extra high',
-    description: 'Extra high reasoning depth for complex problems',
-  },
-] as const
+export const CHAT_REASONING_OPTIONS: readonly AssistantReasoningOption[] =
+  DEFAULT_ASSISTANT_REASONING_OPTIONS
 
 export const CHAT_SLASH_COMMANDS: readonly AssistantSlashCommand[] = [
   {
@@ -324,20 +291,18 @@ function resolveInkTraceKind(
   }
 }
 
-export function findAssistantModelOptionIndex(model: string | null): number {
-  const normalizedModel = normalizeNullableString(model)
-  const index = CHAT_MODEL_OPTIONS.findIndex(
-    (option) => option.value === normalizedModel,
-  )
-  return index >= 0 ? index : 0
+export function findAssistantModelOptionIndex(
+  model: string | null,
+  options: readonly AssistantModelOption[] = CHAT_MODEL_OPTIONS,
+): number {
+  return findAssistantCatalogModelOptionIndex(model, options)
 }
 
-export function findAssistantReasoningOptionIndex(reasoningEffort: string | null): number {
-  const normalizedReasoningEffort = normalizeNullableString(reasoningEffort)
-  const index = CHAT_REASONING_OPTIONS.findIndex(
-    (option) => option.value === normalizedReasoningEffort,
-  )
-  return index >= 0 ? index : 1
+export function findAssistantReasoningOptionIndex(
+  reasoningEffort: string | null,
+  options: readonly AssistantReasoningOption[] = CHAT_REASONING_OPTIONS,
+): number {
+  return findAssistantCatalogReasoningOptionIndex(reasoningEffort, options)
 }
 
 export function getMatchingSlashCommands(
@@ -465,6 +430,7 @@ export function resolveChatMetadataBadges(
 ): ChatMetadataBadge[] {
   const normalizedModel = normalizeNullableString(input.model) ?? input.provider
   const normalizedReasoningEffort = normalizeNullableString(input.reasoningEffort)
+  const capabilities = resolveAssistantProviderCapabilities(input.provider)
 
   return [
     {
@@ -472,7 +438,7 @@ export function resolveChatMetadataBadges(
       label: 'model',
       value: normalizedModel,
     },
-    ...(normalizedReasoningEffort
+    ...(capabilities.supportsReasoningEffort && normalizedReasoningEffort
       ? [
           {
             key: 'reasoning' as const,
@@ -530,7 +496,10 @@ function formatModelSummary(input: {
   reasoningEffort: string | null
 }): string {
   const model = input.model?.trim()
-  const reasoningEffort = input.reasoningEffort?.trim()
+  const capabilities = resolveAssistantProviderCapabilities(input.provider)
+  const reasoningEffort = capabilities.supportsReasoningEffort
+    ? input.reasoningEffort?.trim()
+    : null
 
   if (model) {
     return reasoningEffort ? `${model} ${reasoningEffort}` : model

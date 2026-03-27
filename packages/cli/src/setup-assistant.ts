@@ -1,5 +1,8 @@
 import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
+import {
+  defaultDiscoverOpenAICompatibleModels,
+} from './assistant/provider-catalog.js'
 import { normalizeNullableString } from './assistant/shared.js'
 import {
   createSetupAssistantAccountResolver,
@@ -21,8 +24,6 @@ export const DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL =
 export const DEFAULT_SETUP_OPENAI_COMPATIBLE_MODEL = 'local-model'
 const DEFAULT_SETUP_SANDBOX = 'workspace-write' as const
 const DEFAULT_SETUP_APPROVAL_POLICY = 'on-request' as const
-const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
-const MAX_DISCOVERED_MODELS = 12
 
 export interface ResolveSetupAssistantInput {
   allowPrompt: boolean
@@ -431,45 +432,6 @@ async function promptWithDefault(input: {
   } finally {
     rl.close()
   }
-}
-
-async function defaultDiscoverOpenAICompatibleModels(
-  baseUrl: string,
-): Promise<string[]> {
-  try {
-    const modelsUrl = new URL('models', ensureTrailingSlash(baseUrl))
-    const timeoutSignal =
-      typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
-        ? AbortSignal.timeout(MODEL_DISCOVERY_TIMEOUT_MS)
-        : undefined
-    const response = await fetch(modelsUrl, {
-      headers: {
-        accept: 'application/json',
-      },
-      signal: timeoutSignal,
-    })
-
-    if (!response.ok) {
-      return []
-    }
-
-    const payload = (await response.json()) as {
-      data?: Array<{ id?: unknown }>
-    }
-    const discovered = (payload.data ?? [])
-      .map((entry) =>
-        typeof entry?.id === 'string' ? entry.id.trim() : null,
-      )
-      .filter((entry): entry is string => Boolean(entry))
-
-    return [...new Set(discovered)].slice(0, MAX_DISCOVERED_MODELS)
-  } catch {
-    return []
-  }
-}
-
-function ensureTrailingSlash(baseUrl: string): string {
-  return baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
 }
 
 function buildOpenAICompatibleAssistantDetail(input: {

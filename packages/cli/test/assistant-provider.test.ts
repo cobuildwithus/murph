@@ -24,6 +24,7 @@ import {
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderOptions,
 } from '../src/chat-provider.js'
+import { resolveAssistantModelCatalog } from '../src/assistant/provider-catalog.js'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
@@ -60,10 +61,73 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
 test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {
   assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
     supportsDirectCliExecution: true,
+    supportsModelDiscovery: false,
+    supportsReasoningEffort: true,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
     supportsDirectCliExecution: false,
+    supportsModelDiscovery: true,
+    supportsReasoningEffort: false,
   })
+})
+
+test('resolveAssistantModelCatalog keeps custom Codex models first-class in the picker', () => {
+  const catalog = resolveAssistantModelCatalog({
+    provider: 'codex-cli',
+    currentModel: 'gpt-oss:20b',
+    currentReasoningEffort: 'high',
+    oss: true,
+  })
+
+  assert.equal(catalog.modelOptions[0]?.value, 'gpt-oss:20b')
+  assert.equal(
+    catalog.modelOptions.some((option) => option.value === 'gpt-5.4'),
+    true,
+  )
+  assert.equal(catalog.reasoningOptions.length, 4)
+})
+
+test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and hides reasoning options', () => {
+  const catalog = resolveAssistantModelCatalog({
+    provider: 'openai-compatible',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    providerName: 'ollama',
+    currentModel: 'gpt-oss:20b',
+    currentReasoningEffort: 'high',
+    discoveredModels: ['gpt-oss:20b', 'llama3.3:70b'],
+  })
+
+  assert.deepEqual(
+    catalog.modelOptions.map((option) => option.value),
+    ['gpt-oss:20b', 'llama3.3:70b'],
+  )
+  assert.equal(catalog.providerLabel, 'ollama')
+  assert.deepEqual(catalog.reasoningOptions, [])
+})
+
+test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefined', async () => {
+  providerMocks.executeCodexPrompt.mockResolvedValue({
+    finalMessage: 'assistant reply',
+    jsonEvents: [],
+    sessionId: 'thread-123',
+    stderr: '',
+    stdout: '',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'codex-cli',
+    workingDirectory: '/tmp/vault',
+    userPrompt: 'hello',
+  })
+
+  const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
+  assert.equal(call?.codexCommand, undefined)
+  assert.equal(call?.model, undefined)
+  assert.equal(call?.reasoningEffort, undefined)
+  assert.equal(call?.sandbox, undefined)
+  assert.equal(call?.approvalPolicy, undefined)
+  assert.equal(call?.profile, undefined)
+  assert.equal(call?.oss, false)
 })
 
 test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves the provider session id', async () => {

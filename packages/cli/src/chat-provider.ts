@@ -7,6 +7,10 @@ import type {
 } from './assistant-cli-contracts.js'
 import type { AssistantProviderTraceEvent } from './assistant/provider-traces.js'
 import {
+  resolveAssistantProviderCapabilities as resolveAssistantCatalogProviderCapabilities,
+  type AssistantProviderCapabilities,
+} from './assistant/provider-catalog.js'
+import {
   executeCodexPrompt,
   type CodexProgressEvent,
 } from './assistant-codex.js'
@@ -14,6 +18,7 @@ import { getAssistantBindingContextLines } from './assistant/bindings.js'
 import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
+  type AssistantProviderConfig,
 } from './assistant/provider-config.js'
 import { normalizeNullableString } from './assistant/shared.js'
 import { resolveAssistantLanguageModel } from './model-harness.js'
@@ -66,41 +71,25 @@ export interface AssistantProviderTurnResult {
   rawEvents: unknown[]
 }
 
-export interface AssistantProviderCapabilities {
-  supportsDirectCliExecution: boolean
+interface AssistantResolvedProviderTurnInput {
+  input: AssistantProviderTurnInput
+  prompt: string
+  provider: AssistantChatProvider
+  providerConfig: AssistantProviderConfig
 }
 
-export function resolveAssistantProviderOptions(input: {
-  approvalPolicy?: AssistantApprovalPolicy | null
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  model?: string | null
-  oss?: boolean
-  profile?: string | null
-  providerName?: string | null
-  reasoningEffort?: string | null
-  sandbox?: AssistantSandbox | null
-}) {
-  return serializeAssistantProviderSessionOptions(input)
+interface AssistantProviderAdapter {
+  executeTurn(
+    input: AssistantResolvedProviderTurnInput,
+  ): Promise<AssistantProviderTurnResult>
 }
 
-export function resolveAssistantProviderCapabilities(
-  provider: AssistantChatProvider,
-): AssistantProviderCapabilities {
-  return {
-    supportsDirectCliExecution: provider === 'codex-cli',
-  }
-}
-
-export async function executeAssistantProviderTurn(
-  input: AssistantProviderTurnInput,
-): Promise<AssistantProviderTurnResult> {
-  const provider = input.provider ?? 'codex-cli'
-  const prompt = flattenAssistantProviderPrompt(input)
-  const providerConfig = normalizeAssistantProviderConfig(input)
-
-  switch (provider) {
-    case 'codex-cli': {
+const ASSISTANT_PROVIDER_ADAPTERS: Record<
+  AssistantChatProvider,
+  AssistantProviderAdapter
+> = {
+  'codex-cli': {
+    async executeTurn({ input, prompt, provider, providerConfig }) {
       const result = await executeCodexPrompt({
         codexCommand: providerConfig.codexCommand ?? undefined,
         configOverrides: mergeCodexConfigOverrides({
@@ -130,9 +119,10 @@ export async function executeAssistantProviderTurn(
         stdout: result.stdout,
         rawEvents: result.jsonEvents,
       }
-    }
-
-    case 'openai-compatible': {
+    },
+  },
+  'openai-compatible': {
+    async executeTurn({ input, provider, providerConfig }) {
       const baseUrl = providerConfig.baseUrl
       const model = providerConfig.model
       if (!baseUrl) {
@@ -185,14 +175,48 @@ export async function executeAssistantProviderTurn(
         stdout: '',
         rawEvents: [],
       }
-    }
+    },
+  },
+}
 
-    default:
-      throw new VaultCliError(
-        'ASSISTANT_PROVIDER_UNSUPPORTED',
-        `Assistant provider "${provider}" is not supported in this build.`,
-      )
+export function resolveAssistantProviderOptions(input: {
+  approvalPolicy?: AssistantApprovalPolicy | null
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
+  model?: string | null
+  oss?: boolean
+  profile?: string | null
+  providerName?: string | null
+  reasoningEffort?: string | null
+  sandbox?: AssistantSandbox | null
+}) {
+  return serializeAssistantProviderSessionOptions(input)
+}
+
+export function resolveAssistantProviderCapabilities(
+  provider: AssistantChatProvider,
+): AssistantProviderCapabilities {
+  return resolveAssistantCatalogProviderCapabilities(provider)
+}
+
+export async function executeAssistantProviderTurn(
+  input: AssistantProviderTurnInput,
+): Promise<AssistantProviderTurnResult> {
+  const provider = input.provider ?? 'codex-cli'
+  const adapter = ASSISTANT_PROVIDER_ADAPTERS[provider]
+  if (!adapter) {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      `Assistant provider "${provider}" is not supported in this build.`,
+    )
   }
+
+  return await adapter.executeTurn({
+    input,
+    prompt: flattenAssistantProviderPrompt(input),
+    provider,
+    providerConfig: normalizeAssistantProviderConfig(input),
+  })
 }
 
 export function flattenAssistantProviderPrompt(
