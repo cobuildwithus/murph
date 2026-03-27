@@ -89,3 +89,16 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_DOC_SCAN_SPECS \
   "agent-docs:*.md"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_CI_SCAN_SPECS \
   ".github/workflows"
+repo_tools_join_lines COBUILD_AUDIT_CONTEXT_PRUNE_DIR_NAMES \
+  "node_modules" \
+  ".git" \
+  "dist" \
+  ".next" \
+  ".next-dev" \
+  ".test-dist" \
+  ".turbo" \
+  ".vercel" \
+  "out" \
+  "cache" \
+  "coverage" \
+  "audit-packages"
