@@ -97,35 +97,35 @@ describe("@healthybob/hosted-execution", () => {
     ).resolves.toBe(false);
   });
 
-  it("prefers current hosted dispatch env names but falls back to legacy aliases", () => {
+  it("prefers generic hosted dispatch env names but falls back to Cloudflare compatibility aliases", () => {
     expect(
       readHostedExecutionDispatchEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://runner.example.test/",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "secret",
+        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
+        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "compat-secret",
         HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS: "45000",
-        HOSTED_EXECUTION_DISPATCH_URL: "https://legacy.example.test/",
-        HOSTED_EXECUTION_SIGNING_SECRET: "legacy-secret",
+        HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
+        HOSTED_EXECUTION_SIGNING_SECRET: "secret",
         HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "15000",
       }),
     ).toEqual({
-      dispatchTimeoutMs: 45_000,
-      dispatchUrl: "https://runner.example.test",
+      dispatchTimeoutMs: 15_000,
+      dispatchUrl: "https://dispatch.example.test",
       signingSecret: "secret",
     });
 
     expect(
       readHostedExecutionDispatchEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "   ",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "   ",
-        HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS: "   ",
-        HOSTED_EXECUTION_DISPATCH_URL: "https://legacy.example.test/",
-        HOSTED_EXECUTION_SIGNING_SECRET: "legacy-secret",
-        HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "45000",
+        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
+        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "compat-secret",
+        HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS: "45000",
+        HOSTED_EXECUTION_DISPATCH_URL: "   ",
+        HOSTED_EXECUTION_SIGNING_SECRET: "   ",
+        HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "   ",
       }),
     ).toEqual({
       dispatchTimeoutMs: 45_000,
-      dispatchUrl: "https://legacy.example.test",
-      signingSecret: "legacy-secret",
+      dispatchUrl: "https://compat.example.test",
+      signingSecret: "compat-secret",
     });
   });
 

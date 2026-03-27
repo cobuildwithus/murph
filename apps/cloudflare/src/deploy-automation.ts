@@ -54,10 +54,41 @@ const HOSTED_CONTAINER_IMAGE_VAR_NAMES = [
 ] as const;
 
 const DEFAULT_DEPLOY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DEFAULT_CONTAINER_INSTANCE_TYPE = "basic";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
 const HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS = new Set(["v1", "v2"]);
+const NAMED_CONTAINER_INSTANCE_TYPES = new Set([
+  "basic",
+  "dev",
+  "lite",
+  "standard",
+  "standard-1",
+  "standard-2",
+  "standard-3",
+  "standard-4",
+] as const);
+
+type NamedContainerInstanceType =
+  | "basic"
+  | "dev"
+  | "lite"
+  | "standard"
+  | "standard-1"
+  | "standard-2"
+  | "standard-3"
+  | "standard-4";
+
+export interface HostedContainerCustomInstanceType {
+  disk_mb: number;
+  memory_mib: number;
+  vcpu: number;
+}
+
+export type HostedContainerInstanceType =
+  | NamedContainerInstanceType
+  | HostedContainerCustomInstanceType;
 
 export interface HostedDeployAutomationEnvironment {
   allowedUserEnvKeys: string | null;
@@ -66,6 +97,7 @@ export interface HostedDeployAutomationEnvironment {
   bundlesPreviewBucketName: string;
   bundleEncryptionKeyId: string;
   compatibilityDate: string;
+  containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
   defaultAlarmDelayMs: string;
   imageVars: Record<string, string>;
@@ -90,6 +122,17 @@ export interface HostedWorkerGradualDeploymentSupport {
   migrationTags: string[];
 }
 
+export interface HostedContainerImageListing {
+  name: string;
+  tags: string[];
+}
+
+export interface HostedContainerImageTagReference {
+  image: string;
+  repository: string;
+  tag: string;
+}
+
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 export function readHostedDeployAutomationEnvironment(
@@ -105,6 +148,11 @@ export function readHostedDeployAutomationEnvironment(
     ),
     bundleEncryptionKeyId: normalizeString(source.CF_BUNDLE_KEY_ID) ?? "v1",
     compatibilityDate: normalizeString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
+    containerInstanceType: normalizeContainerInstanceType(
+      source.CF_CONTAINER_INSTANCE_TYPE,
+      DEFAULT_CONTAINER_INSTANCE_TYPE,
+      "CF_CONTAINER_INSTANCE_TYPE",
+    ),
     containerMaxInstances: normalizePositiveInteger(
       source.CF_CONTAINER_MAX_INSTANCES,
       DEFAULT_CONTAINER_MAX_INSTANCES,
@@ -184,6 +232,7 @@ export function buildHostedWranglerDeployConfig(
       {
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
+        instance_type: environment.containerInstanceType,
         ...(Object.keys(environment.imageVars).length > 0
           ? {
               image_vars: environment.imageVars,
@@ -376,6 +425,67 @@ export function resolveCloudflareDeployPaths(baseDir = DEFAULT_DEPLOY_ROOT): {
   };
 }
 
+export function parseHostedContainerImageListOutput(
+  output: string,
+): HostedContainerImageListing[] {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(output) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Cloudflare image list output must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("Cloudflare image list output must be an array.");
+  }
+
+  return parsed.flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`Cloudflare image list entry ${index} must be an object.`);
+    }
+
+    const record = entry as Record<string, unknown>;
+    const name = requireString(
+      typeof record.name === "string" ? record.name : undefined,
+      `Cloudflare image list entry ${index} name`,
+    );
+    const tags = Array.isArray(record.tags)
+      ? record.tags
+        .filter((tag): tag is string => typeof tag === "string")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0 && !tag.startsWith("sha256"))
+      : [];
+
+    return [{
+      name,
+      tags,
+    }];
+  });
+}
+
+export function selectHostedContainerImageTagsForCleanup(input: {
+  images: HostedContainerImageListing[];
+  keepPerRepository: number;
+}): HostedContainerImageTagReference[] {
+  if (!Number.isInteger(input.keepPerRepository) || input.keepPerRepository < 0) {
+    throw new Error("keepPerRepository must be a non-negative integer.");
+  }
+
+  return input.images.flatMap((image) => {
+    const sortedTags = [...new Set(image.tags)].sort((left, right) => right.localeCompare(left));
+    const tagsToDelete = sortedTags.slice(input.keepPerRepository);
+
+    return tagsToDelete.map((tag) => ({
+      image: `${image.name}:${tag}`,
+      repository: image.name,
+      tag,
+    }));
+  });
+}
+
 function normalizePositiveInteger(
   value: string | undefined,
   fallback: number,
@@ -394,6 +504,52 @@ function normalizePositiveInteger(
   }
 
   return parsed;
+}
+
+function normalizeContainerInstanceType(
+  value: string | undefined,
+  fallback: HostedContainerInstanceType,
+  label: string,
+): HostedContainerInstanceType {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (NAMED_CONTAINER_INSTANCE_TYPES.has(normalized as NamedContainerInstanceType)) {
+    return normalized as NamedContainerInstanceType;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(normalized);
+  } catch {
+    throw new Error(
+      `${label} must be one of ${Array.from(NAMED_CONTAINER_INSTANCE_TYPES).join(", ")} or a JSON object with vcpu, memory_mib, and disk_mb.`,
+    );
+  }
+
+  if (!isRecord(parsed)) {
+    throw new Error(`${label} custom values must be a JSON object.`);
+  }
+
+  const vcpu = requirePositiveNumber(parsed.vcpu, `${label}.vcpu`);
+  const memory_mib = requirePositiveNumber(parsed.memory_mib, `${label}.memory_mib`);
+  const disk_mb = requirePositiveNumber(parsed.disk_mb, `${label}.disk_mb`);
+  const unknownKeys = Object.keys(parsed).filter(
+    (key) => key !== "disk_mb" && key !== "memory_mib" && key !== "vcpu",
+  );
+
+  if (unknownKeys.length > 0) {
+    throw new Error(`${label} custom values include unsupported keys: ${unknownKeys.join(", ")}.`);
+  }
+
+  return {
+    disk_mb,
+    memory_mib,
+    vcpu,
+  };
 }
 
 function normalizePositiveIntegerString(
@@ -429,6 +585,14 @@ function normalizeSamplingRate(
   }
 
   return parsed;
+}
+
+function requirePositiveNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a positive number.`);
+  }
+
+  return value;
 }
 
 function normalizeRolloutPercentage(value: number): number {
@@ -494,4 +658,8 @@ function readRequiredStringMap(
   return Object.fromEntries(
     keys.map((key) => [key, requireString(source[key], key)]),
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -74,15 +74,15 @@ Hosted onboarding extras:
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
-- `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL`
-- `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`
-- `HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS`
-
-Legacy aliases still work while the hosted execution bridge is settling:
-
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
+
+Cloudflare compatibility aliases still work:
+
+- `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL`
+- `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`
+- `HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS`
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
@@ -191,6 +191,7 @@ The onboarding lane is intentionally thin:
 - once a member is active, hosted onboarding, hosted share acceptance, and hosted device-sync wakes write signed internal execution intents to the shared Postgres `execution_outbox` in the same transaction as their control-plane state changes instead of synchronously depending on `apps/cloudflare`
 - a best-effort drain still runs after commit, but Cloudflare delivery retries and dedupe now converge through the outbox row instead of request/response coupling
 - hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, while hosted execution side effects are marked sent once their outbox row is durable so a retried webhook only redrains still-pending non-outbox effects
+- the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq replies use the webhook receipt side-effect journal, and inline RevNet issuance uses invoice-owned idempotency state
 
 Current RevNet MVP assumptions:
 

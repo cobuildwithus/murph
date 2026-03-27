@@ -684,22 +684,47 @@ async function drainHostedCommittedSideEffectsAfterCommit(input: {
   vaultRoot: string;
 }): Promise<void> {
   for (const sideEffect of input.sideEffects) {
-    await dispatchAssistantOutboxIntent({
-      dispatchHooks: input.commit
-        ? createHostedAssistantSideEffectDispatchHooks({
-            commit: input.commit,
-            commitTimeoutMs: input.commitTimeoutMs,
-            sideEffectsBaseUrl: input.sideEffectsBaseUrl,
-            userId: input.dispatch.event.userId,
-          })
-        : undefined,
-      intentId: sideEffect.intentId,
-      vault: input.vaultRoot,
+    await dispatchHostedCommittedSideEffect({
+      commit: input.commit,
+      commitTimeoutMs: input.commitTimeoutMs,
+      sideEffect,
+      sideEffectsBaseUrl: input.sideEffectsBaseUrl,
+      userId: input.dispatch.event.userId,
+      vaultRoot: input.vaultRoot,
     });
   }
 }
 
-function createHostedAssistantSideEffectDispatchHooks(input: {
+async function dispatchHostedCommittedSideEffect(input: {
+  commit: HostedExecutionCommitCallback;
+  commitTimeoutMs: number | null;
+  sideEffect: HostedExecutionSideEffect;
+  sideEffectsBaseUrl: string;
+  userId: string;
+  vaultRoot: string;
+} | {
+  commit: null;
+  commitTimeoutMs: number | null;
+  sideEffect: HostedExecutionSideEffect;
+  sideEffectsBaseUrl: string;
+  userId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await dispatchAssistantOutboxIntent({
+    dispatchHooks: input.commit
+      ? createHostedAssistantDeliveryDispatchHooks({
+          commit: input.commit,
+          commitTimeoutMs: input.commitTimeoutMs,
+          sideEffectsBaseUrl: input.sideEffectsBaseUrl,
+          userId: input.userId,
+        })
+      : undefined,
+    intentId: input.sideEffect.intentId,
+    vault: input.vaultRoot,
+  });
+}
+
+function createHostedAssistantDeliveryDispatchHooks(input: {
   commit: HostedExecutionCommitCallback;
   commitTimeoutMs: number | null;
   sideEffectsBaseUrl: string;

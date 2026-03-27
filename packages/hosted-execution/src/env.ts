@@ -23,18 +23,18 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export function readHostedExecutionDispatchEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionDispatchEnvironment {
-  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL);
-  const legacyDispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
-  const signingSecret = normalizeHostedExecutionString(source.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET);
-  const legacySigningSecret = normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET);
-  const dispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS);
-  const legacyDispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS);
+  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
+  const legacyDispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL);
+  const signingSecret = normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET);
+  const legacySigningSecret = normalizeHostedExecutionString(source.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET);
+  const dispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS);
+  const legacyDispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS);
 
   return {
     dispatchTimeoutMs: parsePositiveInteger(
       dispatchTimeout ?? legacyDispatchTimeout,
       30_000,
-      "HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS",
+      "HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS",
     ),
     dispatchUrl: dispatchUrl ?? legacyDispatchUrl,
     signingSecret: signingSecret ?? legacySigningSecret,

@@ -6,10 +6,12 @@ import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
   formatHostedWorkerDeploymentVersionSpecs,
+  parseHostedContainerImageListOutput,
   readHostedDeployAutomationEnvironment,
   resolveCloudflareDeployPaths,
   resolveHostedWorkerGradualDeploymentSupport,
   resolveHostedWorkerDeploymentTraffic,
+  selectHostedContainerImageTagsForCleanup,
 } from "../src/deploy-automation.js";
 
 describe("hosted deploy automation helpers", () => {
@@ -18,6 +20,7 @@ describe("hosted deploy automation helpers", () => {
       AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       CF_BUNDLES_BUCKET: "hb-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
+      CF_CONTAINER_INSTANCE_TYPE: "standard-1",
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_WORKER_NAME: "hb-worker",
@@ -29,6 +32,11 @@ describe("hosted deploy automation helpers", () => {
         class_name: string;
         image: string;
         image_vars?: Record<string, string>;
+        instance_type: string | {
+          disk_mb: number;
+          memory_mib: number;
+          vcpu: number;
+        };
         max_instances: number;
       }>;
       durable_objects: {
@@ -62,6 +70,7 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
+        instance_type: "standard-1",
         image_vars: {
           INSTALL_PADDLEOCR: "1",
         },
@@ -107,6 +116,32 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_CONTROL_TOKEN",
       "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
     ]);
+  });
+
+  it("accepts a custom JSON container instance type for generated deploy config", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hb-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
+      CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048,\"disk_mb\":8192}",
+      CF_WORKER_NAME: "hb-worker",
+    });
+
+    expect(environment.containerInstanceType).toEqual({
+      disk_mb: 8192,
+      memory_mib: 2048,
+      vcpu: 0.5,
+    });
+  });
+
+  it("rejects invalid custom container instance JSON", () => {
+    expect(() =>
+      readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hb-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hb-bundles-preview",
+        CF_CONTAINER_INSTANCE_TYPE: "{\"vcpu\":0.5,\"memory_mib\":2048}",
+        CF_WORKER_NAME: "hb-worker",
+      }),
+    ).toThrowError(/CF_CONTAINER_INSTANCE_TYPE\.disk_mb must be a positive number\./u);
   });
 
   it("renders required and optional worker secrets from CI secrets", () => {
@@ -278,5 +313,58 @@ describe("hosted deploy automation helpers", () => {
       gradualDeploymentsSupported: false,
       migrationTags: ["v1", "v2", "v3"],
     });
+  });
+
+  it("parses wrangler container image JSON output and drops digest tags", () => {
+    expect(parseHostedContainerImageListOutput(JSON.stringify([
+      {
+        name: "healthybob-hosted",
+        tags: ["manual-2026-03-27T00-00-00-000Z", "sha256-deadbeef", "manual-2026-03-26T00-00-00-000Z"],
+      },
+    ]))).toEqual([
+      {
+        name: "healthybob-hosted",
+        tags: ["manual-2026-03-27T00-00-00-000Z", "manual-2026-03-26T00-00-00-000Z"],
+      },
+    ]);
+  });
+
+  it("selects lexicographically older container tags for cleanup per repository", () => {
+    expect(selectHostedContainerImageTagsForCleanup({
+      images: [
+        {
+          name: "healthybob-hosted",
+          tags: [
+            "manual-2026-03-27T00-00-00-000Z",
+            "manual-2026-03-26T00-00-00-000Z",
+            "manual-2026-03-25T00-00-00-000Z",
+          ],
+        },
+        {
+          name: "healthybob-preview",
+          tags: [
+            "manual-2026-03-27T10-00-00-000Z",
+            "manual-2026-03-26T10-00-00-000Z",
+          ],
+        },
+      ],
+      keepPerRepository: 1,
+    })).toEqual([
+      {
+        image: "healthybob-hosted:manual-2026-03-26T00-00-00-000Z",
+        repository: "healthybob-hosted",
+        tag: "manual-2026-03-26T00-00-00-000Z",
+      },
+      {
+        image: "healthybob-hosted:manual-2026-03-25T00-00-00-000Z",
+        repository: "healthybob-hosted",
+        tag: "manual-2026-03-25T00-00-00-000Z",
+      },
+      {
+        image: "healthybob-preview:manual-2026-03-26T10-00-00-000Z",
+        repository: "healthybob-preview",
+        tag: "manual-2026-03-26T10-00-00-000Z",
+      },
+    ]);
   });
 });

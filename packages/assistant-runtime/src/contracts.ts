@@ -15,6 +15,13 @@ import {
   type AssistantChannelDelivery,
 } from "healthybob";
 
+export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
+  "assistant.delivery",
+] as const;
+
+export type HostedExecutionSideEffectKind =
+  (typeof HOSTED_EXECUTION_SIDE_EFFECT_KINDS)[number];
+
 export interface HostedAssistantDeliverySideEffect {
   effectId: string;
   fingerprint: string;
@@ -49,7 +56,10 @@ export function buildHostedAssistantDeliverySideEffect(input: {
 
 export function parseHostedExecutionSideEffect(value: unknown): HostedExecutionSideEffect {
   const record = requireObject(value, "Hosted execution side effect");
-  const kind = requireString(record.kind, "Hosted execution side effect kind");
+  const kind = requireHostedExecutionSideEffectKind(
+    record.kind,
+    "Hosted execution side effect kind",
+  );
 
   switch (kind) {
     case "assistant.delivery":
@@ -79,7 +89,10 @@ export function parseHostedExecutionSideEffectRecord(
   value: unknown,
 ): HostedExecutionSideEffectRecord {
   const record = requireObject(value, "Hosted execution side effect record");
-  const kind = requireString(record.kind, "Hosted execution side effect record kind");
+  const kind = requireHostedExecutionSideEffectKind(
+    record.kind,
+    "Hosted execution side effect record kind",
+  );
 
   switch (kind) {
     case "assistant.delivery":
@@ -122,4 +135,23 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requireHostedExecutionSideEffectKind(
+  value: unknown,
+  label: string,
+): HostedExecutionSideEffectKind {
+  const kind = requireString(value, label);
+
+  if (isHostedExecutionSideEffectKind(kind)) {
+    return kind;
+  }
+
+  throw new TypeError(`Unsupported hosted execution side effect kind: ${kind}`);
+}
+
+export function isHostedExecutionSideEffectKind(
+  value: string,
+): value is HostedExecutionSideEffectKind {
+  return (HOSTED_EXECUTION_SIDE_EFFECT_KINDS as readonly string[]).includes(value);
 }

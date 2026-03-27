@@ -4,7 +4,7 @@ This document is the concrete deploy path for the current hosted architecture:
 
 - `apps/web` stays the public onboarding, billing, auth, and webhook control plane.
 - `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and operator/internal control routes.
-- the same `UserRunnerDurableObject` now launches its native Cloudflare container to materialize the encrypted `vault` + `agent-state` bundles, run one-shot Healthy Bob work, call back into the worker for commit/finalize/outbox durability, and return the final hosted bundle state.
+- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, and per-run env injection before running the one-shot Healthy Bob job and calling back into the worker for commit/finalize/outbox durability.
 
 This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same filesystem-oriented runtime instead of inventing a second persistence model.
 
@@ -16,15 +16,20 @@ This repo now includes:
 - `.dockerignore`
 - generated deploy artifacts under `apps/cloudflare/.deploy/`
 - a manual GitHub Actions deploy workflow at `.github/workflows/deploy-cloudflare-hosted.yml`
+- a rollout helper that can either:
+  - upload a new Worker version and create a gradual deployment, or
+  - fall back to a direct `wrangler deploy` for first deploys and Durable Object migrations
 - scripts to render:
   - `wrangler.generated.jsonc`
   - `worker-secrets.json`
-- a smoke-test script that verifies worker health and optionally triggers one manual hosted run
+- explicit Wrangler observability config for Workers Logs and Workers Traces
+- a smoke-test script that verifies worker health and, when configured with a user id, triggers one manual hosted run and waits for queue drain, `lastRunAt` advance, and durable bundle refs, pinned to the candidate version during gradual rollouts
 
 ## What it does not automate yet
 
 - real Cloudflare account provisioning
 - bucket creation
+- automatic promotion from canary to 100% without an operator decision
 - post-deploy application-level smoke scenarios beyond one manual `/run`
 - broader hosted side-effect hardening beyond the current hosted assistant outbox path
 
@@ -40,6 +45,12 @@ Before your first deploy, you still need to do three one-time setup tasks in Clo
 
 The current worker stores only encrypted bundle blobs in R2 and only small coordination state in Durable Object storage.
 
+Cloudflare-specific rollout constraints still apply:
+
+- first deploys must use `wrangler deploy`; `wrangler versions upload` cannot create the service for the first time
+- Durable Object migrations must use `wrangler deploy`; version uploads do not support DO migrations
+- gradual deployments only support one or two active versions, so finish or roll back an existing split before introducing another candidate
+
 ## Required GitHub environment variables and secrets
 
 Use GitHub Environments such as `staging` and `production`.
@@ -53,7 +64,6 @@ Set these in the selected GitHub environment as variables:
 - `CF_WORKER_NAME`
 - `CF_BUNDLES_BUCKET`
 - `CF_BUNDLES_PREVIEW_BUCKET`
-- `CF_PUBLIC_BASE_URL`
 
 Optional tuning variables:
 
@@ -62,10 +72,12 @@ Optional tuning variables:
 - `CF_CONTAINER_MAX_INSTANCES` (default `1000`)
 - `INSTALL_PADDLEOCR` (default `0`, passed to Wrangler as a container `image_vars` build-time input)
 - `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
+- `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
 - `CF_MAX_EVENT_ATTEMPTS` (default `3`)
 - `CF_RETRY_DELAY_MS` (default `30000`)
 - `CF_RUNNER_TIMEOUT_MS` (default `60000`)
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
+- `CF_TRACE_HEAD_SAMPLING_RATE` (default `0.1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
 - `CF_ALLOWED_USER_ENV_PREFIXES`
 
@@ -129,13 +141,14 @@ From the repo root:
 
 ```bash
 pnpm install
-pnpm --dir apps/cloudflare test
+pnpm --dir apps/cloudflare verify
 ```
 
-If the package-local typecheck is blocked by unrelated in-flight workspace errors, the app-local runtime signal is:
+If you want the faster Node-only loop or just the Workers-runtime lane locally, run:
 
 ```bash
-pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1
+pnpm --dir apps/cloudflare test
+pnpm --dir apps/cloudflare test:workers
 ```
 
 Render the generated deploy artifacts from your shell environment:
@@ -144,11 +157,13 @@ Render the generated deploy artifacts from your shell environment:
 export CF_WORKER_NAME=healthybob-hosted-staging
 export CF_BUNDLES_BUCKET=healthybob-hosted-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=healthybob-hosted-bundles-staging-preview
-export CF_PUBLIC_BASE_URL=https://healthybob-hosted-staging.example.workers.dev
+export CF_CONTAINER_INSTANCE_TYPE=basic
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...
 export HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=...
+export CF_LOG_HEAD_SAMPLING_RATE=1
+export CF_TRACE_HEAD_SAMPLING_RATE=0.1
 
 pnpm --dir apps/cloudflare deploy:config:render
 pnpm --dir apps/cloudflare deploy:secrets:render
@@ -163,22 +178,75 @@ You should now have:
 
 If you want to stage manually before GitHub Actions:
 
+### First deploys and Durable Object migrations
+
+Use a direct deploy when the Worker does not exist yet or the generated config includes a new Durable Object migration:
+
 ```bash
-pnpm --dir apps/cloudflare worker:secret:bulk -- ./.deploy/worker-secrets.json --config ./.deploy/wrangler.generated.jsonc
-pnpm --dir apps/cloudflare worker:deploy -- --config ./.deploy/wrangler.generated.jsonc
+pnpm --dir apps/cloudflare worker:deploy -- \
+  --config ./.deploy/wrangler.generated.jsonc \
+  --secrets-file ./.deploy/worker-secrets.json
 ```
 
 `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. Docker needs to be available on the machine running that command.
 
+### Normal rollouts after the first deploy
+
+Once the Worker already exists and no Durable Object migration is being applied, use the rollout helper so the version upload and deployment stay separate:
+
+```bash
+export HOSTED_EXECUTION_DEPLOYMENT_MODE=gradual
+export HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE=10
+export HOSTED_EXECUTION_INCLUDE_SECRETS=true
+
+pnpm --dir apps/cloudflare deploy:rollout -- --config ./.deploy/wrangler.generated.jsonc
+```
+
+The rollout helper uploads a new Worker version, creates a gradual deployment, and writes a deployment result summary under `apps/cloudflare/.deploy/deployment-result.json`.
+It also fails fast if the rendered config introduces a newer Durable Object migration tag than the gradual rollout helper currently allows, so a migration rollout cannot accidentally take the versions/deployments path.
+
+## Cleaning up old container images
+
+Cloudflare's managed registry keeps old image tags until you delete them. If you deploy frequently with the hosted runner image, clean up stale tags periodically so the registry does not quietly accumulate garbage.
+
+Start with a dry run:
+
+```bash
+pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10
+```
+
+Then apply it once the plan looks correct:
+
+```bash
+pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10 --apply
+```
+
+Notes:
+
+- cleanup is intentionally explicit and operator-driven; the normal deploy path does not auto-delete images
+- the script keeps the newest tags per repository by reverse lexicographic tag order, so it works best with the default timestamp-style deploy tags
+- deleting an image tag that an older Worker version still references will break rollback to that version
+
+To promote an already-uploaded candidate instead of uploading a new version:
+
+```bash
+export HOSTED_EXECUTION_DEPLOYMENT_MODE=gradual
+export HOSTED_EXECUTION_DEPLOY_VERSION_ID=<candidate-version-id>
+export HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE=100
+
+pnpm --dir apps/cloudflare deploy:rollout -- --config ./.deploy/wrangler.generated.jsonc
+```
+
 Then smoke test the deployed worker:
 
 ```bash
-export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL="$CF_PUBLIC_BASE_URL"
+export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL=https://healthybob-hosted-staging.example.workers.dev
 export HOSTED_EXECUTION_SMOKE_USER_ID=member_test_123
+export HOSTED_EXECUTION_SMOKE_VERSION_ID=<candidate-version-id>
 pnpm --dir apps/cloudflare deploy:smoke
 ```
 
-If you do not want the script to trigger a manual hosted run, omit `HOSTED_EXECUTION_SMOKE_USER_ID`.
+If you do not want the script to trigger a manual hosted run, omit `HOSTED_EXECUTION_SMOKE_USER_ID`. If you are smoke testing a gradual rollout, set `HOSTED_EXECUTION_SMOKE_VERSION_ID` so the health check and manual run are pinned to the candidate version instead of the stable version. The smoke helper now polls `GET /internal/users/:id/status` after `POST /run` and fails if the queue never drains, `lastRunAt` does not advance, or no durable bundle refs exist.
 
 ## Using the GitHub Actions workflow
 
@@ -187,7 +255,10 @@ The workflow is intentionally manual (`workflow_dispatch`) so you do not acciden
 Open Actions, then `Deploy Cloudflare Hosted Execution`, and choose:
 
 - `environment`: `staging` or `production`
-- `sync_worker_secrets`: whether to upload Worker secrets with Wrangler before deploy
+- `deployment_mode`: `gradual` for normal rollouts, `direct` for first deploys and Durable Object migration rollouts
+- `gradual_rollout_percentage`: candidate-version traffic percentage for gradual deployments
+- `existing_version_id`: optional already-uploaded version id to promote instead of uploading a fresh version
+- `sync_worker_secrets`: whether to include the rendered Worker secrets file in the upload or deploy command
 - `deploy_worker`: whether to actually deploy the Worker
 - `smoke_user_id`: optional hosted user id to trigger one manual `/run` smoke test
 
@@ -196,12 +267,11 @@ The workflow does this in order:
 1. checks out the repo
 2. installs pnpm and Node 22
 3. installs workspace dependencies
-4. runs the focused `apps/cloudflare` verification path
+4. runs the focused `apps/cloudflare verify` path
 5. renders the generated deploy artifacts
-6. optionally uploads Worker secrets with `wrangler secret bulk`
-7. optionally deploys the Worker with `wrangler deploy`, which also builds the native container image from `Dockerfile.cloudflare-hosted-runner`
-8. runs the worker health and smoke checks
-9. writes a deployment summary into the GitHub Actions step summary
+6. optionally uploads a new Worker version and creates a gradual deployment, or falls back to a direct `wrangler deploy` when `deployment_mode=direct`
+7. runs the worker health and smoke checks, pinning the candidate version during gradual rollouts
+8. writes the uploaded version id, candidate version id, and final traffic split into the GitHub Actions step summary
 
 ## First production deploy checklist
 
@@ -209,11 +279,14 @@ Before the first real production deploy, confirm all of these are true:
 
 - Docker is running wherever `wrangler deploy` will execute
 - the Worker answers `GET /health`
-- `CF_PUBLIC_BASE_URL` is the exact externally reachable URL the container can call for commit/finalize/outbox durability
 - `HOSTED_EXECUTION_CONTROL_TOKEN` is set
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` is set and stable
+- `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` is set when you plan to run smoke checks against a non-default public Worker URL
+- `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `basic`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits
+- Workers Logs and Workers Traces are enabled and visible in the Cloudflare dashboard for the target Worker
 - the R2 bucket names in the generated config are correct
 - the bundle encryption key is present and stable
+- the intended canary percentage is decided ahead of time, and you know which signal will be used to promote to 100% or roll back
 - one seeded hosted user can complete:
   - manual `/run`
   - a Linq inbound message
@@ -226,7 +299,7 @@ The first deploy can take a few minutes before native container starts succeed r
 
 This deploy automation gets you to a real native-container staging posture, but two production-hardening items still matter:
 
-1. keep widening direct scenario coverage for the hosted execution lane, especially real Cloudflare deploy smoke paths
+1. keep widening direct scenario coverage for the hosted execution lane, especially real Cloudflare deploy smoke paths and promotion criteria for gradual rollouts
 2. extend the current durable assistant outbox approach if other externally visible hosted side effects need the same replay-safe treatment
 
 Until those broader guarantees exist, treat the current lane as controlled rollout infrastructure rather than an excuse to skip operational caution.

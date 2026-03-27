@@ -61,7 +61,7 @@ Current worker routes:
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`
 
-`apps/cloudflare/wrangler.jsonc` is the checked-in scaffold for those bindings, env names, and the native container image reference. It intentionally leaves bucket names, worker name, and secrets as placeholders until a real Cloudflare account target exists.
+`apps/cloudflare/wrangler.jsonc` is the checked-in scaffold for those bindings, env names, and the native container image reference. It intentionally leaves bucket names, worker name, and secrets as placeholders until a real Cloudflare account target exists, but it now pins the native container to the baseline `basic` instance type instead of relying on Cloudflare defaults.
 
 ## Native container contract
 
@@ -78,7 +78,7 @@ That means:
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object still destroys the companion container after each drained batch instead of keeping its own lease manager
 
-The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section and points at `../../Dockerfile.cloudflare-hosted-runner`.
+The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, and uses `instance_type: "basic"` in the checked-in scaffold. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `basic` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
 ## Container image
 
@@ -113,7 +113,7 @@ Still intentionally placeholder:
 
 - real Cloudflare account ids, domains, and worker names
 - final bucket names
-- final container-capacity tuning
+- final container-capacity tuning beyond the explicit `basic` baseline
 - fully automatic canary promotion without an operator decision
 
 For the end-to-end deployment path, including the GitHub Actions workflow and generated deploy artifacts, see `apps/cloudflare/DEPLOY.md`.
@@ -122,9 +122,9 @@ For the end-to-end deployment path, including the GitHub Actions workflow and ge
 
 The Cloudflare app now keeps two focused Vitest lanes:
 
-- `pnpm --dir apps/cloudflare test:node` keeps the fast Node-based unit and integration coverage for auth, journaling, bundle storage, control routes, and the one-shot runner path.
-- `pnpm --dir apps/cloudflare test:workers` runs a smaller Workers-runtime suite through `@cloudflare/vitest-pool-workers`, covering signed dispatch, direct Durable Object RPC, Durable Object alarms, bundle journaling, and runner control flows inside the actual Workers runtime.
-- `pnpm --dir apps/cloudflare test` runs both lanes behind the app-local typecheck gate.
+- `pnpm --dir apps/cloudflare test` keeps the default fast loop: app-local typecheck plus the Node-based unit and integration coverage for auth, journaling, bundle storage, control routes, and the one-shot runner path.
+- `pnpm --dir apps/cloudflare test:workers` runs only the smaller Workers-runtime suite through `@cloudflare/vitest-pool-workers`, covering signed dispatch, direct Durable Object RPC, Durable Object alarms, bundle journaling, and runner control flows inside the actual Workers runtime.
+- `pnpm --dir apps/cloudflare verify` runs app-local typecheck once, then both the Node and Workers-runtime lanes.
 
 ## Operational notes
 
@@ -133,9 +133,13 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` includes sibling `assistant-state` plus the minimal operator-home config needed for explicit `member.activated` bootstrap. Vault `.runtime/**` stays local-only and is not bundled into hosted `agent-state`, and per-user runner env overrides live in their own encrypted hosted object.
 - Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.
 - Hosted one-shot runs now collect due outward side effects with the committed hosted result, then the runner drains those committed side effects after the durable commit succeeds. Assistant replies are the first concrete side-effect kind on that path and still originate from the assistant outbox intents in `assistant-state/`.
+- Broad hosted idempotency no longer depends on that runner lane alone: `apps/web` uses the shared Postgres `execution_outbox` for Cloudflare dispatches, hosted webhook receipts keep their own durable side-effect state for Linq replies, and RevNet issuance stays on its invoice-owned idempotency path.
 - Follow-up hosted events now require an already bootstrapped member context; they no longer create the vault or force-enable Linq auto-reply as a hidden side effect.
 - The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production rollout. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
-- Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys and Durable Object migrations still require a direct `wrangler deploy`.
+- Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys still require a direct `wrangler deploy`, and the rollout helper now refuses gradual mode when the rendered config introduces a newer Durable Object migration tag than the currently allowed gradual-deploy set.
+- Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
+- Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
+- The local `wrangler dev` scaffold no longer uses `secrets.required`, so optional provider vars/secrets in `apps/cloudflare/.dev.vars` stay visible during local container runs. Deploy-time required-secret enforcement still happens through `deploy:secrets:render`.
 
 ## Runtime boundary
 
