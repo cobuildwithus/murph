@@ -27,6 +27,19 @@ const nextServer = vi.hoisted(() => ({
 
 const deviceSyncd = vi.hoisted(() => ({
   DeviceSyncError: Error,
+  buildPublicDeviceSyncErrorPayload: (error: {
+    code: string;
+    details?: unknown;
+    message: string;
+    retryable?: boolean;
+  }) => ({
+    error: {
+      code: error.code,
+      ...(error.details ? { details: error.details } : {}),
+      message: error.message,
+      retryable: error.retryable ?? false,
+    },
+  }),
   deviceSyncError: (input: {
     code: string;
     message: string;

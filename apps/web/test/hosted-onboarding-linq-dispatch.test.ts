@@ -1,12 +1,15 @@
+import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  dispatchHostedExecution: vi.fn(),
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedExecutionOutbox: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
-  dispatchHostedExecution: mocks.dispatchHostedExecution,
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
@@ -45,20 +48,17 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-import { HostedBillingStatus } from "@prisma/client";
-
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/service";
 
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.dispatchHostedExecution.mockResolvedValue({
-      dispatched: true,
-    });
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
   });
 
   it("dispatches active-member Linq messages to hosted execution instead of issuing a fresh invite", async () => {
-    const prisma = {
+    const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -79,7 +79,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           normalizedPhoneNumber: "+15551234567",
         }),
       },
-    } as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
+    }) as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
@@ -114,15 +114,27 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "dispatched-active-member",
     });
-    expect(mocks.dispatchHostedExecution).toHaveBeenCalledWith(
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({
-          kind: "linq.message.received",
-          userId: "member_123",
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            kind: "linq.message.received",
+            userId: "member_123",
+          }),
+          eventId: "evt_123",
         }),
-        eventId: "evt_123",
+        sourceId: "linq:evt_123",
+        sourceType: "hosted_webhook_receipt",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 });
+
+function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T {
+  const prismaWithTransaction = prisma as T & {
+    $transaction: (callback: (tx: T) => Promise<unknown>) => Promise<unknown>;
+  };
+  prismaWithTransaction.$transaction = async (callback) => callback(prismaWithTransaction);
+  return prismaWithTransaction;
+}

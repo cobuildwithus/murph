@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => {
   const stripeConstructEvent = vi.fn();
 
   return {
-    dispatchHostedExecution: vi.fn(),
+    drainHostedExecutionOutboxBestEffort: vi.fn(),
+    enqueueHostedExecutionOutbox: vi.fn(),
     isHostedOnboardingRevnetEnabled: vi.fn(),
     normalizeHostedWalletAddress: vi.fn((value: string | null | undefined) => value ?? null),
     requireHostedRevnetConfig: vi.fn(),
@@ -17,8 +18,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
-  dispatchHostedExecution: mocks.dispatchHostedExecution,
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
@@ -90,7 +92,8 @@ import {
 
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
-    mocks.dispatchHostedExecution.mockReset();
+    mocks.drainHostedExecutionOutboxBestEffort.mockReset();
+    mocks.enqueueHostedExecutionOutbox.mockReset();
     mocks.isHostedOnboardingRevnetEnabled.mockReset();
     mocks.normalizeHostedWalletAddress.mockReset();
     mocks.requireHostedRevnetConfig.mockReset();
@@ -98,7 +101,8 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.submitHostedRevnetPayment.mockReset();
     mocks.stripeConstructEvent.mockReset();
     mocks.waitForHostedRevnetPaymentConfirmation.mockReset();
-    mocks.dispatchHostedExecution.mockResolvedValue({ dispatched: true });
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
     mocks.normalizeHostedWalletAddress.mockImplementation((value: string | null | undefined) => value ?? null);
     mocks.requireHostedRevnetConfig.mockReturnValue({
@@ -122,23 +126,17 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.waitForHostedRevnetPaymentConfirmation.mockResolvedValue(undefined);
   });
 
-  it("allows a Linq active-member webhook to retry after a dispatch failure", async () => {
-    mocks.dispatchHostedExecution
-      .mockRejectedValueOnce(new Error("runner unavailable"))
-      .mockResolvedValueOnce({ dispatched: true });
-
-    const prisma: any = {
+  it("completes a Linq active-member webhook after the dispatch is durably queued", async () => {
+    const prisma: any = withPrismaTransaction({
       hostedWebhookReceipt: {
-        create: vi.fn()
-          .mockResolvedValueOnce({})
-          .mockRejectedValueOnce(createUniqueConstraintError()),
-        findUnique: vi.fn(),
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(makeActiveMember()),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -147,16 +145,16 @@ describe("hosted onboarding webhook retry safety", () => {
         signature: null,
         timestamp: null,
       }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_EXECUTION_DISPATCH_FAILED",
-      retryable: true,
+    ).resolves.toMatchObject({
+      ok: true,
+      reason: "dispatched-active-member",
     });
 
-    const firstAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
+    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
       ([payload]: [Record<string, unknown>]) => payload,
     );
-    expect(firstAttemptCalls).toHaveLength(4);
-    expect(firstAttemptCalls[0]).toEqual(
+    expect(receiptCalls).toHaveLength(4);
+    expect(receiptCalls[0]).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
           payloadJson: buildWebhookReceiptPayload({
@@ -177,62 +175,11 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(firstAttemptCalls.at(-1)).toEqual(
+    expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
           payloadJson: buildWebhookReceiptPayload({
             attemptCount: 1,
-            attemptId: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastError: expect.objectContaining({
-              name: "HostedOnboardingError",
-            }),
-            lastReceivedAt: expect.any(String),
-            sideEffects: [
-              buildDispatchSideEffect({
-                attemptCount: 1,
-                eventId: "evt_123",
-                lastAttemptAt: expect.any(String),
-                lastError: {
-                  code: "HOSTED_EXECUTION_DISPATCH_FAILED",
-                  message: "Hosted execution dispatch failed and the webhook should be retried.",
-                  name: "HostedOnboardingError",
-                  retryable: true,
-                },
-                status: "pending",
-              }),
-            ],
-            status: "failed",
-          }),
-        }),
-      }),
-    );
-    prisma.hostedWebhookReceipt.findUnique.mockResolvedValueOnce({
-      payloadJson: firstAttemptCalls.at(-1)?.data?.payloadJson,
-    });
-
-    await expect(
-      handleHostedOnboardingLinqWebhook({
-        prisma,
-        rawBody: buildLinqMessageWebhookBody(),
-        signature: null,
-        timestamp: null,
-      }),
-    ).resolves.toMatchObject({
-      ok: true,
-      reason: "dispatched-active-member",
-    });
-
-    const secondAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls
-      .slice(firstAttemptCalls.length)
-      .map(([payload]: [Record<string, unknown>]) => payload);
-    expect(secondAttemptCalls.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 2,
             attemptId: expect.any(String),
             completedAt: expect.any(String),
             eventPayload: {
@@ -241,7 +188,7 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             sideEffects: [
               buildDispatchSideEffect({
-                attemptCount: 2,
+                attemptCount: 1,
                 eventId: "evt_123",
                 lastAttemptAt: expect.any(String),
                 sentAt: expect.any(String),
@@ -253,13 +200,23 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(mocks.dispatchHostedExecution).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            kind: "linq.message.received",
+            userId: "member_123",
+          }),
+          eventId: "evt_123",
+        }),
+        sourceId: "linq:evt_123",
+        sourceType: "hosted_webhook_receipt",
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
-  it("allows a Stripe invoice webhook to retry after durable updates but before activation dispatch completes", async () => {
-    mocks.dispatchHostedExecution
-      .mockRejectedValueOnce(new Error("dispatch unavailable"))
-      .mockResolvedValueOnce({ dispatched: true });
+  it("completes a Stripe invoice webhook after durable updates queue activation dispatch", async () => {
     mocks.stripeConstructEvent.mockReturnValue({
       data: {
         object: {
@@ -275,12 +232,10 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    const prisma: any = {
+    const prisma: any = withPrismaTransaction({
       hostedWebhookReceipt: {
-        create: vi.fn()
-          .mockResolvedValueOnce({})
-          .mockRejectedValueOnce(createUniqueConstraintError()),
-        findUnique: vi.fn(),
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
@@ -304,7 +259,7 @@ describe("hosted onboarding webhook retry safety", () => {
           stripeSubscriptionId: "sub_123",
         }),
       },
-    };
+    });
 
     await expect(
       handleHostedStripeWebhook({
@@ -312,17 +267,17 @@ describe("hosted onboarding webhook retry safety", () => {
         rawBody: JSON.stringify({ id: "evt_stripe_123" }),
         signature: "sig_123",
       }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_EXECUTION_DISPATCH_FAILED",
-      retryable: true,
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
     });
 
     expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
-    const firstAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
+    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
       ([payload]: [Record<string, unknown>]) => payload,
     );
-    expect(firstAttemptCalls).toHaveLength(4);
-    expect(firstAttemptCalls[0]).toEqual(
+    expect(receiptCalls).toHaveLength(4);
+    expect(receiptCalls[0]).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
           payloadJson: buildWebhookReceiptPayload({
@@ -345,64 +300,11 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(firstAttemptCalls.at(-1)).toEqual(
+    expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
           payloadJson: buildWebhookReceiptPayload({
             attemptCount: 1,
-            attemptId: expect.any(String),
-            eventPayload: {
-              type: "invoice.paid",
-            },
-            lastError: expect.objectContaining({
-              name: "HostedOnboardingError",
-            }),
-            lastReceivedAt: expect.any(String),
-            sideEffects: [
-              buildMemberActivationDispatchSideEffect({
-                attemptCount: 1,
-                lastAttemptAt: expect.any(String),
-                lastError: {
-                  code: "HOSTED_EXECUTION_DISPATCH_FAILED",
-                  message: "Hosted execution dispatch failed and the webhook should be retried.",
-                  name: "HostedOnboardingError",
-                  retryable: true,
-                },
-                occurredAt: expect.any(String),
-                sourceEventId: "evt_stripe_123",
-                sourceType: "stripe.invoice.paid",
-                status: "pending",
-              }),
-            ],
-            status: "failed",
-          }),
-        }),
-      }),
-    );
-    prisma.hostedWebhookReceipt.findUnique.mockResolvedValueOnce({
-      payloadJson: firstAttemptCalls.at(-1)?.data?.payloadJson,
-    });
-
-    await expect(
-      handleHostedStripeWebhook({
-        prisma,
-        rawBody: JSON.stringify({ id: "evt_stripe_123" }),
-        signature: "sig_123",
-      }),
-    ).resolves.toMatchObject({
-      ok: true,
-      type: "invoice.paid",
-    });
-
-    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(2);
-    const secondAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls
-      .slice(firstAttemptCalls.length)
-      .map(([payload]: [Record<string, unknown>]) => payload);
-    expect(secondAttemptCalls.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 2,
             attemptId: expect.any(String),
             completedAt: expect.any(String),
             eventPayload: {
@@ -411,7 +313,7 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             sideEffects: [
               buildMemberActivationDispatchSideEffect({
-                attemptCount: 2,
+                attemptCount: 1,
                 lastAttemptAt: expect.any(String),
                 occurredAt: expect.any(String),
                 sentAt: expect.any(String),
@@ -425,7 +327,20 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(mocks.dispatchHostedExecution).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            kind: "member.activated",
+            userId: "member_123",
+          }),
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
+        }),
+        sourceId: "stripe:evt_stripe_123",
+        sourceType: "hosted_webhook_receipt",
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
   it("does not redispatch an already-sent Linq side effect when reclaiming a failed receipt", async () => {
@@ -451,7 +366,7 @@ describe("hosted onboarding webhook retry safety", () => {
       ],
       status: "failed",
     });
-    const prisma: any = {
+    const prisma: any = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -462,7 +377,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(makeActiveMember()),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -533,7 +448,7 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("allows a Linq invite reply webhook to retry after a Linq send failure", async () => {
@@ -569,7 +484,7 @@ describe("hosted onboarding webhook retry safety", () => {
       triggerText: "I want to get healthy",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
-    const prisma: any = {
+    const prisma: any = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn()
           .mockResolvedValueOnce({})
@@ -596,7 +511,7 @@ describe("hosted onboarding webhook retry safety", () => {
           ...data,
         })),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -774,7 +689,7 @@ describe("hosted onboarding webhook retry safety", () => {
       ],
       status: "failed",
     });
-    const prisma: any = {
+    const prisma: any = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -793,7 +708,7 @@ describe("hosted onboarding webhook retry safety", () => {
         findFirst: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockResolvedValue(invite),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -910,7 +825,7 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -950,7 +865,7 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -990,7 +905,7 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1030,7 +945,7 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1118,7 +1033,7 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(mocks.dispatchHostedExecution).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
   it("submits and confirms an inline RevNet payment exactly once for a paid invoice", async () => {
@@ -1156,7 +1071,7 @@ describe("hosted onboarding webhook retry safety", () => {
       updatedAt: new Date("2026-03-26T12:00:01.000Z"),
     };
 
-    const prisma: any = {
+    const prisma: any = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -1195,7 +1110,7 @@ describe("hosted onboarding webhook retry safety", () => {
           }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     await expect(
       handleHostedStripeWebhook({
@@ -1232,9 +1147,9 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.waitForHostedRevnetPaymentConfirmation).toHaveBeenCalledWith({
       txHash: "0xabc123",
     });
-    expect(mocks.dispatchHostedExecution).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     expect(mocks.waitForHostedRevnetPaymentConfirmation.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.dispatchHostedExecution.mock.invocationCallOrder[0],
+      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );
   });
 
@@ -1259,7 +1174,7 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    const prisma: any = {
+    const prisma: any = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -1295,7 +1210,7 @@ describe("hosted onboarding webhook retry safety", () => {
           updatedAt: new Date("2026-03-26T12:00:02.000Z"),
         }),
       },
-    };
+    });
 
     await expect(
       handleHostedStripeWebhook({
@@ -1311,7 +1226,7 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedRevnetIssuance.upsert).toHaveBeenCalledTimes(1);
     expect(mocks.submitHostedRevnetPayment).not.toHaveBeenCalled();
     expect(mocks.waitForHostedRevnetPaymentConfirmation).not.toHaveBeenCalled();
-    expect(mocks.dispatchHostedExecution).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
   it("treats completed Stripe receipts as duplicates without replaying durable updates", async () => {
@@ -1362,7 +1277,7 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
-    expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 });
 
@@ -1615,4 +1530,12 @@ function buildLinqMessageSideEffect(input: {
       (input.status === "sent" ? "2026-03-26T12:00:01.000Z" : null),
     status: input.status,
   };
+}
+
+function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T {
+  const prismaWithTransaction = prisma as T & {
+    $transaction: (callback: (tx: T) => Promise<unknown>) => Promise<unknown>;
+  };
+  prismaWithTransaction.$transaction = async (callback) => callback(prismaWithTransaction);
+  return prismaWithTransaction;
 }

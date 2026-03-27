@@ -121,9 +121,6 @@ describe("hosted device-sync connect/start route aliases", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "CSRF_ORIGIN_INVALID",
-        details: {
-          origin: "https://evil.example.test",
-        },
         message: "Mutation origin https://evil.example.test is not allowed for hosted device-sync routes.",
         retryable: false,
       },

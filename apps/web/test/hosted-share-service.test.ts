@@ -4,12 +4,20 @@ import { HostedBillingStatus } from "@prisma/client";
 import type { SharePack } from "@healthybob/contracts";
 
 const mocks = vi.hoisted(() => ({
-  dispatchHostedExecutionStatus: vi.fn(),
+  drainHostedExecutionOutbox: vi.fn(),
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedExecutionOutbox: vi.fn(),
+  findHostedExecutionOutboxByEventId: vi.fn(),
   issueHostedInviteForPhone: vi.fn(),
+  readHostedExecutionOutboxOutcome: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
-  dispatchHostedExecutionStatus: mocks.dispatchHostedExecutionStatus,
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutbox: mocks.drainHostedExecutionOutbox,
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+  enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
+  findHostedExecutionOutboxByEventId: mocks.findHostedExecutionOutboxByEventId,
+  readHostedExecutionOutboxOutcome: mocks.readHostedExecutionOutboxOutcome,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -71,21 +79,14 @@ describe("hosted share service", () => {
         inviteCode: "invite_123",
       },
     });
-    mocks.dispatchHostedExecutionStatus.mockResolvedValue({
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      inFlight: false,
+    mocks.drainHostedExecutionOutbox.mockResolvedValue([]);
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
+    mocks.findHostedExecutionOutboxByEventId.mockResolvedValue({
       lastError: null,
-      lastEventId: "vault.share.accepted:seed",
-      lastRunAt: "2026-03-26T12:00:00.000Z",
-      nextWakeAt: null,
-      pendingEventCount: 0,
-      poisonedEventIds: [],
-      retryingEventId: null,
-      userId: "member_123",
+      status: "completed",
     });
+    mocks.readHostedExecutionOutboxOutcome.mockReturnValue("completed");
   });
 
   it("creates a hosted share link and threads a recipient invite into the final url", async () => {
@@ -111,22 +112,6 @@ describe("hosted share service", () => {
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
-
-    mocks.dispatchHostedExecutionStatus.mockImplementation(async ({ eventId }) => ({
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      inFlight: false,
-      lastError: null,
-      lastEventId: eventId,
-      lastRunAt: "2026-03-26T12:00:00.000Z",
-      nextWakeAt: null,
-      pendingEventCount: 0,
-      poisonedEventIds: [],
-      retryingEventId: null,
-      userId: "member_123",
-    }));
 
     const result = await acceptHostedShareLink({
       prisma: prisma as never,
@@ -171,29 +156,13 @@ describe("hosted share service", () => {
     });
     const dispatchEventIds: string[] = [];
 
-    mocks.dispatchHostedExecutionStatus
-      .mockImplementationOnce(async ({ eventId }) => {
-        dispatchEventIds.push(eventId);
-        throw new Error("socket hang up");
-      })
-      .mockImplementationOnce(async ({ eventId }) => {
-        dispatchEventIds.push(eventId);
-        return {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: eventId,
-          lastRunAt: "2026-03-26T12:00:00.000Z",
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "member_123",
-        };
-      });
+    mocks.readHostedExecutionOutboxOutcome
+      .mockReturnValueOnce("pending")
+      .mockReturnValueOnce("completed");
+    mocks.enqueueHostedExecutionOutbox.mockImplementation(async ({ dispatch }: { dispatch: { eventId: string } }) => {
+      dispatchEventIds.push(dispatch.eventId);
+      return undefined;
+    });
 
     await expect(() =>
       acceptHostedShareLink({
@@ -256,8 +225,7 @@ type HostedShareRow = {
 
 function createHostedSharePrisma() {
   const rows: HostedShareRow[] = [];
-
-  return {
+  const prismaLike = {
     rows,
     hostedShareLink: {
       create: async ({ data }: { data: Omit<HostedShareRow, "acceptedAt" | "acceptedByMemberId" | "consumedAt" | "consumedByMemberId" | "lastEventId" | "updatedAt"> }) => {
@@ -313,5 +281,14 @@ function createHostedSharePrisma() {
         return row;
       },
     },
+  };
+
+  const transactionalPrisma = {
+    ...prismaLike,
+  };
+
+  return {
+    ...transactionalPrisma,
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback(transactionalPrisma as unknown),
   };
 }
