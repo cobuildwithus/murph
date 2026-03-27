@@ -145,6 +145,18 @@ type HostedWebhookReceiptClaim = {
   state: HostedWebhookReceiptState;
 };
 
+class HostedWebhookReceiptSideEffectDrainError extends Error {
+  readonly claimedReceipt: HostedWebhookReceiptClaim;
+  readonly cause: unknown;
+
+  constructor(claimedReceipt: HostedWebhookReceiptClaim, cause: unknown) {
+    super("Hosted webhook side-effect drain failed.");
+    this.name = "HostedWebhookReceiptSideEffectDrainError";
+    this.claimedReceipt = claimedReceipt;
+    this.cause = cause;
+  }
+}
+
 const HOSTED_REVNET_SUBMITTING_STALE_MS = 5 * 60 * 1000;
 
 export async function getHostedInviteStatus(input: {
@@ -440,10 +452,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     return response;
   } catch (error) {
-    claimedReceipt = readHostedWebhookReceiptClaimFromError(error) ?? claimedReceipt;
+    const drainFailure = readHostedWebhookReceiptDrainError(error);
+    const failure = drainFailure?.cause ?? error;
+    claimedReceipt = drainFailure?.claimedReceipt ?? claimedReceipt;
     await markHostedWebhookReceiptFailed({
       claimedReceipt,
-      error,
+      error: failure,
       eventId: event.event_id,
       eventPayload: {
         eventType: event.event_type,
@@ -451,7 +465,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       prisma,
       source: "linq",
     });
-    throw error;
+    throw failure;
   }
 }
 
@@ -773,10 +787,12 @@ export async function handleHostedStripeWebhook(input: {
       type: event.type,
     };
   } catch (error) {
-    claimedReceipt = readHostedWebhookReceiptClaimFromError(error) ?? claimedReceipt;
+    const drainFailure = readHostedWebhookReceiptDrainError(error);
+    const failure = drainFailure?.cause ?? error;
+    claimedReceipt = drainFailure?.claimedReceipt ?? claimedReceipt;
     await markHostedWebhookReceiptFailed({
       claimedReceipt,
-      error,
+      error: failure,
       eventId: event.id,
       eventPayload: {
         type: event.type,
@@ -784,7 +800,7 @@ export async function handleHostedStripeWebhook(input: {
       prisma,
       source: "stripe",
     });
-    throw error;
+    throw failure;
   }
 }
 
@@ -1783,7 +1799,7 @@ async function drainHostedWebhookReceiptSideEffects(input: {
         prisma: input.prisma,
         source: input.source,
       });
-      throw attachHostedWebhookReceiptClaim(error, currentClaim);
+      throw new HostedWebhookReceiptSideEffectDrainError(currentClaim, error);
     }
   }
 
@@ -2200,37 +2216,12 @@ function readHostedWebhookSideEffectRetryable(error: Error): boolean | null {
     : null;
 }
 
-function attachHostedWebhookReceiptClaim(
+function readHostedWebhookReceiptDrainError(
   error: unknown,
-  claimedReceipt: HostedWebhookReceiptClaim,
-): Error {
-  const enrichedError = error instanceof Error ? error : new Error(String(error));
-  Object.defineProperty(enrichedError, "claimedReceipt", {
-    configurable: true,
-    enumerable: false,
-    value: claimedReceipt,
-    writable: true,
-  });
-  return enrichedError;
-}
-
-function readHostedWebhookReceiptClaimFromError(error: unknown): HostedWebhookReceiptClaim | null {
-  if (!error || typeof error !== "object" || !("claimedReceipt" in error)) {
-    return null;
-  }
-
-  const candidate = (error as { claimedReceipt?: unknown }).claimedReceipt;
-
-  if (
-    !candidate ||
-    typeof candidate !== "object" ||
-    !("payloadJson" in candidate) ||
-    !("state" in candidate)
-  ) {
-    return null;
-  }
-
-  return candidate as HostedWebhookReceiptClaim;
+): HostedWebhookReceiptSideEffectDrainError | null {
+  return error instanceof HostedWebhookReceiptSideEffectDrainError
+    ? error
+    : null;
 }
 
 function generateHostedWebhookReceiptAttemptId(): string {

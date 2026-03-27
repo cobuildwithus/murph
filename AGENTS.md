@@ -46,6 +46,7 @@ If instructions still conflict after applying this order, ask the user before ac
 - For non-doc repo changes that touch production code or tests, run completion workflow audit passes in order: `simplify` -> `test-coverage-audit` -> `task-finish-review`.
 - Those required audit passes must be executed explicitly via spawned subagents using the matching docs in `agent-docs/prompts/`; do not treat local self-review by the main implementation agent as satisfying the requirement.
 - Treat the repo's mandatory completion-workflow audit passes as standing maintainer authorization for the required spawned subagents. When the current environment supports spawned agents, do not pause only to ask for separate delegation permission for those required audit passes. If the environment or tool policy still blocks subagents, say so explicitly and follow the higher-priority constraint.
+- Do not wait for an explicit user request before launching those required completion-workflow audit subagents; repo policy already authorizes them for qualifying changes.
 - Docs/process-only changes and vault-only data tasks skip completion workflow audit passes unless the user explicitly asks to run them.
 - For UI-affecting `packages/web` changes, inspect the rendered result at desktop and mobile sizes before handoff.
 - Until product/runtime tooling exists, do not invent fake compatibility or deployment requirements; define them in `agent-docs/operations/verification-and-runtime.md` and `package.json` in the same change that introduces them.
