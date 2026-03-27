@@ -101,6 +101,34 @@ test("health history appends to the shared event ledger and supports list/read f
   assert.ok(historyOperations.every((operation) => operation.status === "committed"));
 });
 
+test("health history writes store the vault-local dayKey and timezone when UTC crosses midnight", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-history-local-day");
+  await initializeVault({
+    vaultRoot,
+    timezone: "Australia/Melbourne",
+  });
+
+  const appended = await appendHistoryEvent({
+    vaultRoot,
+    kind: "encounter",
+    occurredAt: "2026-03-26T21:00:00.000Z",
+    title: "Breakfast follow-up",
+    encounterType: "office_visit",
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: appended.relativePath,
+  });
+  const storedRecord = stored.find(
+    (record) => (record as { id?: string }).id === appended.record.id,
+  ) as { dayKey?: string; timeZone?: string } | undefined;
+
+  assert.equal(appended.record.dayKey, "2026-03-27");
+  assert.equal(appended.record.timeZone, "Australia/Melbourne");
+  assert.equal(storedRecord?.dayKey, "2026-03-27");
+  assert.equal(storedRecord?.timeZone, "Australia/Melbourne");
+});
+
 test("history test-event normalization keeps writes canonical and ignores legacy status aliases on read", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-history-test-aliases");
   await initializeVault({ vaultRoot });
