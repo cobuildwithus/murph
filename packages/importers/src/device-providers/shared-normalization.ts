@@ -7,6 +7,7 @@ import type {
   DeviceSamplePayload,
   DeviceSampleValuePayload,
 } from "../core-port.js";
+import type { NormalizedDeviceBatch } from "./types.js";
 
 export interface ObservationEventOptions {
   metric: string;
@@ -14,6 +15,8 @@ export interface ObservationEventOptions {
   unit: string;
   occurredAt?: string;
   recordedAt?: string;
+  dayKey?: string;
+  timeZone?: string;
   title: string;
   note?: string;
   rawArtifactRoles?: string[];
@@ -25,6 +28,8 @@ export interface SampleOptions {
   value: unknown;
   unit: string;
   recordedAt?: string;
+  dayKey?: string;
+  timeZone?: string;
   externalRef: DeviceExternalRefPayload;
 }
 
@@ -32,6 +37,8 @@ export interface MetricEmissionContext<T> {
   source: T;
   occurredAt?: string;
   recordedAt?: string;
+  dayKey?: string;
+  timeZone?: string;
   rawArtifactRoles?: string[];
   externalRef: (facet?: string) => DeviceExternalRefPayload;
 }
@@ -72,6 +79,16 @@ export interface DeletionObservationOptions {
     version?: string,
     facet?: string,
   ) => DeviceExternalRefPayload;
+}
+
+export interface NormalizedDeviceBatchOptions {
+  provider: string;
+  accountId?: string;
+  importedAt?: string;
+  events?: DeviceEventPayload[];
+  samples?: DeviceSamplePayload[];
+  rawArtifacts?: DeviceRawArtifactPayload[];
+  provenance?: Record<string, unknown>;
 }
 
 export function asPlainObject(value: unknown): PlainObject | undefined {
@@ -143,6 +160,37 @@ export function trimToLength(value: string, maxLength: number): string {
   return value.trim().slice(0, maxLength);
 }
 
+export function makeProviderExternalRef(
+  system: string,
+  resourceType: string,
+  resourceId: string,
+  version?: string,
+  facet?: string,
+): DeviceExternalRefPayload {
+  return stripUndefined({
+    system,
+    resourceType,
+    resourceId,
+    version,
+    facet,
+  });
+}
+
+export function makeNormalizedDeviceBatch(
+  options: NormalizedDeviceBatchOptions,
+): NormalizedDeviceBatch {
+  return stripUndefined({
+    provider: options.provider,
+    accountId: options.accountId,
+    importedAt: options.importedAt,
+    source: "device",
+    events: options.events,
+    samples: options.samples,
+    rawArtifacts: options.rawArtifacts,
+    provenance: options.provenance,
+  });
+}
+
 export function createRawArtifact(
   role: string,
   fileName: string,
@@ -199,6 +247,8 @@ export function pushObservationEvent(
       kind: "observation",
       occurredAt,
       recordedAt: options.recordedAt,
+      dayKey: options.dayKey,
+      timeZone: options.timeZone,
       source: "device",
       title: trimToLength(options.title, 160),
       note: options.note ? trimToLength(options.note, 4000) : undefined,
@@ -232,6 +282,8 @@ export function pushSample(
     stripUndefined({
       stream: options.stream,
       recordedAt: options.recordedAt,
+      dayKey: options.dayKey,
+      timeZone: options.timeZone,
       source: "device",
       quality: "normalized",
       unit: options.unit,
@@ -263,6 +315,8 @@ export function emitObservationMetrics<T>(
       unit: descriptor.unit,
       occurredAt: context.occurredAt,
       recordedAt: context.recordedAt,
+      dayKey: context.dayKey,
+      timeZone: context.timeZone,
       title: resolveMetricDescriptorValue(descriptor.title, context.source),
       note: descriptor.note
         ? resolveMetricDescriptorValue(descriptor.note, context.source)
@@ -291,6 +345,8 @@ export function emitSampleMetrics<T>(
       value,
       unit: descriptor.unit,
       recordedAt: context.recordedAt,
+      dayKey: context.dayKey,
+      timeZone: context.timeZone,
       externalRef: context.externalRef(
         descriptor.facet
           ? resolveMetricDescriptorValue(descriptor.facet, context.source)

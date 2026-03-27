@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { extractIsoDatePrefix } from "@healthybob/contracts";
 import {
   SEARCH_DB_RELATIVE_PATH,
   openSqliteRuntimeDatabase,
@@ -254,17 +255,19 @@ async function searchVaultSqliteWithStatus(
     }
 
     if (filters.from) {
+      const from = extractIsoDatePrefix(filters.from) ?? filters.from;
       whereClauses.push(
         "substr(COALESCE(hb_search_document.date, hb_search_document.occurred_at), 1, 10) >= ?",
       );
-      parameters.push(filters.from.slice(0, 10));
+      parameters.push(from);
     }
 
     if (filters.to) {
+      const to = extractIsoDatePrefix(filters.to) ?? filters.to;
       whereClauses.push(
         "substr(COALESCE(hb_search_document.date, hb_search_document.occurred_at), 1, 10) <= ?",
       );
-      parameters.push(filters.to.slice(0, 10));
+      parameters.push(to);
     }
 
     const candidateLimit = Math.max(

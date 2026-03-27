@@ -41,7 +41,11 @@ import {
   VARIANT_ZYGOSITIES,
 } from "./constants.js";
 import { GENERIC_CONTRACT_ID_PATTERN, idPattern } from "./ids.js";
-import { isStrictIsoDate, isStrictIsoDateTime } from "./time.js";
+import {
+  isStrictIsoDate,
+  isStrictIsoDateTime,
+  isValidIanaTimeZone,
+} from "./time.js";
 
 export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -148,6 +152,17 @@ function isoDateString(): z.ZodType<string> {
     .string()
     .meta({ format: "date" })
     .refine((value) => isStrictIsoDate(value), "Invalid ISO date string.");
+}
+
+function timeZoneString(): z.ZodString;
+function timeZoneString(options: { optional: true }): z.ZodOptional<z.ZodString>;
+function timeZoneString(options: { optional?: boolean } = {}) {
+  const schema = boundedString(3, 64).refine(
+    (value) => isValidIanaTimeZone(value),
+    "Invalid IANA time zone.",
+  );
+
+  return options.optional ? schema.optional() : schema;
 }
 
 function integerSchema(minimum?: number, maximum?: number): z.ZodType<number> {
@@ -321,6 +336,7 @@ const baseEventOptionalShape = {
   relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
+  timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;
 
 function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape>(
@@ -349,6 +365,7 @@ const baseSampleShape = {
 
 const baseSampleOptionalShape = {
   externalRef: externalRefSchema.optional(),
+  timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;
 
 function sampleSchema<const TStream extends SampleStream, TExtra extends z.ZodRawShape>(
@@ -372,7 +389,7 @@ export const vaultMetadataSchema = withContractMetadata(
       vaultId: idSchema(ID_PREFIXES.vault),
       createdAt: isoDateTimeString(),
       title: boundedString(1, 120),
-      timezone: boundedString(3, 64),
+      timezone: timeZoneString(),
       idPolicy: z
         .object({
           format: z.literal(CONTRACT_ID_FORMAT),
@@ -616,7 +633,7 @@ export const coreFrontmatterSchema = withContractMetadata(
       docType: z.literal(FRONTMATTER_DOC_TYPES.core),
       vaultId: idSchema(ID_PREFIXES.vault),
       title: boundedString(1, 160),
-      timezone: boundedString(3, 64),
+      timezone: timeZoneString(),
       updatedAt: isoDateTimeString(),
       activeExperimentSlugs: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })

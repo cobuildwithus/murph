@@ -12,6 +12,7 @@ import {
   buildDailyFoodCronExpression,
   buildDailyFoodCronJobName,
   buildDailyFoodCronPrompt,
+  buildDailyFoodSchedule,
   dailyFoodTimeSchema,
   slugifyFoodLookup,
 } from './food-autolog.js'
@@ -50,6 +51,13 @@ interface FoodReadModel {
 const FOOD_ID_PATTERN = /^food_[0-9A-Za-z]+$/u
 
 interface FoodCoreRuntime {
+  loadVault(input: {
+    vaultRoot: string
+  }): Promise<{
+    metadata: {
+      timezone?: string | null
+    }
+  }>
   upsertFood(input: {
     vaultRoot: string
     foodId?: string
@@ -266,6 +274,10 @@ export async function addDailyFoodRecord(input: {
   let existingDailyJobs: Awaited<ReturnType<typeof listAssistantCronJobs>> = []
 
   try {
+    const vault = await core.loadVault({
+      vaultRoot: input.vault,
+    })
+    const timeZone = vault.metadata.timezone ?? 'UTC'
     const desiredExpression = buildDailyFoodCronExpression(time)
     existingFood = await findFoodForDailyAdd(core, {
       vault: input.vault,
@@ -293,7 +305,14 @@ export async function addDailyFoodRecord(input: {
       )
     }
 
-    if (existingJob && !isDailyFoodCronJobExpression(existingJob.schedule, desiredExpression)) {
+    if (
+      existingJob &&
+      !isDailyFoodScheduleMatch(existingJob.schedule, {
+        desiredExpression,
+        time,
+        timeZone,
+      })
+    ) {
       throw new VaultCliError(
         'conflict',
         `Food "${existingFood?.title ?? title}" already has a recurring auto-log job with a different schedule. Remove or change the existing recurring food before setting a new time.`,
@@ -322,10 +341,7 @@ export async function addDailyFoodRecord(input: {
         vault: input.vault,
         name: buildDailyFoodCronJobName(food.slug),
         prompt: buildDailyFoodCronPrompt(food.title),
-        schedule: {
-          kind: 'cron',
-          expression: desiredExpression,
-        },
+        schedule: buildDailyFoodSchedule(time, timeZone),
         foodAutoLog: {
           foodId: food.foodId,
         },
@@ -510,14 +526,24 @@ async function findFoodForDailyAdd(
   return foods.find((food) => food.title === input.title) ?? null
 }
 
-function isDailyFoodCronJobExpression(
+function isDailyFoodScheduleMatch(
   schedule: {
     kind: string
     expression?: string
+    localTime?: string
+    timeZone?: string
   },
-  desiredExpression: string,
+  input: {
+    desiredExpression: string
+    time: string
+    timeZone: string
+  },
 ) {
-  return schedule.kind === 'cron' && schedule.expression === desiredExpression
+  if (schedule.kind === 'dailyLocal') {
+    return schedule.localTime === input.time && schedule.timeZone === input.timeZone
+  }
+
+  return schedule.kind === 'cron' && schedule.expression === input.desiredExpression
 }
 
 function mergeFoodAliases(

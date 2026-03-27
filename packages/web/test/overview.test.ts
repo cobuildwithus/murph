@@ -176,6 +176,7 @@ test("loadVaultOverview summarizes a readable vault without leaking source paths
     });
 
     assert.equal(result.status, "ready");
+    assert.equal(result.timeZone, "Australia/Melbourne");
     assert.equal(result.metrics.find((metric) => metric.label === "records")?.value, 10);
     assert.equal(result.currentProfile?.topGoals[0]?.title, "Protect sleep consistency");
     assert.equal(result.currentProfile?.summary?.includes("#"), false);
@@ -418,6 +419,63 @@ test("loadVaultOverview keeps weekly stats separated by unit for the same stream
           unit: "min",
         },
       ],
+    );
+  } finally {
+    vi.useRealTimers();
+    await destroyWebFixtureVault(vaultRoot);
+  }
+});
+
+test("loadVaultOverview uses the vault timezone for week windows at UTC day boundaries", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-23T23:30:00.000Z"));
+
+  const vaultRoot = await createWebFixtureVault();
+
+  try {
+    await writeFixtureFile(
+      vaultRoot,
+      "ledger/samples/sleep/2026/2026-03.jsonl",
+      [
+        {
+          schemaVersion: "hb.sample.v1",
+          id: "smp_sleep_boundary_current",
+          stream: "sleep",
+          recordedAt: "2026-03-23T21:00:00.000Z",
+          dayKey: "2026-03-24",
+          value: 8,
+          unit: "hrs",
+          source: "manual",
+        },
+        {
+          schemaVersion: "hb.sample.v1",
+          id: "smp_sleep_boundary_previous",
+          stream: "sleep",
+          recordedAt: "2026-03-16T21:00:00.000Z",
+          dayKey: "2026-03-17",
+          value: 7,
+          unit: "hrs",
+          source: "manual",
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n") + "\n",
+    );
+
+    const result = await loadVaultOverview({
+      vaultRoot,
+    });
+
+    assert.equal(result.status, "ready");
+    assert.deepEqual(
+      result.weeklyStats.find((entry) => entry.stream === "sleep" && entry.unit === "hrs"),
+      {
+        currentWeekAvg: 8,
+        deltaPercent: ((8 - 7) / 7) * 100,
+        previousWeekAvg: 7,
+        stream: "sleep",
+        unit: "hrs",
+      },
     );
   } finally {
     vi.useRealTimers();

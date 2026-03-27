@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -41,6 +41,7 @@ import {
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.js'
 import { saveAssistantSelfDeliveryTarget } from '../src/operator-config.js'
+import { resolveAssistantStatePaths } from '../src/assistant/store.js'
 
 const cleanupPaths: string[] = []
 
@@ -350,6 +351,118 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
 
   const afterStatus = await getAssistantCronStatus(vaultRoot)
   assert.equal(afterStatus.totalJobs, 0)
+})
+
+test('assistant cron assigns vault timezones to cron schedules and computes next runs in local time', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-timezone-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await initializeVault({
+    vaultRoot,
+    timezone: 'Australia/Melbourne',
+  })
+
+  const job = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'morning-check-in',
+    prompt: 'Send my morning check-in.',
+    ...testCronDeliveryTarget,
+    schedule: buildAssistantCronSchedule({
+      cron: '0 8 * * *',
+    }),
+    now: new Date('2026-03-26T21:30:00.000Z'),
+  })
+
+  assert.equal(job.schedule.kind, 'cron')
+  assert.equal(job.schedule.timeZone, 'Australia/Melbourne')
+  assert.equal(job.state.nextRunAt, '2026-03-27T21:00:00.000Z')
+})
+
+test('assistant cron re-enable normalizes legacy cron schedules to the vault timezone', async () => {
+  vi.useFakeTimers()
+
+  try {
+    vi.setSystemTime(new Date('2026-03-26T21:30:00.000Z'))
+
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-legacy-timezone-'))
+    const vaultRoot = path.join(parent, 'vault')
+    cleanupPaths.push(parent)
+
+    await initializeVault({
+      vaultRoot,
+      timezone: 'Australia/Melbourne',
+    })
+
+    const job = await addAssistantCronJob({
+      vault: vaultRoot,
+      name: 'legacy-morning-check-in',
+      prompt: 'Send my migrated morning check-in.',
+      ...testCronDeliveryTarget,
+      schedule: buildAssistantCronSchedule({
+        cron: '0 8 * * *',
+      }),
+    })
+
+    await setAssistantCronJobEnabled(vaultRoot, job.jobId, false)
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const store = JSON.parse(await readFile(paths.cronJobsPath, 'utf8')) as {
+      version: number
+      jobs: Array<Record<string, unknown>>
+    }
+    const legacyJob = store.jobs[0] as {
+      schedule?: Record<string, unknown>
+      state?: Record<string, unknown>
+    }
+
+    assert.equal(legacyJob.schedule?.kind, 'cron')
+    delete legacyJob.schedule?.timeZone
+    legacyJob.state = {
+      ...(legacyJob.state ?? {}),
+      nextRunAt: null,
+    }
+
+    await writeFile(paths.cronJobsPath, `${JSON.stringify(store, null, 2)}\n`, 'utf8')
+
+    const reenabled = await setAssistantCronJobEnabled(vaultRoot, job.jobId, true)
+
+    assert.equal(reenabled.enabled, true)
+    assert.equal(reenabled.schedule.kind, 'cron')
+    assert.equal(reenabled.schedule.timeZone, 'Australia/Melbourne')
+    assert.equal(reenabled.state.nextRunAt, '2026-03-27T21:00:00.000Z')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('assistant cron daily-local schedules stay pinned to local time across DST changes', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-daily-local-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await initializeVault({
+    vaultRoot,
+    timezone: 'America/New_York',
+  })
+
+  const job = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'food-daily:daily-oats',
+    prompt: 'Auto-log recurring food "Daily Oats" as a note-only meal.',
+    foodAutoLog: {
+      foodId: 'food_daily_oats_01',
+    },
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '08:00',
+      timeZone: 'America/New_York',
+    },
+    now: new Date('2026-03-07T13:30:00.000Z'),
+  })
+
+  assert.equal(job.schedule.kind, 'dailyLocal')
+  assert.equal(job.state.nextRunAt, '2026-03-08T12:00:00.000Z')
 })
 
 test('assistant cron manual runs record history and remove completed one-shot jobs by default', async () => {

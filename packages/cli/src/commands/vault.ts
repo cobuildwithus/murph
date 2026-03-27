@@ -8,6 +8,7 @@ import {
   isoTimestampSchema,
   localDateSchema,
   pathSchema,
+  timeZoneSchema,
   vaultInitResultSchema,
   vaultValidateResultSchema,
 } from '../vault-cli-contracts.js'
@@ -87,12 +88,15 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) 
     {
       description: 'Create the baseline vault layout through the core write path.',
       args: emptyArgsSchema,
-      options: withBaseOptions(),
+      options: withBaseOptions({
+        timezone: timeZoneSchema.optional().describe('Optional IANA timezone for the new vault. Defaults to the local system timezone.'),
+      }),
       output: vaultInitResultSchema,
       async run({ options }) {
         return services.core.init({
           vault: options.vault,
           requestId: requestIdFromOptions(options),
+          timezone: options.timezone,
         })
       },
     },
@@ -162,7 +166,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) 
     args: emptyArgsSchema,
     options: withBaseOptions({
       title: z.string().min(1).optional().describe('Optional new vault title.'),
-      timezone: z.string().min(3).optional().describe('Optional new vault timezone.'),
+      timezone: timeZoneSchema.optional().describe('Optional new vault timezone.'),
     }),
     output: vaultUpdateResultSchema,
     async run({ options }) {

@@ -1,3 +1,4 @@
+import { resolveSystemTimeZone } from "@healthybob/contracts"
 import { VaultCliError } from "../vault-cli-errors.js"
 import {
   ensureManagedDeviceSyncControlPlane,
@@ -258,10 +259,15 @@ async function renameSupplementRecord(input: CommandContext & {
 
 function createIntegratedCoreServices(): CoreWriteServices {
   return {
-    async init(input: CommandContext) {
+    async init(input: CommandContext & {
+      timezone?: string
+    }) {
       const { vault } = input
       const { core } = await loadIntegratedRuntime()
-      await core.initializeVault({ vaultRoot: vault })
+      await core.initializeVault({
+        vaultRoot: vault,
+        timezone: input.timezone ?? resolveSystemTimeZone(),
+      })
       return {
         vault,
         created: true,

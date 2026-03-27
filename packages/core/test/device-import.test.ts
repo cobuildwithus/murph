@@ -147,7 +147,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     },
   });
 
-  assert.equal(result.importId, "xfm_GZPCHDEK8TZAANCWR96F9ESMDS");
+  assert.equal(result.importId, "xfm_KQXMGM79XEKSXSKBN7J10F0WQ7");
   assert.equal(result.events.length, 2);
   assert.equal(result.samples.length, 1);
   assert.equal(result.rawArtifacts.length, 2);
@@ -155,12 +155,12 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.equal(result.accountId, "whoop-user-1");
   assert.deepEqual(
     result.events.map((record) => record.id),
-    ["evt_3AQ5R2750CPRC0DA9NBTENXG34", "evt_MDTG8REWHQ7SK31CZBZ5BT5YKY"],
+    ["evt_Q4EB9ZXH4DP9HNQFVJK9M3JCZD", "evt_87GD6PEP1R7T5PAGT24YZN9BDW"],
   );
-  assert.deepEqual(result.samples.map((record) => record.id), ["smp_XDGGHZJ94CC7TVYS1EXR2WMRPD"]);
+  assert.deepEqual(result.samples.map((record) => record.id), ["smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK"]);
   assert.equal(
     result.rawArtifacts[0]?.relativePath,
-    "raw/integrations/whoop/2026/03/xfm_GZPCHDEK8TZAANCWR96F9ESMDS/01-sleep-sleep-1.json",
+    "raw/integrations/whoop/2026/03/xfm_KQXMGM79XEKSXSKBN7J10F0WQ7/01-sleep-sleep-1.json",
   );
 
   const eventRecords = (await readJsonlRecords({
@@ -180,15 +180,16 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.deepEqual(eventRecords, [
     {
       schemaVersion: "hb.event.v1",
-      id: "evt_3AQ5R2750CPRC0DA9NBTENXG34",
+      id: "evt_Q4EB9ZXH4DP9HNQFVJK9M3JCZD",
       kind: "sleep_session",
       occurredAt: "2026-03-15T22:00:00.000Z",
       recordedAt: "2026-03-16T07:30:00.000Z",
       dayKey: "2026-03-15",
+      timeZone: "UTC",
       source: "device",
       title: "WHOOP sleep",
       rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_GZPCHDEK8TZAANCWR96F9ESMDS/01-sleep-sleep-1.json",
+        "raw/integrations/whoop/2026/03/xfm_KQXMGM79XEKSXSKBN7J10F0WQ7/01-sleep-sleep-1.json",
       ],
       externalRef: {
         system: "whoop",
@@ -202,15 +203,16 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     },
     {
       schemaVersion: "hb.event.v1",
-      id: "evt_MDTG8REWHQ7SK31CZBZ5BT5YKY",
+      id: "evt_87GD6PEP1R7T5PAGT24YZN9BDW",
       kind: "observation",
       occurredAt: "2026-03-16T07:30:00.000Z",
       recordedAt: "2026-03-16T07:30:00.000Z",
       dayKey: "2026-03-16",
+      timeZone: "UTC",
       source: "device",
       title: "WHOOP recovery score",
       rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_GZPCHDEK8TZAANCWR96F9ESMDS/02-recovery-sleep-1.json",
+        "raw/integrations/whoop/2026/03/xfm_KQXMGM79XEKSXSKBN7J10F0WQ7/02-recovery-sleep-1.json",
       ],
       externalRef: {
         system: "whoop",
@@ -227,8 +229,9 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.deepEqual(sampleRecords, [
     {
       schemaVersion: "hb.sample.v1",
-      id: "smp_XDGGHZJ94CC7TVYS1EXR2WMRPD",
+      id: "smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK",
       dayKey: "2026-03-16",
+      timeZone: "UTC",
       stream: "hrv",
       recordedAt: "2026-03-16T07:30:00.000Z",
       source: "device",
@@ -249,10 +252,10 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.equal(manifest.artifacts.length, 2);
   assert.equal(path.posix.dirname(manifest.artifacts[0]?.relativePath ?? ""), manifest.rawDirectory);
   assert.deepEqual(manifest.provenance.eventIds, [
-    "evt_3AQ5R2750CPRC0DA9NBTENXG34",
-    "evt_MDTG8REWHQ7SK31CZBZ5BT5YKY",
+    "evt_Q4EB9ZXH4DP9HNQFVJK9M3JCZD",
+    "evt_87GD6PEP1R7T5PAGT24YZN9BDW",
   ]);
-  assert.deepEqual(manifest.provenance.sampleIds, ["smp_XDGGHZJ94CC7TVYS1EXR2WMRPD"]);
+  assert.deepEqual(manifest.provenance.sampleIds, ["smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK"]);
   assert.deepEqual(manifest.provenance.operatorMetadata, {
     syncMode: "test",
   });
@@ -428,9 +431,9 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
   assert.equal(first.importId, second.importId);
   assert.equal(first.events[0]?.id, second.events[0]?.id);
   assert.equal(first.samples[0]?.id, second.samples[0]?.id);
-  assert.equal(first.importId, "xfm_9HED690JJYB3N1SWJ8VHVF451B");
-  assert.equal(first.events[0]?.id, "evt_5EQYZG1HWJREHNHWSQD6ARD4S3");
-  assert.equal(first.samples[0]?.id, "smp_XDGGHZJ94CC7TVYS1EXR2WMRPD");
+  assert.equal(first.importId, "xfm_X8RGG8PH36DJ3NDGF0ZFD6TZ22");
+  assert.equal(first.events[0]?.id, "evt_94AGES9S70YS6RGKNAHV7EAGKM");
+  assert.equal(first.samples[0]?.id, "smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK");
   assert.equal(eventRecords.length, 1);
   assert.equal(sampleRecords.length, 1);
 });
@@ -466,22 +469,23 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
   })) as EventRecord[];
   const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
-  assert.equal(result.importId, "xfm_DXBEVA7EW5DFJAJ4SK0HQ9QT5J");
-  assert.equal(result.events[0]?.id, "evt_TM9DGPYBVDN70AC36SVY596KGP");
+  assert.equal(result.importId, "xfm_57SVH349QXCASB1MGNNG0S25NZ");
+  assert.equal(result.events[0]?.id, "evt_PQ5N36XDAY9GEWX8DG8B6D9KKA");
   assert.equal(eventRecords[0]?.kind, "note");
   assert.deepEqual(eventRecords[0]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
   assert.deepEqual(eventRecords, [
     {
       schemaVersion: "hb.event.v1",
-      id: "evt_TM9DGPYBVDN70AC36SVY596KGP",
+      id: "evt_PQ5N36XDAY9GEWX8DG8B6D9KKA",
       kind: "note",
       occurredAt: "2026-03-16T09:30:00.000Z",
       recordedAt: "2026-03-16T09:30:00.000Z",
       dayKey: "2026-03-16",
+      timeZone: "UTC",
       source: "device",
       title: "note",
       note: "single raw fallback",
-      rawRefs: ["raw/integrations/whoop/2026/03/xfm_DXBEVA7EW5DFJAJ4SK0HQ9QT5J/01-whoop-01.json"],
+      rawRefs: ["raw/integrations/whoop/2026/03/xfm_57SVH349QXCASB1MGNNG0S25NZ/01-whoop-01.json"],
     },
   ]);
   assert.equal(manifest.artifacts[0]?.role, "artifact-1");
@@ -513,15 +517,16 @@ test("importDeviceBatch supports sample-only batches without raw artifacts", asy
     relativePath: result.sampleShardPaths[0] as string,
   })) as SampleRecord[];
 
-  assert.equal(result.importId, "xfm_082BTGD7SW8VX2GTQYVFD325B9");
-  assert.equal(result.samples[0]?.id, "smp_R0VG997F9XWSH6WSV7AZWD63TA");
+  assert.equal(result.importId, "xfm_40N1ZZTYB1FKP8FD6T79JJJREC");
+  assert.equal(result.samples[0]?.id, "smp_4MJE9FC8C4J9V2SQDNTAXXRYJ3");
   assert.equal(result.manifestPath, "");
   assert.equal(result.rawArtifacts.length, 0);
   assert.deepEqual(sampleRecords, [
     {
       schemaVersion: "hb.sample.v1",
-      id: "smp_R0VG997F9XWSH6WSV7AZWD63TA",
+      id: "smp_4MJE9FC8C4J9V2SQDNTAXXRYJ3",
       dayKey: "2026-03-16",
+      timeZone: "UTC",
       stream: "respiratory_rate",
       recordedAt: "2026-03-16T07:30:00.000Z",
       source: "device",

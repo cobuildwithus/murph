@@ -503,7 +503,7 @@ test('command schema reflects only domain-specific options', async () => {
     }
   }
 
-  assert.deepEqual(Object.keys(schema.options.properties), ['vault', 'requestId'])
+  assert.deepEqual(Object.keys(schema.options.properties), ['vault', 'requestId', 'timezone'])
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_HELP_TIMEOUT_MS)
 

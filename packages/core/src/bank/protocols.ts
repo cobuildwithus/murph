@@ -1,5 +1,7 @@
 import { VaultError } from "../errors.js";
 import { generateRecordId } from "../ids.js";
+import { defaultTimeZone, toLocalDayKey } from "../time.js";
+import { loadVault } from "../vault.js";
 import {
   loadMarkdownRegistryDocuments,
   resolveMarkdownRegistryUpsertTarget,
@@ -337,6 +339,8 @@ async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<Prot
 export async function upsertProtocolItem(
   input: UpsertProtocolItemInput,
 ): Promise<UpsertProtocolItemResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const today = toLocalDayKey(new Date(), vault.metadata.timezone ?? defaultTimeZone(), "startedOn");
   const normalizedProtocolId = normalizeId(input.protocolId, "protocolId", "prot");
   const existingRecords = await loadProtocolItems(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
@@ -370,7 +374,7 @@ export async function upsertProtocolItem(
           optionalEnum(value, PROTOCOL_STATUSES, "status") ?? "active",
         ),
         startedOn:
-          optionalDateOnly(input.startedOn ?? existingRecord?.startedOn ?? new Date(), "startedOn") ?? "",
+          optionalDateOnly(input.startedOn ?? existingRecord?.startedOn ?? today, "startedOn") ?? "",
         stoppedOn: resolveOptionalUpsertValue(input.stoppedOn, existingRecord?.stoppedOn, (value) =>
           optionalDateOnly(value, "stoppedOn"),
         ),
@@ -452,8 +456,12 @@ export async function readProtocolItem(input: ReadProtocolItemInput): Promise<Pr
 export async function stopProtocolItem(
   input: StopProtocolItemInput,
 ): Promise<StopProtocolItemResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const current = await resolveProtocolRecord(input);
-  const stoppedOn = optionalDateOnly(input.stoppedOn ?? new Date(), "stoppedOn") ?? "";
+  const stoppedOn = optionalDateOnly(
+    input.stoppedOn ?? toLocalDayKey(new Date(), vault.metadata.timezone ?? defaultTimeZone(), "stoppedOn"),
+    "stoppedOn",
+  ) ?? "";
   const updatedRecord = validateProtocolTiming({
     ...current,
     status: "stopped",

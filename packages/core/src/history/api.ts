@@ -17,8 +17,9 @@ import { VaultError } from "../errors.js";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
 import { generateRecordId } from "../ids.js";
 import { runCanonicalWrite } from "../operations/index.js";
-import { toDateOnly } from "../time.js";
+import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.js";
 import { walkVaultFiles } from "../fs.js";
+import { loadVault } from "../vault.js";
 
 import {
   compareIsoTimestamps,
@@ -72,10 +73,14 @@ interface HistoryFieldDefinition<TValue> {
   normalize: (value: unknown, fieldName: string) => TValue;
 }
 
-function normalizeBaseEvent(input: AppendHistoryEventInput) {
+function normalizeBaseEvent(
+  input: AppendHistoryEventInput,
+  fallbackTimeZone?: string,
+) {
   const occurredAt = normalizeTimestamp(input.occurredAt, "occurredAt");
   const recordedAt = normalizeTimestamp(input.recordedAt ?? occurredAt, "recordedAt");
   const eventId = normalizeId(input.eventId, "eventId", ID_PREFIXES.event) ?? generateRecordId("event");
+  const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
 
   return {
     schemaVersion: "hb.event.v1" as const,
@@ -83,7 +88,8 @@ function normalizeBaseEvent(input: AppendHistoryEventInput) {
     kind: input.kind,
     occurredAt,
     recordedAt,
-    dayKey: toDateOnly(occurredAt, "occurredAt"),
+    dayKey: toLocalDayKey(occurredAt, timeZone ?? defaultTimeZone(), "occurredAt"),
+    timeZone,
     source: optionalEnum(input.source ?? "manual", HEALTH_HISTORY_SOURCES, "source") ?? "manual",
     title: requireString(input.title, "title", 160),
     note: optionalString(input.note, "note", 4000),
@@ -430,12 +436,15 @@ function normalizeHistoryKindFields(
   return stripUndefined(normalized);
 }
 
-function buildHistoryEventRecord(input: AppendHistoryEventInput): HistoryEventRecord {
+function buildHistoryEventRecord(
+  input: AppendHistoryEventInput,
+  fallbackTimeZone?: string,
+): HistoryEventRecord {
   if (!HISTORY_KIND_SET.has(input.kind)) {
     throw new VaultError("VAULT_INVALID_INPUT", "Unsupported health history kind.");
   }
 
-  const baseRecord = normalizeBaseEvent(input);
+  const baseRecord = normalizeBaseEvent(input, fallbackTimeZone);
   const record = stripUndefined({
     ...baseRecord,
     kind: input.kind,
@@ -473,6 +482,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     occurredAt: normalizeTimestamp(value.occurredAt as string, "occurredAt"),
     recordedAt: normalizeTimestamp(value.recordedAt as string, "recordedAt"),
     dayKey: requireString(value.dayKey, "dayKey", 10),
+    timeZone: normalizeTimeZone(optionalString(value.timeZone, "timeZone", 64)),
     source: optionalEnum(value.source, HEALTH_HISTORY_SOURCES, "source") ?? "manual",
     title: requireString(value.title, "title", 160),
     note: optionalString(value.note, "note", 4000),
@@ -545,7 +555,8 @@ function normalizeLimit(limit: number | undefined): number | null {
 export async function appendHistoryEvent(
   input: AppendHistoryEventInput,
 ): Promise<AppendHistoryEventResult> {
-  const record = buildHistoryEventRecord(input);
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const record = buildHistoryEventRecord(input, vault.metadata.timezone);
   const relativePath = toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,
     record.occurredAt,

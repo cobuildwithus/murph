@@ -18,6 +18,7 @@ import {
   providerFrontmatterSchema as providerFrontmatterContract,
   recipeFrontmatterSchema as recipeFrontmatterContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
+  workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
 } from "./zod.js";
@@ -43,6 +44,7 @@ export const profileSnapshotSchema = toJsonSchema(profileSnapshotContract);
 export const profileCurrentFrontmatterSchema = toJsonSchema(profileCurrentFrontmatterContract);
 export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContract);
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
+export const workoutFormatFrontmatterSchema = toJsonSchema(workoutFormatFrontmatterContract);
 export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
 export const allergyFrontmatterSchema = toJsonSchema(allergyFrontmatterContract);
@@ -67,6 +69,7 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-provider": providerFrontmatterSchema,
   "frontmatter-recipe": recipeFrontmatterSchema,
   "frontmatter-protocol": protocolFrontmatterSchema,
+  "frontmatter-workout-format": workoutFormatFrontmatterSchema,
   "profile-snapshot": profileSnapshotSchema,
   "sample-record": sampleRecordSchema,
   "vault-metadata": vaultMetadataSchema,

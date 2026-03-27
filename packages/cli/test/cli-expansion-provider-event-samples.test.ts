@@ -489,8 +489,12 @@ test.sequential(
       assert.equal(jobs.length, 1)
       assert.equal(jobs[0]?.jobId, requireData(foodSchedule).jobId)
       assert.equal(jobs[0]?.name, 'food-daily:morning-smoothie')
-      assert.equal(jobs[0]?.schedule.kind, 'cron')
-      assert.equal(jobs[0]?.schedule.expression, '0 8 * * *')
+      assert.equal(jobs[0]?.schedule.kind, 'dailyLocal')
+      assert.equal(jobs[0]?.schedule.localTime, '08:00')
+      assert.equal(
+        jobs[0]?.schedule.timeZone,
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+      )
       assert.deepEqual(jobs[0]?.foodAutoLog, {
         foodId: requireData(foodSchedule).foodId,
       })

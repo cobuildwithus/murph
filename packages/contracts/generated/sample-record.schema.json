@@ -74,6 +74,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "value": {
           "type": "integer",
           "minimum": 0
@@ -168,6 +173,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "value": {
           "type": "number",
@@ -264,6 +274,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "value": {
           "type": "integer",
           "minimum": 0
@@ -358,6 +373,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "stage": {
           "type": "string",
@@ -474,6 +494,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "value": {
           "type": "number",
           "minimum": 0
@@ -569,6 +594,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "value": {
           "type": "number"
         },
@@ -662,6 +692,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "value": {
           "type": "number",

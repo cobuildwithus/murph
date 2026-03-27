@@ -16,6 +16,7 @@ import type {
   ProviderFrontmatter,
   RecipeFrontmatter,
   ProtocolFrontmatter,
+  WorkoutFormatFrontmatter,
   SampleRecord,
   VaultMetadata,
 } from "./zod.js";
@@ -27,6 +28,7 @@ type FrontmatterExamples = {
   food: FoodFrontmatter;
   provider: ProviderFrontmatter;
   recipe: RecipeFrontmatter;
+  workoutFormat: WorkoutFormatFrontmatter;
 };
 
 type HealthFrontmatterExamples = {
@@ -87,6 +89,7 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
     profileSnapshotsRoot: "ledger/profile-snapshots",
     providersRoot: "bank/providers",
     recipesRoot: "bank/recipes",
+    workoutFormatsRoot: "bank/workout-formats",
     rawAssessmentsRoot: "raw/assessments",
     rawRoot: "raw",
     eventsRoot: "ledger/events",
@@ -621,6 +624,34 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
   },
+  workoutFormat: {
+    schemaVersion: "hb.frontmatter.workout-format.v1",
+    docType: "workout_format",
+    workoutFormatId: "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    slug: "upper-body-a",
+    title: "Upper Body A",
+    status: "active",
+    summary: "Default upper-body strength session I repeat most weeks.",
+    activityType: "strength-training",
+    durationMinutes: 45,
+    strengthExercises: [
+      {
+        exercise: "pushups",
+        setCount: 4,
+        repsPerSet: 20,
+      },
+      {
+        exercise: "incline bench",
+        setCount: 4,
+        repsPerSet: 12,
+        load: 65,
+        loadUnit: "lb",
+        loadDescription: "45 lb bar plus 10 lb plates on both sides",
+      },
+    ],
+    tags: ["gym", "strength"],
+    note: "Usual upper-body session when I do not need to vary the lifts.",
+  },
 });
 
 export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples> = Object.freeze({
@@ -871,5 +902,35 @@ relatedConditionIds:
 ---
 
 # Sheet Pan Salmon Bowls
+`,
+  workoutFormat: `---
+schemaVersion: hb.frontmatter.workout-format.v1
+docType: workout_format
+workoutFormatId: wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1
+slug: upper-body-a
+title: Upper Body A
+status: active
+summary: Default upper-body strength session I repeat most weeks.
+activityType: strength-training
+durationMinutes: 45
+strengthExercises:
+  -
+    exercise: pushups
+    setCount: 4
+    repsPerSet: 20
+  -
+    exercise: incline bench
+    setCount: 4
+    repsPerSet: 12
+    load: 65
+    loadUnit: lb
+    loadDescription: 45 lb bar plus 10 lb plates on both sides
+tags:
+  - gym
+  - strength
+note: Usual upper-body session when I do not need to vary the lifts.
+---
+
+# Upper Body A
 `,
 });

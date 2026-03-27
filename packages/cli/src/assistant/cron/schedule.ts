@@ -1,3 +1,8 @@
+import {
+  formatTimeZoneDateTimeParts,
+  normalizeIanaTimeZone,
+  parseDailyTime,
+} from '@healthybob/contracts'
 import type { AssistantCronSchedule } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 
@@ -138,26 +143,43 @@ export function computeAssistantCronNextRunAt(
     }
     case 'every':
       return new Date(after.getTime() + schedule.everyMs).toISOString()
+    case 'dailyLocal':
+      return findNextAssistantDailyLocalOccurrence(
+        schedule.localTime,
+        schedule.timeZone,
+        after,
+      )
     case 'cron':
-      return findNextAssistantCronOccurrence(schedule.expression, after)
+      return findNextAssistantCronOccurrence(
+        schedule.expression,
+        after,
+        schedule.timeZone,
+      )
   }
 }
 
 export function findNextAssistantCronOccurrence(
   expression: string,
   after: Date,
+  timeZone?: string,
 ): string | null {
   const parsed = parseAssistantCronExpression(expression)
+  const resolvedTimeZone = normalizeAssistantCronTimeZone(timeZone)
   const candidate = new Date(after.getTime())
-  candidate.setSeconds(0, 0)
-  candidate.setMinutes(candidate.getMinutes() + 1)
+  candidate.setUTCSeconds(0, 0)
+  candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
 
   for (let index = 0; index < MAX_CRON_LOOKAHEAD_MINUTES; index += 1) {
-    if (matchesAssistantCronExpression(parsed, candidate)) {
+    if (
+      matchesAssistantCronExpression(
+        parsed,
+        formatTimeZoneDateTimeParts(candidate, resolvedTimeZone),
+      )
+    ) {
       return candidate.toISOString()
     }
 
-    candidate.setMinutes(candidate.getMinutes() + 1)
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
   }
 
   return null
@@ -293,27 +315,33 @@ function resolveCronFieldRange(
 
 function matchesAssistantCronExpression(
   expression: ParsedCronExpression,
-  date: Date,
+  dateTime: {
+    minute: number
+    hour: number
+    month: number
+    day: number
+    dayOfWeek: number
+  },
 ): boolean {
-  if (!matchesParsedCronField(expression.minute, date.getMinutes())) {
+  if (!matchesParsedCronField(expression.minute, dateTime.minute)) {
     return false
   }
 
-  if (!matchesParsedCronField(expression.hour, date.getHours())) {
+  if (!matchesParsedCronField(expression.hour, dateTime.hour)) {
     return false
   }
 
-  if (!matchesParsedCronField(expression.month, date.getMonth() + 1)) {
+  if (!matchesParsedCronField(expression.month, dateTime.month)) {
     return false
   }
 
   const dayOfMonthMatches = matchesParsedCronField(
     expression.dayOfMonth,
-    date.getDate(),
+    dateTime.day,
   )
   const dayOfWeekMatches = matchesParsedCronField(
     expression.dayOfWeek,
-    date.getDay(),
+    dateTime.dayOfWeek,
   )
 
   if (expression.dayOfMonth.any && expression.dayOfWeek.any) {
@@ -339,6 +367,48 @@ function invalidCronFieldError(label: string, value: string): VaultCliError {
   return new VaultCliError(
     'ASSISTANT_CRON_INVALID_SCHEDULE',
     `Invalid cron ${label} field: ${value}.`,
+  )
+}
+
+function findNextAssistantDailyLocalOccurrence(
+  localTime: string,
+  timeZone: string,
+  after: Date,
+): string | null {
+  const parsedTime = parseDailyTime(localTime)
+  if (!parsedTime) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_SCHEDULE',
+      'Daily-local schedules require a valid HH:MM local time.',
+    )
+  }
+
+  const resolvedTimeZone = normalizeAssistantCronTimeZone(timeZone)
+  const candidate = new Date(after.getTime())
+  candidate.setUTCSeconds(0, 0)
+  candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+
+  for (let index = 0; index < MAX_CRON_LOOKAHEAD_MINUTES; index += 1) {
+    const parts = formatTimeZoneDateTimeParts(candidate, resolvedTimeZone)
+    if (parts.hour === parsedTime.hour && parts.minute === parsedTime.minute) {
+      return candidate.toISOString()
+    }
+
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+  }
+
+  return null
+}
+
+function normalizeAssistantCronTimeZone(value: string | null | undefined): string {
+  const normalized = normalizeIanaTimeZone(value ?? 'UTC')
+  if (normalized) {
+    return normalized
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CRON_INVALID_SCHEDULE',
+    'Assistant cron schedules require a valid IANA timezone.',
   )
 }
 

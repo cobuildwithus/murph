@@ -42,6 +42,7 @@ test("overview route returns ready JSON with no-store caching", async () => {
     sampleSummaries: [],
     search: null,
     status: "ready",
+    timeZone: "Australia/Melbourne",
     timeline: [],
     weeklyStats: [],
   });

@@ -1,3 +1,5 @@
+import { extractIsoDatePrefix } from "@healthybob/contracts";
+
 import {
   asObject,
   firstObject,
@@ -83,11 +85,7 @@ const REGISTRY_RELATION_SCALAR_KEYS = [
 export function normalizeCanonicalDate(
   value: string | null | undefined,
 ): string | null {
-  if (typeof value !== "string" || value.length === 0) {
-    return null;
-  }
-
-  return value.length >= 10 ? value.slice(0, 10) : value;
+  return extractIsoDatePrefix(value);
 }
 
 export function uniqueStrings(values: readonly unknown[]): string[] {
@@ -365,7 +363,7 @@ export function projectHistoryEntity(
     kind,
     status,
     occurredAt,
-    date: normalizeCanonicalDate(occurredAt),
+    date: firstString(source, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
     path: relativePath,
     title,
     body: firstString(source, ["note", "summary"]),
@@ -407,7 +405,7 @@ export function projectRegistryEntity(
     kind: firstString(attributes, ["docType", "kind"]) ?? family,
     status: record.status,
     occurredAt,
-    date: normalizeCanonicalDate(occurredAt),
+    date: firstString(attributes, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
     path: record.relativePath,
     title: record.title,
     body: record.body,

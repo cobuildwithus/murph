@@ -1,3 +1,5 @@
+import { extractIsoDatePrefix } from "@healthybob/contracts";
+
 import type { VaultRecord, VaultRecordType } from "./model.js";
 
 const DEFAULT_LIMIT = 20;
@@ -327,8 +329,8 @@ export function compareDateLike(
     return -1;
   }
 
-  const normalizedValue = value.length > 10 ? value.slice(0, 10) : value;
-  const normalizedBoundary = boundary.length > 10 ? boundary.slice(0, 10) : boundary;
+  const normalizedValue = extractIsoDatePrefix(value) ?? value;
+  const normalizedBoundary = extractIsoDatePrefix(boundary) ?? boundary;
 
   return normalizedValue.localeCompare(normalizedBoundary);
 }

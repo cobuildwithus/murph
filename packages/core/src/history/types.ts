@@ -52,6 +52,7 @@ export interface HistoryEventBase {
   occurredAt: string;
   recordedAt: string;
   dayKey: string;
+  timeZone?: string;
   source: HistoryEventSource;
   title: string;
   note?: string;
@@ -119,6 +120,7 @@ interface HistoryEventDraftBase {
   eventId?: string;
   occurredAt: DateInput;
   recordedAt?: DateInput;
+  timeZone?: string;
   source?: HistoryEventSource;
   title: string;
   note?: string;

@@ -6,6 +6,8 @@ import { VaultError } from "../errors.js";
 import { walkVaultFiles } from "../fs.js";
 import { generateRecordId } from "../ids.js";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
+import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.js";
+import { loadVault } from "../vault.js";
 
 import {
   compactObject,
@@ -57,6 +59,7 @@ const RESERVED_EVENT_KEYS = new Set([
   "occurredAt",
   "recordedAt",
   "dayKey",
+  "timeZone",
   "source",
   "title",
   "note",
@@ -86,7 +89,7 @@ function eventSpecificFields(payload: JsonObject): Record<string, unknown> {
   );
 }
 
-function buildManualEventRecord(payload: JsonObject): EventRecord {
+function buildManualEventRecord(payload: JsonObject, fallbackTimeZone?: string): EventRecord {
   const kind = valueAsString(payload.kind);
   if (!kind || !EVENT_WRITE_KIND_SET.has(kind as EventWriteKind)) {
     throw new VaultError("HB_EVENT_KIND_INVALID", "Event payload requires a supported kind.");
@@ -96,6 +99,11 @@ function buildManualEventRecord(payload: JsonObject): EventRecord {
   if (!occurredAt) {
     throw new VaultError("HB_EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
   }
+
+  const timeZone = normalizeTimeZone(valueAsString(payload.timeZone) ?? fallbackTimeZone);
+  const dayKey =
+    normalizeLocalDate(valueAsString(payload.dayKey)) ??
+    toLocalDayKey(occurredAt, timeZone ?? defaultTimeZone(), "occurredAt");
 
   return validateContract(
     eventRecordSchema,
@@ -107,7 +115,8 @@ function buildManualEventRecord(payload: JsonObject): EventRecord {
       kind,
       occurredAt,
       recordedAt: normalizeTimestampInput(payload.recordedAt) ?? new Date().toISOString(),
-      dayKey: normalizeLocalDate(valueAsString(payload.dayKey)) ?? occurredAt.slice(0, 10),
+      dayKey,
+      timeZone,
       source: normalizeOptionalText(valueAsString(payload.source)) ?? "manual",
       title: requireText(payload.title, "Event payload requires a title."),
       note: normalizeOptionalText(valueAsString(payload.note)) ?? undefined,
@@ -128,7 +137,10 @@ export function buildExperimentEventRecord(input: {
   experimentId: string;
   experimentSlug: string;
   phase: ExperimentEventRecord["phase"];
+  timeZone?: string;
 }): ExperimentEventRecord {
+  const timeZone = normalizeTimeZone(input.timeZone);
+
   return validateContract(
     eventRecordSchema,
     compactObject({
@@ -137,7 +149,8 @@ export function buildExperimentEventRecord(input: {
       kind: "experiment_event",
       occurredAt: input.occurredAt,
       recordedAt: new Date().toISOString(),
-      dayKey: input.occurredAt.slice(0, 10),
+      dayKey: toLocalDayKey(input.occurredAt, timeZone ?? defaultTimeZone(), "occurredAt"),
+      timeZone,
       source: "manual",
       title: input.title.trim(),
       note: normalizeOptionalText(input.note) ?? undefined,
@@ -181,7 +194,8 @@ async function findEventLedgerFileById(
 export async function upsertEvent(
   input: UpsertEventInput,
 ): Promise<UpsertEventResult> {
-  const eventRecord = buildManualEventRecord(input.payload);
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const eventRecord = buildManualEventRecord(input.payload, vault.metadata.timezone);
   const existingLedgerFile = await findEventLedgerFileById(input.vaultRoot, eventRecord.id);
   const ledgerFile = toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,

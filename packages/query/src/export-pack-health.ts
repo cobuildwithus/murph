@@ -1,3 +1,5 @@
+import { extractIsoDatePrefix } from "@healthybob/contracts";
+
 import {
   type CanonicalEntity,
 } from "./canonical-entities.js";
@@ -201,7 +203,10 @@ function matchesDateWindow(
     return false;
   }
 
-  const comparable = value.slice(0, 10);
+  const comparable = extractIsoDatePrefix(value);
+  if (!comparable) {
+    return false;
+  }
   if (filters.from && comparable < filters.from) {
     return false;
   }

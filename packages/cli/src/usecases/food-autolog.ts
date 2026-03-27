@@ -1,3 +1,4 @@
+import type { AssistantCronSchedule } from '../assistant-cli-contracts.js'
 import { z } from 'incur'
 
 export const dailyFoodTimeSchema = z
@@ -17,6 +18,17 @@ export function buildDailyFoodCronExpression(time: string) {
   const [hour, minute] = normalizedTime.split(':')
 
   return `${Number.parseInt(minute ?? '0', 10)} ${Number.parseInt(hour ?? '0', 10)} * * *`
+}
+
+export function buildDailyFoodSchedule(
+  time: string,
+  timeZone: string,
+): AssistantCronSchedule {
+  return {
+    kind: 'dailyLocal',
+    localTime: dailyFoodTimeSchema.parse(time),
+    timeZone,
+  }
 }
 
 export function buildDailyFoodCronJobName(slug: string) {

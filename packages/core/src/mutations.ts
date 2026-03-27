@@ -45,7 +45,12 @@ import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.js"
 import { resolveVaultPath } from "./path-safety.js";
 import { sanitizePathSegment } from "./path-safety.js";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "./raw.js";
-import { toDateOnly, toIsoTimestamp } from "./time.js";
+import {
+  defaultTimeZone,
+  normalizeTimeZone,
+  toIsoTimestamp,
+  toLocalDayKey,
+} from "./time.js";
 import { loadVault } from "./vault.js";
 
 import type { RawArtifact } from "./raw.js";
@@ -186,6 +191,8 @@ interface DeviceEventInput extends LooseRecord {
   kind?: string;
   occurredAt?: DateInput;
   recordedAt?: DateInput;
+  dayKey?: string;
+  timeZone?: string;
   source?: string;
   title?: string;
   note?: string;
@@ -199,6 +206,8 @@ interface DeviceEventInput extends LooseRecord {
 interface DeviceSampleInput extends LooseRecord {
   stream?: string;
   recordedAt?: DateInput;
+  dayKey?: string;
+  timeZone?: string;
   source?: string;
   quality?: string;
   unit?: string;
@@ -212,9 +221,9 @@ interface ImportDeviceBatchInput {
   accountId?: string;
   importedAt?: DateInput;
   source?: string;
-  events?: DeviceEventInput[];
-  samples?: DeviceSampleInput[];
-  rawArtifacts?: DeviceRawArtifactInput[];
+  events?: readonly DeviceEventInput[];
+  samples?: readonly DeviceSampleInput[];
+  rawArtifacts?: readonly DeviceRawArtifactInput[];
   provenance?: Record<string, unknown>;
 }
 
@@ -268,6 +277,9 @@ interface BuildEventRecordInput<K extends EventKind> {
   kind: K;
   occurredAt: DateInput;
   recordedAt?: DateInput;
+  dayKey?: string;
+  timeZone?: string;
+  defaultTimeZone?: string;
   source?: string;
   title?: string;
   note?: string;
@@ -282,6 +294,9 @@ interface BuildEventRecordInput<K extends EventKind> {
 interface BuildSampleRecordInput {
   stream: SampleStream;
   recordedAt?: DateInput;
+  dayKey?: string;
+  timeZone?: string;
+  defaultTimeZone?: string;
   source?: string;
   quality?: string;
   sample: SampleInputRecord;
@@ -295,6 +310,7 @@ interface NormalizedEventSeed<K extends EventKind> {
   occurredAt: string;
   recordedAt: string;
   dayKey: string;
+  timeZone?: string;
   source: EventSource;
   title: string;
   note?: string;
@@ -322,6 +338,7 @@ interface NormalizedSampleSeed {
   stream: SampleStream;
   recordedAt: string;
   dayKey: string;
+  timeZone?: string;
   source: SampleSource;
   quality: SampleQuality;
   externalRef?: ExternalRef;
@@ -406,6 +423,12 @@ function normalizeLooseRecord(value: unknown, code: string, message: string): Lo
   }
 
   return assertPlainObject<LooseRecord>(value, code, message);
+}
+
+function normalizeDayKeyInput(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
+    ? value.trim()
+    : undefined;
 }
 
 function normalizeRequiredRole(value: unknown, label: string): string {
@@ -564,6 +587,9 @@ function buildNormalizedEventSeed<K extends EventKind>({
   kind,
   occurredAt,
   recordedAt = new Date(),
+  dayKey,
+  timeZone,
+  defaultTimeZone: fallbackTimeZone,
   source,
   title,
   note,
@@ -590,12 +616,16 @@ function buildNormalizedEventSeed<K extends EventKind>({
   );
   const occurredTimestamp = toIsoTimestamp(occurredAt, "occurredAt");
   const recordedTimestamp = toIsoTimestamp(recordedAt, "recordedAt");
+  const resolvedTimeZone = normalizeTimeZone(timeZone ?? fallbackTimeZone);
+  const resolvedDayKey = normalizeDayKeyInput(dayKey) ??
+    toLocalDayKey(occurredTimestamp, resolvedTimeZone ?? defaultTimeZone(), "occurredAt");
 
   const seed: NormalizedEventSeed<K> = {
     kind,
     occurredAt: occurredTimestamp,
     recordedAt: recordedTimestamp,
-    dayKey: toDateOnly(occurredTimestamp),
+    dayKey: resolvedDayKey,
+    timeZone: resolvedTimeZone,
     source: normalizeSource(source, EVENT_SOURCE_SET, "manual"),
     title: typeof title === "string" && title.trim() ? title.trim() : kind,
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
@@ -630,6 +660,7 @@ function materializeEventRecord<K extends EventKind>({
     occurredAt: seed.occurredAt,
     recordedAt: seed.recordedAt,
     dayKey: seed.dayKey,
+    timeZone: seed.timeZone,
     source: seed.source,
     title: seed.title,
     note: seed.note,
@@ -695,6 +726,9 @@ async function stageJsonlRecord(
 function buildNormalizedSampleSeed({
   stream,
   recordedAt,
+  dayKey,
+  timeZone,
+  defaultTimeZone: fallbackTimeZone,
   source,
   quality,
   sample,
@@ -703,11 +737,15 @@ function buildNormalizedSampleSeed({
 }: Omit<BuildSampleRecordInput, "recordId">): NormalizedSampleSeed {
   const recordedTimestamp = toIsoTimestamp(sample.recordedAt ?? recordedAt, "recordedAt");
   const normalizedUnit = normalizeNumericUnit(stream, unit);
+  const resolvedTimeZone = normalizeTimeZone(timeZone ?? fallbackTimeZone);
+  const resolvedDayKey = normalizeDayKeyInput(dayKey) ??
+    toLocalDayKey(recordedTimestamp, resolvedTimeZone ?? defaultTimeZone(), "recordedAt");
 
   const baseSeed = {
     stream,
     recordedAt: recordedTimestamp,
-    dayKey: toDateOnly(recordedTimestamp),
+    dayKey: resolvedDayKey,
+    timeZone: resolvedTimeZone,
     source: normalizeSource(source, SAMPLE_SOURCE_SET, "import"),
     quality: normalizeSource(quality, SAMPLE_QUALITY_SET, "raw"),
     externalRef: normalizeExternalRef(externalRef),
@@ -777,6 +815,7 @@ function materializeSampleRecord({
     schemaVersion: SAMPLE_SCHEMA_VERSION,
     id: recordId,
     dayKey: seed.dayKey,
+    timeZone: seed.timeZone,
     stream: seed.stream,
     recordedAt: seed.recordedAt,
     source: seed.source,
@@ -890,15 +929,19 @@ function prepareDeviceBatchPlan({
   provider,
   accountId,
   importedAt = new Date(),
+  defaultTimeZone: fallbackTimeZone,
   source = "device",
   events = [],
   samples = [],
   rawArtifacts = [],
   provenance,
-}: Omit<ImportDeviceBatchInput, "vaultRoot">): DeviceBatchPlan {
+}: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
+  defaultTimeZone?: string;
+}): DeviceBatchPlan {
   const normalizedProvider = sanitizePathSegment(provider, "provider");
   const normalizedAccountId = typeof accountId === "string" && accountId.trim() ? accountId.trim() : undefined;
   const normalizedImportedAt = toIsoTimestamp(importedAt, "importedAt");
+  const resolvedTimeZone = normalizeTimeZone(fallbackTimeZone);
   const normalizedProvenance = normalizeLooseRecord(
     provenance,
     "VAULT_INVALID_DEVICE_PROVENANCE",
@@ -960,6 +1003,9 @@ function prepareDeviceBatchPlan({
       kind,
       occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? normalizedImportedAt,
       recordedAt: eventInput.recordedAt ?? eventInput.occurredAt,
+      dayKey: typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined,
+      timeZone: typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined,
+      defaultTimeZone: resolvedTimeZone,
       source: eventInput.source ?? source,
       title: typeof eventInput.title === "string" ? eventInput.title : undefined,
       note: eventInput.note,
@@ -1005,6 +1051,9 @@ function prepareDeviceBatchPlan({
     const seed = buildNormalizedSampleSeed({
       stream,
       recordedAt: sampleInput.recordedAt ?? samplePayload.recordedAt ?? samplePayload.occurredAt,
+      dayKey: typeof sampleInput.dayKey === "string" ? sampleInput.dayKey : undefined,
+      timeZone: typeof sampleInput.timeZone === "string" ? sampleInput.timeZone : undefined,
+      defaultTimeZone: resolvedTimeZone,
       source: sampleInput.source ?? source,
       quality: sampleInput.quality ?? "normalized",
       sample: samplePayload,
@@ -1181,7 +1230,7 @@ export async function importDocument({
   note,
   source = "import",
 }: ImportDocumentInput): Promise<ImportDocumentResult> {
-  await loadVault({ vaultRoot });
+  const vault = await loadVault({ vaultRoot });
   const documentId = generateRecordId(ID_PREFIXES.document);
   const raw = prepareRawArtifact({
     sourcePath,
@@ -1192,6 +1241,7 @@ export async function importDocument({
   const event = prepareEventRecord({
     kind: "document",
     occurredAt,
+    timeZone: vault.metadata.timezone,
     source,
     title: String(title ?? raw.originalFileName).trim(),
     note,
@@ -1267,7 +1317,7 @@ export async function addMeal({
   audioPath,
   source = "manual",
 }: AddMealInput): Promise<AddMealResult> {
-  await loadVault({ vaultRoot });
+  const vault = await loadVault({ vaultRoot });
 
   if (!photoPath && !audioPath && !note) {
     throw new VaultError(
@@ -1299,6 +1349,7 @@ export async function addMeal({
   const event = prepareEventRecord({
     kind: "meal",
     occurredAt,
+    timeZone: vault.metadata.timezone,
     source,
     title: "Meal",
     note,
@@ -1412,7 +1463,7 @@ export async function importSamples({
   quality = "raw",
   batchProvenance,
 }: ImportSamplesInput): Promise<ImportSamplesResult> {
-  await loadVault({ vaultRoot });
+  const vault = await loadVault({ vaultRoot });
 
   if (!SAMPLE_STREAM_SET.has(stream as SampleStream)) {
     throw new VaultError(
@@ -1440,6 +1491,7 @@ export async function importSamples({
     buildSampleRecord({
       stream: normalizedStream,
       recordedAt: sample.recordedAt ?? sample.occurredAt,
+      timeZone: vault.metadata.timezone,
       source,
       quality,
       sample,
@@ -1464,6 +1516,7 @@ export async function importSamples({
     const record = buildSampleRecord({
       stream: normalizedStream,
       recordedAt: normalizedSample.recordedAt ?? normalizedSample.occurredAt,
+      timeZone: vault.metadata.timezone,
       source,
       quality,
       sample: normalizedSample,
@@ -1574,11 +1627,12 @@ export async function importDeviceBatch({
   rawArtifacts = [],
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
-  await loadVault({ vaultRoot });
+  const vault = await loadVault({ vaultRoot });
   const deviceBatchPlan = prepareDeviceBatchPlan({
     provider,
     accountId,
     importedAt,
+    defaultTimeZone: vault.metadata.timezone,
     source,
     events,
     samples,

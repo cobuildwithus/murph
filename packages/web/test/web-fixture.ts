@@ -21,8 +21,11 @@ export async function createWebFixtureVault(): Promise<string> {
     "vault.json",
     JSON.stringify(
       {
+        createdAt: "2026-03-12T00:00:00.000Z",
         vaultId: "vault_web_fixture_01",
         owner: "fixture",
+        timezone: "Australia/Melbourne",
+        title: "Web fixture vault",
       },
       null,
       2,

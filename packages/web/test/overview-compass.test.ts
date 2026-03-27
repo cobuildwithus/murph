@@ -20,6 +20,7 @@ function buildReadyOverview(
     sampleSummaries: [],
     search: null,
     status: "ready",
+    timeZone: "Australia/Melbourne",
     timeline: [],
     weeklyStats: [],
     ...overrides,

@@ -38,6 +38,7 @@ import {
   safeParseContract,
   sampleRecordSchema,
   vaultMetadataSchema,
+  workoutFormatFrontmatterSchema,
   parseFrontmatterMarkdown,
   parseFrontmatterDocument,
 } from "@healthybob/contracts";
@@ -132,6 +133,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-protocol",
   "frontmatter-provider",
   "frontmatter-recipe",
+  "frontmatter-workout-format",
   "profile-snapshot",
   "sample-record",
   "vault-metadata",
@@ -199,6 +201,11 @@ assertNoErrors("experiment frontmatter object", exampleFrontmatterObjects.experi
 assertNoErrors("food frontmatter object", exampleFrontmatterObjects.food, foodFrontmatterSchema);
 assertNoErrors("provider frontmatter object", exampleFrontmatterObjects.provider, providerFrontmatterSchema);
 assertNoErrors("recipe frontmatter object", exampleFrontmatterObjects.recipe, recipeFrontmatterSchema);
+assertNoErrors(
+  "workout-format frontmatter object",
+  exampleFrontmatterObjects.workoutFormat,
+  workoutFormatFrontmatterSchema,
+);
 assertNoErrors("profile current frontmatter object", exampleHealthFrontmatterObjects.profileCurrent, profileCurrentFrontmatterSchema);
 assertNoErrors("goal frontmatter object", exampleHealthFrontmatterObjects.goal, goalFrontmatterSchema);
 assertNoErrors("condition frontmatter object", exampleHealthFrontmatterObjects.condition, conditionFrontmatterSchema);
@@ -240,6 +247,10 @@ assert.deepEqual(parseFrontmatterMarkdown(exampleFrontmatterMarkdown.recipe), {
 assert.deepEqual(
   parseFrontmatterDocument(exampleFrontmatterMarkdown.recipe).attributes,
   exampleFrontmatterObjects.recipe,
+);
+assert.deepEqual(
+  parseFrontmatterDocument(exampleFrontmatterMarkdown.workoutFormat).attributes,
+  exampleFrontmatterObjects.workoutFormat,
 );
 assert.deepEqual(
   parseFrontmatterMarkdown(`---

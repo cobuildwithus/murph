@@ -7,6 +7,7 @@ import { test } from "vitest";
 import type {
   AuditRecord,
   DocumentEventRecord,
+  EventRecord,
   ExperimentEventRecord,
   MealEventRecord,
   SampleRecord,
@@ -121,6 +122,7 @@ test("core constants stay aligned with canonical contracts constants", () => {
     profileCurrent: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
     recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
     protocol: CONTRACT_SCHEMA_VERSION.protocolFrontmatter,
+    workoutFormat: CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter,
   });
   assert.equal(Object.isFrozen(CORE_FRONTMATTER_SCHEMA_VERSIONS), true);
   assert.equal(CORE_ASSESSMENT_RESPONSE_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.assessmentResponse);
@@ -207,6 +209,38 @@ test("initializeVault rejects invalid generated metadata before writing canonica
 
   await assert.rejects(() => fs.access(path.join(vaultRoot, "vault.json")));
   await assert.rejects(() => fs.access(path.join(vaultRoot, "CORE.md")));
+});
+
+test("upsertEvent stores the vault-local dayKey and timezone when UTC crosses midnight", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-event-local-day");
+  await initializeVault({
+    vaultRoot,
+    timezone: "Australia/Melbourne",
+  });
+
+  const payload = {
+    id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+    kind: "note",
+    occurredAt: "2026-03-26T21:00:00.000Z",
+    title: "Breakfast note",
+    note: "Should stay on the March 27 local day.",
+  } satisfies Record<string, unknown>;
+
+  const result = await upsertEvent({
+    vaultRoot,
+    payload,
+  });
+  const ledgerRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.ledgerFile,
+  });
+  const eventRecord = ledgerRecords.find(
+    (record) => expectRecord<{ id?: string }>(record).id === payload.id,
+  ) as EventRecord | undefined;
+
+  assert.ok(eventRecord);
+  assert.equal(eventRecord.dayKey, "2026-03-27");
+  assert.equal(eventRecord.timeZone, "Australia/Melbourne");
 });
 
 test("loadVault backfills additive metadata defaults in memory and repairVault persists them", async () => {
@@ -422,6 +456,29 @@ test("note-only meals stay first-class meal events without raw artifacts", async
   assert.equal(meal.photo, null);
   assert.equal(meal.audio, null);
   assert.deepEqual(manifest.artifacts, []);
+});
+
+test("meal day keys follow the vault timezone instead of UTC date slicing", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  await initializeVault({
+    vaultRoot,
+    timezone: "Australia/Melbourne",
+  });
+
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-26T21:00:00.000Z",
+    note: "breakfast",
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+
+  assert.equal(mealEvent.dayKey, "2026-03-27");
+  assert.equal(mealEvent.timeZone, "Australia/Melbourne");
 });
 
 test("meal, journal, experiment, and samples mutations write expected contract data", async () => {

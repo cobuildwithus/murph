@@ -104,6 +104,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "documentId": {
           "type": "string",
           "pattern": "^doc_[0-9A-HJKMNP-TV-Z]{26}$"
@@ -240,6 +245,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "encounterType": {
           "type": "string",
           "minLength": 1,
@@ -370,6 +380,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "mealId": {
           "type": "string",
@@ -509,6 +524,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "symptom": {
           "type": "string",
           "minLength": 1,
@@ -637,6 +657,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "note": {
           "type": "string",
           "minLength": 1,
@@ -758,6 +783,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "metric": {
           "type": "string",
@@ -888,6 +918,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "experimentId": {
           "type": "string",
@@ -1024,6 +1059,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "medicationName": {
           "type": "string",
           "minLength": 1,
@@ -1156,6 +1196,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "procedure": {
           "type": "string",
           "minLength": 1,
@@ -1283,6 +1328,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "supplementName": {
           "type": "string",
@@ -1415,6 +1465,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "testName": {
           "type": "string",
@@ -1672,6 +1727,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "activityType": {
           "type": "string",
           "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
@@ -1882,6 +1942,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "startAt": {
           "type": "string",
           "format": "date-time"
@@ -2013,6 +2078,11 @@
           ],
           "additionalProperties": false
         },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
         "interventionType": {
           "type": "string",
           "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
@@ -2141,6 +2211,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "substance": {
           "type": "string",
@@ -2278,6 +2353,11 @@
             "resourceId"
           ],
           "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
         },
         "exposureType": {
           "type": "string",

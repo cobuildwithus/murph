@@ -214,6 +214,10 @@
           "type": "string",
           "const": "bank/recipes"
         },
+        "workoutFormatsRoot": {
+          "type": "string",
+          "const": "bank/workout-formats"
+        },
         "rawAssessmentsRoot": {
           "type": "string",
           "const": "raw/assessments"
@@ -259,6 +263,7 @@
         "profileSnapshotsRoot",
         "providersRoot",
         "recipesRoot",
+        "workoutFormatsRoot",
         "rawAssessmentsRoot",
         "rawRoot",
         "eventsRoot",

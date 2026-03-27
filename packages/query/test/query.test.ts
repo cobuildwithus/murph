@@ -239,6 +239,38 @@ test("summarizeDailySamples groups by day and stream with stable numeric aggrega
   }
 });
 
+test("listRecords prefers stored local day keys over UTC-derived dates", () => {
+  const vault = createEmptyReadModel();
+  const sample = createSampleRecord({
+    id: "smp_local_day_01",
+    occurredAt: "2026-03-26T21:00:00.000Z",
+    date: "2026-03-27",
+    sourcePath: "ledger/samples/glucose/2026/2026-03.jsonl",
+    data: {
+      value: 94,
+      unit: "mg_dL",
+    },
+  });
+
+  vault.samples = [sample];
+  vault.records = [sample];
+
+  assert.deepEqual(
+    listRecords(vault, {
+      from: "2026-03-27",
+      to: "2026-03-27",
+    }).map((record) => record.displayId),
+    ["smp_local_day_01"],
+  );
+  assert.deepEqual(
+    listRecords(vault, {
+      from: "2026-03-26",
+      to: "2026-03-26",
+    }).map((record) => record.displayId),
+    [],
+  );
+});
+
 test("buildExportPack produces derived exports payloads without touching the vault", async () => {
   const vaultRoot = await createFixtureVault();
 
@@ -1764,7 +1796,7 @@ function createSampleRecord(overrides: {
     sourcePath: overrides.sourcePath,
     sourceFile: path.join("/tmp", overrides.id),
     occurredAt,
-    date: overrides.date ?? (occurredAt ? occurredAt.slice(0, 10) : null),
+    date: overrides.date ?? (occurredAt ? occurredAt.split("T", 1)[0] ?? null : null),
     kind: "sample",
     stream: overrides.stream ?? "glucose",
     experimentSlug: overrides.experimentSlug ?? null,

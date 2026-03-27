@@ -1,3 +1,5 @@
+import { extractIsoDatePrefix } from "@healthybob/contracts";
+
 import { stripEmptyObject, stripUndefined } from "../shared.js";
 import {
   asArray,
@@ -6,6 +8,8 @@ import {
   emitObservationMetrics,
   emitSampleMetrics,
   finiteNumber,
+  makeNormalizedDeviceBatch,
+  makeProviderExternalRef,
   minutesBetween,
   pushDeletionObservation as pushSharedDeletionObservation,
   pushRawArtifact,
@@ -62,13 +66,7 @@ function makeExternalRef(
   version?: string,
   facet?: string,
 ): DeviceExternalRefPayload {
-  return stripUndefined({
-    system: "oura",
-    resourceType,
-    resourceId,
-    version,
-    facet,
-  });
+  return makeProviderExternalRef("oura", resourceType, resourceId, version, facet);
 }
 
 function firstIso(...candidates: unknown[]): string | undefined {
@@ -89,6 +87,21 @@ function firstNumber(...candidates: unknown[]): number | undefined {
 
     if (numeric !== undefined) {
       return numeric;
+    }
+  }
+
+  return undefined;
+}
+
+function firstDayKey(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") {
+      continue;
+    }
+
+    const dayKey = extractIsoDatePrefix(candidate);
+    if (dayKey) {
+      return dayKey;
     }
   }
 
@@ -421,6 +434,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const activityId = stringId(activity.id) ?? stringId(activity.day) ?? `daily-activity-${events.length + 1}`;
     const recordedAt = firstIso(activity.timestamp, activity.day) ?? importedAt;
     const occurredAt = recordedAt;
+    const dayKey = firstDayKey(stringId(activity.day), recordedAt);
     const role = `daily-activity:${activityId}`;
     const version = firstIso(activity.timestamp);
 
@@ -432,6 +446,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         source: activity,
         occurredAt,
         recordedAt,
+        dayKey,
         rawArtifactRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-activity", activityId, version, facet),
       },
@@ -443,6 +458,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const summaryId = stringId(summary.id) ?? stringId(summary.day) ?? `daily-sleep-${events.length + 1}`;
     const recordedAt = firstIso(summary.timestamp, summary.day) ?? importedAt;
     const occurredAt = recordedAt;
+    const dayKey = firstDayKey(stringId(summary.day), recordedAt);
     const role = `daily-sleep:${summaryId}`;
     const version = firstIso(summary.timestamp);
 
@@ -454,6 +470,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         source: summary,
         occurredAt,
         recordedAt,
+        dayKey,
         rawArtifactRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-sleep", summaryId, version, facet),
       },
@@ -466,6 +483,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       stringId(readiness.id) ?? stringId(readiness.day) ?? `daily-readiness-${events.length + 1}`;
     const recordedAt = firstIso(readiness.timestamp, readiness.day) ?? importedAt;
     const occurredAt = recordedAt;
+    const dayKey = firstDayKey(stringId(readiness.day), recordedAt);
     const role = `daily-readiness:${readinessId}`;
     const version = firstIso(readiness.timestamp);
 
@@ -477,6 +495,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         source: readiness,
         occurredAt,
         recordedAt,
+        dayKey,
         rawArtifactRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-readiness", readinessId, version, facet),
       },
@@ -488,6 +507,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const spo2Id = stringId(spo2.id) ?? stringId(spo2.day) ?? `daily-spo2-${events.length + 1}`;
     const recordedAt = firstIso(spo2.timestamp, spo2.day) ?? importedAt;
     const occurredAt = recordedAt;
+    const dayKey = firstDayKey(stringId(spo2.day), recordedAt);
     const role = `daily-spo2:${spo2Id}`;
     const version = firstIso(spo2.timestamp);
 
@@ -499,6 +519,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         source: spo2,
         occurredAt,
         recordedAt,
+        dayKey,
         rawArtifactRoles: [role],
         externalRef: (facet) => makeExternalRef("daily-spo2", spo2Id, version, facet),
       },
@@ -513,6 +534,14 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const recordedAt =
       firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt, endAt, startAt) ?? importedAt;
     const occurredAt = startAt ?? recordedAt;
+    const dayKey = firstDayKey(
+      stringId(sleep.day),
+      stringId(sleep.date),
+      stringId(sleep.sleep_date),
+      endAt,
+      recordedAt,
+      occurredAt,
+    );
     const durationMinutes =
       minutesBetween(startAt, endAt) ??
       secondsToMinutes(sleep.time_in_bed) ??
@@ -540,6 +569,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           kind: "sleep_session",
           occurredAt,
           recordedAt,
+          dayKey,
           source: "device",
           title: sleepType.includes("nap") ? "Oura nap" : "Oura sleep",
           rawArtifactRoles: [role],
@@ -558,6 +588,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       {
         source: sleep,
         recordedAt,
+        dayKey,
         externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
       },
       OURA_SLEEP_SAMPLE_METRICS,
@@ -569,6 +600,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         source: sleep,
         occurredAt,
         recordedAt,
+        dayKey,
         rawArtifactRoles: [role],
         externalRef: (facet) => makeExternalRef("sleep", sleepId, version, facet),
       },
@@ -582,6 +614,12 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const endAt = firstIso(session.end_datetime, session.end_time, session.end);
     const recordedAt = firstIso(session.timestamp, endAt, startAt) ?? importedAt;
     const occurredAt = startAt ?? recordedAt;
+    const dayKey = firstDayKey(
+      stringId(session.day),
+      stringId(session.date),
+      occurredAt,
+      recordedAt,
+    );
     const durationMinutes = minutesBetween(startAt, endAt);
     const sessionType = slugify(session.type, "session");
     const role = `session:${sessionId}`;
@@ -595,6 +633,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           kind: "activity_session",
           occurredAt,
           recordedAt,
+          dayKey,
           source: "device",
           title: trimToLength(`Oura ${sessionType} session`, 160),
           rawArtifactRoles: [role],
@@ -614,6 +653,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       {
         source: session,
         recordedAt,
+        dayKey,
         externalRef: (facet) => makeExternalRef("session", sessionId, version, facet),
       },
       OURA_SESSION_SAMPLE_METRICS,
@@ -627,6 +667,12 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const recordedAt =
       firstIso(workout.timestamp, workout.updated_at, workout.updatedAt, endAt, startAt) ?? importedAt;
     const occurredAt = startAt ?? recordedAt;
+    const dayKey = firstDayKey(
+      stringId(workout.day),
+      stringId(workout.date),
+      occurredAt,
+      recordedAt,
+    );
     const durationMinutes = minutesBetween(startAt, endAt);
     const activityType = slugify(
       workout.activity ?? workout.activity_type ?? workout.sport_name ?? workout.sport ?? workout.type,
@@ -645,6 +691,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           kind: "activity_session",
           occurredAt,
           recordedAt,
+          dayKey,
           source: "device",
           title: trimToLength(`Oura ${activityType}`, 160),
           rawArtifactRoles: [role],
@@ -670,6 +717,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
         },
         occurredAt,
         recordedAt,
+        dayKey,
         rawArtifactRoles: [role],
         externalRef: (facet) => makeExternalRef("workout", workoutId, version, facet),
       },
@@ -688,6 +736,7 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
       value: bpm,
       unit: "bpm",
       recordedAt,
+      dayKey: firstDayKey(recordedAt),
       externalRef: makeExternalRef("heartrate", pointId, version, slugify(point.source, "sample")),
     });
   }
@@ -712,11 +761,10 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     },
   });
 
-  return stripUndefined({
+  return makeNormalizedDeviceBatch({
     provider: "oura",
     accountId,
     importedAt,
-    source: "device",
     events,
     samples,
     rawArtifacts,

@@ -7,6 +7,8 @@ import {
   type InboxDoctorCheck,
 } from '../inbox-cli-contracts.js'
 import { errorMessage, normalizeNullableString } from '../text/shared.js'
+import { extractIsoDatePrefix } from '@healthybob/contracts'
+
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {
   RuntimeAttachmentParseJobRecord,
@@ -249,8 +251,8 @@ export function resolveAttachmentParseState(
 export function occurredDayFromCapture(
   capture: RuntimeCaptureRecord,
 ): string {
-  const day = capture.occurredAt.slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+  const day = extractIsoDatePrefix(capture.occurredAt)
+  if (!day) {
     throw new VaultCliError(
       'INBOX_CAPTURE_OCCURRED_AT_INVALID',
       `Inbox capture "${capture.captureId}" has an invalid occurredAt timestamp.`,

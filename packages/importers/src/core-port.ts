@@ -67,6 +67,8 @@ export interface DeviceEventPayload {
   kind: string;
   occurredAt: string;
   recordedAt?: string;
+  dayKey?: string;
+  timeZone?: string;
   source?: string;
   title?: string;
   note?: string;
@@ -90,6 +92,8 @@ export interface DeviceSampleValuePayload {
 export interface DeviceSamplePayload {
   stream: string;
   recordedAt?: string;
+  dayKey?: string;
+  timeZone?: string;
   source?: string;
   quality?: string;
   unit: string;

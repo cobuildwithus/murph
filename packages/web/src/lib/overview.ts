@@ -2,6 +2,12 @@ import { access, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  addDaysToIsoDate,
+  extractIsoDatePrefix,
+  formatTimeZoneDateTimeParts,
+  normalizeIanaTimeZone,
+} from "@healthybob/contracts";
+import {
   scoreSearchDocuments,
   type SearchableDocument,
 } from "@healthybob/query/search";
@@ -85,6 +91,7 @@ export interface OverviewTimelineEntry {
   kind: string | null;
   occurredAt: string;
   stream: string | null;
+  timeZone: string | null;
   title: string;
 }
 
@@ -112,6 +119,7 @@ export interface ReadyOverview {
   sampleSummaries: OverviewSampleSummary[];
   search: OverviewSearchResult | null;
   status: "ready";
+  timeZone: string;
   timeline: OverviewTimelineEntry[];
   weeklyStats: OverviewWeeklyStat[];
 }
@@ -187,6 +195,13 @@ export async function loadVaultOverview(
     const timelineLimit = clampLimit(options.timelineLimit, DEFAULT_TIMELINE_LIMIT, 16);
     const sampleLimit = clampLimit(options.sampleLimit, DEFAULT_SAMPLE_LIMIT, 12);
     const query = normalizeOverviewQuery(options.query);
+    const rawTimeZone =
+      vault.metadata && typeof vault.metadata === "object" && "timezone" in vault.metadata
+        ? (vault.metadata as { timezone?: unknown }).timezone
+        : undefined;
+    const timeZone = normalizeIanaTimeZone(
+      typeof rawTimeZone === "string" ? rawTimeZone : undefined,
+    ) ?? "UTC";
 
     return {
       currentProfile: summarizeCurrentProfile(vault),
@@ -206,12 +221,13 @@ export async function loadVaultOverview(
         })),
       search: query.length > 0 ? searchVaultSafely(vault, query) : null,
       status: "ready",
-      weeklyStats: buildWeeklyStats(vault),
+      timeZone,
+      weeklyStats: buildWeeklyStats(vault, timeZone),
       timeline: buildTimeline(vault, {
         includeDailySampleSummaries: true,
         includeProfileSnapshots: true,
         limit: timelineLimit,
-      }).map((entry) => toOverviewTimelineEntry(entry)),
+      }).map((entry) => toOverviewTimelineEntry(entry, timeZone)),
     };
   } catch {
     return {
@@ -308,19 +324,13 @@ function summarizeRecentJournals(vault: VaultReadModel): OverviewJournalEntry[] 
     }));
 }
 
-function buildWeeklyStats(vault: VaultReadModel): OverviewWeeklyStat[] {
+function buildWeeklyStats(vault: VaultReadModel, timeZone: string): OverviewWeeklyStat[] {
   const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
-
-  const dayOfWeek = now.getUTCDay();
+  const todayStr = formatTimeZoneDateTimeParts(now, timeZone).dayKey;
+  const dayOfWeek = formatTimeZoneDateTimeParts(now, timeZone).dayOfWeek;
   const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const thisMonday = new Date(now);
-  thisMonday.setUTCDate(now.getUTCDate() - mondayOffset);
-  const thisWeekStart = thisMonday.toISOString().slice(0, 10);
-
-  const lastMonday = new Date(thisMonday);
-  lastMonday.setUTCDate(thisMonday.getUTCDate() - 7);
-  const lastWeekStart = lastMonday.toISOString().slice(0, 10);
+  const thisWeekStart = addDaysToIsoDate(todayStr, -mondayOffset);
+  const lastWeekStart = addDaysToIsoDate(thisWeekStart, -7);
 
   const thisWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
   const lastWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
@@ -501,13 +511,22 @@ function resolveGoals(vault: VaultReadModel, goalIds: readonly string[]): Overvi
   });
 }
 
-function toOverviewTimelineEntry(entry: TimelineItem): OverviewTimelineEntry {
+function toOverviewTimelineEntry(
+  entry: TimelineItem,
+  defaultTimeZone: string,
+): OverviewTimelineEntry {
+  const rawTimeZone = isRecord(entry.data) ? getRecordField(entry.data, "timeZone") : undefined;
+
   return {
     entryType: entry.entryType,
     id: entry.id,
     kind: entry.kind,
     occurredAt: entry.occurredAt,
     stream: entry.stream,
+    timeZone:
+      typeof rawTimeZone === "string" && rawTimeZone.trim().length > 0
+        ? rawTimeZone
+        : defaultTimeZone,
     title: entry.title,
   };
 }
@@ -613,9 +632,5 @@ function compareLatestStrings(left: string | null | undefined, right: string | n
 }
 
 function extractDate(value: string | null | undefined): string {
-  if (typeof value === "string" && value.length >= 10) {
-    return value.slice(0, 10);
-  }
-
-  return "Undated";
+  return extractIsoDatePrefix(value) ?? "Undated";
 }

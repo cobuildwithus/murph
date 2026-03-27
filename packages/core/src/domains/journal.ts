@@ -7,7 +7,7 @@ import { VaultError } from "../errors.js";
 import { stringifyFrontmatterDocument } from "../frontmatter.js";
 import { writeVaultTextFile } from "../fs.js";
 import { loadVault } from "../vault.js";
-import { toDateOnly } from "../time.js";
+import { defaultTimeZone, toLocalDayKey } from "../time.js";
 
 import {
   appendMarkdownParagraph,
@@ -100,8 +100,8 @@ export async function ensureJournalDay({
   vaultRoot,
   date,
 }: EnsureJournalDayInput): Promise<EnsureJournalDayResult> {
-  await loadVault({ vaultRoot });
-  const day = toDateOnly(date, "date");
+  const vault = await loadVault({ vaultRoot });
+  const day = toLocalDayKey(date, vault.metadata.timezone ?? defaultTimeZone(), "date");
   const [year] = day.split("-");
   const relativePath = `${VAULT_LAYOUT.journalDirectory}/${year}/${day}.md`;
   const attributes = validateContract(

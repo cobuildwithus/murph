@@ -107,6 +107,7 @@ test("HomePage renders the ready state", async () => {
       total: 1,
     },
     status: "ready",
+    timeZone: "Australia/Melbourne",
     timeline: [
       {
         entryType: "event",
@@ -114,6 +115,7 @@ test("HomePage renders the ready state", async () => {
         kind: "encounter",
         occurredAt: "2026-03-12T09:30:00Z",
         stream: null,
+        timeZone: "Australia/Melbourne",
         title: "Sleep consult follow-up",
       },
     ],
@@ -137,6 +139,11 @@ test("HomePage renders the ready state", async () => {
   });
 
   const markup = renderToStaticMarkup(await HomePage());
+  const expectedGeneratedAt = new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Australia/Melbourne",
+  }).format(new Date("2026-03-12T15:00:00Z"));
 
   assert.equal(mockedLoadVaultOverviewFromEnv.mock.calls.length, 1);
   assert.equal(mockedLoadDeviceSyncOverviewFromEnv.mock.calls.length, 1);
@@ -152,6 +159,7 @@ test("HomePage renders the ready state", async () => {
   assert.match(markup, /Keep the current investigation simple long enough to learn something from it\./);
   assert.match(markup, /Sleep Reset/);
   assert.match(markup, /Protect sleep consistency/);
+  assert.match(markup, new RegExp(`Last read ${escapeRegExp(expectedGeneratedAt)}`, "u"));
   assert.match(markup, /Wearable connections/);
   assert.match(markup, /Connect/);
   assert.ok(markup.indexOf("Weekly compass") < markup.indexOf("Current investigations"));
@@ -176,6 +184,7 @@ test("HomePage keeps additional weekly stat rows when the same stream has multip
     sampleSummaries: [],
     search: null,
     status: "ready",
+    timeZone: "Australia/Melbourne",
     timeline: [],
     weeklyStats: [
       {
@@ -235,6 +244,7 @@ test("HomePage keeps the current investigations section scoped to active experim
     sampleSummaries: [],
     search: null,
     status: "ready",
+    timeZone: "Australia/Melbourne",
     timeline: [],
     weeklyStats: [],
   });
@@ -279,6 +289,10 @@ test("HomePage renders the setup state when no vault is configured", async () =>
   assert.match(markup, /VAULT/);
   assert.match(markup, /save a default Healthy Bob vault first/);
 });
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
 
 test("HomePage renders the unreadable-vault error state", async () => {
   const { default: HomePage } = await import("../app/page");

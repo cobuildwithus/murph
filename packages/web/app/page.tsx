@@ -51,7 +51,7 @@ export default async function HomePage() {
           </div>
           {overview.status === "ready" ? (
             <p className="text-muted font-display text-[0.78rem] font-bold tracking-[0.12em] uppercase">
-              Last read {formatMoment(overview.generatedAt)}
+              Last read {formatMoment(overview.generatedAt, overview.timeZone)}
             </p>
           ) : null}
         </div>
@@ -120,7 +120,7 @@ function ReadyState({
             {overview.currentProfile?.title ?? "No current profile yet"}
           </h2>
           {overview.currentProfile?.recordedAt ? (
-            <p className="text-muted text-sm shrink-0">{formatMoment(overview.currentProfile.recordedAt)}</p>
+            <p className="text-muted text-sm shrink-0">{formatMoment(overview.currentProfile.recordedAt, overview.timeZone)}</p>
           ) : null}
         </div>
         <p className="text-muted leading-relaxed mb-5">
@@ -158,7 +158,7 @@ function ReadyState({
         </div>
       </section>
 
-      <DeviceSyncSection deviceSync={deviceSync} />
+      <DeviceSyncSection deviceSync={deviceSync} timeZone={overview.timeZone} />
 
       <section>
         <h2 className="font-display text-xs font-bold tracking-[0.14em] uppercase text-accent mb-4">Recent activity</h2>
@@ -200,7 +200,13 @@ function CompassSection({ rows }: { rows: ReturnType<typeof buildOverviewCompass
   );
 }
 
-function DeviceSyncSection({ deviceSync }: { deviceSync: DeviceSyncOverview }) {
+function DeviceSyncSection({
+  deviceSync,
+  timeZone,
+}: {
+  deviceSync: DeviceSyncOverview
+  timeZone: string
+}) {
   return (
     <section className="rounded-[1.8rem] border border-line bg-paper/80 shadow-card overflow-hidden">
       <div className="border-b border-line/70 px-6 py-5 max-sm:px-4">
@@ -244,6 +250,7 @@ function DeviceSyncSection({ deviceSync }: { deviceSync: DeviceSyncOverview }) {
               <DeviceProviderCard
                 provider={provider}
                 accounts={deviceSync.accounts.filter((account) => account.provider === provider.provider)}
+                timeZone={timeZone}
                 key={provider.provider}
               />
             ))
@@ -259,9 +266,11 @@ function DeviceSyncSection({ deviceSync }: { deviceSync: DeviceSyncOverview }) {
 function DeviceProviderCard({
   provider,
   accounts,
+  timeZone,
 }: {
   provider: DeviceSyncProviderDescriptor;
   accounts: DeviceSyncAccountRecord[];
+  timeZone: string;
 }) {
   const label =
     accounts.some((account) => account.status === "reauthorization_required")
@@ -309,7 +318,7 @@ function DeviceProviderCard({
       {accounts.length ? (
         <div className="mt-4 grid gap-2">
           {accounts.map((account) => (
-            <DeviceAccountRow account={account} key={account.id} />
+            <DeviceAccountRow account={account} key={account.id} timeZone={timeZone} />
           ))}
         </div>
       ) : (
@@ -321,7 +330,13 @@ function DeviceProviderCard({
   );
 }
 
-function DeviceAccountRow({ account }: { account: DeviceSyncAccountRecord }) {
+function DeviceAccountRow({
+  account,
+  timeZone,
+}: {
+  account: DeviceSyncAccountRecord
+  timeZone: string
+}) {
   return (
     <div className="rounded-xl border border-line/70 bg-card-strong/80 px-4 py-3">
       <div className="flex items-start justify-between gap-4 max-sm:flex-col max-sm:items-start">
@@ -330,7 +345,7 @@ function DeviceAccountRow({ account }: { account: DeviceSyncAccountRecord }) {
             {account.displayName ?? account.externalAccountId}
           </div>
           <div className="text-muted text-sm leading-relaxed">
-            {humanizeToken(account.status)} · connected {formatMoment(account.connectedAt)}
+            {humanizeToken(account.status)} · connected {formatMoment(account.connectedAt, timeZone)}
           </div>
           {account.lastErrorMessage ? (
             <div className="text-warm text-xs mt-1">{account.lastErrorMessage}</div>
@@ -427,7 +442,7 @@ function ExperimentCard({ experiment }: { experiment: OverviewExperiment }) {
 function TimelineRow({ entry }: { entry: OverviewTimelineEntry }) {
   return (
     <div className="flex items-baseline gap-4 py-2.5 border-b border-line/60 last:border-b-0 max-sm:flex-col max-sm:gap-0.5">
-      <div className="text-warm font-display text-xs font-bold shrink-0 w-40 max-sm:w-auto">{formatMoment(entry.occurredAt)}</div>
+      <div className="text-warm font-display text-xs font-bold shrink-0 w-40 max-sm:w-auto">{formatMoment(entry.occurredAt, entry.timeZone ?? undefined)}</div>
       <div className="flex-1 min-w-0">
         <span className="font-display text-[0.95rem] font-bold">{entry.title}</span>
         <span className="text-muted text-sm ml-2">
@@ -472,17 +487,26 @@ function formatStatValue(value: number): string {
 }
 
 function formatDate(value: string): string {
+  const [yearText, monthText, dayText] = value.split("-", 3);
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return value;
+  }
+
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
+  }).format(new Date(Date.UTC(year, month - 1, day, 12)));
 }
 
-function formatMoment(value: string): string {
+function formatMoment(value: string, timeZone = "UTC"): string {
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "UTC",
+    timeZone,
   }).format(new Date(value));
 }
 

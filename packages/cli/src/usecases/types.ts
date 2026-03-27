@@ -392,7 +392,11 @@ export interface SupplementCompoundListResult {
 }
 
 export interface CoreWriteServices extends HealthCoreServiceMethods {
-  init(input: CommandContext): Promise<VaultInitResult>
+  init(
+    input: CommandContext & {
+      timezone?: string
+    },
+  ): Promise<VaultInitResult>
   validate(input: CommandContext): Promise<VaultValidateResult>
   addMeal(
     input: CommandContext & {
@@ -785,6 +789,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }>
   initializeVault(input: {
     vaultRoot: string
+    timezone?: string
   }): Promise<unknown>
   validateVault(input: {
     vaultRoot: string

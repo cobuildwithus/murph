@@ -13,7 +13,10 @@ import {
   localDateSchema,
   slugSchema,
 } from '../vault-cli-contracts.js'
-import { readJsonPayload } from './shared.js'
+import {
+  asListEnvelope,
+  readJsonPayload,
+} from './shared.js'
 import {
   compactObject,
   inferVaultLinkKind,
@@ -198,7 +201,7 @@ export async function createExperimentRecord(input: {
     slug: input.slug,
     title: normalizeOptionalText(input.title) ?? input.slug,
     hypothesis: normalizeOptionalText(input.hypothesis) ?? undefined,
-    startedOn: input.startedOn ?? new Date().toISOString().slice(0, 10),
+    startedOn: input.startedOn,
     status: normalizeOptionalText(input.status) ?? 'active',
   })
 
@@ -349,16 +352,10 @@ export async function listExperimentRecords(input: {
     .slice(0, input.limit)
     .map(toShowEntity)
 
-  return {
-    vault: input.vault,
-    filters: {
-      status: input.status ?? null,
-      limit: input.limit,
-    },
-    items,
-    count: items.length,
-    nextCursor: null,
-  }
+  return asListEnvelope(input.vault, {
+    status: input.status ?? null,
+    limit: input.limit,
+  }, items)
 }
 
 export async function ensureJournalRecord(input: {
@@ -490,18 +487,12 @@ export async function listJournalRecords(input: {
     .slice(0, input.limit)
     .map(toShowEntity)
 
-  return {
-    vault: input.vault,
-    filters: {
-      kind: 'journal_day',
-      from: input.from,
-      to: input.to,
-      limit: input.limit,
-    },
-    items,
-    count: items.length,
-    nextCursor: null,
-  }
+  return asListEnvelope(input.vault, {
+    kind: 'journal_day',
+    from: input.from,
+    to: input.to,
+    limit: input.limit,
+  }, items)
 }
 
 export async function showVaultSummary(vault: string) {

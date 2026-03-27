@@ -1,3 +1,5 @@
+import { extractIsoDatePrefix } from "@healthybob/contracts";
+
 import { listRecords, type VaultReadModel, type VaultRecord } from "./model.js";
 import {
   summarizeDailySamples,
@@ -318,11 +320,7 @@ function compareTimelineEntries(left: TimelineEntry, right: TimelineEntry): numb
 }
 
 function extractDate(value: string | null | undefined): string {
-  if (!value) {
-    return "";
-  }
-
-  return value.length >= 10 ? value.slice(0, 10) : value;
+  return extractIsoDatePrefix(value) ?? "";
 }
 
 function normalizeLimit(limit: number | undefined): number {

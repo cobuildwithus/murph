@@ -38,7 +38,8 @@
         "protocol_upsert",
         "samples_import_csv",
         "show",
-        "validate"
+        "validate",
+        "workout_format_upsert"
       ]
     },
     "status": {

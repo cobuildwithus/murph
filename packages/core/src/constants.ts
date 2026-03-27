@@ -27,6 +27,7 @@ export const FRONTMATTER_SCHEMA_VERSIONS = Object.freeze({
   profileCurrent: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
   recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
   protocol: CONTRACT_SCHEMA_VERSION.protocolFrontmatter,
+  workoutFormat: CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter,
 });
 
 export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.assessmentResponse;
@@ -35,7 +36,7 @@ export const PROFILE_SNAPSHOT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.profileSn
 export const SAMPLE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.sample;
 export const AUDIT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.audit;
 
-export const DEFAULT_TIMEZONE = "America/New_York";
+export const DEFAULT_TIMEZONE = "UTC";
 
 export const ID_PREFIXES = CONTRACT_ID_PREFIXES;
 
@@ -54,6 +55,7 @@ export const VAULT_LAYOUT = Object.freeze({
   profileCurrentDocument: "bank/profile/current.md",
   providersDirectory: "bank/providers",
   recipesDirectory: "bank/recipes",
+  workoutFormatsDirectory: "bank/workout-formats",
   protocolsDirectory: "bank/protocols",
   rawDirectory: "raw",
   rawAssessmentsDirectory: "raw/assessments",
@@ -85,6 +87,7 @@ export const VAULT_PATHS = Object.freeze({
   profileSnapshotsRoot: VAULT_LAYOUT.profileSnapshotsDirectory,
   providersRoot: VAULT_LAYOUT.providersDirectory,
   recipesRoot: VAULT_LAYOUT.recipesDirectory,
+  workoutFormatsRoot: VAULT_LAYOUT.workoutFormatsDirectory,
   rawAssessmentsRoot: VAULT_LAYOUT.rawAssessmentsDirectory,
   rawRoot: VAULT_LAYOUT.rawDirectory,
   eventsRoot: VAULT_LAYOUT.eventLedgerDirectory,
@@ -115,6 +118,7 @@ export const REQUIRED_DIRECTORIES = Object.freeze([
   VAULT_LAYOUT.profileDirectory,
   VAULT_LAYOUT.providersDirectory,
   VAULT_LAYOUT.recipesDirectory,
+  VAULT_LAYOUT.workoutFormatsDirectory,
   VAULT_LAYOUT.protocolsDirectory,
   "ledger",
   VAULT_LAYOUT.assessmentLedgerDirectory,

@@ -1,3 +1,4 @@
+import { extractIsoDatePrefix } from "@healthybob/contracts";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -623,7 +624,7 @@ async function readJsonlRecordFamily(
         kind,
         status: pickString(payload, ["status"]),
         occurredAt,
-        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey"]),
+        date: pickString(payload, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
         path: sourcePath,
         title: pickString(payload, ["title", "summary"]),
         body: pickString(payload, ["note", "summary"]),
@@ -673,7 +674,7 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         kind: "sample",
         status: pickString(payload, ["quality"]),
         occurredAt,
-        date: normalizeCanonicalDate(occurredAt) ?? pickString(payload, ["dayKey"]),
+        date: pickString(payload, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
         path: sourcePath,
         title: `${stream} sample`,
         body: null,
@@ -844,8 +845,8 @@ function compareDateStrings(
     return -1;
   }
 
-  const normalizedValue = value.length > 10 ? value.slice(0, 10) : value;
-  const normalizedBoundary = boundary.length > 10 ? boundary.slice(0, 10) : boundary;
+  const normalizedValue = extractIsoDatePrefix(value) ?? value;
+  const normalizedBoundary = extractIsoDatePrefix(boundary) ?? boundary;
 
   if (normalizedValue < normalizedBoundary) {
     return -1;

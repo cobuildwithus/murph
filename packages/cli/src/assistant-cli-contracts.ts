@@ -1,5 +1,9 @@
 import { z } from 'incur'
-import { isoTimestampSchema, pathSchema } from './vault-cli-contracts.js'
+import {
+  isoTimestampSchema,
+  pathSchema,
+  timeZoneSchema,
+} from './vault-cli-contracts.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -93,6 +97,7 @@ export const assistantCronScheduleKindValues = [
   'at',
   'every',
   'cron',
+  'dailyLocal',
 ] as const
 export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
 export const assistantCronRunStatusValues = [
@@ -513,6 +518,17 @@ export const assistantCronExpressionScheduleSchema = z
   .object({
     kind: z.literal('cron'),
     expression: z.string().min(1),
+    timeZone: timeZoneSchema.optional(),
+  })
+  .strict()
+
+export const assistantCronDailyLocalScheduleSchema = z
+  .object({
+    kind: z.literal('dailyLocal'),
+    localTime: z
+      .string()
+      .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u, 'Expected a 24-hour HH:MM time.'),
+    timeZone: timeZoneSchema,
   })
   .strict()
 
@@ -520,6 +536,7 @@ export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
   assistantCronAtScheduleSchema,
   assistantCronEveryScheduleSchema,
   assistantCronExpressionScheduleSchema,
+  assistantCronDailyLocalScheduleSchema,
 ])
 
 export const assistantCronTargetSchema = z

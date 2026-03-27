@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { extractIsoDatePrefix } from '@healthybob/contracts'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
@@ -162,7 +163,7 @@ export function matchesDateRange(
     return !from && !to
   }
 
-  const date = value.slice(0, 10)
+  const date = extractIsoDatePrefix(value) ?? value
   if (from && date < from) {
     return false
   }

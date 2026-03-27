@@ -16,7 +16,7 @@ import { readUtf8File } from "../fs.js";
 import { generateRecordId } from "../ids.js";
 import { toMonthlyShardRelativePath } from "../jsonl.js";
 import { sanitizePathSegment } from "../path-safety.js";
-import { toDateOnly, toIsoTimestamp } from "../time.js";
+import { defaultTimeZone, toIsoTimestamp, toLocalDayKey } from "../time.js";
 import { loadVault } from "../vault.js";
 
 import { buildExperimentEventRecord } from "./events.js";
@@ -199,10 +199,10 @@ export async function createExperiment({
   startedOn = new Date(),
   status = "active",
 }: CreateExperimentInput): Promise<CreateExperimentResult> {
-  await loadVault({ vaultRoot });
+  const vault = await loadVault({ vaultRoot });
   const safeSlug = sanitizePathSegment(slug, "experiment");
   const startedTimestamp = toIsoTimestamp(startedOn, "startedOn");
-  const startedDay = toDateOnly(startedOn, "startedOn");
+  const startedDay = toLocalDayKey(startedOn, vault.metadata.timezone ?? defaultTimeZone(), "startedOn");
   const relativePath = `${VAULT_LAYOUT.experimentsDirectory}/${safeSlug}.md`;
   const normalizedTitle = String(title ?? safeSlug).trim();
   const normalizedStatus = coerceExperimentStatus(status);
@@ -386,6 +386,7 @@ export async function updateExperiment(
 async function appendExperimentLifecycleEvent(
   input: AppendExperimentLifecycleEventInput,
 ): Promise<AppendExperimentLifecycleEventResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const { document } = await readExperimentFrontmatterDocument(
     input.vaultRoot,
     input.relativePath,
@@ -418,6 +419,7 @@ async function appendExperimentLifecycleEvent(
     experimentId: document.attributes.experimentId,
     experimentSlug: document.attributes.slug,
     phase: input.phase,
+    timeZone: vault.metadata.timezone,
   });
   const ledgerFile = toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,
@@ -471,12 +473,13 @@ export async function stopExperiment(
   if (!occurredAt) {
     throw new VaultError("HB_INVALID_TIMESTAMP", "Experiment lifecycle event requires occurredAt.");
   }
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
 
   return appendExperimentLifecycleEvent({
     ...input,
     phase: "stop",
     occurredAt,
     nextStatus: "completed",
-    endedOn: occurredAt.slice(0, 10),
+    endedOn: toLocalDayKey(occurredAt, vault.metadata.timezone ?? defaultTimeZone(), "occurredAt"),
   });
 }

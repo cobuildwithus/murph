@@ -6,6 +6,7 @@ import {
   assertContract,
   auditRecordSchema,
   eventRecordSchema,
+  toLocalDayKey,
   type AuditRecord,
   type EventRecord,
 } from "@healthybob/contracts";
@@ -285,6 +286,7 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
   envelope: StoredCaptureEnvelope;
   createAuditId?: () => string;
 }): Promise<StoredCaptureCanonicalEvidence> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const eventPath = buildInboxCaptureEventPath(input.envelope);
   const auditPath = buildInboxCaptureAuditPath(input.envelope);
   const lock = await acquireCanonicalWriteLock(input.vaultRoot);
@@ -309,6 +311,7 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
           eventId: input.envelope.eventId,
           inbound: input.envelope.input,
           stored: input.envelope.stored,
+          timeZone: vault.metadata.timezone,
         }),
       });
     }
@@ -359,6 +362,7 @@ export async function appendInboxCaptureEvent(input: {
   inbound: InboundCapture;
   stored: StoredCapture;
 }): Promise<{ relativePath: string; record: EventRecord }> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const relativePath = toMonthlyShardRelativePath(
     VAULT_LAYOUT.eventLedgerDirectory,
     input.occurredAt,
@@ -368,6 +372,7 @@ export async function appendInboxCaptureEvent(input: {
     eventId: input.eventId,
     inbound: input.inbound,
     stored: input.stored,
+    timeZone: vault.metadata.timezone,
   });
 
   await applyCanonicalWriteBatch({
@@ -491,13 +496,17 @@ function buildInboxCaptureEventRecord(input: {
   eventId: string;
   inbound: InboundCapture;
   stored: StoredCapture;
+  timeZone?: string;
 }): EventRecord {
+  const timeZone = input.timeZone ?? "UTC";
+
   return assertContract<EventRecord>(eventRecordSchema, {
     schemaVersion: "hb.event.v1",
     id: input.eventId,
     occurredAt: input.inbound.occurredAt,
     recordedAt: input.stored.storedAt,
-    dayKey: input.inbound.occurredAt.slice(0, 10),
+    dayKey: toLocalDayKey(input.inbound.occurredAt, timeZone),
+    timeZone,
     source: "import",
     kind: "note",
     title: `Inbox capture from ${input.inbound.source}`,

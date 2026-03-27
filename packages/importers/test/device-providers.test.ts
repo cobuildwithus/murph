@@ -278,12 +278,20 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const workoutEvent = payload.events?.find((event) => event.externalRef?.resourceType === "workout");
+  const activityScoreEvent = payload.events?.find(
+    (event) => event.fields?.metric === "activity-score",
+  );
+  const sleepSummarySample = payload.samples?.find(
+    (sample) => sample.stream === "respiratory_rate",
+  );
 
   assert.deepEqual(sleepEvent?.fields, {
     startAt: "2026-03-14T22:30:00.000Z",
     endAt: "2026-03-15T06:45:00.000Z",
     durationMinutes: 495,
   });
+  assert.equal(activityScoreEvent?.dayKey, "2026-03-15");
+  assert.equal(sleepSummarySample?.dayKey, "2026-03-15");
   assert.equal(workoutEvent?.fields?.activityType, "running");
   assert.equal(workoutEvent?.fields?.distanceKm, 6.8);
 });
