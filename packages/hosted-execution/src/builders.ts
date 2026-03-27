@@ -2,6 +2,7 @@ import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchRequest,
+  HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionLinqMessageReceivedEvent,
   HostedExecutionMemberActivatedEvent,
   HostedExecutionVaultShareAcceptedEvent,
@@ -36,6 +37,31 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
       normalizedPhoneNumber: input.normalizedPhoneNumber,
       userId: input.userId,
     } satisfies HostedExecutionLinqMessageReceivedEvent,
+    eventId: input.eventId,
+    occurredAt: input.occurredAt,
+  });
+}
+
+export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
+  envelopeFrom: string | null;
+  envelopeTo: string | null;
+  eventId: string;
+  identityId: string;
+  occurredAt: string;
+  rawMessageKey: string;
+  threadTarget: string | null;
+  userId: string;
+}): HostedExecutionDispatchRequest {
+  return buildHostedExecutionDispatch({
+    event: {
+      envelopeFrom: input.envelopeFrom,
+      envelopeTo: input.envelopeTo,
+      identityId: input.identityId,
+      kind: "email.message.received",
+      rawMessageKey: input.rawMessageKey,
+      threadTarget: input.threadTarget,
+      userId: input.userId,
+    } satisfies HostedExecutionEmailMessageReceivedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
   });
@@ -79,12 +105,12 @@ export function buildHostedExecutionVaultShareAcceptedDispatch(input: {
   eventId: string;
   memberId: string;
   occurredAt: string;
-  pack: HostedExecutionVaultShareAcceptedEvent["pack"];
+  share: HostedExecutionVaultShareAcceptedEvent["share"];
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
     event: {
       kind: "vault.share.accepted",
-      pack: input.pack,
+      share: input.share,
       userId: input.memberId,
     } satisfies HostedExecutionVaultShareAcceptedEvent,
     eventId: input.eventId,

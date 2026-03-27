@@ -22,6 +22,7 @@ export interface NormalizeParsedEmailMessageInput {
   accountAddress?: string | null;
   accountId?: string | null;
   message: ParsedEmailMessage;
+  selfAddresses?: ReadonlyArray<string | null | undefined> | null;
   source?: string;
   threadTarget?: string | null;
 }
@@ -30,12 +31,14 @@ export async function normalizeParsedEmailMessage({
   accountAddress = null,
   accountId = null,
   message,
+  selfAddresses = null,
   source = "email",
   threadTarget = null,
 }: NormalizeParsedEmailMessageInput): Promise<InboundCapture> {
   const normalizedMessage = await toParsedEmailChatMessage({
     accountAddress,
     message,
+    selfAddresses,
     threadTarget,
   });
 
@@ -49,14 +52,20 @@ export async function normalizeParsedEmailMessage({
 export async function toParsedEmailChatMessage(input: {
   accountAddress?: string | null;
   message: ParsedEmailMessage;
+  selfAddresses?: ReadonlyArray<string | null | undefined> | null;
   threadTarget?: string | null;
 }): Promise<ChatMessage> {
   const normalizedAccountAddress = resolveEmailAddress(input.accountAddress ?? null);
+  const normalizedSelfAddresses = resolveParsedEmailSelfAddresses([
+    normalizedAccountAddress,
+    ...(input.selfAddresses ?? []),
+  ]);
+  const selfAddressSet = new Set(normalizedSelfAddresses.map((value) => value.toLowerCase()));
   const actorId = resolveEmailAddress(input.message.from ?? null);
   const actorDisplayName = resolveEmailDisplayName(input.message.from ?? null);
   const resolvedThreadTarget = resolveParsedEmailThreadTarget({
-    accountAddress: normalizedAccountAddress,
     message: input.message,
+    selfAddresses: normalizedSelfAddresses,
     threadTarget: input.threadTarget ?? null,
   });
 
@@ -65,10 +74,7 @@ export async function toParsedEmailChatMessage(input: {
     actor: {
       displayName: actorDisplayName,
       id: actorId,
-      isSelf:
-        normalizedAccountAddress !== null &&
-        actorId !== null &&
-        actorId.toLowerCase() === normalizedAccountAddress.toLowerCase(),
+      isSelf: actorId !== null && selfAddressSet.has(actorId.toLowerCase()),
     },
     externalId: `email:${input.message.messageId ?? input.message.rawHash.slice(0, 24)}`,
     occurredAt: toIsoTimestamp(input.message.occurredAt ?? new Date()),
@@ -84,6 +90,7 @@ export async function toParsedEmailChatMessage(input: {
         accountAddress: normalizedAccountAddress,
         cc: input.message.cc,
         from: input.message.from,
+        selfAddresses: normalizedSelfAddresses,
         to: input.message.to,
       }),
       title: normalizeTextValue(input.message.subject ?? null),
@@ -92,8 +99,8 @@ export async function toParsedEmailChatMessage(input: {
 }
 
 function resolveParsedEmailThreadTarget(input: {
-  accountAddress: string | null;
   message: ParsedEmailMessage;
+  selfAddresses: ReadonlyArray<string>;
   threadTarget: string | null;
 }): HostedEmailThreadTarget {
   const existing = parseHostedEmailThreadTarget(input.threadTarget);
@@ -101,11 +108,14 @@ function resolveParsedEmailThreadTarget(input: {
     return existing;
   }
 
-  const sender = resolveEmailAddress(input.message.from ?? null);
+  const replyRecipients = input.message.replyTo
+    .map((value) => resolveEmailAddress(value))
+    .filter((value): value is string => value !== null);
+  const replyRecipient = replyRecipients[0] ?? resolveEmailAddress(input.message.from ?? null);
   const cc = collectReplyAllRecipients({
-    accountAddress: input.accountAddress,
-    recipients: [...input.message.to, ...input.message.cc],
-    sender,
+    primaryRecipient: replyRecipient,
+    recipients: [...replyRecipients.slice(1), ...input.message.to, ...input.message.cc],
+    selfAddresses: input.selfAddresses,
   });
 
   return createHostedEmailThreadTarget({
@@ -117,17 +127,18 @@ function resolveParsedEmailThreadTarget(input: {
     replyAliasAddress: null,
     replyKey: null,
     subject: normalizeTextValue(input.message.subject ?? null),
-    to: sender ? [sender] : [],
+    to: replyRecipient ? [replyRecipient] : [],
   });
 }
 
 function collectReplyAllRecipients(input: {
-  accountAddress: string | null;
+  primaryRecipient: string | null;
   recipients: ReadonlyArray<string | null | undefined>;
-  sender: string | null;
+  selfAddresses: ReadonlyArray<string>;
 }): string[] {
   const seen = new Set<string>();
   const recipients: string[] = [];
+  const selfAddressSet = new Set(input.selfAddresses.map((value) => value.toLowerCase()));
 
   for (const value of input.recipients) {
     const normalized = resolveEmailAddress(value ?? null);
@@ -135,11 +146,11 @@ function collectReplyAllRecipients(input: {
       continue;
     }
 
-    if (input.accountAddress !== null && normalized === input.accountAddress) {
+    if (selfAddressSet.has(normalized.toLowerCase())) {
       continue;
     }
 
-    if (input.sender !== null && normalized === input.sender) {
+    if (input.primaryRecipient !== null && normalized === input.primaryRecipient) {
       continue;
     }
 
@@ -152,6 +163,25 @@ function collectReplyAllRecipients(input: {
   }
 
   return recipients;
+}
+
+function resolveParsedEmailSelfAddresses(
+  values: ReadonlyArray<string | null | undefined>,
+): string[] {
+  const seen = new Set<string>();
+  const addresses: string[] = [];
+
+  for (const value of values) {
+    const normalized = resolveEmailAddress(value ?? null);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    addresses.push(normalized);
+  }
+
+  return addresses;
 }
 
 function buildParsedEmailAttachments(

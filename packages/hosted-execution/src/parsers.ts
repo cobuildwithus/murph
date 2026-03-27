@@ -3,11 +3,15 @@ import { assertContract, sharePackSchema } from "@murph/contracts";
 import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionBundleRef,
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
+  HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionEvent,
+  HostedExecutionEventDispatchState,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
   HostedExecutionSharePackResponse,
+  HostedExecutionShareReference,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserEnvUpdate,
   HostedExecutionUserStatus,
@@ -67,6 +71,24 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
       ),
       summary: requireString(result.summary, "Hosted execution runner result summary"),
     },
+  };
+}
+
+export function parseHostedExecutionDispatchResult(value: unknown): HostedExecutionDispatchResult {
+  const record = requireObject(value, "Hosted execution dispatch result");
+  const event = requireObject(record.event, "Hosted execution dispatch result event");
+
+  return {
+    event: {
+      eventId: requireString(event.eventId, "Hosted execution dispatch result eventId"),
+      lastError: readNullableString(
+        event.lastError,
+        "Hosted execution dispatch result lastError",
+      ),
+      state: parseHostedExecutionEventDispatchState(event.state),
+      userId: requireString(event.userId, "Hosted execution dispatch result userId"),
+    },
+    status: parseHostedExecutionUserStatus(record.status),
   };
 }
 
@@ -141,7 +163,6 @@ export function parseHostedExecutionSharePackResponse(value: unknown): HostedExe
 
   return {
     pack: assertContract(sharePackSchema, record.pack, "share pack"),
-    shareCode: requireString(record.shareCode, "Hosted execution share pack response shareCode"),
     shareId: requireString(record.shareId, "Hosted execution share pack response shareId"),
   };
 }
@@ -182,6 +203,28 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       };
+    case "email.message.received":
+      return {
+        envelopeFrom: readNullableString(
+          record.envelopeFrom,
+          "Hosted execution email message envelopeFrom",
+        ),
+        envelopeTo: readNullableString(
+          record.envelopeTo,
+          "Hosted execution email message envelopeTo",
+        ),
+        identityId: requireString(record.identityId, "Hosted execution email message identityId"),
+        kind,
+        rawMessageKey: requireString(
+          record.rawMessageKey,
+          "Hosted execution email message rawMessageKey",
+        ),
+        threadTarget: readNullableString(
+          record.threadTarget,
+          "Hosted execution email message threadTarget",
+        ),
+        userId,
+      } satisfies HostedExecutionEmailMessageReceivedEvent;
     case "assistant.cron.tick":
       return {
         kind,
@@ -197,12 +240,40 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     case "vault.share.accepted":
       return {
         kind,
-        pack: assertContract(sharePackSchema, record.pack, "Hosted execution share pack"),
+        share: parseHostedExecutionShareReference(record.share),
         userId,
       } satisfies HostedExecutionVaultShareAcceptedEvent;
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
+}
+
+export function parseHostedExecutionShareReference(value: unknown): HostedExecutionShareReference {
+  const record = requireObject(value, "Hosted execution share reference");
+
+  return {
+    shareCode: requireString(record.shareCode, "Hosted execution share reference shareCode"),
+    shareId: requireString(record.shareId, "Hosted execution share reference shareId"),
+  };
+}
+
+function parseHostedExecutionEventDispatchState(
+  value: unknown,
+): HostedExecutionEventDispatchState {
+  const state = requireString(value, "Hosted execution dispatch result event state");
+
+  if (
+    state === "queued"
+    || state === "duplicate_pending"
+    || state === "duplicate_consumed"
+    || state === "backpressured"
+    || state === "completed"
+    || state === "poisoned"
+  ) {
+    return state;
+  }
+
+  throw new TypeError(`Unsupported hosted execution event dispatch state: ${state}`);
 }
 
 function parseCronReason(value: unknown): HostedExecutionAssistantCronTickEvent["reason"] {

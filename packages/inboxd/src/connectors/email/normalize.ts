@@ -38,6 +38,7 @@ export interface InferDirectEmailThreadParticipantsInput {
   bcc?: ReadonlyArray<string | null | undefined> | null;
   cc?: ReadonlyArray<string | null | undefined> | null;
   from?: string | null;
+  selfAddresses?: ReadonlyArray<string | null | undefined> | null;
   to?: ReadonlyArray<string | null | undefined> | null;
 }
 
@@ -148,7 +149,10 @@ export function inferDirectEmailThread(
 export function inferDirectEmailThreadFromParticipants(
   input: InferDirectEmailThreadParticipantsInput,
 ): boolean {
-  const normalizedAccountAddress = resolveEmailAddress(input.accountAddress ?? null);
+  const selfAddresses = resolveEmailParticipantSet([
+    input.accountAddress,
+    ...(input.selfAddresses ?? []),
+  ]);
   const allParticipants = new Set<string>();
   const otherParticipants = new Set<string>();
 
@@ -161,10 +165,7 @@ export function inferDirectEmailThreadFromParticipants(
     const normalizedLower = normalized.toLowerCase();
     allParticipants.add(normalizedLower);
 
-    if (
-      normalizedAccountAddress !== null &&
-      normalizedLower === normalizedAccountAddress.toLowerCase()
-    ) {
+    if (selfAddresses.has(normalizedLower)) {
       return;
     }
 
@@ -182,11 +183,11 @@ export function inferDirectEmailThreadFromParticipants(
     appendParticipant(value);
   }
 
-  if (normalizedAccountAddress !== null && otherParticipants.size > 0) {
+  if (selfAddresses.size > 0 && otherParticipants.size > 0) {
     return otherParticipants.size <= 1;
   }
 
-  if (normalizedAccountAddress === null && allParticipants.size > 0) {
+  if (selfAddresses.size === 0 && allParticipants.size > 0) {
     return allParticipants.size <= 2;
   }
 
@@ -199,6 +200,23 @@ export function inferDirectEmailThreadFromParticipants(
     .filter((value): value is string => value !== null).length;
 
   return recipientCount <= 1;
+}
+
+function resolveEmailParticipantSet(
+  values: ReadonlyArray<string | null | undefined>,
+): Set<string> {
+  const participants = new Set<string>();
+
+  for (const value of values) {
+    const normalized = resolveEmailAddress(value ?? null);
+    if (!normalized) {
+      continue;
+    }
+
+    participants.add(normalized.toLowerCase());
+  }
+
+  return participants;
 }
 
 export function resolveAgentmailAddress(

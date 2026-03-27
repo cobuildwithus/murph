@@ -7,7 +7,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murph/core";
+import { openInboxRuntime, rebuildRuntimeFromVault } from "@murph/inboxd";
 import {
+  parseHostedEmailThreadTarget,
   resolveAssistantStatePaths,
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
@@ -89,9 +91,10 @@ describe("runHostedExecutionJob", () => {
 
     expect(result.result.summary).toContain("Processed member activation");
     expect(result.result.summary).toContain("created the canonical vault");
-    expect(result.result.summary).toContain("enabled Linq auto-reply");
+    expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
     expect(result.result.summary).toContain("Parser jobs: 0.");
-    expect(automationState.autoReplyChannels).toContain("linq");
+    expect(automationState.autoReplyChannels).not.toContain("linq");
+    expect(automationState.autoReplyChannels).not.toContain("email");
     await expect(
       readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
     ).rejects.toThrow();
@@ -131,16 +134,18 @@ describe("runHostedExecutionJob", () => {
 
     expect(secondActivation.result.summary).toContain("Processed member activation");
     expect(secondActivation.result.summary).toContain("reused the canonical vault");
-    expect(secondActivation.result.summary).toContain("kept Linq auto-reply enabled");
+    expect(secondActivation.result.summary).toContain("kept hosted email auto-reply unchanged");
   });
 
 
-  it("bootstraps hosted email auto-reply when the hosted email bridge is configured", async () => {
+  it("does not bootstrap hosted email auto-reply when ingress is configured but send credentials are missing", async () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
 
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
     process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
 
     try {
       const result = await runHostedExecutionJob({
@@ -151,8 +156,54 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
-            linqChatId: "chat_email",
-            normalizedPhoneNumber: "+15551230000",
+            userId: "member_email_partial",
+          },
+          eventId: "evt_activation_email_partial",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-partial-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(automationState.autoReplyChannels).not.toContain("email");
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
+  it("bootstraps hosted email auto-reply when the hosted email bridge is configured", async () => {
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
+    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
             userId: "member_email",
           },
           eventId: "evt_activation_email",
@@ -172,10 +223,63 @@ describe("runHostedExecutionJob", () => {
 
       expect(result.result.summary).toContain("enabled hosted email auto-reply");
       expect(automationState.autoReplyChannels).toContain("email");
-      expect(automationState.autoReplyChannels).toContain("linq");
+      expect(automationState.autoReplyChannels).not.toContain("linq");
     } finally {
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
+  it("does not bootstrap hosted email auto-reply when sender credentials exist without a hosted email domain", async () => {
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailFromAddress = process.env.HOSTED_EMAIL_FROM_ADDRESS;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
+    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
+    process.env.HOSTED_EMAIL_FROM_ADDRESS = "assistant@mail.example.test";
+    delete process.env.HOSTED_EMAIL_DOMAIN;
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_email_no_domain",
+          },
+          eventId: "evt_activation_email_no_domain",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-no-domain-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(automationState.autoReplyChannels).not.toContain("email");
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_FROM_ADDRESS", previousHostedEmailFromAddress);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
     }
   });
 
@@ -254,6 +358,108 @@ describe("runHostedExecutionJob", () => {
 
       expect(result.result.summary).toContain("Persisted hosted email capture");
       expect(requests).toEqual(["GET /messages/raw_email_123"]);
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("persists hosted stable-alias email captures with Reply-To-based thread targets", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_email_alias",
+        },
+        eventId: "evt_activation_email_alias",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const raw = [
+      'From: Alice Example <alice@example.test>',
+      'Reply-To: Alice Replies <reply@example.test>, Team Replies <team@example.test>',
+      'To: assistant+u-member_email_alias@mail.example.test',
+      'Cc: assistant@mail.example.test',
+      'Subject: Hosted alias hello',
+      'Message-ID: <msg_email_alias@example.test>',
+      'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+      '',
+      'Hello from the hosted stable alias path.',
+      '',
+    ].join('\r\n');
+    const server = createServer((request, response) => {
+      if (request.url === "/messages/raw_email_alias") {
+        response.statusCode = 200;
+        response.setHeader("content-type", "message/rfc822");
+        response.end(raw);
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted email test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        emailBaseUrl: `http://127.0.0.1:${address.port}`,
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            envelopeFrom: "alice@example.test",
+            envelopeTo: "assistant+u-member_email_alias@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_email_alias",
+            threadTarget: null,
+            userId: "member_email_alias",
+          },
+          eventId: "evt_email_alias",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-alias-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const runtime = await openInboxRuntime({
+        vaultRoot: restored.vaultRoot,
+      });
+
+      try {
+        await rebuildRuntimeFromVault({
+          runtime,
+          vaultRoot: restored.vaultRoot,
+        });
+        const capture = runtime.listCaptures({ limit: 1 })[0];
+        const threadTarget = parseHostedEmailThreadTarget(capture?.thread.id ?? null);
+
+        expect(capture?.actor.id).toBe("alice@example.test");
+        expect(capture?.thread.isDirect).toBe(true);
+        expect(threadTarget?.to).toEqual(["reply@example.test"]);
+        expect(threadTarget?.cc).toEqual(["team@example.test"]);
+      } finally {
+        runtime.close();
+      }
     } finally {
       setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();

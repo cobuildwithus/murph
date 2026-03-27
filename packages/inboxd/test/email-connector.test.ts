@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   createHostedEmailThreadTarget,
+  parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
 } from "@murph/runtime-state";
 
@@ -323,4 +324,31 @@ test("parseRawEmailMessage parses multipart email and normalizeParsedEmailMessag
   assert.equal(capture.attachments[0]?.kind, 'document');
   assert.equal(capture.attachments[0]?.fileName, 'summary.pdf');
   assert.equal(capture.attachments[0]?.byteSize, 'pdf-data'.length);
+});
+
+test("normalizeParsedEmailMessage treats the hosted stable alias as self and prefers Reply-To for first-contact thread targets", async () => {
+  const raw = [
+    'From: Alice Example <alice@example.test>',
+    'Reply-To: Alice Replies <reply@example.test>, Team Replies <team@example.test>',
+    'To: assistant+u-member_123@mail.example.test',
+    'Subject: Hosted hello',
+    'Message-ID: <msg_alias_123@example.test>',
+    'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+    '',
+    'Hello from the hosted stable alias path.',
+    '',
+  ].join('\r\n');
+
+  const capture = await normalizeParsedEmailMessage({
+    accountAddress: 'assistant@mail.example.test',
+    accountId: 'assistant@mail.example.test',
+    message: parseRawEmailMessage(raw),
+    selfAddresses: ['assistant+u-member_123@mail.example.test'],
+  });
+  const threadTarget = parseHostedEmailThreadTarget(capture.thread.id);
+
+  assert.equal(capture.thread.isDirect, true);
+  assert.equal(capture.actor.id, 'alice@example.test');
+  assert.equal(threadTarget?.to[0], 'reply@example.test');
+  assert.deepEqual(threadTarget?.cc ?? [], ['team@example.test']);
 });

@@ -130,8 +130,8 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(stub.dispatch).toHaveBeenCalledTimes(1);
-    expect(stub.dispatch).toHaveBeenCalledWith(dispatch);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
   });
 
   it("rejects stale, malformed, and future signed dispatch requests", async () => {
@@ -213,9 +213,9 @@ describe("cloudflare worker routes", () => {
       ok: true,
     });
     expect(harness.bucket.keys()).toEqual([
+      "bundles/agent-state/ad36dc9bda6b1f6ed90262c98b5884c0284212b608662e5d6d2398c4c7915feb.bundle.json",
+      "bundles/vault/e6f0a1fbb43c89196dcfcbef85908f19ab4c5f7cc4f4c452284697757683d7ef.bundle.json",
       "transient/execution-journal/member_123/evt_commit.json",
-      "users/member_123/agent-state.bundle.json",
-      "users/member_123/vault.bundle.json",
     ]);
     const journalStore = createHostedExecutionJournalStore({
       bucket: harness.bucket.api,
@@ -532,8 +532,10 @@ describe("cloudflare worker routes", () => {
     const updateResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/env", {
         body: JSON.stringify({
+          env: {
+            OPENAI_API_KEY: "sk-test",
+          },
           mode: "merge",
-          OPENAI_API_KEY: "sk-test",
         }),
         headers: {
           authorization: "Bearer control-token",
@@ -544,7 +546,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(updateResponse.status).toBe(200);
-    expect(stub.updateUserEnv).toHaveBeenCalledWith("member_123", {
+    expect(stub.updateUserEnv).toHaveBeenCalledWith({
       env: {
         OPENAI_API_KEY: "sk-test",
       },
@@ -561,7 +563,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(envStatusResponse.status).toBe(200);
-    expect(stub.getUserEnvStatus).toHaveBeenCalledWith("member_123");
+    expect(stub.getUserEnvStatus).toHaveBeenCalledWith();
 
     const clearResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/env", {
@@ -659,6 +661,29 @@ describe("cloudflare worker routes", () => {
       }),
       createWorkerEnv(createUserRunnerStub(), {
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted email ingress is not configured.",
+    });
+  });
+
+  it("returns 503 from the hosted email address route when a sender address is configured without a hosted email domain", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      createWorkerEnv(createUserRunnerStub(), {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
       }),
     );
 
@@ -1013,8 +1038,14 @@ describe("cloudflare worker routes", () => {
 
     expect(overflowResponse.status).toBe(429);
     await expect(overflowResponse.json()).resolves.toMatchObject({
-      backpressuredEventIds: ["evt_overflow"],
-      poisonedEventIds: [],
+      event: {
+        eventId: "evt_overflow",
+        state: "backpressured",
+      },
+      status: {
+        backpressuredEventIds: ["evt_overflow"],
+        poisonedEventIds: [],
+      },
     });
 
     firstRun.resolve();
@@ -1357,9 +1388,9 @@ function createUserRunnerStub() {
     bootstrapUser: vi.fn(async (userId: string) => ({
       userId,
     })),
-    clearUserEnv: vi.fn(async (userId: string) => ({
+    clearUserEnv: vi.fn(async () => ({
       configuredUserEnvKeys: [],
-      userId,
+      userId: "member_123",
     })),
     commit: vi.fn(async (input: {
       eventId: string;
@@ -1376,6 +1407,8 @@ function createUserRunnerStub() {
         summary: "ok",
       },
     })),
+    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
+      buildDispatchResultFixture(input.event.userId, input.eventId)),
     dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
       backpressuredEventIds: [],
       bundleRefs: {
@@ -1407,11 +1440,11 @@ function createUserRunnerStub() {
         summary: "ok",
       },
     })),
-    getUserEnvStatus: vi.fn(async (userId: string) => ({
+    getUserEnvStatus: vi.fn(async () => ({
       configuredUserEnvKeys: [],
-      userId,
+      userId: "member_123",
     })),
-    status: vi.fn(async (userId: string) => ({
+    status: vi.fn(async () => ({
       backpressuredEventIds: [],
       bundleRefs: {
         agentState: null,
@@ -1425,12 +1458,39 @@ function createUserRunnerStub() {
       pendingEventCount: 0,
       poisonedEventIds: [],
       retryingEventId: null,
-      userId,
+      userId: "member_123",
     })),
-    updateUserEnv: vi.fn(async (userId: string, update: { env: Record<string, string | null> }) => ({
+    updateUserEnv: vi.fn(async (update: { env: Record<string, string | null> }) => ({
       configuredUserEnvKeys: Object.keys(update.env).sort(),
-      userId,
+      userId: "member_123",
     })),
+  };
+}
+
+function buildDispatchResultFixture(userId: string, eventId: string) {
+  return {
+    event: {
+      eventId,
+      lastError: null,
+      state: "completed" as const,
+      userId,
+    },
+    status: {
+      backpressuredEventIds: [],
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: eventId,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId,
+    },
   };
 }
 

@@ -7,6 +7,7 @@ import {
   runHostedAssistantRuntimeJobIsolated,
   type HostedAssistantRuntimeJobRequest,
 } from "@murph/assistant-runtime";
+import { readHostedEmailCapabilities } from "@murph/hosted-execution";
 
 import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
 import { normalizeHostedUserEnv } from "./user-env.ts";
@@ -52,13 +53,20 @@ export async function runHostedExecutionJob(
 ): Promise<HostedExecutionRunnerResult> {
   hostedExecutionRunStartHookForTests?.();
   const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests;
+  const emailCapabilities = readHostedEmailCapabilities(
+    process.env as Readonly<Record<string, string | undefined>>,
+  );
 
   const runtime = {
     ...callbackBaseUrls,
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
       Number.parseInt(process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
     ),
-    forwardedEnv: buildHostedRunnerContainerEnv(process.env),
+    forwardedEnv: {
+      ...buildHostedRunnerContainerEnv(process.env),
+      HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
+      HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
+    },
     userEnv: normalizeHostedUserEnv(input.userEnv ?? {}, process.env),
   };
 

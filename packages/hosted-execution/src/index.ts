@@ -3,6 +3,7 @@ export * from "./builders.ts";
 export * from "./client.ts";
 export * from "./contracts.ts";
 export * from "./env.ts";
+export * from "./hosted-email.ts";
 export * from "./parsers.ts";
 export * from "./routes.ts";
 export * from "./side-effects.ts";
