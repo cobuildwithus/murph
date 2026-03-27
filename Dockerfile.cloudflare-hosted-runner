@@ -6,13 +6,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/root \
     NODE_ENV=production \
     PORT=8080 \
-    WHISPER_MODEL=base \
     XDG_CACHE_HOME=/root/.cache \
     HOSTED_HOME=/root/.murph \
     HOSTED_MODELS_ROOT=/root/.murph/models \
-    WHISPER_MODEL_DIR=/root/.murph/models/whisper \
-    PADDLEOCR_MODEL_DIR=/root/.murph/models/paddleocr \
-    PARSER_FFMPEG_PATH=/usr/bin/ffmpeg \
+    FFMPEG_COMMAND=/usr/bin/ffmpeg \
     HF_HOME=/root/.cache/huggingface
 
 RUN apt-get update \

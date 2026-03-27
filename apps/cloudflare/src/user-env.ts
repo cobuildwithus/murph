@@ -2,7 +2,6 @@ export const HOSTED_USER_ENV_SCHEMA = "murph.hosted-user-env.v1";
 const LEGACY_HOSTED_USER_ENV_SCHEMA = "healthybob.hosted-user-env.v1";
 
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
-  "AGENTMAIL_API_BASE_URL",
   "AGENTMAIL_API_KEY",
   "AGENTMAIL_BASE_URL",
   "ANTHROPIC_API_KEY",
@@ -20,8 +19,6 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "OURA_CLIENT_ID",
   "OURA_CLIENT_SECRET",
   "PADDLEOCR_COMMAND",
-  "PADDLEOCR_MODEL_DIR",
-  "PARSER_FFMPEG_PATH",
   "PDFTOTEXT_COMMAND",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
@@ -30,8 +27,6 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "TELEGRAM_WEBHOOK_SECRET",
   "TOGETHER_API_KEY",
   "WHISPER_COMMAND",
-  "WHISPER_MODEL",
-  "WHISPER_MODEL_DIR",
   "WHISPER_MODEL_PATH",
   "WHOOP_CLIENT_ID",
   "WHOOP_CLIENT_SECRET",
@@ -94,6 +89,10 @@ export interface HostedUserEnvUpdate {
 
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
+const HOSTED_USER_ENV_ALIASES = {
+  AGENTMAIL_API_BASE_URL: "AGENTMAIL_BASE_URL",
+  PARSER_FFMPEG_PATH: "FFMPEG_COMMAND",
+} as const;
 
 export function decodeHostedUserEnvPayload(
   payload: Uint8Array | ArrayBuffer | null,
@@ -267,7 +266,7 @@ function normalizeHostedUserEnvKey(key: string): string {
     throw new Error(`Hosted user env key is invalid: ${key}`);
   }
 
-  return normalized;
+  return HOSTED_USER_ENV_ALIASES[normalized as keyof typeof HOSTED_USER_ENV_ALIASES] ?? normalized;
 }
 
 function normalizeHostedUserEnvValue(value: string, key: string): string | null {

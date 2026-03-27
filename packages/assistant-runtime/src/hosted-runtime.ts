@@ -33,7 +33,10 @@ import {
 } from "@murph/runtime-state";
 import {
   buildHostedAssistantDeliverySideEffect,
+  parseHostedExecutionSharePackResponse,
   parseHostedExecutionSideEffects,
+  readHostedEmailCapabilities,
+  resolveHostedEmailSelfAddresses,
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunnerRequest,
@@ -43,18 +46,30 @@ import {
 } from "@murph/hosted-execution";
 import {
   createIntegratedInboxCliServices,
+} from "murph/inbox-services";
+import {
   createIntegratedVaultCliServices,
-  dispatchAssistantOutboxIntent,
-  getAssistantCronStatus,
-  listAssistantOutboxIntents,
-  readAssistantAutomationState,
-  refreshAssistantStatusSnapshot,
+} from "murph/vault-cli-services";
+import {
   runAssistantAutomation,
-  saveAssistantAutomationState,
+} from "murph/assistant/automation";
+import {
+  getAssistantCronStatus,
+} from "murph/assistant/cron";
+import {
+  dispatchAssistantOutboxIntent,
+  listAssistantOutboxIntents,
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-} from "@murph/assistant-services";
+} from "murph/assistant/outbox";
+import {
+  readAssistantAutomationState,
+  saveAssistantAutomationState,
+} from "murph/assistant/store";
+import {
+  refreshAssistantStatusSnapshot,
+} from "murph/assistant/status";
 import {
   buildHostedRunnerEmailMessageUrl,
   createHostedEmailChannelDependencies,
@@ -114,7 +129,6 @@ interface HostedAssistantRuntimeChildResult {
 
 interface HostedBootstrapResult {
   emailAutoReplyEnabled: boolean;
-  linqAutoReplyEnabled: boolean;
   vaultCreated: boolean;
 }
 
@@ -383,13 +397,17 @@ function resumeHostedCommittedExecution(
 async function executeHostedDispatchForCommit(input: {
   request: HostedAssistantRuntimeJobRequest;
   restored: HostedRestoredExecutionContext;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "emailBaseUrl">;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "emailBaseUrl" | "sharePackBaseUrl" | "sharePackToken"
+  >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
   const requestId = input.request.dispatch.eventId;
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
     emailBaseUrl: input.runtime.emailBaseUrl,
+    runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     vaultRoot: input.restored.vaultRoot,
   });
@@ -572,6 +590,7 @@ async function prepareHostedDispatchContext(
 async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   emailBaseUrl: string;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<HostedDispatchExecutionMetrics> {
@@ -583,6 +602,7 @@ async function executeHostedDispatchEvent(input: {
   const dispatchEffect = await handleHostedDispatchEvent({
     dispatch: input.dispatch,
     emailBaseUrl: input.emailBaseUrl,
+    runtime: input.runtime,
     vaultRoot: input.vaultRoot,
   });
 
@@ -596,6 +616,7 @@ async function executeHostedDispatchEvent(input: {
 async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   emailBaseUrl: string;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">;
   vaultRoot: string;
 }): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
   const dispatch = input.dispatch;
@@ -635,9 +656,13 @@ async function handleHostedDispatchEvent(input: {
         shareImportTitle: null,
       };
     case "vault.share.accepted":
-      return await handleHostedShareAcceptedDispatch(input.vaultRoot, {
-        ...dispatch,
-        event: dispatch.event,
+      return await handleHostedShareAcceptedDispatch({
+        dispatch: {
+          ...dispatch,
+          event: dispatch.event,
+        },
+        runtime: input.runtime,
+        vaultRoot: input.vaultRoot,
       });
     default:
       return assertNever(dispatch.event);
@@ -645,18 +670,58 @@ async function handleHostedDispatchEvent(input: {
 }
 
 async function handleHostedShareAcceptedDispatch(
-  vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest & {
-    event: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>;
+  input: {
+    dispatch: HostedExecutionDispatchRequest & {
+      event: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>;
+    };
+    runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">;
+    vaultRoot: string;
   },
 ): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
+  const sharePayload = await fetchHostedSharePayload(
+    input.dispatch.event.share,
+    input.runtime,
+  );
+
   return {
     shareImportResult: await importSharePackIntoVault({
-      vaultRoot,
-      pack: dispatch.event.pack,
+      vaultRoot: input.vaultRoot,
+      pack: sharePayload.pack,
     }),
-    shareImportTitle: dispatch.event.pack.title,
+    shareImportTitle: sharePayload.pack.title,
   };
+}
+
+async function fetchHostedSharePayload(
+  share: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>["share"],
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">,
+): Promise<ReturnType<typeof parseHostedExecutionSharePackResponse>> {
+  if (!runtime.sharePackBaseUrl || !runtime.sharePackToken) {
+    throw new Error("Hosted share payload fetch is not configured.");
+  }
+
+  const url = new URL(
+    `/api/hosted-share/internal/${encodeURIComponent(share.shareId)}/payload`,
+    runtime.sharePackBaseUrl,
+  );
+  url.searchParams.set("shareCode", share.shareCode);
+  const response = await fetch(url, {
+    headers: {
+      authorization: `Bearer ${runtime.sharePackToken}`,
+    },
+  });
+  const text = await response.text();
+  const payload = text.trim() ? JSON.parse(text) as unknown : null;
+
+  if (!response.ok) {
+    throw new Error(
+      `Hosted share payload fetch failed with HTTP ${response.status}${
+        text ? `: ${text.slice(0, 500)}` : ""
+      }.`,
+    );
+  }
+
+  return parseHostedExecutionSharePackResponse(payload);
 }
 
 async function bootstrapHostedMemberContext(
@@ -678,18 +743,13 @@ async function bootstrapHostedMemberContext(
 
   const automationState = await readAssistantAutomationState(vaultRoot);
   const nextAutoReplyChannels = [...automationState.autoReplyChannels];
-  const linqAutoReplyEnabled = !nextAutoReplyChannels.includes("linq");
-  if (linqAutoReplyEnabled) {
-    nextAutoReplyChannels.push("linq");
-  }
-
-  const emailAutoReplyEnabled = isHostedEmailConfigured(runtimeEnv)
+  const emailAutoReplyEnabled = readHostedEmailCapabilities(runtimeEnv).sendReady
     && !nextAutoReplyChannels.includes("email");
   if (emailAutoReplyEnabled) {
     nextAutoReplyChannels.push("email");
   }
 
-  if (linqAutoReplyEnabled || emailAutoReplyEnabled) {
+  if (emailAutoReplyEnabled) {
     await saveAssistantAutomationState(vaultRoot, {
       ...automationState,
       autoReplyChannels: nextAutoReplyChannels,
@@ -699,29 +759,8 @@ async function bootstrapHostedMemberContext(
 
   return {
     emailAutoReplyEnabled,
-    linqAutoReplyEnabled,
     vaultCreated,
   };
-}
-
-
-function isHostedEmailConfigured(env: Readonly<Record<string, string>>): boolean {
-  return resolveHostedEmailSenderIdentity(env) !== null;
-}
-
-function resolveHostedEmailSenderIdentity(env: Readonly<Record<string, string>>): string | null {
-  const explicit = env.HOSTED_EMAIL_FROM_ADDRESS?.trim() ?? "";
-  if (explicit) {
-    return explicit;
-  }
-
-  const domain = env.HOSTED_EMAIL_DOMAIN?.trim() ?? "";
-  if (!domain) {
-    return null;
-  }
-
-  const localPart = env.HOSTED_EMAIL_LOCAL_PART?.trim() || "assistant";
-  return `${localPart}@${domain}`;
 }
 async function requireHostedBootstrapForDispatch(
   vaultRoot: string,
@@ -818,6 +857,10 @@ async function ingestHostedEmailMessage(
       accountAddress: dispatch.event.identityId,
       accountId: dispatch.event.identityId,
       message: parseRawEmailMessage(new Uint8Array(await response.arrayBuffer())),
+      selfAddresses: resolveHostedEmailSelfAddresses({
+        envelopeTo: dispatch.event.envelopeTo,
+        senderIdentity: dispatch.event.identityId,
+      }),
       source: "email",
       threadTarget: dispatch.event.threadTarget,
     });
@@ -1206,9 +1249,6 @@ function summarizeDispatch(
             metrics.bootstrapResult.vaultCreated
               ? "created the canonical vault"
               : "reused the canonical vault",
-            metrics.bootstrapResult.linqAutoReplyEnabled
-              ? "enabled Linq auto-reply"
-              : "kept Linq auto-reply enabled",
             metrics.bootstrapResult.emailAutoReplyEnabled
               ? "enabled hosted email auto-reply"
               : "kept hosted email auto-reply unchanged",
@@ -1229,7 +1269,7 @@ function summarizeDispatch(
       const importedProtocols = metrics.shareImportResult?.protocols.length ?? 0;
       const importedRecipes = metrics.shareImportResult?.recipes.length ?? 0;
       const loggedMeal = metrics.shareImportResult?.meal ? " Logged one meal entry from the shared food." : "";
-      const title = metrics.shareImportTitle ?? dispatch.event.pack.title;
+      const title = metrics.shareImportTitle ?? dispatch.event.share.shareId;
       return `Imported share pack "${title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
     }
     default:

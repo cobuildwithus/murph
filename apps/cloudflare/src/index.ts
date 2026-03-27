@@ -1,7 +1,12 @@
+import { DurableObject } from "cloudflare:workers";
+
 import {
   buildHostedExecutionAssistantCronTickDispatch,
+  buildHostedExecutionEmailMessageReceivedDispatch,
   parseHostedExecutionDispatchRequest,
+  readHostedEmailCapabilities,
   type HostedExecutionBundleRef,
+  type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
@@ -44,6 +49,7 @@ interface UserRunnerDurableObjectStubLike {
     };
   }): Promise<HostedExecutionCommittedResult>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
+  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
   finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
@@ -195,12 +201,7 @@ export default {
         })
       ) ?? notFound();
     } catch (error) {
-      return json(
-        {
-          error: error instanceof Error ? error.message : String(error),
-        },
-        500,
-      );
+      return mapWorkerRouteError(error);
     }
   },
   async email(message: HostedEmailWorkerRequest, env: WorkerEnvironmentSource): Promise<void> {
@@ -208,10 +209,11 @@ export default {
   },
 };
 
-export class UserRunnerDurableObject implements UserRunnerDurableObjectStubLike {
+export class UserRunnerDurableObject extends DurableObject implements UserRunnerDurableObjectStubLike {
   private readonly runner: HostedUserRunner;
 
   constructor(state: DurableObjectStateLike, env: WorkerEnvironmentSource) {
+    super(state as never, env as never);
     this.runner = new HostedUserRunner(
       state,
       readHostedExecutionEnvironment(
@@ -231,6 +233,10 @@ export class UserRunnerDurableObject implements UserRunnerDurableObjectStubLike 
     return this.runner.dispatch(input);
   }
 
+  async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
+    return this.runner.dispatchWithOutcome(input);
+  }
+
   async commit(input: {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
@@ -239,58 +245,30 @@ export class UserRunnerDurableObject implements UserRunnerDurableObjectStubLike 
         vault: HostedExecutionBundleRef | null;
       };
     };
-    userId?: string;
   }): Promise<HostedExecutionCommittedResult> {
-    if (input.userId) {
-      await this.runner.bootstrapUser(input.userId);
-    }
     return this.runner.commit(input);
   }
 
   async finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
-    userId?: string;
   }): Promise<HostedExecutionCommittedResult> {
-    if (input.userId) {
-      await this.runner.bootstrapUser(input.userId);
-    }
     return this.runner.finalizeCommit(input);
   }
 
-  async status(userId?: string): Promise<HostedExecutionUserStatus> {
-    if (userId) {
-      await this.runner.bootstrapUser(userId);
-    }
+  async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
   }
 
-  async getUserEnvStatus(userId?: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    if (userId) {
-      await this.runner.bootstrapUser(userId);
-    }
+  async getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
     return this.runner.getUserEnvStatus();
   }
 
-  async updateUserEnv(
-    userIdOrUpdate: string | HostedUserEnvUpdate,
-    update?: HostedUserEnvUpdate,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    if (typeof userIdOrUpdate === "string") {
-      await this.runner.bootstrapUser(userIdOrUpdate);
-      if (!update) {
-        throw new TypeError("Hosted user env update payload is required.");
-      }
-      return this.runner.updateUserEnv(update);
-    }
-
-    return this.runner.updateUserEnv(userIdOrUpdate);
+  async updateUserEnv(update: HostedUserEnvUpdate): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.runner.updateUserEnv(update);
   }
 
-  async clearUserEnv(userId?: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    if (userId) {
-      await this.runner.bootstrapUser(userId);
-    }
+  async clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
     return this.runner.clearUserEnv();
   }
 
@@ -397,7 +375,7 @@ async function handleStatusRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(await callRunnerStatus(stub, userId));
+  return json(await stub.status());
 }
 
 async function handleUserEnvRoute(
@@ -408,20 +386,16 @@ async function handleUserEnvRoute(
   const stub = await resolveUserRunnerStub(context.env, userId);
 
   if (context.request.method === "GET") {
-    return json(await callRunnerGetUserEnvStatus(stub, userId));
+    return json(await stub.getUserEnvStatus());
   }
 
   if (context.request.method === "PUT") {
     return json(
-      await callRunnerUpdateUserEnv(
-        stub,
-        userId,
-        parseHostedUserEnvUpdate(await readJsonObject(context.request)),
-      ),
+      await stub.updateUserEnv(parseHostedUserEnvUpdate(await readJsonObject(context.request))),
     );
   }
 
-  return json(await callRunnerClearUserEnv(stub, userId));
+  return json(await stub.clearUserEnv());
 }
 
 async function handleUserEmailAddressRoute(
@@ -429,6 +403,15 @@ async function handleUserEmailAddressRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
+  const capabilities = readHostedEmailCapabilities(
+    context.env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  if (!capabilities.ingressReady || !capabilities.senderIdentity) {
+    return json({
+      error: "Hosted email ingress is not configured.",
+    }, 503);
+  }
+
   const config = readHostedEmailConfig(
     context.env as unknown as Readonly<Record<string, string | undefined>>,
   );
@@ -442,7 +425,7 @@ async function handleUserEmailAddressRoute(
 
   return json({
     address,
-    identityId: config.fromAddress,
+    identityId: capabilities.senderIdentity,
     userId,
   });
 }
@@ -454,6 +437,14 @@ async function handleHostedEmailIngress(
   const environment = readHostedExecutionEnvironment(
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
+  const capabilities = readHostedEmailCapabilities(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  if (!capabilities.ingressReady) {
+    message.setReject?.("Hosted email ingress is not configured.");
+    return;
+  }
+
   const config = readHostedEmailConfig(
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
@@ -480,19 +471,16 @@ async function handleHostedEmailIngress(
   const eventId = `email:${rawMessageKey}`;
 
   const stub = await resolveUserRunnerStub(env, route.userId);
-  await stub.dispatch({
-    event: {
-      envelopeFrom: normalizeHostedEmailEnvelopeAddress(message.from),
-      envelopeTo: normalizeHostedEmailEnvelopeAddress(message.to),
-      identityId: route.identityId,
-      kind: "email.message.received",
-      rawMessageKey,
-      threadTarget: route.target ? serializeHostedEmailThreadTarget(route.target) : null,
-      userId: route.userId,
-    },
+  await stub.dispatch(buildHostedExecutionEmailMessageReceivedDispatch({
+    envelopeFrom: normalizeHostedEmailEnvelopeAddress(message.from),
+    envelopeTo: normalizeHostedEmailEnvelopeAddress(message.to),
     eventId,
+    identityId: route.identityId,
     occurredAt: new Date().toISOString(),
-  });
+    rawMessageKey,
+    threadTarget: route.target ? serializeHostedEmailThreadTarget(route.target) : null,
+    userId: route.userId,
+  }));
 }
 
 function normalizeHostedEmailEnvelopeAddress(value: string | null | undefined): string | null {
@@ -503,11 +491,12 @@ function normalizeHostedEmailEnvelopeAddress(value: string | null | undefined): 
 async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<Response> {
   const payload = await readCachedRequestText(context);
   const dispatch = parseHostedExecutionDispatchRequest(JSON.parse(payload) as unknown);
-  const status = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatch(dispatch);
+  const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId))
+    .dispatchWithOutcome(dispatch);
 
-  return isBackpressuredStatus(status, dispatch.eventId)
-    ? json(status, 429)
-    : json(status);
+  return result.event.state === "backpressured"
+    ? json(result, 429)
+    : json(result);
 }
 
 function createManualRunDispatch(userId: string): HostedExecutionDispatchRequest {
@@ -524,79 +513,8 @@ async function resolveUserRunnerStub(
   userId: string,
 ): Promise<UserRunnerDurableObjectStubLike> {
   const stub = env.USER_RUNNER.getByName(userId);
-  await maybeBootstrapRunnerUser(stub, userId);
+  await stub.bootstrapUser(userId);
   return stub;
-}
-
-async function callRunnerStatus(
-  stub: UserRunnerDurableObjectStubLike,
-  userId: string,
-): Promise<HostedExecutionUserStatus> {
-  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
-    status: (userId?: string) => Promise<HostedExecutionUserStatus>;
-  };
-  return compatibleStub.status.length > 0
-    ? compatibleStub.status(userId)
-    : compatibleStub.status();
-}
-
-async function callRunnerGetUserEnvStatus(
-  stub: UserRunnerDurableObjectStubLike,
-  userId: string,
-): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
-    getUserEnvStatus: (userId?: string) => Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
-  };
-  return compatibleStub.getUserEnvStatus.length > 0
-    ? compatibleStub.getUserEnvStatus(userId)
-    : compatibleStub.getUserEnvStatus();
-}
-
-async function callRunnerUpdateUserEnv(
-  stub: UserRunnerDurableObjectStubLike,
-  userId: string,
-  update: HostedUserEnvUpdate,
-): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
-    updateUserEnv: (
-      userIdOrUpdate: string | HostedUserEnvUpdate,
-      update?: HostedUserEnvUpdate,
-    ) => Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
-  };
-  return compatibleStub.updateUserEnv.length > 1
-    ? compatibleStub.updateUserEnv(userId, update)
-    : compatibleStub.updateUserEnv(update);
-}
-
-async function callRunnerClearUserEnv(
-  stub: UserRunnerDurableObjectStubLike,
-  userId: string,
-): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
-    clearUserEnv: (userId?: string) => Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
-  };
-  return compatibleStub.clearUserEnv.length > 0
-    ? compatibleStub.clearUserEnv(userId)
-    : compatibleStub.clearUserEnv();
-}
-
-async function maybeBootstrapRunnerUser(
-  stub: UserRunnerDurableObjectStubLike,
-  userId: string,
-): Promise<void> {
-  try {
-    await (stub as UserRunnerDurableObjectStubLike & {
-      bootstrapUser?: (userId: string) => Promise<{ userId: string }>;
-    }).bootstrapUser?.(userId);
-  } catch (error) {
-    if (
-      error instanceof TypeError
-      && error.message.includes('does not implement "bootstrapUser"')
-    ) {
-      return;
-    }
-    throw error;
-  }
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {
@@ -633,6 +551,23 @@ function decodeRouteParam(value: string): string {
 
 function unauthorized(): Response {
   return json({ error: "Unauthorized" }, 401);
+}
+
+function mapWorkerRouteError(error: unknown): Response {
+  const status = (
+    error instanceof SyntaxError
+    || error instanceof TypeError
+    || error instanceof URIError
+  )
+    ? 400
+    : 500;
+
+  return json(
+    {
+      error: error instanceof Error ? error.message : String(error),
+    },
+    status,
+  );
 }
 
 async function readCachedRequestText(
