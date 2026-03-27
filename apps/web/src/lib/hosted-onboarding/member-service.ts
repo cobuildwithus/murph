@@ -155,6 +155,15 @@ export async function completeHostedPrivyVerification(input: {
         prisma,
         now,
       });
+
+  if (member.status === HostedMemberStatus.suspended) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      message: "This hosted account is suspended. Contact support to restore access.",
+      httpStatus: 403,
+    });
+  }
+
   const activeInvite = invite ?? await issueHostedInvite({
     channel: "web",
     linqChatId: null,
@@ -442,9 +451,12 @@ async function reconcileHostedPrivyIdentityOnMember(input: {
         normalizedPhoneNumber: input.identity.phone.number,
         phoneNumberVerifiedAt: input.now,
         privyUserId: input.identity.userId,
-        status: input.member.billingStatus === HostedBillingStatus.active
-          ? HostedMemberStatus.active
-          : HostedMemberStatus.registered,
+        status:
+          input.member.status === HostedMemberStatus.suspended
+            ? HostedMemberStatus.suspended
+            : input.member.billingStatus === HostedBillingStatus.active
+              ? HostedMemberStatus.active
+              : HostedMemberStatus.registered,
         walletAddress: normalizedWalletAddress,
         walletChainType: input.identity.wallet.chainType,
         walletProvider: "privy",

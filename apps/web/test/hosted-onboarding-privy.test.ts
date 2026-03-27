@@ -22,6 +22,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
+  getOptionalHostedPrivyIdentityFromCookies,
   hasHostedPrivyPhoneAuthConfig,
   readHostedPrivyIdentityTokenFromCookieStore,
   requireHostedPrivyIdentity,
@@ -153,6 +154,35 @@ describe("hosted Privy verification", () => {
       httpStatus: 401,
     });
     expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
+  });
+
+  it("treats an invalid optional Privy cookie as absent", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "stale-cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockRejectedValue(new Error("bad token"));
+
+    await expect(getOptionalHostedPrivyIdentityFromCookies()).resolves.toBeNull();
+  });
+
+  it("treats an optional Privy cookie without the required embedded wallet as absent", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phoneNumber: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+    });
+
+    await expect(getOptionalHostedPrivyIdentityFromCookies()).resolves.toBeNull();
   });
 
   it("requires the Privy verification key config for hosted verification", async () => {

@@ -20,7 +20,6 @@ export interface HostedRevnetConfig {
   stripeCurrency: string;
   terminalAddress: Address;
   treasuryPrivateKey: Hex;
-  waitConfirmations: number;
   weiPerStripeMinorUnit: bigint;
 }
 
@@ -158,36 +157,6 @@ export async function submitHostedRevnetPayment(input: {
   };
 }
 
-export async function waitForHostedRevnetPaymentConfirmation(input: {
-  chainId?: number;
-  txHash: Hex;
-}): Promise<void> {
-  const config = requireHostedRevnetConfig();
-  const confirmations = Math.max(1, config.waitConfirmations);
-
-  const publicClient = createPublicClient({
-    transport: http(config.rpcUrl),
-  });
-  await assertHostedRevnetRpcChain({
-    chainId: input.chainId ?? config.chainId,
-    publicClient,
-    rpcUrl: config.rpcUrl,
-  });
-  const receipt = await publicClient.waitForTransactionReceipt({
-    confirmations,
-    hash: input.txHash,
-  });
-
-  if (receipt.status !== "success") {
-    throw hostedOnboardingError({
-      code: "REVNET_PAYMENT_REVERTED",
-      message: `Hosted RevNet payment reverted onchain for transaction ${input.txHash}.`,
-      httpStatus: 502,
-      retryable: true,
-    });
-  }
-}
-
 export function requireHostedRevnetConfig(): HostedRevnetConfig {
   const environment = getHostedOnboardingEnvironment();
 
@@ -268,7 +237,6 @@ export function requireHostedRevnetConfig(): HostedRevnetConfig {
     stripeCurrency: environment.revnetStripeCurrency,
     terminalAddress,
     treasuryPrivateKey: parsePrivateKey(environment.revnetTreasuryPrivateKey),
-    waitConfirmations: environment.revnetWaitConfirmations,
     weiPerStripeMinorUnit,
   };
 }

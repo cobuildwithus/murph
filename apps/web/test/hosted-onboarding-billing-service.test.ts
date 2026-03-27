@@ -50,7 +50,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     revnetStripeCurrency: "usd",
     revnetTerminalAddress: "0x0000000000000000000000000000000000000001",
     revnetTreasuryPrivateKey: `0x${"11".repeat(32)}`,
-    revnetWaitConfirmations: 1,
     revnetWeiPerStripeMinorUnit: "2000000000000",
     sessionCookieName: "hb_hosted_session",
     sessionTtlDays: 30,

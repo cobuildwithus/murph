@@ -76,7 +76,15 @@ export async function getOptionalHostedPrivyIdentityFromCookies(): Promise<Hoste
     return null;
   }
 
-  return requireHostedPrivyIdentity(identityToken);
+  try {
+    return await requireHostedPrivyIdentity(identityToken);
+  } catch (error) {
+    if (isOptionalHostedPrivyIdentityError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 export async function verifyHostedPrivyIdentityToken(identityToken: string): Promise<HostedPrivyUser> {
@@ -151,4 +159,17 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   }
 
   return null;
+}
+
+function isOptionalHostedPrivyIdentityError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = "code" in error ? error.code : null;
+  return (
+    code === "PRIVY_AUTH_FAILED" ||
+    code === "PRIVY_PHONE_REQUIRED" ||
+    code === "PRIVY_WALLET_REQUIRED"
+  );
 }

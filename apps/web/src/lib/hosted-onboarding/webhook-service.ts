@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
-import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
+import { Prisma, type HostedMember, type HostedRevnetIssuance, type PrismaClient } from "@prisma/client";
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {
   HostedBillingCheckoutStatus,
@@ -55,28 +55,28 @@ import {
   isHostedOnboardingRevnetEnabled,
   requireHostedRevnetConfig,
   submitHostedRevnetPayment,
-  waitForHostedRevnetPaymentConfirmation,
 } from "./revnet";
 import { requireHostedMemberWalletAddressForRevnet } from "./billing-service";
 
 const REVNET_BROADCAST_STATUS_UNKNOWN_CODE = "REVNET_PAYMENT_BROADCAST_STATUS_UNKNOWN";
 import { revokeHostedSessionsForMember } from "./session";
 
-type HostedRevnetIssuanceRecord = {
-  beneficiaryAddress: string;
-  chainId: number;
-  failureCode?: string | null;
-  id: string;
-  idempotencyKey: string;
-  payTxHash: string | null;
-  paymentAmount: string;
-  projectId: string;
-  status: HostedRevnetIssuanceStatus;
-  stripeChargeId?: string | null;
-  stripePaymentIntentId?: string | null;
-  terminalAddress: string;
-  updatedAt: Date;
-};
+type HostedRevnetIssuanceRecord = Pick<
+  HostedRevnetIssuance,
+  | "beneficiaryAddress"
+  | "chainId"
+  | "failureCode"
+  | "id"
+  | "idempotencyKey"
+  | "payTxHash"
+  | "paymentAmount"
+  | "projectId"
+  | "status"
+  | "stripeChargeId"
+  | "stripePaymentIntentId"
+  | "terminalAddress"
+  | "updatedAt"
+>;
 
 type HostedWebhookEventPayload = Prisma.InputJsonObject;
 
@@ -595,14 +595,7 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
     prisma: input.prisma,
   });
 
-  if (
-    issuance.status === HostedRevnetIssuanceStatus.confirmed ||
-    issuance.status === HostedRevnetIssuanceStatus.submitted ||
-    issuance.payTxHash ||
-    isHostedRevnetIssuanceBroadcastStatusUnknown(issuance) ||
-    (issuance.status === HostedRevnetIssuanceStatus.submitting &&
-      !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt))
-  ) {
+  if (shouldSkipHostedRevnetIssuanceSubmission(issuance)) {
     return;
   }
 
@@ -626,15 +619,7 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
       },
     });
 
-    if (
-      !latestIssuance ||
-      latestIssuance.status === HostedRevnetIssuanceStatus.confirmed ||
-      latestIssuance.status === HostedRevnetIssuanceStatus.submitted ||
-      latestIssuance.payTxHash ||
-      isHostedRevnetIssuanceBroadcastStatusUnknown(latestIssuance) ||
-      (latestIssuance.status === HostedRevnetIssuanceStatus.submitting &&
-        !isHostedRevnetIssuanceSubmittingStale(latestIssuance.updatedAt))
-    ) {
+    if (shouldSkipHostedRevnetIssuanceSubmission(latestIssuance)) {
       return;
     }
 
@@ -696,54 +681,6 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
       },
     });
   }
-}
-
-async function confirmHostedRevnetIssuance(input: {
-  issuance: HostedRevnetIssuanceRecord;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (!input.issuance.payTxHash) {
-    throw hostedOnboardingError({
-      code: "REVNET_PAYMENT_HASH_MISSING",
-      message: "Hosted RevNet issuance is missing the submitted transaction hash.",
-      httpStatus: 503,
-      retryable: true,
-    });
-  }
-
-  try {
-    await waitForHostedRevnetPaymentConfirmation({
-      chainId: input.issuance.chainId,
-      txHash: input.issuance.payTxHash as `0x${string}`,
-    });
-  } catch (error) {
-    const failure = serializeHostedRevnetIssuanceFailure(error);
-
-    await input.prisma.hostedRevnetIssuance.update({
-      where: {
-        id: input.issuance.id,
-      },
-      data: {
-        failureCode: failure.code,
-        failureMessage: failure.message,
-        status: HostedRevnetIssuanceStatus.failed,
-      },
-    });
-
-    throw error;
-  }
-
-  await input.prisma.hostedRevnetIssuance.update({
-    where: {
-      id: input.issuance.id,
-    },
-    data: {
-      confirmedAt: new Date(),
-      failureCode: null,
-      failureMessage: null,
-      status: HostedRevnetIssuanceStatus.confirmed,
-    },
-  });
 }
 
 function buildHostedRevnetPaymentMemo(issuanceId: string): string {
@@ -834,6 +771,20 @@ function isHostedRevnetIssuanceBroadcastStatusUnknown(issuance: HostedRevnetIssu
   return (
     issuance.status === HostedRevnetIssuanceStatus.submitting &&
     issuance.failureCode === REVNET_BROADCAST_STATUS_UNKNOWN_CODE
+  );
+}
+
+function shouldSkipHostedRevnetIssuanceSubmission(
+  issuance: HostedRevnetIssuanceRecord | null,
+): boolean {
+  return Boolean(
+    !issuance ||
+      issuance.status === HostedRevnetIssuanceStatus.confirmed ||
+      issuance.status === HostedRevnetIssuanceStatus.submitted ||
+      issuance.payTxHash ||
+      isHostedRevnetIssuanceBroadcastStatusUnknown(issuance) ||
+      (issuance.status === HostedRevnetIssuanceStatus.submitting &&
+        !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt)),
   );
 }
 

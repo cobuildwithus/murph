@@ -51,7 +51,6 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY: "USD",
       HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS: "0x0000000000000000000000000000000000000001",
       HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY: `0x${"11".repeat(32)}`,
-      HOSTED_ONBOARDING_REVNET_WAIT_CONFIRMATIONS: "0",
       HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT: "2000000000000",
       HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
     }));
@@ -61,7 +60,6 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.revnetRpcUrl).toBe("https://rpc.example.test/base");
     expect(environment.revnetStripeCurrency).toBe("usd");
     expect(environment.revnetTerminalAddress).toBe("0x0000000000000000000000000000000000000001");
-    expect(environment.revnetWaitConfirmations).toBe(0);
     expect(environment.revnetWeiPerStripeMinorUnit).toBe("2000000000000");
   });
 

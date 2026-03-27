@@ -24,7 +24,6 @@ const mocks = vi.hoisted(() => {
     stripeChargesRetrieve,
     stripeConstructEvent,
     stripePaymentIntentsRetrieve,
-    waitForHostedRevnetPaymentConfirmation: vi.fn(),
   };
 });
 
@@ -59,7 +58,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     revnetStripeCurrency: null,
     revnetTerminalAddress: null,
     revnetTreasuryPrivateKey: null,
-    revnetWaitConfirmations: 1,
     revnetWeiPerStripeMinorUnit: null,
     sessionCookieName: "hb_hosted_session",
     sessionTtlDays: 30,
@@ -99,7 +97,6 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
   normalizeHostedWalletAddress: mocks.normalizeHostedWalletAddress,
   requireHostedRevnetConfig: mocks.requireHostedRevnetConfig,
   submitHostedRevnetPayment: mocks.submitHostedRevnetPayment,
-  waitForHostedRevnetPaymentConfirmation: mocks.waitForHostedRevnetPaymentConfirmation,
 }));
 
 import {
@@ -120,7 +117,6 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.stripeChargesRetrieve.mockReset();
     mocks.stripeConstructEvent.mockReset();
     mocks.stripePaymentIntentsRetrieve.mockReset();
-    mocks.waitForHostedRevnetPaymentConfirmation.mockReset();
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.isHostedRevnetBroadcastStatusUnknownError.mockImplementation((error: unknown) =>
@@ -135,7 +131,6 @@ describe("hosted onboarding webhook retry safety", () => {
       stripeCurrency: "usd",
       terminalAddress: "0x0000000000000000000000000000000000000001",
       treasuryPrivateKey: `0x${"11".repeat(32)}`,
-      waitConfirmations: 1,
       weiPerStripeMinorUnit: 2_000_000_000_000n,
     });
     mocks.submitHostedRevnetPayment.mockResolvedValue({
@@ -153,7 +148,6 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.stripePaymentIntentsRetrieve.mockResolvedValue({
       customer: "cus_123",
     });
-    mocks.waitForHostedRevnetPaymentConfirmation.mockResolvedValue(undefined);
   });
 
   it("completes a Linq active-member webhook after the dispatch is durably queued", async () => {
@@ -1427,7 +1421,6 @@ describe("hosted onboarding webhook retry safety", () => {
       projectId: 1n,
       terminalAddress: "0x0000000000000000000000000000000000000001",
     });
-    expect(mocks.waitForHostedRevnetPaymentConfirmation).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
@@ -1533,7 +1526,6 @@ describe("hosted onboarding webhook retry safety", () => {
         }),
       }),
     );
-    expect(mocks.waitForHostedRevnetPaymentConfirmation).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
@@ -1622,7 +1614,6 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedRevnetIssuance.findUnique).toHaveBeenCalledTimes(1);
     expect(prisma.hostedRevnetIssuance.create).not.toHaveBeenCalled();
     expect(mocks.submitHostedRevnetPayment).not.toHaveBeenCalled();
-    expect(mocks.waitForHostedRevnetPaymentConfirmation).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
@@ -1734,7 +1725,6 @@ describe("hosted onboarding webhook retry safety", () => {
       projectId: 99n,
       terminalAddress: "0x0000000000000000000000000000000000000002",
     });
-    expect(mocks.waitForHostedRevnetPaymentConfirmation).not.toHaveBeenCalled();
   });
 
   it("suspends hosted access and revokes sessions when Stripe creates a refund", async () => {
@@ -1897,7 +1887,6 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     );
     expect(mocks.submitHostedRevnetPayment).not.toHaveBeenCalled();
-    expect(mocks.waitForHostedRevnetPaymentConfirmation).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 

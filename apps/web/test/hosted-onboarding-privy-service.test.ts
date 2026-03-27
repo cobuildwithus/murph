@@ -332,6 +332,104 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.stage).toBe("active");
   });
 
+  it("preserves suspension and refuses to create a new session for a suspended invited member", async () => {
+    const suspendedMember = makeMember({
+      billingStatus: HostedBillingStatus.active,
+      phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+      status: HostedMemberStatus.suspended,
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
+      walletProvider: "privy",
+    });
+    const invite = makeInvite(suspendedMember);
+    const prisma: any = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...suspendedMember,
+          ...data,
+        })),
+      },
+    };
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMember.update).toHaveBeenCalledWith({
+      where: {
+        id: "member_123",
+      },
+      data: expect.objectContaining({
+        status: HostedMemberStatus.suspended,
+      }),
+    });
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(mocks.createHostedSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses a returning suspended member during public Privy verification before issuing a fresh invite", async () => {
+    const suspendedMember = makeMember({
+      billingStatus: HostedBillingStatus.not_started,
+      phoneNumberVerifiedAt: NOW,
+      privyUserId: "did:privy:user_123",
+      status: HostedMemberStatus.suspended,
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: NOW,
+      walletProvider: "privy",
+    });
+    const prisma: any = {
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+          if (where.privyUserId || where.normalizedPhoneNumber || where.walletAddress) {
+            return suspendedMember;
+          }
+
+          return null;
+        }),
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...suspendedMember,
+          ...data,
+        })),
+      },
+    };
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity(),
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.createHostedSession).not.toHaveBeenCalled();
+  });
+
   it("rejects a verified phone that conflicts across two existing hosted members", async () => {
     const phoneMember = makeMember({ id: "member_phone" });
     const walletMember = makeMember({
