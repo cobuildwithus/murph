@@ -2,13 +2,11 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
-  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
 }));
 
@@ -38,7 +36,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       linqApiToken: "linq-token",
       linqWebhookSecret: null,
       publicBaseUrl: "https://join.example.test",
-      sessionCookieName: "hb_hosted_session",
+      sessionCookieName: "hosted_session",
       sessionTtlDays: 30,
       stripeBillingMode: "payment",
       stripePriceId: "price_123",
@@ -53,7 +51,6 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/s
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
   });
 
@@ -125,6 +122,40 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
+      }),
+    );
+    const receiptWrites = (
+      prisma as {
+        hostedWebhookReceipt: {
+          updateMany: ReturnType<typeof vi.fn>;
+        };
+      }
+    ).hostedWebhookReceipt.updateMany.mock.calls.map(
+      ([payload]: [Record<string, unknown>]) => payload,
+    );
+    expect(receiptWrites.at(-1)).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            receiptState: expect.objectContaining({
+              sideEffects: expect.arrayContaining([
+                expect.objectContaining({
+                  kind: "hosted_execution_dispatch",
+                  payload: expect.objectContaining({
+                    dispatchRef: expect.objectContaining({
+                      eventId: "evt_123",
+                      eventKind: "linq.message.received",
+                      userId: "member_123",
+                    }),
+                    linqEvent: expect.objectContaining({
+                      event_id: "evt_123",
+                    }),
+                  }),
+                }),
+              ]),
+            }),
+          }),
+        }),
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();

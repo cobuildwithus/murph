@@ -59,7 +59,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     revnetTerminalAddress: null,
     revnetTreasuryPrivateKey: null,
     revnetWeiPerStripeMinorUnit: null,
-    sessionCookieName: "hb_hosted_session",
+    sessionCookieName: "hosted_session",
     sessionTtlDays: 30,
     stripeBillingMode: "payment",
     stripePriceId: "price_123",
@@ -2297,6 +2297,67 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
+
+  it("treats completed Stripe receipts with minimized activation side effects as duplicates", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          customer: "cus_123",
+        },
+      },
+      id: "evt_stripe_123",
+      type: "invoice.paid",
+    });
+
+    const prisma: any = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: buildWebhookReceiptPayload({
+            attemptCount: 1,
+            attemptId: "attempt-1",
+            completedAt: "2026-03-26T12:00:00.000Z",
+            eventPayload: {
+              type: "invoice.paid",
+            },
+            sideEffects: [
+              buildMemberActivationDispatchSideEffect({
+                attemptCount: 1,
+                lastAttemptAt: "2026-03-26T12:00:00.250Z",
+                sentAt: "2026-03-26T12:00:00.400Z",
+                sourceEventId: "evt_stripe_123",
+                sourceType: "stripe.invoice.paid",
+                status: "sent",
+              }),
+            ],
+            status: "completed",
+          }),
+        }),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      duplicate: true,
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
 });
 
 function buildLinqMessageWebhookBody(input: {
@@ -2419,48 +2480,62 @@ function buildDispatchSideEffect(input: {
   sentAt?: unknown;
   status: "pending" | "sent";
 }) {
+  const occurredAt = input.occurredAt ?? "2026-03-26T12:00:00.000Z";
+  const linqEvent = {
+    api_version: "v1",
+    created_at: occurredAt,
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        id: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      received_at: "2026-03-26T12:00:00.000Z",
+      recipient_phone: "+15550000000",
+      service: "sms",
+    },
+    event_id: input.eventId,
+    event_type: "message.received",
+    partner_id: null,
+    trace_id: null,
+  };
+
   return {
     attemptCount: input.attemptCount ?? 0,
     effectId: input.effectId ?? `dispatch:${input.eventId}`,
     kind: "hosted_execution_dispatch",
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
-    payload: {
-      dispatch: {
-        event: {
-          kind: "linq.message.received",
-          linqEvent: {
-            api_version: "v1",
-            created_at: "2026-03-26T12:00:00.000Z",
-            data: {
-              chat_id: "chat_123",
-              from: "+15551234567",
-              is_from_me: false,
-              message: {
-                id: "msg_123",
-                parts: [
-                  {
-                    type: "text",
-                    value: "hello",
-                  },
-                ],
-              },
-              received_at: "2026-03-26T12:00:00.000Z",
-              recipient_phone: "+15550000000",
-              service: "sms",
+    payload:
+      input.status === "sent"
+        ? {
+            dispatchRef: {
+              eventId: input.eventId,
+              eventKind: "linq.message.received",
+              occurredAt,
+              userId: "member_123",
             },
-            event_id: "evt_123",
-            event_type: "message.received",
-            partner_id: null,
-            trace_id: null,
+            linqEvent,
+          }
+        : {
+            dispatch: {
+              event: {
+                kind: "linq.message.received",
+                linqEvent,
+                normalizedPhoneNumber: "+15551234567",
+                userId: "member_123",
+              },
+              eventId: input.eventId,
+              occurredAt,
+            },
           },
-          normalizedPhoneNumber: "+15551234567",
-          userId: "member_123",
-        },
-        eventId: input.eventId,
-        occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
-      },
-    },
     result: input.status === "sent" ? { dispatched: true } : null,
     sentAt:
       input.sentAt ??
@@ -2485,6 +2560,7 @@ function buildMemberActivationDispatchSideEffect(input: {
   const eventId =
     input.effectId ??
     `dispatch:member.activated:${input.sourceType}:${memberId}:${input.sourceEventId}`;
+  const occurredAt = input.occurredAt ?? "2026-03-26T12:00:00.000Z";
 
   return {
     attemptCount: input.attemptCount ?? 0,
@@ -2492,16 +2568,26 @@ function buildMemberActivationDispatchSideEffect(input: {
     kind: "hosted_execution_dispatch",
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
-    payload: {
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: memberId,
-        },
-        eventId: String(eventId).replace(/^dispatch:/u, ""),
-        occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
-      },
-    },
+    payload:
+      input.status === "sent"
+        ? {
+            dispatchRef: {
+              eventId: String(eventId).replace(/^dispatch:/u, ""),
+              eventKind: "member.activated",
+              occurredAt,
+              userId: memberId,
+            },
+          }
+        : {
+            dispatch: {
+              event: {
+                kind: "member.activated",
+                userId: memberId,
+              },
+              eventId: String(eventId).replace(/^dispatch:/u, ""),
+              occurredAt,
+            },
+          },
     result: input.status === "sent" ? { dispatched: true } : null,
     sentAt:
       input.sentAt ??

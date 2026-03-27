@@ -4,6 +4,11 @@ import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import {
+  buildHostedExecutionDispatchRef,
+  readHostedExecutionDispatchRef,
+  type HostedExecutionDispatchRef,
+} from "../hosted-execution/outbox-payload";
 
 export type HostedWebhookEventPayload = Prisma.InputJsonObject;
 
@@ -21,15 +26,22 @@ type HostedWebhookSideEffectErrorState = {
 
 type HostedWebhookSideEffectStatus = "pending" | "sent";
 
+type HostedWebhookDispatchSideEffectPayload =
+  | {
+      dispatch: HostedExecutionDispatchRequest;
+    }
+  | {
+      dispatchRef: HostedExecutionDispatchRef;
+      linqEvent?: Record<string, unknown> | null;
+    };
+
 export type HostedWebhookDispatchSideEffect = {
   attemptCount: number;
   effectId: string;
   kind: "hosted_execution_dispatch";
   lastAttemptAt: string | null;
   lastError: HostedWebhookSideEffectErrorState | null;
-  payload: {
-    dispatch: HostedExecutionDispatchRequest;
-  };
+  payload: HostedWebhookDispatchSideEffectPayload;
   result: {
     dispatched: true;
   } | null;
@@ -210,6 +222,27 @@ export function createHostedWebhookDispatchSideEffect(input: {
     sentAt: null,
     status: "pending",
   };
+}
+
+function readHostedWebhookDispatchPayloadDispatch(
+  payload: HostedWebhookDispatchSideEffect["payload"],
+): HostedExecutionDispatchRequest | null {
+  return "dispatch" in payload
+    ? payload.dispatch
+    : null;
+}
+
+function minimizeHostedWebhookDispatchPayload(
+  dispatch: HostedExecutionDispatchRequest,
+): HostedWebhookDispatchSideEffect["payload"] {
+  return dispatch.event.kind === "linq.message.received"
+    ? {
+        dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+        linqEvent: { ...dispatch.event.linqEvent },
+      }
+    : {
+        dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+      };
 }
 
 export function createHostedWebhookLinqMessageSideEffect(input: {
@@ -531,7 +564,7 @@ async function markHostedWebhookDispatchEffectQueued(input: {
       state: nextState,
     };
     const updatedCount = await input.enqueueDispatchEffect({
-      dispatch: input.dispatchEffect.payload.dispatch,
+      dispatch: requireHostedWebhookDispatchEffectDispatch(input.dispatchEffect),
       eventId: input.eventId,
       nextPayloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
       previousClaim: currentClaim,
@@ -933,7 +966,35 @@ function readHostedWebhookSideEffect(
     case "hosted_execution_dispatch": {
       const dispatchPayload = payload.dispatch;
 
-      if (!dispatchPayload || typeof dispatchPayload !== "object" || Array.isArray(dispatchPayload)) {
+      if (dispatchPayload && typeof dispatchPayload === "object" && !Array.isArray(dispatchPayload)) {
+        return {
+          attemptCount,
+          effectId,
+          kind,
+          lastAttemptAt,
+          lastError,
+          payload: {
+            dispatch: dispatchPayload as unknown as HostedExecutionDispatchRequest,
+          },
+          result: result.dispatched === true ? { dispatched: true } : null,
+          sentAt,
+          status,
+        };
+      }
+
+      const dispatchRef = readHostedExecutionDispatchRef(
+        {
+          dispatchRef: payload.dispatchRef ?? null,
+        },
+        {
+          eventId: "",
+          eventKind: "",
+          occurredAt: null,
+          userId: "",
+        },
+      );
+
+      if (!dispatchRef) {
         return null;
       }
 
@@ -944,7 +1005,8 @@ function readHostedWebhookSideEffect(
         lastAttemptAt,
         lastError,
         payload: {
-          dispatch: dispatchPayload as unknown as HostedExecutionDispatchRequest,
+          dispatchRef,
+          linqEvent: toHostedWebhookReceiptRecord(payload.linqEvent),
         },
         result: result.dispatched === true ? { dispatched: true } : null,
         sentAt,
@@ -1064,6 +1126,7 @@ function mergeHostedWebhookSideEffect(
         attemptCount: currentDispatchEffect.attemptCount,
         lastAttemptAt: currentDispatchEffect.lastAttemptAt,
         lastError: currentDispatchEffect.status === "sent" ? null : currentDispatchEffect.lastError,
+        payload: currentDispatchEffect.status === "sent" ? currentDispatchEffect.payload : desiredEffect.payload,
         result: currentDispatchEffect.status === "sent" ? currentDispatchEffect.result : null,
         sentAt: currentDispatchEffect.status === "sent" ? currentDispatchEffect.sentAt : null,
         status: currentDispatchEffect.status === "sent" ? "sent" : "pending",
@@ -1113,14 +1176,18 @@ function markHostedWebhookSideEffectSent(
   sentAt: string,
 ): HostedWebhookSideEffect {
   switch (effect.kind) {
-    case "hosted_execution_dispatch":
+    case "hosted_execution_dispatch": {
+      const dispatch = readHostedWebhookDispatchPayloadDispatch(effect.payload);
+
       return {
         ...effect,
         lastError: null,
+        payload: dispatch ? minimizeHostedWebhookDispatchPayload(dispatch) : effect.payload,
         result: result as HostedWebhookDispatchSideEffect["result"],
         sentAt,
         status: "sent",
       };
+    }
     case "linq_message_send":
       return {
         ...effect,
@@ -1194,6 +1261,26 @@ async function updateHostedWebhookReceiptClaim(input: {
     httpStatus: 503,
     retryable: true,
   });
+}
+
+function requireHostedWebhookDispatchEffectDispatch(
+  effect: HostedWebhookDispatchSideEffect,
+): HostedExecutionDispatchRequest {
+  const dispatch = readHostedWebhookDispatchPayloadDispatch(effect.payload);
+
+  if (!dispatch) {
+    throw new Error(`Hosted webhook dispatch side effect ${effect.effectId} no longer carries a dispatch payload.`);
+  }
+
+  return dispatch;
+}
+
+function toHostedWebhookReceiptRecord(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function toHostedWebhookReceiptObject(
