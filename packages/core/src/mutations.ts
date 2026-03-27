@@ -249,6 +249,39 @@ interface PreparedDeviceRawArtifact {
   sha256: string;
 }
 
+interface NormalizedDeviceEvent {
+  seed: NormalizedEventSeed<EventKind>;
+  rawArtifactRoles: string[];
+  recordId: string;
+}
+
+interface NormalizedDeviceSample {
+  seed: NormalizedSampleSeed;
+  recordId: string;
+}
+
+interface NormalizedDeviceRawArtifact {
+  role: string;
+  fileName: string;
+  mediaType?: string;
+  content: string;
+  metadata?: LooseRecord;
+  sha256: string;
+  index: number;
+}
+
+interface NormalizedDeviceBatchInputs {
+  provider: string;
+  accountId?: string;
+  importedAt: string;
+  source: string;
+  defaultTimeZone?: string;
+  provenance: LooseRecord;
+  events: NormalizedDeviceEvent[];
+  samples: NormalizedDeviceSample[];
+  rawArtifacts: NormalizedDeviceRawArtifact[];
+}
+
 interface PreparedJsonlEntry<RecordType extends { id: string }> {
   relativePath: string;
   record: RecordType;
@@ -488,6 +521,14 @@ function assertContractShape<T>(
 
 function normalizeSource<T extends string>(value: unknown, allowed: ReadonlySet<T>, fallback: T): T {
   return typeof value === "string" && allowed.has(value as T) ? (value as T) : fallback;
+}
+
+function normalizeSampleInputRecord(
+  value: unknown,
+  code: string,
+  message: string,
+): SampleInputRecord {
+  return assertPlainObject<SampleInputRecord>(value, code, message);
 }
 
 function trimStringList(value: unknown): string[] | undefined {
@@ -925,7 +966,153 @@ async function stageJsonlAppendPlan(batch: WriteBatch, appendPlan: JsonlAppendPl
   }
 }
 
-function prepareDeviceBatchPlan({
+function normalizeDeviceEventInputs(
+  eventInputs: readonly DeviceEventInput[],
+  context: Pick<NormalizedDeviceBatchInputs, "provider" | "accountId" | "importedAt" | "source" | "defaultTimeZone">,
+): NormalizedDeviceEvent[] {
+  return eventInputs.map((eventInput, index) => {
+    const kind = String(eventInput.kind ?? "").trim() as EventKind;
+
+    if (!EVENT_KIND_SET.has(kind)) {
+      throw new VaultError(
+        "VAULT_UNSUPPORTED_EVENT_KIND",
+        `Unsupported baseline event kind "${String(eventInput.kind ?? "")}".`,
+        { index },
+      );
+    }
+
+    const fields = normalizeLooseRecord(
+      eventInput.fields,
+      "VAULT_INVALID_EVENT_FIELDS",
+      `Device event ${index + 1} fields must be a plain object.`,
+    ) ?? {};
+    const rawArtifactRoles = trimStringList(eventInput.rawArtifactRoles) ?? [];
+    const seed = buildNormalizedEventSeed({
+      kind,
+      occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? context.importedAt,
+      recordedAt: eventInput.recordedAt ?? eventInput.occurredAt,
+      dayKey: typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined,
+      timeZone: typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined,
+      defaultTimeZone: context.defaultTimeZone,
+      source: eventInput.source ?? context.source,
+      title: typeof eventInput.title === "string" ? eventInput.title : undefined,
+      note: eventInput.note,
+      tags: eventInput.tags,
+      relatedIds: eventInput.relatedIds,
+      externalRef: eventInput.externalRef,
+      fields,
+    });
+    const { rawRefs: _rawRefs, ...seedRecord } = materializeEventRecord({ seed });
+
+    return {
+      seed,
+      rawArtifactRoles,
+      recordId: deterministicContractId(
+        ID_PREFIXES.event,
+        stableStringify({
+          provider: context.provider,
+          accountId: context.accountId ?? null,
+          rawArtifactRoles,
+          record: seedRecord,
+        }),
+      ),
+    };
+  });
+}
+
+function normalizeDeviceSampleInputs(
+  sampleInputs: readonly DeviceSampleInput[],
+  context: Pick<NormalizedDeviceBatchInputs, "provider" | "accountId" | "source" | "defaultTimeZone">,
+): NormalizedDeviceSample[] {
+  return sampleInputs.map((sampleInput, index) => {
+    const stream = String(sampleInput.stream ?? "").trim() as SampleStream;
+
+    if (!SAMPLE_STREAM_SET.has(stream)) {
+      throw new VaultError(
+        "VAULT_UNSUPPORTED_SAMPLE_STREAM",
+        `Unsupported baseline sample stream "${String(sampleInput.stream ?? "")}".`,
+        { index },
+      );
+    }
+
+    const sample = normalizeSampleInputRecord(
+      sampleInput.sample,
+      "VAULT_INVALID_SAMPLE",
+      `Device sample ${index + 1} must include a sample object.`,
+    );
+    const seed = buildNormalizedSampleSeed({
+      stream,
+      recordedAt: sampleInput.recordedAt ?? sample.recordedAt ?? sample.occurredAt,
+      dayKey: typeof sampleInput.dayKey === "string" ? sampleInput.dayKey : undefined,
+      timeZone: typeof sampleInput.timeZone === "string" ? sampleInput.timeZone : undefined,
+      defaultTimeZone: context.defaultTimeZone,
+      source: sampleInput.source ?? context.source,
+      quality: sampleInput.quality ?? "normalized",
+      sample,
+      unit: String(sampleInput.unit ?? ""),
+      externalRef: sampleInput.externalRef,
+    });
+    const record = materializeSampleRecord({ seed });
+
+    return {
+      seed,
+      recordId: deterministicContractId(
+        ID_PREFIXES.sample,
+        stableStringify({
+          provider: context.provider,
+          accountId: context.accountId ?? null,
+          record,
+        }),
+      ),
+    };
+  });
+}
+
+function normalizeDeviceRawArtifactInputs(
+  rawArtifactInputs: readonly DeviceRawArtifactInput[],
+  provider: string,
+): NormalizedDeviceRawArtifact[] {
+  const seenRawRoles = new Set<string>();
+
+  return rawArtifactInputs.map((artifactInput, index) => {
+    const role = normalizeRequiredRole(
+      artifactInput.role ?? `artifact-${index + 1}`,
+      `raw artifact ${index + 1} role`,
+    );
+
+    if (seenRawRoles.has(role)) {
+      throw new VaultError(
+        "VAULT_DUPLICATE_RAW_ROLE",
+        `Device raw artifact role "${role}" may only appear once per batch.`,
+      );
+    }
+
+    seenRawRoles.add(role);
+    const content = normalizeInlineRawContent(artifactInput.content);
+
+    return {
+      role,
+      fileName:
+        typeof artifactInput.fileName === "string" && artifactInput.fileName.trim()
+          ? artifactInput.fileName.trim()
+          : `${provider}-${String(index + 1).padStart(2, "0")}.json`,
+      mediaType:
+        typeof artifactInput.mediaType === "string" && artifactInput.mediaType.trim()
+          ? artifactInput.mediaType.trim()
+          : undefined,
+      content,
+      metadata: normalizeLooseRecord(
+        artifactInput.metadata,
+        "VAULT_INVALID_RAW_ARTIFACT",
+        `Device raw artifact ${index + 1} metadata must be a plain object.`,
+      ),
+      sha256: createHash("sha256").update(content).digest("hex"),
+      index,
+    };
+  });
+}
+
+function normalizeDeviceBatchInputs({
   provider,
   accountId,
   importedAt = new Date(),
@@ -937,11 +1124,11 @@ function prepareDeviceBatchPlan({
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
   defaultTimeZone?: string;
-}): DeviceBatchPlan {
+}): NormalizedDeviceBatchInputs {
   const normalizedProvider = sanitizePathSegment(provider, "provider");
   const normalizedAccountId = typeof accountId === "string" && accountId.trim() ? accountId.trim() : undefined;
   const normalizedImportedAt = toIsoTimestamp(importedAt, "importedAt");
-  const resolvedTimeZone = normalizeTimeZone(fallbackTimeZone);
+  const defaultTimeZone = normalizeTimeZone(fallbackTimeZone);
   const normalizedProvenance = normalizeLooseRecord(
     provenance,
     "VAULT_INVALID_DEVICE_PROVENANCE",
@@ -982,164 +1169,39 @@ function prepareDeviceBatchPlan({
     );
   }
 
-  const preparedEventSeeds = eventInputs.map((eventInput, index) => {
-    const kind = String(eventInput.kind ?? "").trim() as EventKind;
-
-    if (!EVENT_KIND_SET.has(kind)) {
-      throw new VaultError(
-        "VAULT_UNSUPPORTED_EVENT_KIND",
-        `Unsupported baseline event kind "${String(eventInput.kind ?? "")}".`,
-        { index },
-      );
-    }
-
-    const fields = normalizeLooseRecord(
-      eventInput.fields,
-      "VAULT_INVALID_EVENT_FIELDS",
-      `Device event ${index + 1} fields must be a plain object.`,
-    ) ?? {};
-    const rawArtifactRoles = trimStringList(eventInput.rawArtifactRoles) ?? [];
-    const seed = buildNormalizedEventSeed({
-      kind,
-      occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? normalizedImportedAt,
-      recordedAt: eventInput.recordedAt ?? eventInput.occurredAt,
-      dayKey: typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined,
-      timeZone: typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined,
-      defaultTimeZone: resolvedTimeZone,
-      source: eventInput.source ?? source,
-      title: typeof eventInput.title === "string" ? eventInput.title : undefined,
-      note: eventInput.note,
-      tags: eventInput.tags,
-      relatedIds: eventInput.relatedIds,
-      externalRef: eventInput.externalRef,
-      fields,
-    });
-    const { rawRefs: _rawRefs, ...seedRecord } = materializeEventRecord({ seed });
-    const recordId = deterministicContractId(
-      ID_PREFIXES.event,
-      stableStringify({
-        provider: normalizedProvider,
-        accountId: normalizedAccountId ?? null,
-        rawArtifactRoles,
-        record: seedRecord,
-      }),
-    );
-
-    return {
-      seed,
-      rawArtifactRoles,
-      recordId,
-    };
-  });
-
-  const preparedSampleSeeds = sampleInputs.map((sampleInput, index) => {
-    const stream = String(sampleInput.stream ?? "").trim() as SampleStream;
-
-    if (!SAMPLE_STREAM_SET.has(stream)) {
-      throw new VaultError(
-        "VAULT_UNSUPPORTED_SAMPLE_STREAM",
-        `Unsupported baseline sample stream "${String(sampleInput.stream ?? "")}".`,
-        { index },
-      );
-    }
-
-    const samplePayload = assertPlainObject<SampleInputRecord>(
-      sampleInput.sample,
-      "VAULT_INVALID_SAMPLE",
-      `Device sample ${index + 1} must include a sample object.`,
-    );
-    const seed = buildNormalizedSampleSeed({
-      stream,
-      recordedAt: sampleInput.recordedAt ?? samplePayload.recordedAt ?? samplePayload.occurredAt,
-      dayKey: typeof sampleInput.dayKey === "string" ? sampleInput.dayKey : undefined,
-      timeZone: typeof sampleInput.timeZone === "string" ? sampleInput.timeZone : undefined,
-      defaultTimeZone: resolvedTimeZone,
-      source: sampleInput.source ?? source,
-      quality: sampleInput.quality ?? "normalized",
-      sample: samplePayload,
-      unit: String(sampleInput.unit ?? ""),
-      externalRef: sampleInput.externalRef,
-    });
-    const seedRecord = materializeSampleRecord({ seed });
-    const recordId = deterministicContractId(
-      ID_PREFIXES.sample,
-      stableStringify({
-        provider: normalizedProvider,
-        accountId: normalizedAccountId ?? null,
-        record: seedRecord,
-      }),
-    );
-
-    return {
-      seed,
-      recordId,
-    };
-  });
-
-  const seenRawRoles = new Set<string>();
-  const normalizedRawArtifacts = rawArtifactInputs.map((artifactInput, index) => {
-    const role = normalizeRequiredRole(
-      artifactInput.role ?? `artifact-${index + 1}`,
-      `raw artifact ${index + 1} role`,
-    );
-
-    if (seenRawRoles.has(role)) {
-      throw new VaultError(
-        "VAULT_DUPLICATE_RAW_ROLE",
-        `Device raw artifact role "${role}" may only appear once per batch.`,
-      );
-    }
-
-    seenRawRoles.add(role);
-
-    const fileName =
-      typeof artifactInput.fileName === "string" && artifactInput.fileName.trim()
-        ? artifactInput.fileName.trim()
-        : `${normalizedProvider}-${String(index + 1).padStart(2, "0")}.json`;
-    const content = normalizeInlineRawContent(artifactInput.content);
-    const metadata = normalizeLooseRecord(
-      artifactInput.metadata,
-      "VAULT_INVALID_RAW_ARTIFACT",
-      `Device raw artifact ${index + 1} metadata must be a plain object.`,
-    );
-
-    return {
-      role,
-      fileName,
-      mediaType:
-        typeof artifactInput.mediaType === "string" && artifactInput.mediaType.trim()
-          ? artifactInput.mediaType.trim()
-          : undefined,
-      content,
-      metadata,
-      sha256: createHash("sha256").update(content).digest("hex"),
-      index,
-    };
-  });
-
-  const effectiveOccurredAt = earliestTimestamp(
-    [
-      ...preparedEventSeeds.map(({ seed }) => seed.occurredAt),
-      ...preparedSampleSeeds.map(({ seed }) => seed.recordedAt),
-    ],
-    normalizedImportedAt,
-  );
-  const importId = deterministicContractId(
-    ID_PREFIXES.transform,
-    stableStringify({
+  return {
+    provider: normalizedProvider,
+    accountId: normalizedAccountId,
+    importedAt: normalizedImportedAt,
+    source,
+    defaultTimeZone,
+    provenance: normalizedProvenance,
+    events: normalizeDeviceEventInputs(eventInputs, {
       provider: normalizedProvider,
-      accountId: normalizedAccountId ?? null,
-      eventIds: preparedEventSeeds.map(({ recordId }) => recordId),
-      sampleIds: preparedSampleSeeds.map(({ recordId }) => recordId),
-      rawArtifacts: normalizedRawArtifacts.map((artifact) => ({
-        role: artifact.role,
-        fileName: artifact.fileName,
-        mediaType: artifact.mediaType ?? null,
-        sha256: artifact.sha256,
-      })),
+      accountId: normalizedAccountId,
+      importedAt: normalizedImportedAt,
+      source,
+      defaultTimeZone,
     }),
-  );
-  const preparedRawArtifacts: PreparedDeviceRawArtifact[] = normalizedRawArtifacts.map((artifact) => ({
+    samples: normalizeDeviceSampleInputs(sampleInputs, {
+      provider: normalizedProvider,
+      accountId: normalizedAccountId,
+      source,
+      defaultTimeZone,
+    }),
+    rawArtifacts: normalizeDeviceRawArtifactInputs(rawArtifactInputs, normalizedProvider),
+  };
+}
+
+function prepareDeviceRawArtifacts(
+  rawArtifacts: readonly NormalizedDeviceRawArtifact[],
+  options: {
+    importId: string;
+    provider: string;
+    effectiveOccurredAt: string;
+  },
+): PreparedDeviceRawArtifact[] {
+  return rawArtifacts.map((artifact) => ({
     role: artifact.role,
     content: artifact.content,
     raw: prepareInlineRawArtifact({
@@ -1147,26 +1209,33 @@ function prepareDeviceBatchPlan({
       targetName: `${String(artifact.index + 1).padStart(2, "0")}-${artifact.fileName}`,
       mediaType: artifact.mediaType,
       category: "integrations",
-      provider: normalizedProvider,
-      occurredAt: effectiveOccurredAt,
-      recordId: importId,
+      provider: options.provider,
+      occurredAt: options.effectiveOccurredAt,
+      recordId: options.importId,
     }),
     metadata: artifact.metadata,
     sha256: artifact.sha256,
   }));
+}
+
+function prepareDeviceEventEntries(
+  events: readonly NormalizedDeviceEvent[],
+  preparedRawArtifacts: readonly PreparedDeviceRawArtifact[],
+): PreparedJsonlEntry<EventRecord>[] {
   const rawArtifactPathByRole = new Map(
     preparedRawArtifacts.map((artifact) => [artifact.role, artifact.raw.relativePath] as const),
   );
   const soleRawArtifactPath = preparedRawArtifacts.length === 1 ? preparedRawArtifacts[0]?.raw.relativePath : undefined;
-  const preparedEvents = preparedEventSeeds.map((eventSeed) => {
-    const rawRefs = eventSeed.rawArtifactRoles.length > 0
-      ? eventSeed.rawArtifactRoles.map((role) => {
+
+  return events.map((event) => {
+    const rawRefs = event.rawArtifactRoles.length > 0
+      ? event.rawArtifactRoles.map((role) => {
           const rawPath = rawArtifactPathByRole.get(role);
 
           if (!rawPath) {
             throw new VaultError(
               "VAULT_RAW_ROLE_MISSING",
-              `No staged raw artifact matched role "${role}" for device event ${eventSeed.recordId}.`,
+              `No staged raw artifact matched role "${role}" for device event ${event.recordId}.`,
             );
           }
 
@@ -1177,10 +1246,10 @@ function prepareDeviceBatchPlan({
         : undefined;
     const record = finalizeEventRecord({
       seed: {
-        ...eventSeed.seed,
+        ...event.seed,
         rawRefs,
       },
-      recordId: eventSeed.recordId,
+      recordId: event.recordId,
     });
 
     return {
@@ -1192,29 +1261,90 @@ function prepareDeviceBatchPlan({
       ),
     };
   });
-  const preparedSamples = preparedSampleSeeds.map((sampleSeed) => {
+}
+
+function prepareDeviceSampleEntries(
+  samples: readonly NormalizedDeviceSample[],
+): PreparedJsonlEntry<SampleRecord>[] {
+  return samples.map((sample) => {
     const record = finalizeSampleRecord({
-      seed: sampleSeed.seed,
-      recordId: sampleSeed.recordId,
+      seed: sample.seed,
+      recordId: sample.recordId,
     });
 
     return {
       record,
       relativePath: toMonthlyShardRelativePath(
-        `${VAULT_LAYOUT.sampleLedgerDirectory}/${sampleSeed.seed.stream}`,
+        `${VAULT_LAYOUT.sampleLedgerDirectory}/${sample.seed.stream}`,
         record.recordedAt,
         "recordedAt",
       ),
     };
   });
+}
+
+function prepareDeviceBatchPlan({
+  provider,
+  accountId,
+  importedAt = new Date(),
+  defaultTimeZone: fallbackTimeZone,
+  source = "device",
+  events = [],
+  samples = [],
+  rawArtifacts = [],
+  provenance,
+}: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
+  defaultTimeZone?: string;
+}): DeviceBatchPlan {
+  const normalizedInputs = normalizeDeviceBatchInputs({
+    provider,
+    accountId,
+    importedAt,
+    defaultTimeZone: fallbackTimeZone,
+    source,
+    events,
+    samples,
+    rawArtifacts,
+    provenance,
+  });
+
+  const effectiveOccurredAt = earliestTimestamp(
+    [
+      ...normalizedInputs.events.map(({ seed }) => seed.occurredAt),
+      ...normalizedInputs.samples.map(({ seed }) => seed.recordedAt),
+    ],
+    normalizedInputs.importedAt,
+  );
+  const importId = deterministicContractId(
+    ID_PREFIXES.transform,
+    stableStringify({
+      provider: normalizedInputs.provider,
+      accountId: normalizedInputs.accountId ?? null,
+      eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
+      sampleIds: normalizedInputs.samples.map(({ recordId }) => recordId),
+      rawArtifacts: normalizedInputs.rawArtifacts.map((artifact) => ({
+        role: artifact.role,
+        fileName: artifact.fileName,
+        mediaType: artifact.mediaType ?? null,
+        sha256: artifact.sha256,
+      })),
+    }),
+  );
+  const preparedRawArtifacts = prepareDeviceRawArtifacts(normalizedInputs.rawArtifacts, {
+    importId,
+    provider: normalizedInputs.provider,
+    effectiveOccurredAt,
+  });
+  const preparedEvents = prepareDeviceEventEntries(normalizedInputs.events, preparedRawArtifacts);
+  const preparedSamples = prepareDeviceSampleEntries(normalizedInputs.samples);
 
   return {
     importId,
-    provider: normalizedProvider,
-    accountId: normalizedAccountId,
-    importedAt: normalizedImportedAt,
-    source,
-    provenance: normalizedProvenance,
+    provider: normalizedInputs.provider,
+    accountId: normalizedInputs.accountId,
+    importedAt: normalizedInputs.importedAt,
+    source: normalizedInputs.source,
+    provenance: normalizedInputs.provenance,
     effectiveOccurredAt,
     preparedEvents,
     preparedSamples,
@@ -1481,7 +1611,7 @@ export async function importSamples({
 
   const normalizedStream = stream as SampleStream;
   const normalizedSamples = samples.map((sample) =>
-    assertPlainObject<SampleInputRecord>(
+    normalizeSampleInputRecord(
       sample,
       "VAULT_INVALID_SAMPLE",
       "Each sample must be a plain object.",

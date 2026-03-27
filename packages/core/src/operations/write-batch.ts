@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 
 import { VaultError } from "../errors.ts";
 import { ensureDirectory, pathExists, walkVaultFiles } from "../fs.ts";
+import { VAULT_LAYOUT } from "../constants.ts";
 import {
   normalizeRelativeVaultPath,
   normalizeVaultRoot,
@@ -28,6 +29,7 @@ export const WRITE_OPERATION_DIRECTORY = ".runtime/operations";
 
 type WriteOperationStatus = "staged" | "committing" | "committed" | "rolled_back" | "failed";
 type WriteOperationActionState = "staged" | "applied" | "reused" | "rolled_back";
+const PROTECTED_CANONICAL_ROOT_FILES = new Set<string>([VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument]);
 
 interface CreateWriteBatchInput {
   vaultRoot: string;
@@ -156,6 +158,14 @@ export interface StoredWriteOperation {
   error?: StoredWriteOperationError;
 }
 
+export interface RecoverableStoredWriteOperation {
+  operationId: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  actions: StoredWriteAction[];
+}
+
 function isStoredWriteOperationStatus(value: unknown): value is WriteOperationStatus {
   return (
     value === "staged" ||
@@ -262,6 +272,78 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
   return value as StoredWriteAction;
 }
 
+function parseRecoverableStoredAction(value: unknown): StoredWriteAction | null {
+  const action = parseStoredAction(value);
+  if (!action) {
+    return null;
+  }
+
+  if (
+    (action.kind === "raw_copy" || action.kind === "text_write" || action.kind === "jsonl_append") &&
+    typeof action.stageRelativePath !== "string"
+  ) {
+    return null;
+  }
+
+  return action;
+}
+
+export function isProtectedCanonicalPath(relativePath: string): boolean {
+  // Raw artifacts remain enforced by the isolated provider workspace +
+  // sandbox boundary rather than full snapshot/replay in the assistant guard.
+  return (
+    PROTECTED_CANONICAL_ROOT_FILES.has(relativePath) ||
+    relativePath.startsWith(`${VAULT_LAYOUT.journalDirectory}/`) ||
+    relativePath.startsWith("bank/") ||
+    (relativePath.startsWith("ledger/") && relativePath.endsWith(".jsonl")) ||
+    (relativePath.startsWith(`${VAULT_LAYOUT.auditDirectory}/`) && relativePath.endsWith(".jsonl"))
+  );
+}
+
+export async function listProtectedCanonicalPaths(vaultRoot: string): Promise<string[]> {
+  const matches = new Set<string>();
+
+  await Promise.all(
+    [...PROTECTED_CANONICAL_ROOT_FILES].map(async (relativePath) => {
+      if (await pathExists(resolveVaultPath(vaultRoot, relativePath).absolutePath)) {
+        matches.add(relativePath);
+      }
+    }),
+  );
+
+  for (const relativeDirectory of [VAULT_LAYOUT.journalDirectory, "bank", "ledger", VAULT_LAYOUT.auditDirectory]) {
+    await walkProtectedCanonicalFiles(vaultRoot, relativeDirectory, matches);
+  }
+
+  return [...matches].sort();
+}
+
+async function walkProtectedCanonicalFiles(
+  vaultRoot: string,
+  relativeDirectory: string,
+  matches: Set<string>,
+): Promise<void> {
+  const absoluteDirectory = resolveVaultPath(vaultRoot, relativeDirectory).absolutePath;
+  if (!(await pathExists(absoluteDirectory))) {
+    return;
+  }
+
+  const entries = await fs.readdir(absoluteDirectory, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of entries) {
+    const childRelativePath = path.posix.join(relativeDirectory, entry.name);
+    if (entry.isDirectory()) {
+      await walkProtectedCanonicalFiles(vaultRoot, childRelativePath, matches);
+      continue;
+    }
+
+    if (entry.isFile() && isProtectedCanonicalPath(childRelativePath)) {
+      matches.add(childRelativePath);
+    }
+  }
+}
+
 export async function readStoredWriteOperation(
   vaultRoot: string,
   relativePath: string,
@@ -312,6 +394,42 @@ export async function readStoredWriteOperation(
           }
         : undefined,
   };
+}
+
+export async function readRecoverableStoredWriteOperation(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<RecoverableStoredWriteOperation | null> {
+  try {
+    const resolved = resolveVaultPath(vaultRoot, relativePath);
+    const raw = JSON.parse(await readText(resolved.absolutePath)) as unknown;
+
+    if (!isPlainRecord(raw)) {
+      return null;
+    }
+
+    const actions = Array.isArray(raw.actions) ? raw.actions.map(parseRecoverableStoredAction) : null;
+    if (
+      typeof raw.operationId !== "string" ||
+      typeof raw.createdAt !== "string" ||
+      typeof raw.updatedAt !== "string" ||
+      typeof raw.status !== "string" ||
+      !actions ||
+      actions.some((action) => action === null)
+    ) {
+      return null;
+    }
+
+    return {
+      operationId: raw.operationId,
+      status: raw.status,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
+      actions: actions as StoredWriteAction[],
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function runCanonicalWrite<TResult>({

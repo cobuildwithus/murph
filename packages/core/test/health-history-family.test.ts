@@ -203,6 +203,118 @@ test("history test-event normalization keeps writes canonical and ignores legacy
   );
 });
 
+test("history append keeps per-kind defaults and resultSummary alias behavior through stored/read/list flows", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-history-kind-normalization");
+  await initializeVault({ vaultRoot });
+
+  const procedure = await appendHistoryEvent({
+    vaultRoot,
+    kind: "procedure",
+    occurredAt: "2026-03-04T09:00:00.000Z",
+    title: "Left knee arthroscopy",
+    procedure: "arthroscopy",
+  });
+  const adverseEffect = await appendHistoryEvent({
+    vaultRoot,
+    kind: "adverse_effect",
+    occurredAt: "2026-03-04T10:00:00.000Z",
+    title: "Nausea after ibuprofen",
+    substance: "ibuprofen",
+    effect: "nausea",
+  });
+  const exposure = await appendHistoryEvent({
+    vaultRoot,
+    kind: "exposure",
+    occurredAt: "2026-03-04T11:00:00.000Z",
+    title: "Mold cleanup",
+    substance: "mold",
+  });
+  const labResult = await appendHistoryEvent({
+    vaultRoot,
+    kind: "test",
+    occurredAt: "2026-03-04T12:00:00.000Z",
+    title: "hs-CRP imported from summary-only payload",
+    testName: "hs_crp",
+    resultSummary: "Borderline elevation noted in source system.",
+  });
+
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: procedure.relativePath,
+  });
+  const storedById = new Map(
+    stored.map((record) => [(record as { id?: string }).id, record as Record<string, unknown>]),
+  );
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    order: "asc",
+  });
+  const listedById = new Map(listed.map((record) => [record.id, record]));
+  const readProcedure = await readHistoryEvent({
+    vaultRoot,
+    eventId: procedure.record.id,
+  });
+  const readAdverseEffect = await readHistoryEvent({
+    vaultRoot,
+    eventId: adverseEffect.record.id,
+  });
+  const readExposure = await readHistoryEvent({
+    vaultRoot,
+    eventId: exposure.record.id,
+  });
+  const readLabResult = await readHistoryEvent({
+    vaultRoot,
+    eventId: labResult.record.id,
+  });
+
+  assert.equal(procedure.record.kind, "procedure");
+  assert.equal(procedure.record.status, "completed");
+  assert.equal(readProcedure.record.kind, "procedure");
+  assert.equal(readProcedure.record.status, "completed");
+  assert.equal(listedById.get(procedure.record.id)?.kind, "procedure");
+  assert.equal(
+    (listedById.get(procedure.record.id) as { status?: string } | undefined)?.status,
+    "completed",
+  );
+  assert.equal(storedById.get(procedure.record.id)?.status, "completed");
+
+  assert.equal(adverseEffect.record.kind, "adverse_effect");
+  assert.equal(adverseEffect.record.severity, "moderate");
+  assert.equal(readAdverseEffect.record.kind, "adverse_effect");
+  assert.equal(readAdverseEffect.record.severity, "moderate");
+  assert.equal(listedById.get(adverseEffect.record.id)?.kind, "adverse_effect");
+  assert.equal(
+    (listedById.get(adverseEffect.record.id) as { severity?: string } | undefined)?.severity,
+    "moderate",
+  );
+  assert.equal(storedById.get(adverseEffect.record.id)?.severity, "moderate");
+
+  assert.equal(exposure.record.kind, "exposure");
+  assert.equal(exposure.record.exposureType, "unspecified");
+  assert.equal(readExposure.record.kind, "exposure");
+  assert.equal(readExposure.record.exposureType, "unspecified");
+  assert.equal(listedById.get(exposure.record.id)?.kind, "exposure");
+  assert.equal(
+    (listedById.get(exposure.record.id) as { exposureType?: string } | undefined)?.exposureType,
+    "unspecified",
+  );
+  assert.equal(storedById.get(exposure.record.id)?.exposureType, "unspecified");
+
+  assert.equal(labResult.record.kind, "test");
+  assert.equal(labResult.record.summary, "Borderline elevation noted in source system.");
+  assert.equal(labResult.record.resultStatus, "unknown");
+  assert.equal(readLabResult.record.kind, "test");
+  assert.equal(readLabResult.record.summary, "Borderline elevation noted in source system.");
+  assert.equal(readLabResult.record.resultStatus, "unknown");
+  assert.equal(listedById.get(labResult.record.id)?.kind, "test");
+  assert.equal(
+    (listedById.get(labResult.record.id) as { summary?: string } | undefined)?.summary,
+    "Borderline elevation noted in source system.",
+  );
+  assert.equal(storedById.get(labResult.record.id)?.summary, "Borderline elevation noted in source system.");
+  assert.equal(storedById.get(labResult.record.id)?.resultSummary, undefined);
+});
+
 test("blood-test writes infer result status and persist structured analytes canonically", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-blood-test");
   await initializeVault({ vaultRoot });

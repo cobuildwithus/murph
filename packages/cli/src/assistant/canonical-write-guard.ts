@@ -3,7 +3,6 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  readdir,
   rm,
   unlink,
   writeFile,
@@ -11,9 +10,11 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
+  isProtectedCanonicalPath,
+  listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
+  readRecoverableStoredWriteOperation,
   readStoredWriteOperation as readWriteOperationMetadata,
-  VAULT_LAYOUT,
   resolveVaultPath,
 } from '@healthybob/core'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -61,13 +62,9 @@ type ExpectedFileState =
     }
 
 type StoredWriteOperation = Awaited<ReturnType<typeof readWriteOperationMetadata>>
-interface GuardRecoveredOperation {
-  actions: StoredWriteOperation['actions']
-  createdAt: string
-  operationId: string
-  status: string
-  updatedAt: string
-}
+type GuardRecoveredOperation = NonNullable<
+  Awaited<ReturnType<typeof readRecoverableStoredWriteOperation>>
+>
 
 interface GuardOperationEntry {
   guardFailure: GuardAuditStateFailure | null
@@ -75,11 +72,6 @@ interface GuardOperationEntry {
   relativePath: string
   snapshotStatus: string | null
 }
-
-const PROTECTED_ROOT_FILES = new Set<string>([
-  VAULT_LAYOUT.metadata,
-  VAULT_LAYOUT.coreDocument,
-])
 
 export async function executeWithCanonicalWriteGuard<TResult>(
   input: GuardInput<TResult>,
@@ -249,7 +241,10 @@ async function applyCommittedOperationEffects(input: {
           metadataPath: relativePath,
           reason: 'invalid_write_operation_metadata',
         })
-        const recovered = await recoverStoredWriteOperationForGuard(input.vaultRoot, relativePath)
+        const recovered = await readRecoverableStoredWriteOperation(
+          input.vaultRoot,
+          relativePath,
+        )
         return {
           guardFailure: failure,
           operation: recovered,
@@ -356,66 +351,6 @@ function compareOperationOrder(
   )
 }
 
-async function listProtectedCanonicalPaths(vaultRoot: string): Promise<string[]> {
-  const matches = new Set<string>()
-
-  for (const relativePath of PROTECTED_ROOT_FILES) {
-    if (await protectedPathExists(vaultRoot, relativePath)) {
-      matches.add(relativePath)
-    }
-  }
-
-  await walkProtectedDirectory(vaultRoot, VAULT_LAYOUT.journalDirectory, () => true, matches)
-  await walkProtectedDirectory(vaultRoot, 'bank', () => true, matches)
-  await walkProtectedDirectory(
-    vaultRoot,
-    'ledger',
-    (relativePath) => relativePath.endsWith('.jsonl'),
-    matches,
-  )
-  await walkProtectedDirectory(
-    vaultRoot,
-    VAULT_LAYOUT.auditDirectory,
-    (relativePath) => relativePath.endsWith('.jsonl'),
-    matches,
-  )
-
-  return [...matches].sort()
-}
-
-async function walkProtectedDirectory(
-  vaultRoot: string,
-  relativeDirectory: string,
-  include: (relativePath: string) => boolean,
-  matches: Set<string>,
-): Promise<void> {
-  const absoluteDirectory = resolveVaultPath(vaultRoot, relativeDirectory).absolutePath
-  let entries
-  try {
-    entries = await readdir(absoluteDirectory, {
-      withFileTypes: true,
-    })
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return
-    }
-
-    throw error
-  }
-
-  for (const entry of entries) {
-    const childRelativePath = path.posix.join(relativeDirectory, entry.name)
-    if (entry.isDirectory()) {
-      await walkProtectedDirectory(vaultRoot, childRelativePath, include, matches)
-      continue
-    }
-
-    if (entry.isFile() && include(childRelativePath)) {
-      matches.add(childRelativePath)
-    }
-  }
-}
-
 async function readStoredWriteOperationStatusForGuard(
   vaultRoot: string,
   relativePath: string,
@@ -423,25 +358,8 @@ async function readStoredWriteOperationStatusForGuard(
   try {
     return (await readStoredWriteOperationIfPresent(vaultRoot, relativePath))?.status ?? null
   } catch {
-    return (await recoverStoredWriteOperationForGuard(vaultRoot, relativePath))?.status ?? null
+    return (await readRecoverableStoredWriteOperation(vaultRoot, relativePath))?.status ?? null
   }
-}
-
-function isProtectedCanonicalPath(relativePath: string): boolean {
-  // Raw artifacts remain enforced by the isolated provider workspace +
-  // sandbox boundary rather than full snapshot/replay in this guard. Walking
-  // and copying the entire `raw/**` tree on every assistant turn would turn
-  // large vaults into a pathological hot path.
-  return (
-    PROTECTED_ROOT_FILES.has(relativePath) ||
-    relativePath.startsWith(`${VAULT_LAYOUT.journalDirectory}/`) ||
-    relativePath.startsWith('bank/') ||
-    (relativePath.startsWith('ledger/') && relativePath.endsWith('.jsonl')) ||
-    (
-      relativePath.startsWith(`${VAULT_LAYOUT.auditDirectory}/`) &&
-      relativePath.endsWith('.jsonl')
-    )
-  )
 }
 
 export function isAssistantCanonicalWriteBlockedError(
@@ -462,88 +380,6 @@ async function readStoredWriteOperationIfPresent(
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
-    }
-
-    throw error
-  }
-}
-
-async function recoverStoredWriteOperationForGuard(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<GuardRecoveredOperation | null> {
-  try {
-    const raw = JSON.parse(
-      await readFile(resolveVaultPath(vaultRoot, relativePath).absolutePath, 'utf8'),
-    ) as unknown
-    if (!isPlainObject(raw)) {
-      return null
-    }
-
-    const actions = Array.isArray(raw.actions)
-      ? raw.actions.map(parseRecoverableStoredAction)
-      : null
-    if (
-      typeof raw.operationId !== 'string' ||
-      typeof raw.createdAt !== 'string' ||
-      typeof raw.updatedAt !== 'string' ||
-      typeof raw.status !== 'string' ||
-      !actions ||
-      actions.some((action) => action === null)
-    ) {
-      return null
-    }
-
-    return {
-      actions: actions as StoredWriteOperation['actions'],
-      createdAt: raw.createdAt,
-      operationId: raw.operationId,
-      status: raw.status,
-      updatedAt: raw.updatedAt,
-    }
-  } catch {
-    return null
-  }
-}
-
-function parseRecoverableStoredAction(
-  value: unknown,
-): StoredWriteOperation['actions'][number] | null {
-  if (!isPlainObject(value) || typeof value.kind !== 'string') {
-    return null
-  }
-
-  if (typeof value.targetRelativePath !== 'string' || typeof value.state !== 'string') {
-    return null
-  }
-
-  if (
-    value.kind === 'raw_copy' ||
-    value.kind === 'text_write' ||
-    value.kind === 'jsonl_append'
-  ) {
-    return typeof value.stageRelativePath === 'string'
-      ? (value as StoredWriteOperation['actions'][number])
-      : null
-  }
-
-  if (value.kind === 'delete') {
-    return value as StoredWriteOperation['actions'][number]
-  }
-
-  return null
-}
-
-async function protectedPathExists(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<boolean> {
-  try {
-    await readFile(resolveVaultPath(vaultRoot, relativePath).absolutePath)
-    return true
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return false
     }
 
     throw error
@@ -771,8 +607,4 @@ function createGuardAuditStateFailure(input: {
     reason: input.reason,
     targetRelativePath: input.targetRelativePath,
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
 }

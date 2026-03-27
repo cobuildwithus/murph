@@ -1252,6 +1252,53 @@ snapshotId psnap_health_01
   }
 });
 
+test("tolerant async collector preserves fallback and failure ordering for malformed current-profile and registry markdown", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+  });
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/profile/current.md",
+      `---
+schemaVersion: hb.frontmatter.profile-current.v1
+snapshotId psnap_health_01
+---
+# Current Profile
+`,
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "bank/conditions/broken.md",
+      `---
+schemaVersion: hv/condition@v1
+conditionId cond_broken
+---
+# Broken
+`,
+    );
+
+    const collected = await collectCanonicalEntities(vaultRoot, {
+      mode: "tolerant-async",
+    });
+
+    assert.equal(collected.currentProfile?.entityId, "current");
+    assert.equal(collected.currentProfile?.attributes.snapshotId, "psnap_health_01");
+    assert.deepEqual(
+      collected.conditions.map((entity) => entity.entityId),
+      ["cond_sleep_01"],
+    );
+    assert.deepEqual(
+      collected.failures.map((failure) => failure.relativePath),
+      ["bank/profile/current.md", "bank/conditions/broken.md"],
+    );
+    assert.equal(collected.markdownByPath.has("bank/profile/current.md"), false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("buildExportPack date filters exclude older health slices while keeping current profile derivation", async () => {
   const vaultRoot = await createHealthVault({
     currentProfileSnapshotId: "psnap_health_01",

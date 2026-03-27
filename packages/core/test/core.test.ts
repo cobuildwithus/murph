@@ -69,6 +69,8 @@ import {
   writeVaultTextFile,
 } from "../src/fs.ts";
 import {
+  listProtectedCanonicalPaths,
+  readRecoverableStoredWriteOperation,
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
   WriteBatch,
@@ -1758,6 +1760,72 @@ test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE
     (error: unknown) =>
       error instanceof VaultError && error.code === "CANONICAL_WRITE_EMPTY",
   );
+});
+
+test("readRecoverableStoredWriteOperation tolerates malformed top-level metadata when actions stay recoverable", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-recoverable-write-operation");
+  await initializeVault({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, ".runtime/operations/op_test/payloads"), { recursive: true });
+
+  const relativePath = ".runtime/operations/op_test.json";
+  await fs.writeFile(
+    path.join(vaultRoot, relativePath),
+    JSON.stringify(
+      {
+        operationId: "op_test",
+        status: "committed",
+        createdAt: "2026-03-27T00:00:00.000Z",
+        updatedAt: "2026-03-27T00:00:01.000Z",
+        actions: [
+          {
+            kind: "text_write",
+            state: "applied",
+            targetRelativePath: "bank/test.md",
+            stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const recovered = await readRecoverableStoredWriteOperation(vaultRoot, relativePath);
+
+  assert.deepEqual(recovered, {
+    operationId: "op_test",
+    status: "committed",
+    createdAt: "2026-03-27T00:00:00.000Z",
+    updatedAt: "2026-03-27T00:00:01.000Z",
+    actions: [
+      {
+        kind: "text_write",
+        state: "applied",
+        targetRelativePath: "bank/test.md",
+        stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+      },
+    ],
+  });
+});
+
+test("listProtectedCanonicalPaths excludes symlinks under protected trees", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-protected-path-symlink");
+  const externalRoot = await makeTempDirectory("healthybob-protected-path-symlink-external");
+
+  try {
+    await initializeVault({ vaultRoot });
+    const externalPath = await writeExternalFile(externalRoot, "external.md", "# external\n");
+    await fs.writeFile(path.join(vaultRoot, "bank", "real.md"), "# real\n", "utf8");
+    await fs.symlink(externalPath, path.join(vaultRoot, "bank", "linked.md"));
+
+    const protectedPaths = await listProtectedCanonicalPaths(vaultRoot);
+
+    assert.equal(protectedPaths.includes("bank/real.md"), true);
+    assert.equal(protectedPaths.includes("bank/linked.md"), false);
+  } finally {
+    await fs.rm(externalRoot, { recursive: true, force: true });
+  }
 });
 
 test("WriteBatch rejects further mutations after commit with OPERATION_STATE_INVALID", async () => {
