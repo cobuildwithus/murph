@@ -40,10 +40,15 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
 }
 
-export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionBaseEvent {
-  kind: "vault.share.accepted";
+export interface HostedExecutionSharePackReference {
   shareCode: string;
-  pack: SharePack;
+  shareId: string;
+}
+
+export interface HostedExecutionVaultShareAcceptedEvent
+  extends HostedExecutionBaseEvent, HostedExecutionSharePackReference {
+  kind: "vault.share.accepted";
+  previewTitle: string | null;
 }
 
 export type HostedExecutionEvent =
@@ -113,4 +118,8 @@ export interface HostedExecutionUserEnvStatus {
 export interface HostedExecutionUserEnvUpdate {
   env: Record<string, string | null>;
   mode: "merge" | "replace";
+}
+
+export interface HostedExecutionSharePackResponse extends HostedExecutionSharePackReference {
+  pack: SharePack;
 }

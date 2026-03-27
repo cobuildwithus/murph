@@ -1,4 +1,4 @@
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
+import { Prisma } from "@prisma/client";
 import { deviceSyncError, isDeviceSyncError } from "@healthybob/device-syncd";
 
 import type {
@@ -11,10 +11,13 @@ import {
   drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox,
 } from "../hosted-execution/outbox";
+import {
+  buildHostedDeviceSyncWakeDispatch,
+  type HostedDeviceSyncWakeSource,
+} from "./hosted-dispatch";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import { toIsoTimestamp } from "./shared";
 
-export type HostedDeviceSyncWakeSource = "connection-established" | "disconnect" | "webhook-accepted";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -225,9 +228,19 @@ export async function dispatchHostedDeviceSyncWake(input: {
   const dispatch = buildHostedDeviceSyncWakeDispatch(input);
 
   await prisma.$transaction(async (tx) => {
+    const signal = await tx.deviceSyncSignal.create({
+      data: {
+        connectionId: input.connectionId,
+        createdAt: new Date(input.occurredAt),
+        kind: mapHostedDeviceSyncSignalKind(input.source),
+        payloadJson: buildHostedDeviceSyncSignalPayload(input),
+        provider: input.provider,
+        userId: input.userId,
+      },
+    });
     await enqueueHostedExecutionOutbox({
       dispatch,
-      sourceId: input.connectionId,
+      sourceId: String(signal.id),
       sourceType: "device_sync_signal",
       tx,
     });
@@ -243,25 +256,27 @@ export async function dispatchHostedDeviceSyncWake(input: {
   };
 }
 
-function buildHostedDeviceSyncWakeDispatch(input: {
-  connectionId: string;
+function buildHostedDeviceSyncSignalPayload(input: {
   occurredAt: string;
-  provider: string;
-  source: HostedDeviceSyncWakeSource;
   traceId?: string | null;
-  userId: string;
-}): HostedExecutionDispatchRequest {
+}): Prisma.InputJsonObject {
   return {
-    event: {
-      kind: "device-sync.wake",
-      connectionId: input.connectionId,
-      provider: input.provider,
-      reason: mapHostedDeviceSyncWakeReason(input.source),
-      userId: input.userId,
-    },
-    eventId: buildHostedDeviceSyncWakeEventId(input),
     occurredAt: input.occurredAt,
-  };
+    ...(input.traceId ? { traceId: input.traceId } : {}),
+  } satisfies Prisma.InputJsonObject;
+}
+
+function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): string {
+  switch (source) {
+    case "connection-established":
+      return "connected";
+    case "disconnect":
+      return "disconnected";
+    case "webhook-accepted":
+      return "webhook_hint";
+    default:
+      return source satisfies never;
+  }
 }
 
 function buildHostedWebhookHintSignal(input: {
@@ -287,37 +302,4 @@ function buildHostedWebhookHintSignal(input: {
   }
 
   return signal;
-}
-
-function buildHostedDeviceSyncWakeEventId(input: {
-  connectionId: string;
-  occurredAt: string;
-  provider: string;
-  source: HostedDeviceSyncWakeSource;
-  traceId?: string | null;
-  userId: string;
-}): string {
-  return [
-    "device-sync",
-    input.source,
-    input.userId,
-    input.provider,
-    input.connectionId,
-    input.traceId ?? input.occurredAt,
-  ].join(":");
-}
-
-function mapHostedDeviceSyncWakeReason(
-  source: HostedDeviceSyncWakeSource,
-): Extract<HostedExecutionDispatchRequest["event"], { kind: "device-sync.wake" }>["reason"] {
-  switch (source) {
-    case "connection-established":
-      return "connected";
-    case "disconnect":
-      return "disconnected";
-    case "webhook-accepted":
-      return "webhook_hint";
-    default:
-      return source satisfies never;
-  }
 }

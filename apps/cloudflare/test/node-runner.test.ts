@@ -69,8 +69,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
           userId: "member_123",
         },
         eventId: "evt_123",
@@ -111,8 +109,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
           userId: "member_123",
         },
         eventId: "evt_activation_first",
@@ -125,8 +121,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
           userId: "member_123",
         },
         eventId: "evt_activation_second",
@@ -168,8 +162,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
           userId: "member_123",
         },
         eventId: "evt_activation",
@@ -230,8 +222,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_456",
-          normalizedPhoneNumber: "+15557654321",
           userId: "member_456",
         },
         eventId: "evt_activation_share",
@@ -244,7 +234,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "vault.share.accepted",
-          shareCode: "share_test_123",
           pack,
           userId: "member_456",
         },
@@ -276,8 +265,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
           userId: "member_123",
         },
         eventId: "evt_user_env",
@@ -323,8 +310,6 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
-            linqChatId: "chat_123",
-            normalizedPhoneNumber: "+15551234567",
             userId: "member_123",
           },
           eventId: "evt_user_env_restore",
@@ -427,8 +412,6 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
-            linqChatId: "chat_1",
-            normalizedPhoneNumber: "+15550000001",
             userId: "member_1",
           },
           eventId: "evt_one",
@@ -450,8 +433,6 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
-            linqChatId: "chat_2",
-            normalizedPhoneNumber: "+15550000002",
             userId: "member_2",
           },
           eventId: "evt_two",
@@ -583,8 +564,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
           userId: "member_123",
         },
         eventId: "evt_outbox",
@@ -793,8 +772,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
           userId: "member_123",
         },
         eventId: "evt_outbox_send",
@@ -1088,8 +1065,6 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
-            linqChatId: "chat_123",
-            normalizedPhoneNumber: "+15551234567",
             userId: "member_123",
           },
           eventId: "evt_commit",
@@ -1167,8 +1142,6 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
-            linqChatId: "chat_123",
-            normalizedPhoneNumber: "+15551234567",
             userId: "member_123",
           },
           eventId: "evt_commit",
@@ -1187,8 +1160,6 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
-            linqChatId: "chat_456",
-            normalizedPhoneNumber: "+15557654321",
             userId: "member_456",
           },
           eventId: "evt_after_failure",

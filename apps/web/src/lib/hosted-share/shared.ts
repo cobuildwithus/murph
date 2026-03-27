@@ -1,7 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
 import { Prisma } from "@prisma/client";
+import {
+  buildHostedExecutionVaultShareAcceptedDispatch,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionSharePackResponse,
+} from "@healthybob/hosted-execution";
 import { assertContract, sharePackSchema, type SharePack } from "@healthybob/contracts";
 
 import {
@@ -34,6 +38,14 @@ export function findHostedShareLinkByCode(shareCode: string, prisma: HostedShare
   return prisma.hostedShareLink.findUnique({
     where: {
       codeHash: hashHostedShareCode(shareCode),
+    },
+  });
+}
+
+export function findHostedShareLinkById(shareId: string, prisma: HostedSharePrismaClient) {
+  return prisma.hostedShareLink.findUnique({
+    where: {
+      id: shareId,
     },
   });
 }
@@ -76,6 +88,28 @@ export function readHostedSharePreview(
   }
 
   return buildHostedSharePreview(fallbackPack);
+}
+
+export async function readHostedSharePackByReference(input: {
+  prisma: HostedSharePrismaClient;
+  shareCode: string;
+  shareId: string;
+}): Promise<HostedExecutionSharePackResponse> {
+  const record = await findHostedShareLinkById(input.shareId, input.prisma);
+
+  if (!record || record.codeHash !== hashHostedShareCode(input.shareCode)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SHARE_NOT_FOUND",
+      message: "That share link is not valid.",
+      httpStatus: 404,
+    });
+  }
+
+  return {
+    pack: readHostedSharePack(record).pack,
+    shareCode: input.shareCode,
+    shareId: input.shareId,
+  };
 }
 
 export async function releaseHostedShareAcceptance(input: {
@@ -158,19 +192,18 @@ export function buildHostedShareAcceptanceDispatch(input: {
   acceptedAt: string;
   eventId: string;
   memberId: string;
-  pack: SharePack;
+  previewTitle: string | null;
   shareCode: string;
+  shareId: string;
 }): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "vault.share.accepted",
-      pack: input.pack,
-      shareCode: input.shareCode,
-      userId: input.memberId,
-    },
+  return buildHostedExecutionVaultShareAcceptedDispatch({
+    acceptedAt: input.acceptedAt,
     eventId: input.eventId,
-    occurredAt: input.acceptedAt,
-  };
+    memberId: input.memberId,
+    previewTitle: input.previewTitle,
+    shareCode: input.shareCode,
+    shareId: input.shareId,
+  });
 }
 
 export function hashHostedShareCode(value: string): string {

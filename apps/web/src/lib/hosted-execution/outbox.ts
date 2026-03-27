@@ -13,6 +13,8 @@ import type {
 
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecutionStatus } from "./dispatch";
+import { hydrateHostedExecutionDispatch } from "./hydration";
+import { serializeHostedExecutionOutboxPayload } from "./outbox-payload";
 
 const CLAIM_LEASE_MS = 30_000;
 const RETRY_BASE_DELAY_MS = 5_000;
@@ -47,7 +49,7 @@ export async function enqueueHostedExecutionOutbox(
       sourceId: input.sourceId ?? null,
       eventId: input.dispatch.eventId,
       eventKind: input.dispatch.event.kind,
-      payloadJson: input.dispatch as unknown as Prisma.InputJsonValue,
+      payloadJson: serializeHostedExecutionOutboxPayload(input.dispatch),
       status: ExecutionOutboxStatus.pending,
       nextAttemptAt: now,
     },
@@ -243,8 +245,10 @@ async function processHostedExecutionOutboxRecord(
   record: ExecutionOutbox & { claimToken: string },
   nowIso: string,
 ): Promise<ExecutionOutbox> {
+  let dispatch: HostedExecutionDispatchRequest | null = null;
+
   try {
-    const dispatch = record.payloadJson as unknown as HostedExecutionDispatchRequest;
+    dispatch = await hydrateHostedExecutionDispatch(record, prisma);
     const status = await dispatchHostedExecutionStatus(dispatch);
     const lifecycle = resolveHostedExecutionLifecycle({
       eventId: record.eventId,
@@ -269,6 +273,7 @@ async function processHostedExecutionOutboxRecord(
                   ? STATUS_REFRESH_DELAY_MS
                   : computeRetryDelayMs(record.attemptCount)),
             ),
+      payloadJson: serializeHostedExecutionOutboxPayload(dispatch),
       status: lifecycle.status,
     });
   } catch (error) {
@@ -279,6 +284,9 @@ async function processHostedExecutionOutboxRecord(
       lastError: error instanceof Error ? error.message : String(error),
       lastStatusJson: record.lastStatusJson as Prisma.InputJsonValue | null,
       nextAttemptAt: new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
+      payloadJson: dispatch
+        ? serializeHostedExecutionOutboxPayload(dispatch)
+        : (record.payloadJson as Prisma.InputJsonValue),
       status: record.acceptedAt ? ExecutionOutboxStatus.accepted : ExecutionOutboxStatus.pending,
     });
   }
@@ -294,6 +302,7 @@ async function finalizeHostedExecutionOutboxAttempt(
     lastError: string | null;
     lastStatusJson: Prisma.InputJsonValue | null;
     nextAttemptAt: Date | null;
+    payloadJson: Prisma.InputJsonValue;
     status: ExecutionOutboxStatus;
   },
 ): Promise<ExecutionOutbox> {
@@ -310,6 +319,7 @@ async function finalizeHostedExecutionOutboxAttempt(
       lastError: input.lastError,
       lastStatusJson: input.lastStatusJson ?? Prisma.JsonNull,
       nextAttemptAt: input.nextAttemptAt ?? record.nextAttemptAt,
+      payloadJson: input.payloadJson,
       claimToken: null,
       claimExpiresAt: null,
     },

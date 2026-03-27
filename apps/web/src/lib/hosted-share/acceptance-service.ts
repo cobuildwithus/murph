@@ -1,22 +1,15 @@
 import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import {
-  drainHostedExecutionOutbox,
-  findHostedExecutionOutboxByEventId,
-  readHostedExecutionOutboxOutcome,
-  enqueueHostedExecutionOutbox,
-} from "../hosted-execution/outbox";
+import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import type { HostedSessionRecord } from "../hosted-onboarding/session";
 
 import {
   buildHostedShareAcceptanceDispatch,
   buildHostedShareAcceptanceEventId,
-  finalizeHostedShareAcceptance,
   readHostedSharePack,
   readHostedSharePreview,
-  releaseHostedShareAcceptance,
   requireHostedShareLink,
   hashHostedShareCode,
   normalizeOptionalString,
@@ -70,6 +63,7 @@ export async function acceptHostedShareLink(input: {
       return {
         alreadyImported: true,
         imported: true,
+        pending: false,
         preview,
         shareCode,
       };
@@ -108,7 +102,6 @@ export async function acceptHostedShareLink(input: {
     });
     const latest = await requireHostedShareLink(shareCode, tx);
     const dispatchEventId = latest.lastEventId ?? eventId;
-    const { pack } = readHostedSharePack(latest);
 
     if (!latest.consumedAt && latest.acceptedByMemberId === input.sessionRecord.member.id) {
       await enqueueHostedExecutionOutbox({
@@ -116,8 +109,9 @@ export async function acceptHostedShareLink(input: {
           acceptedAt: acceptedAt.toISOString(),
           eventId: dispatchEventId,
           memberId: input.sessionRecord.member.id,
-          pack,
+          previewTitle: preview.title,
           shareCode,
+          shareId: latest.id,
         }),
         sourceId: latest.id,
         sourceType: "hosted_share_link",
@@ -133,53 +127,26 @@ export async function acceptHostedShareLink(input: {
 
   record = claimed.record;
 
-  if (claimed.claimCount === 0 && record.acceptedByMemberId && record.acceptedByMemberId !== input.sessionRecord.member.id) {
+  if (
+    claimed.claimCount === 0
+    && record.acceptedByMemberId
+    && record.acceptedByMemberId !== input.sessionRecord.member.id
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_SHARE_ALREADY_CLAIMED",
       message: "That share link has already been claimed by another member.",
       httpStatus: 409,
     });
   }
-  const dispatchEventId = record.lastEventId ?? eventId;
-  await drainHostedExecutionOutbox({
-    eventIds: [dispatchEventId],
-    prisma,
-  });
-  const outboxRecord = await findHostedExecutionOutboxByEventId(dispatchEventId, prisma);
-  const outboxOutcome = readHostedExecutionOutboxOutcome(outboxRecord);
 
-  if (outboxOutcome === "pending") {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_IMPORT_PENDING",
-      message: "The shared bundle is still importing. Reopen this link in a few seconds.",
-      httpStatus: 503,
-      retryable: true,
-    });
-  }
-
-  if (outboxOutcome === "failed") {
-    await releaseHostedShareAcceptance({
-      prisma,
-      shareCode,
-      memberId: input.sessionRecord.member.id,
-    });
-
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_IMPORT_FAILED",
-      message: outboxRecord?.lastError ?? "The hosted share could not be imported right now.",
-      httpStatus: 502,
-    });
-  }
-  await finalizeHostedShareAcceptance({
-    eventId: dispatchEventId,
-    memberId: input.sessionRecord.member.id,
-    prisma,
-    shareCode,
-  });
+  const imported = Boolean(
+    record.consumedAt && record.consumedByMemberId === input.sessionRecord.member.id,
+  );
 
   return {
     alreadyImported: false,
-    imported: true,
+    imported,
+    pending: !imported,
     preview,
     shareCode,
   };

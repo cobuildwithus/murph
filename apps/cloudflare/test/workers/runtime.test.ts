@@ -217,8 +217,6 @@ function createDispatch(
   return {
     event: {
       kind: "member.activated",
-      linqChatId: "chat_123",
-      normalizedPhoneNumber: "+15551234567",
       userId,
     },
     eventId,

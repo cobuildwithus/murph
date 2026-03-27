@@ -165,20 +165,39 @@ class HostedWebhookReceiptSideEffectDrainError extends Error {
 
 const HOSTED_REVNET_SUBMITTING_STALE_MS = 5 * 60 * 1000;
 
-export async function handleHostedOnboardingLinqWebhook(input: {
-  rawBody: string;
-  signature: string | null;
-  timestamp: string | null;
-  prisma?: PrismaClient;
-  signal?: AbortSignal;
-}): Promise<{
+type HostedOnboardingLinqWebhookResponse = {
   duplicate?: boolean;
   ignored?: boolean;
   inviteCode?: string;
   joinUrl?: string;
   ok: true;
   reason?: string;
-}> {
+};
+
+type HostedOnboardingLinqWebhookPlan =
+  | {
+    desiredSideEffects: [];
+    kind: "ignore";
+    response: HostedOnboardingLinqWebhookResponse;
+  }
+  | {
+    desiredSideEffects: [HostedWebhookDispatchSideEffect];
+    kind: "active-member-dispatch";
+    response: HostedOnboardingLinqWebhookResponse;
+  }
+  | {
+    desiredSideEffects: [HostedWebhookLinqMessageSideEffect];
+    kind: "invite-reply";
+    response: HostedOnboardingLinqWebhookResponse;
+  };
+
+export async function handleHostedOnboardingLinqWebhook(input: {
+  rawBody: string;
+  signature: string | null;
+  timestamp: string | null;
+  prisma?: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<HostedOnboardingLinqWebhookResponse> {
   const prisma = input.prisma ?? getPrisma();
   const environment = getHostedOnboardingEnvironment();
 
@@ -208,130 +227,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 
   try {
-    const desiredSideEffects: HostedWebhookSideEffect[] = [];
-    let response:
-      | {
-        duplicate?: boolean;
-        ignored?: boolean;
-        inviteCode?: string;
-        joinUrl?: string;
-        ok: true;
-        reason?: string;
-      };
-
-    if (event.event_type !== "message.received") {
-      response = {
-        ok: true,
-        ignored: true,
-        reason: event.event_type,
-      };
-    } else {
-      const messageEvent = requireHostedLinqMessageReceivedEvent(event);
-      const summary = summarizeHostedLinqMessage(messageEvent);
-
-      if (summary.isFromMe) {
-        response = {
-          ok: true,
-          ignored: true,
-          reason: "own-message",
-        };
-      } else {
-        const normalizedPhoneNumber = normalizePhoneNumber(summary.phoneNumber);
-
-        if (!normalizedPhoneNumber) {
-          response = {
-            ok: true,
-            ignored: true,
-            reason: "invalid-phone",
-          };
-        } else {
-          const existingMember = await prisma.hostedMember.findUnique({
-            where: {
-              normalizedPhoneNumber,
-            },
-            include: {
-              invites: {
-                orderBy: {
-                  createdAt: "desc",
-                },
-                take: 1,
-              },
-            },
-          });
-
-          if (existingMember?.billingStatus === HostedBillingStatus.active) {
-            desiredSideEffects.push(
-              createHostedWebhookDispatchSideEffect({
-                dispatch: {
-                  event: {
-                    kind: "linq.message.received",
-                    linqChatId: summary.chatId,
-                    linqEvent: event as unknown as Record<string, unknown>,
-                    normalizedPhoneNumber,
-                    userId: existingMember.id,
-                  },
-                  eventId: event.event_id,
-                  occurredAt: event.created_at,
-                },
-              }),
-            );
-
-            response = {
-              ok: true,
-              ignored: false,
-              reason: "dispatched-active-member",
-            };
-          } else {
-            const shouldStart = !existingMember || shouldStartHostedOnboarding(summary.text);
-
-            if (!shouldStart) {
-              response = {
-                ok: true,
-                ignored: true,
-                reason: "no-trigger",
-              };
-            } else {
-              const member = await ensureHostedMemberForPhone({
-                linqChatId: summary.chatId,
-                normalizedPhoneNumber,
-                originalPhoneNumber: summary.phoneNumber,
-                prisma,
-              });
-              const invite = await issueHostedInvite({
-                channel: "linq",
-                linqChatId: summary.chatId,
-                linqEventId: event.event_id,
-                memberId: member.id,
-                prisma,
-                triggerText: summary.text,
-              });
-              const joinUrl = buildHostedInviteUrl(invite.inviteCode);
-              desiredSideEffects.push(
-                createHostedWebhookLinqMessageSideEffect({
-                  chatId: summary.chatId,
-                  inviteId: invite.id,
-                  message: buildHostedInviteReply({
-                    activeSubscription: member.billingStatus === HostedBillingStatus.active,
-                    joinUrl,
-                  }),
-                  sourceEventId: event.event_id,
-                }),
-              );
-
-              response = {
-                ok: true,
-                inviteCode: invite.inviteCode,
-                joinUrl,
-              };
-            }
-          }
-        }
-      }
-    }
+    const plan = await planHostedOnboardingLinqWebhook({
+      event,
+      prisma,
+    });
 
     claimedReceipt = await queueHostedWebhookReceiptSideEffects({
       claimedReceipt,
-      desiredSideEffects,
+      desiredSideEffects: plan.desiredSideEffects,
       eventId: event.event_id,
       prisma,
       source: "linq",
@@ -354,7 +257,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       source: "linq",
     });
 
-    return response;
+    return plan.response;
   } catch (error) {
     const drainFailure = readHostedWebhookReceiptDrainError(error);
     const failure = drainFailure?.cause ?? error;
@@ -371,6 +274,139 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw failure;
   }
+}
+
+async function planHostedOnboardingLinqWebhook(input: {
+  event: ReturnType<typeof parseHostedLinqWebhookEvent>;
+  prisma: PrismaClient;
+}): Promise<HostedOnboardingLinqWebhookPlan> {
+  if (input.event.event_type !== "message.received") {
+    return {
+      kind: "ignore",
+      desiredSideEffects: [],
+      response: {
+        ok: true,
+        ignored: true,
+        reason: input.event.event_type,
+      },
+    };
+  }
+
+  const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
+  const summary = summarizeHostedLinqMessage(messageEvent);
+
+  if (summary.isFromMe) {
+    return {
+      kind: "ignore",
+      desiredSideEffects: [],
+      response: {
+        ok: true,
+        ignored: true,
+        reason: "own-message",
+      },
+    };
+  }
+
+  const normalizedPhoneNumber = normalizePhoneNumber(summary.phoneNumber);
+
+  if (!normalizedPhoneNumber) {
+    return {
+      kind: "ignore",
+      desiredSideEffects: [],
+      response: {
+        ok: true,
+        ignored: true,
+        reason: "invalid-phone",
+      },
+    };
+  }
+
+  const existingMember = await input.prisma.hostedMember.findUnique({
+    where: {
+      normalizedPhoneNumber,
+    },
+    include: {
+      invites: {
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 1,
+      },
+    },
+  });
+
+  if (existingMember?.billingStatus === HostedBillingStatus.active) {
+    return {
+      kind: "active-member-dispatch",
+      desiredSideEffects: [
+        createHostedWebhookDispatchSideEffect({
+          dispatch: {
+            event: {
+              kind: "linq.message.received",
+              linqEvent: input.event as unknown as Record<string, unknown>,
+              normalizedPhoneNumber,
+              userId: existingMember.id,
+            },
+            eventId: input.event.event_id,
+            occurredAt: input.event.created_at,
+          },
+        }),
+      ],
+      response: {
+        ok: true,
+        ignored: false,
+        reason: "dispatched-active-member",
+      },
+    };
+  }
+
+  if (existingMember && !shouldStartHostedOnboarding(summary.text)) {
+    return {
+      kind: "ignore",
+      desiredSideEffects: [],
+      response: {
+        ok: true,
+        ignored: true,
+        reason: "no-trigger",
+      },
+    };
+  }
+
+  const member = await ensureHostedMemberForPhone({
+    linqChatId: summary.chatId,
+    normalizedPhoneNumber,
+    originalPhoneNumber: summary.phoneNumber,
+    prisma: input.prisma,
+  });
+  const invite = await issueHostedInvite({
+    channel: "linq",
+    linqChatId: summary.chatId,
+    linqEventId: input.event.event_id,
+    memberId: member.id,
+    prisma: input.prisma,
+    triggerText: summary.text,
+  });
+  const joinUrl = buildHostedInviteUrl(invite.inviteCode);
+
+  return {
+    kind: "invite-reply",
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        chatId: summary.chatId,
+        inviteId: invite.id,
+        message: buildHostedInviteReply({
+          activeSubscription: member.billingStatus === HostedBillingStatus.active,
+          joinUrl,
+        }),
+        sourceEventId: input.event.event_id,
+      }),
+    ],
+    response: {
+      ok: true,
+      inviteCode: invite.inviteCode,
+      joinUrl,
+    },
+  };
 }
 
 export async function handleHostedStripeWebhook(input: {
@@ -1998,9 +2034,7 @@ async function applyStripeCheckoutCompleted(
       desiredSideEffects.push(
         createHostedWebhookDispatchSideEffect({
           dispatch: buildHostedMemberActivationDispatch({
-            linqChatId: updatedMember.linqChatId,
             memberId: updatedMember.id,
-            normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
             occurredAt: dispatchContext.occurredAt,
             sourceEventId: dispatchContext.sourceEventId,
             sourceType: "stripe.checkout.session.completed",
@@ -2122,9 +2156,7 @@ async function applyStripeSubscriptionUpdated(
     desiredSideEffects.push(
       createHostedWebhookDispatchSideEffect({
         dispatch: buildHostedMemberActivationDispatch({
-          linqChatId: updatedMember.linqChatId,
           memberId: updatedMember.id,
-          normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
           occurredAt: dispatchContext.occurredAt,
           sourceEventId: dispatchContext.sourceEventId,
           sourceType: dispatchContext.sourceType,
@@ -2200,9 +2232,7 @@ async function applyStripeInvoicePaid(
   desiredSideEffects.push(
     createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedMemberActivationDispatch({
-        linqChatId: updatedMember.linqChatId,
         memberId: updatedMember.id,
-        normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
         occurredAt: dispatchContext.occurredAt,
         sourceEventId: dispatchContext.sourceEventId,
         sourceType: "stripe.invoice.paid",

@@ -153,8 +153,6 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_123",
@@ -215,8 +213,6 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_native_container",
@@ -448,8 +444,6 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_final_bundles",
@@ -495,8 +489,6 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_finalized_recovery",
@@ -566,8 +558,6 @@ describe("HostedUserRunner", () => {
     const firstStatus = await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_finalize_retry",
@@ -625,8 +615,6 @@ describe("HostedUserRunner", () => {
     const first = await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_first",
@@ -1547,8 +1535,6 @@ describe("HostedUserRunner", () => {
     await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_bootstrap",
@@ -1634,8 +1620,6 @@ describe("HostedUserRunner", () => {
     await runner.dispatch({
       event: {
         kind: "member.activated",
-        linqChatId: "chat_123",
-        normalizedPhoneNumber: "+15551234567",
         userId: "member_123",
       },
       eventId: "evt_alarm_clear",

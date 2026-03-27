@@ -18,6 +18,7 @@ import {
   type AuthenticatedHostedUser,
 } from "./auth";
 import { createHostedSecretCodec } from "./crypto";
+import type { HostedDeviceSyncWakeSource } from "./hosted-dispatch";
 import { readHostedDeviceSyncEnvironment } from "./env";
 import { createHostedDeviceSyncRegistry } from "./providers";
 import {
@@ -32,7 +33,6 @@ import {
   disconnectHostedDeviceSyncConnection,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
-  type HostedDeviceSyncWakeSource,
 } from "./wake-service";
 import {
   HostedDeviceSyncAgentSessionService,

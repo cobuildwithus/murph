@@ -10,7 +10,12 @@ const mocks = vi.hoisted(() => ({
   getConnectionForUser: vi.fn(),
   getConnectionOwnerId: vi.fn(),
   markConnectionDisconnected: vi.fn(),
-  prismaTx: { __tx: true },
+  prismaTx: {
+    __tx: true,
+    deviceSyncSignal: {
+      create: vi.fn(),
+    },
+  },
   prisma: {
     $transaction: vi.fn(),
   },
@@ -163,6 +168,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       startConnection: vi.fn(),
     }));
     mocks.createSignal.mockResolvedValue({ id: 8 });
+    mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(undefined);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -187,20 +193,30 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
+    expect(mocks.prismaTx.deviceSyncSignal.create).toHaveBeenCalledWith({
+      data: {
+        connectionId: "dsc_123",
+        createdAt: new Date("2026-03-26T12:00:00.000Z"),
+        kind: "connected",
+        payloadJson: {
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+        provider: "oura",
+        userId: "user-123",
+      },
+    });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       {
         dispatch: {
           event: {
-            connectionId: "dsc_123",
             kind: "device-sync.wake",
-            provider: "oura",
             reason: "connected",
             userId: "user-123",
           },
           eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
-        sourceId: "dsc_123",
+        sourceId: "8",
         sourceType: "device_sync_signal",
         tx: mocks.prismaTx,
       },
@@ -222,11 +238,25 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
+    expect(mocks.prismaTx.deviceSyncSignal.create).toHaveBeenCalledWith({
+      data: {
+        connectionId: "dsc_123",
+        createdAt: new Date("2026-03-26T12:00:00.000Z"),
+        kind: "webhook_hint",
+        payloadJson: {
+          occurredAt: "2026-03-26T12:00:00.000Z",
+          traceId: "trace_123",
+        },
+        provider: "oura",
+        userId: "user-123",
+      },
+    });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
           eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
         }),
+        sourceId: "8",
       }),
     );
   });
@@ -240,19 +270,30 @@ describe("dispatchHostedDeviceSyncWake", () => {
       userId: "user-123",
     });
 
+    expect(mocks.prismaTx.deviceSyncSignal.create).toHaveBeenCalledWith({
+      data: {
+        connectionId: "dsc_123",
+        createdAt: new Date("2026-03-26T12:00:00.000Z"),
+        kind: "disconnected",
+        payloadJson: {
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+        provider: "oura",
+        userId: "user-123",
+      },
+    });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: {
           event: {
-            connectionId: "dsc_123",
             kind: "device-sync.wake",
-            provider: "oura",
             reason: "disconnected",
             userId: "user-123",
           },
           eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
+        sourceId: "8",
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
@@ -368,9 +409,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       expect.objectContaining({
         dispatch: {
           event: {
-            connectionId: "dsc_123",
             kind: "device-sync.wake",
-            provider: "oura",
             reason: "webhook_hint",
             userId: "user-123",
           },
