@@ -6,6 +6,7 @@ import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
   formatHostedWorkerDeploymentVersionSpecs,
+  HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   parseHostedContainerImageListOutput,
   readHostedDeployAutomationEnvironment,
   resolveCloudflareDeployPaths,
@@ -20,6 +21,7 @@ describe("hosted deploy automation helpers", () => {
       AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_CONTAINER_SLEEP_AFTER: "7m",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
@@ -107,10 +109,29 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER).toBe("7m");
     expect(config.vars.AGENTMAIL_BASE_URL).toBe("https://mail.example.test/v0");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
-    expect(config.secrets).toBeUndefined();
+    expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
+  });
+
+  it("normalizes the legacy AgentMail and ffmpeg deploy aliases onto canonical worker vars", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
+    });
+
+    expect(environment.workerVars).toMatchObject({
+      AGENTMAIL_BASE_URL: "https://legacy-mail.example.test/v0",
+      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "5m",
+    });
+    expect(environment.workerVars.AGENTMAIL_API_BASE_URL).toBeUndefined();
+    expect(environment.workerVars.PARSER_FFMPEG_PATH).toBeUndefined();
   });
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {
