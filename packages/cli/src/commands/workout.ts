@@ -21,8 +21,7 @@ import {
 } from '../usecases/workout.js'
 import {
   createDirectEntityDeleteCommandDefinition,
-  createDirectEntityEditCommandDefinition,
-  dayKeyPolicySchema,
+  createDirectEventBackedEntityEditCommandDefinition,
 } from './record-mutation-command-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
@@ -125,7 +124,7 @@ export function registerWorkoutCommands(
     },
   })
 
-  workout.command('edit', createDirectEntityEditCommandDefinition({
+  workout.command('edit', createDirectEventBackedEntityEditCommandDefinition({
     arg: {
       name: 'id',
       schema: z
@@ -135,11 +134,6 @@ export function registerWorkoutCommands(
     },
     description:
       'Edit one workout session by merging a partial JSON patch or one or more path assignments into the saved activity event.',
-    hint:
-      'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved workout day stays explicit.',
-    options: {
-      dayKeyPolicy: dayKeyPolicySchema.optional(),
-    },
     run(input) {
       return editWorkoutRecord({
         vault: input.vault,

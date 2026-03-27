@@ -12,8 +12,7 @@ import {
 } from '../usecases/intervention.js'
 import {
   createDirectEntityDeleteCommandDefinition,
-  createDirectEntityEditCommandDefinition,
-  dayKeyPolicySchema,
+  createDirectEventBackedEntityEditCommandDefinition,
 } from './record-mutation-command-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
@@ -122,18 +121,13 @@ export function registerInterventionCommands(
     },
   })
 
-  intervention.command('edit', createDirectEntityEditCommandDefinition({
+  intervention.command('edit', createDirectEventBackedEntityEditCommandDefinition({
     arg: {
       name: 'id',
       schema: interventionLookupSchema.describe('Canonical intervention event id such as evt_<ULID>.'),
     },
     description:
       'Edit one intervention session by merging a partial JSON patch or one or more path assignments into the saved event.',
-    hint:
-      'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved intervention day stays explicit.',
-    options: {
-      dayKeyPolicy: dayKeyPolicySchema.optional(),
-    },
     run(input) {
       return editInterventionRecord({
         vault: input.vault,

@@ -24,6 +24,10 @@ interface EntityEditCommandInput {
   inputFile?: string
   set?: string[]
   clear?: string[]
+}
+
+export interface EventBackedEntityEditCommandInput
+  extends EntityEditCommandInput {
   dayKeyPolicy?: 'keep' | 'recompute'
 }
 
@@ -33,14 +37,18 @@ interface EntityDeleteCommandInput {
   lookup: string
 }
 
-interface EntityEditCommandConfig<TResult> {
+interface EntityEditCommandConfig<TResult, TInput extends EntityEditCommandInput = EntityEditCommandInput> {
   arg: EntityCommandArgConfig
   description: string
   hint?: string
   examples?: Array<Record<string, unknown>>
   output?: z.ZodType<TResult>
   options?: Record<string, z.ZodTypeAny>
-  run(input: EntityEditCommandInput): Promise<TResult>
+  buildInput?: (
+    input: EntityEditCommandInput,
+    options: Record<string, unknown>,
+  ) => TInput
+  run(input: TInput): Promise<TResult>
 }
 
 interface EntityDeleteCommandConfig<TResult> {
@@ -68,8 +76,11 @@ export const dayKeyPolicySchema = z
     'Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone.',
   )
 
-export function createEntityEditCommandConfig<TResult>(
-  config: EntityEditCommandConfig<TResult>,
+const EVENT_BACKED_DAY_KEY_POLICY_HINT =
+  'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved local day stays explicit.'
+
+export function createEntityEditCommandConfig<TResult, TInput extends EntityEditCommandInput = EntityEditCommandInput>(
+  config: EntityEditCommandConfig<TResult, TInput>,
 ) {
   return {
     name: 'edit',
@@ -103,7 +114,7 @@ export function createEntityEditCommandConfig<TResult>(
     }) {
       const lookup = String(context.args[config.arg.name] ?? '')
 
-      return config.run({
+      const input = {
         vault: context.options.vault,
         requestId: context.requestId,
         lookup,
@@ -117,14 +128,43 @@ export function createEntityEditCommandConfig<TResult>(
         clear: Array.isArray(context.options.clear)
           ? context.options.clear.filter((value): value is string => typeof value === 'string')
           : undefined,
-        dayKeyPolicy:
-          context.options.dayKeyPolicy === 'keep' ||
-          context.options.dayKeyPolicy === 'recompute'
-            ? context.options.dayKeyPolicy
-            : undefined,
-      })
+      }
+
+      return config.run(
+        config.buildInput
+          ? config.buildInput(input, context.options as Record<string, unknown>)
+          : (input as TInput),
+      )
     },
   }
+}
+
+export function createEventBackedEntityEditCommandConfig<TResult>(
+  config: Omit<
+    EntityEditCommandConfig<TResult, EventBackedEntityEditCommandInput>,
+    'buildInput' | 'hint' | 'options'
+  > & {
+    hint?: string
+    options?: Record<string, z.ZodTypeAny>
+  },
+) {
+  return createEntityEditCommandConfig<TResult, EventBackedEntityEditCommandInput>({
+    ...config,
+    hint: config.hint ?? EVENT_BACKED_DAY_KEY_POLICY_HINT,
+    options: {
+      dayKeyPolicy: dayKeyPolicySchema.optional(),
+      ...(config.options ?? {}),
+    },
+    buildInput(input, options) {
+      return {
+        ...input,
+        dayKeyPolicy:
+          options.dayKeyPolicy === 'keep' || options.dayKeyPolicy === 'recompute'
+            ? options.dayKeyPolicy
+            : undefined,
+      }
+    },
+  })
 }
 
 export function createEntityDeleteCommandConfig<TResult>(
@@ -161,6 +201,44 @@ export function createDirectEntityEditCommandDefinition<TResult>(
   config: EntityEditCommandConfig<TResult>,
 ) {
   const command = createEntityEditCommandConfig(config)
+
+  return {
+    args: command.args,
+    description: command.description,
+    examples: command.examples,
+    hint: command.hint,
+    options: withBaseOptions(command.options ?? {}),
+    output: command.output,
+    async run(context: {
+      args: Record<string, unknown>
+      options: {
+        vault: string
+        requestId?: string
+        input?: string
+        set?: string[]
+        clear?: string[]
+        dayKeyPolicy?: 'keep' | 'recompute'
+      }
+    }) {
+      return command.run({
+        args: context.args,
+        options: context.options,
+        requestId: requestIdFromOptions(context.options),
+      })
+    },
+  }
+}
+
+export function createDirectEventBackedEntityEditCommandDefinition<TResult>(
+  config: Omit<
+    EntityEditCommandConfig<TResult, EventBackedEntityEditCommandInput>,
+    'buildInput' | 'hint' | 'options'
+  > & {
+    hint?: string
+    options?: Record<string, z.ZodTypeAny>
+  },
+) {
+  const command = createEventBackedEntityEditCommandConfig(config)
 
   return {
     args: command.args,

@@ -217,6 +217,15 @@ function normalizeExplicitTimeZone(
   return normalized
 }
 
+function normalizePatchedDayKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+  return /^\d{4}-\d{2}-\d{2}$/u.test(trimmed) ? trimmed : undefined
+}
+
 function applyTemporalEditPolicy(input: {
   original: JsonObject
   patched: JsonObject
@@ -264,8 +273,20 @@ function applyTemporalEditPolicy(input: {
     )
   }
 
+  const nextRecord = structuredClone(input.patched)
+
   if (dayKeyTouched && !dayKeyCleared) {
-    return input.patched
+    const patchedDayKey = normalizePatchedDayKey(input.patched.dayKey)
+
+    if (!patchedDayKey) {
+      throw new VaultCliError(
+        'invalid_payload',
+        'A direct dayKey patch must be a concrete YYYY-MM-DD value. Otherwise use --day-key-policy recompute with an explicit timeZone.',
+      )
+    }
+
+    nextRecord.dayKey = patchedDayKey
+    return nextRecord
   }
 
   if (!input.dayKeyPolicy && !dayKeyTouched) {
@@ -274,8 +295,6 @@ function applyTemporalEditPolicy(input: {
       'Editing occurredAt or timeZone requires an explicit local-day choice: pass --day-key-policy keep, pass --day-key-policy recompute, or patch dayKey directly.',
     )
   }
-
-  const nextRecord = structuredClone(input.patched)
 
   if (input.dayKeyPolicy === 'keep') {
     if (typeof input.original.dayKey !== 'string' || input.original.dayKey.length === 0) {

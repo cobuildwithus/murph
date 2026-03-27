@@ -18,8 +18,7 @@ import {
 import { registerLedgerEventEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,
-  createEntityEditCommandConfig,
-  dayKeyPolicySchema,
+  createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
 
 const eventIdSchema = z
@@ -119,18 +118,13 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultCliServices) 
       },
     },
     additionalCommands: [
-      createEntityEditCommandConfig({
+      createEventBackedEntityEditCommandConfig({
         arg: {
           name: 'id',
           schema: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
         },
         description:
           'Edit one canonical event by merging a partial JSON patch or one or more path assignments into the saved record.',
-        hint:
-          'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the local-calendar day stays explicit.',
-        options: {
-          dayKeyPolicy: dayKeyPolicySchema.optional(),
-        },
         async run(input) {
           const result = await editEventRecord({
             vault: input.vault,

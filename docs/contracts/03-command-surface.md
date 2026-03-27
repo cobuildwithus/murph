@@ -80,20 +80,25 @@ vault-cli recipe show <id> --vault <path> [--request-id <id>]
 vault-cli recipe list --vault <path> [--status draft|saved|archived] [--limit <n>] [--request-id <id>]
 vault-cli event scaffold --vault <path> --kind <kind> [--request-id <id>]
 vault-cli event upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli event edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli event show <id> --vault <path> [--request-id <id>]
 vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--request-id <id>]
 vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--request-id <id>]
+vault-cli document edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli document show <id> --vault <path> [--request-id <id>]
 vault-cli document list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
 vault-cli document manifest <id> --vault <path> [--request-id <id>]
 vault-cli meal add --vault <path> [--photo <path>] [--audio <path>] [--note "..."] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli meal edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal show <id> --vault <path> [--request-id <id>]
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli workout edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
 vault-cli workout format show <name> --vault <path> [--request-id <id>]
 vault-cli workout format list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli workout format log <name> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--protocol-id <protocolId>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli intervention edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
 vault-cli meal manifest <id> --vault <path> [--request-id <id>]
 vault-cli samples add --vault <path> --input @file.json [--request-id <id>]
@@ -156,6 +161,8 @@ vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUr
 ```
 
 `vault-cli inbox model bundle` materializes the normalized routing bundle plus image-routing eligibility metadata. `vault-cli inbox model route` may attach supported stored routing images to the model request when the capture includes an eligible JPEG, PNG, WEBP, or GIF attachment.
+
+For event-backed edit commands (`event`, `document`, `meal`, `workout`, `intervention`), changing `occurredAt` or `timeZone` without patching `dayKey` directly now requires `--day-key-policy keep|recompute`. This prevents silent stale-day retention and prevents legacy records without explicit `timeZone` provenance from silently materializing the vault default timezone into the saved record during edits.
 
 `vault-cli assistant ask|chat|deliver|status|doctor` persist or inspect out-of-vault assistant session state. Durable assistant memory is now managed explicitly through `vault-cli assistant memory search|get|upsert|forget`, and scheduled assistant prompts are managed through `vault-cli assistant cron preset list|show|install` plus `vault-cli assistant cron add|status|list|show|enable|disable|remove|run|runs`, with only a small core long-term block injected automatically into fresh sessions. New prompt-backed cron jobs must bind an explicit outbound channel route and always deliver their generated response; interactive onboarding no longer materializes preset cron jobs automatically because it does not yet collect those delivery destinations. Coarse system-written turn receipts, replay-safe outbox intents, diagnostics snapshots, persisted status snapshots, and provider failover cooldown state live under `assistant-state/` for read-only `status` / `doctor` inspection. In provider-backed Codex sessions the live memory and cron paths are exposed as bounded MCP tool surfaces, while OpenAI-compatible sessions replay the recent local transcript plus the same bootstrap system context on each turn. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, selected non-canonical health context only loads in private contexts, assistant cron state stays outside the canonical vault under `assistant-state/cron/`, and the vault remains authoritative.
 

@@ -1170,6 +1170,223 @@ test.sequential(
 )
 
 test.sequential(
+  'food and recipe edit rename the underlying document when slug is patched',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-edit-rename-'))
+    const foodPayloadPath = path.join(vaultRoot, 'food.json')
+    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      await writeFile(
+        foodPayloadPath,
+        JSON.stringify({
+          title: 'Regular Acai Bowl',
+          slug: 'regular-acai-bowl',
+          status: 'active',
+          note: 'Typical order.',
+        }),
+        'utf8',
+      )
+      await writeFile(
+        recipePayloadPath,
+        JSON.stringify({
+          title: 'Sheet Pan Salmon Bowls',
+          slug: 'sheet-pan-salmon-bowls',
+          status: 'saved',
+          ingredients: ['2 salmon fillets'],
+          steps: ['Roast the salmon.'],
+        }),
+        'utf8',
+      )
+
+      const foodCreated = await runSliceCli<{ foodId: string }>([
+        'food',
+        'upsert',
+        '--input',
+        `@${foodPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeCreated = await runSliceCli<{ recipeId: string }>([
+        'recipe',
+        'upsert',
+        '--input',
+        `@${recipePayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(foodCreated.ok, true)
+      assert.equal(recipeCreated.ok, true)
+
+      const foodEdited = await runSliceCli<{
+        entity: {
+          id: string
+          path: string | null
+        }
+      }>([
+        'food',
+        'edit',
+        requireData(foodCreated).foodId,
+        '--set',
+        'slug=protein-acai-bowl',
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeEdited = await runSliceCli<{
+        entity: {
+          id: string
+          path: string | null
+        }
+      }>([
+        'recipe',
+        'edit',
+        requireData(recipeCreated).recipeId,
+        '--set',
+        'slug=sheet-pan-salmon-skillet',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(foodEdited.ok, true)
+      assert.equal(
+        requireData(foodEdited).entity.path,
+        'bank/foods/protein-acai-bowl.md',
+      )
+      await access(path.join(vaultRoot, 'bank/foods/protein-acai-bowl.md'))
+      await assert.rejects(() =>
+        access(path.join(vaultRoot, 'bank/foods/regular-acai-bowl.md')))
+
+      assert.equal(recipeEdited.ok, true)
+      assert.equal(
+        requireData(recipeEdited).entity.path,
+        'bank/recipes/sheet-pan-salmon-skillet.md',
+      )
+      await access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-skillet.md'))
+      await assert.rejects(() =>
+        access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-bowls.md')))
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'provider edit keeps templated markdown body aligned with note updates and body resets',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-provider-body-sync-'))
+    const providerPayloadPath = path.join(vaultRoot, 'provider.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      await writeFile(
+        providerPayloadPath,
+        JSON.stringify({
+          title: 'Labcorp',
+          slug: 'labcorp',
+          status: 'active',
+          note: 'Primary lab partner.',
+        }),
+        'utf8',
+      )
+
+      const created = await runSliceCli<{ providerId: string; path: string }>([
+        'provider',
+        'upsert',
+        '--input',
+        `@${providerPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(created.ok, true)
+
+      const noteEdited = await runSliceCli<{
+        entity: {
+          path: string | null
+          data: {
+            note?: string
+          }
+        }
+      }>([
+        'provider',
+        'edit',
+        requireData(created).providerId,
+        '--set',
+        'note=Updated lab note.',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(noteEdited.ok, true)
+      assert.equal(requireData(noteEdited).entity.data.note, 'Updated lab note.')
+
+      const editedMarkdown = await readFile(
+        path.join(vaultRoot, 'bank/providers/labcorp.md'),
+        'utf8',
+      )
+      assert.match(editedMarkdown, /Updated lab note\./u)
+      assert.doesNotMatch(editedMarkdown, /Primary lab partner\./u)
+
+      const titleEdited = await runSliceCli<{
+        entity: {
+          title: string | null
+        }
+      }>([
+        'provider',
+        'edit',
+        requireData(created).providerId,
+        '--set',
+        'title="Labcorp West"',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(titleEdited.ok, true)
+      assert.equal(requireData(titleEdited).entity.title, 'Labcorp West')
+
+      const retitledMarkdown = await readFile(
+        path.join(vaultRoot, 'bank/providers/labcorp.md'),
+        'utf8',
+      )
+      assert.match(retitledMarkdown, /^# Labcorp West$/mu)
+      assert.doesNotMatch(retitledMarkdown, /^# Labcorp$/mu)
+
+      const bodyReset = await runSliceCli<{
+        entity: {
+          data: {
+            note?: string
+          }
+        }
+      }>([
+        'provider',
+        'edit',
+        requireData(created).providerId,
+        '--clear',
+        'body',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(bodyReset.ok, true)
+      assert.equal(requireData(bodyReset).entity.data.note, 'Updated lab note.')
+
+      const resetMarkdown = await readFile(
+        path.join(vaultRoot, 'bank/providers/labcorp.md'),
+        'utf8',
+      )
+      assert.match(resetMarkdown, /## Notes/u)
+      assert.match(resetMarkdown, /Updated lab note\./u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'provider, food, recipe, and event edit/delete mutate existing records and remove them cleanly',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-record-mutations-'))
@@ -1494,12 +1711,116 @@ test.sequential(
         /requires an explicit local-day choice/u,
       )
 
-      const recomputeWithoutExplicitTimeZone = await runSliceCli([
+      const policyWithoutTemporalEdit = await runSliceCli([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'title="Retitled headache"',
+        '--day-key-policy',
+        'keep',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(policyWithoutTemporalEdit.ok, false)
+      assert.equal(policyWithoutTemporalEdit.error?.code, 'invalid_option')
+      assert.match(
+        policyWithoutTemporalEdit.error?.message ?? '',
+        /only valid when occurredAt or timeZone changes/u,
+      )
+
+      const explicitDayKeyWithoutPolicy = await runSliceCli<{
+        entity: {
+          occurredAt: string | null
+          data: Record<string, unknown>
+        }
+      }>([
         'event',
         'edit',
         requireData(eventUpsert).eventId,
         '--set',
         'occurredAt=2026-03-27T01:30:00.000Z',
+        '--set',
+        'dayKey=2026-03-26',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(explicitDayKeyWithoutPolicy.ok, true)
+      assert.equal(
+        requireData(explicitDayKeyWithoutPolicy).entity.occurredAt,
+        '2026-03-27T01:30:00.000Z',
+      )
+      assert.equal(
+        requireData(explicitDayKeyWithoutPolicy).entity.data.dayKey,
+        '2026-03-26',
+      )
+      assert.equal(
+        requireData(explicitDayKeyWithoutPolicy).entity.data.timeZone,
+        undefined,
+      )
+
+      const conflictingPolicyAndDayKeyPatch = await runSliceCli([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'occurredAt=2026-03-27T02:30:00.000Z',
+        '--set',
+        'dayKey=2026-03-27',
+        '--day-key-policy',
+        'keep',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(conflictingPolicyAndDayKeyPatch.ok, false)
+      assert.equal(conflictingPolicyAndDayKeyPatch.error?.code, 'invalid_payload')
+      assert.match(
+        conflictingPolicyAndDayKeyPatch.error?.message ?? '',
+        /Choose either --day-key-policy or an explicit dayKey patch/u,
+      )
+
+      const nullDayKeyPatch = await runSliceCli([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'occurredAt=2026-03-27T03:00:00.000Z',
+        '--set',
+        'dayKey=null',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(nullDayKeyPatch.ok, false)
+      assert.equal(nullDayKeyPatch.error?.code, 'invalid_payload')
+      assert.match(
+        nullDayKeyPatch.error?.message ?? '',
+        /direct dayKey patch must be a concrete YYYY-MM-DD value/u,
+      )
+
+      const invalidDayKeyPatch = await runSliceCli([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'occurredAt=2026-03-27T03:15:00.000Z',
+        '--set',
+        'dayKey=not-a-date',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(invalidDayKeyPatch.ok, false)
+      assert.equal(invalidDayKeyPatch.error?.code, 'invalid_payload')
+      assert.match(
+        invalidDayKeyPatch.error?.message ?? '',
+        /direct dayKey patch must be a concrete YYYY-MM-DD value/u,
+      )
+
+      const recomputeWithoutExplicitTimeZone = await runSliceCli([
+        'event',
+        'edit',
+        requireData(eventUpsert).eventId,
+        '--set',
+        'occurredAt=2026-03-27T03:30:00.000Z',
         '--day-key-policy',
         'recompute',
         '--vault',
@@ -1521,15 +1842,15 @@ test.sequential(
         'edit',
         requireData(eventUpsert).eventId,
         '--set',
-        'occurredAt=2026-03-27T01:30:00.000Z',
+        'occurredAt=2026-03-27T04:30:00.000Z',
         '--day-key-policy',
         'keep',
         '--vault',
         vaultRoot,
       ])
       assert.equal(keepDayKey.ok, true)
-      assert.equal(requireData(keepDayKey).entity.occurredAt, '2026-03-27T01:30:00.000Z')
-      assert.equal(requireData(keepDayKey).entity.data.dayKey, '2026-03-27')
+      assert.equal(requireData(keepDayKey).entity.occurredAt, '2026-03-27T04:30:00.000Z')
+      assert.equal(requireData(keepDayKey).entity.data.dayKey, '2026-03-26')
       assert.equal(requireData(keepDayKey).entity.data.timeZone, undefined)
 
       const setExplicitTimeZoneAndRecompute = await runSliceCli<{
@@ -1549,7 +1870,7 @@ test.sequential(
       ])
       assert.equal(setExplicitTimeZoneAndRecompute.ok, true)
       assert.equal(requireData(setExplicitTimeZoneAndRecompute).entity.data.timeZone, 'America/New_York')
-      assert.equal(requireData(setExplicitTimeZoneAndRecompute).entity.data.dayKey, '2026-03-26')
+      assert.equal(requireData(setExplicitTimeZoneAndRecompute).entity.data.dayKey, '2026-03-27')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

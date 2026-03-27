@@ -20,8 +20,7 @@ import type { VaultCliServices } from '../vault-cli-services.js'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,
-  createEntityEditCommandConfig,
-  dayKeyPolicySchema,
+  createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
@@ -110,18 +109,13 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
       },
     },
     additionalCommands: [
-      createEntityEditCommandConfig({
+      createEventBackedEntityEditCommandConfig({
         arg: {
           name: 'id',
           schema: mealLookupSchema,
         },
         description:
           'Edit one meal by merging a partial JSON patch or one or more path assignments into the saved event.',
-        hint:
-          'When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved meal day stays explicit.',
-        options: {
-          dayKeyPolicy: dayKeyPolicySchema.optional(),
-        },
         run(input) {
           return editMealRecord({
             vault: input.vault,

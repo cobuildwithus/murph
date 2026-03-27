@@ -1,6 +1,6 @@
 # CLI Record Edit/Delete
 
-Status: completed
+Status: in_progress
 Created: 2026-03-27
 Updated: 2026-03-27
 
@@ -69,3 +69,11 @@ Updated: 2026-03-27
 - Repo wrappers remain red outside this lane:
   - `pnpm typecheck` and `pnpm test` fail in unrelated `apps/web` hosted-onboarding files
   - `pnpm test:coverage` reaches unrelated broad-suite failures and a later Vitest coverage temp-file ENOENT outside the focused CLI/core slice
+
+## Follow-up review
+
+- Goal: perform a thorough post-landing audit of the new edit/delete functionality, fix any real bugs found, and extend focused regressions only where they close a confirmed hole.
+- Current focus:
+  - shared `applyRecordPatch` semantics and path-based set/clear behavior
+  - noun-specific edit/delete adapters for `document`, `meal`, `workout`, `intervention`, `food`, `provider`, `recipe`, and generic `event`
+  - core event/registry delete behavior and edit-path invariants
