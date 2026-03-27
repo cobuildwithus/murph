@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildSharePackFromVault, initializeVault, readFood, upsertFood, upsertProtocolItem } from "@healthybob/core";
 import { restoreHostedExecutionContext } from "@healthybob/runtime-state";
 
-import { runHostedExecutionJob } from "../src/node-runner.js";
+import { runHostedExecutionJob, setHostedExecutionRunStartHookForTests } from "../src/node-runner.js";
 import { writeHostedUserEnvToAgentStateBundle } from "../src/user-env.js";
 
 describe("runHostedExecutionJob", () => {
@@ -212,54 +212,261 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
+  it("serializes concurrent hosted runs so per-user env overrides do not overlap", async () => {
+    const firstAgentState = writeHostedUserEnvToAgentStateBundle({
+      agentStateBundle: null,
+      env: {
+        CUSTOM_API_KEY: "user-one-key",
+      },
+      now: "2026-03-26T12:00:00.000Z",
+    });
+    const secondAgentState = writeHostedUserEnvToAgentStateBundle({
+      agentStateBundle: null,
+      env: {
+        CUSTOM_API_KEY: "user-two-key",
+      },
+      now: "2026-03-26T12:00:00.000Z",
+    });
+    const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
+    process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
+
+    const firstRunStarted = createDeferred<void>();
+    const secondRunStarted = createDeferred<void>();
+    let startedRunCount = 0;
+    const releaseFirstCommit = createDeferred<void>();
+    const seenValues: string[] = [];
+    const commitFetch = vi.fn()
+      .mockImplementationOnce(async () => {
+        seenValues.push(process.env.CUSTOM_API_KEY ?? "missing");
+        await releaseFirstCommit.promise;
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      })
+      .mockImplementationOnce(async () => {
+        seenValues.push(process.env.CUSTOM_API_KEY ?? "missing");
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      });
+    vi.stubGlobal("fetch", commitFetch);
+    setHostedExecutionRunStartHookForTests(() => {
+      startedRunCount += 1;
+      if (startedRunCount === 1) {
+        firstRunStarted.resolve();
+      } else if (startedRunCount === 2) {
+        secondRunStarted.resolve();
+      }
+    });
+
+    try {
+      const firstRun = runHostedExecutionJob({
+        bundles: {
+          agentState: Buffer.from(firstAgentState).toString("base64"),
+          vault: null,
+        },
+        commit: {
+          bundleRefs: { agentState: null, vault: null },
+          token: "runner-token",
+          url: "https://worker.example.test/internal/runner-events/member_1/evt_one/commit",
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            linqChatId: "chat_1",
+            normalizedPhoneNumber: "+15550000001",
+            userId: "member_1",
+          },
+          eventId: "evt_one",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+
+      await firstRunStarted.promise;
+      await vi.waitFor(() => {
+        expect(commitFetch).toHaveBeenCalledTimes(1);
+      });
+
+      const secondRun = runHostedExecutionJob({
+        bundles: {
+          agentState: Buffer.from(secondAgentState).toString("base64"),
+          vault: null,
+        },
+        commit: {
+          bundleRefs: { agentState: null, vault: null },
+          token: "runner-token",
+          url: "https://worker.example.test/internal/runner-events/member_2/evt_two/commit",
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            linqChatId: "chat_2",
+            normalizedPhoneNumber: "+15550000002",
+            userId: "member_2",
+          },
+          eventId: "evt_two",
+          occurredAt: "2026-03-26T12:00:01.000Z",
+        },
+      });
+
+      await Promise.resolve();
+      expect(startedRunCount).toBe(1);
+      expect(commitFetch).toHaveBeenCalledTimes(1);
+
+      releaseFirstCommit.resolve();
+      await firstRun;
+      await secondRunStarted.promise;
+      await secondRun;
+
+      expect(startedRunCount).toBe(2);
+      expect(commitFetch).toHaveBeenCalledTimes(2);
+      expect(seenValues).toEqual(["user-one-key", "user-two-key"]);
+    } finally {
+      setHostedExecutionRunStartHookForTests(null);
+      restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
+    }
+  });
+
   it("posts a durable commit before returning when a commit callback is configured", async () => {
+    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
+    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
     const commitFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
       }),
     );
     vi.stubGlobal("fetch", commitFetch);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
 
-    const result = await runHostedExecutionJob({
-      bundles: {
-        agentState: null,
-        vault: null,
-      },
-      commit: {
-        bundleRefs: {
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
           agentState: null,
           vault: null,
         },
-        token: "runner-token",
-        url: "https://worker.example.test/internal/runner-events/member_123/evt_commit/commit",
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
-          userId: "member_123",
+        commit: {
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          token: "runner-token",
+          url: "https://worker.example.test/internal/runner-events/member_123/evt_commit/commit",
         },
-        eventId: "evt_commit",
-        occurredAt: "2026-03-26T12:10:00.000Z",
-      },
-    });
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            linqChatId: "chat_123",
+            normalizedPhoneNumber: "+15551234567",
+            userId: "member_123",
+          },
+          eventId: "evt_commit",
+          occurredAt: "2026-03-26T12:10:00.000Z",
+        },
+      });
 
-    expect(commitFetch).toHaveBeenCalledTimes(1);
-    const [url, init] = commitFetch.mock.calls[0] ?? [];
-    expect(url).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/commit");
-    expect(init?.headers).toMatchObject({
-      authorization: "Bearer runner-token",
-      "content-type": "application/json; charset=utf-8",
+      expect(commitFetch).toHaveBeenCalledTimes(1);
+      expect(timeoutSpy).toHaveBeenCalledWith(15_000);
+      const [url, init] = commitFetch.mock.calls[0] ?? [];
+      expect(url).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/commit");
+      expect(init?.headers).toMatchObject({
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      });
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        bundles: result.bundles,
+        currentBundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        result: result.result,
+      });
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
+    }
+  });
+
+  it("releases the runner queue after a failed hosted run", async () => {
+    const firstRunStarted = createDeferred<void>();
+    const secondRunStarted = createDeferred<void>();
+    const firstCommitEntered = createDeferred<void>();
+    const releaseFirstCommit = createDeferred<void>();
+    let startedRunCount = 0;
+
+    setHostedExecutionRunStartHookForTests(() => {
+      startedRunCount += 1;
+      if (startedRunCount === 1) {
+        firstRunStarted.resolve();
+      } else if (startedRunCount === 2) {
+        secondRunStarted.resolve();
+      }
     });
-    expect(JSON.parse(String(init?.body))).toMatchObject({
-      bundles: result.bundles,
-      currentBundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      result: result.result,
-    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementationOnce(async () => {
+        firstCommitEntered.resolve();
+        await releaseFirstCommit.promise;
+        return new Response("commit failed", { status: 500 });
+      }),
+    );
+
+    try {
+      const firstRun = runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        commit: {
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          token: "runner-token",
+          url: "https://worker.example.test/internal/runner-events/member_123/evt_commit/commit",
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            linqChatId: "chat_123",
+            normalizedPhoneNumber: "+15551234567",
+            userId: "member_123",
+          },
+          eventId: "evt_commit",
+          occurredAt: "2026-03-26T12:10:00.000Z",
+        },
+      });
+
+      await firstRunStarted.promise;
+      await firstCommitEntered.promise;
+
+      const secondRun = runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            linqChatId: "chat_456",
+            normalizedPhoneNumber: "+15557654321",
+            userId: "member_456",
+          },
+          eventId: "evt_after_failure",
+          occurredAt: "2026-03-26T12:10:01.000Z",
+        },
+      });
+
+      await Promise.resolve();
+      expect(startedRunCount).toBe(1);
+
+      releaseFirstCommit.resolve();
+      await expect(firstRun).rejects.toThrow(
+        "Hosted runner durable commit failed for member_123/evt_commit with HTTP 500.",
+      );
+
+      await secondRunStarted.promise;
+      const secondResult = await secondRun;
+
+      expect(startedRunCount).toBe(2);
+      expect(secondResult.result.summary).toContain("Initialized hosted member bundles");
+    } finally {
+      setHostedExecutionRunStartHookForTests(null);
+    }
   });
 
 });
@@ -271,4 +478,19 @@ function restoreEnvVar(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolveValue, rejectValue) => {
+    resolve = resolveValue;
+    reject = rejectValue;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
+  };
 }

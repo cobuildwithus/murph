@@ -26,7 +26,7 @@ Last verified: 2026-03-27
 - No automated check hits a live Linq endpoint; Linq webhook delivery and outbound reply behavior are currently verified through mocked CLI, inboxd, and hosted `apps/web` tests only.
 - No automated check hits a live AgentMail endpoint; email provisioning, polling, and in-thread reply behavior are currently verified through mocked CLI and inboxd tests only.
 - No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, and stubbed control-plane callers.
-- No automated check validates a real Cloudflare Worker deploy or the hosted runner container image. `apps/cloudflare` tests cover the in-repo worker and Node runner seams only; `apps/cloudflare/wrangler.jsonc`, `apps/cloudflare/.dev.vars.example`, `apps/cloudflare/.runner.env.example`, and `Dockerfile.cloudflare-hosted-runner` remain manual scaffolds.
+- No routine repo verification command validates a real Cloudflare Worker deploy or a real hosted runner service rollout. `apps/cloudflare` tests cover the in-repo worker and Node runner seams only. The repo now includes checked-in deploy-artifact render helpers plus the manual workflow `.github/workflows/deploy-cloudflare-hosted.yml` for worker deploys and runner image publication, but live deployment still depends on operator-supplied Cloudflare credentials, GitHub environment wiring, and a separately managed runner host.
 - The tag-driven release workflow is present, but it is only exercised on real `v*.*.*` tag pushes and does not run a live npm publish during ordinary repo verification.
 
 ## Update Rule

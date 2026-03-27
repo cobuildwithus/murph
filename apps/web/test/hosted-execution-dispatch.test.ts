@@ -13,6 +13,9 @@ import {
 } from "@/src/lib/hosted-execution/dispatch";
 
 describe("dispatchHostedExecutionBestEffort", () => {
+  const originalCloudflareBaseUrl = process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL;
+  const originalCloudflareSigningSecret = process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET;
+  const originalCloudflareTimeoutMs = process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS;
   const originalDispatchUrl = process.env.HOSTED_EXECUTION_DISPATCH_URL;
   const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
   const originalDispatchTimeoutMs = process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
@@ -20,6 +23,9 @@ describe("dispatchHostedExecutionBestEffort", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL;
+    delete process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET;
+    delete process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS;
     delete process.env.HOSTED_EXECUTION_DISPATCH_URL;
     delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
     delete process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
@@ -28,6 +34,24 @@ describe("dispatchHostedExecutionBestEffort", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+
+    if (typeof originalCloudflareBaseUrl === "string") {
+      process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = originalCloudflareBaseUrl;
+    } else {
+      delete process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL;
+    }
+
+    if (typeof originalCloudflareSigningSecret === "string") {
+      process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = originalCloudflareSigningSecret;
+    } else {
+      delete process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET;
+    }
+
+    if (typeof originalCloudflareTimeoutMs === "string") {
+      process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS = originalCloudflareTimeoutMs;
+    } else {
+      delete process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS;
+    }
 
     if (typeof originalDispatchUrl === "string") {
       process.env.HOSTED_EXECUTION_DISPATCH_URL = originalDispatchUrl;
@@ -72,9 +96,9 @@ describe("dispatchHostedExecutionBestEffort", () => {
   });
 
   it("swallows dispatch failures and logs the provided context", async () => {
-    process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
-    global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://runner.example.test";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "secret";
+    global.fetch = vi.fn().mockResolvedValue(new Response("runner unavailable", { status: 503 }));
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -99,14 +123,14 @@ describe("dispatchHostedExecutionBestEffort", () => {
     });
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted execution dispatch failed (device-sync webhook-accepted user=user-123 provider=oura connection=dsc_123).",
-      "Hosted execution dispatch failed with HTTP 503.",
+      "Hosted execution dispatch failed with HTTP 503: runner unavailable.",
     );
     expect(timeoutSpy).toHaveBeenCalledWith(30_000);
   });
 
   it("swallows transport rejections and logs the provided context", async () => {
-    process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://runner.example.test";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "secret";
     global.fetch = vi.fn().mockRejectedValue(new Error("socket hang up"));
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -136,9 +160,9 @@ describe("dispatchHostedExecutionBestEffort", () => {
   });
 
   it("uses an explicit dispatch timeout override", async () => {
-    process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
-    process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = "45000";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://runner.example.test";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "secret";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS = "45000";
     global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -158,8 +182,8 @@ describe("dispatchHostedExecutionBestEffort", () => {
   });
 
   it("signs dispatches with a fresh envelope timestamp instead of business occurredAt", async () => {
-    process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://runner.example.test";
+    process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "secret";
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
     global.fetch = vi.fn().mockResolvedValue(

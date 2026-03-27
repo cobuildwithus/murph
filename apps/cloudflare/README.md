@@ -77,6 +77,7 @@ Current expectations for that runner container:
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - `PORT` to choose the listen port, defaulting to `8080`
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` when the internal runner endpoint should require bearer auth
+- optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` so a stuck durable commit callback does not wedge the runner process indefinitely
 - optional provider/runtime env such as `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET`, `DEVICE_SYNC_PUBLIC_BASE_URL`, `DEVICE_SYNC_SECRET`, `LINQ_API_BASE_URL`, `LINQ_API_TOKEN`, `AGENTMAIL_API_KEY`, `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`, and related model-provider keys when the one-shot runner should execute hosted device-sync work and assistant replies instead of skipping them
 - optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when encrypted per-user env overrides need to cover additional key names
 - encrypted per-user overrides are loaded from `.healthybob/hosted/user-env.json` inside the user's `agent-state` bundle, applied only for the duration of that user's one-shot run, and then removed from process env again before the worker goes idle
@@ -93,6 +94,7 @@ Current scaffold files:
 - `apps/cloudflare/wrangler.jsonc`
 - `apps/cloudflare/.dev.vars.example`
 - `apps/cloudflare/.runner.env.example`
+- `apps/cloudflare/DEPLOY.md`
 - `Dockerfile.cloudflare-hosted-runner`
 - `.dockerignore`
 
@@ -100,14 +102,16 @@ Still intentionally placeholder:
 
 - real Cloudflare account ids, domains, and service names
 - final bucket names
-- secret provisioning automation
-- CI/CD deploy jobs
+- account-specific Cloudflare values until you generate them for a concrete staging/production target
+- automatic rollout of the separate runner service onto your chosen container platform
 - a slim production image or standalone built runner entrypoint
+
+For the end-to-end deployment path, including the GitHub Actions workflow, generated deploy artifacts, and the first-deploy checklist, see `apps/cloudflare/DEPLOY.md`.
 
 ## Setup
 
 1. Create or choose a Cloudflare Workers Paid account and create the R2 bucket names you want for hosted bundles.
-2. Update `apps/cloudflare/wrangler.jsonc` with the real bucket names and the real worker name.
+2. Update `apps/cloudflare/wrangler.jsonc` with the real bucket names, worker name, and runner base URL if you are doing a fully manual deploy. For the generated-config path, use `apps/cloudflare/DEPLOY.md` instead.
 3. Copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` for local development, or set the same values through the Cloudflare secret/vars UI for deployed environments. Generate `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` with a 32-byte base64 value such as `openssl rand -base64 32`. Also set `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL` to the public Worker origin that the runner will call back for durable commit completion.
 4. Build and run the separate hosted runner container:
    - `cp apps/cloudflare/.runner.env.example apps/cloudflare/.runner.env`
@@ -119,6 +123,7 @@ Still intentionally placeholder:
 7. In `apps/web` / Vercel, set:
    - `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL`
    - `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`
+   - `HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS`
 8. Confirm the Cloudflare worker answers `GET /health` and the runner container answers `GET /health`, then trigger `POST /internal/users/:userId/run` with the operator token for a smoke run.
 9. When a hosted user needs their own Telegram bot/model-provider/AgentMail credentials, call `PUT /internal/users/:userId/env` with a body like `{ "mode": "merge", "env": { "TELEGRAM_BOT_TOKEN": "...", "OPENAI_API_KEY": "..." } }`. Those values are stored only inside the encrypted `agent-state` bundle and are reapplied automatically on future cron/webhook runs.
 
@@ -132,3 +137,8 @@ Still intentionally placeholder:
 ## Typecheck note
 
 The app-local no-emit typecheck excludes the Node runner bridge files that import the current `healthybob` runtime directly. Those files are still exercised by the app Vitest suite; the exclusion keeps this app's typecheck scoped to its own source while unrelated in-flight CLI typing issues remain elsewhere in the workspace.
+
+## Known follow-ups
+
+- The current journal plus durable commit path protects bundle consistency and event replay handling, but it does not yet provide a full outbox for externally visible side effects. See `docs/cloudflare-hosted-idempotency-followup.md` for the next migration step.
+- The separate Node runner remains the lower-risk deploy target for now. A later rewrite can collapse this into native Cloudflare container-backed Durable Objects once that platform surface is stable enough for production.

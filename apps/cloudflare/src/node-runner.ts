@@ -25,94 +25,120 @@ import { loadHostedUserEnvForRunner } from "./user-env.js";
 
 const HOSTED_MAX_PARSER_JOBS = 50;
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
+let hostedExecutionRunQueue: Promise<void> = Promise.resolve();
+let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 
 export interface HostedExecutionRunnerJobRequest extends HostedExecutionRunnerRequest {
   commit?: HostedExecutionRunnerCommitRequest | null;
 }
 
+export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null): void {
+  hostedExecutionRunStartHookForTests = hook;
+}
+
 export async function runHostedExecutionJob(
   input: HostedExecutionRunnerJobRequest,
 ): Promise<HostedExecutionRunnerResult> {
-  const cli = createHostedCliRuntime();
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-runner-"));
+  return withHostedExecutionRunLock(async () => {
+    const cli = createHostedCliRuntime();
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-runner-"));
 
-  try {
-    const restored = await restoreHostedExecutionContext({
-      agentStateBundle: decodeHostedBundleBase64(input.bundles.agentState),
-      vaultBundle: decodeHostedBundleBase64(input.bundles.vault),
-      workspaceRoot,
-    });
-    const requestId = input.dispatch.eventId;
-    const userEnvOverrides = await loadHostedUserEnvForRunner(restored.operatorHomeRoot, process.env);
+    try {
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(input.bundles.agentState),
+        vaultBundle: decodeHostedBundleBase64(input.bundles.vault),
+        workspaceRoot,
+      });
+      const requestId = input.dispatch.eventId;
+      const userEnvOverrides = await loadHostedUserEnvForRunner(restored.operatorHomeRoot, process.env);
 
-    return await withHostedProcessEnvironment(
-      {
-        envOverrides: userEnvOverrides,
-        hostedMemberId: input.dispatch.event.userId,
-        operatorHomeRoot: restored.operatorHomeRoot,
-        vaultRoot: restored.vaultRoot,
-      },
-      async () => {
-        await ensureHostedBootstrap(restored.vaultRoot, input.dispatch, cli);
-        let shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null = null;
-
-        switch (input.dispatch.event.kind) {
-          case "member.activated":
-            break;
-          case "linq.message.received":
-            await ingestHostedLinqMessage(restored.vaultRoot, {
-              ...input.dispatch,
-              event: input.dispatch.event,
-            });
-            break;
-          case "assistant.cron.tick":
-          case "device-sync.wake":
-            break;
-          case "vault.share.accepted":
-            shareImportResult = await importSharePackIntoVault({
-              vaultRoot: restored.vaultRoot,
-              pack: input.dispatch.event.pack,
-            });
-            break;
-          default:
-            assertNever(input.dispatch.event);
-        }
-
-        const parserResult = await drainHostedParserQueue(restored.vaultRoot);
-        await runHostedAssistantAutomation(restored.vaultRoot, requestId, cli);
-        const deviceSyncResult = await runHostedDeviceSyncPass(restored.vaultRoot);
-        const bundles = await snapshotHostedExecutionContext({
+      return await withHostedProcessEnvironment(
+        {
+          envOverrides: userEnvOverrides,
+          hostedMemberId: input.dispatch.event.userId,
           operatorHomeRoot: restored.operatorHomeRoot,
           vaultRoot: restored.vaultRoot,
-        });
+        },
+        async () => {
+          await ensureHostedBootstrap(restored.vaultRoot, input.dispatch, cli);
+          let shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null = null;
 
-        const result: HostedExecutionRunnerResult = {
-          bundles: {
-            agentState: encodeHostedBundleBase64(bundles.agentStateBundle),
-            vault: encodeHostedBundleBase64(bundles.vaultBundle),
-          },
-          result: {
-            eventsHandled: 1,
-            summary: summarizeDispatch(input.dispatch, {
-              deviceSyncProcessed: deviceSyncResult.processedJobs,
-              deviceSyncSkipped: deviceSyncResult.skipped,
-              parserProcessed: parserResult.processedJobs,
-              shareImportResult,
-            }),
-          },
-        };
+          switch (input.dispatch.event.kind) {
+            case "member.activated":
+              break;
+            case "linq.message.received":
+              await ingestHostedLinqMessage(restored.vaultRoot, {
+                ...input.dispatch,
+                event: input.dispatch.event,
+              });
+              break;
+            case "assistant.cron.tick":
+            case "device-sync.wake":
+              break;
+            case "vault.share.accepted":
+              shareImportResult = await importSharePackIntoVault({
+                vaultRoot: restored.vaultRoot,
+                pack: input.dispatch.event.pack,
+              });
+              break;
+            default:
+              assertNever(input.dispatch.event);
+          }
 
-        await commitHostedExecutionResult({
-          commit: input.commit ?? null,
-          dispatch: input.dispatch,
-          result,
-        });
+          const parserResult = await drainHostedParserQueue(restored.vaultRoot);
+          await runHostedAssistantAutomation(restored.vaultRoot, requestId, cli);
+          const deviceSyncResult = await runHostedDeviceSyncPass(restored.vaultRoot);
+          const bundles = await snapshotHostedExecutionContext({
+            operatorHomeRoot: restored.operatorHomeRoot,
+            vaultRoot: restored.vaultRoot,
+          });
 
-        return result;
-      },
-    );
+          const result: HostedExecutionRunnerResult = {
+            bundles: {
+              agentState: encodeHostedBundleBase64(bundles.agentStateBundle),
+              vault: encodeHostedBundleBase64(bundles.vaultBundle),
+            },
+            result: {
+              eventsHandled: 1,
+              summary: summarizeDispatch(input.dispatch, {
+                deviceSyncProcessed: deviceSyncResult.processedJobs,
+                deviceSyncSkipped: deviceSyncResult.skipped,
+                parserProcessed: parserResult.processedJobs,
+                shareImportResult,
+              }),
+            },
+          };
+
+          await commitHostedExecutionResult({
+            commit: input.commit ?? null,
+            dispatch: input.dispatch,
+            result,
+          });
+
+          return result;
+        },
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+}
+
+async function withHostedExecutionRunLock<T>(run: () => Promise<T>): Promise<T> {
+  const previousRun = hostedExecutionRunQueue;
+  let release: (() => void) | null = null;
+
+  hostedExecutionRunQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previousRun.catch(() => {});
+
+  try {
+    hostedExecutionRunStartHookForTests?.();
+    return await run();
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    release?.();
   }
 }
 
@@ -139,6 +165,7 @@ async function commitHostedExecutionResult(input: {
       "content-type": "application/json; charset=utf-8",
     },
     method: "POST",
+    signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs()),
   });
 
   if (!response.ok) {
@@ -372,4 +399,28 @@ async function withHostedProcessEnvironment<T>(
 
 function assertNever(value: never): never {
   throw new Error(`Unexpected hosted execution event: ${JSON.stringify(value)}`);
+}
+
+function readHostedRunnerCommitTimeoutMs(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  return parsePositiveInteger(
+    source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS,
+    30_000,
+    "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+  );
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number, label: string): number {
+  if (!value || value.trim().length === 0) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
 }
