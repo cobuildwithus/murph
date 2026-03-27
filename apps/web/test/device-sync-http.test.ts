@@ -217,7 +217,7 @@ describe("device sync callback redirect helpers", () => {
 
   it("keeps raw callback error text out of redirect query params", () => {
     const response = httpModule.errorToCallbackRedirect({
-      returnTo: "https://app.healthybob.test/settings/devices?tab=wearables",
+      returnTo: "https://app.withmurph.ai/settings/devices?tab=wearables",
       provider: "demo",
       error: mocks.deviceSyncError({
         code: "OAUTH_CALLBACK_REJECTED",
@@ -234,7 +234,7 @@ describe("device sync callback redirect helpers", () => {
     expect(location).toBeTruthy();
 
     const destination = new URL(location!);
-    expect(destination.origin).toBe("https://app.healthybob.test");
+    expect(destination.origin).toBe("https://app.withmurph.ai");
     expect(destination.pathname).toBe("/settings/devices");
     expect(destination.searchParams.get("tab")).toBe("wearables");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");

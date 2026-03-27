@@ -5,26 +5,82 @@ import { resolveHostedPrivyClientAppId, resolveHostedSignupPhoneNumber } from "@
 import { hasHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
 
 export const metadata: Metadata = {
-  title: "Healthy Bob",
-  description: "Your personal health assistant.",
+  title: "Murph — Health guidance that fits your real life",
+  description: "Track meals, sync wearables, spot patterns, and get answers about your health in plain English.",
 };
 
-const featureItems = [
+const capabilities = [
   {
-    title: "Ask in plain English",
-    body: "Get help understanding your health without turning your life into a spreadsheet.",
+    title: "Any chat app",
+    body: "Talk to Murph on iMessage, Telegram, or email. No app to download.",
   },
   {
-    title: "Sync your wearables",
-    body: "Bring in signals from tools like Oura and WHOOP so the picture stays current.",
+    title: "Wearable sync",
+    body: "Pulls sleep, activity, and recovery data from Oura, WHOOP, and Garmin automatically.",
   },
   {
-    title: "Remember what helps",
-    body: "Keep track of meals, routines, supplements, and other things you want to revisit later.",
+    title: "Persistent memory",
+    body: "Remembers your meals, routines, supplements, and goals across every conversation.",
   },
   {
-    title: "Notice patterns over time",
-    body: "See how sleep, food, movement, and symptoms connect so the next step feels obvious.",
+    title: "Pattern detection",
+    body: "Connects how you sleep, eat, and move so you can see what actually works.",
+  },
+  {
+    title: "Plain English",
+    body: "Ask any health question. No jargon, no searching — just a clear, grounded answer.",
+  },
+  {
+    title: "Always private",
+    body: "Your health data stays on your device. Nothing is sold or shared.",
+  },
+] as const;
+
+const conversations = [
+  {
+    messages: [
+      { from: "user", text: "I've been sleeping terribly this week. What's going on?" },
+      { from: "bob", text: "Your Oura data shows your average deep sleep dropped from 1h 42m to 53m since Monday. You also started a new magnesium brand on Sunday — that timing lines up. Want to try switching back and I'll track the difference?" },
+    ],
+  },
+  {
+    messages: [
+      { from: "user", text: "Log breakfast: two eggs, sourdough toast, black coffee" },
+      { from: "bob", text: "Logged. That's about 380 cal, 24g protein. You've been consistent with high-protein mornings this week — your afternoon energy scores are up 15% vs. last month when you were skipping breakfast." },
+    ],
+  },
+  {
+    messages: [
+      { from: "user", text: "What should I eat before my 6pm run?" },
+      { from: "bob", text: "Based on your past runs, you perform best with a light carb snack 90 min before. A banana with a tablespoon of peanut butter has worked well for you — your last three runs after that combo averaged 8:12/mi vs. 8:45/mi fasted." },
+    ],
+  },
+] as const;
+
+const integrations = [
+  "iMessage", "Telegram", "Email", "Oura", "WHOOP", "Garmin",
+] as const;
+
+const faqItems = [
+  {
+    question: "Do I need to download an app?",
+    answer: "No. Murph works through iMessage, Telegram, or email — tools you already have.",
+  },
+  {
+    question: "How does wearable syncing work?",
+    answer: "You connect your Oura, WHOOP, or Garmin account once. Murph automatically pulls your sleep, activity, and recovery data going forward.",
+  },
+  {
+    question: "Is my health data private?",
+    answer: "Yes. Your data is encrypted and stays on your device. We never sell or share your health information with third parties.",
+  },
+  {
+    question: "What can I ask Murph?",
+    answer: "Anything about your health. Log meals, ask about supplement timing, check sleep trends, get pre-workout food suggestions — all in plain English.",
+  },
+  {
+    question: "How much does it cost?",
+    answer: "Sign up is free to start. We'll walk you through pricing during onboarding.",
   },
 ] as const;
 
@@ -35,96 +91,263 @@ export default function HomePage() {
   const phoneAuthReady = hasHostedPrivyPhoneAuthConfig() && Boolean(privyAppId);
 
   return (
-    <main className="min-h-screen px-5 py-8 md:px-8 md:py-12">
-      <div className="mx-auto max-w-6xl space-y-10">
-        <header className="flex flex-wrap items-center justify-between gap-4 animate-fade-up">
-          <span className="text-sm font-bold uppercase tracking-[0.12em] text-green-800">
-            Healthy Bob
-          </span>
-          <span className="rounded-full border border-stone-200/60 bg-white/70 px-4 py-2 text-sm text-stone-500">
-            Private health guidance that fits real life
-          </span>
-        </header>
+    <main className="min-h-screen">
+      {/* Nav */}
+      <header className="mx-auto flex max-w-7xl items-center gap-4 px-6 pt-10 md:px-12 lg:px-16">
+        <span className="animate-fade-up text-sm font-bold uppercase tracking-[0.2em] text-olive">
+          Murph
+        </span>
+        <span className="h-px w-10 bg-stone-300" aria-hidden="true" />
+        <span className="animate-fade-up text-sm tracking-wide text-stone-400">
+          Your personal health assistant
+        </span>
+      </header>
 
-        <section className="grid gap-5 lg:grid-cols-2">
-          <div className="animate-fade-up rounded-3xl bg-white p-8 shadow-sm md:p-12" style={{ animationDelay: "0.1s" }}>
-            <span className="inline-block rounded-full bg-green-50 px-3.5 py-1.5 text-sm font-semibold text-green-700">
-              Your personal health assistant
-            </span>
-            <h1 className="mt-5 max-w-[10ch] text-5xl font-bold leading-[0.95] tracking-tighter text-stone-900 md:text-7xl">
+      {/* Hero */}
+      <section className="mx-auto max-w-7xl px-6 pb-20 pt-16 md:px-12 md:pb-28 md:pt-24 lg:px-16">
+        <div className="grid items-start gap-12 lg:grid-cols-[1fr_400px] lg:gap-16 xl:grid-cols-[1fr_440px] xl:gap-24">
+          <div className="animate-fade-up [animation-delay:0.1s]">
+            <h1 className="text-[clamp(2.75rem,6.5vw,5.5rem)] font-bold leading-[0.92] tracking-[-0.04em] text-stone-900">
               Your personal health assistant.
             </h1>
-            <p className="mt-5 max-w-md text-lg leading-relaxed text-stone-500">
-              Healthy Bob helps you understand what is happening, remember what matters, and make calmer decisions
-              about your health.
+            <p className="mt-8 max-w-lg text-lg leading-relaxed text-stone-400 md:text-xl md:leading-relaxed">
+              Murph meets you where you already are — iMessage, Telegram,
+              or email. Ask questions, track meals, and spot patterns without
+              downloading another app.
             </p>
           </div>
 
-          <section
-            aria-labelledby="signup-title"
-            className="animate-fade-up rounded-3xl bg-green-800 p-8 text-white shadow-md md:p-10"
-            style={{ animationDelay: "0.2s" }}
-          >
-            <span className="inline-block rounded-full bg-white/15 px-3.5 py-1.5 text-sm font-semibold">
-              Signup
-            </span>
-            <div className="mt-4 space-y-2">
-              <h2 id="signup-title" className="text-3xl font-bold tracking-tight md:text-4xl">
-                Start with your phone.
-              </h2>
-              <p className="leading-relaxed text-white/75">
-                Verify your phone number, create your rewards wallet, and continue to payment in one clean flow.
-              </p>
-            </div>
-
-            <div className="mt-6 rounded-2xl bg-white p-4 text-stone-900">
-              {phoneAuthReady && privyAppId ? (
-                <HostedPhoneAuth mode="public" privyAppId={privyAppId} />
-              ) : (
-                <p className="leading-relaxed text-stone-500">
-                  Phone signup is not configured for this environment yet.
-                </p>
-              )}
-            </div>
-
-            {signupHref && signupPhone ? (
-              <div className="mt-4 space-y-3 rounded-2xl bg-white/10 p-5">
-                <strong>Prefer texting first?</strong>
-                <p className="leading-relaxed text-white/65">
-                  You can still start from SMS and we&apos;ll send back a secure signup link at {signupPhone.displayValue}.
-                </p>
-                <a
-                  href={signupHref}
-                  className="inline-flex items-center rounded-full bg-white px-5 py-3 font-bold text-green-800 transition-colors hover:bg-green-50"
-                >
-                  Text to start instead
-                </a>
-              </div>
-            ) : null}
-
-            <div className="mt-4 space-y-2 text-sm text-white/55">
-              <span className="block">1. Verify your phone number.</span>
-              <span className="block">2. Create your secure Healthy Bob account.</span>
-              <span className="block">3. Provision your rewards wallet and continue to checkout.</span>
-            </div>
-          </section>
-        </section>
-
-        <section
-          aria-label="Core features"
-          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-        >
-          {featureItems.map((item, index) => (
-            <article
-              key={item.title}
-              className="animate-fade-up rounded-2xl border border-stone-200/50 bg-white p-5 space-y-2"
-              style={{ animationDelay: `${0.3 + index * 0.07}s` }}
+          <div className="animate-fade-up [animation-delay:0.2s]">
+            <section
+              aria-labelledby="signup-title"
+              className="rounded-lg bg-olive p-7 text-white md:p-9"
             >
-              <h2 className="font-semibold leading-tight text-stone-900">{item.title}</h2>
-              <p className="text-sm leading-relaxed text-stone-500">{item.body}</p>
-            </article>
+              <h2
+                id="signup-title"
+                className="text-2xl font-bold tracking-tight md:text-3xl"
+              >
+                Sign up with your phone.
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-white/60">
+                Takes about a minute. We verify your number, set up your
+                account, and you&apos;re in.
+              </p>
+
+              <div className="mt-5 rounded bg-white p-4 text-stone-900">
+                {phoneAuthReady && privyAppId ? (
+                  <HostedPhoneAuth mode="public" privyAppId={privyAppId} />
+                ) : (
+                  <p className="text-sm leading-relaxed text-stone-500">
+                    Phone signup is not configured for this environment yet.
+                  </p>
+                )}
+              </div>
+
+              {signupHref && signupPhone ? (
+                <div className="mt-4 space-y-2 border-t border-white/15 pt-4">
+                  <strong className="text-sm">Prefer texting?</strong>
+                  <p className="text-sm leading-relaxed text-white/50">
+                    Text {signupPhone.displayValue} and we&apos;ll send you a
+                    signup link.
+                  </p>
+                  <a
+                    href={signupHref}
+                    className="inline-flex items-center rounded bg-white px-5 py-2.5 text-sm font-bold text-olive transition-colors hover:bg-cream-dark"
+                  >
+                    Text to start
+                  </a>
+                </div>
+              ) : null}
+            </section>
+          </div>
+        </div>
+      </section>
+
+      {/* Works with */}
+      <section className="border-t border-stone-200">
+        <div className="mx-auto max-w-7xl px-6 py-12 md:px-12 lg:px-16">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+            <p className="text-sm font-semibold uppercase tracking-[0.15em] text-olive">
+              Works with
+            </p>
+            {integrations.map((name) => (
+              <span
+                key={name}
+                className="border border-stone-200 px-4 py-2 text-sm font-medium text-stone-500"
+              >
+                {name}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* What it does — capability grid */}
+      <section className="border-t border-stone-200">
+        <div className="mx-auto max-w-7xl px-6 py-20 md:px-12 md:py-24 lg:px-16">
+          <p className="mb-12 text-sm font-semibold uppercase tracking-[0.15em] text-olive">
+            What it does
+          </p>
+          <div className="grid gap-px bg-stone-200 sm:grid-cols-2 lg:grid-cols-3">
+            {capabilities.map((item) => (
+              <article key={item.title} className="bg-cream p-6 md:p-8">
+                <h3 className="text-lg font-semibold text-stone-900">
+                  {item.title}
+                </h3>
+                <p className="mt-2 leading-relaxed text-stone-400">
+                  {item.body}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Example conversations */}
+      <section className="border-t border-stone-200 bg-olive">
+        <div className="mx-auto max-w-7xl px-6 py-20 md:px-12 md:py-24 lg:px-16">
+          <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-white/40">
+            See it in action
+          </p>
+          <h2 className="mb-12 max-w-md text-3xl font-bold tracking-tight text-white md:text-4xl">
+            Real questions, real answers.
+          </h2>
+          <div className="grid gap-6 lg:grid-cols-3">
+            {conversations.map((convo, index) => (
+              <div
+                key={index}
+                className="space-y-3 rounded-lg bg-white/5 p-5 backdrop-blur-sm md:p-6"
+              >
+                {convo.messages.map((msg, msgIndex) => (
+                  <div
+                    key={msgIndex}
+                    className={
+                      msg.from === "user"
+                        ? "ml-8 rounded rounded-br-none bg-white/15 p-3 text-sm leading-relaxed text-white"
+                        : "mr-8 rounded rounded-bl-none bg-white p-3 text-sm leading-relaxed text-stone-700"
+                    }
+                  >
+                    {msg.text}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Quick Start */}
+      <section className="border-t border-stone-200">
+        <div className="mx-auto max-w-7xl px-6 py-20 md:px-12 md:py-24 lg:px-16">
+          <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-olive">
+            Quick start
+          </p>
+          <h2 className="mb-10 max-w-md text-3xl font-bold tracking-tight text-stone-900 md:text-4xl">
+            Up and running in one command.
+          </h2>
+          <div className="overflow-hidden rounded-lg border border-stone-800 bg-stone-900">
+            {/* Terminal chrome */}
+            <div className="flex items-center gap-2 border-b border-stone-800 px-4 py-3">
+              <span className="h-3 w-3 rounded-full bg-red-400/80" />
+              <span className="h-3 w-3 rounded-full bg-amber-400/80" />
+              <span className="h-3 w-3 rounded-full bg-green-400/80" />
+              <span className="ml-4 text-xs text-stone-500">terminal</span>
+            </div>
+            {/* Terminal body */}
+            <div className="space-y-4 p-6 font-mono text-sm leading-relaxed md:p-8">
+              <p className="text-stone-500"># Install and set up your vault</p>
+              <p>
+                <span className="text-olive-light">$</span>{" "}
+                <span className="text-white">pnpm onboard --vault ./vault</span>
+              </p>
+              <p className="text-stone-500"># Or use the setup script</p>
+              <p>
+                <span className="text-olive-light">$</span>{" "}
+                <span className="text-white">./scripts/setup-host.sh --vault ./vault</span>
+              </p>
+              <div className="border-t border-stone-800 pt-4">
+                <p className="text-stone-500"># Start chatting</p>
+                <p>
+                  <span className="text-olive-light">$</span>{" "}
+                  <span className="text-white">murph chat</span>
+                </p>
+              </div>
+            </div>
+          </div>
+          <p className="mt-4 text-sm text-stone-400">
+            Works on macOS and Linux. Provisions parsers, builds the workspace,
+            and launches interactive onboarding.
+          </p>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="border-t border-stone-200">
+        <div className="mx-auto max-w-7xl px-6 py-20 md:px-12 md:py-24 lg:px-16">
+          <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-olive">
+            FAQ
+          </p>
+          <h2 className="mb-12 text-3xl font-bold tracking-tight text-stone-900 md:text-4xl">
+            Common questions.
+          </h2>
+          <div className="grid gap-px bg-stone-200 lg:grid-cols-2">
+            {faqItems.map((item) => (
+              <div key={item.question} className="bg-cream p-6 md:p-8">
+                <h3 className="font-semibold text-stone-900">
+                  {item.question}
+                </h3>
+                <p className="mt-2 leading-relaxed text-stone-400">
+                  {item.answer}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className="border-t border-stone-200 bg-olive">
+        <div className="mx-auto max-w-7xl px-6 py-20 text-center text-white md:px-12 md:py-28 lg:px-16">
+          <h2 className="text-3xl font-bold tracking-tight md:text-5xl">
+            Start using Murph today.
+          </h2>
+          <p className="mx-auto mt-4 max-w-lg text-lg leading-relaxed text-white/60">
+            Sign up with your phone number. No app to download, no account to
+            configure. Just text and go.
+          </p>
+          <div className="mt-8">
+            <a
+              href="#signup-title"
+              className="inline-flex rounded bg-white px-7 py-3.5 font-bold text-olive transition-colors hover:bg-cream-dark"
+            >
+              Get started free
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Trust strip */}
+      <div className="overflow-hidden border-t border-stone-200">
+        <div className="animate-marquee flex whitespace-nowrap py-4">
+          {Array.from({ length: 2 }).map((_, repeat) => (
+            <div key={repeat} className="flex shrink-0 items-center gap-10 px-5">
+              {[
+                "Works on iMessage, Telegram, and email",
+                "Syncs with Oura, WHOOP, and Garmin",
+                "Plain English — no jargon",
+                "Always online, always private",
+              ].map((text) => (
+                <span
+                  key={`${repeat}-${text}`}
+                  className="flex items-center gap-3 text-sm text-stone-400"
+                >
+                  <span className="h-1 w-1 bg-olive/40" aria-hidden="true" />
+                  {text}
+                </span>
+              ))}
+            </div>
           ))}
-        </section>
+        </div>
       </div>
     </main>
   );

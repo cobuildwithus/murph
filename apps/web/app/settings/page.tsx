@@ -9,8 +9,8 @@ import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/shared";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Healthy Bob account settings",
-  description: "Add or update the verified email linked to your Healthy Bob account.",
+  title: "Murph account settings",
+  description: "Add or update the verified email linked to your Murph account.",
 };
 
 export default async function SettingsPage() {
@@ -29,7 +29,7 @@ export default async function SettingsPage() {
             Verify your email
           </h1>
           <p className="max-w-2xl text-lg leading-relaxed text-stone-500">
-            Add or update the email attached to your Healthy Bob account. We&apos;ll send a one-time code through Privy
+            Add or update the email attached to your Murph account. We&apos;ll send a one-time code through Privy
             and only save the email after the code is confirmed.
           </p>
         </header>
@@ -38,7 +38,7 @@ export default async function SettingsPage() {
           <section className="space-y-4 rounded-lg bg-white p-6 shadow-sm md:p-8">
             <h2 className="text-2xl font-bold tracking-tight text-stone-900">Sign in to manage settings</h2>
             <p className="text-base leading-relaxed text-stone-500">
-              Open your latest Healthy Bob invite or account link in this browser first. The settings page only works
+              Open your latest Murph invite or account link in this browser first. The settings page only works
               for an active hosted session.
             </p>
             <a
@@ -57,7 +57,7 @@ export default async function SettingsPage() {
                   {maskPhoneNumber(sessionRecord.member.normalizedPhoneNumber)}
                 </p>
                 <p className="text-sm leading-relaxed text-stone-500">
-                  This browser already has an active Healthy Bob hosted session.
+                  This browser already has an active Murph hosted session.
                 </p>
               </div>
               <div className="space-y-1.5">

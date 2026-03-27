@@ -359,7 +359,7 @@ async function findHostedMemberForPrivyIdentity(input: {
   if (matches.size > 1) {
     throw hostedOnboardingError({
       code: "PRIVY_IDENTITY_CONFLICT",
-      message: "This verified phone session conflicts with an existing Healthy Bob account. Contact support so we can merge it safely.",
+      message: "This verified phone session conflicts with an existing Murph account. Contact support so we can merge it safely.",
       httpStatus: 409,
     });
   }
@@ -475,7 +475,7 @@ async function reconcileHostedPrivyIdentityOnMember(input: {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       throw hostedOnboardingError({
         code: "PRIVY_IDENTITY_CONFLICT",
-        message: "This verified phone session conflicts with an existing Healthy Bob account. Contact support so we can merge it safely.",
+        message: "This verified phone session conflicts with an existing Murph account. Contact support so we can merge it safely.",
         httpStatus: 409,
       });
     }
@@ -560,7 +560,7 @@ export async function requireHostedInviteForAuthentication(
   if (!invite) {
     throw hostedOnboardingError({
       code: "INVITE_NOT_FOUND",
-      message: "That Healthy Bob invite link is no longer valid.",
+      message: "That Murph invite link is no longer valid.",
       httpStatus: 404,
     });
   }
@@ -568,7 +568,7 @@ export async function requireHostedInviteForAuthentication(
   if (invite.expiresAt <= now || invite.status === HostedInviteStatus.expired) {
     throw hostedOnboardingError({
       code: "INVITE_EXPIRED",
-      message: "That Healthy Bob invite link has expired. Text the number again for a fresh link.",
+      message: "That Murph invite link has expired. Text the number again for a fresh link.",
       httpStatus: 410,
     });
   }
@@ -577,9 +577,7 @@ export async function requireHostedInviteForAuthentication(
 }
 
 export function buildHostedMemberActivationDispatch(input: {
-  linqChatId: string | null;
   memberId: string;
-  normalizedPhoneNumber: string;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
@@ -587,8 +585,6 @@ export function buildHostedMemberActivationDispatch(input: {
   return {
     event: {
       kind: "member.activated",
-      linqChatId: input.linqChatId,
-      normalizedPhoneNumber: input.normalizedPhoneNumber,
       userId: input.memberId,
     },
     eventId: buildHostedMemberActivationEventId(input),

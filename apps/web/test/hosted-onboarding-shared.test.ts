@@ -21,8 +21,8 @@ describe("hosted onboarding shared helpers", () => {
 
   it("detects onboarding trigger phrases", () => {
     expect(shouldStartHostedOnboarding("I want to get healthy")).toBe(true);
-    expect(shouldStartHostedOnboarding("healthy bob please")).toBe(true);
-    expect(shouldStartHostedOnboarding("start healthy bob")).toBe(true);
+    expect(shouldStartHostedOnboarding("murph please")).toBe(true);
+    expect(shouldStartHostedOnboarding("start murph")).toBe(true);
     expect(shouldStartHostedOnboarding("start")).toBe(false);
     expect(shouldStartHostedOnboarding("hello there")).toBe(false);
   });

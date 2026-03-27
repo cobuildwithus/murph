@@ -942,7 +942,7 @@ describe("hosted onboarding webhook retry safety", () => {
           attemptCount: 1,
           inviteId: "invite_123",
           lastAttemptAt: "2026-03-26T12:00:00.250Z",
-          message: "Use this invite link to join Healthy Bob: https://join.example.test/join/join_123",
+          message: "Use this invite link to join Murph: https://join.example.test/join/join_123",
           sentAt: "2026-03-26T12:00:00.400Z",
           status: "sent",
         }),
@@ -2307,7 +2307,6 @@ function buildDispatchSideEffect(input: {
       dispatch: {
         event: {
           kind: "linq.message.received",
-          linqChatId: "chat_123",
           linqEvent: {
             api_version: "v1",
             created_at: "2026-03-26T12:00:00.000Z",
@@ -2353,9 +2352,7 @@ function buildMemberActivationDispatchSideEffect(input: {
   effectId?: unknown;
   lastAttemptAt?: unknown;
   lastError?: unknown;
-  linqChatId?: string | null;
   memberId?: string;
-  normalizedPhoneNumber?: string;
   occurredAt?: unknown;
   sentAt?: unknown;
   sourceEventId: string;
@@ -2377,8 +2374,6 @@ function buildMemberActivationDispatchSideEffect(input: {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: input.linqChatId ?? "chat_123",
-          normalizedPhoneNumber: input.normalizedPhoneNumber ?? "+15551234567",
           userId: memberId,
         },
         eventId: String(eventId).replace(/^dispatch:/u, ""),

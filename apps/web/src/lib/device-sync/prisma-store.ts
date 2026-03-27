@@ -187,7 +187,7 @@ export class PrismaDeviceSyncControlPlaneStore
         if (ownerId && existing.userId !== ownerId) {
           throw deviceSyncError({
             code: "CONNECTION_OWNERSHIP_CONFLICT",
-            message: "This provider account is already connected to a different Healthy Bob user.",
+            message: "This provider account is already connected to a different Murph user.",
             retryable: false,
             httpStatus: 409,
           });
@@ -244,7 +244,7 @@ export class PrismaDeviceSyncControlPlaneStore
       if (!ownerId) {
         throw deviceSyncError({
           code: "CONNECTION_OWNER_REQUIRED",
-          message: "Hosted device-sync connections must be initiated by an authenticated Healthy Bob user.",
+          message: "Hosted device-sync connections must be initiated by an authenticated Murph user.",
           retryable: false,
           httpStatus: 400,
         });

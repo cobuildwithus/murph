@@ -34,19 +34,19 @@ export default async function OpenGraphImage() {
             fontWeight: 700,
           }}
         >
-          Healthy Bob hosted invite
+          Murph hosted invite
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <div style={{ fontSize: 88, fontWeight: 800, lineHeight: 1, letterSpacing: -4 }}>
             Verify your phone.
           </div>
           <div style={{ fontSize: 44, lineHeight: 1.35, color: "rgba(226,232,240,1)" }}>
-            Finish Apple Pay. Start hosted Healthy Bob.
+            Finish Apple Pay. Start hosted Murph.
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 28, color: "rgba(191,219,254,1)" }}>
           <span>Phone-bound onboarding</span>
-          <span>Healthy Bob</span>
+          <span>Murph</span>
         </div>
       </div>
     ),

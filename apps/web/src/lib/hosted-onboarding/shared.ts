@@ -6,8 +6,11 @@ import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
   /\bi\s*want\s*to\s*get\s*healthy\b/iu,
   /\bget\s*healthy\b/iu,
+  /\bmurph\b/iu,
   /\bhealthy\s*bob\b/iu,
+  /\bjoin\s+murph\b/iu,
   /\bjoin\s+(healthy\s*bob|get\s*healthy)\b/iu,
+  /\bstart\s+murph\b/iu,
   /\bstart\s+(healthy\s*bob|get\s*healthy)\b/iu,
 ] as const;
 

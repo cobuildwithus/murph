@@ -10,16 +10,16 @@ import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Healthy Bob hosted invite",
-  description: "Verify your phone and finish hosted Healthy Bob checkout.",
+  title: "Murph hosted invite",
+  description: "Verify your phone and finish hosted Murph checkout.",
   openGraph: {
-    title: "Healthy Bob hosted invite",
-    description: "Verify your phone and finish hosted Healthy Bob checkout.",
+    title: "Murph hosted invite",
+    description: "Verify your phone and finish hosted Murph checkout.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Healthy Bob hosted invite",
-    description: "Verify your phone and finish hosted Healthy Bob checkout.",
+    title: "Murph hosted invite",
+    description: "Verify your phone and finish hosted Murph checkout.",
   },
 };
 

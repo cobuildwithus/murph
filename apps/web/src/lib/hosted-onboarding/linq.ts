@@ -204,11 +204,11 @@ export function buildHostedInviteReply(input: {
   joinUrl: string;
 }): string {
   return input.activeSubscription
-    ? `Healthy Bob hosted access is already active for this number.
+    ? `Murph hosted access is already active for this number.
 
 Sign in with your verified phone here:
 ${input.joinUrl}`
-    : `Healthy Bob hosted invite
+    : `Murph hosted invite
 
 Verify your phone and finish Apple Pay here:
 ${input.joinUrl}`;

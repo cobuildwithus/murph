@@ -188,14 +188,14 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
         </div>
       ) : !authenticated ? (
         <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-800">
-          Open your latest Healthy Bob invite or sign-in flow in this browser first. We need the matching Privy session
+          Open your latest Murph invite or sign-in flow in this browser first. We need the matching Privy session
           before we can verify an email on your hosted account.
         </div>
       ) : !canManageEmail ? (
         <div className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-800">
           <p>
             This browser is signed in to a different Privy account than the active hosted session. Sign out here, then
-            reopen the correct Healthy Bob invite before linking an email address.
+            reopen the correct Murph invite before linking an email address.
           </p>
           <button
             type="button"

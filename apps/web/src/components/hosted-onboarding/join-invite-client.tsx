@@ -163,7 +163,7 @@ export function JoinInviteClient({
                 <p className="text-green-700">Protocols: {sharePreview.protocolTitles.join(", ")}</p>
               ) : null}
               {sharePreview.logMealAfterImport ? (
-                <p className="text-green-600">Healthy Bob will also log the smoothie after import.</p>
+                <p className="text-green-600">Murph will also log the smoothie after import.</p>
               ) : null}
             </div>
           ) : null}
@@ -252,7 +252,7 @@ export function JoinInviteClient({
       <section className="space-y-2.5 rounded border border-stone-200/60 bg-white/80 p-5 text-sm leading-relaxed text-stone-500">
         <strong className="text-stone-800">What happens here</strong>
         <p>1. We verify the phone number that received this invite.</p>
-        <p>2. We create or reconnect your Healthy Bob account in Postgres.</p>
+        <p>2. We create or reconnect your Murph account in Postgres.</p>
         <p>3. We provision or reuse your self-custodial rewards wallet and set a hosted session cookie.</p>
         <p>4. We hand you off to checkout, then your hosted access turns active.</p>
       </section>
@@ -275,16 +275,16 @@ function resolveTitle(status: HostedInviteStatusPayload): string {
     case "active":
       return "You\u2019re in";
     default:
-      return "Healthy Bob";
+      return "Murph";
   }
 }
 
 function resolveSubtitle(status: HostedInviteStatusPayload): string {
   switch (status.stage) {
     case "invalid":
-      return "Text the Healthy Bob number again and we\u2019ll send you a fresh hosted link.";
+      return "Text the Murph number again and we\u2019ll send you a fresh hosted link.";
     case "expired":
-      return "Text the Healthy Bob number again and we\u2019ll send you a fresh link.";
+      return "Text the Murph number again and we\u2019ll send you a fresh link.";
     case "register":
       return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we\u2019ll create your rewards wallet and hand you off to Apple Pay.`;
     case "authenticate":
@@ -292,8 +292,8 @@ function resolveSubtitle(status: HostedInviteStatusPayload): string {
     case "checkout":
       return "Your phone is verified, your wallet is ready, and one more tap finishes hosted access.";
     case "active":
-      return "Your hosted Healthy Bob access is active for this number.";
+      return "Your hosted Murph access is active for this number.";
     default:
-      return "Healthy Bob hosted onboarding";
+      return "Murph hosted onboarding";
   }
 }
