@@ -3,12 +3,17 @@ import {
   HostedBillingCheckoutStatus,
   HostedBillingMode,
   HostedBillingStatus,
+  HostedMemberStatus,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import { requireHostedInviteForAuthentication } from "./member-service";
+import {
+  getOptionalHostedPrivyIdentityFromCookies,
+  requireHostedPrivyIdentityFromCookies,
+} from "./privy";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedOnboardingStripeConfig,
@@ -33,7 +38,6 @@ export async function createHostedBillingCheckout(input: {
   prisma?: PrismaClient;
   sessionRecord: HostedSessionRecord;
   shareCode?: string | null;
-  walletAddress?: string | null;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -47,6 +51,17 @@ export async function createHostedBillingCheckout(input: {
     });
   }
 
+  if (
+    input.sessionRecord.member.status === HostedMemberStatus.suspended ||
+    invite.member.status === HostedMemberStatus.suspended
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      message: "This hosted account is suspended. Contact support to restore access.",
+      httpStatus: 403,
+    });
+  }
+
   if (invite.member.billingStatus === HostedBillingStatus.active) {
     return {
       alreadyActive: true,
@@ -55,9 +70,8 @@ export async function createHostedBillingCheckout(input: {
   }
 
   const shareCode = normalizeNullableString(input.shareCode);
-  const resolvedWalletAddress = resolveHostedMemberWalletAddress({
+  const resolvedWalletAddress = await resolveHostedMemberWalletAddress({
     existingWalletAddress: invite.member.walletAddress,
-    nextWalletAddress: normalizeNullableString(input.walletAddress),
     requireWalletAddress: isHostedOnboardingRevnetEnabled(),
   });
   const { billingMode, priceId, stripe } = requireHostedOnboardingStripeConfig();
@@ -74,11 +88,8 @@ export async function createHostedBillingCheckout(input: {
     stripe,
   });
   const checkoutMetadata: Record<string, string> = {
-    inviteCode: invite.inviteCode,
     inviteId: invite.id,
     memberId: invite.member.id,
-    normalizedPhoneNumber: invite.member.normalizedPhoneNumber,
-    ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
   };
   const checkoutSessionParams: Stripe.Checkout.SessionCreateParams = {
     cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, shareCode),
@@ -155,8 +166,6 @@ async function ensureHostedStripeCustomer(input: {
 }): Promise<string> {
   const customerMetadata = {
     memberId: input.member.id,
-    normalizedPhoneNumber: input.member.normalizedPhoneNumber,
-    ...(input.member.walletAddress ? { walletAddress: input.member.walletAddress } : {}),
   };
 
   if (input.member.stripeCustomerId) {
@@ -186,33 +195,29 @@ async function ensureHostedStripeCustomer(input: {
   return customer.id;
 }
 
-function resolveHostedMemberWalletAddress(input: {
+async function resolveHostedMemberWalletAddress(input: {
   existingWalletAddress: string | null | undefined;
-  nextWalletAddress: string | null | undefined;
   requireWalletAddress: boolean;
-}): string | null {
-  const normalizedNextWalletAddress = normalizeNullableString(input.nextWalletAddress);
-
-  if (normalizedNextWalletAddress) {
-    const walletAddress = normalizeHostedWalletAddress(normalizedNextWalletAddress);
-
-    if (!walletAddress) {
-      throw hostedOnboardingError({
-        code: "HOSTED_WALLET_ADDRESS_INVALID",
-        message: "The hosted wallet address must be a valid EVM address.",
-        httpStatus: 400,
-      });
-    }
-
-    return walletAddress;
-  }
-
+}): Promise<string | null> {
   const normalizedExistingWalletAddress = normalizeNullableString(input.existingWalletAddress);
+  const trustedWalletAddress = normalizedExistingWalletAddress
+    ? normalizeHostedWalletAddress((await getOptionalHostedPrivyIdentityFromCookies())?.wallet.address)
+    : normalizeHostedWalletAddress(
+        (await resolveHostedBillingWalletIdentity(input.requireWalletAddress))?.wallet.address,
+      );
 
   if (normalizedExistingWalletAddress) {
     const walletAddress = normalizeHostedWalletAddress(normalizedExistingWalletAddress);
 
     if (walletAddress) {
+      if (trustedWalletAddress && trustedWalletAddress !== walletAddress) {
+        throw hostedOnboardingError({
+          code: "HOSTED_WALLET_ADDRESS_CONFLICT",
+          message: "This hosted member is already bound to a different verified rewards wallet.",
+          httpStatus: 409,
+        });
+      }
+
       return walletAddress;
     }
 
@@ -227,6 +232,10 @@ function resolveHostedMemberWalletAddress(input: {
     });
   }
 
+  if (trustedWalletAddress) {
+    return trustedWalletAddress;
+  }
+
   if (input.requireWalletAddress) {
     throw hostedOnboardingError({
       code: "HOSTED_WALLET_ADDRESS_REQUIRED",
@@ -236,6 +245,14 @@ function resolveHostedMemberWalletAddress(input: {
   }
 
   return null;
+}
+
+async function resolveHostedBillingWalletIdentity(requireWalletAddress: boolean) {
+  if (requireWalletAddress) {
+    return requireHostedPrivyIdentityFromCookies();
+  }
+
+  return getOptionalHostedPrivyIdentityFromCookies();
 }
 
 export function requireHostedMemberWalletAddressForRevnet(member: HostedMember) {

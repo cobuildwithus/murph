@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HostedMemberStatus } from "@prisma/client";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
@@ -11,6 +12,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import { hashHostedSessionToken } from "@/src/lib/hosted-onboarding/shared";
 import {
   createHostedSession,
+  resolveHostedSessionFromRequest,
   revokeHostedSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/session";
 
@@ -18,16 +20,26 @@ const NOW = new Date("2026-03-26T12:00:00.000Z");
 
 describe("hosted onboarding session lifecycle", () => {
   let prisma: {
+    hostedMember: {
+      findUnique: ReturnType<typeof vi.fn>;
+    };
     hostedSession: {
       create: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
     };
   };
 
   beforeEach(() => {
     prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          status: HostedMemberStatus.active,
+        }),
+      },
       hostedSession: {
         create: vi.fn().mockResolvedValue({}),
+        findFirst: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
@@ -71,6 +83,27 @@ describe("hosted onboarding session lifecycle", () => {
     });
   });
 
+  it("refuses to create a hosted session for a suspended member", async () => {
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      status: HostedMemberStatus.suspended,
+    });
+
+    await expect(
+      createHostedSession({
+        inviteId: "invite-1",
+        memberId: "member-1",
+        now: NOW,
+        prisma: prisma as never,
+        userAgent: "test-agent",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedSession.create).not.toHaveBeenCalled();
+  });
+
   it("revokes the stored session record when logout presents the hosted session cookie", async () => {
     const revoked = await revokeHostedSessionFromRequest(
       new Request("https://join.example.test/api/hosted-onboarding/session/logout", {
@@ -95,6 +128,43 @@ describe("hosted onboarding session lifecycle", () => {
       data: {
         revokedAt: NOW,
         revokeReason: "logout",
+      },
+    });
+  });
+
+  it("treats a suspended member session as invalid and revokes the cookie-backed session", async () => {
+    prisma.hostedSession.findFirst.mockResolvedValue({
+      expiresAt: new Date("2026-03-30T12:00:00.000Z"),
+      id: "session-1",
+      member: {
+        status: HostedMemberStatus.suspended,
+      },
+      revokedAt: null,
+    });
+
+    await expect(
+      resolveHostedSessionFromRequest(
+        new Request("https://join.example.test/join/invite-1", {
+          headers: {
+            cookie: "hb_hosted_session=session-token",
+          },
+        }),
+        prisma as never,
+        NOW,
+      ),
+    ).resolves.toBeNull();
+
+    expect(prisma.hostedSession.updateMany).toHaveBeenCalledWith({
+      where: {
+        expiresAt: {
+          gt: NOW,
+        },
+        id: "session-1",
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: NOW,
+        revokeReason: "member_suspended",
       },
     });
   });

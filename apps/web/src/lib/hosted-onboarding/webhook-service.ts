@@ -49,20 +49,32 @@ import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
+  coerceHostedWalletAddress,
   convertStripeMinorAmountToRevnetPaymentAmount,
+  isHostedRevnetBroadcastStatusUnknownError,
   isHostedOnboardingRevnetEnabled,
-  normalizeHostedWalletAddress,
   requireHostedRevnetConfig,
   submitHostedRevnetPayment,
   waitForHostedRevnetPaymentConfirmation,
 } from "./revnet";
 import { requireHostedMemberWalletAddressForRevnet } from "./billing-service";
 
+const REVNET_BROADCAST_STATUS_UNKNOWN_CODE = "REVNET_PAYMENT_BROADCAST_STATUS_UNKNOWN";
+import { revokeHostedSessionsForMember } from "./session";
+
 type HostedRevnetIssuanceRecord = {
+  beneficiaryAddress: string;
+  chainId: number;
+  failureCode?: string | null;
   id: string;
   idempotencyKey: string;
   payTxHash: string | null;
+  paymentAmount: string;
+  projectId: string;
   status: HostedRevnetIssuanceStatus;
+  stripeChargeId?: string | null;
+  stripePaymentIntentId?: string | null;
+  terminalAddress: string;
   updatedAt: Date;
 };
 
@@ -460,6 +472,15 @@ export async function handleHostedStripeWebhook(input: {
       case "invoice.payment_failed":
         await applyStripeInvoicePaymentFailed(event.data.object as Stripe.Invoice, prisma);
         break;
+      case "refund.created":
+        await applyStripeRefundCreated(event.data.object as Stripe.Refund, event.type, prisma);
+        break;
+      case "charge.dispute.created":
+      case "charge.dispute.closed":
+      case "charge.dispute.funds_reinstated":
+      case "charge.dispute.funds_withdrawn":
+        await applyStripeDisputeUpdated(event.data.object as Stripe.Dispute, event.type, prisma);
+        break;
       default:
         break;
     }
@@ -515,6 +536,10 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
   member: HostedMember;
   prisma: PrismaClient;
 }): Promise<void> {
+  if (input.member.status === HostedMemberStatus.suspended) {
+    return;
+  }
+
   if (!isHostedOnboardingRevnetEnabled()) {
     return;
   }
@@ -550,64 +575,35 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
     (input.invoice as Stripe.Invoice & { charge?: string | { id?: unknown } | null }).charge ?? null,
   );
 
-  let issuance = await input.prisma.hostedRevnetIssuance.upsert({
-    where: {
-      idempotencyKey,
-    },
-    create: {
-      id: generateHostedRevnetIssuanceId(),
-      memberId: input.member.id,
-      idempotencyKey,
-      stripeInvoiceId: input.invoice.id,
-      stripePaymentIntentId: paymentIntentId,
-      stripeChargeId: chargeId,
-      chainId: config.chainId,
-      projectId: config.projectId.toString(),
-      terminalAddress: config.terminalAddress,
-      paymentAssetAddress: REVNET_NATIVE_TOKEN,
-      beneficiaryAddress: beneficiaryAddress.toLowerCase(),
-      stripePaymentAmountMinor: amountPaid,
-      stripePaymentCurrency: config.stripeCurrency,
-      paymentAmount: paymentAmount.toString(),
-      status: HostedRevnetIssuanceStatus.pending,
-    },
-    update: {
-      stripePaymentIntentId: paymentIntentId ?? undefined,
-      stripeChargeId: chargeId ?? undefined,
-      beneficiaryAddress: beneficiaryAddress.toLowerCase(),
-      paymentAssetAddress: REVNET_NATIVE_TOKEN,
-      stripePaymentAmountMinor: amountPaid,
-      stripePaymentCurrency: config.stripeCurrency,
-      paymentAmount: paymentAmount.toString(),
-    },
+  let issuance = await findOrCreateHostedRevnetIssuance({
+    amountPaid,
+    beneficiaryAddress,
+    chargeId,
+    config,
+    idempotencyKey,
+    invoiceId: input.invoice.id,
+    memberId: input.member.id,
+    paymentAmount,
+    paymentIntentId,
+    prisma: input.prisma,
   });
 
-  if (issuance.status === HostedRevnetIssuanceStatus.confirmed) {
-    return;
-  }
+  issuance = await patchHostedRevnetIssuanceStripeReferences({
+    chargeId,
+    issuance,
+    paymentIntentId,
+    prisma: input.prisma,
+  });
 
   if (
-    issuance.payTxHash &&
-    (issuance.status === HostedRevnetIssuanceStatus.submitted ||
-      issuance.status === HostedRevnetIssuanceStatus.failed)
+    issuance.status === HostedRevnetIssuanceStatus.confirmed ||
+    issuance.status === HostedRevnetIssuanceStatus.submitted ||
+    issuance.payTxHash ||
+    isHostedRevnetIssuanceBroadcastStatusUnknown(issuance) ||
+    (issuance.status === HostedRevnetIssuanceStatus.submitting &&
+      !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt))
   ) {
-    await confirmHostedRevnetIssuance({
-      issuance,
-      prisma: input.prisma,
-    });
     return;
-  }
-
-  if (
-    issuance.status === HostedRevnetIssuanceStatus.submitting &&
-    !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt)
-  ) {
-    throw hostedOnboardingError({
-      code: "REVNET_ISSUANCE_IN_FLIGHT",
-      message: `Hosted RevNet issuance is already in flight for Stripe invoice ${input.invoice.id}.`,
-      httpStatus: 503,
-      retryable: true,
-    });
   }
 
   const claimedIssuance = await input.prisma.hostedRevnetIssuance.updateMany({
@@ -630,19 +626,15 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
       },
     });
 
-    if (latestIssuance?.status === HostedRevnetIssuanceStatus.confirmed) {
-      return;
-    }
-
     if (
-      latestIssuance?.payTxHash &&
-      (latestIssuance.status === HostedRevnetIssuanceStatus.submitted ||
-        latestIssuance.status === HostedRevnetIssuanceStatus.failed)
+      !latestIssuance ||
+      latestIssuance.status === HostedRevnetIssuanceStatus.confirmed ||
+      latestIssuance.status === HostedRevnetIssuanceStatus.submitted ||
+      latestIssuance.payTxHash ||
+      isHostedRevnetIssuanceBroadcastStatusUnknown(latestIssuance) ||
+      (latestIssuance.status === HostedRevnetIssuanceStatus.submitting &&
+        !isHostedRevnetIssuanceSubmittingStale(latestIssuance.updatedAt))
     ) {
-      await confirmHostedRevnetIssuance({
-        issuance: latestIssuance,
-        prisma: input.prisma,
-      });
       return;
     }
 
@@ -656,9 +648,24 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
 
   try {
     const submission = await submitHostedRevnetPayment({
-      amountMinor: amountPaid,
-      beneficiaryAddress,
-      memo: buildHostedRevnetPaymentMemo(input.member.id, input.invoice.id),
+      beneficiaryAddress: requireHostedRevnetIssuanceAddress(
+        issuance.beneficiaryAddress,
+        "Hosted RevNet issuance beneficiary address",
+      ),
+      chainId: issuance.chainId,
+      memo: buildHostedRevnetPaymentMemo(issuance.id),
+      paymentAmount: requireHostedRevnetIssuanceBigInt(
+        issuance.paymentAmount,
+        "Hosted RevNet issuance payment amount",
+      ),
+      projectId: requireHostedRevnetIssuanceBigInt(
+        issuance.projectId,
+        "Hosted RevNet issuance project id",
+      ),
+      terminalAddress: requireHostedRevnetIssuanceAddress(
+        issuance.terminalAddress,
+        "Hosted RevNet issuance terminal address",
+      ),
     });
 
     issuance = await input.prisma.hostedRevnetIssuance.update({
@@ -666,14 +673,15 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
         id: issuance.id,
       },
       data: {
+        failureCode: null,
+        failureMessage: null,
         payTxHash: submission.payTxHash,
         status: HostedRevnetIssuanceStatus.submitted,
         submittedAt: new Date(),
-        paymentAmount: submission.paymentAmount.toString(),
       },
     });
   } catch (error) {
-    const failure = serializeHostedRevnetIssuanceFailure(error);
+    const failure = classifyHostedRevnetIssuanceFailure(error);
 
     await input.prisma.hostedRevnetIssuance.update({
       where: {
@@ -682,17 +690,12 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
       data: {
         failureCode: failure.code,
         failureMessage: failure.message,
-        status: HostedRevnetIssuanceStatus.failed,
+        status: failure.bucket === "broadcast_unknown"
+          ? HostedRevnetIssuanceStatus.submitting
+          : HostedRevnetIssuanceStatus.failed,
       },
     });
-
-    throw error;
   }
-
-  await confirmHostedRevnetIssuance({
-    issuance,
-    prisma: input.prisma,
-  });
 }
 
 async function confirmHostedRevnetIssuance(input: {
@@ -710,6 +713,7 @@ async function confirmHostedRevnetIssuance(input: {
 
   try {
     await waitForHostedRevnetPaymentConfirmation({
+      chainId: input.issuance.chainId,
       txHash: input.issuance.payTxHash as `0x${string}`,
     });
   } catch (error) {
@@ -742,12 +746,40 @@ async function confirmHostedRevnetIssuance(input: {
   });
 }
 
-function buildHostedRevnetPaymentMemo(memberId: string, invoiceId: string): string {
-  return `HealthyBob invoice ${invoiceId} member ${memberId}`;
+function buildHostedRevnetPaymentMemo(issuanceId: string): string {
+  return `issuance:${issuanceId}`;
 }
 
 function isHostedRevnetIssuanceSubmittingStale(updatedAt: Date): boolean {
   return updatedAt.getTime() <= Date.now() - HOSTED_REVNET_SUBMITTING_STALE_MS;
+}
+
+function requireHostedRevnetIssuanceBigInt(value: string, label: string): bigint {
+  if (!/^\d+$/u.test(value)) {
+    throw hostedOnboardingError({
+      code: "REVNET_ISSUANCE_INVALID",
+      message: `${label} must be an unsigned integer string.`,
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
+
+  return BigInt(value);
+}
+
+function requireHostedRevnetIssuanceAddress(value: string, label: string) {
+  const address = coerceHostedWalletAddress(value);
+
+  if (!address) {
+    throw hostedOnboardingError({
+      code: "REVNET_ISSUANCE_INVALID",
+      message: `${label} must be a valid EVM address.`,
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
+
+  return address;
 }
 
 function serializeHostedRevnetIssuanceFailure(error: unknown): {
@@ -772,6 +804,127 @@ function serializeHostedRevnetIssuanceFailure(error: unknown): {
     code: "REVNET_PAYMENT_FAILED",
     message: "Unknown Hosted RevNet issuance failure.",
   };
+}
+
+function classifyHostedRevnetIssuanceFailure(error: unknown): {
+  bucket: "broadcast_unknown" | "definitely_not_broadcast";
+  code: string;
+  message: string;
+} {
+  if (isHostedRevnetBroadcastStatusUnknownError(error)) {
+    const failure = serializeHostedRevnetIssuanceFailure(error);
+
+    return {
+      bucket: "broadcast_unknown",
+      code: REVNET_BROADCAST_STATUS_UNKNOWN_CODE,
+      message: failure.message,
+    };
+  }
+
+  const failure = serializeHostedRevnetIssuanceFailure(error);
+
+  return {
+    bucket: "definitely_not_broadcast",
+    code: failure.code,
+    message: failure.message,
+  };
+}
+
+function isHostedRevnetIssuanceBroadcastStatusUnknown(issuance: HostedRevnetIssuanceRecord): boolean {
+  return (
+    issuance.status === HostedRevnetIssuanceStatus.submitting &&
+    issuance.failureCode === REVNET_BROADCAST_STATUS_UNKNOWN_CODE
+  );
+}
+
+async function findOrCreateHostedRevnetIssuance(input: {
+  amountPaid: number;
+  beneficiaryAddress: ReturnType<typeof requireHostedMemberWalletAddressForRevnet>;
+  chargeId: string | null;
+  config: ReturnType<typeof requireHostedRevnetConfig>;
+  idempotencyKey: string;
+  invoiceId: string;
+  memberId: string;
+  paymentAmount: bigint;
+  paymentIntentId: string | null;
+  prisma: PrismaClient;
+}): Promise<HostedRevnetIssuanceRecord> {
+  const existingIssuance = await input.prisma.hostedRevnetIssuance.findUnique({
+    where: {
+      idempotencyKey: input.idempotencyKey,
+    },
+  });
+
+  if (existingIssuance) {
+    return existingIssuance;
+  }
+
+  try {
+    return await input.prisma.hostedRevnetIssuance.create({
+      data: {
+        id: generateHostedRevnetIssuanceId(),
+        memberId: input.memberId,
+        idempotencyKey: input.idempotencyKey,
+        stripeInvoiceId: input.invoiceId,
+        stripePaymentIntentId: input.paymentIntentId,
+        stripeChargeId: input.chargeId,
+        chainId: input.config.chainId,
+        projectId: input.config.projectId.toString(),
+        terminalAddress: input.config.terminalAddress,
+        paymentAssetAddress: REVNET_NATIVE_TOKEN,
+        beneficiaryAddress: input.beneficiaryAddress.toLowerCase(),
+        stripePaymentAmountMinor: input.amountPaid,
+        stripePaymentCurrency: input.config.stripeCurrency,
+        paymentAmount: input.paymentAmount.toString(),
+        status: HostedRevnetIssuanceStatus.pending,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const issuance = await input.prisma.hostedRevnetIssuance.findUnique({
+        where: {
+          idempotencyKey: input.idempotencyKey,
+        },
+      });
+
+      if (issuance) {
+        return issuance;
+      }
+    }
+
+    throw error;
+  }
+}
+
+async function patchHostedRevnetIssuanceStripeReferences(input: {
+  chargeId: string | null;
+  issuance: HostedRevnetIssuanceRecord;
+  paymentIntentId: string | null;
+  prisma: PrismaClient;
+}): Promise<HostedRevnetIssuanceRecord> {
+  const updateData: {
+    stripeChargeId?: string;
+    stripePaymentIntentId?: string;
+  } = {};
+
+  if (!input.issuance.stripePaymentIntentId && input.paymentIntentId) {
+    updateData.stripePaymentIntentId = input.paymentIntentId;
+  }
+
+  if (!input.issuance.stripeChargeId && input.chargeId) {
+    updateData.stripeChargeId = input.chargeId;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return input.issuance;
+  }
+
+  return input.prisma.hostedRevnetIssuance.update({
+    where: {
+      id: input.issuance.id,
+    },
+    data: updateData,
+  });
 }
 
 async function recordHostedWebhookReceipt(input: {
@@ -1861,15 +2014,13 @@ async function applyStripeCheckoutCompleted(
     subscriptionId: coerceStripeSubscriptionId(session.subscription),
   });
   const inviteId = normalizeNullableString(session.metadata?.inviteId);
-  const walletAddress = normalizeHostedWalletAddress(normalizeNullableString(session.metadata?.walletAddress));
-  const billingStatus =
-    session.mode === "subscription"
-      ? session.payment_status === "paid" || session.payment_status === "no_payment_required"
-        ? HostedBillingStatus.active
-        : HostedBillingStatus.incomplete
-      : session.payment_status === "paid"
-        ? HostedBillingStatus.active
-        : HostedBillingStatus.checkout_open;
+  const billingStatus = resolveHostedCheckoutCompletedBillingStatus({
+    currentBillingStatus: member?.billingStatus ?? null,
+    mode: session.mode,
+    paymentStatus: session.payment_status,
+    revnetSubscription:
+      isHostedOnboardingRevnetEnabled() && session.mode === "subscription",
+  });
 
   if (member) {
     const updatedMember = await prisma.hostedMember.update({
@@ -1877,14 +2028,19 @@ async function applyStripeCheckoutCompleted(
       data: {
         billingMode: session.mode === "subscription" ? HostedBillingMode.subscription : HostedBillingMode.payment,
         billingStatus,
-        status: billingStatus === HostedBillingStatus.active ? HostedMemberStatus.active : member.status,
+        status:
+          member.status === HostedMemberStatus.suspended
+            ? HostedMemberStatus.suspended
+            : billingStatus === HostedBillingStatus.active
+              ? HostedMemberStatus.active
+              : member.status,
         stripeCustomerId: typeof session.customer === "string" ? session.customer : session.customer?.id ?? member.stripeCustomerId,
         stripeSubscriptionId: coerceStripeSubscriptionId(session.subscription) ?? member.stripeSubscriptionId,
         stripeLatestCheckoutSessionId: session.id,
-        ...(walletAddress ? { walletAddress } : {}),
       },
     });
     if (
+      updatedMember.status !== HostedMemberStatus.suspended &&
       billingStatus === HostedBillingStatus.active &&
       !(isHostedOnboardingRevnetEnabled() && session.mode === "subscription")
     ) {
@@ -1971,7 +2127,6 @@ async function applyStripeSubscriptionUpdated(
   prisma: PrismaClient,
 ): Promise<HostedWebhookSideEffect[]> {
   const desiredSideEffects: HostedWebhookSideEffect[] = [];
-  const billingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
   const member = await findMemberForStripeObject({
     clientReferenceId: null,
     customerId: typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id,
@@ -1984,6 +2139,12 @@ async function applyStripeSubscriptionUpdated(
     return desiredSideEffects;
   }
 
+  const billingStatus = resolveHostedSubscriptionBillingStatus({
+    currentBillingStatus: member.billingStatus,
+    nextBillingStatus: mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status),
+    revnetEnabled: isHostedOnboardingRevnetEnabled(),
+  });
+
   const updatedMember = await prisma.hostedMember.update({
     where: {
       id: member.id,
@@ -1991,13 +2152,22 @@ async function applyStripeSubscriptionUpdated(
     data: {
       billingMode: HostedBillingMode.subscription,
       billingStatus,
-      status: billingStatus === HostedBillingStatus.active ? HostedMemberStatus.active : member.status,
+      status:
+        member.status === HostedMemberStatus.suspended
+          ? HostedMemberStatus.suspended
+          : billingStatus === HostedBillingStatus.active
+            ? HostedMemberStatus.active
+            : member.status,
       stripeCustomerId:
         typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id,
       stripeSubscriptionId: subscription.id,
     },
   });
-  if (billingStatus === HostedBillingStatus.active && !isHostedOnboardingRevnetEnabled()) {
+  if (
+    updatedMember.status !== HostedMemberStatus.suspended &&
+    billingStatus === HostedBillingStatus.active &&
+    !isHostedOnboardingRevnetEnabled()
+  ) {
     desiredSideEffects.push(
       createHostedWebhookDispatchSideEffect({
         dispatch: buildHostedMemberActivationDispatch({
@@ -2033,9 +2203,7 @@ async function applyStripeInvoicePaid(
   prisma: PrismaClient,
 ): Promise<HostedWebhookSideEffect[]> {
   const desiredSideEffects: HostedWebhookSideEffect[] = [];
-  const subscriptionId = coerceStripeSubscriptionId(
-    invoice.parent?.subscription_details?.subscription,
-  );
+  const subscriptionId = resolveStripeInvoiceSubscriptionId(invoice);
   const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id ?? null;
   const member = await findMemberForStripeObject({
     clientReferenceId: null,
@@ -2056,16 +2224,27 @@ async function applyStripeInvoicePaid(
     data: {
       billingMode: subscriptionId ? HostedBillingMode.subscription : member.billingMode,
       billingStatus: HostedBillingStatus.active,
-      status: HostedMemberStatus.active,
+      status:
+        member.status === HostedMemberStatus.suspended
+          ? HostedMemberStatus.suspended
+          : HostedMemberStatus.active,
       stripeCustomerId: customerId ?? member.stripeCustomerId,
       stripeSubscriptionId: subscriptionId ?? member.stripeSubscriptionId,
     },
   });
 
-  await maybeIssueHostedRevnetForStripeInvoice({
-    invoice,
-    member: updatedMember,
-    prisma,
+  if (updatedMember.status === HostedMemberStatus.suspended) {
+    return desiredSideEffects;
+  }
+  await prisma.hostedInvite.updateMany({
+    where: {
+      memberId: member.id,
+      paidAt: null,
+    },
+    data: {
+      paidAt: new Date(),
+      status: HostedInviteStatus.paid,
+    },
   });
   desiredSideEffects.push(
     createHostedWebhookDispatchSideEffect({
@@ -2080,13 +2259,24 @@ async function applyStripeInvoicePaid(
     }),
   );
 
+  try {
+    await maybeIssueHostedRevnetForStripeInvoice({
+      invoice,
+      member: updatedMember,
+      prisma,
+    });
+  } catch (error) {
+    console.error(
+      "Hosted RevNet invoice issuance failed after Stripe invoice.paid; member activation remains active.",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
   return desiredSideEffects;
 }
 
 async function applyStripeInvoicePaymentFailed(invoice: Stripe.Invoice, prisma: PrismaClient): Promise<void> {
-  const subscriptionId = coerceStripeSubscriptionId(
-    invoice.parent?.subscription_details?.subscription,
-  );
+  const subscriptionId = resolveStripeInvoiceSubscriptionId(invoice);
   const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id ?? null;
   const member = await findMemberForStripeObject({
     clientReferenceId: null,
@@ -2111,6 +2301,160 @@ async function applyStripeInvoicePaymentFailed(invoice: Stripe.Invoice, prisma: 
       stripeCustomerId: customerId ?? member.stripeCustomerId,
       stripeSubscriptionId: subscriptionId ?? member.stripeSubscriptionId,
     },
+  });
+}
+
+function resolveHostedCheckoutCompletedBillingStatus(input: {
+  currentBillingStatus: HostedBillingStatus | null;
+  mode: Stripe.Checkout.Session.Mode | null;
+  paymentStatus: Stripe.Checkout.Session.PaymentStatus | null;
+  revnetSubscription: boolean;
+}): HostedBillingStatus {
+  if (input.mode === "subscription") {
+    const paymentSettled =
+      input.paymentStatus === "paid" || input.paymentStatus === "no_payment_required";
+
+    if (!paymentSettled) {
+      return HostedBillingStatus.incomplete;
+    }
+
+    if (
+      input.revnetSubscription &&
+      input.currentBillingStatus !== HostedBillingStatus.active
+    ) {
+      return HostedBillingStatus.incomplete;
+    }
+
+    return HostedBillingStatus.active;
+  }
+
+  return input.paymentStatus === "paid"
+    ? HostedBillingStatus.active
+    : HostedBillingStatus.checkout_open;
+}
+
+function resolveHostedSubscriptionBillingStatus(input: {
+  currentBillingStatus: HostedBillingStatus;
+  nextBillingStatus: HostedBillingStatus;
+  revnetEnabled: boolean;
+}): HostedBillingStatus {
+  if (
+    input.revnetEnabled &&
+    input.nextBillingStatus === HostedBillingStatus.active &&
+    input.currentBillingStatus !== HostedBillingStatus.active
+  ) {
+    return HostedBillingStatus.incomplete;
+  }
+
+  return input.nextBillingStatus;
+}
+
+function resolveStripeInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+  const parentSubscriptionId = coerceStripeObjectId(
+    (
+      invoice as Stripe.Invoice & {
+        parent?: {
+          subscription_details?: {
+            subscription?: unknown;
+          } | null;
+        } | null;
+      }
+    ).parent?.subscription_details?.subscription ?? null,
+  );
+
+  if (parentSubscriptionId) {
+    return parentSubscriptionId;
+  }
+
+  return coerceStripeObjectId(
+    (
+      invoice as Stripe.Invoice & {
+        subscription?: unknown;
+      }
+    ).subscription ?? null,
+  );
+}
+
+async function applyStripeRefundCreated(
+  refund: Stripe.Refund,
+  sourceType: string,
+  prisma: PrismaClient,
+): Promise<void> {
+  const customerContext = await resolveStripeCustomerContext({
+    chargeId: coerceStripeObjectId(refund.charge),
+    paymentIntentId: coerceStripeObjectId(refund.payment_intent),
+  });
+  const member = await findMemberForStripeReversal({
+    chargeId: coerceStripeObjectId(refund.charge),
+    customerId: customerContext.customerId,
+    paymentIntentId: coerceStripeObjectId(refund.payment_intent),
+    prisma,
+    subscriptionId: null,
+  });
+
+  if (!member) {
+    return;
+  }
+
+  await suspendHostedMemberForBillingReversal({
+    member,
+    prisma,
+    reason: sourceType,
+    stripeCustomerId: customerContext.customerId,
+  });
+}
+
+async function applyStripeDisputeUpdated(
+  dispute: Stripe.Dispute,
+  sourceType: string,
+  prisma: PrismaClient,
+): Promise<void> {
+  const paymentIntentId = coerceStripeObjectId(dispute.payment_intent);
+  const chargeId = coerceStripeObjectId(dispute.charge);
+  const customerContext = await resolveStripeCustomerContext({
+    chargeId,
+    paymentIntentId,
+  });
+  const member = await findMemberForStripeReversal({
+    chargeId,
+    customerId: customerContext.customerId,
+    paymentIntentId,
+    prisma,
+    subscriptionId: null,
+  });
+
+  if (!member) {
+    return;
+  }
+
+  await suspendHostedMemberForBillingReversal({
+    member,
+    prisma,
+    reason: sourceType,
+    stripeCustomerId: customerContext.customerId,
+  });
+}
+
+async function suspendHostedMemberForBillingReversal(input: {
+  member: HostedMember;
+  prisma: PrismaClient;
+  reason: string;
+  stripeCustomerId?: string | null;
+}): Promise<void> {
+  await input.prisma.hostedMember.update({
+    where: {
+      id: input.member.id,
+    },
+    data: {
+      billingStatus: HostedBillingStatus.unpaid,
+      status: HostedMemberStatus.suspended,
+      stripeCustomerId: input.stripeCustomerId ?? input.member.stripeCustomerId,
+    },
+  });
+  await revokeHostedSessionsForMember({
+    memberId: input.member.id,
+    prisma: input.prisma,
+    reason: `billing_reversal:${input.reason}`,
   });
 }
 
@@ -2170,6 +2514,88 @@ async function findMemberForStripeObject(input: {
   }
 
   return null;
+}
+
+async function findMemberForStripeReversal(input: {
+  chargeId: string | null;
+  customerId: string | null;
+  paymentIntentId: string | null;
+  prisma: PrismaClient;
+  subscriptionId: string | null;
+}): Promise<HostedMember | null> {
+  const directMember = await findMemberForStripeObject({
+    clientReferenceId: null,
+    customerId: input.customerId,
+    memberId: null,
+    prisma: input.prisma,
+    subscriptionId: input.subscriptionId,
+  });
+
+  if (directMember) {
+    return directMember;
+  }
+
+  if (!input.chargeId && !input.paymentIntentId) {
+    return null;
+  }
+
+  const issuance = await input.prisma.hostedRevnetIssuance.findFirst({
+    where: {
+      OR: [
+        ...(input.chargeId
+          ? [
+            {
+              stripeChargeId: input.chargeId,
+            },
+          ]
+          : []),
+        ...(input.paymentIntentId
+          ? [
+            {
+              stripePaymentIntentId: input.paymentIntentId,
+            },
+          ]
+          : []),
+      ],
+    },
+    include: {
+      member: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  return issuance?.member ?? null;
+}
+
+async function resolveStripeCustomerContext(input: {
+  chargeId: string | null;
+  paymentIntentId: string | null;
+}): Promise<{ customerId: string | null }> {
+  if (input.paymentIntentId) {
+    const { stripe } = requireHostedOnboardingStripeConfig();
+    const paymentIntent = await stripe.paymentIntents.retrieve(input.paymentIntentId);
+
+    return {
+      customerId: coerceStripeObjectId(
+        (paymentIntent as Stripe.PaymentIntent & { customer?: unknown }).customer ?? null,
+      ),
+    };
+  }
+
+  if (input.chargeId) {
+    const { stripe } = requireHostedOnboardingStripeConfig();
+    const charge = await stripe.charges.retrieve(input.chargeId);
+
+    return {
+      customerId: coerceStripeObjectId((charge as Stripe.Charge & { customer?: unknown }).customer ?? null),
+    };
+  }
+
+  return {
+    customerId: null,
+  };
 }
 
 function createHostedWebhookDispatchSideEffect(input: {

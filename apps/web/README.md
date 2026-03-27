@@ -198,4 +198,4 @@ Current RevNet MVP assumptions:
 - RevNet issuance is only enabled when `HOSTED_ONBOARDING_STRIPE_BILLING_MODE=subscription`.
 - The configured treasury key must already control a wallet funded on the target chain.
 - The Stripe webhook waits for the configured number of confirmations before dispatching member activation.
-- Chargebacks and disputes are not clawed back onchain in this MVP; the implementation is safe and idempotent, not reversible.
+- Chargebacks, disputes, and refunds are not clawed back onchain in this MVP; instead the Stripe webhook suspends hosted access, revokes live hosted sessions, and halts future activation or RevNet issuance until manual review.

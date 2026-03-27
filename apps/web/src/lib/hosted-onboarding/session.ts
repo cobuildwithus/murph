@@ -1,4 +1,9 @@
-import type { HostedMember, HostedSession, PrismaClient } from "@prisma/client";
+import {
+  HostedMemberStatus,
+  type HostedMember,
+  type HostedSession,
+  type PrismaClient,
+} from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { getPrisma } from "../prisma";
@@ -30,6 +35,23 @@ export async function createHostedSession(input: {
   const prisma = input.prisma ?? getPrisma();
   const environment = getHostedOnboardingEnvironment();
   const now = input.now ?? new Date();
+  const member = await prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      status: true,
+    },
+  });
+
+  if (member?.status === HostedMemberStatus.suspended) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      message: "This hosted account is suspended. Contact support to restore access.",
+      httpStatus: 403,
+    });
+  }
+
   const token = generateHostedSessionToken();
   const tokenHash = hashHostedSessionToken(token);
   const sessionId = generateHostedSessionId();
@@ -117,6 +139,31 @@ export async function revokeHostedSessionFromRequest(
   return token ? revokeHostedSessionByToken(token, prisma, now, reason) : false;
 }
 
+export async function revokeHostedSessionsForMember(input: {
+  memberId: string;
+  now?: Date;
+  prisma?: PrismaClient;
+  reason: string;
+}): Promise<number> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const result = await prisma.hostedSession.updateMany({
+    where: {
+      expiresAt: {
+        gt: now,
+      },
+      memberId: input.memberId,
+      revokedAt: null,
+    },
+    data: {
+      revokedAt: now,
+      revokeReason: input.reason,
+    },
+  });
+
+  return result.count;
+}
+
 export function applyHostedSessionCookie(
   response: NextResponse,
   token: string,
@@ -166,6 +213,24 @@ async function findHostedSessionByToken(
   });
 
   if (!session) {
+    return null;
+  }
+
+  if (session.member.status === HostedMemberStatus.suspended) {
+    await prisma.hostedSession.updateMany({
+      where: {
+        expiresAt: {
+          gt: now,
+        },
+        id: session.id,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: now,
+        revokeReason: "member_suspended",
+      },
+    });
+
     return null;
   }
 
