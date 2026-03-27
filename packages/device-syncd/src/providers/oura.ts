@@ -442,7 +442,8 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           }),
       });
 
-      const grantedScopesFromToken = splitScopes(tokenPayload.scope);
+      const grantedScopesFromToken = splitScopes(tokenPayload.scope)
+        .map((scope) => scope.replace(/^extapi:/u, ""));
       const grantedScopes =
         grantedScopesFromToken.length > 0
           ? grantedScopesFromToken

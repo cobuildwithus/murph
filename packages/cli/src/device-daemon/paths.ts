@@ -64,9 +64,7 @@ export function buildManagedDeviceSyncEnvironment(input: {
         : '80'
   const normalizedHost =
     readEnvValue(input.env, DEVICE_SYNC_HOST_ENV_KEYS) ||
-    (normalizedBaseUrl.hostname === 'localhost'
-      ? '127.0.0.1'
-      : normalizedBaseUrl.hostname)
+    normalizedBaseUrl.hostname
 
   return {
     ...input.env,
