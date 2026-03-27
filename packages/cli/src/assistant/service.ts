@@ -27,6 +27,7 @@ import {
 } from '../chat-provider.js'
 import {
   resolveAssistantOperatorDefaults,
+  resolveAssistantProviderDefaults,
   type AssistantOperatorDefaults,
 } from '../operator-config.js'
 import {
@@ -72,7 +73,9 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
+  compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
+  mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
 import {
@@ -81,10 +84,16 @@ import {
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import {
+  normalizeAssistantSessionSnapshot,
+  readAssistantCodexPromptVersion,
+  writeAssistantCodexPromptVersion,
+} from './provider-state.js'
+import {
   executeWithCanonicalWriteGuard,
   isAssistantCanonicalWriteBlockedError,
 } from './canonical-write-guard.js'
 import { resolveAssistantProviderWorkingDirectory } from './provider-workspace.js'
+import { shouldUseAssistantLocalTranscriptContext } from './provider-registry.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
@@ -100,6 +109,7 @@ interface AssistantSessionResolutionFields {
   baseUrl?: string | null
   channel?: string | null
   conversation?: ConversationRef | null
+  headers?: Record<string, string> | null
   identityId?: string | null
   model?: string | null
   maxSessionAgeMs?: number | null
@@ -293,7 +303,16 @@ export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
   defaults: AssistantOperatorDefaults | null,
 ): ResolveAssistantSessionInput {
-  const providerConfig = mergeAssistantProviderConfigs(input, defaults)
+  const inferredProvider = mergeAssistantProviderConfigs(defaults, input).provider
+  const providerDefaults = resolveAssistantProviderDefaults(defaults, inferredProvider)
+  const providerConfig = mergeAssistantProviderConfigsForProvider(
+    inferredProvider,
+    providerDefaults ? { provider: inferredProvider, ...providerDefaults } : null,
+    compactAssistantProviderConfigInput({
+      provider: inferredProvider,
+      ...input,
+    }),
+  )
   const sessionId = input.conversation?.sessionId ?? input.sessionId
   const alias = input.conversation?.alias ?? input.alias
   const channel = input.conversation?.channel ?? input.channel
@@ -332,7 +351,7 @@ export function buildResolveAssistantSessionInput(
           : directness === 'group'
             ? false
             : undefined,
-    provider: input.provider ?? defaults?.provider ?? undefined,
+    provider: providerConfig.provider,
     model: providerConfig.model,
     sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox) ?? 'workspace-write',
     approvalPolicy: providerConfig.approvalPolicy ?? 'on-request',
@@ -341,6 +360,8 @@ export function buildResolveAssistantSessionInput(
     baseUrl: providerConfig.baseUrl,
     apiKeyEnv: providerConfig.apiKeyEnv,
     providerName: providerConfig.providerName,
+    headers:
+      providerConfig.provider === 'openai-compatible' ? providerConfig.headers : null,
     reasoningEffort: providerConfig.reasoningEffort,
     maxSessionAgeMs: input.maxSessionAgeMs ?? null,
   }
@@ -548,15 +569,24 @@ export async function updateAssistantSessionOptions(input: {
     createIfMissing: false,
   })
 
+  const providerConfig = mergeAssistantProviderConfigsForProvider(
+    session.session.provider,
+    {
+      provider: session.session.provider,
+      ...session.session.providerOptions,
+    },
+    {
+      provider: session.session.provider,
+      ...input.providerOptions,
+    },
+  )
+
   return saveAssistantSession(input.vault, {
     ...session.session,
-    providerOptions: {
-      ...session.session.providerOptions,
-      ...input.providerOptions,
-      sandbox: clampVaultBoundAssistantSandbox(
-        input.providerOptions.sandbox ?? session.session.providerOptions.sandbox,
-      ) ?? null,
-    },
+    providerOptions: serializeAssistantProviderSessionOptions({
+      ...providerConfig,
+      sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox),
+    }),
     updatedAt: new Date().toISOString(),
   })
 }
@@ -589,19 +619,29 @@ function resolveAssistantTurnRoutes(
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
-  const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
-  const mergedProviderConfig = mergeAssistantProviderConfigs(
-    input,
-    resolved.session.providerOptions,
+  const provider = mergeAssistantProviderConfigs(
     defaults,
-  )
+    { provider: resolved.session.provider, ...resolved.session.providerOptions },
+    input,
+  ).provider
+  const providerDefaults = resolveAssistantProviderDefaults(defaults, provider)
   const providerOptions = serializeAssistantProviderSessionOptions(
-    {
-      ...mergedProviderConfig,
-      sandbox: clampVaultBoundAssistantSandbox(mergedProviderConfig.sandbox),
-    },
+    mergeAssistantProviderConfigsForProvider(
+      provider,
+      providerDefaults ? { provider, ...providerDefaults } : null,
+      { provider, ...resolved.session.providerOptions },
+      compactAssistantProviderConfigInput({
+        provider,
+        ...input,
+        sandbox: clampVaultBoundAssistantSandbox(input.sandbox),
+      }),
+    ),
   )
-  const executionConfig = mergeAssistantProviderConfigs(input, defaults)
+  const executionConfig = mergeAssistantProviderConfigsForProvider(
+    provider,
+    providerDefaults ? { provider, ...providerDefaults } : null,
+    compactAssistantProviderConfigInput({ provider, ...input }),
+  )
   return buildAssistantFailoverRoutes({
     backups: input.failoverRoutes ?? defaults?.failoverRoutes ?? null,
     codexCommand: executionConfig.codexCommand,
@@ -636,7 +676,9 @@ async function resolveAssistantRouteTurnPlan(input: {
     shouldResetCodexProviderSession
   const shouldInjectFirstTurnOnboarding =
     input.input.enableFirstTurnOnboarding === true && input.session.turnCount === 0
-  const conversationMessages = shouldUseLocalTranscriptContext(input.route.provider)
+  const conversationMessages = shouldUseAssistantLocalTranscriptContext(
+    input.route.provider,
+  )
     ? removeTrailingCurrentUserPrompt(
         await loadAssistantConversationMessages({
           limit: 20,
@@ -1071,6 +1113,7 @@ async function executeProviderTurnWithRecovery(input: {
             baseUrl: route.providerOptions.baseUrl,
             apiKeyEnv: route.providerOptions.apiKeyEnv,
             providerName: route.providerOptions.providerName,
+            headers: route.providerOptions.headers,
             conversationMessages: routePlan.conversationMessages,
             onEvent: input.input.onProviderEvent ?? undefined,
             profile: route.providerOptions.profile,
@@ -1105,11 +1148,16 @@ async function executeProviderTurnWithRecovery(input: {
       lastError = error
       const errorCode = readAssistantErrorCode(error)
       const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
-        codexPromptVersion:
-          route.provider === 'codex-cli' ? CURRENT_CODEX_PROMPT_VERSION : null,
         error,
         provider: route.provider,
         providerOptions: route.providerOptions,
+        providerState:
+          route.provider === 'codex-cli'
+            ? writeAssistantCodexPromptVersion(
+                workingSession.providerState,
+                CURRENT_CODEX_PROMPT_VERSION,
+              )
+            : null,
         session: workingSession,
         vault: input.input.vault,
       })
@@ -1224,9 +1272,12 @@ async function persistAssistantTurnAndSession(input: {
       previousProvider: input.session.provider,
       previousProviderSessionId: input.session.providerSessionId,
     }),
-    codexPromptVersion:
+    providerState:
       input.providerResult.provider === 'codex-cli'
-        ? CURRENT_CODEX_PROMPT_VERSION
+        ? writeAssistantCodexPromptVersion(
+            input.session.providerState,
+            CURRENT_CODEX_PROMPT_VERSION,
+          )
         : null,
     providerOptions: input.providerResult.providerOptions,
     updatedAt,
@@ -1495,12 +1546,6 @@ function shouldRecordAssistantRouteFailure(errorCode: string | null): boolean {
   return errorCode !== 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED'
 }
 
-function shouldUseLocalTranscriptContext(
-  provider: AssistantChatProvider,
-): boolean {
-  return provider === 'openai-compatible'
-}
-
 function shouldResetCodexProviderSessionForPromptVersion(input: {
   provider: AssistantChatProvider
   session: AssistantSession
@@ -1509,7 +1554,7 @@ function shouldResetCodexProviderSessionForPromptVersion(input: {
     input.provider === 'codex-cli' &&
     input.session.provider === 'codex-cli' &&
     input.session.providerSessionId !== null &&
-    normalizeNullableString(input.session.codexPromptVersion) !==
+    readAssistantCodexPromptVersion(input.session) !==
       CURRENT_CODEX_PROMPT_VERSION
   )
 }
@@ -1660,17 +1705,18 @@ async function restoreMissingAssistantSessionSnapshot(input: {
 function normalizeRestoredAssistantSessionSnapshot(
   snapshot: AssistantSession,
 ): AssistantSession {
-  if (
-    snapshot.provider === 'codex-cli' &&
-    normalizeNullableString(snapshot.codexPromptVersion) === null
-  ) {
-    return {
-      ...snapshot,
-      codexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
-    }
+  const normalized = normalizeAssistantSessionSnapshot(snapshot)
+  if (normalized.provider !== 'codex-cli') {
+    return normalized
   }
 
-  return snapshot
+  return {
+    ...normalized,
+    providerState: writeAssistantCodexPromptVersion(
+      normalized.providerState,
+      readAssistantCodexPromptVersion(normalized) ?? CURRENT_CODEX_PROMPT_VERSION,
+    ),
+  }
 }
 
 function buildAssistantSystemPrompt(input: {

@@ -160,6 +160,21 @@ function assertBlockedAssistantResult(
 test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
   const defaults = {
     provider: 'codex-cli' as const,
+    defaultsByProvider: {
+      'codex-cli': {
+        codexCommand: '/opt/bin/codex',
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write' as const,
+        approvalPolicy: 'on-request' as const,
+        profile: 'ops',
+        oss: true,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        headers: null,
+      },
+    },
     codexCommand: '/opt/bin/codex',
     model: 'gpt-5.4-mini',
     reasoningEffort: 'high',
@@ -201,6 +216,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       baseUrl: null,
       apiKeyEnv: null,
       providerName: null,
+      headers: null,
       reasoningEffort: 'high',
     },
   )
@@ -243,6 +259,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       baseUrl: null,
       apiKeyEnv: null,
       providerName: null,
+      headers: null,
       reasoningEffort: 'low',
     },
   )
@@ -1307,7 +1324,11 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
     ...resolved.session,
     provider: 'codex-cli',
     providerSessionId: 'thread-stale-codex',
-    codexPromptVersion: '2026-03-20.1',
+    providerState: {
+      codexCli: {
+        promptVersion: '2026-03-20.1',
+      },
+    },
     updatedAt: '2026-03-26T00:00:00.000Z',
     lastTurnAt: '2026-03-26T00:00:00.000Z',
     turnCount: 2,
@@ -1341,7 +1362,10 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
     /bootstrapping the fresh Codex provider session/u,
   )
   assert.equal(result.session.providerSessionId, 'thread-fresh-codex')
-  assert.equal(result.session.codexPromptVersion, CURRENT_CODEX_PROMPT_VERSION)
+  assert.equal(
+    result.session.providerState?.codexCli?.promptVersion,
+    CURRENT_CODEX_PROMPT_VERSION,
+  )
   assert.equal(result.session.turnCount, 3)
 })
 

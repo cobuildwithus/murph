@@ -1,105 +1,234 @@
-import {
-  assistantProviderSessionOptionsSchema,
-  type AssistantApprovalPolicy,
-  type AssistantProviderSessionOptions,
-  type AssistantSandbox,
+import type {
+  AssistantApprovalPolicy,
+  AssistantChatProvider,
+  AssistantProviderSessionOptions,
+  AssistantSandbox,
 } from '../assistant-cli-contracts.js'
+import type { AssistantModelSpec } from '../model-harness.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
 import { normalizeNullableString } from './shared.js'
 
-export interface AssistantProviderConfig {
+export interface AssistantCodexProviderConfig {
   approvalPolicy: AssistantApprovalPolicy | null
-  apiKeyEnv: string | null
-  baseUrl: string | null
+  apiKeyEnv: null
+  baseUrl: null
   codexCommand: string | null
+  headers: null
   model: string | null
-  oss: boolean | null
+  oss: boolean
   profile: string | null
-  providerName: string | null
+  provider: 'codex-cli'
+  providerName: null
   reasoningEffort: string | null
   sandbox: AssistantSandbox | null
 }
 
-type AssistantProviderConfigInput = {
+export interface AssistantOpenAICompatibleProviderConfig {
+  approvalPolicy: null
+  apiKeyEnv: string | null
+  baseUrl: string | null
+  codexCommand: null
+  headers: Record<string, string> | null
+  model: string | null
+  oss: false
+  profile: null
+  provider: 'openai-compatible'
+  providerName: string | null
+  reasoningEffort: null
+  sandbox: null
+}
+
+export type AssistantProviderConfig =
+  | AssistantCodexProviderConfig
+  | AssistantOpenAICompatibleProviderConfig
+
+export type AssistantProviderConfigInput = {
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
   baseUrl?: string | null
   codexCommand?: string | null
+  headers?: Record<string, string> | null
   model?: string | null
   oss?: boolean | null
   profile?: string | null
+  provider?: AssistantChatProvider | null
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
 }
 
-const EMPTY_ASSISTANT_PROVIDER_CONFIG: AssistantProviderConfig = {
-  model: null,
-  reasoningEffort: null,
-  sandbox: null,
-  approvalPolicy: null,
-  profile: null,
-  oss: null,
-  baseUrl: null,
-  apiKeyEnv: null,
-  providerName: null,
-  codexCommand: null,
+const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
+  'approvalPolicy',
+  'apiKeyEnv',
+  'baseUrl',
+  'codexCommand',
+  'headers',
+  'model',
+  'oss',
+  'profile',
+  'providerName',
+  'reasoningEffort',
+  'sandbox',
+] as const satisfies readonly (keyof AssistantProviderConfigInput)[]
+
+export function resolveAssistantProvider(
+  provider: AssistantChatProvider | null | undefined,
+): AssistantChatProvider {
+  return provider ?? 'codex-cli'
+}
+
+export function inferAssistantProviderFromConfigInput(
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantChatProvider | null {
+  if (input?.provider) {
+    return input.provider
+  }
+
+  if (
+    normalizeNullableString(input?.baseUrl) ||
+    normalizeNullableString(input?.apiKeyEnv) ||
+    normalizeNullableString(input?.providerName) ||
+    normalizeAssistantHeaders(input?.headers)
+  ) {
+    return 'openai-compatible'
+  }
+
+  return null
 }
 
 export function normalizeAssistantProviderConfig(
   input: AssistantProviderConfigInput | null | undefined,
 ): AssistantProviderConfig {
-  return {
-    model: normalizeNullableString(input?.model),
-    reasoningEffort: normalizeNullableString(input?.reasoningEffort),
-    sandbox: input?.sandbox ?? null,
-    approvalPolicy: input?.approvalPolicy ?? null,
-    profile: normalizeNullableString(input?.profile),
-    oss: typeof input?.oss === 'boolean' ? input.oss : null,
-    baseUrl: normalizeNullableString(input?.baseUrl),
-    apiKeyEnv: normalizeNullableString(input?.apiKeyEnv),
-    providerName: normalizeNullableString(input?.providerName),
-    codexCommand: normalizeNullableString(input?.codexCommand),
+  return sanitizeAssistantProviderConfig(
+    resolveAssistantProvider(inferAssistantProviderFromConfigInput(input)),
+    input,
+  )
+}
+
+export function sanitizeAssistantProviderConfig(
+  provider: AssistantChatProvider,
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantProviderConfig {
+  switch (provider) {
+    case 'openai-compatible':
+      return {
+        provider,
+        approvalPolicy: null,
+        apiKeyEnv: normalizeNullableString(input?.apiKeyEnv),
+        baseUrl: normalizeNullableString(input?.baseUrl),
+        codexCommand: null,
+        headers: normalizeAssistantHeaders(input?.headers),
+        model: normalizeNullableString(input?.model),
+        oss: false,
+        profile: null,
+        providerName: normalizeNullableString(input?.providerName),
+        reasoningEffort: null,
+        sandbox: null,
+      }
+    case 'codex-cli':
+    default:
+      return {
+        provider: 'codex-cli',
+        approvalPolicy: input?.approvalPolicy ?? null,
+        apiKeyEnv: null,
+        baseUrl: null,
+        codexCommand: normalizeNullableString(input?.codexCommand),
+        headers: null,
+        model: normalizeNullableString(input?.model),
+        oss: input?.oss === true,
+        profile: normalizeNullableString(input?.profile),
+        providerName: null,
+        reasoningEffort: normalizeNullableString(input?.reasoningEffort),
+        sandbox: input?.sandbox ?? null,
+      }
   }
+}
+
+export function mergeAssistantProviderConfigsForProvider(
+  provider: AssistantChatProvider,
+  ...inputs: ReadonlyArray<AssistantProviderConfigInput | null | undefined>
+): AssistantProviderConfig {
+  const merged: AssistantProviderConfigInput = {
+    provider,
+  }
+
+  for (const input of inputs) {
+    if (!input) {
+      continue
+    }
+
+    for (const field of ASSISTANT_PROVIDER_CONFIG_FIELDS) {
+      if (!(field in input)) {
+        continue
+      }
+
+      ;(merged as Record<string, unknown>)[field] = (
+        input as Record<string, unknown>
+      )[field]
+    }
+  }
+
+  return sanitizeAssistantProviderConfig(provider, merged)
 }
 
 export function mergeAssistantProviderConfigs(
   ...inputs: ReadonlyArray<AssistantProviderConfigInput | null | undefined>
 ): AssistantProviderConfig {
-  const merged = { ...EMPTY_ASSISTANT_PROVIDER_CONFIG }
+  let provider: AssistantChatProvider = 'codex-cli'
 
   for (const input of inputs) {
-    const normalized = normalizeAssistantProviderConfig(input)
-    merged.model ??= normalized.model
-    merged.reasoningEffort ??= normalized.reasoningEffort
-    merged.sandbox ??= normalized.sandbox
-    merged.approvalPolicy ??= normalized.approvalPolicy
-    merged.profile ??= normalized.profile
-    merged.oss ??= normalized.oss
-    merged.baseUrl ??= normalized.baseUrl
-    merged.apiKeyEnv ??= normalized.apiKeyEnv
-    merged.providerName ??= normalized.providerName
-    merged.codexCommand ??= normalized.codexCommand
+    const inferredProvider = inferAssistantProviderFromConfigInput(input)
+    if (inferredProvider) {
+      provider = inferredProvider
+    }
   }
 
-  return merged
+  return mergeAssistantProviderConfigsForProvider(provider, ...inputs)
+}
+
+export function compactAssistantProviderConfigInput(
+  input: AssistantProviderConfigInput | null | undefined,
+): AssistantProviderConfigInput | null {
+  if (!input) {
+    return null
+  }
+
+  const compacted: AssistantProviderConfigInput = {}
+
+  if (input.provider) {
+    compacted.provider = input.provider
+  }
+
+  for (const field of ASSISTANT_PROVIDER_CONFIG_FIELDS) {
+    const value = input[field]
+    if (value === null || value === undefined) {
+      continue
+    }
+
+    ;(compacted as Record<string, unknown>)[field] = value
+  }
+
+  return Object.keys(compacted).length > 0 ? compacted : null
 }
 
 export function serializeAssistantProviderSessionOptions(
   input: AssistantProviderConfigInput | null | undefined,
 ): AssistantProviderSessionOptions {
   const normalized = normalizeAssistantProviderConfig(input)
-  return assistantProviderSessionOptionsSchema.parse({
+  return {
     model: normalized.model,
     reasoningEffort: normalized.reasoningEffort,
     sandbox: normalized.sandbox,
     approvalPolicy: normalized.approvalPolicy,
     profile: normalized.profile,
-    oss: normalized.oss ?? false,
-    baseUrl: normalized.baseUrl ?? undefined,
-    apiKeyEnv: normalized.apiKeyEnv ?? undefined,
-    providerName: normalized.providerName ?? undefined,
-  })
+    oss: normalized.oss,
+    ...(normalized.baseUrl ? { baseUrl: normalized.baseUrl } : {}),
+    ...(normalized.apiKeyEnv ? { apiKeyEnv: normalized.apiKeyEnv } : {}),
+    ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
+    ...(normalized.provider === 'openai-compatible' && normalized.headers
+      ? { headers: normalized.headers }
+      : {}),
+  }
 }
 
 export function serializeAssistantProviderOperatorDefaults(
@@ -110,6 +239,7 @@ export function serializeAssistantProviderOperatorDefaults(
   | 'apiKeyEnv'
   | 'baseUrl'
   | 'codexCommand'
+  | 'headers'
   | 'model'
   | 'oss'
   | 'profile'
@@ -129,6 +259,8 @@ export function serializeAssistantProviderOperatorDefaults(
     baseUrl: normalized.baseUrl,
     apiKeyEnv: normalized.apiKeyEnv,
     providerName: normalized.providerName,
+    headers:
+      normalized.provider === 'openai-compatible' ? normalized.headers : null,
   }
 }
 
@@ -139,16 +271,60 @@ export function assistantProviderConfigsEqual(
   const normalizedLeft = normalizeAssistantProviderConfig(left)
   const normalizedRight = normalizeAssistantProviderConfig(right)
 
-  return (
-    normalizedLeft.model === normalizedRight.model &&
-    normalizedLeft.reasoningEffort === normalizedRight.reasoningEffort &&
-    normalizedLeft.sandbox === normalizedRight.sandbox &&
-    normalizedLeft.approvalPolicy === normalizedRight.approvalPolicy &&
-    normalizedLeft.profile === normalizedRight.profile &&
-    normalizedLeft.oss === normalizedRight.oss &&
-    normalizedLeft.baseUrl === normalizedRight.baseUrl &&
-    normalizedLeft.apiKeyEnv === normalizedRight.apiKeyEnv &&
-    normalizedLeft.providerName === normalizedRight.providerName &&
-    normalizedLeft.codexCommand === normalizedRight.codexCommand
-  )
+  if (normalizedLeft.provider !== normalizedRight.provider) {
+    return false
+  }
+
+  return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight)
+}
+
+export function resolveAssistantModelSpecFromProviderConfig(
+  input: AssistantProviderConfigInput | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): AssistantModelSpec | null {
+  const normalized = normalizeAssistantProviderConfig(input)
+  if (normalized.provider !== 'openai-compatible') {
+    return null
+  }
+
+  const model = normalizeNullableString(normalized.model)
+  const baseUrl = normalizeNullableString(normalized.baseUrl)
+  if (!model || !baseUrl) {
+    return null
+  }
+
+  const apiKeyEnv = normalizeNullableString(normalized.apiKeyEnv)
+  const apiKeyValue =
+    apiKeyEnv && typeof env[apiKeyEnv] === 'string' && env[apiKeyEnv].trim().length > 0
+      ? env[apiKeyEnv]
+      : undefined
+
+  return {
+    baseUrl,
+    model,
+    ...(apiKeyValue ? { apiKey: apiKeyValue } : {}),
+    ...(apiKeyEnv ? { apiKeyEnv } : {}),
+    ...(normalized.headers ? { headers: normalized.headers } : {}),
+    ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
+  }
+}
+
+export function normalizeAssistantHeaders(
+  headers: Record<string, string> | null | undefined,
+): Record<string, string> | null {
+  if (!headers || typeof headers !== 'object') {
+    return null
+  }
+
+  const normalizedEntries = Object.entries(headers)
+    .map(([key, value]) => [normalizeNullableString(key), normalizeNullableString(value)] as const)
+    .filter(
+      (entry): entry is readonly [string, string] =>
+        entry[0] !== null && entry[1] !== null,
+    )
+    .sort(([left], [right]) => left.localeCompare(right))
+
+  return normalizedEntries.length > 0
+    ? Object.fromEntries(normalizedEntries)
+    : null
 }

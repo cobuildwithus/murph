@@ -188,6 +188,11 @@ const assistantProviderOptionFields = {
     .describe(
       'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
     ),
+  headersJson: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.'),
   sandbox: z
     .enum(assistantSandboxValues)
     .optional()
@@ -370,6 +375,7 @@ type AssistantProviderCliOptions = {
   approvalPolicy?: AssistantChatOptions['approvalPolicy']
   baseUrl?: string
   codexCommand?: string
+  headersJson?: string
   model?: string
   oss?: boolean
   profile?: string
@@ -538,6 +544,7 @@ function assistantConversationOptionsFromCli<T extends AssistantConversationCliO
 function assistantProviderOverridesFromCli<T extends AssistantProviderCliOptions>(
   options: T,
 ) {
+  const headers = parseHeadersJsonOption(options.headersJson)
   return {
     provider: options.provider,
     codexCommand: options.codexCommand,
@@ -549,6 +556,7 @@ function assistantProviderOverridesFromCli<T extends AssistantProviderCliOptions
     approvalPolicy: options.approvalPolicy,
     profile: options.profile,
     oss: options.oss,
+    ...(headers ? { headers } : {}),
   }
 }
 

@@ -3,10 +3,12 @@ import path from 'node:path'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
+  assistantChatProviderValues,
   assistantSessionSchema,
   assistantTranscriptEntrySchema,
   type AssistantAliasStore,
   type AssistantAutomationState,
+  type AssistantChatProvider,
   type AssistantSession,
   type AssistantTranscriptEntry,
 } from '../../assistant-cli-contracts.js'
@@ -20,6 +22,8 @@ import {
   normalizeNullableString,
   writeJsonFileAtomic,
 } from '../shared.js'
+import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
+import { normalizeAssistantSessionSnapshot } from '../provider-state.js'
 import type {
   AssistantStatePaths,
 } from './paths.js'
@@ -61,7 +65,9 @@ export async function readAssistantSession(input: {
 
   try {
     const raw = await readFile(sessionPath, 'utf8')
-    return assistantSessionSchema.parse(JSON.parse(raw) as unknown)
+    return normalizeAssistantSessionSnapshot(
+      assistantSessionSchema.parse(normalizeAssistantSessionRecord(JSON.parse(raw) as unknown)),
+    )
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -75,7 +81,10 @@ export async function writeAssistantSession(
   session: AssistantSession,
 ): Promise<void> {
   const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
-  await writeJsonFileAtomic(sessionPath, session)
+  await writeJsonFileAtomic(
+    sessionPath,
+    assistantSessionSchema.parse(normalizeAssistantSessionForWrite(session)),
+  )
 }
 
 export async function readAssistantTranscriptEntries(
@@ -167,6 +176,49 @@ async function pathExists(filePath: string): Promise<boolean> {
 
     throw error
   }
+}
+
+function normalizeAssistantSessionRecord(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return raw
+  }
+
+  const source = raw as Record<string, unknown>
+  const provider: AssistantChatProvider =
+    typeof source.provider === 'string' && source.provider.trim().length > 0
+      ? ((assistantChatProviderValues as readonly string[]).includes(source.provider)
+          ? (source.provider as AssistantChatProvider)
+          : 'codex-cli')
+      : 'codex-cli'
+  const rawProviderOptions =
+    source.providerOptions &&
+    typeof source.providerOptions === 'object' &&
+    !Array.isArray(source.providerOptions)
+      ? (source.providerOptions as Record<string, unknown>)
+      : {}
+  const { codexPromptVersion: _legacyCodexPromptVersion, ...rest } = source
+
+  return {
+    ...rest,
+    provider,
+    providerOptions: serializeAssistantProviderSessionOptions({
+      provider,
+      ...rawProviderOptions,
+    }),
+  }
+}
+
+function normalizeAssistantSessionForWrite(
+  session: AssistantSession,
+): AssistantSession {
+  return normalizeAssistantSessionSnapshot({
+    ...session,
+    providerOptions: serializeAssistantProviderSessionOptions({
+      provider: session.provider,
+      ...session.providerOptions,
+    }),
+    providerState: session.providerState,
+  })
 }
 
 export async function persistResolvedSession(

@@ -5,6 +5,7 @@ import { z } from 'zod'
 import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
+  assistantHeadersSchema,
   assistantProviderFailoverRouteSchema,
   assistantSelfDeliveryTargetSchema,
   assistantSandboxValues,
@@ -15,6 +16,11 @@ import {
   resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
 import { readEnvValue } from './env-values.js'
+import {
+  inferAssistantProviderFromConfigInput,
+  mergeAssistantProviderConfigsForProvider,
+  serializeAssistantProviderOperatorDefaults,
+} from './assistant/provider-config.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
@@ -26,8 +32,32 @@ const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
 export const VAULT_ENV = 'VAULT'
 export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
+const assistantProviderDefaultsEntrySchema = z.object({
+  codexCommand: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+  reasoningEffort: z.string().min(1).nullable().default(null),
+  sandbox: z.enum(assistantSandboxValues).nullable(),
+  approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
+  profile: z.string().min(1).nullable(),
+  oss: z.boolean().nullable(),
+  baseUrl: z.string().min(1).nullable().optional(),
+  apiKeyEnv: z.string().min(1).nullable().optional(),
+  providerName: z.string().min(1).nullable().optional(),
+  headers: assistantHeadersSchema.nullable().optional(),
+})
+
+const assistantDefaultsByProviderSchema = z
+  .object({
+    'codex-cli': assistantProviderDefaultsEntrySchema.nullable().optional(),
+    'openai-compatible': assistantProviderDefaultsEntrySchema.nullable().optional(),
+  })
+  .strict()
+  .nullable()
+  .optional()
+
 const assistantOperatorDefaultsSchema = z.object({
   provider: z.enum(assistantChatProviderValues).nullable(),
+  defaultsByProvider: assistantDefaultsByProviderSchema,
   codexCommand: z.string().min(1).nullable(),
   model: z.string().min(1).nullable(),
   reasoningEffort: z.string().min(1).nullable().default(null),
@@ -39,6 +69,7 @@ const assistantOperatorDefaultsSchema = z.object({
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
+  headers: assistantHeadersSchema.nullable().optional(),
   failoverRoutes: z.array(assistantProviderFailoverRouteSchema).nullable().optional(),
   account: z
     .object({
@@ -357,7 +388,28 @@ export async function resolveAssistantOperatorDefaults(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantOperatorDefaults | null> {
   const config = await readOperatorConfig(homeDirectory)
-  return config?.assistant ?? null
+  return normalizeAssistantOperatorDefaults(config?.assistant ?? null)
+}
+
+export function resolveAssistantProviderDefaults(
+  defaults: AssistantOperatorDefaults | null | undefined,
+  provider: typeof assistantChatProviderValues[number],
+): z.infer<typeof assistantProviderDefaultsEntrySchema> | null {
+  if (!defaults) {
+    return null
+  }
+
+  const nestedDefaults = defaults.defaultsByProvider?.[provider] ?? null
+  if (!nestedDefaults) {
+    return null
+  }
+
+  return assistantProviderDefaultsEntrySchema.parse(
+    serializeAssistantProviderOperatorDefaults({
+      provider,
+      ...nestedDefaults,
+    }),
+  )
 }
 
 export async function listAssistantSelfDeliveryTargets(
@@ -489,30 +541,43 @@ function mergeAssistantOperatorDefaults(
   existing: AssistantOperatorDefaults | null,
   patch: Partial<AssistantOperatorDefaults>,
 ): AssistantOperatorDefaults {
+  const inferredProvider = inferAssistantProviderFromConfigInput(patch)
+  const selectedProvider =
+    'provider' in patch
+      ? patch.provider ??
+        inferredProvider ??
+        existing?.provider ??
+        (hasAssistantProviderConfigPatch(patch) ? 'codex-cli' : null) ??
+        null
+      : existing?.provider ??
+        inferredProvider ??
+        (hasAssistantProviderConfigPatch(patch) ? 'codex-cli' : null) ??
+        null
+  const nextDefaultsByProvider = buildAssistantDefaultsByProvider({
+    existing,
+    patch,
+    selectedProvider,
+  })
+  const activeProviderDefaults = selectedProvider
+    ? nextDefaultsByProvider?.[selectedProvider] ?? null
+    : null
+
   return assistantOperatorDefaultsSchema.parse({
-    provider:
-      'provider' in patch ? patch.provider : existing?.provider ?? null,
-    codexCommand:
-      'codexCommand' in patch ? patch.codexCommand : existing?.codexCommand ?? null,
-    model: 'model' in patch ? patch.model : existing?.model ?? null,
-    reasoningEffort:
-      'reasoningEffort' in patch
-        ? patch.reasoningEffort
-        : existing?.reasoningEffort ?? null,
+    provider: selectedProvider,
+    defaultsByProvider: nextDefaultsByProvider,
+    codexCommand: activeProviderDefaults?.codexCommand ?? null,
+    model: activeProviderDefaults?.model ?? null,
+    reasoningEffort: activeProviderDefaults?.reasoningEffort ?? null,
     identityId:
       'identityId' in patch ? patch.identityId : existing?.identityId ?? null,
-    sandbox: 'sandbox' in patch ? patch.sandbox : existing?.sandbox ?? null,
-    approvalPolicy:
-      'approvalPolicy' in patch
-        ? patch.approvalPolicy
-        : existing?.approvalPolicy ?? null,
-    profile: 'profile' in patch ? patch.profile : existing?.profile ?? null,
-    oss: 'oss' in patch ? patch.oss : existing?.oss ?? null,
-    baseUrl: 'baseUrl' in patch ? patch.baseUrl : existing?.baseUrl ?? null,
-    apiKeyEnv:
-      'apiKeyEnv' in patch ? patch.apiKeyEnv : existing?.apiKeyEnv ?? null,
-    providerName:
-      'providerName' in patch ? patch.providerName : existing?.providerName ?? null,
+    sandbox: activeProviderDefaults?.sandbox ?? null,
+    approvalPolicy: activeProviderDefaults?.approvalPolicy ?? null,
+    profile: activeProviderDefaults?.profile ?? null,
+    oss: activeProviderDefaults?.oss ?? null,
+    baseUrl: activeProviderDefaults?.baseUrl ?? null,
+    apiKeyEnv: activeProviderDefaults?.apiKeyEnv ?? null,
+    providerName: activeProviderDefaults?.providerName ?? null,
+    headers: activeProviderDefaults?.headers ?? null,
     failoverRoutes:
       'failoverRoutes' in patch
         ? patch.failoverRoutes
@@ -523,6 +588,154 @@ function mergeAssistantOperatorDefaults(
         ? normalizeAssistantSelfDeliveryTargetMap(patch.selfDeliveryTargets ?? null)
         : existing?.selfDeliveryTargets ?? null,
   })
+}
+
+function normalizeAssistantOperatorDefaults(
+  defaults: AssistantOperatorDefaults | null | undefined,
+): AssistantOperatorDefaults | null {
+  if (!defaults) {
+    return null
+  }
+
+  const selectedProvider = defaults.provider ?? null
+  const defaultsByProvider = normalizeAssistantDefaultsByProvider(
+    defaults.defaultsByProvider,
+  )
+  const activeProviderDefaults = selectedProvider
+    ? defaultsByProvider?.[selectedProvider] ?? null
+    : null
+
+  return assistantOperatorDefaultsSchema.parse({
+    ...defaults,
+    provider: selectedProvider,
+    defaultsByProvider,
+    codexCommand: activeProviderDefaults?.codexCommand ?? null,
+    model: activeProviderDefaults?.model ?? null,
+    reasoningEffort: activeProviderDefaults?.reasoningEffort ?? null,
+    sandbox: activeProviderDefaults?.sandbox ?? null,
+    approvalPolicy: activeProviderDefaults?.approvalPolicy ?? null,
+    profile: activeProviderDefaults?.profile ?? null,
+    oss: activeProviderDefaults?.oss ?? null,
+    baseUrl: activeProviderDefaults?.baseUrl ?? null,
+    apiKeyEnv: activeProviderDefaults?.apiKeyEnv ?? null,
+    providerName: activeProviderDefaults?.providerName ?? null,
+    headers: activeProviderDefaults?.headers ?? null,
+  })
+}
+
+function buildAssistantDefaultsByProvider(input: {
+  existing: AssistantOperatorDefaults | null | undefined
+  patch: Partial<AssistantOperatorDefaults>
+  selectedProvider: typeof assistantChatProviderValues[number] | null
+}): AssistantOperatorDefaults['defaultsByProvider'] {
+  const nextDefaultsByProvider: NonNullable<AssistantOperatorDefaults['defaultsByProvider']> = {}
+
+  for (const provider of assistantChatProviderValues) {
+    const existingDefaults = resolveAssistantProviderDefaults(input.existing, provider)
+    if (existingDefaults) {
+      nextDefaultsByProvider[provider] = existingDefaults
+    }
+  }
+
+  if (input.selectedProvider && hasAssistantProviderConfigPatch(input.patch)) {
+    const existingSelectedDefaults =
+      nextDefaultsByProvider[input.selectedProvider] ?? null
+    nextDefaultsByProvider[input.selectedProvider] =
+      assistantProviderDefaultsEntrySchema.parse(
+        serializeAssistantProviderOperatorDefaults(
+          mergeAssistantProviderConfigsForProvider(
+            input.selectedProvider,
+            existingSelectedDefaults
+              ? {
+                  provider: input.selectedProvider,
+                  ...existingSelectedDefaults,
+                }
+              : null,
+            {
+              provider: input.selectedProvider,
+              codexCommand:
+                'codexCommand' in input.patch
+                  ? input.patch.codexCommand
+                  : undefined,
+              model: 'model' in input.patch ? input.patch.model : undefined,
+              reasoningEffort:
+                'reasoningEffort' in input.patch
+                  ? input.patch.reasoningEffort
+                  : undefined,
+              sandbox:
+                'sandbox' in input.patch ? input.patch.sandbox : undefined,
+              approvalPolicy:
+                'approvalPolicy' in input.patch
+                  ? input.patch.approvalPolicy
+                  : undefined,
+              profile:
+                'profile' in input.patch ? input.patch.profile : undefined,
+              oss: 'oss' in input.patch ? input.patch.oss : undefined,
+              baseUrl:
+                'baseUrl' in input.patch ? input.patch.baseUrl : undefined,
+              apiKeyEnv:
+                'apiKeyEnv' in input.patch ? input.patch.apiKeyEnv : undefined,
+              providerName:
+                'providerName' in input.patch
+                  ? input.patch.providerName
+                  : undefined,
+              headers:
+                'headers' in input.patch ? input.patch.headers ?? null : undefined,
+            },
+          ),
+        ),
+      )
+  }
+
+  return Object.keys(nextDefaultsByProvider).length > 0
+    ? assistantDefaultsByProviderSchema.parse(nextDefaultsByProvider)
+    : null
+}
+
+function normalizeAssistantDefaultsByProvider(
+  defaultsByProvider: AssistantOperatorDefaults['defaultsByProvider'],
+): AssistantOperatorDefaults['defaultsByProvider'] {
+  if (!defaultsByProvider) {
+    return null
+  }
+
+  const normalized: NonNullable<AssistantOperatorDefaults['defaultsByProvider']> = {}
+
+  for (const provider of assistantChatProviderValues) {
+    const entry = defaultsByProvider[provider]
+    if (!entry) {
+      continue
+    }
+
+    normalized[provider] = assistantProviderDefaultsEntrySchema.parse(
+      serializeAssistantProviderOperatorDefaults({
+        provider,
+        ...entry,
+      }),
+    )
+  }
+
+  return Object.keys(normalized).length > 0
+    ? assistantDefaultsByProviderSchema.parse(normalized)
+    : null
+}
+
+function hasAssistantProviderConfigPatch(
+  patch: Partial<AssistantOperatorDefaults>,
+): boolean {
+  return [
+    'codexCommand',
+    'model',
+    'reasoningEffort',
+    'sandbox',
+    'approvalPolicy',
+    'profile',
+    'oss',
+    'baseUrl',
+    'apiKeyEnv',
+    'providerName',
+    'headers',
+  ].some((field) => field in patch)
 }
 
 function normalizeAssistantSelfDeliveryTargetMap(

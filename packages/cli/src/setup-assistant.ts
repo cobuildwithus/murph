@@ -21,7 +21,6 @@ export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.4'
 export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL =
   'http://127.0.0.1:11434/v1'
-export const DEFAULT_SETUP_OPENAI_COMPATIBLE_MODEL = 'local-model'
 const DEFAULT_SETUP_SANDBOX = 'workspace-write' as const
 const DEFAULT_SETUP_APPROVAL_POLICY = 'on-request' as const
 
@@ -38,7 +37,11 @@ export interface SetupAssistantResolver {
 
 interface SetupAssistantResolverDependencies {
   assistantAccount?: SetupAssistantAccountResolver
-  discoverModels?: (baseUrl: string) => Promise<string[]>
+  discoverModels?: (input: {
+    apiKeyEnv?: string | null
+    baseUrl: string
+    providerName?: string | null
+  }) => Promise<string[]>
   input?: NodeJS.ReadableStream
   output?: NodeJS.WritableStream
 }
@@ -113,7 +116,16 @@ export function createSetupAssistantResolver(
   dependencies: SetupAssistantResolverDependencies = {},
 ): SetupAssistantResolver {
   const discoverModels =
-    dependencies.discoverModels ?? defaultDiscoverOpenAICompatibleModels
+    dependencies.discoverModels ??
+    (async (input: {
+      apiKeyEnv?: string | null
+      baseUrl: string
+      providerName?: string | null
+    }) =>
+      await defaultDiscoverOpenAICompatibleModels(input.baseUrl, {
+        apiKeyEnv: input.apiKeyEnv,
+        providerName: input.providerName,
+      }))
   const assistantAccount =
     dependencies.assistantAccount ?? createSetupAssistantAccountResolver()
   const input = dependencies.input ?? defaultInput
@@ -242,10 +254,28 @@ export function createSetupAssistantResolver(
               'OpenAI-compatible base URL',
           })
 
+          const apiKeyEnv = await resolveOptionalPromptedValue({
+            allowPrompt: resolutionInput.allowPrompt,
+            defaultValue:
+              normalizeNullableString(
+                resolutionInput.options.assistantApiKeyEnv,
+              ) ?? null,
+            input,
+            output,
+            prompt:
+              'API key environment variable (leave blank for local/no auth)',
+          })
+          const providerName =
+            normalizeNullableString(
+              resolutionInput.options.assistantProviderName,
+            ) ?? null
           const discoveredModels =
-            normalizeNullableString(resolutionInput.options.assistantModel) === null &&
-            resolutionInput.allowPrompt
-              ? await discoverModels(baseUrl)
+            normalizeNullableString(resolutionInput.options.assistantModel) === null
+              ? await discoverModels({
+                  baseUrl,
+                  apiKeyEnv,
+                  providerName,
+                })
               : []
 
           const model = await resolveOpenAICompatibleModel({
@@ -258,18 +288,6 @@ export function createSetupAssistantResolver(
             output,
           })
 
-          const apiKeyEnv = await resolveOptionalPromptedValue({
-            allowPrompt: resolutionInput.allowPrompt,
-            defaultValue:
-              normalizeNullableString(
-                resolutionInput.options.assistantApiKeyEnv,
-              ) ?? null,
-            input,
-            output,
-            prompt:
-              'API key environment variable (leave blank for local/no auth)',
-          })
-
           resolvedAssistant = {
             preset: 'openai-compatible',
             enabled: true,
@@ -277,10 +295,7 @@ export function createSetupAssistantResolver(
             model,
             baseUrl,
             apiKeyEnv,
-            providerName:
-              normalizeNullableString(
-                resolutionInput.options.assistantProviderName,
-              ) ?? null,
+            providerName,
             codexCommand: null,
             profile: null,
             reasoningEffort:
@@ -331,7 +346,14 @@ async function resolveOpenAICompatibleModel(input: {
   }
 
   if (!input.allowPrompt) {
-    return input.discoveredModels[0] ?? DEFAULT_SETUP_OPENAI_COMPATIBLE_MODEL
+    const discoveredModel = input.discoveredModels[0] ?? null
+    if (discoveredModel) {
+      return discoveredModel
+    }
+
+    throw new Error(
+      'OpenAI-compatible setup requires an explicit model when discovery does not return any models.',
+    )
   }
 
   if (input.discoveredModels.length > 0) {
@@ -355,21 +377,45 @@ async function resolveOpenAICompatibleModel(input: {
         numericIndex >= 1 &&
         numericIndex <= input.discoveredModels.length
       ) {
-        return input.discoveredModels[numericIndex - 1] ??
-          DEFAULT_SETUP_OPENAI_COMPATIBLE_MODEL
+        return input.discoveredModels[numericIndex - 1] ?? input.discoveredModels[0] ?? ''
       }
 
       return choice
     }
   }
 
-  return await resolvePromptedValue({
+  return await resolveRequiredPromptedValue({
     allowPrompt: true,
-    defaultValue: DEFAULT_SETUP_OPENAI_COMPATIBLE_MODEL,
     input: input.input,
     output: input.output,
     prompt: 'Default model for the OpenAI-compatible endpoint',
   })
+}
+
+async function resolveRequiredPromptedValue(input: {
+  allowPrompt: boolean
+  input: NodeJS.ReadableStream
+  output: NodeJS.WritableStream
+  prompt: string
+}): Promise<string> {
+  if (!input.allowPrompt) {
+    return ''
+  }
+
+  while (true) {
+    const response = await promptWithDefault({
+      defaultValue: null,
+      input: input.input,
+      output: input.output,
+      prompt: input.prompt,
+    })
+
+    if (response) {
+      return response
+    }
+
+    input.output.write('A model id is required.\n')
+  }
 }
 
 async function resolvePromptedValue(input: {

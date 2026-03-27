@@ -1,33 +1,25 @@
-import { generateText } from 'ai'
 import type {
   AssistantApprovalPolicy,
   AssistantChatProvider,
   AssistantSandbox,
   AssistantSessionBinding,
 } from './assistant-cli-contracts.js'
-import type { AssistantProviderTraceEvent } from './assistant/provider-traces.js'
-import {
-  resolveAssistantProviderCapabilities as resolveAssistantCatalogProviderCapabilities,
-  type AssistantProviderCapabilities,
-} from './assistant/provider-catalog.js'
-import {
-  executeCodexPrompt,
-  type CodexProgressEvent,
-} from './assistant-codex.js'
 import { getAssistantBindingContextLines } from './assistant/bindings.js'
 import {
-  normalizeAssistantProviderConfig,
+  sanitizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
-  type AssistantProviderConfig,
 } from './assistant/provider-config.js'
+import {
+  executeAssistantProviderTurnWithDefinition,
+  resolveAssistantProviderCapabilities as resolveAssistantRegistryProviderCapabilities,
+  type AssistantProviderCapabilities,
+  type AssistantProviderProgressEvent,
+  type AssistantProviderTurnExecutionResult,
+} from './assistant/provider-registry.js'
+import type { AssistantProviderTraceEvent } from './assistant/provider-traces.js'
 import { normalizeNullableString } from './assistant/shared.js'
-import { resolveAssistantLanguageModel } from './model-harness.js'
-import { VaultCliError } from './vault-cli-errors.js'
 
-const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
-const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
-
-export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
+export type { AssistantProviderProgressEvent } from './assistant/provider-registry.js'
 
 export interface AssistantProviderTurnInput {
   abortSignal?: AbortSignal
@@ -42,6 +34,7 @@ export interface AssistantProviderTurnInput {
   }>
   continuityContext?: string | null
   env?: NodeJS.ProcessEnv
+  headers?: Record<string, string> | null
   model?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -62,130 +55,17 @@ export interface AssistantProviderTurnInput {
   workingDirectory: string
 }
 
-export interface AssistantProviderTurnResult {
-  provider: AssistantChatProvider
-  providerSessionId: string | null
-  response: string
-  stderr: string
-  stdout: string
-  rawEvents: unknown[]
-}
-
-interface AssistantResolvedProviderTurnInput {
-  input: AssistantProviderTurnInput
-  prompt: string
-  provider: AssistantChatProvider
-  providerConfig: AssistantProviderConfig
-}
-
-interface AssistantProviderAdapter {
-  executeTurn(
-    input: AssistantResolvedProviderTurnInput,
-  ): Promise<AssistantProviderTurnResult>
-}
-
-const ASSISTANT_PROVIDER_ADAPTERS: Record<
-  AssistantChatProvider,
-  AssistantProviderAdapter
-> = {
-  'codex-cli': {
-    async executeTurn({ input, prompt, provider, providerConfig }) {
-      const result = await executeCodexPrompt({
-        codexCommand: providerConfig.codexCommand ?? undefined,
-        configOverrides: mergeCodexConfigOverrides({
-          configOverrides: input.configOverrides,
-          showThinkingTraces: input.showThinkingTraces ?? false,
-        }),
-        abortSignal: input.abortSignal,
-        env: input.env,
-        workingDirectory: input.workingDirectory,
-        prompt,
-        resumeSessionId: input.resumeProviderSessionId,
-        model: providerConfig.model ?? undefined,
-        reasoningEffort: providerConfig.reasoningEffort ?? undefined,
-        sandbox: providerConfig.sandbox ?? undefined,
-        approvalPolicy: providerConfig.approvalPolicy ?? undefined,
-        profile: providerConfig.profile ?? undefined,
-        oss: providerConfig.oss ?? false,
-        onProgress: input.onEvent ?? undefined,
-        onTraceEvent: input.onTraceEvent,
-      })
-
-      return {
-        provider,
-        providerSessionId: result.sessionId,
-        response: result.finalMessage,
-        stderr: result.stderr,
-        stdout: result.stdout,
-        rawEvents: result.jsonEvents,
-      }
-    },
-  },
-  'openai-compatible': {
-    async executeTurn({ input, provider, providerConfig }) {
-      const baseUrl = providerConfig.baseUrl
-      const model = providerConfig.model
-      if (!baseUrl) {
-        throw new VaultCliError(
-          'ASSISTANT_BASE_URL_REQUIRED',
-          'The openai-compatible assistant provider requires a base URL.',
-        )
-      }
-      if (!model) {
-        throw new VaultCliError(
-          'ASSISTANT_MODEL_REQUIRED',
-          'The openai-compatible assistant provider requires a model id.',
-        )
-      }
-
-      const resolvedEnv = {
-        ...process.env,
-        ...(input.env ?? {}),
-      }
-      const apiKeyEnv = providerConfig.apiKeyEnv
-      const languageModel = resolveAssistantLanguageModel({
-        apiKey:
-          apiKeyEnv && typeof resolvedEnv[apiKeyEnv] === 'string'
-            ? resolvedEnv[apiKeyEnv]
-            : undefined,
-        apiKeyEnv: apiKeyEnv ?? undefined,
-        baseUrl,
-        model,
-        providerName: providerConfig.providerName ?? undefined,
-      })
-      const result = await generateText({
-        model: languageModel,
-        system: normalizeNullableString(input.systemPrompt) ?? undefined,
-        messages: buildAssistantProviderMessages({
-          conversationMessages: input.conversationMessages,
-          prompt: input.prompt,
-          sessionContext: input.sessionContext,
-          userPrompt: input.userPrompt,
-        }),
-        abortSignal: input.abortSignal,
-        timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
-        maxRetries: OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
-      })
-
-      return {
-        provider,
-        providerSessionId: null,
-        response: result.text,
-        stderr: '',
-        stdout: '',
-        rawEvents: [],
-      }
-    },
-  },
-}
+export type AssistantProviderTurnResult = AssistantProviderTurnExecutionResult
 
 export function resolveAssistantProviderOptions(input: {
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
   baseUrl?: string | null
+  headers?: Record<string, string> | null
   model?: string | null
   oss?: boolean
   profile?: string | null
+  provider?: AssistantChatProvider | null
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
@@ -196,26 +76,39 @@ export function resolveAssistantProviderOptions(input: {
 export function resolveAssistantProviderCapabilities(
   provider: AssistantChatProvider,
 ): AssistantProviderCapabilities {
-  return resolveAssistantCatalogProviderCapabilities(provider)
+  return resolveAssistantRegistryProviderCapabilities(provider)
 }
 
 export async function executeAssistantProviderTurn(
   input: AssistantProviderTurnInput,
 ): Promise<AssistantProviderTurnResult> {
   const provider = input.provider ?? 'codex-cli'
-  const adapter = ASSISTANT_PROVIDER_ADAPTERS[provider]
-  if (!adapter) {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      `Assistant provider "${provider}" is not supported in this build.`,
-    )
-  }
+  const providerConfig = sanitizeAssistantProviderConfig(provider, input)
 
-  return await adapter.executeTurn({
-    input,
+  return await executeAssistantProviderTurnWithDefinition({
+    abortSignal: input.abortSignal,
+    configOverrides: input.configOverrides,
+    conversationMessages:
+      provider === 'openai-compatible'
+        ? buildAssistantProviderMessages({
+            continuityContext: input.continuityContext,
+            conversationMessages: input.conversationMessages,
+            prompt: input.prompt,
+            sessionContext: input.sessionContext,
+            userPrompt: input.userPrompt,
+          })
+        : input.conversationMessages,
+    env: input.env,
+    onEvent: input.onEvent,
+    onTraceEvent: input.onTraceEvent,
     prompt: flattenAssistantProviderPrompt(input),
-    provider,
-    providerConfig: normalizeAssistantProviderConfig(input),
+    providerConfig,
+    resumeProviderSessionId: input.resumeProviderSessionId,
+    sessionContext: input.sessionContext,
+    showThinkingTraces: input.showThinkingTraces,
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+    workingDirectory: input.workingDirectory,
   })
 }
 
@@ -232,8 +125,7 @@ export function flattenAssistantProviderPrompt(
 
   const userPrompt = normalizeNullableString(input.userPrompt)
   if (!userPrompt) {
-    throw new VaultCliError(
-      'ASSISTANT_PROMPT_REQUIRED',
+    throw new Error(
       'Assistant provider turns require either prompt or userPrompt.',
     )
   }
@@ -259,98 +151,55 @@ export function flattenAssistantProviderPrompt(
 export function buildAssistantProviderMessages(
   input: Pick<
     AssistantProviderTurnInput,
-    'continuityContext' | 'conversationMessages' | 'prompt' | 'sessionContext' | 'userPrompt'
+    | 'continuityContext'
+    | 'conversationMessages'
+    | 'prompt'
+    | 'sessionContext'
+    | 'userPrompt'
   >,
 ): Array<{
   content: string
   role: 'assistant' | 'user'
 }> {
-  const explicitPrompt = normalizeNullableString(input.prompt)
-  if (explicitPrompt) {
-    return [
-      ...normalizeConversationMessages(input.conversationMessages),
-      {
-        role: 'user',
-        content: explicitPrompt,
-      },
-    ]
+  const messages = (input.conversationMessages ?? [])
+    .map((message) => ({
+      role: message.role,
+      content: normalizeNullableString(message.content) ?? '',
+    }))
+    .filter((message) => message.content.length > 0)
+
+  const prompt = normalizeNullableString(input.prompt)
+  if (prompt) {
+    messages.push({
+      role: 'user',
+      content: prompt,
+    })
+    return messages
   }
 
   const userPrompt = normalizeNullableString(input.userPrompt)
   if (!userPrompt) {
-    throw new VaultCliError(
-      'ASSISTANT_PROMPT_REQUIRED',
+    throw new Error(
       'Assistant provider turns require either prompt or userPrompt.',
     )
   }
 
-  const contextLines =
+  const sessionContextLines =
     input.sessionContext?.binding
       ? getAssistantBindingContextLines(input.sessionContext.binding)
       : []
-  const userContent = [
-    contextLines.length > 0
-      ? `Conversation context:\n${contextLines.join('\n')}`
+  const continuityContext = normalizeNullableString(input.continuityContext)
+  const userParts = [
+    sessionContextLines.length > 0
+      ? `Conversation context:\n${sessionContextLines.join('\n')}`
       : null,
-    normalizeNullableString(input.continuityContext),
+    continuityContext,
     userPrompt,
-  ]
-    .filter((line): line is string => Boolean(line))
-    .join('\n\n')
+  ].filter((part): part is string => Boolean(part))
 
-  return [
-    ...normalizeConversationMessages(input.conversationMessages),
-    {
-      role: 'user',
-      content: userContent,
-    },
-  ]
-}
-
-function normalizeConversationMessages(
-  messages: AssistantProviderTurnInput['conversationMessages'],
-): Array<{
-  content: string
-  role: 'assistant' | 'user'
-}> {
-  return (messages ?? [])
-    .map((message) => ({
-      role: message.role,
-      content: message.content.trim(),
-    }))
-    .filter((message) => message.content.length > 0)
-}
-
-function mergeCodexConfigOverrides(input: {
-  configOverrides?: readonly string[]
-  showThinkingTraces: boolean
-}): readonly string[] | undefined {
-  const overrides = [...(input.configOverrides ?? [])]
-
-  if (!input.showThinkingTraces) {
-    return overrides.length > 0 ? overrides : input.configOverrides
-  }
-
-  upsertCodexConfigOverride(overrides, 'model_reasoning_summary', '"auto"')
-  upsertCodexConfigOverride(overrides, 'hide_agent_reasoning', 'false')
-
-  return overrides
-}
-
-function upsertCodexConfigOverride(
-  overrides: string[],
-  key: string,
-  value: string,
-): void {
-  const assignmentPrefix = `${key}=`
-  const existingIndex = overrides.findIndex((override) =>
-    override.trim().startsWith(assignmentPrefix),
-  )
-
-  if (existingIndex >= 0) {
-    overrides[existingIndex] = `${key}=${value}`
-    return
-  }
-
-  overrides.push(`${key}=${value}`)
+  messages.push({
+    role: 'user',
+    content: userParts.join('\n\n'),
+  })
+  return messages
 }

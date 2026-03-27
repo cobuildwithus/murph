@@ -104,6 +104,7 @@ export function normalizeProviderOptions(input: {
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
   baseUrl?: string | null
+  headers?: Record<string, string> | null
   model?: string | null
   oss?: boolean
   profile?: string | null

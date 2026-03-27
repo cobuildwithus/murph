@@ -21,6 +21,7 @@ import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
 import {
   discoverAssistantProviderModels,
   resolveAssistantModelCatalog,
+  type AssistantModelDiscoveryResult,
 } from '../provider-catalog.js'
 import type {
   AssistantProviderTraceEvent,
@@ -107,6 +108,8 @@ interface ModelSwitcherState {
   mode: 'model' | 'reasoning'
   modelIndex: number
   reasoningIndex: number
+  modelOptions: readonly AssistantModelOption[]
+  reasoningOptions: readonly AssistantReasoningOption[]
 }
 
 type ComposerSubmitMode = 'enter' | 'tab'
@@ -2721,6 +2724,27 @@ function wrapPickerIndex(index: number, count: number): number {
   return ((index % count) + count) % count
 }
 
+function assistantModelDiscoveryResultsEqual(
+  left: AssistantModelDiscoveryResult | null,
+  right: AssistantModelDiscoveryResult | null,
+): boolean {
+  if (left === right) {
+    return true
+  }
+
+  if (!left || !right) {
+    return false
+  }
+
+  return (
+    left.status === right.status &&
+    (normalizeNullableString(left.message) ?? null) ===
+      (normalizeNullableString(right.message) ?? null) &&
+    left.models.length === right.models.length &&
+    left.models.every((model, index) => model.id === right.models[index]?.id)
+  )
+}
+
 export async function runAssistantChatWithInk(
   input: AssistantChatInput,
 ): Promise<AssistantChatResult> {
@@ -2811,7 +2835,8 @@ export async function runAssistantChatWithInk(
       const [activeReasoningEffort, setActiveReasoningEffort] = React.useState<string | null>(
         initialActiveReasoningEffort,
       )
-      const [discoveredModels, setDiscoveredModels] = React.useState<readonly string[]>([])
+      const [modelDiscovery, setModelDiscovery] =
+        React.useState<AssistantModelDiscoveryResult | null>(null)
       const [modelSwitcherState, setModelSwitcherState] =
         React.useState<ModelSwitcherState | null>(null)
       const latestSessionRef = React.useRef(resolved.session)
@@ -2826,7 +2851,9 @@ export async function runAssistantChatWithInk(
         baseUrl: session.providerOptions.baseUrl,
         currentModel: activeModel,
         currentReasoningEffort: activeReasoningEffort,
-        discoveredModels,
+        discovery: modelDiscovery,
+        headers: session.providerOptions.headers ?? null,
+        apiKeyEnv: session.providerOptions.apiKeyEnv,
         oss: session.providerOptions.oss,
         providerName: session.providerOptions.providerName,
       })
@@ -2851,27 +2878,29 @@ export async function runAssistantChatWithInk(
         const baseUrl = normalizeNullableString(session.providerOptions.baseUrl)
 
         if (!modelCatalog.capabilities.supportsModelDiscovery || !baseUrl) {
-          setDiscoveredModels((existing) => (existing.length === 0 ? existing : []))
+          setModelDiscovery((existing) => (existing === null ? existing : null))
           return () => {
             cancelled = true
           }
         }
 
         void (async () => {
-          const nextDiscoveredModels = await discoverAssistantProviderModels({
+          const nextDiscovery = await discoverAssistantProviderModels({
             provider: session.provider,
             baseUrl,
+            apiKeyEnv: session.providerOptions.apiKeyEnv,
+            headers: session.providerOptions.headers ?? null,
+            providerName: session.providerOptions.providerName,
           })
 
           if (cancelled) {
             return
           }
 
-          setDiscoveredModels((existing) =>
-            existing.length === nextDiscoveredModels.length &&
-            existing.every((value, index) => value === nextDiscoveredModels[index])
+          setModelDiscovery((existing) =>
+            assistantModelDiscoveryResultsEqual(existing, nextDiscovery)
               ? existing
-              : nextDiscoveredModels,
+              : nextDiscovery,
           )
         })()
 
@@ -2881,7 +2910,10 @@ export async function runAssistantChatWithInk(
       }, [
         modelCatalog.capabilities.supportsModelDiscovery,
         session.provider,
+        session.providerOptions.apiKeyEnv,
         session.providerOptions.baseUrl,
+        session.providerOptions.headers,
+        session.providerOptions.providerName,
       ])
 
       React.useEffect(() => {
@@ -2934,6 +2966,8 @@ export async function runAssistantChatWithInk(
             activeReasoningEffort,
             modelCatalog.reasoningOptions,
           ),
+          modelOptions: modelCatalog.modelOptions,
+          reasoningOptions: modelCatalog.reasoningOptions,
         })
       }
 
@@ -2948,7 +2982,7 @@ export async function runAssistantChatWithInk(
               ...previous,
               modelIndex: wrapPickerIndex(
                 previous.modelIndex + delta,
-                modelCatalog.modelOptions.length,
+                previous.modelOptions.length,
               ),
             }
           }
@@ -2957,7 +2991,7 @@ export async function runAssistantChatWithInk(
             ...previous,
             reasoningIndex: wrapPickerIndex(
               previous.reasoningIndex + delta,
-              modelCatalog.reasoningOptions.length,
+              previous.reasoningOptions.length,
             ),
           }
         })
@@ -2982,12 +3016,12 @@ export async function runAssistantChatWithInk(
 
       const applyModelSwitcherSelection = (selection: ModelSwitcherState) => {
         const nextModel =
-          modelCatalog.modelOptions[selection.modelIndex]?.value ??
+          selection.modelOptions[selection.modelIndex]?.value ??
           activeModel ??
           null
         const nextReasoningEffort =
-          modelCatalog.reasoningOptions.length > 0
-            ? modelCatalog.reasoningOptions[selection.reasoningIndex]?.value ??
+          selection.reasoningOptions.length > 0
+            ? selection.reasoningOptions[selection.reasoningIndex]?.value ??
               activeReasoningEffort ??
               'medium'
             : null
@@ -3021,6 +3055,7 @@ export async function runAssistantChatWithInk(
             setSession(updatedSession)
 
             await saveAssistantOperatorDefaultsPatch({
+              provider: updatedSession.provider,
               model: nextModel,
               reasoningEffort: nextReasoningEffort,
             })
@@ -3043,7 +3078,7 @@ export async function runAssistantChatWithInk(
 
         if (
           modelSwitcherState.mode === 'model' &&
-          modelCatalog.reasoningOptions.length > 0
+          modelSwitcherState.reasoningOptions.length > 0
         ) {
           setModelSwitcherState({
             ...modelSwitcherState,
@@ -3450,12 +3485,12 @@ export async function runAssistantChatWithInk(
                   currentReasoningEffort: activeReasoningEffort,
                   mode: modelSwitcherState.mode,
                   modelIndex: modelSwitcherState.modelIndex,
-                  modelOptions: modelCatalog.modelOptions,
+                  modelOptions: modelSwitcherState.modelOptions,
                   onCancel: cancelModelSwitcher,
                   onConfirm: confirmModelSwitcher,
                   onMove: moveModelSwitcherSelection,
                   reasoningIndex: modelSwitcherState.reasoningIndex,
-                  reasoningOptions: modelCatalog.reasoningOptions,
+                  reasoningOptions: modelSwitcherState.reasoningOptions,
                 })
               : null,
             createElement(ChatComposer, {

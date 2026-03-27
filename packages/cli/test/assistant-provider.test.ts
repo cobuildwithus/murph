@@ -8,6 +8,11 @@ const providerMocks = vi.hoisted(() => ({
   resolveAssistantLanguageModel: vi.fn(),
 }))
 
+const promptMocks = vi.hoisted(() => ({
+  answers: [] as string[],
+  prompts: [] as string[],
+}))
+
 vi.mock('ai', () => ({
   generateText: providerMocks.generateText,
 }))
@@ -18,6 +23,18 @@ vi.mock('../src/assistant-codex.js', () => ({
 
 vi.mock('../src/model-harness.js', () => ({
   resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
+}))
+
+vi.mock('node:readline/promises', () => ({
+  default: {
+    createInterface: () => ({
+      close() {},
+      question: async (prompt: string) => {
+        promptMocks.prompts.push(prompt)
+        return promptMocks.answers.shift() ?? ''
+      },
+    }),
+  },
 }))
 
 import {
@@ -35,6 +52,8 @@ beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
   providerMocks.generateText.mockReset()
   providerMocks.resolveAssistantLanguageModel.mockReset()
+  promptMocks.answers.length = 0
+  promptMocks.prompts.length = 0
   vi.unstubAllGlobals()
 })
 
@@ -464,6 +483,42 @@ test('createSetupAssistantResolver chooses the first discovered OpenAI-compatibl
 
   assert.equal(resolved.provider, 'openai-compatible')
   assert.equal(resolved.model, 'llama3.3:70b')
+})
+
+test('createSetupAssistantResolver requires a non-empty OpenAI-compatible model when discovery is empty', async () => {
+  const discoverModels = vi.fn().mockResolvedValue([])
+  promptMocks.answers.push('', '', '', 'custom-model')
+  const input = new PassThrough()
+  const output = new PassThrough()
+  const outputChunks: string[] = []
+  output.on('data', (chunk: Buffer | string) => {
+    outputChunks.push(chunk.toString())
+  })
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    discoverModels,
+    input,
+    output,
+  })
+
+  const resolved = await resolver.resolve({
+    allowPrompt: true,
+    commandName: 'setup',
+    preset: 'openai-compatible',
+    options: {} as any,
+  })
+
+  assert.equal(resolved.provider, 'openai-compatible')
+  assert.equal(resolved.model, 'custom-model')
+  assert.match(outputChunks.join(''), /A model id is required\./u)
+  assert.deepEqual(promptMocks.prompts, [
+    'OpenAI-compatible base URL [http://127.0.0.1:11434/v1]: ',
+    'API key environment variable (leave blank for local/no auth): ',
+    'Default model for the OpenAI-compatible endpoint: ',
+    'Default model for the OpenAI-compatible endpoint: ',
+  ])
 })
 
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {

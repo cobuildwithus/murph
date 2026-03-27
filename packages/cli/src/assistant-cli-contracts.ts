@@ -157,6 +157,23 @@ export const assistantStatusRunLockStateValues = [
   'stale',
 ] as const
 
+export const assistantHeadersSchema = z.record(
+  z.string().min(1),
+  z.string(),
+)
+
+export const assistantCodexProviderStateSchema = z
+  .object({
+    promptVersion: z.string().min(1).nullable().default(null),
+  })
+  .strict()
+
+export const assistantSessionProviderStateSchema = z
+  .object({
+    codexCli: assistantCodexProviderStateSchema.nullable().default(null),
+  })
+  .strict()
+
 export const assistantProviderFailoverRouteSchema = z
   .object({
     name: z.string().min(1).nullable().default(null),
@@ -171,6 +188,7 @@ export const assistantProviderFailoverRouteSchema = z
     baseUrl: z.string().min(1).nullable().optional(),
     apiKeyEnv: z.string().min(1).nullable().optional(),
     providerName: z.string().min(1).nullable().optional(),
+    headers: assistantHeadersSchema.nullable().optional(),
     cooldownMs: z.number().int().positive().nullable().default(null),
   })
   .strict()
@@ -185,6 +203,7 @@ export const assistantProviderSessionOptionsSchema = z.object({
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
+  headers: assistantHeadersSchema.nullable().optional(),
 })
 
 export const assistantAliasStoreSchema = z
@@ -216,7 +235,7 @@ export const assistantSessionSchema = z
     sessionId: z.string().min(1),
     provider: z.enum(assistantChatProviderValues),
     providerSessionId: z.string().min(1).nullable(),
-    codexPromptVersion: z.string().min(1).nullable().optional(),
+    providerState: assistantSessionProviderStateSchema.nullable().optional(),
     providerOptions: assistantProviderSessionOptionsSchema,
     alias: z.string().min(1).nullable(),
     binding: assistantSessionBindingSchema,
@@ -1164,4 +1183,7 @@ export type AssistantDoctorCheckStatus =
   (typeof assistantDoctorCheckStatusValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
+>
+export type AssistantSessionProviderState = z.infer<
+  typeof assistantSessionProviderStateSchema
 >
