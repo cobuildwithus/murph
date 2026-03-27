@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
@@ -170,6 +170,9 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(second.created, false)
   assert.equal(second.session.sessionId, first.session.sessionId)
 
+  const stateDirectoryStats = await stat(statePaths.stateDirectory)
+  assert.equal(stateDirectoryStats.isDirectory(), true)
+
   const saved = await saveAssistantSession(vaultRoot, {
     ...first.session,
     updatedAt: new Date('2026-03-16T17:00:00.000Z').toISOString(),
@@ -262,6 +265,58 @@ test('assistant state documents support show put patch list and delete with JSON
   assert.equal(afterDelete.value, null)
 })
 
+test('assistant state patch creates missing documents and replaces arrays', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-patch-create-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await patchAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_456',
+    patch: {
+      arr: [1, 2],
+      obj: {
+        a: 1,
+      },
+    },
+  })
+  assert.equal(created.exists, true)
+  assert.deepEqual(created.value, {
+    arr: [1, 2],
+    obj: {
+      a: 1,
+    },
+  })
+
+  const updated = await patchAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_456',
+    patch: {
+      arr: [3],
+      obj: {
+        b: 2,
+      },
+    },
+  })
+  assert.deepEqual(updated.value, {
+    arr: [3],
+    obj: {
+      a: 1,
+      b: 2,
+    },
+  })
+
+  const listed = await listAssistantStateDocuments({
+    vault: vaultRoot,
+    prefix: 'cron',
+  })
+  assert.deepEqual(
+    listed.map((entry) => entry.docId),
+    ['cron/job_456'],
+  )
+})
+
 test('assistant state documents reject invalid document ids', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-invalid-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -275,6 +330,43 @@ test('assistant state documents reject invalid document ids', async () => {
         docId: '../escape',
       }),
     /slash-delimited segments/u,
+  )
+})
+
+test('assistant state document listing ignores invalid on-disk filenames', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-doc-invalid-list-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(path.join(statePaths.stateDirectory, 'cron'), {
+    recursive: true,
+  })
+  await writeFile(
+    path.join(statePaths.stateDirectory, 'cron', 'bad name.json'),
+    JSON.stringify({
+      ignored: true,
+    }),
+    'utf8',
+  )
+
+  await putAssistantStateDocument({
+    vault: vaultRoot,
+    docId: 'cron/job_123',
+    value: {
+      kept: true,
+    },
+  })
+
+  const listed = await listAssistantStateDocuments({
+    vault: vaultRoot,
+    prefix: 'cron',
+  })
+
+  assert.deepEqual(
+    listed.map((entry) => entry.docId),
+    ['cron/job_123'],
   )
 })
 

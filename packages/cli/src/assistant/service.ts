@@ -14,6 +14,7 @@ import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import {
   buildAssistantCronMcpConfig,
   buildAssistantMemoryMcpConfig,
+  buildAssistantStateMcpConfig,
   buildAssistantCliGuidanceText,
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
@@ -82,7 +83,7 @@ import { errorMessage, normalizeNullableString } from './shared.js'
 
 // Bump this when changing the durable Codex bootstrap prompt text so existing
 // Codex provider sessions re-bootstrap cleanly on their next turn.
-export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-26.4'
+export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-27.1'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -500,18 +501,24 @@ async function resolveAssistantRouteTurnPlan(input: {
     : null
   const providerCapabilities = resolveAssistantProviderCapabilities(input.route.provider)
   const supportsDirectCliExecution = providerCapabilities.supportsDirectCliExecution
+  const stateMcpConfig = buildAssistantStateMcpConfig(
+    input.sharedPlan.workingDirectory,
+  )
   const memoryMcpConfig = buildAssistantMemoryMcpConfig(
     input.sharedPlan.workingDirectory,
   )
   const cronMcpConfig = buildAssistantCronMcpConfig(
     input.sharedPlan.workingDirectory,
   )
+  const assistantStateMcpAvailable =
+    supportsDirectCliExecution && stateMcpConfig !== null
   const assistantMemoryMcpAvailable =
     supportsDirectCliExecution && memoryMcpConfig !== null
   const assistantCronMcpAvailable =
     supportsDirectCliExecution && cronMcpConfig !== null
   const configOverrides = supportsDirectCliExecution
     ? [
+        ...(stateMcpConfig?.configOverrides ?? []),
         ...(memoryMcpConfig?.configOverrides ?? []),
         ...(cronMcpConfig?.configOverrides ?? []),
       ]
@@ -538,6 +545,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       : undefined,
     systemPrompt: shouldInjectBootstrapContext
       ? buildAssistantSystemPrompt({
+          assistantStateMcpAvailable,
           assistantCronMcpAvailable,
           cliAccess: input.sharedPlan.cliAccess,
           assistantMemoryMcpAvailable,
@@ -1499,6 +1507,7 @@ function normalizeRestoredAssistantSessionSnapshot(
 }
 
 function buildAssistantSystemPrompt(input: {
+  assistantStateMcpAvailable: boolean
   assistantCronMcpAvailable: boolean
   assistantMemoryMcpAvailable: boolean
   cliAccess: {
@@ -1546,6 +1555,11 @@ function buildAssistantSystemPrompt(input: {
     buildOutboundReplyFormattingGuidance(input.channel),
     buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
     input.assistantMemoryPrompt,
+    buildAssistantStateGuidanceText({
+      rawCommand: input.cliAccess.rawCommand,
+      assistantStateMcpAvailable: input.assistantStateMcpAvailable,
+      supportsDirectCliExecution: input.supportsDirectCliExecution,
+    }),
     buildAssistantMemoryGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
       assistantMemoryMcpAvailable: input.assistantMemoryMcpAvailable,
@@ -1562,6 +1576,39 @@ function buildAssistantSystemPrompt(input: {
   ]
     .filter((value): value is string => Boolean(value))
     .join('\n\n')
+}
+
+function buildAssistantStateGuidanceText(
+  input: {
+    assistantStateMcpAvailable: boolean
+    rawCommand: 'vault-cli'
+    supportsDirectCliExecution: boolean
+  },
+): string {
+  if (input.assistantStateMcpAvailable) {
+    return [
+      'Assistant state MCP tools are exposed in this session. Prefer `assistant state ...` tools over shelling out, and do not edit `assistant-state/state/` files directly.',
+      'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
+      'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
+      'Use `assistant state show` and `assistant state list` to inspect scratch state before repeating a question or suggestion, and use `assistant state patch` for incremental updates.',
+      `Use \`${input.rawCommand} assistant state ...\` only as a fallback when the MCP tools are unavailable in this session.`,
+    ].join('\n\n')
+  }
+
+  if (input.supportsDirectCliExecution) {
+    return [
+      'Assistant state MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available.',
+      `Use \`${input.rawCommand} assistant state list|show|put|patch|delete\` for small runtime scratchpads, and do not edit \`assistant-state/state/\` files directly.`,
+      'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
+      'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
+    ].join('\n\n')
+  }
+
+  return [
+    'This provider path does not expose Healthy Bob assistant-state tools or direct shell access.',
+    `If the user needs assistant scratch state inspected or changed here, give them the exact \`${input.rawCommand} assistant state ...\` command to run or switch to a Codex-backed Healthy Bob chat session.`,
+    'Do not claim you inspected or updated assistant scratch state in this session unless a real tool call happened.',
+  ].join('\n\n')
 }
 
 function buildAssistantVaultEvidenceFormattingGuidance(

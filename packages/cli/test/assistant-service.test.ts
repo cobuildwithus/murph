@@ -270,6 +270,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const expectedUserBinDirectory = path.join(homeRoot, '.local', 'bin')
   const turnContext = resolveAssistantMemoryTurnContext(firstCall?.env)
+  const stateMcpExposed =
+    firstCall?.configOverrides?.some((value: string) =>
+      value.includes('"assistant","state","--mcp"'),
+    ) ?? false
   const memoryMcpExposed =
     firstCall?.configOverrides?.some((value: string) =>
       value.includes('"assistant","memory","--mcp"'),
@@ -342,6 +346,8 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /10 to 60 minutes/u)
   assert.match(firstCall?.systemPrompt ?? '', /defaults the overall timeout to 40m/u)
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli deepthink <prompt>/u)
+  assert.match(firstCall?.systemPrompt ?? '', /assistant state show/u)
+  assert.match(firstCall?.systemPrompt ?? '', /non-canonical runtime scratchpads/u)
   assert.match(firstCall?.systemPrompt ?? '', /search assistant memory before answering/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -369,6 +375,17 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
   assert.equal(turnContext?.provenance.sessionId?.startsWith('asst_'), true)
+  if (stateMcpExposed) {
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /Assistant state MCP tools are exposed in this session/u,
+    )
+  } else {
+    assert.match(
+      firstCall?.systemPrompt ?? '',
+      /Assistant state MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available/u,
+    )
+  }
   if (memoryMcpExposed) {
     assert.match(firstCall?.systemPrompt ?? '', /Assistant memory MCP tools are exposed in this session/u)
   } else {
@@ -390,7 +407,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   }
   assert.equal(
     Boolean(firstCall?.configOverrides?.some((value: string) => value.includes('.args=['))),
-    memoryMcpExposed || cronMcpExposed,
+    stateMcpExposed || memoryMcpExposed || cronMcpExposed,
   )
   assert.equal(
     String(firstCall?.env?.PATH ?? '').split(path.delimiter)[0],

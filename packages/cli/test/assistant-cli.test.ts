@@ -423,6 +423,7 @@ test.sequential(
         job: {
           jobId: string
           name: string
+          stateDocId: string | null
           target: {
             channel: string | null
             deliverResponse: boolean
@@ -443,6 +444,7 @@ test.sequential(
         'stretch-reminder',
         '--every',
         '2h',
+        '--state',
         '--channel',
         'telegram',
         '--sourceThread',
@@ -455,6 +457,7 @@ test.sequential(
     assert.equal(added.job.enabled, true)
     assert.equal(added.job.target.channel, 'telegram')
     assert.equal(added.job.target.deliverResponse, true)
+    assert.equal(added.job.stateDocId, `cron/${added.job.jobId}`)
     assert.equal(added.jobsPath.includes(path.join(parent, 'assistant-state')), true)
 
     const status = requireData(
@@ -516,6 +519,188 @@ test.sequential(
       }>(['assistant', 'cron', 'remove', 'stretch-reminder', '--vault', vaultRoot]),
     )
     assert.equal(removed.removed.jobId, added.job.jobId)
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant cron state binding options are optional and validated',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-state-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const stateless = requireData(
+      await runCli<{
+        job: {
+          jobId: string
+          stateDocId: string | null
+        }
+      }>([
+        'assistant',
+        'cron',
+        'add',
+        'Check in quietly.',
+        '--vault',
+        vaultRoot,
+        '--name',
+        'stateless-check-in',
+        '--every',
+        '2h',
+        '--channel',
+        'telegram',
+        '--sourceThread',
+        '123456789',
+      ]),
+    )
+    assert.equal(stateless.job.stateDocId, null)
+
+    const explicit = requireData(
+      await runCli<{
+        job: {
+          stateDocId: string | null
+        }
+      }>([
+        'assistant',
+        'cron',
+        'add',
+        'Check in with explicit state.',
+        '--vault',
+        vaultRoot,
+        '--name',
+        'explicit-state-check-in',
+        '--every',
+        '2h',
+        '--stateDoc',
+        'cron/weekly-health-snapshot',
+        '--channel',
+        'telegram',
+        '--sourceThread',
+        '123456789',
+      ]),
+    )
+    assert.equal(explicit.job.stateDocId, 'cron/weekly-health-snapshot')
+
+    const invalid = await runCli([
+      'assistant',
+      'cron',
+      'add',
+      'This should not be created.',
+      '--vault',
+      vaultRoot,
+      '--name',
+      'invalid-state-binding',
+      '--every',
+      '2h',
+      '--stateDoc',
+      '../escape',
+      '--channel',
+      'telegram',
+      '--sourceThread',
+      '123456789',
+    ])
+    assert.equal(invalid.ok, false)
+    if (!invalid.ok) {
+      assert.match(String(invalid.error.message ?? ''), /stateDocId must use slash-delimited segments/u)
+    }
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant state list/show/put/patch/delete expose typed scratchpad documents through the CLI',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-cli-'))
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const missing = requireData(
+      await runCli<{
+        document: {
+          exists: boolean
+          value: Record<string, unknown> | null
+        }
+      }>(['assistant', 'state', 'show', 'cron/job_123', '--vault', vaultRoot]),
+    )
+    assert.equal(missing.document.exists, false)
+    assert.equal(missing.document.value, null)
+
+    const created = requireData(
+      await runCli<{
+        documentsRoot: string
+        document: {
+          exists: boolean
+          value: Record<string, unknown> | null
+        }
+      }>(
+        ['assistant', 'state', 'put', 'cron/job_123', '--vault', vaultRoot, '--input', '-'],
+        {
+          stdin: JSON.stringify({
+            pending: {
+              signal: 'sleep_drop',
+            },
+            status: 'awaiting_user_context',
+          }),
+        },
+      ),
+    )
+    assert.equal(created.document.exists, true)
+    assert.deepEqual(created.document.value, {
+      pending: {
+        signal: 'sleep_drop',
+      },
+      status: 'awaiting_user_context',
+    })
+    assert.equal(created.documentsRoot.includes(path.join(parent, 'assistant-state')), true)
+
+    const patched = requireData(
+      await runCli<{
+        document: {
+          value: Record<string, unknown> | null
+        }
+      }>(
+        ['assistant', 'state', 'patch', 'cron/job_123', '--vault', vaultRoot, '--input', '-'],
+        {
+          stdin: JSON.stringify({
+            pending: {
+              cooldownUntil: '2026-03-29T10:00:00.000Z',
+            },
+          }),
+        },
+      ),
+    )
+    assert.deepEqual(patched.document.value, {
+      pending: {
+        signal: 'sleep_drop',
+        cooldownUntil: '2026-03-29T10:00:00.000Z',
+      },
+      status: 'awaiting_user_context',
+    })
+
+    const listed = requireData(
+      await runCli<{
+        prefix: string | null
+        documents: Array<{
+          docId: string
+        }>
+      }>(['assistant', 'state', 'list', '--vault', vaultRoot, '--prefix', 'cron']),
+    )
+    assert.equal(listed.prefix, 'cron')
+    assert.deepEqual(
+      listed.documents.map((document) => document.docId),
+      ['cron/job_123'],
+    )
+
+    const deleted = requireData(
+      await runCli<{
+        docId: string
+        existed: boolean
+      }>(['assistant', 'state', 'delete', 'cron/job_123', '--vault', vaultRoot]),
+    )
+    assert.equal(deleted.docId, 'cron/job_123')
+    assert.equal(deleted.existed, true)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )

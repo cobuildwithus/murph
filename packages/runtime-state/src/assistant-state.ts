@@ -22,6 +22,7 @@ export interface AssistantStatePaths {
   outboxDirectory: string;
   receiptsDirectory: string;
   sessionsDirectory: string;
+  stateDirectory: string;
   statusPath: string;
   transcriptsDirectory: string;
   turnsDirectory: string;
@@ -53,6 +54,7 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     outboxDirectory: path.join(rootPath, "outbox"),
     receiptsDirectory,
     sessionsDirectory: path.join(rootPath, "sessions"),
+    stateDirectory: path.join(rootPath, "state"),
     statusPath: path.join(rootPath, "status.json"),
     transcriptsDirectory: path.join(rootPath, "transcripts"),
     // Keep the newer timeline-oriented helper name aligned with the existing

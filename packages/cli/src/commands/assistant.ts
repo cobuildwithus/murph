@@ -25,6 +25,11 @@ import {
   assistantMemoryVisibleSectionValues,
   assistantMemoryWriteScopeValues,
   assistantRunResultSchema,
+  assistantStateDeleteResultSchema,
+  assistantStateListResultSchema,
+  assistantStatePatchResultSchema,
+  assistantStatePutResultSchema,
+  assistantStateShowResultSchema,
   assistantSelfDeliveryTargetClearResultSchema,
   assistantSelfDeliveryTargetListResultSchema,
   assistantSelfDeliveryTargetSetResultSchema,
@@ -43,10 +48,15 @@ import {
   getAssistantCronPreset,
   getAssistantCronJob,
   getAssistantCronStatus,
+  getAssistantStateDocument,
   installAssistantCronPreset,
   listAssistantCronPresets,
   listAssistantCronJobs,
   listAssistantCronRuns,
+  listAssistantStateDocuments,
+  deleteAssistantStateDocument,
+  patchAssistantStateDocument,
+  putAssistantStateDocument,
   removeAssistantCronJob,
   runAssistantAutomation,
   runAssistantChat,
@@ -72,6 +82,8 @@ import {
   redactAssistantDisplayPath,
   getAssistantSession,
   listAssistantSessions,
+  redactAssistantStateDocumentListEntry,
+  redactAssistantStateDocumentSnapshot,
   resolveAssistantStatePaths,
 } from '../assistant-state.js'
 import {
@@ -81,6 +93,10 @@ import {
   withBaseOptions,
 } from '../command-helpers.js'
 import type { InboxCliServices } from '../inbox-services.js'
+import {
+  inputFileOptionSchema,
+  loadJsonInputObject,
+} from '../json-input.js'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
   applyAssistantSelfDeliveryTargetDefaults,
@@ -220,6 +236,22 @@ const assistantCronDeliveryOptionFields = {
     .optional()
     .describe(
       'Optional explicit outbound destination for each cron run. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound cron jobs reply in place.',
+    ),
+}
+
+const assistantCronStateOptionFields = {
+  state: z
+    .boolean()
+    .optional()
+    .describe(
+      'Bind this cron job to a default assistant state document under assistant-state/state/cron/<jobId>.json.',
+    ),
+  stateDoc: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional explicit assistant state document id to bind to this cron job, such as cron/weekly-health-snapshot.',
     ),
 }
 
@@ -462,6 +494,14 @@ function buildAssistantStateResultPaths(vault: string) {
   return buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot)
 }
 
+function buildAssistantStateDocumentResultPaths(vault: string) {
+  const statePaths = resolveAssistantStatePaths(vault)
+  return {
+    ...buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot),
+    documentsRoot: redactAssistantDisplayPath(statePaths.stateDirectory),
+  }
+}
+
 function buildAssistantMemoryResultPaths(vault: string) {
   const statePaths = resolveAssistantMemoryStoragePaths(vault)
   return buildAssistantStateRootResultPaths(vault, statePaths.assistantStateRoot)
@@ -541,6 +581,16 @@ async function resolveAssistantDeliveryRouteFromCli(input: {
       allowSingleSavedTargetFallback: input.allowSingleSavedTargetFallback,
     },
   )
+}
+
+function assistantCronStateOptionsFromCli<T extends {
+  state?: boolean
+  stateDoc?: string
+}>(options: T) {
+  return {
+    bindState: options.state,
+    stateDocId: options.stateDoc,
+  }
 }
 
 async function runAssistantChatCommand(context: {
@@ -977,6 +1027,140 @@ export function registerAssistantCommands(
       'run',
       createAssistantRunCommandDefinition(inboxServices, vaultServices),
     )
+  }
+
+  const registerStateCommands = () => {
+    const state = Cli.create('state', {
+      description:
+        'Inspect and update small non-canonical assistant state documents stored outside the vault under assistant-state/state.',
+    })
+
+    state.command('list', {
+      args: emptyArgsSchema,
+      description: 'List assistant state documents, optionally filtered by a prefix namespace.',
+      hint:
+        'Use prefixes such as `cron` or `cron/<jobId>` to narrow the scratchpad documents that belong to one workflow.',
+      options: withBaseOptions({
+        prefix: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional slash-delimited document prefix such as cron or cron/job_123.'),
+      }),
+      output: assistantStateListResultSchema,
+      async run(context) {
+        const documents = await listAssistantStateDocuments({
+          vault: context.options.vault,
+          prefix: context.options.prefix,
+        })
+
+        return {
+          ...buildAssistantStateDocumentResultPaths(context.options.vault),
+          prefix: context.options.prefix ?? null,
+          documents: documents.map(redactAssistantStateDocumentListEntry),
+        }
+      },
+    })
+
+    state.command('show', {
+      args: z.object({
+        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
+      }),
+      description: 'Show one assistant state document by id.',
+      options: withBaseOptions(),
+      output: assistantStateShowResultSchema,
+      async run(context) {
+        const document = await getAssistantStateDocument({
+          vault: context.options.vault,
+          docId: context.args.doc,
+        })
+
+        return {
+          ...buildAssistantStateDocumentResultPaths(context.options.vault),
+          document: redactAssistantStateDocumentSnapshot(document),
+        }
+      },
+    })
+
+    state.command('put', {
+      args: z.object({
+        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
+      }),
+      description: 'Replace one assistant state document with a JSON object payload.',
+      hint:
+        'Use this for full replacement. For incremental updates that preserve existing keys, use `assistant state patch`.',
+      options: withBaseOptions({
+        input: inputFileOptionSchema.describe(
+          'JSON object payload in @file.json form or - for stdin.',
+        ),
+      }),
+      output: assistantStatePutResultSchema,
+      async run(context) {
+        const value = await loadJsonInputObject(context.options.input, 'assistant state document')
+        const document = await putAssistantStateDocument({
+          vault: context.options.vault,
+          docId: context.args.doc,
+          value,
+        })
+
+        return {
+          ...buildAssistantStateDocumentResultPaths(context.options.vault),
+          document: redactAssistantStateDocumentSnapshot(document),
+        }
+      },
+    })
+
+    state.command('patch', {
+      args: z.object({
+        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
+      }),
+      description: 'Merge-patch one assistant state document with a JSON object payload.',
+      hint:
+        'This uses JSON Merge Patch semantics: object keys merge recursively, `null` deletes a key, and arrays replace the previous value.',
+      options: withBaseOptions({
+        input: inputFileOptionSchema.describe(
+          'JSON object merge-patch payload in @file.json form or - for stdin.',
+        ),
+      }),
+      output: assistantStatePatchResultSchema,
+      async run(context) {
+        const patch = await loadJsonInputObject(context.options.input, 'assistant state patch')
+        const document = await patchAssistantStateDocument({
+          vault: context.options.vault,
+          docId: context.args.doc,
+          patch,
+        })
+
+        return {
+          ...buildAssistantStateDocumentResultPaths(context.options.vault),
+          document: redactAssistantStateDocumentSnapshot(document),
+        }
+      },
+    })
+
+    state.command('delete', {
+      args: z.object({
+        doc: z.string().min(1).describe('Assistant state document id such as cron/job_123.'),
+      }),
+      description: 'Delete one assistant state document by id.',
+      options: withBaseOptions(),
+      output: assistantStateDeleteResultSchema,
+      async run(context) {
+        const result = await deleteAssistantStateDocument({
+          vault: context.options.vault,
+          docId: context.args.doc,
+        })
+
+        return {
+          ...buildAssistantStateDocumentResultPaths(context.options.vault),
+          docId: result.docId,
+          documentPath: redactAssistantDisplayPath(result.documentPath),
+          existed: result.existed,
+        }
+      },
+    })
+
+    assistant.command(state)
   }
 
   const registerMemoryCommands = () => {
@@ -1430,6 +1614,7 @@ export function registerAssistantCommands(
           .describe('Create the preset-backed cron job in a disabled state without scheduling it yet.'),
         ...assistantSessionOptionFields,
         ...assistantCronDeliveryOptionFields,
+        ...assistantCronStateOptionFields,
       }),
       output: assistantCronPresetInstallResultSchema,
       async run(context) {
@@ -1457,6 +1642,7 @@ export function registerAssistantCommands(
           additionalInstructions: context.options.instructions,
           schedule,
           enabled: context.options.disabled ? false : true,
+          ...assistantCronStateOptionsFromCli(context.options),
           ...assistantConversationOptionsFromCli({
             ...context.options,
             channel: savedRoute.channel ?? context.options.channel,
@@ -1598,6 +1784,7 @@ export function registerAssistantCommands(
           .describe('Create the job in a disabled state without scheduling it yet.'),
         ...assistantSessionOptionFields,
         ...assistantCronDeliveryOptionFields,
+        ...assistantCronStateOptionFields,
       }),
       output: assistantCronAddResultSchema,
       async run(context) {
@@ -1620,6 +1807,7 @@ export function registerAssistantCommands(
           }),
           enabled: context.options.disabled ? false : true,
           keepAfterRun: context.options.keepAfterRun,
+          ...assistantCronStateOptionsFromCli(context.options),
           ...assistantConversationOptionsFromCli({
             ...context.options,
             channel: savedRoute.channel ?? context.options.channel,
@@ -1846,6 +2034,7 @@ export function registerAssistantCommands(
   }
 
   registerConversationCommands()
+  registerStateCommands()
   registerMemoryCommands()
   registerSelfTargetCommands()
   registerCronCommands()

@@ -79,10 +79,33 @@ export type {
   AssistantOutboxDispatchHooks,
   AssistantOutboxDispatchMode,
 } from './assistant/outbox.js'
+export type {
+  AssistantOutboxIntent,
+} from './assistant-cli-contracts.js'
 export {
+  dispatchAssistantOutboxIntent,
   drainAssistantOutbox,
   listAssistantOutboxIntents,
+  shouldDispatchAssistantOutboxIntent,
 } from './assistant/outbox.js'
+export type {
+  AssistantStateDeleteDocumentInput,
+  AssistantStateDeleteDocumentResult,
+  AssistantStateDocumentSnapshot,
+  AssistantStateGetDocumentInput,
+  AssistantStateListDocumentsInput,
+  AssistantStatePatchDocumentInput,
+  AssistantStatePutDocumentInput,
+} from './assistant/state.js'
+export {
+  buildDefaultAssistantCronStateDocId,
+  deleteAssistantStateDocument,
+  getAssistantStateDocument,
+  listAssistantStateDocuments,
+  patchAssistantStateDocument,
+  putAssistantStateDocument,
+  resolveAssistantStateDocumentPath,
+} from './assistant/state.js'
 
 export async function runAssistantChat(
   input: import('./assistant/service.js').AssistantChatInput,

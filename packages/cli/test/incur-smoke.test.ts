@@ -351,6 +351,8 @@ test('assistant cron add schema exposes the scheduler-specific options', async (
   assert.equal('at' in schema.options.properties, true)
   assert.equal('every' in schema.options.properties, true)
   assert.equal('cron' in schema.options.properties, true)
+  assert.equal('state' in schema.options.properties, true)
+  assert.equal('stateDoc' in schema.options.properties, true)
   assert.equal('deliverResponse' in schema.options.properties, false)
   assert.equal('deliveryTarget' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'name'])
@@ -386,9 +388,41 @@ test('assistant cron preset install schema exposes preset variables, instruction
   assert.equal('at' in schema.options.properties, true)
   assert.equal('every' in schema.options.properties, true)
   assert.equal('cron' in schema.options.properties, true)
+  assert.equal('state' in schema.options.properties, true)
+  assert.equal('stateDoc' in schema.options.properties, true)
   assert.equal('deliverResponse' in schema.options.properties, false)
   assert.equal('deliveryTarget' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
+}, INCUR_SCHEMA_TIMEOUT_MS)
+
+test('assistant state schemas expose document ids and JSON input payload flags', async () => {
+  const listSchema = JSON.parse(
+    await runRawCli(['assistant', 'state', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const putSchema = JSON.parse(
+    await runRawCli(['assistant', 'state', 'put', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('prefix' in listSchema.options.properties, true)
+  assert.deepEqual(listSchema.options.required, ['vault'])
+  assert.equal('doc' in putSchema.args.properties, true)
+  assert.deepEqual(putSchema.args.required, ['doc'])
+  assert.equal('input' in putSchema.options.properties, true)
+  assert.deepEqual(putSchema.options.required, ['vault', 'input'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('food schedule schema exposes the recurring food options', async () => {

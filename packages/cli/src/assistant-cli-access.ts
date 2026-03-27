@@ -5,6 +5,7 @@ import { resolveOperatorHomeDirectory } from './operator-config.js'
 import { assistantMemoryTurnEnvKeys } from './assistant/memory.js'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
+const ASSISTANT_STATE_MCP_SERVER_NAME = 'healthybob_state'
 const ASSISTANT_MEMORY_MCP_SERVER_NAME = 'healthybob_memory'
 const ASSISTANT_CRON_MCP_SERVER_NAME = 'healthybob_cron'
 const ASSISTANT_CLI_MCP_FORWARD_ENV_VARS = [
@@ -74,6 +75,16 @@ export function buildAssistantMemoryMcpConfig(
   return buildAssistantCliSubtreeMcpConfig({
     serverName: ASSISTANT_MEMORY_MCP_SERVER_NAME,
     subcommandPath: ['memory'],
+    workingDirectory,
+  })
+}
+
+export function buildAssistantStateMcpConfig(
+  workingDirectory: string,
+): AssistantCliMcpConfig | null {
+  return buildAssistantCliSubtreeMcpConfig({
+    serverName: ASSISTANT_STATE_MCP_SERVER_NAME,
+    subcommandPath: ['state'],
     workingDirectory,
   })
 }

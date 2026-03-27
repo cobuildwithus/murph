@@ -47,6 +47,9 @@ export async function ensureAssistantState(
     mkdir(paths.diagnosticsDirectory, {
       recursive: true,
     }),
+    mkdir(paths.stateDirectory, {
+      recursive: true,
+    }),
   ])
 }
 

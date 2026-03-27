@@ -10,6 +10,9 @@ import {
 } from '@healthybob/core'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
+// This file is intentionally excluded from the default root Vitest include list.
+// Keep must-run regression coverage in included CLI/runtime suites as well.
+
 const cronServiceMocks = vi.hoisted(() => ({
   sendAssistantMessage: vi.fn(),
 }))
@@ -80,6 +83,7 @@ test('assistant cron presets stay separate from scheduler state until installed'
 
   assert.ok(presets.some((preset) => preset.id === 'environment-health-watch'))
   assert.ok(presets.some((preset) => preset.id === 'morning-mindfulness'))
+  assert.ok(presets.every((preset) => !('promptTemplate' in preset)))
   assert.equal(mindfulnessPreset.id, 'morning-mindfulness')
   assert.match(mindfulnessPreset.promptTemplate, /morning mindfulness prompt/u)
   assert.match(mindfulnessPreset.promptTemplate, /text-message friendly/u)
@@ -353,6 +357,72 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
   assert.equal(afterStatus.totalJobs, 0)
 })
 
+test('assistant cron jobs only bind assistant state when configured', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-state-doc-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const statelessJob = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'stateless-check-in',
+    prompt: 'Check in quietly.',
+    ...testCronDeliveryTarget,
+    schedule: buildAssistantCronSchedule({
+      every: '2h',
+    }),
+  })
+  assert.equal(statelessJob.stateDocId, null)
+
+  const defaultStatefulJob = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'stateful-check-in',
+    prompt: 'Check in with carry-over state.',
+    ...testCronDeliveryTarget,
+    schedule: buildAssistantCronSchedule({
+      every: '2h',
+    }),
+    bindState: true,
+  })
+  assert.equal(defaultStatefulJob.stateDocId, `cron/${defaultStatefulJob.jobId}`)
+
+  const explicitStatefulJob = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'explicit-stateful-check-in',
+    prompt: 'Check in with explicit state.',
+    ...testCronDeliveryTarget,
+    schedule: buildAssistantCronSchedule({
+      every: '2h',
+    }),
+    stateDocId: 'cron/weekly-health-snapshot',
+  })
+  assert.equal(explicitStatefulJob.stateDocId, 'cron/weekly-health-snapshot')
+})
+
+test('assistant cron rejects invalid stateDocId bindings', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-invalid-state-doc-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  await assert.rejects(
+    () =>
+      addAssistantCronJob({
+        vault: vaultRoot,
+        name: 'invalid-state-binding',
+        prompt: 'This should not be created.',
+        ...testCronDeliveryTarget,
+        schedule: buildAssistantCronSchedule({
+          every: '2h',
+        }),
+        stateDocId: '../escape',
+      }),
+    /stateDocId must use slash-delimited segments/u,
+  )
+})
+
 test('assistant cron assigns vault timezones to cron schedules and computes next runs in local time', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-timezone-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -516,6 +586,7 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     schedule: buildAssistantCronSchedule({
       at: new Date(Date.now() + 60_000).toISOString(),
     }),
+    bindState: true,
   })
 
   const result = await runAssistantCronJobNow({
@@ -534,6 +605,14 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   assert.equal(
     cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.channel,
     'telegram',
+  )
+  assert.match(
+    String(cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.prompt ?? ''),
+    /This cron job is bound to assistant state document/u,
+  )
+  assert.match(
+    String(cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.prompt ?? ''),
+    new RegExp(job.stateDocId ?? '', 'u'),
   )
 
   await assert.rejects(

@@ -591,6 +591,7 @@ export const assistantCronJobSchema = z
     prompt: z.string().min(1),
     schedule: assistantCronScheduleSchema,
     target: assistantCronTargetSchema,
+    stateDocId: z.string().min(1).nullable().default(null),
     foodAutoLog: assistantCronFoodAutoLogSchema.optional(),
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
@@ -704,6 +705,53 @@ export const assistantMemoryForgetResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
   removed: assistantMemoryRecordSchema,
+})
+
+export const assistantStateDocumentValueSchema = z.record(
+  z.string(),
+  z.unknown(),
+)
+
+export const assistantStateDocumentSchema = z.object({
+  docId: z.string().min(1),
+  documentPath: pathSchema,
+  exists: z.boolean(),
+  updatedAt: isoTimestampSchema.nullable(),
+  value: assistantStateDocumentValueSchema.nullable(),
+})
+
+export const assistantStateDocumentListEntrySchema = z.object({
+  docId: z.string().min(1),
+  documentPath: pathSchema,
+  updatedAt: isoTimestampSchema,
+})
+
+export const assistantStateListResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  documentsRoot: pathSchema,
+  prefix: z.string().min(1).nullable(),
+  documents: z.array(assistantStateDocumentListEntrySchema),
+})
+
+export const assistantStateShowResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  documentsRoot: pathSchema,
+  document: assistantStateDocumentSchema,
+})
+
+export const assistantStatePutResultSchema = assistantStateShowResultSchema
+
+export const assistantStatePatchResultSchema = assistantStateShowResultSchema
+
+export const assistantStateDeleteResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  documentsRoot: pathSchema,
+  docId: z.string().min(1),
+  documentPath: pathSchema,
+  existed: z.boolean(),
 })
 
 export const assistantCronStatusResultSchema = z.object({
@@ -931,6 +979,30 @@ export type AssistantMemoryUpsertResult = z.infer<
 >
 export type AssistantMemoryForgetResult = z.infer<
   typeof assistantMemoryForgetResultSchema
+>
+export type AssistantStateDocumentValue = z.infer<
+  typeof assistantStateDocumentValueSchema
+>
+export type AssistantStateDocument = z.infer<
+  typeof assistantStateDocumentSchema
+>
+export type AssistantStateDocumentListEntry = z.infer<
+  typeof assistantStateDocumentListEntrySchema
+>
+export type AssistantStateListResult = z.infer<
+  typeof assistantStateListResultSchema
+>
+export type AssistantStateShowResult = z.infer<
+  typeof assistantStateShowResultSchema
+>
+export type AssistantStatePutResult = z.infer<
+  typeof assistantStatePutResultSchema
+>
+export type AssistantStatePatchResult = z.infer<
+  typeof assistantStatePatchResultSchema
+>
+export type AssistantStateDeleteResult = z.infer<
+  typeof assistantStateDeleteResultSchema
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronTarget = z.infer<typeof assistantCronTargetSchema>

@@ -53,6 +53,10 @@ import {
 } from './store.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
+import {
+  assertAssistantStateDocumentId,
+  buildDefaultAssistantCronStateDocId,
+} from './state.js'
 
 const ASSISTANT_CRON_JOB_SCHEMA = 'healthybob.assistant-cron-job.v1'
 const ASSISTANT_CRON_RUN_SCHEMA = 'healthybob.assistant-cron-run.v1'
@@ -76,6 +80,7 @@ interface FoodAutoLogCoreRuntime {
 }
 
 export interface AddAssistantCronJobInput extends AssistantCronTargetInput {
+  bindState?: boolean
   enabled?: boolean
   foodAutoLog?: {
     foodId: string
@@ -85,6 +90,7 @@ export interface AddAssistantCronJobInput extends AssistantCronTargetInput {
   now?: Date
   prompt: string
   schedule: AssistantCronSchedule
+  stateDocId?: string | null
   vault: string
 }
 
@@ -124,10 +130,12 @@ export interface ProcessDueAssistantCronJobsInput {
 
 export interface InstallAssistantCronPresetInput extends AssistantCronTargetInput {
   additionalInstructions?: string | null
+  bindState?: boolean
   enabled?: boolean
   name?: string | null
   presetId: string
   schedule?: AssistantCronSchedule | null
+  stateDocId?: string | null
   variables?: Record<string, string | null | undefined> | null
   vault: string
 }
@@ -173,6 +181,8 @@ export async function installAssistantCronPreset(
     sourceThreadId: input.sourceThreadId,
     deliverResponse: input.deliverResponse,
     deliveryTarget: input.deliveryTarget,
+    bindState: input.bindState,
+    stateDocId: input.stateDocId,
   })
 
   return {
@@ -217,15 +227,21 @@ export async function addAssistantCronJob(
     assertAssistantCronJobNameIsAvailable(store, name)
 
     const timestamp = now.toISOString()
+    const jobId = createAssistantCronJobId()
     const job = assistantCronJobSchema.parse({
       schema: ASSISTANT_CRON_JOB_SCHEMA,
-      jobId: createAssistantCronJobId(),
+      jobId,
       name,
       enabled,
       keepAfterRun,
       prompt,
       schedule,
       target,
+      stateDocId: resolveAssistantCronStateDocId({
+        bindState: resolvedInput.bindState,
+        explicitStateDocId: resolvedInput.stateDocId,
+        jobId,
+      }),
       foodAutoLog: resolvedInput.foodAutoLog,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -624,7 +640,7 @@ async function executeClaimedAssistantCronJob(input: {
     } else {
       const result = await sendAssistantMessage({
         vault: input.vault,
-        prompt: input.job.prompt,
+        prompt: buildAssistantCronExecutionPrompt(input.job),
         sessionId: input.job.target.sessionId ?? undefined,
         alias: input.job.target.alias ?? undefined,
         channel: input.job.target.channel ?? undefined,
@@ -707,6 +723,40 @@ async function executeClaimedAssistantCronJob(input: {
     removedAfterRun: finalized.removedAfterRun,
     run,
   }
+}
+
+function resolveAssistantCronStateDocId(input: {
+  bindState?: boolean
+  explicitStateDocId?: string | null
+  jobId: string
+}): string | null {
+  const explicitStateDocId = normalizeNullableString(input.explicitStateDocId)
+  if (explicitStateDocId) {
+    return assertAssistantStateDocumentId(explicitStateDocId, 'stateDocId')
+  }
+
+  if (!input.bindState) {
+    return null
+  }
+
+  return buildDefaultAssistantCronStateDocId(input.jobId)
+}
+
+function buildAssistantCronExecutionPrompt(job: AssistantCronJob): string {
+  if (job.stateDocId === null) {
+    return job.prompt
+  }
+
+  return [
+    `You are running as assistant cron job "${job.name}" (${job.jobId}).`,
+    `This cron job is bound to assistant state document "${job.stateDocId}".`,
+    'If run-to-run scratch state matters, read that document before acting.',
+    'Before finishing, update the same document only when you need to carry forward non-canonical runtime state such as cooldowns, unresolved signals, pending follow-up questions, or delivery policy decisions.',
+    'Do not treat assistant state scratchpads as canonical facts. Durable confirmed context belongs in assistant memory or the vault; user-facing summaries belong in the journal or other canonical write surfaces.',
+    '',
+    'Cron job instructions:',
+    job.prompt,
+  ].join('\n\n')
 }
 
 function finalizeAssistantCronJobAfterRun(input: {
