@@ -773,19 +773,6 @@ function createGuardAuditStateFailure(input: {
   }
 }
 
-function isGuardAuditStateFailure(value: unknown): value is GuardAuditStateFailure {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    'reason' in value &&
-    (value as { reason?: unknown }).reason !== undefined &&
-    'metadataPath' in value &&
-    typeof (value as { metadataPath?: unknown }).metadataPath === 'string' &&
-    'causeMessage' in value &&
-    typeof (value as { causeMessage?: unknown }).causeMessage === 'string'
-  )
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }

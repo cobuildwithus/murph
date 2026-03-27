@@ -1,8 +1,12 @@
 import {
-  createTimeoutAbortController,
   waitForRetryDelay,
   type ResponseHeadersLike,
 } from './http-retry.js'
+import {
+  fetchJsonResponse,
+  readJsonErrorResponse,
+  requestJsonWithRetry,
+} from './http-json-retry.js'
 import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -279,13 +283,16 @@ export function createAgentmailApiClient(
       url.search = input.query.toString()
     }
 
-    let attempt = 1
-
-    while (true) {
-      let response: AgentmailFetchResponse
-
-      try {
-        response = await fetchAgentmailResponse({
+    return requestJsonWithRetry<T, AgentmailFetchResponse>({
+      createHttpError: (response) =>
+        createAgentmailHttpError(
+          response,
+          input.method,
+          input.path,
+          input.body ?? undefined,
+        ),
+      fetchResponse: () =>
+        fetchAgentmailResponse({
           body: input.body ?? undefined,
           fetchImplementation,
           headers: {
@@ -296,39 +303,13 @@ export function createAgentmailApiClient(
           path: input.path,
           signal: input.signal,
           url: url.toString(),
-        })
-      } catch (error) {
-        if (isRetryableAgentmailError(error) && attempt < AGENTMAIL_HTTP_MAX_ATTEMPTS) {
-          await waitForAgentmailRetryDelay(attempt, input.signal)
-          attempt += 1
-          continue
-        }
-
-        throw error
-      }
-
-      if (!response.ok) {
-        const failure = await createAgentmailHttpError(
-          response,
-          input.method,
-          input.path,
-          input.body ?? undefined,
-        )
-        if (isRetryableAgentmailError(failure) && attempt < AGENTMAIL_HTTP_MAX_ATTEMPTS) {
-          await waitForAgentmailRetryDelay(
-            attempt,
-            input.signal,
-            response.headers,
-          )
-          attempt += 1
-          continue
-        }
-
-        throw failure
-      }
-
-      return (await response.json()) as T
-    }
+        }),
+      isRetryableError: isRetryableAgentmailError,
+      maxAttempts: AGENTMAIL_HTTP_MAX_ATTEMPTS,
+      parseResponse: async (response) => (await response.json()) as T,
+      signal: input.signal,
+      waitForRetryDelay: waitForAgentmailRetryDelay,
+    })
   }
 
   return {
@@ -532,37 +513,34 @@ async function fetchAgentmailResponse(input: {
   signal?: AbortSignal
   url: string
 }): Promise<AgentmailFetchResponse> {
-  const timeout = createTimeoutAbortController(input.signal, AGENTMAIL_REQUEST_TIMEOUT_MS)
-
-  try {
-    return await input.fetchImplementation(input.url, {
-      method: input.method,
-      headers: input.headers,
-      body: input.body ? JSON.stringify(input.body) : undefined,
-      signal: timeout.signal,
-    })
-  } catch (error) {
-    if (input.signal?.aborted) {
-      throw error
-    }
-
-    throw new VaultCliError(
-      'AGENTMAIL_REQUEST_FAILED',
-      timeout.timedOut()
-        ? `AgentMail request ${input.method} ${input.path} timed out after ${AGENTMAIL_REQUEST_TIMEOUT_MS}ms.`
-        : `AgentMail request ${input.method} ${input.path} failed before a response was returned.`,
-      createAgentmailErrorContext({
-        error: errorMessage(error),
-        method: input.method,
-        path: input.path,
-        retryable: shouldRetryAgentmailTransportFailure(input.method, input.path, input.body),
-        timedOut: timeout.timedOut(),
-        timeoutMs: AGENTMAIL_REQUEST_TIMEOUT_MS,
-      }),
-    )
-  } finally {
-    timeout.cleanup()
-  }
+  return fetchJsonResponse({
+    body: input.body ? JSON.stringify(input.body) : undefined,
+    createTransportError: ({ error, timedOut }) =>
+      new VaultCliError(
+        'AGENTMAIL_REQUEST_FAILED',
+        timedOut
+          ? `AgentMail request ${input.method} ${input.path} timed out after ${AGENTMAIL_REQUEST_TIMEOUT_MS}ms.`
+          : `AgentMail request ${input.method} ${input.path} failed before a response was returned.`,
+        createAgentmailErrorContext({
+          error: errorMessage(error),
+          method: input.method,
+          path: input.path,
+          retryable: shouldRetryAgentmailTransportFailure(
+            input.method,
+            input.path,
+            input.body,
+          ),
+          timedOut,
+          timeoutMs: AGENTMAIL_REQUEST_TIMEOUT_MS,
+        }),
+      ),
+    fetchImplementation: input.fetchImplementation,
+    headers: input.headers,
+    method: input.method,
+    signal: input.signal,
+    timeoutMs: AGENTMAIL_REQUEST_TIMEOUT_MS,
+    url: input.url,
+  })
 }
 
 function shouldRetryAgentmailTransportFailure(
@@ -629,16 +607,7 @@ async function createAgentmailHttpError(
   path: string,
   body?: Record<string, unknown>,
 ): Promise<VaultCliError> {
-  let payload: unknown = null
-  let rawText: string | null = null
-
-  try {
-    payload = await response.json()
-  } catch {
-    try {
-      rawText = await response.text()
-    } catch {}
-  }
+  const { payload, rawText } = await readJsonErrorResponse(response)
 
   return new VaultCliError(
     'AGENTMAIL_REQUEST_FAILED',

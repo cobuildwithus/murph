@@ -78,6 +78,39 @@ export function normalizeDomainList(value: unknown, fieldName: string): string[]
   return [...new Set(normalized)].sort((left, right) => left.localeCompare(right));
 }
 
+export function normalizeUniqueTextList(
+  value: unknown,
+  fieldName: string,
+  maxItems = 100,
+  maxLength = 4000,
+): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array.`);
+  }
+
+  if (value.length > maxItems) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} exceeds the maximum item count.`);
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  value.forEach((entry, index) => {
+    const item = requireString(entry, `${fieldName}[${index}]`, maxLength);
+
+    if (!seen.has(item)) {
+      seen.add(item);
+      normalized.push(item);
+    }
+  });
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 export function optionalFiniteNumber(
   value: unknown,
   fieldName: string,

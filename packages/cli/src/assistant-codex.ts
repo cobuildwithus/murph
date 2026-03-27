@@ -580,11 +580,6 @@ function normalizeCodexEvent(event: unknown): NormalizedCodexEvent | null {
   }
 }
 
-function extractCodexProgressEvent(event: unknown): CodexProgressEvent | null {
-  const normalized = normalizeCodexEvent(event)
-  return extractCodexProgressEventFromNormalized(normalized)
-}
-
 function extractCodexProgressEventFromNormalized(
   normalized: NormalizedCodexEvent | null,
 ): CodexProgressEvent | null {

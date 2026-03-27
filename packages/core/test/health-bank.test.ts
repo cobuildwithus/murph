@@ -237,8 +237,12 @@ test("providers and recipes use first-class markdown registry reads without chan
     cuisine: "mediterranean",
     dishType: "dinner",
     summary: "A reliable high-protein salmon bowl with roasted vegetables and rice.",
-    ingredients: ["2 salmon fillets", "2 cups cooked rice"],
-    steps: ["Roast the broccoli.", "Add the salmon and finish roasting."],
+    ingredients: ["2 cups cooked rice", "2 salmon fillets", "2 cups cooked rice"],
+    steps: [
+      "Add the salmon and finish roasting.",
+      "Roast the broccoli.",
+      "Add the salmon and finish roasting.",
+    ],
   });
 
   const listedProviders = await listProviders(vaultRoot);
@@ -273,6 +277,11 @@ test("providers and recipes use first-class markdown registry reads without chan
   assert.equal(listedRecipes.length, 1);
   assert.equal(readRecipeById.recipeId, createdRecipe.record.recipeId);
   assert.equal(readRecipeById.slug, "sheet-pan-salmon-bowls");
+  assert.deepEqual(readRecipeById.ingredients, ["2 cups cooked rice", "2 salmon fillets"]);
+  assert.deepEqual(readRecipeById.steps, [
+    "Add the salmon and finish roasting.",
+    "Roast the broccoli.",
+  ]);
   assert.equal(readRecipeBySlug.recipeId, createdRecipe.record.recipeId);
   assert.equal(readRecipeBySlug.title, "Sheet Pan Salmon Bowls");
 
@@ -421,8 +430,8 @@ test("foods use first-class markdown registry reads for regular meals and staple
     status: "active",
     kind: "acai bowl",
     vendor: "Neighborhood Acai Bar",
-    aliases: ["regular acai bowl", "usual acai bowl"],
-    ingredients: ["acai base", "banana", "granola"],
+    aliases: ["usual acai bowl", "regular acai bowl", "usual acai bowl"],
+    ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola.",
     autoLogDaily: {
@@ -437,8 +446,8 @@ test("foods use first-class markdown registry reads for regular meals and staple
     status: "active",
     kind: "acai bowl",
     vendor: "Neighborhood Acai Bar",
-    aliases: ["regular acai bowl", "usual acai bowl"],
-    ingredients: ["acai base", "banana", "granola"],
+    aliases: ["usual acai bowl", "regular acai bowl", "usual acai bowl"],
+    ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola.",
     autoLogDaily: {
@@ -475,6 +484,8 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.equal(listedFoods.length, 2);
   assert.equal(readFoodById.foodId, createdFood.record.foodId);
   assert.equal(readFoodById.slug, createdFood.record.slug);
+  assert.deepEqual(readFoodById.aliases, ["usual acai bowl", "regular acai bowl"]);
+  assert.deepEqual(readFoodById.ingredients, ["banana", "acai base", "granola"]);
   assert.deepEqual(readFoodById.autoLogDaily, {
     time: "08:00",
   });
@@ -514,6 +525,131 @@ test("foods use first-class markdown registry reads for regular meals and staple
       error.code === "VAULT_FOOD_MISSING" &&
       error.message === "Food was not found.",
   );
+});
+
+test("food and recipe text-list normalization preserves validation messages and clear semantics", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-bank-text-list-validation");
+  await initializeVault({ vaultRoot });
+
+  const createdFood = await upsertFood({
+    vaultRoot,
+    title: "Validation Smoothie",
+    ingredients: ["banana", "protein powder"],
+    aliases: ["usual smoothie"],
+  });
+  const createdRecipe = await upsertRecipe({
+    vaultRoot,
+    title: "Validation Bowl",
+    ingredients: ["rice"],
+    steps: ["Cook the rice."],
+  });
+
+  await assert.rejects(
+    () =>
+      upsertFood({
+        vaultRoot,
+        title: "Broken Food",
+        aliases: "usual smoothie" as unknown as string[],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "aliases must be an array.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertFood({
+        vaultRoot,
+        title: "Too Many Ingredients",
+        ingredients: Array.from({ length: 101 }, (_, index) => `ingredient ${index}`),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "ingredients exceeds the maximum item count.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertFood({
+        vaultRoot,
+        title: "Too Long Ingredient",
+        ingredients: ["a".repeat(4001)],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "ingredients[0] exceeds the maximum length.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertRecipe({
+        vaultRoot,
+        title: "Broken Recipe",
+        steps: "Mix everything." as unknown as string[],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "steps must be an array.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertRecipe({
+        vaultRoot,
+        title: "Too Many Recipe Ingredients",
+        ingredients: Array.from({ length: 101 }, (_, index) => `ingredient ${index}`),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "ingredients exceeds the maximum item count.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertRecipe({
+        vaultRoot,
+        title: "Blank Recipe Step",
+        steps: ["   "],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "steps[0] is required.",
+  );
+
+  await upsertFood({
+    vaultRoot,
+    foodId: createdFood.record.foodId,
+    title: createdFood.record.title,
+    aliases: null as unknown as string[] | undefined,
+    ingredients: [] as string[],
+  });
+  await upsertRecipe({
+    vaultRoot,
+    recipeId: createdRecipe.record.recipeId,
+    title: createdRecipe.record.title,
+    ingredients: [] as string[],
+    steps: null as unknown as string[] | undefined,
+  });
+
+  const clearedFood = await readFood({
+    vaultRoot,
+    foodId: createdFood.record.foodId,
+  });
+  const clearedRecipe = await readRecipe({
+    vaultRoot,
+    recipeId: createdRecipe.record.recipeId,
+  });
+
+  assert.equal(clearedFood.aliases, undefined);
+  assert.equal(clearedFood.ingredients, undefined);
+  assert.equal(clearedRecipe.ingredients, undefined);
+  assert.equal(clearedRecipe.steps, undefined);
 });
 
 test("workout formats use first-class markdown registry reads for repeated sessions", async () => {

@@ -30,6 +30,15 @@ interface HostedExecutionContainerInvokeRequest<TRequest extends HostedExecution
   userId: string;
 }
 
+interface HostedExecutionContainerRunnerInput<TRequest extends HostedExecutionRunnerRequest> {
+  request: TRequest;
+  runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
+  runnerControlToken: string | null;
+  runnerEnvironment: Readonly<Record<string, string>>;
+  timeoutMs: number;
+  userId: string;
+}
+
 export interface HostedExecutionContainerStubLike {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
@@ -199,25 +208,14 @@ export class RunnerContainer extends Container {
 
 export async function invokeHostedExecutionContainerRunner<
   TRequest extends HostedExecutionRunnerRequest,
->(input: {
-  request: TRequest;
-  runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
-  runnerControlToken: string | null;
-  runnerEnvironment: Readonly<Record<string, string>>;
-  timeoutMs: number;
-  userId: string;
-}): Promise<HostedExecutionRunnerResult> {
-  if (!input.runnerControlToken) {
-    throw new HostedExecutionConfigurationError(
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
-    );
-  }
+>(input: HostedExecutionContainerRunnerInput<TRequest>): Promise<HostedExecutionRunnerResult> {
+  const runnerControlToken = requireHostedExecutionRunnerControlToken(input.runnerControlToken);
 
   const response = await input.runnerContainerNamespace.getByName(input.userId).fetch(
     new Request(RUNNER_INVOKE_URL, {
       body: JSON.stringify({
         request: input.request,
-        runnerControlToken: input.runnerControlToken,
+        runnerControlToken,
         runnerEnvironment: input.runnerEnvironment,
         timeoutMs: input.timeoutMs,
         userId: input.userId,
@@ -274,6 +272,16 @@ function requireString(value: unknown, label: string): string {
 function readRunnerControlToken(value: unknown): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError("runnerControlToken must be a non-empty string.");
+  }
+
+  return value;
+}
+
+function requireHostedExecutionRunnerControlToken(value: string | null): string {
+  if (!value) {
+    throw new HostedExecutionConfigurationError(
+      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
+    );
   }
 
   return value;

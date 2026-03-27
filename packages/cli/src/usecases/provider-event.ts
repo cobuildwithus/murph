@@ -17,6 +17,7 @@ import {
   isVaultQueryableRecordId,
   normalizeIsoTimestamp,
   normalizeOptionalText,
+  toEventUpsertVaultCliError,
   toVaultCliError,
   stringArray,
   uniqueStrings,
@@ -543,23 +544,7 @@ export async function upsertEventRecord(input: {
       created: result.created,
     }
   } catch (error) {
-    throw toVaultCliError(error, {
-      EVENT_KIND_INVALID: {
-        code: 'contract_invalid',
-      },
-      EVENT_OCCURRED_AT_MISSING: {
-        code: 'invalid_timestamp',
-      },
-      EVENT_CONTRACT_INVALID: {
-        code: 'contract_invalid',
-      },
-      INVALID_TIMESTAMP: {
-        code: 'invalid_timestamp',
-      },
-      INVALID_INPUT: {
-        code: 'contract_invalid',
-      },
-    })
+    throw toEventUpsertVaultCliError(error)
   }
 }
 

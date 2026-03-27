@@ -3,10 +3,14 @@ import type {
   LinqSendMessageResponse,
 } from '@healthybob/inboxd'
 import {
-  createTimeoutAbortController,
   waitForRetryDelay,
   type ResponseHeadersLike,
 } from './http-retry.js'
+import {
+  fetchJsonResponse,
+  readJsonErrorResponse,
+  requestJsonWithRetry,
+} from './http-json-retry.js'
 import { errorMessage, normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
@@ -145,13 +149,12 @@ async function requestLinqJson<T>(input: {
     resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
   )
   const url = new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`)
-  let attempt = 1
 
-  while (true) {
-    let response: LinqFetchResponse
-
-    try {
-      response = await fetchLinqResponse({
+  return requestJsonWithRetry<T, LinqFetchResponse>({
+    createHttpError: (response) =>
+      createLinqHttpError(response, input.method, input.path),
+    fetchResponse: () =>
+      fetchLinqResponse({
         fetchImplementation,
         url: url.toString(),
         method: input.method,
@@ -162,30 +165,13 @@ async function requestLinqJson<T>(input: {
         body: input.body ? JSON.stringify(input.body) : undefined,
         signal: input.signal,
         path: input.path,
-      })
-    } catch (error) {
-      if (isRetryableLinqRequestError(error) && attempt < LINQ_HTTP_MAX_ATTEMPTS) {
-        await waitForLinqRetryDelay(attempt, input.signal)
-        attempt += 1
-        continue
-      }
-
-      throw error
-    }
-
-    if (!response.ok) {
-      const failure = await createLinqHttpError(response, input.method, input.path)
-      if (isRetryableLinqRequestError(failure) && attempt < LINQ_HTTP_MAX_ATTEMPTS) {
-        await waitForLinqRetryDelay(attempt, input.signal, response.headers)
-        attempt += 1
-        continue
-      }
-
-      throw failure
-    }
-
-    return (await response.json()) as T
-  }
+      }),
+    isRetryableError: isRetryableLinqRequestError,
+    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+    parseResponse: async (response) => (await response.json()) as T,
+    signal: input.signal,
+    waitForRetryDelay: waitForLinqRetryDelay,
+  })
 }
 
 async function fetchLinqResponse(input: {
@@ -197,30 +183,23 @@ async function fetchLinqResponse(input: {
   body?: string
   signal?: AbortSignal
 }): Promise<LinqFetchResponse> {
-  const timeout = createTimeoutAbortController(input.signal, LINQ_HTTP_TIMEOUT_MS)
-
-  try {
-    return await input.fetchImplementation(input.url, {
-      method: input.method,
-      headers: input.headers,
-      body: input.body,
-      signal: timeout.signal,
-    })
-  } catch (error) {
-    if (input.signal?.aborted) {
-      throw error
-    }
-
-    throw createLinqRequestError({
-      method: input.method,
-      path: input.path,
-      error,
-      timedOut: timeout.timedOut(),
-      retryable: shouldRetryLinqTransportFailure(input.method),
-    })
-  } finally {
-    timeout.cleanup()
-  }
+  return fetchJsonResponse({
+    body: input.body,
+    createTransportError: ({ error, timedOut }) =>
+      createLinqRequestError({
+        method: input.method,
+        path: input.path,
+        error,
+        timedOut,
+        retryable: shouldRetryLinqTransportFailure(input.method),
+      }),
+    fetchImplementation: input.fetchImplementation,
+    headers: input.headers,
+    method: input.method,
+    signal: input.signal,
+    timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+    url: input.url,
+  })
 }
 
 async function createLinqHttpError(
@@ -228,16 +207,7 @@ async function createLinqHttpError(
   method: 'GET' | 'POST',
   path: string,
 ): Promise<VaultCliError> {
-  let payload: unknown = null
-  let rawText: string | null = null
-
-  try {
-    payload = await response.json()
-  } catch {
-    try {
-      rawText = await response.text()
-    } catch {}
-  }
+  const { payload, rawText } = await readJsonErrorResponse(response)
 
   return new VaultCliError(
     'LINQ_API_REQUEST_FAILED',

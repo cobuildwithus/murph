@@ -1,6 +1,5 @@
 import type { RecipeUpsertPayload } from "@healthybob/contracts";
 
-import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
 
@@ -18,6 +17,7 @@ import {
   normalizeDomainList,
   normalizeRecordIdList,
   normalizeSelectorSlug,
+  normalizeUniqueTextList,
   normalizeUpsertSelectorSlug,
   optionalEnum,
   optionalFiniteNumber,
@@ -42,38 +42,6 @@ import type {
   UpsertRecipeInput,
   UpsertRecipeResult,
 } from "./types.ts";
-
-function normalizeRecipeTextList(
-  value: unknown,
-  fieldName: string,
-  maxItems = 100,
-): string[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array.`);
-  }
-
-  if (value.length > maxItems) {
-    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} exceeds the maximum item count.`);
-  }
-
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-
-  value.forEach((entry, index) => {
-    const item = requireString(entry, `${fieldName}[${index}]`, 4000);
-
-    if (!seen.has(item)) {
-      seen.add(item);
-      normalized.push(item);
-    }
-  });
-
-  return normalized.length > 0 ? normalized : undefined;
-}
 
 function normalizeRecipeStatus(value: unknown): RecipeStatus {
   return optionalEnum(value, RECIPE_STATUSES, "status") ?? "saved";
@@ -146,8 +114,8 @@ function parseRecipeRecord(
     cookTimeMinutes: normalizeRecipeTimeMinutes(attributes.cookTimeMinutes, "cookTimeMinutes"),
     totalTimeMinutes: normalizeRecipeTimeMinutes(attributes.totalTimeMinutes, "totalTimeMinutes"),
     tags: normalizeDomainList(attributes.tags, "tags"),
-    ingredients: normalizeRecipeTextList(attributes.ingredients, "ingredients"),
-    steps: normalizeRecipeTextList(attributes.steps, "steps"),
+    ingredients: normalizeUniqueTextList(attributes.ingredients, "ingredients"),
+    steps: normalizeUniqueTextList(attributes.steps, "steps"),
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
     relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
     relativePath,
@@ -285,10 +253,10 @@ export async function upsertRecipe(input: UpsertRecipeInput): Promise<UpsertReci
             normalizeDomainList(value, "tags"),
           ),
           ingredients: resolveOptionalUpsertValue(input.ingredients, existingRecord?.ingredients, (value) =>
-            normalizeRecipeTextList(value, "ingredients"),
+            normalizeUniqueTextList(value, "ingredients"),
           ),
           steps: resolveOptionalUpsertValue(input.steps, existingRecord?.steps, (value) =>
-            normalizeRecipeTextList(value, "steps"),
+            normalizeUniqueTextList(value, "steps"),
           ),
           relatedGoalIds: resolveOptionalUpsertValue(input.relatedGoalIds, existingRecord?.relatedGoalIds, (value) =>
             normalizeRecordIdList(value, "relatedGoalIds", "goal"),

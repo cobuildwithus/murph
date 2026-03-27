@@ -97,17 +97,43 @@ async function withCliUsecaseMocks<TResult>(options: {
   }
 }
 
-function isVaultCliErrorLike(error: unknown, code: string, vaultCode: string): boolean {
-  return Boolean(
-    error &&
+function isVaultCliErrorLike(
+  error: unknown,
+  input: {
+    code: string;
+    message?: string;
+    vaultCode: string;
+    context?: Record<string, unknown>;
+  },
+): boolean {
+  if (
+    !(
+      error &&
       typeof error === "object" &&
       error instanceof Error &&
       "code" in error &&
-      (error as { code?: unknown }).code === code &&
+      (error as { code?: unknown }).code === input.code &&
       "name" in error &&
       (error as { name?: unknown }).name === "VaultCliError" &&
       "context" in error &&
-      (error as { context?: { vaultCode?: unknown } }).context?.vaultCode === vaultCode,
+      typeof (error as { context?: unknown }).context === "object" &&
+      (error as { context?: unknown }).context !== null
+    )
+  ) {
+    return false;
+  }
+
+  if (input.message !== undefined && error.message !== input.message) {
+    return false;
+  }
+
+  const context = (error as { context: Record<string, unknown> }).context;
+  if (context.vaultCode !== input.vaultCode) {
+    return false;
+  }
+
+  return Object.entries(input.context ?? {}).every(
+    ([key, value]) => context[key] === value,
   );
 }
 
@@ -207,26 +233,47 @@ test.sequential("public core mutators reject concurrent writers while another pr
 test.sequential("provider and event CLI usecases map renamed core error codes to CLI errors", async () => {
   const providerConflict = new VaultError("PROVIDER_CONFLICT", "Provider already exists.");
   const providerFrontmatter = new VaultError("PROVIDER_FRONTMATTER_INVALID", "Provider frontmatter is invalid.");
+  const eventRecord = {
+    recordType: "event",
+    primaryLookupId: "event_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    displayId: "event_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    kind: "note",
+    occurredAt: "2026-03-12T12:00:00.000Z",
+    date: "2026-03-12",
+    title: "Mock note",
+    data: {
+      id: "event_01JNV422Y2M5ZBV64ZP4N1DRB1",
+      kind: "note",
+      occurredAt: "2026-03-12T12:00:00.000Z",
+      title: "Mock note",
+      note: "Existing note",
+    },
+  };
   const eventFailures = [
     {
       vaultCode: "EVENT_KIND_INVALID",
       cliCode: "contract_invalid",
+      message: "EVENT_KIND_INVALID failure",
     },
     {
       vaultCode: "EVENT_OCCURRED_AT_MISSING",
       cliCode: "invalid_timestamp",
+      message: "EVENT_OCCURRED_AT_MISSING failure",
     },
     {
       vaultCode: "EVENT_CONTRACT_INVALID",
       cliCode: "contract_invalid",
+      message: "EVENT_CONTRACT_INVALID failure",
     },
     {
       vaultCode: "INVALID_TIMESTAMP",
       cliCode: "invalid_timestamp",
+      message: "INVALID_TIMESTAMP failure",
     },
     {
       vaultCode: "INVALID_INPUT",
       cliCode: "contract_invalid",
+      message: "INVALID_INPUT failure",
     },
   ] as const;
 
@@ -239,7 +286,9 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
         throw providerFrontmatter;
       },
       upsertEvent: async () => {
-        throw new VaultError("EVENT_KIND_INVALID", "Event payload requires a supported kind.");
+        throw new VaultError("EVENT_KIND_INVALID", "Event payload requires a supported kind.", {
+          exampleDetail: "kind",
+        });
       },
     },
     run: async () => {
@@ -256,7 +305,11 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
               status: "active",
             },
           }),
-        (error: unknown) => isVaultCliErrorLike(error, "conflict", "PROVIDER_CONFLICT"),
+        (error: unknown) =>
+          isVaultCliErrorLike(error, {
+            code: "conflict",
+            vaultCode: "PROVIDER_CONFLICT",
+          }),
       );
 
       await assert.rejects(
@@ -266,7 +319,10 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
             limit: 10,
           }),
         (error: unknown) =>
-          isVaultCliErrorLike(error, "contract_invalid", "PROVIDER_FRONTMATTER_INVALID"),
+          isVaultCliErrorLike(error, {
+            code: "contract_invalid",
+            vaultCode: "PROVIDER_FRONTMATTER_INVALID",
+          }),
       );
 
       for (const failure of eventFailures) {
@@ -278,7 +334,9 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
             return [];
           },
           upsertEvent: async () => {
-            throw new VaultError(failure.vaultCode, `${failure.vaultCode} failure`);
+            throw new VaultError(failure.vaultCode, failure.message, {
+              exampleDetail: failure.vaultCode.toLowerCase(),
+            });
           },
         };
 
@@ -300,7 +358,50 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
                   },
                 }),
               (error: unknown) =>
-                isVaultCliErrorLike(error, failure.cliCode, failure.vaultCode),
+                isVaultCliErrorLike(error, {
+                  code: failure.cliCode,
+                  message: failure.message,
+                  vaultCode: failure.vaultCode,
+                  context: {
+                    exampleDetail: failure.vaultCode.toLowerCase(),
+                  },
+                }),
+            );
+          },
+        });
+
+        await withCliUsecaseMocks({
+          coreRuntime: {
+            upsertEvent: async () => {
+              throw new VaultError(failure.vaultCode, failure.message, {
+                exampleDetail: failure.vaultCode.toLowerCase(),
+              });
+            },
+          },
+          queryRuntime: {
+            readVault: async () => ({}),
+            lookupRecordById: () => eventRecord,
+          },
+          run: async () => {
+            const { editEventRecord } = await import("../src/usecases/event-record-mutations.js");
+
+            await assert.rejects(
+              () =>
+                editEventRecord({
+                  vault: "/tmp/mock-vault",
+                  lookup: eventRecord.primaryLookupId,
+                  entityLabel: "event",
+                  set: ["title=Updated mock note"],
+                }),
+              (error: unknown) =>
+                isVaultCliErrorLike(error, {
+                  code: failure.cliCode,
+                  message: failure.message,
+                  vaultCode: failure.vaultCode,
+                  context: {
+                    exampleDetail: failure.vaultCode.toLowerCase(),
+                  },
+                }),
             );
           },
         });
@@ -341,7 +442,11 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
             date: "2026-03-13",
             text: "Checkpoint note",
           }),
-        (error: unknown) => isVaultCliErrorLike(error, "not_found", "JOURNAL_DAY_MISSING"),
+        (error: unknown) =>
+          isVaultCliErrorLike(error, {
+            code: "not_found",
+            vaultCode: "JOURNAL_DAY_MISSING",
+          }),
       );
 
       await assert.rejects(
@@ -352,7 +457,10 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
             occurredAt: "not-a-timestamp",
           }),
         (error: unknown) =>
-          isVaultCliErrorLike(error, "invalid_timestamp", "INVALID_TIMESTAMP"),
+          isVaultCliErrorLike(error, {
+            code: "invalid_timestamp",
+            vaultCode: "INVALID_TIMESTAMP",
+          }),
       );
     },
   });

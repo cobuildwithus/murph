@@ -12,7 +12,10 @@ import {
   applyRecordPatch,
   type JsonObject,
 } from './record-mutations.js'
-import { toVaultCliError } from './vault-usecase-helpers.js'
+import {
+  toEventUpsertVaultCliError,
+  toVaultCliError,
+} from './vault-usecase-helpers.js'
 
 interface EventMutationCoreRuntime {
   upsertEvent(input: {
@@ -359,23 +362,7 @@ export async function editEventRecord(input: EditEventRecordInput) {
       created: result.created,
     }
   } catch (error) {
-    throw toVaultCliError(error, {
-      EVENT_KIND_INVALID: {
-        code: 'contract_invalid',
-      },
-      EVENT_OCCURRED_AT_MISSING: {
-        code: 'invalid_timestamp',
-      },
-      EVENT_CONTRACT_INVALID: {
-        code: 'contract_invalid',
-      },
-      INVALID_TIMESTAMP: {
-        code: 'invalid_timestamp',
-      },
-      INVALID_INPUT: {
-        code: 'contract_invalid',
-      },
-    })
+    throw toEventUpsertVaultCliError(error)
   }
 }
 

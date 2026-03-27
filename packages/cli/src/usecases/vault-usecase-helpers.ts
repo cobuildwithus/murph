@@ -93,6 +93,24 @@ interface VaultErrorMapping {
   details?: Record<string, unknown> | ((details: Record<string, unknown>) => Record<string, unknown>)
 }
 
+const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
+  EVENT_KIND_INVALID: {
+    code: 'contract_invalid',
+  },
+  EVENT_OCCURRED_AT_MISSING: {
+    code: 'invalid_timestamp',
+  },
+  EVENT_CONTRACT_INVALID: {
+    code: 'contract_invalid',
+  },
+  INVALID_TIMESTAMP: {
+    code: 'invalid_timestamp',
+  },
+  INVALID_INPUT: {
+    code: 'contract_invalid',
+  },
+}
+
 export function toVaultCliError(
   error: unknown,
   mappings: Record<string, VaultErrorMapping> = {},
@@ -116,6 +134,10 @@ export function toVaultCliError(
       ...mappedDetails,
     },
   )
+}
+
+export function toEventUpsertVaultCliError(error: unknown) {
+  return toVaultCliError(error, eventUpsertVaultErrorMappings)
 }
 
 function toVaultRelativePathError(relativePath: string, error: unknown) {

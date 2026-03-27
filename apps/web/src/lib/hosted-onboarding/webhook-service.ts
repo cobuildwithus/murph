@@ -1,6 +1,9 @@
 import { randomBytes } from "node:crypto";
 
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
+import {
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@healthybob/hosted-execution";
 import { Prisma, type HostedMember, type HostedRevnetIssuance, type PrismaClient } from "@prisma/client";
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {
@@ -340,16 +343,14 @@ async function planHostedOnboardingLinqWebhook(input: {
       kind: "active-member-dispatch",
       desiredSideEffects: [
         createHostedWebhookDispatchSideEffect({
-          dispatch: {
-            event: {
-              kind: "linq.message.received",
-              linqEvent: input.event as unknown as Record<string, unknown>,
-              normalizedPhoneNumber,
-              userId: existingMember.id,
-            },
+          dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
             eventId: input.event.event_id,
+            linqChatId: summary.chatId,
+            linqEvent: input.event as unknown as Record<string, unknown>,
+            normalizedPhoneNumber,
             occurredAt: input.event.created_at,
-          },
+            userId: existingMember.id,
+          }),
         }),
       ],
       response: {
@@ -2034,7 +2035,9 @@ async function applyStripeCheckoutCompleted(
       desiredSideEffects.push(
         createHostedWebhookDispatchSideEffect({
           dispatch: buildHostedMemberActivationDispatch({
+            linqChatId: updatedMember.linqChatId,
             memberId: updatedMember.id,
+            normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
             occurredAt: dispatchContext.occurredAt,
             sourceEventId: dispatchContext.sourceEventId,
             sourceType: "stripe.checkout.session.completed",
@@ -2156,7 +2159,9 @@ async function applyStripeSubscriptionUpdated(
     desiredSideEffects.push(
       createHostedWebhookDispatchSideEffect({
         dispatch: buildHostedMemberActivationDispatch({
+          linqChatId: updatedMember.linqChatId,
           memberId: updatedMember.id,
+          normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
           occurredAt: dispatchContext.occurredAt,
           sourceEventId: dispatchContext.sourceEventId,
           sourceType: dispatchContext.sourceType,
@@ -2232,7 +2237,9 @@ async function applyStripeInvoicePaid(
   desiredSideEffects.push(
     createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedMemberActivationDispatch({
+        linqChatId: updatedMember.linqChatId,
         memberId: updatedMember.id,
+        normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
         occurredAt: dispatchContext.occurredAt,
         sourceEventId: dispatchContext.sourceEventId,
         sourceType: "stripe.invoice.paid",

@@ -19,6 +19,7 @@ import {
   normalizeId,
   normalizeRecordIdList,
   normalizeSelectorSlug,
+  normalizeUniqueTextList,
   normalizeUpsertSelectorSlug,
   optionalEnum,
   optionalString,
@@ -44,38 +45,6 @@ import type {
 } from "./types.ts";
 
 const DAILY_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
-
-function normalizeFoodTextList(
-  value: unknown,
-  fieldName: string,
-  maxItems = 100,
-): string[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array.`);
-  }
-
-  if (value.length > maxItems) {
-    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} exceeds the maximum item count.`);
-  }
-
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-
-  value.forEach((entry, index) => {
-    const item = requireString(entry, `${fieldName}[${index}]`, 4000);
-
-    if (!seen.has(item)) {
-      seen.add(item);
-      normalized.push(item);
-    }
-  });
-
-  return normalized.length > 0 ? normalized : undefined;
-}
 
 function normalizeFoodStatus(value: unknown): FoodStatus {
   return optionalEnum(value, FOOD_STATUSES, "status") ?? "active";
@@ -152,8 +121,8 @@ function parseFoodRecord(
     vendor: optionalString(attributes.vendor, "vendor", 160),
     location: optionalString(attributes.location, "location", 160),
     serving: optionalString(attributes.serving, "serving", 160),
-    aliases: normalizeFoodTextList(attributes.aliases, "aliases"),
-    ingredients: normalizeFoodTextList(attributes.ingredients, "ingredients"),
+    aliases: normalizeUniqueTextList(attributes.aliases, "aliases"),
+    ingredients: normalizeUniqueTextList(attributes.ingredients, "ingredients"),
     tags: normalizeDomainList(attributes.tags, "tags"),
     note: optionalString(attributes.note, "note", 4000),
     attachedProtocolIds: normalizeRecordIdList(attributes.attachedProtocolIds, "attachedProtocolIds", "prot"),
@@ -267,10 +236,10 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
             optionalString(value, "serving", 160),
           ),
           aliases: resolveOptionalUpsertValue(input.aliases, existingRecord?.aliases, (value) =>
-            normalizeFoodTextList(value, "aliases"),
+            normalizeUniqueTextList(value, "aliases"),
           ),
           ingredients: resolveOptionalUpsertValue(input.ingredients, existingRecord?.ingredients, (value) =>
-            normalizeFoodTextList(value, "ingredients"),
+            normalizeUniqueTextList(value, "ingredients"),
           ),
           tags: resolveOptionalUpsertValue(input.tags, existingRecord?.tags, (value) =>
             normalizeDomainList(value, "tags"),
