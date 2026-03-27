@@ -102,7 +102,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs, and no tracked .env/.env.* private files or dist/.next/.test-dist/*.tsbuildinfo artifacts, were found.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs and fixed PostCSS config paths, and no tracked .env/.env.* private files or dist/.next/.test-dist/*.tsbuildinfo artifacts, were found.",
   );
 }
 
