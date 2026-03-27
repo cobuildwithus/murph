@@ -1,6 +1,6 @@
 # CLI Record Edit/Delete
 
-Status: in_progress
+Status: completed
 Created: 2026-03-27
 Updated: 2026-03-27
 
@@ -73,7 +73,13 @@ Updated: 2026-03-27
 ## Follow-up review
 
 - Goal: perform a thorough post-landing audit of the new edit/delete functionality, fix any real bugs found, and extend focused regressions only where they close a confirmed hole.
-- Current focus:
-  - shared `applyRecordPatch` semantics and path-based set/clear behavior
-  - noun-specific edit/delete adapters for `document`, `meal`, `workout`, `intervention`, `food`, `provider`, `recipe`, and generic `event`
-  - core event/registry delete behavior and edit-path invariants
+- Findings fixed:
+  - `food edit --set slug=...` now threads `allowSlugRename` through the CLI mutation path so slug edits actually rename the canonical record file.
+  - `recipe edit --set slug=...` now threads `allowSlugRename` through the CLI/core recipe path so slug edits no longer silently leave the old file in place.
+  - Provider edits now keep default templated markdown bodies aligned when `note` or `title` changes, and `--clear body` regenerates the template with the current note instead of dropping it.
+- Follow-up regression proof:
+  - isolated provider/food/recipe regression run passed after the fixes, including slug rename coverage and provider default-body sync/reset coverage
+  - added explicit provider title-change coverage so the default-body heading rewrite is exercised alongside the note-sync path
+- Wrapper verification status:
+  - `pnpm typecheck` currently fails outside this lane in `packages/contracts` script-module resolution/type errors
+  - `pnpm test` and `pnpm test:coverage` currently fail outside this lane in `apps/web/test/hosted-onboarding-webhook-idempotency.test.ts`

@@ -145,6 +145,7 @@ export async function upsertFoodRecord(input: {
   vault: string
   payload: FoodPayload
   clearedFields?: ReadonlySet<string>
+  allowSlugRename?: boolean
 }) {
   const core = await loadFoodCoreRuntime()
 
@@ -154,6 +155,7 @@ export async function upsertFoodRecord(input: {
         vault: input.vault,
         payload: input.payload,
         clearedFields: input.clearedFields,
+        allowSlugRename: input.allowSlugRename,
       }),
     )
 
@@ -218,6 +220,7 @@ export async function editFoodRecord(input: {
     vault: input.vault,
     payload: patchedPayload,
     clearedFields: patched.clearedFields,
+    allowSlugRename: patched.touchedTopLevelFields.has('slug'),
   })
 
   return showFoodRecord(input.vault, food.foodId)
@@ -572,12 +575,14 @@ function buildFoodCoreInput(input: {
   vault: string
   payload: FoodPayload
   clearedFields?: ReadonlySet<string>
+  allowSlugRename?: boolean
 }): FoodCoreUpsertInput {
   const clearedFields = input.clearedFields ?? new Set<string>()
 
   return compactObject({
     vaultRoot: input.vault,
     foodId: input.payload.foodId,
+    allowSlugRename: input.allowSlugRename === true ? true : undefined,
     slug: clearedFields.has('slug') ? undefined : input.payload.slug,
     title: input.payload.title,
     status: clearedFields.has('status') ? 'active' : input.payload.status,

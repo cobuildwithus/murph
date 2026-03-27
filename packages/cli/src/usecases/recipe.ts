@@ -30,6 +30,7 @@ interface RecipeCoreRuntime {
   upsertRecipe(input: {
     vaultRoot: string
     recipeId?: string
+    allowSlugRename?: boolean
     slug?: string
     title?: string
     status?: string
@@ -151,6 +152,7 @@ export async function upsertRecipeRecord(input: {
   vault: string
   payload: RecipePayload
   clearedFields?: ReadonlySet<string>
+  allowSlugRename?: boolean
 }) {
   const core = await loadRecipeCoreRuntime()
 
@@ -160,6 +162,7 @@ export async function upsertRecipeRecord(input: {
         vault: input.vault,
         payload: input.payload,
         clearedFields: input.clearedFields,
+        allowSlugRename: input.allowSlugRename,
       }),
     )
 
@@ -224,6 +227,7 @@ export async function editRecipeRecord(input: {
     vault: input.vault,
     payload: patchedPayload,
     clearedFields: patched.clearedFields,
+    allowSlugRename: patched.touchedTopLevelFields.has('slug'),
   })
 
   return showRecipeRecord(input.vault, recipe.recipeId)
@@ -373,6 +377,7 @@ function buildRecipeCoreInput(input: {
   vault: string
   payload: RecipePayload
   clearedFields?: ReadonlySet<string>
+  allowSlugRename?: boolean
 }): RecipeCoreUpsertInput {
   const clearedFields = input.clearedFields ?? new Set<string>()
   const resetTotalTimeMinutes =
@@ -382,6 +387,7 @@ function buildRecipeCoreInput(input: {
   return compactObject({
     vaultRoot: input.vault,
     recipeId: input.payload.recipeId,
+    allowSlugRename: input.allowSlugRename === true ? true : undefined,
     slug: clearedFields.has('slug') ? undefined : input.payload.slug,
     title: input.payload.title,
     status: clearedFields.has('status') ? 'saved' : input.payload.status,

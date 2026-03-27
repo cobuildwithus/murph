@@ -215,6 +215,7 @@ export interface RecipeRecord {
 export interface UpsertRecipeInput {
   vaultRoot: string;
   recipeId?: string;
+  allowSlugRename?: boolean;
   slug?: string;
   title?: string;
   status?: RecipeStatus;

@@ -377,9 +377,14 @@ export async function editProviderRecord(input: {
     clear: input.clear,
     patchLabel: 'provider payload',
   })
-  const patchedPayload = parseProviderPayload({
-    ...patched.record,
-    providerId: provider.providerId,
+  const patchedPayload = syncProviderBodyForEdit({
+    originalPayload: payload,
+    patchedPayload: parseProviderPayload({
+      ...patched.record,
+      providerId: provider.providerId,
+    }),
+    clearedFields: patched.clearedFields,
+    touchedTopLevelFields: patched.touchedTopLevelFields,
   })
 
   await upsertProviderRecord({
@@ -389,6 +394,43 @@ export async function editProviderRecord(input: {
   })
 
   return showProviderRecord(input.vault, provider.providerId)
+}
+
+function isDefaultProviderBody(payload: ProviderPayload): boolean {
+  return (
+    typeof payload.body === 'string' &&
+    payload.body.trim() === buildProviderBodyTemplate(payload.title, payload.note).trim()
+  )
+}
+
+function syncProviderBodyForEdit(input: {
+  originalPayload: ProviderPayload
+  patchedPayload: ProviderPayload
+  clearedFields: ReadonlySet<string>
+  touchedTopLevelFields: ReadonlySet<string>
+}): ProviderPayload {
+  if (input.clearedFields.has('body')) {
+    return {
+      ...input.patchedPayload,
+      body: buildProviderBodyTemplate(input.patchedPayload.title, input.patchedPayload.note),
+    }
+  }
+
+  if (
+    !input.touchedTopLevelFields.has('body') &&
+    isDefaultProviderBody(input.originalPayload) &&
+    (
+      input.touchedTopLevelFields.has('title') ||
+      input.touchedTopLevelFields.has('note')
+    )
+  ) {
+    return {
+      ...input.patchedPayload,
+      body: buildProviderBodyTemplate(input.patchedPayload.title, input.patchedPayload.note),
+    }
+  }
+
+  return input.patchedPayload
 }
 
 export async function deleteProviderRecord(input: {
@@ -706,6 +748,10 @@ function buildProviderCoreInput(input: {
 }): ProviderCoreUpsertInput {
   const clearedFields = input.clearedFields ?? new Set<string>()
   const note = clearedFields.has('note') ? '' : input.payload.note
+  const body =
+    clearedFields.has('body')
+      ? input.payload.body ?? buildProviderBodyTemplate(input.payload.title, note)
+      : input.payload.body
 
   return compactObject({
     vaultRoot: input.vault,
@@ -720,9 +766,7 @@ function buildProviderCoreInput(input: {
     phone: clearedFields.has('phone') ? '' : input.payload.phone,
     note,
     aliases: clearedFields.has('aliases') ? [] : input.payload.aliases,
-    body: clearedFields.has('body')
-      ? buildProviderBodyTemplate(input.payload.title, undefined)
-      : input.payload.body,
+    body,
   }) as ProviderCoreUpsertInput
 }
 
