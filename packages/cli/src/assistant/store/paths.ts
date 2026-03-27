@@ -5,15 +5,19 @@ import {
   type AssistantStatePaths,
 } from '@healthybob/runtime-state'
 import {
-  assistantProviderSessionOptionsSchema,
   type AssistantApprovalPolicy,
   type AssistantProviderSessionOptions,
   type AssistantSandbox,
 } from '../../assistant-cli-contracts.js'
+import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
 import {
   resolveAssistantConversationKey,
   type AssistantBindingPatch,
 } from '../bindings.js'
+import {
+  conversationRefFromLocator,
+  conversationRefToBindingFields,
+} from '../conversation-ref.js'
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantSessionLocator } from './types.js'
 
@@ -66,38 +70,31 @@ export function resolveAssistantConversationLookupKey(
 export function bindingInputFromLocator(
   input: AssistantSessionLocator,
 ): AssistantBindingPatch {
-  const conversation = normalizeConversationLocator(input)
+  const conversation = conversationRefFromLocator(input)
+  const bindingFields = conversationRefToBindingFields(conversation)
   return {
-    actorId: conversation.actorId,
-    channel: normalizeNullableString(conversation.channel),
+    actorId: bindingFields.actorId,
+    channel: conversation.channel ?? null,
     deliveryKind: input.deliveryKind ?? null,
-    identityId: normalizeNullableString(conversation.identityId),
-    threadId: normalizeNullableString(conversation.threadId),
-    threadIsDirect: conversation.threadIsDirect,
+    identityId: conversation.identityId ?? null,
+    threadId: conversation.threadId ?? null,
+    threadIsDirect: bindingFields.threadIsDirect,
   }
 }
 
 export function bindingPatchFromLocator(
   input: AssistantSessionLocator,
 ): AssistantBindingPatch {
-  const conversation = normalizeConversationLocator(input)
+  const conversation = conversationRefFromLocator(input)
+  const bindingFields = conversationRefToBindingFields(conversation)
   const patch: AssistantBindingPatch = {}
 
-  if (
-    'conversation' in input ||
-    'actorId' in input ||
-    'participantId' in input ||
-    'channel' in input ||
-    'identityId' in input ||
-    'threadId' in input ||
-    'sourceThreadId' in input ||
-    'threadIsDirect' in input
-  ) {
-    patch.actorId = conversation.actorId
-    patch.channel = normalizeNullableString(conversation.channel)
-    patch.identityId = normalizeNullableString(conversation.identityId)
-    patch.threadId = normalizeNullableString(conversation.threadId)
-    patch.threadIsDirect = conversation.threadIsDirect
+  if (hasConversationLocatorFields(input)) {
+    patch.actorId = bindingFields.actorId
+    patch.channel = conversation.channel ?? null
+    patch.identityId = conversation.identityId ?? null
+    patch.threadId = conversation.threadId ?? null
+    patch.threadIsDirect = bindingFields.threadIsDirect
   }
   if ('deliveryKind' in input) {
     patch.deliveryKind = input.deliveryKind ?? null
@@ -117,65 +114,24 @@ export function normalizeProviderOptions(input: {
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
 }): AssistantProviderSessionOptions {
-  return assistantProviderSessionOptionsSchema.parse({
-    model: normalizeNullableString(input.model),
-    reasoningEffort: normalizeNullableString(input.reasoningEffort),
-    sandbox: input.sandbox ?? null,
-    approvalPolicy: input.approvalPolicy ?? null,
-    profile: normalizeNullableString(input.profile),
-    oss: input.oss ?? false,
-    baseUrl: normalizeNullableString(input.baseUrl) ?? undefined,
-    apiKeyEnv: normalizeNullableString(input.apiKeyEnv) ?? undefined,
-    providerName: normalizeNullableString(input.providerName) ?? undefined,
-  })
+  return serializeAssistantProviderSessionOptions(input)
 }
 
 export function createAssistantSessionId(): string {
   return `asst_${randomUUID().replace(/-/gu, '')}`
 }
 
-function normalizeConversationLocator(input: AssistantSessionLocator): {
-  actorId: string | null
-  channel: string | null
-  identityId: string | null
-  threadId: string | null
-  threadIsDirect: boolean | null
-} {
-  const conversation = input.conversation ?? null
-  return {
-    actorId:
-      normalizeNullableString(conversation?.participantId) ??
-      normalizeNullableString(input.actorId ?? input.participantId),
-    channel:
-      normalizeNullableString(conversation?.channel) ??
-      normalizeNullableString(input.channel),
-    identityId:
-      normalizeNullableString(conversation?.identityId) ??
-      normalizeNullableString(input.identityId),
-    threadId:
-      normalizeNullableString(conversation?.threadId) ??
-      normalizeNullableString(input.threadId ?? input.sourceThreadId),
-    threadIsDirect: normalizeConversationThreadDirectness(
-      conversation?.directness,
-      input.threadIsDirect,
-    ),
-  }
-}
-
-function normalizeConversationThreadDirectness(
-  directness: string | null | undefined,
-  threadIsDirect: boolean | null | undefined,
-): boolean | null {
-  if (typeof threadIsDirect === 'boolean') {
-    return threadIsDirect
-  }
-
-  switch (normalizeNullableString(directness)) {
-    case 'direct':
-      return true
-    case 'group':
-      return false
-    default:
-      return null
-  }
+function hasConversationLocatorFields(
+  input: AssistantSessionLocator,
+): boolean {
+  return (
+    'conversation' in input ||
+    'actorId' in input ||
+    'participantId' in input ||
+    'channel' in input ||
+    'identityId' in input ||
+    'threadId' in input ||
+    'sourceThreadId' in input ||
+    'threadIsDirect' in input
+  )
 }

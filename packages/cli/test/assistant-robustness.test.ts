@@ -459,6 +459,55 @@ test('drainAssistantOutbox keeps post-send hosted journal persistence failures r
   }
 })
 
+test('buildAssistantFailoverRoutes dedupes routes that only differ by null versus undefined provider-option storage', () => {
+  const routes = buildAssistantFailoverRoutes({
+    provider: 'codex-cli',
+    providerOptions: {
+      model: 'gpt-oss:20b',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+    },
+    backups: [
+      {
+        name: null,
+        provider: 'openai-compatible',
+        codexCommand: null,
+        model: 'gpt-oss:20b',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        cooldownMs: null,
+      },
+      {
+        name: null,
+        provider: 'openai-compatible',
+        codexCommand: null,
+        model: 'gpt-oss:20b',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        cooldownMs: null,
+      },
+    ],
+  })
+
+  assert.equal(routes.length, 2)
+  assert.equal(routes[1]?.provider, 'openai-compatible')
+  assert.equal(routes[1]?.providerOptions.baseUrl, undefined)
+  assert.equal(routes[1]?.providerOptions.apiKeyEnv, undefined)
+  assert.equal(routes[1]?.providerOptions.providerName, undefined)
+})
+
 test('sendAssistantMessage fails over across provider routes and records cooldown and receipt state', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-robustness-failover-'))
   const homeRoot = path.join(parent, 'home')

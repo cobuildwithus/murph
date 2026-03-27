@@ -11,6 +11,10 @@ import {
   type CodexProgressEvent,
 } from './assistant-codex.js'
 import { getAssistantBindingContextLines } from './assistant/bindings.js'
+import {
+  normalizeAssistantProviderConfig,
+  serializeAssistantProviderSessionOptions,
+} from './assistant/provider-config.js'
 import { normalizeNullableString } from './assistant/shared.js'
 import { resolveAssistantLanguageModel } from './model-harness.js'
 import { VaultCliError } from './vault-cli-errors.js'
@@ -77,17 +81,7 @@ export function resolveAssistantProviderOptions(input: {
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
 }) {
-  return {
-    model: normalizeNullableString(input.model),
-    reasoningEffort: normalizeNullableString(input.reasoningEffort),
-    sandbox: input.sandbox ?? null,
-    approvalPolicy: input.approvalPolicy ?? null,
-    profile: normalizeNullableString(input.profile),
-    oss: input.oss ?? false,
-    baseUrl: normalizeNullableString(input.baseUrl) ?? undefined,
-    apiKeyEnv: normalizeNullableString(input.apiKeyEnv) ?? undefined,
-    providerName: normalizeNullableString(input.providerName) ?? undefined,
-  }
+  return serializeAssistantProviderSessionOptions(input)
 }
 
 export function resolveAssistantProviderCapabilities(
@@ -103,11 +97,12 @@ export async function executeAssistantProviderTurn(
 ): Promise<AssistantProviderTurnResult> {
   const provider = input.provider ?? 'codex-cli'
   const prompt = flattenAssistantProviderPrompt(input)
+  const providerConfig = normalizeAssistantProviderConfig(input)
 
   switch (provider) {
     case 'codex-cli': {
       const result = await executeCodexPrompt({
-        codexCommand: input.codexCommand,
+        codexCommand: providerConfig.codexCommand ?? undefined,
         configOverrides: mergeCodexConfigOverrides({
           configOverrides: input.configOverrides,
           showThinkingTraces: input.showThinkingTraces ?? false,
@@ -117,12 +112,12 @@ export async function executeAssistantProviderTurn(
         workingDirectory: input.workingDirectory,
         prompt,
         resumeSessionId: input.resumeProviderSessionId,
-        model: normalizeNullableString(input.model),
-        reasoningEffort: normalizeNullableString(input.reasoningEffort),
-        sandbox: input.sandbox ?? undefined,
-        approvalPolicy: input.approvalPolicy ?? undefined,
-        profile: normalizeNullableString(input.profile),
-        oss: input.oss ?? false,
+        model: providerConfig.model ?? undefined,
+        reasoningEffort: providerConfig.reasoningEffort ?? undefined,
+        sandbox: providerConfig.sandbox ?? undefined,
+        approvalPolicy: providerConfig.approvalPolicy ?? undefined,
+        profile: providerConfig.profile ?? undefined,
+        oss: providerConfig.oss ?? false,
         onProgress: input.onEvent ?? undefined,
         onTraceEvent: input.onTraceEvent,
       })
@@ -138,8 +133,8 @@ export async function executeAssistantProviderTurn(
     }
 
     case 'openai-compatible': {
-      const baseUrl = normalizeNullableString(input.baseUrl)
-      const model = normalizeNullableString(input.model)
+      const baseUrl = providerConfig.baseUrl
+      const model = providerConfig.model
       if (!baseUrl) {
         throw new VaultCliError(
           'ASSISTANT_BASE_URL_REQUIRED',
@@ -157,7 +152,7 @@ export async function executeAssistantProviderTurn(
         ...process.env,
         ...(input.env ?? {}),
       }
-      const apiKeyEnv = normalizeNullableString(input.apiKeyEnv)
+      const apiKeyEnv = providerConfig.apiKeyEnv
       const languageModel = resolveAssistantLanguageModel({
         apiKey:
           apiKeyEnv && typeof resolvedEnv[apiKeyEnv] === 'string'
@@ -166,7 +161,7 @@ export async function executeAssistantProviderTurn(
         apiKeyEnv: apiKeyEnv ?? undefined,
         baseUrl,
         model,
-        providerName: normalizeNullableString(input.providerName) ?? undefined,
+        providerName: providerConfig.providerName ?? undefined,
       })
       const result = await generateText({
         model: languageModel,

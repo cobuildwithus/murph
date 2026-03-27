@@ -114,7 +114,8 @@ export async function executeCodexPrompt(
     discoveredSessionId = discoveredSessionId ?? extractCodexSessionId(event)
     lastEventError = extractCodexErrorMessage(event) ?? lastEventError
 
-    const updates = extractCodexTraceUpdates(event)
+    const normalizedEvent = normalizeCodexEvent(event)
+    const updates = extractCodexTraceUpdatesFromNormalized(normalizedEvent)
     for (const update of updates) {
       recordAssistantTraceUpdate(update)
     }
@@ -125,7 +126,7 @@ export async function executeCodexPrompt(
       updates,
     })
 
-    const progressEvent = extractCodexProgressEvent(event)
+    const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
     if (progressEvent) {
       if (progressEvent.kind === 'message') {
         lastAgentMessage = progressEvent.text
@@ -508,7 +509,28 @@ function tryParseJsonLine(
   }
 }
 
-function extractCodexProgressEvent(event: unknown): CodexProgressEvent | null {
+interface NormalizedCodexEvent {
+  assistantText: string | null
+  commandLabel: string | null
+  errorText: string | null
+  eventType: string
+  exitCode: number | null
+  filePaths: string[]
+  itemId: string | null
+  itemState: 'completed' | 'running' | null
+  itemType: string | null
+  planEventText: string | null
+  planItemText: string | null
+  rawEvent: unknown
+  reasoningText: string | null
+  reroutedModel: string | null
+  searchQuery: string | null
+  textDelta: string | null
+  toolName: string | null
+  toolServer: string | null
+}
+
+function normalizeCodexEvent(event: unknown): NormalizedCodexEvent | null {
   const record = asRecord(event)
   if (!record) {
     return null
@@ -521,163 +543,187 @@ function extractCodexProgressEvent(event: unknown): CodexProgressEvent | null {
     return null
   }
 
-  const errorText = normalizeStatusText(extractCodexErrorMessage(record))
-  if (errorText) {
-    return {
-      id: 'codex-status',
-      kind: 'status',
-      rawEvent: event,
-      state: 'completed',
-      text: errorText,
-    }
-  }
-
   const item = extractCodexEventItem(record)
-  const itemId = extractCodexItemId(record, item)
-  const itemType = normalizeIdentifier(
-    typeof item?.type === 'string'
-      ? item.type
-      : typeof record.item_type === 'string'
-        ? record.item_type
-        : typeof record.itemType === 'string'
-          ? record.itemType
+
+  return {
+    assistantText: extractAssistantTextFromItem(item),
+    commandLabel: extractCommandLikeLabel(item),
+    errorText: normalizeStatusText(extractCodexErrorMessage(record)),
+    eventType,
+    exitCode: extractNumericField(item, ['exit_code', 'exitCode']),
+    filePaths: collectFilePaths(item),
+    itemId: extractCodexItemId(record, item),
+    itemState:
+      eventType === 'item.started'
+        ? 'running'
+        : eventType === 'item.completed'
+          ? 'completed'
           : null,
-  )
-  if (!itemType || (eventType !== 'item.started' && eventType !== 'item.completed')) {
+    itemType: extractCodexEventItemType(record, item),
+    planEventText: extractCodexEventPlanText(record),
+    planItemText: extractCodexItemPlanText(item),
+    rawEvent: event,
+    reasoningText: extractReasoningTextFromItem(item),
+    reroutedModel: normalizeStatusText(
+      findDeepStringByKeys(record, ['model', 'target_model', 'targetModel']) ?? null,
+    ),
+    searchQuery: normalizeStatusText(
+      findDeepStringByKeys(item, ['query', 'search_query', 'searchQuery']) ?? null,
+    ),
+    textDelta: extractEventTextDelta(record),
+    toolName: normalizeStatusText(
+      findDeepStringByKeys(item, ['tool', 'tool_name', 'toolName', 'name']) ?? null,
+    ),
+    toolServer: normalizeStatusText(
+      findDeepStringByKeys(item, ['server', 'server_name', 'serverName']) ?? null,
+    ),
+  }
+}
+
+function extractCodexProgressEvent(event: unknown): CodexProgressEvent | null {
+  const normalized = normalizeCodexEvent(event)
+  return extractCodexProgressEventFromNormalized(normalized)
+}
+
+function extractCodexProgressEventFromNormalized(
+  normalized: NormalizedCodexEvent | null,
+): CodexProgressEvent | null {
+  if (!normalized) {
     return null
   }
 
-  const state = eventType === 'item.started' ? 'running' : 'completed'
-
-  if (itemType === 'reasoning') {
+  if (normalized.errorText) {
     return {
-      id: itemId,
-      kind: 'reasoning',
-      rawEvent: event,
-      state,
-      text:
-        extractReasoningTextFromItem(item) ??
-        (state === 'running' ? 'Thinking…' : 'Thought through the next step.'),
+      id: 'codex-status',
+      kind: 'status',
+      rawEvent: normalized.rawEvent,
+      state: 'completed',
+      text: normalized.errorText,
     }
   }
 
-  if (itemType === 'command.execution') {
-    const command = extractCommandLikeLabel(item)
-    if (!command) {
+  if (!normalized.itemType || normalized.itemState === null) {
+    return null
+  }
+
+  if (normalized.itemType === 'reasoning') {
+    return {
+      id: normalized.itemId,
+      kind: 'reasoning',
+      rawEvent: normalized.rawEvent,
+      state: normalized.itemState,
+      text:
+        normalized.reasoningText ??
+        (normalized.itemState === 'running'
+          ? 'Thinking…'
+          : 'Thought through the next step.'),
+    }
+  }
+
+  if (normalized.itemType === 'command.execution') {
+    if (!normalized.commandLabel) {
       return null
     }
 
     return {
-      id: itemId,
+      id: normalized.itemId,
       kind: 'command',
-      rawEvent: event,
-      state,
-      text: `$ ${command}`,
+      rawEvent: normalized.rawEvent,
+      state: normalized.itemState,
+      text: `$ ${normalized.commandLabel}`,
     }
   }
 
-  if (itemType === 'mcp.tool.call' || itemType === 'tool.call') {
-    const server = normalizeStatusText(
-      findDeepStringByKeys(item, ['server', 'server_name', 'serverName']) ?? null,
-    )
-    const tool = normalizeStatusText(
-      findDeepStringByKeys(item, ['tool', 'tool_name', 'toolName', 'name']) ?? null,
-    )
-
+  if (
+    normalized.itemType === 'mcp.tool.call' ||
+    normalized.itemType === 'tool.call'
+  ) {
     return {
-      id: itemId,
+      id: normalized.itemId,
       kind: 'tool',
-      rawEvent: event,
-      state,
+      rawEvent: normalized.rawEvent,
+      state: normalized.itemState,
       text:
-        tool && server && server !== tool
-          ? `Tool ${server}.${tool}`
-          : tool
-            ? `Tool ${tool}`
-            : server
-              ? `Tool ${server}`
+        normalized.toolName &&
+        normalized.toolServer &&
+        normalized.toolServer !== normalized.toolName
+          ? `Tool ${normalized.toolServer}.${normalized.toolName}`
+          : normalized.toolName
+            ? `Tool ${normalized.toolName}`
+            : normalized.toolServer
+              ? `Tool ${normalized.toolServer}`
               : 'Used a tool.',
     }
   }
 
-  if (itemType === 'web.search') {
-    const query = normalizeStatusText(
-      findDeepStringByKeys(item, ['query', 'search_query', 'searchQuery']) ?? null,
-    )
-
+  if (normalized.itemType === 'web.search') {
     return {
-      id: itemId,
+      id: normalized.itemId,
       kind: 'search',
-      rawEvent: event,
-      state,
-      text: query ? `Web: ${query}` : 'Ran a web search.',
+      rawEvent: normalized.rawEvent,
+      state: normalized.itemState,
+      text: normalized.searchQuery
+        ? `Web: ${normalized.searchQuery}`
+        : 'Ran a web search.',
     }
   }
 
-  if (itemType === 'file.change') {
-    const paths = collectFilePaths(item)
+  if (normalized.itemType === 'file.change') {
     const text =
-      paths.length === 0
+      normalized.filePaths.length === 0
         ? 'Updated files.'
-        : paths.length === 1
-          ? `Changed ${paths[0]}`
-          : `Changed files: ${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ', …' : ''}`
+        : normalized.filePaths.length === 1
+          ? `Changed ${normalized.filePaths[0]}`
+          : `Changed files: ${normalized.filePaths.slice(0, 3).join(', ')}${normalized.filePaths.length > 3 ? ', …' : ''}`
 
     return {
-      id: itemId,
+      id: normalized.itemId,
       kind: 'file',
-      rawEvent: event,
-      state,
+      rawEvent: normalized.rawEvent,
+      state: normalized.itemState,
       text,
     }
   }
 
-  if (itemType === 'plan') {
-    const planText = normalizeStreamingText(
-      findDeepStringByKeys(item, ['explanation', 'summary', 'message', 'text']) ??
-        findDeepStringByKeys(record, ['explanation', 'summary', 'plan']) ??
-        null,
-    )
-
+  if (normalized.itemType === 'plan') {
     return {
-      id: itemId,
+      id: normalized.itemId,
       kind: 'plan',
-      rawEvent: event,
-      state,
-      text: planText ? `Plan:\n${planText}` : 'Updated the plan.',
+      rawEvent: normalized.rawEvent,
+      state: normalized.itemState,
+      text: (normalized.planItemText ?? normalized.planEventText)
+        ? `Plan:\n${normalized.planItemText ?? normalized.planEventText}`
+        : 'Updated the plan.',
     }
   }
 
-  if (itemType === 'agent.message' || itemType === 'assistant.message') {
-    const assistantText = extractAssistantTextFromItem(item)
-    if (!assistantText) {
+  if (
+    normalized.itemType === 'agent.message' ||
+    normalized.itemType === 'assistant.message'
+  ) {
+    if (!normalized.assistantText) {
       return null
     }
 
     return {
-      id: itemId,
+      id: normalized.itemId,
       kind: 'message',
-      rawEvent: event,
-      state,
-      text: assistantText,
+      rawEvent: normalized.rawEvent,
+      state: normalized.itemState,
+      text: normalized.assistantText,
     }
   }
 
-  const statusText = summarizeCodexStatusItem({
-    eventType,
-    item,
-    itemId,
-    itemType,
-  })
+  const statusText = summarizeCodexStatusItem(normalized)
   if (!statusText) {
     return null
   }
 
   return {
-    id: itemId ?? `status:${itemType}`,
+    id: normalized.itemId ?? `status:${normalized.itemType}`,
     kind: 'status',
-    rawEvent: event,
-    state,
+    rawEvent: normalized.rawEvent,
+    state: normalized.itemState,
     text: statusText,
   }
 }
@@ -705,165 +751,138 @@ function extractCodexStatusEventFromStderrLine(
 export function extractCodexTraceUpdates(
   event: unknown,
 ): AssistantProviderTraceUpdate[] {
-  const record = asRecord(event)
-  if (!record) {
+  const normalized = normalizeCodexEvent(event)
+  return extractCodexTraceUpdatesFromNormalized(normalized)
+}
+
+function extractCodexTraceUpdatesFromNormalized(
+  normalized: NormalizedCodexEvent | null,
+): AssistantProviderTraceUpdate[] {
+  if (!normalized) {
     return []
   }
 
-  const eventType = normalizeIdentifier(
-    typeof record.type === 'string' ? record.type : null,
-  )
-  if (eventType === null) {
-    return []
-  }
-
-  const errorMessage = extractCodexErrorMessage(record)
-  if (errorMessage) {
-    const normalizedErrorMessage = normalizeStatusText(errorMessage)
-    if (!normalizedErrorMessage) {
-      return []
-    }
-
+  if (normalized.errorText) {
     return [
-      isRetryableConnectionStatus(normalizedErrorMessage)
+      isRetryableConnectionStatus(normalized.errorText)
         ? {
             kind: 'status',
             mode: 'replace',
             streamKey: 'status:connection',
-            text: normalizedErrorMessage,
+            text: normalized.errorText,
           }
         : {
             kind: 'error',
-            text: normalizedErrorMessage,
+            text: normalized.errorText,
           },
     ]
   }
 
-  const item = extractCodexEventItem(record)
-  const itemId = extractCodexItemId(record, item)
-  const itemType = normalizeIdentifier(
-    typeof item?.type === 'string'
-      ? item.type
-      : typeof record.item_type === 'string'
-        ? record.item_type
-        : typeof record.itemType === 'string'
-          ? record.itemType
-          : null,
-  )
-
   if (
-    eventType.includes('agent.message.delta') ||
-    eventType.includes('assistant.message.delta')
+    normalized.eventType.includes('agent.message.delta') ||
+    normalized.eventType.includes('assistant.message.delta')
   ) {
-    const textDelta = extractEventTextDelta(record)
-    return textDelta
+    return normalized.textDelta
       ? [
           {
             kind: 'assistant',
             mode: 'append',
-            streamKey: buildTraceStreamKey('assistant', itemId),
-            text: textDelta,
+            streamKey: buildTraceStreamKey('assistant', normalized.itemId),
+            text: normalized.textDelta,
           },
         ]
       : []
   }
 
   if (
-    eventType.includes('reasoning.summary.text.delta') ||
-    eventType.includes('reasoning.text.delta')
+    normalized.eventType.includes('reasoning.summary.text.delta') ||
+    normalized.eventType.includes('reasoning.text.delta')
   ) {
-    const textDelta = extractEventTextDelta(record)
-    return textDelta
+    return normalized.textDelta
       ? [
           {
             kind: 'thinking',
             mode: 'append',
-            streamKey: buildTraceStreamKey('thinking', itemId),
-            text: textDelta,
+            streamKey: buildTraceStreamKey('thinking', normalized.itemId),
+            text: normalized.textDelta,
           },
         ]
       : []
   }
 
-  if (eventType.endsWith('plan.updated')) {
-    const planText = normalizeStreamingText(
-      findDeepStringByKeys(record, ['explanation', 'summary', 'plan']) ?? null,
-    )
-
-    return planText
+  if (normalized.eventType.endsWith('plan.updated')) {
+    return normalized.planEventText
       ? [
           {
             kind: 'thinking',
             mode: 'replace',
-            streamKey: buildTraceStreamKey('thinking', itemId ?? 'plan'),
-            text: planText,
+            streamKey: buildTraceStreamKey(
+              'thinking',
+              normalized.itemId ?? 'plan',
+            ),
+            text: normalized.planEventText,
           },
         ]
       : []
   }
 
-  if (eventType === 'model.rerouted') {
-    const reroutedModel = normalizeStatusText(
-      findDeepStringByKeys(record, ['model', 'target_model', 'targetModel']) ?? null,
-    )
-
-    return reroutedModel
+  if (normalized.eventType === 'model.rerouted') {
+    return normalized.reroutedModel
       ? [
           {
             kind: 'status',
             mode: 'replace',
             streamKey: 'status:model-reroute',
-            text: `Switched to ${reroutedModel}.`,
+            text: `Switched to ${normalized.reroutedModel}.`,
           },
         ]
       : []
   }
 
-  if (eventType !== 'item.started' && eventType !== 'item.completed') {
+  if (normalized.itemState === null) {
     return []
   }
 
-  if (itemType === 'agent.message' || itemType === 'assistant.message') {
-    const assistantText = extractAssistantTextFromItem(item)
-    return assistantText
+  if (
+    normalized.itemType === 'agent.message' ||
+    normalized.itemType === 'assistant.message'
+  ) {
+    return normalized.assistantText
       ? [
           {
             kind: 'assistant',
             mode: 'replace',
-            streamKey: buildTraceStreamKey('assistant', itemId),
-            text: assistantText,
+            streamKey: buildTraceStreamKey('assistant', normalized.itemId),
+            text: normalized.assistantText,
           },
         ]
       : []
   }
 
-  if (itemType === 'reasoning') {
-    const reasoningText = extractReasoningTextFromItem(item)
-    return reasoningText
+  if (normalized.itemType === 'reasoning') {
+    return normalized.reasoningText
       ? [
           {
             kind: 'thinking',
             mode: 'replace',
-            streamKey: buildTraceStreamKey('thinking', itemId),
-            text: reasoningText,
+            streamKey: buildTraceStreamKey('thinking', normalized.itemId),
+            text: normalized.reasoningText,
           },
         ]
       : []
   }
 
-  const statusText = summarizeCodexStatusItem({
-    eventType,
-    item,
-    itemId,
-    itemType,
-  })
+  const statusText = summarizeCodexStatusItem(normalized)
 
   return statusText
     ? [
         {
           kind: 'status',
           mode: 'replace',
-          streamKey: buildTraceStreamKey('status', itemId ?? itemType),
+          streamKey: buildTraceStreamKey(
+            'status',
+            normalized.itemId ?? normalized.itemType,
+          ),
           text: statusText,
         },
       ]
@@ -887,6 +906,21 @@ function extractCodexEventItem(
   return null
 }
 
+function extractCodexEventItemType(
+  event: Record<string, unknown>,
+  item: Record<string, unknown> | null,
+): string | null {
+  return normalizeIdentifier(
+    typeof item?.type === 'string'
+      ? item.type
+      : typeof event.item_type === 'string'
+        ? event.item_type
+        : typeof event.itemType === 'string'
+          ? event.itemType
+          : null,
+  )
+}
+
 function extractCodexItemId(
   event: Record<string, unknown>,
   item: Record<string, unknown> | null,
@@ -901,6 +935,22 @@ function extractCodexItemId(
             ? event.itemId
             : null,
     ) ?? null
+  )
+}
+
+function extractCodexEventPlanText(
+  event: Record<string, unknown>,
+): string | null {
+  return normalizeStreamingText(
+    findDeepStringByKeys(event, ['explanation', 'summary', 'plan']) ?? null,
+  )
+}
+
+function extractCodexItemPlanText(
+  item: Record<string, unknown> | null,
+): string | null {
+  return normalizeStreamingText(
+    findDeepStringByKeys(item, ['explanation', 'summary', 'message', 'text']) ?? null,
   )
 }
 
@@ -1035,52 +1085,42 @@ function extractEventTextDelta(record: Record<string, unknown>): string | null {
   )
 }
 
-function summarizeCodexStatusItem(input: {
-  eventType: string
-  item: Record<string, unknown> | null
-  itemId: string | null
-  itemType: string | null
-}): string | null {
+function summarizeCodexStatusItem(input: NormalizedCodexEvent): string | null {
   const itemType = input.itemType
   if (!itemType) {
     return null
   }
 
-  const started = input.eventType === 'item.started'
-  const completed = input.eventType === 'item.completed'
+  const started = input.itemState === 'running'
+  const completed = input.itemState === 'completed'
 
   if (itemType === 'command.execution') {
-    const command = extractCommandLikeLabel(input.item)
-    const exitCode = extractNumericField(input.item, ['exit_code', 'exitCode'])
-
     if (started) {
-      return command ? `Running ${command}.` : 'Running command.'
+      return input.commandLabel
+        ? `Running ${input.commandLabel}.`
+        : 'Running command.'
     }
 
-    if (completed && typeof exitCode === 'number') {
-      return command
-        ? exitCode === 0
-          ? `Finished ${command}.`
-          : `${command} exited with code ${exitCode}.`
-        : exitCode === 0
+    if (completed && typeof input.exitCode === 'number') {
+      return input.commandLabel
+        ? input.exitCode === 0
+          ? `Finished ${input.commandLabel}.`
+          : `${input.commandLabel} exited with code ${input.exitCode}.`
+        : input.exitCode === 0
           ? 'Command finished.'
-          : `Command exited with code ${exitCode}.`
+          : `Command exited with code ${input.exitCode}.`
     }
 
-    return command ? `Finished ${command}.` : 'Command finished.'
+    return input.commandLabel
+      ? `Finished ${input.commandLabel}.`
+      : 'Command finished.'
   }
 
   if (itemType === 'mcp.tool.call' || itemType === 'tool.call') {
-    const server = normalizeStatusText(
-      findDeepStringByKeys(input.item, ['server', 'server_name', 'serverName']) ?? null,
-    )
-    const tool = normalizeStatusText(
-      findDeepStringByKeys(input.item, ['tool', 'tool_name', 'toolName', 'name']) ?? null,
-    )
     const label =
-      server && tool
-        ? `${server}/${tool}`
-        : tool ?? server ?? 'tool call'
+      input.toolServer && input.toolName
+        ? `${input.toolServer}/${input.toolName}`
+        : input.toolName ?? input.toolServer ?? 'tool call'
 
     return started
       ? `Using ${label}.`
@@ -1090,28 +1130,27 @@ function summarizeCodexStatusItem(input: {
   }
 
   if (itemType === 'web.search') {
-    const query = normalizeStatusText(
-      findDeepStringByKeys(input.item, ['query', 'search_query', 'searchQuery']) ?? null,
-    )
-
     if (started) {
-      return query ? `Searching the web for ${JSON.stringify(query)}.` : 'Searching the web.'
+      return input.searchQuery
+        ? `Searching the web for ${JSON.stringify(input.searchQuery)}.`
+        : 'Searching the web.'
     }
 
-    return query ? `Finished web search for ${JSON.stringify(query)}.` : 'Finished web search.'
+    return input.searchQuery
+      ? `Finished web search for ${JSON.stringify(input.searchQuery)}.`
+      : 'Finished web search.'
   }
 
   if (itemType === 'file.change' && completed) {
-    const paths = collectFilePaths(input.item)
-    if (paths.length === 0) {
+    if (input.filePaths.length === 0) {
       return 'Updated files.'
     }
 
-    if (paths.length === 1) {
-      return `Updated ${paths[0]}.`
+    if (input.filePaths.length === 1) {
+      return `Updated ${input.filePaths[0]}.`
     }
 
-    return `Updated files: ${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ', …' : ''}.`
+    return `Updated files: ${input.filePaths.slice(0, 3).join(', ')}${input.filePaths.length > 3 ? ', …' : ''}.`
   }
 
   return null

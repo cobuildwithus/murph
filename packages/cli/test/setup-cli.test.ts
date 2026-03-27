@@ -123,9 +123,12 @@ test('setup scheduled updates defer preset-backed jobs until an explicit deliver
   try {
     const scheduledUpdates = await configureSetupScheduledUpdates({
       dryRun: false,
-      presetIds: ['weekly-health-snapshot', 'environment-health-watch'],
+      presetIds: [
+        'weekly-health-snapshot',
+        'environment-health-watch',
+        'weekly-health-snapshot',
+      ],
       steps,
-      vault: vaultRoot,
     })
 
     assert.deepEqual(
@@ -148,52 +151,38 @@ test('setup scheduled updates defer preset-backed jobs until an explicit deliver
 })
 
 test('setup scheduled updates keep returning deferred recommendations on repeated onboarding runs', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
+  await configureSetupScheduledUpdates({
+    dryRun: false,
+    presetIds: ['environment-health-watch'],
+    steps: [],
+  })
 
-  try {
-    await configureSetupScheduledUpdates({
-      dryRun: false,
-      presetIds: ['environment-health-watch'],
-      steps: [],
-      vault: vaultRoot,
-    })
+  const steps: SetupResult['steps'] = []
+  const scheduledUpdates = await configureSetupScheduledUpdates({
+    dryRun: false,
+    presetIds: ['environment-health-watch'],
+    steps,
+  })
 
-    const steps: SetupResult['steps'] = []
-    const scheduledUpdates = await configureSetupScheduledUpdates({
-      dryRun: false,
-      presetIds: ['environment-health-watch'],
-      steps,
-      vault: vaultRoot,
-    })
-
-    assert.deepEqual(
-      scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
-      [['environment-health-watch', 'skipped']],
-    )
-    assert.equal(steps[0]?.status, 'skipped')
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
+  assert.deepEqual(
+    scheduledUpdates.map((entry) => [entry.preset.id, entry.status]),
+    [['environment-health-watch', 'skipped']],
+  )
+  assert.equal(steps[0]?.status, 'skipped')
 })
 
 test('setup scheduled updates can be fully opted out during onboarding', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
   const steps: SetupResult['steps'] = []
 
-  try {
-    const scheduledUpdates = await configureSetupScheduledUpdates({
-      dryRun: false,
-      presetIds: [],
-      steps,
-      vault: vaultRoot,
-    })
+  const scheduledUpdates = await configureSetupScheduledUpdates({
+    dryRun: false,
+    presetIds: [],
+    steps,
+  })
 
-    assert.deepEqual(scheduledUpdates, [])
-    assert.equal(steps[0]?.status, 'skipped')
-    assert.match(steps[0]?.detail ?? '', /No assistant scheduled updates selected/u)
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
+  assert.deepEqual(scheduledUpdates, [])
+  assert.equal(steps[0]?.status, 'skipped')
+  assert.match(steps[0]?.detail ?? '', /No assistant scheduled updates selected/u)
 })
 
 test('public URL review recommends hosted apps/web for wearable ingress when no public base is configured', () => {
@@ -249,6 +238,35 @@ test('public URL review recommends tunnel mode for Linq-only ingress and keeps t
   )
 })
 
+test('public URL review keeps hosted wearable guidance while preserving the local Linq webhook when both are selected', () => {
+  const review = buildSetupWizardPublicUrlReview({
+    channels: ['linq'],
+    wearables: ['oura', 'whoop'],
+  })
+
+  assert.equal(review.enabled, true)
+  assert.equal(review.recommendedStrategy, 'hosted')
+  assert.match(review.summary, /hosted `apps\/web`/u)
+  assert.match(review.summary, /local inbox webhook/u)
+  assert.deepEqual(
+    review.targets.map((target) => target.label),
+    [
+      'WHOOP callback',
+      'WHOOP webhook',
+      'Oura callback',
+      'Oura webhook',
+      'Linq webhook',
+    ],
+  )
+  assert.match(
+    describeSetupWizardPublicUrlStrategyChoice({
+      review,
+      strategy: 'hosted',
+    }),
+    /keep Linq on the local webhook path/u,
+  )
+})
+
 test('public URL review stays hidden when a public device-sync base is already configured', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: ['linq'],
@@ -258,6 +276,77 @@ test('public URL review stays hidden when a public device-sync base is already c
 
   assert.equal(review.enabled, false)
   assert.equal(review.targets.length, 0)
+})
+
+test('interactive onboarding treats public URL guidance as informational and never forwards a strategy into setup', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-public-url-'))
+  const receivedInputs: Array<{
+    channels: string[] | null
+    publicUrlStrategy: string | null
+    scheduledUpdatePresetIds: string[] | null
+    wearables: string[] | null
+  }> = []
+  const cli = createSetupCli({
+    commandName: 'healthybob',
+    runtimeEnv: {
+      getCurrentEnv() {
+        return {}
+      },
+      async promptForMissing() {
+        return {}
+      },
+    },
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+    services: {
+      async setupMacos(input: any) {
+        receivedInputs.push({
+          channels: input.channels == null ? null : [...input.channels],
+          publicUrlStrategy:
+            typeof input.publicUrlStrategy === 'string'
+              ? input.publicUrlStrategy
+              : null,
+          scheduledUpdatePresetIds:
+            input.scheduledUpdatePresetIds == null
+              ? null
+              : [...input.scheduledUpdatePresetIds],
+          wearables: input.wearables == null ? null : [...input.wearables],
+        })
+        return makeSetupResult(input.vault)
+      },
+    } as ReturnType<typeof createSetupServices>,
+    wizard: {
+      async run() {
+        return {
+          channels: ['linq'],
+          publicUrlStrategy: 'hosted',
+          scheduledUpdates: [],
+          wearables: ['whoop'],
+        } as any
+      },
+    },
+  })
+
+  try {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+      env: process.env,
+      exit: () => {},
+      stdout() {},
+    })
+
+    assert.deepEqual(receivedInputs, [
+      {
+        channels: ['linq'],
+        publicUrlStrategy: null,
+        scheduledUpdatePresetIds: [],
+        wearables: ['whoop'],
+      },
+    ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('codex auth account parser captures the local ChatGPT plan without persisting identifiers', () => {

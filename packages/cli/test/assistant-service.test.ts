@@ -5,6 +5,7 @@ import path from 'node:path'
 import {
   applyCanonicalWriteBatch,
   initializeVault,
+  listWriteOperationMetadataPaths,
   readJsonlRecords,
   updateVaultSummary,
 } from '@healthybob/core'
@@ -82,6 +83,17 @@ beforeEach(() => {
   serviceMocks.deliverAssistantMessageOverBinding.mockReset()
   serviceMocks.executeAssistantProviderTurn.mockReset()
 })
+
+async function findNewOperationMetadataPath(
+  vaultRoot: string,
+  existingPaths: Set<string>,
+): Promise<string> {
+  const operationRelativePath = (
+    await listWriteOperationMetadataPaths(vaultRoot)
+  ).find((relativePath) => !existingPaths.has(relativePath))
+  assert.ok(operationRelativePath)
+  return operationRelativePath
+}
 
 test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
   const defaults = {
@@ -172,6 +184,57 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       reasoningEffort: 'low',
     },
   )
+})
+
+test('sendAssistantMessage treats null provider-option inputs as fallbacks to saved operator defaults', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-provider-defaults-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    await saveAssistantOperatorDefaultsPatch({
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
+    })
+
+    await sendAssistantMessage({
+      vault: vaultRoot,
+      prompt: 'Use the saved assistant backend.',
+      provider: 'openai-compatible',
+      model: null,
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+    })
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.provider, 'openai-compatible')
+  assert.equal(firstCall?.model, 'gpt-oss:20b')
+  assert.equal(firstCall?.baseUrl, 'http://127.0.0.1:11434/v1')
+  assert.equal(firstCall?.apiKeyEnv, 'OLLAMA_API_KEY')
+  assert.equal(firstCall?.providerName, 'ollama')
 })
 
 test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and capability-aware assistant tool guidance', async () => {
@@ -1699,6 +1762,337 @@ test('sendAssistantMessage restores the committed canonical content when a provi
 
   const metadata = JSON.parse(await readFile(metadataPath, 'utf8'))
   assert.equal(metadata.title, 'Legit Guarded Title')
+})
+
+test('sendAssistantMessage blocks on malformed write-operation metadata and still rolls back later direct tampering', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'healthybob-assistant-service-canonical-bad-operation-metadata-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-corrupted-metadata.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const committedContent = '# Guarded metadata corruption\n'
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    const existingOperationPaths = new Set(
+      await listWriteOperationMetadataPaths(vaultRoot),
+    )
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_bad_metadata_test',
+      summary: 'Write guarded metadata corruption target',
+      textWrites: [
+        {
+          relativePath: targetRelativePath,
+          content: committedContent,
+        },
+      ],
+    })
+
+    const operationRelativePath = await findNewOperationMetadataPath(
+      vaultRoot,
+      existingOperationPaths,
+    )
+    const operationPath = path.join(vaultRoot, operationRelativePath)
+    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as Record<string, unknown>
+    operation.schemaVersion = 'broken-write-operation'
+    await writeFile(
+      operationPath,
+      `${JSON.stringify(operation, null, 2)}\n`,
+    )
+    await writeFile(targetPath, 'tampered-after-corruption\n')
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-bad-operation-metadata',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-bad-operation-metadata',
+      prompt: 'Update the vault title.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.equal(error.context?.guardFailureReason, 'invalid_write_operation_metadata')
+      assert.equal(error.context?.guardFailureCode, 'OPERATION_INVALID')
+      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
+      assert.deepEqual(error.context?.paths, [targetRelativePath])
+      return true
+    },
+  )
+
+  assert.equal(await readFile(targetPath, 'utf8'), committedContent)
+
+  const session = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:canonical-bad-operation-metadata',
+  })
+  assert.equal(session.session.turnCount, 0)
+  assert.equal(session.session.providerSessionId, null)
+})
+
+test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead of being treated like no payload', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'healthybob-assistant-service-canonical-missing-committed-payload-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-missing-payload.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const committedContent = '# Guarded missing payload corruption\n'
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    const existingOperationPaths = new Set(
+      await listWriteOperationMetadataPaths(vaultRoot),
+    )
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_missing_payload_test',
+      summary: 'Write guarded missing payload target',
+      textWrites: [
+        {
+          relativePath: targetRelativePath,
+          content: committedContent,
+        },
+      ],
+    })
+
+    const operationRelativePath = await findNewOperationMetadataPath(
+      vaultRoot,
+      existingOperationPaths,
+    )
+    const operationPath = path.join(vaultRoot, operationRelativePath)
+    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+      actions?: Array<Record<string, unknown>>
+    }
+    assert.ok(Array.isArray(operation.actions))
+    operation.actions?.forEach((action) => {
+      if (action.kind === 'text_write' && action.targetRelativePath === targetRelativePath) {
+        delete action.committedPayloadBase64
+      }
+    })
+    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-missing-committed-payload',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-missing-committed-payload',
+      prompt: 'Update the vault title.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.equal(error.context?.guardFailureReason, 'invalid_committed_payload')
+      assert.equal(error.context?.guardFailureActionKind, 'text_write')
+      assert.equal(error.context?.guardFailureTargetPath, targetRelativePath)
+      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
+      assert.deepEqual(error.context?.paths, [targetRelativePath])
+      return true
+    },
+  )
+
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+
+  const session = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:canonical-missing-committed-payload',
+  })
+  assert.equal(session.session.turnCount, 0)
+  assert.equal(session.session.providerSessionId, null)
+})
+
+test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and still rolls back later direct tampering', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'healthybob-assistant-service-canonical-noncanonical-payload-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-noncanonical-payload.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const committedContent = '# Guarded noncanonical payload corruption\n'
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    const existingOperationPaths = new Set(
+      await listWriteOperationMetadataPaths(vaultRoot),
+    )
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_noncanonical_payload_test',
+      summary: 'Write guarded noncanonical payload target',
+      textWrites: [
+        {
+          relativePath: targetRelativePath,
+          content: committedContent,
+        },
+      ],
+    })
+
+    const operationRelativePath = await findNewOperationMetadataPath(
+      vaultRoot,
+      existingOperationPaths,
+    )
+    const operationPath = path.join(vaultRoot, operationRelativePath)
+    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+      actions?: Array<Record<string, unknown>>
+    }
+    assert.ok(Array.isArray(operation.actions))
+    operation.actions?.forEach((action) => {
+      if (
+        action.kind === 'text_write' &&
+        action.targetRelativePath === targetRelativePath &&
+        typeof action.committedPayloadBase64 === 'string'
+      ) {
+        action.committedPayloadBase64 = action.committedPayloadBase64.endsWith('=')
+          ? action.committedPayloadBase64.replace(/=+$/u, '')
+          : `${action.committedPayloadBase64}\n`
+      }
+    })
+    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+    await writeFile(targetPath, 'tampered-after-noncanonical-payload\n')
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-noncanonical-committed-payload',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-noncanonical-committed-payload',
+      prompt: 'Update the vault title.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.equal(error.context?.guardFailureReason, 'invalid_committed_payload')
+      assert.equal(error.context?.guardFailureActionKind, 'text_write')
+      assert.equal(error.context?.guardFailureTargetPath, targetRelativePath)
+      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
+      assert.deepEqual(error.context?.paths, [targetRelativePath])
+      return true
+    },
+  )
+
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+
+  const session = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:canonical-noncanonical-committed-payload',
+  })
+  assert.equal(session.session.turnCount, 0)
+  assert.equal(session.session.providerSessionId, null)
+})
+
+test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossible non-UTF-8 write bytes', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'healthybob-assistant-service-canonical-binary-payload-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-binary-payload.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const committedContent = '# Guarded binary payload corruption\n'
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    const existingOperationPaths = new Set(
+      await listWriteOperationMetadataPaths(vaultRoot),
+    )
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_binary_payload_test',
+      summary: 'Write guarded binary payload target',
+      textWrites: [
+        {
+          relativePath: targetRelativePath,
+          content: committedContent,
+        },
+      ],
+    })
+
+    const operationRelativePath = await findNewOperationMetadataPath(
+      vaultRoot,
+      existingOperationPaths,
+    )
+    const operationPath = path.join(vaultRoot, operationRelativePath)
+    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+      actions?: Array<Record<string, unknown>>
+    }
+    assert.ok(Array.isArray(operation.actions))
+    operation.actions?.forEach((action) => {
+      if (action.kind === 'text_write' && action.targetRelativePath === targetRelativePath) {
+        action.committedPayloadBase64 = '/w=='
+      }
+    })
+    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-binary-committed-payload',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:canonical-binary-committed-payload',
+      prompt: 'Update the vault title.',
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED')
+      assert.equal(error.context?.guardFailureReason, 'invalid_committed_payload')
+      assert.equal(error.context?.guardFailureActionKind, 'text_write')
+      assert.equal(error.context?.guardFailureTargetPath, targetRelativePath)
+      assert.match(error.context?.guardFailurePath ?? '', /^\.runtime\/operations\/op_/u)
+      assert.deepEqual(error.context?.paths, [targetRelativePath])
+      return true
+    },
+  )
+
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+
+  const session = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:canonical-binary-committed-payload',
+  })
+  assert.equal(session.session.turnCount, 0)
+  assert.equal(session.session.providerSessionId, null)
 })
 
 test('sendAssistantMessage prefers the canonical write guard error when the provider both writes directly and throws', async () => {

@@ -71,12 +71,6 @@ interface SetupWizardWearableOption {
 
 export type SetupPublicUrlStrategy = 'hosted' | 'tunnel'
 
-interface SetupWizardPublicUrlOption {
-  description: string
-  title: string
-  value: SetupPublicUrlStrategy
-}
-
 export interface SetupWizardPublicUrlTarget {
   detail: string
   label: string
@@ -85,7 +79,6 @@ export interface SetupWizardPublicUrlTarget {
 
 export interface SetupWizardPublicUrlReview {
   enabled: boolean
-  options: readonly SetupWizardPublicUrlOption[]
   recommendedStrategy: SetupPublicUrlStrategy
   summary: string
   targets: SetupWizardPublicUrlTarget[]
@@ -99,6 +92,12 @@ type SetupWizardStep =
   | 'wearables'
   | 'public-url'
   | 'confirm'
+
+type SetupWizardFlowStep = Exclude<SetupWizardStep, 'intro'>
+type SetupWizardSelectionStep = Extract<
+  SetupWizardFlowStep,
+  'assistant' | 'scheduled-updates' | 'channels' | 'wearables'
+>
 
 const DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL = 'http://127.0.0.1:8788'
 const DEFAULT_SETUP_LINQ_WEBHOOK_URL = 'http://127.0.0.1:8789/linq-webhook'
@@ -172,21 +171,6 @@ const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [
     description: 'OAuth connect plus ongoing sync.',
     title: 'WHOOP',
     wearable: 'whoop',
-  },
-]
-
-const setupWizardPublicUrlOptions: readonly SetupWizardPublicUrlOption[] = [
-  {
-    value: 'hosted',
-    title: 'Hosted app first',
-    description:
-      'Use hosted `apps/web` for WHOOP/Oura callbacks and webhooks. This is the easier stable base when you need public device-sync ingress.',
-  },
-  {
-    value: 'tunnel',
-    title: 'Tunnel first',
-    description:
-      'Keep ingress local and expose the local webhook/callback routes through a tunnel. This is the recommended starting point for Linq today.',
   },
 ]
 
@@ -370,30 +354,16 @@ export async function runSetupWizard(
     const [scheduledUpdateIndex, setScheduledUpdateIndex] = React.useState(0)
     const [channelIndex, setChannelIndex] = React.useState(0)
     const [wearableIndex, setWearableIndex] = React.useState(0)
-    const [publicUrlIndex, setPublicUrlIndex] = React.useState(0)
     const [selectedAssistantPreset, setSelectedAssistantPreset] =
       React.useState<SetupAssistantPreset>(initialAssistantPreset)
     const [selectedChannels, setSelectedChannels] = React.useState<SetupChannel[]>(
       initialChannels,
     )
-    const [selectedScheduledUpdates, setSelectedScheduledUpdates] = React.useState<string[]>(
-      initialScheduledUpdates,
-    )
+    const [selectedScheduledUpdates, setSelectedScheduledUpdates] =
+      React.useState<string[]>(initialScheduledUpdates)
     const [selectedWearables, setSelectedWearables] = React.useState<SetupWearable[]>(
       initialWearables,
     )
-    const [selectedPublicUrlStrategy, setSelectedPublicUrlStrategy] =
-      React.useState<SetupPublicUrlStrategy>(
-        buildSetupWizardPublicUrlReview({
-          channels: initialChannels,
-          wearables: initialWearables,
-          publicBaseUrl: input.publicBaseUrl,
-          deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
-          linqLocalWebhookUrl: input.linqLocalWebhookUrl,
-        }).recommendedStrategy,
-      )
-    const [publicUrlStrategyTouched, setPublicUrlStrategyTouched] =
-      React.useState(false)
     const latestAssistantRef = React.useRef<SetupAssistantPreset>(
       initialAssistantPreset,
     )
@@ -408,6 +378,12 @@ export async function runSetupWizard(
       linqLocalWebhookUrl: input.linqLocalWebhookUrl,
     })
     const includePublicUrlStep = publicUrlReview.enabled
+    const publicUrlGuidance = publicUrlReview.enabled
+      ? describeSetupWizardPublicUrlStrategyChoice({
+          review: publicUrlReview,
+          strategy: publicUrlReview.recommendedStrategy,
+        })
+      : null
 
     React.useEffect(() => {
       latestAssistantRef.current = selectedAssistantPreset
@@ -425,21 +401,144 @@ export async function runSetupWizard(
       latestWearablesRef.current = selectedWearables
     }, [selectedWearables])
 
-    React.useEffect(() => {
-      if (publicUrlStrategyTouched || !publicUrlReview.enabled) {
-        return
-      }
+    type SetupWizardSelectionLine = {
+      active: boolean
+      description: string
+      key: string
+      selected: boolean
+      title: string
+    }
 
-      const recommendedIndex = findSetupWizardPublicUrlOptionIndex(
-        publicUrlReview.recommendedStrategy,
-      )
-      setPublicUrlIndex(recommendedIndex)
-      setSelectedPublicUrlStrategy(publicUrlReview.recommendedStrategy)
-    }, [
-      publicUrlReview.enabled,
-      publicUrlReview.recommendedStrategy,
-      publicUrlStrategyTouched,
-    ])
+    type SetupWizardSelectionConfig = {
+      instructions: string
+      lines: SetupWizardSelectionLine[]
+      marker: 'checkbox' | 'radio'
+      nextStep: SetupWizardStep
+      previousStep: SetupWizardStep
+      selectCurrentOnEnter: boolean
+      setIndex: React.Dispatch<React.SetStateAction<number>>
+      step: SetupWizardSelectionStep
+      stepIntro?: string
+      toggleCurrent: () => void
+    }
+
+    const selectionSteps: Record<
+      SetupWizardSelectionStep,
+      SetupWizardSelectionConfig
+    > = {
+      assistant: {
+        instructions:
+          'Use ↑/↓ to move, Space to select, Enter to continue, or Esc to go back.',
+        lines: setupWizardAssistantOptions.map((option, index) => ({
+          active: index === assistantIndex,
+          description: option.description,
+          key: option.preset,
+          selected: option.preset === selectedAssistantPreset,
+          title: option.title,
+        })),
+        marker: 'radio',
+        nextStep: 'scheduled-updates',
+        previousStep: 'intro',
+        selectCurrentOnEnter: true,
+        setIndex: setAssistantIndex,
+        step: 'assistant',
+        toggleCurrent: () => {
+          const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
+          if (activePreset) {
+            setSelectedAssistantPreset(activePreset)
+          }
+        },
+      },
+      'scheduled-updates': {
+        instructions:
+          'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
+        lines: setupWizardScheduledUpdateOptions.map((option, index) => ({
+          active: index === scheduledUpdateIndex,
+          description: option.description,
+          key: option.id,
+          selected: selectedScheduledUpdates.includes(option.id),
+          title: `${option.title} · ${option.scheduleLabel}`,
+        })),
+        marker: 'checkbox',
+        nextStep: 'channels',
+        previousStep: 'assistant',
+        selectCurrentOnEnter: false,
+        setIndex: setScheduledUpdateIndex,
+        step: 'scheduled-updates',
+        stepIntro:
+          'Two broad starter updates are selected by default. Onboarding will not install them automatically because cron jobs now require an explicit outbound destination; use this screen to review what you may want to install later with `assistant cron preset install --channel ...`.',
+        toggleCurrent: () => {
+          const activePresetId =
+            setupWizardScheduledUpdateOptions[scheduledUpdateIndex]?.id
+          if (activePresetId) {
+            setSelectedScheduledUpdates((current) =>
+              toggleSetupWizardScheduledUpdate(current, activePresetId),
+            )
+          }
+        },
+      },
+      channels: {
+        instructions:
+          'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
+        lines: setupWizardChannelOptions.map((option, index) => {
+          const status = getChannelStatus(option.channel)
+          return {
+            active: index === channelIndex,
+            description: `${option.description} ${status.detail}`.trim(),
+            key: option.channel,
+            selected: selectedChannels.includes(option.channel),
+            title: `${option.title} · ${status.badge}`,
+          }
+        }),
+        marker: 'checkbox',
+        nextStep: 'wearables',
+        previousStep: 'scheduled-updates',
+        selectCurrentOnEnter: false,
+        setIndex: setChannelIndex,
+        step: 'channels',
+        toggleCurrent: () => {
+          const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
+          if (activeChannel) {
+            setSelectedChannels((current) =>
+              toggleSetupWizardChannel(current, activeChannel),
+            )
+          }
+        },
+      },
+      wearables: {
+        instructions:
+          'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
+        lines: setupWizardWearableOptions.map((option, index) => {
+          const status = getWearableStatus(option.wearable)
+          return {
+            active: index === wearableIndex,
+            description: `${option.description} ${status.detail}`.trim(),
+            key: option.wearable,
+            selected: selectedWearables.includes(option.wearable),
+            title: `${option.title} · ${status.badge}`,
+          }
+        }),
+        marker: 'checkbox',
+        nextStep: includePublicUrlStep ? 'public-url' : 'confirm',
+        previousStep: 'channels',
+        selectCurrentOnEnter: false,
+        setIndex: setWearableIndex,
+        step: 'wearables',
+        toggleCurrent: () => {
+          const activeWearable = setupWizardWearableOptions[wearableIndex]?.wearable
+          if (activeWearable) {
+            setSelectedWearables((current) =>
+              toggleSetupWizardWearable(current, activeWearable),
+            )
+          }
+        },
+      },
+    }
+
+    const selectionStep =
+      step === 'intro' || step === 'public-url' || step === 'confirm'
+        ? null
+        : selectionSteps[step]
 
     useInput((value, key) => {
       if ((key.ctrl && value === 'c') || value.toLowerCase() === 'q') {
@@ -465,200 +564,48 @@ export async function runSetupWizard(
         return
       }
 
-      if (step === 'assistant') {
+      if (selectionStep) {
         if (key.upArrow) {
-          setAssistantIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, -1),
+          selectionStep.setIndex((current) =>
+            wrapSetupWizardIndex(current, selectionStep.lines.length, -1),
           )
           return
         }
 
         if (key.downArrow) {
-          setAssistantIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardAssistantOptions.length, 1),
+          selectionStep.setIndex((current) =>
+            wrapSetupWizardIndex(current, selectionStep.lines.length, 1),
           )
           return
         }
 
         if (value === ' ') {
-          const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
-          if (activePreset) {
-            setSelectedAssistantPreset(activePreset)
-          }
+          selectionStep.toggleCurrent()
           return
         }
 
         if (key.escape) {
-          setStep('intro')
+          setStep(selectionStep.previousStep)
           return
         }
 
         if (key.return) {
-          const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
-          if (activePreset) {
-            setSelectedAssistantPreset(activePreset)
+          if (selectionStep.selectCurrentOnEnter) {
+            selectionStep.toggleCurrent()
           }
-          setStep('scheduled-updates')
+          setStep(selectionStep.nextStep)
           return
-        }
-        return
-      }
-
-      if (step === 'scheduled-updates') {
-        if (key.upArrow) {
-          setScheduledUpdateIndex((current) =>
-            wrapSetupWizardIndex(
-              current,
-              setupWizardScheduledUpdateOptions.length,
-              -1,
-            ),
-          )
-          return
-        }
-
-        if (key.downArrow) {
-          setScheduledUpdateIndex((current) =>
-            wrapSetupWizardIndex(
-              current,
-              setupWizardScheduledUpdateOptions.length,
-              1,
-            ),
-          )
-          return
-        }
-
-        if (value === ' ') {
-          const activePresetId =
-            setupWizardScheduledUpdateOptions[scheduledUpdateIndex]?.id
-          if (activePresetId) {
-            setSelectedScheduledUpdates((current) =>
-              toggleSetupWizardScheduledUpdate(current, activePresetId),
-            )
-          }
-          return
-        }
-
-        if (key.escape) {
-          setStep('assistant')
-          return
-        }
-
-        if (key.return) {
-          setStep('channels')
-          return
-        }
-        return
-      }
-
-      if (step === 'channels') {
-        if (key.upArrow) {
-          setChannelIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardChannelOptions.length, -1),
-          )
-          return
-        }
-
-        if (key.downArrow) {
-          setChannelIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardChannelOptions.length, 1),
-          )
-          return
-        }
-
-        if (value === ' ') {
-          const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
-          if (activeChannel) {
-            setSelectedChannels((current) =>
-              toggleSetupWizardChannel(current, activeChannel),
-            )
-          }
-          return
-        }
-
-        if (key.escape) {
-          setStep('scheduled-updates')
-          return
-        }
-
-        if (key.return) {
-          setStep('wearables')
-        }
-        return
-      }
-
-      if (step === 'wearables') {
-        if (key.upArrow) {
-          setWearableIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardWearableOptions.length, -1),
-          )
-          return
-        }
-
-        if (key.downArrow) {
-          setWearableIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardWearableOptions.length, 1),
-          )
-          return
-        }
-
-        if (value === ' ') {
-          const activeWearable = setupWizardWearableOptions[wearableIndex]?.wearable
-          if (activeWearable) {
-            setSelectedWearables((current) =>
-              toggleSetupWizardWearable(current, activeWearable),
-            )
-          }
-          return
-        }
-
-        if (key.escape) {
-          setStep('channels')
-          return
-        }
-
-        if (key.return) {
-          setStep(includePublicUrlStep ? 'public-url' : 'confirm')
         }
         return
       }
 
       if (step === 'public-url') {
-        if (key.upArrow) {
-          setPublicUrlStrategyTouched(true)
-          setPublicUrlIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardPublicUrlOptions.length, -1),
-          )
-          return
-        }
-
-        if (key.downArrow) {
-          setPublicUrlStrategyTouched(true)
-          setPublicUrlIndex((current) =>
-            wrapSetupWizardIndex(current, setupWizardPublicUrlOptions.length, 1),
-          )
-          return
-        }
-
-        if (value === ' ') {
-          const activeStrategy = setupWizardPublicUrlOptions[publicUrlIndex]?.value
-          if (activeStrategy) {
-            setPublicUrlStrategyTouched(true)
-            setSelectedPublicUrlStrategy(activeStrategy)
-          }
-          return
-        }
-
         if (key.escape) {
           setStep('wearables')
           return
         }
 
-        if (key.return) {
-          const activeStrategy = setupWizardPublicUrlOptions[publicUrlIndex]?.value
-          if (activeStrategy) {
-            setPublicUrlStrategyTouched(true)
-            setSelectedPublicUrlStrategy(activeStrategy)
-          }
+        if (key.return || value === ' ') {
           setStep('confirm')
         }
         return
@@ -684,357 +631,225 @@ export async function runSetupWizard(
       }
     })
 
-      const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
-      const selectedChannelSummary = formatSelectionSummary(
-        selectedChannels.map((channel) => formatSetupChannel(channel)),
-      )
-      const selectedScheduledUpdateSummary = formatSelectionSummary(
-        selectedScheduledUpdates.map((presetId) =>
-          formatSetupScheduledUpdate(presetId),
-        ),
-      )
-      const selectedWearableSummary = formatSelectionSummary(
-        selectedWearables.map((wearable) => formatSetupWearable(wearable)),
-      )
-      const publicUrlStrategySummary = publicUrlReview.enabled
-        ? describeSetupWizardPublicUrlStrategyChoice({
-            review: publicUrlReview,
-            strategy: selectedPublicUrlStrategy,
-          })
-        : null
-      const selectedReadyNow = [
-        ...selectedChannels.flatMap((channel) =>
-          getChannelStatus(channel).ready ? [formatSetupChannel(channel)] : [],
-        ),
-        ...selectedWearables.flatMap((wearable) =>
-          getWearableStatus(wearable).ready ? [formatSetupWearable(wearable)] : [],
-        ),
-      ]
-      const selectedNeedsEnv = [
-        ...selectedChannels.flatMap((channel) => {
-          const status = getChannelStatus(channel)
-          return status.missingEnv.length > 0
-            ? [`${formatSetupChannel(channel)} (${formatMissingEnv(status.missingEnv)})`]
-            : []
-        }),
-        ...selectedWearables.flatMap((wearable) => {
-          const status = getWearableStatus(wearable)
-          return status.missingEnv.length > 0
-            ? [`${formatSetupWearable(wearable)} (${formatMissingEnv(status.missingEnv)})`]
-            : []
-        }),
-      ]
+    const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
+    const selectedChannelSummary = formatSelectionSummary(
+      selectedChannels.map((channel) => formatSetupChannel(channel)),
+    )
+    const selectedScheduledUpdateSummary = formatSelectionSummary(
+      selectedScheduledUpdates.map((presetId) =>
+        formatSetupScheduledUpdate(presetId),
+      ),
+    )
+    const selectedWearableSummary = formatSelectionSummary(
+      selectedWearables.map((wearable) => formatSetupWearable(wearable)),
+    )
+    const selectedReadyNow = [
+      ...selectedChannels.flatMap((channel) =>
+        getChannelStatus(channel).ready ? [formatSetupChannel(channel)] : [],
+      ),
+      ...selectedWearables.flatMap((wearable) =>
+        getWearableStatus(wearable).ready ? [formatSetupWearable(wearable)] : [],
+      ),
+    ]
+    const selectedNeedsEnv = [
+      ...selectedChannels.flatMap((channel) => {
+        const status = getChannelStatus(channel)
+        return status.missingEnv.length > 0
+          ? [`${formatSetupChannel(channel)} (${formatMissingEnv(status.missingEnv)})`]
+          : []
+      }),
+      ...selectedWearables.flatMap((wearable) => {
+        const status = getWearableStatus(wearable)
+        return status.missingEnv.length > 0
+          ? [`${formatSetupWearable(wearable)} (${formatMissingEnv(status.missingEnv)})`]
+          : []
+      }),
+    ]
 
-      const assistantLines = setupWizardAssistantOptions.map((option, index) => {
-        const active = index === assistantIndex
-        const selected = option.preset === selectedAssistantPreset
-
-        return createElement(
+    const selectionStepLines =
+      selectionStep?.lines.map((line) =>
+        createElement(
           Box,
           {
             flexDirection: 'column',
-            key: option.preset,
+            key: line.key,
             marginBottom: 1,
           },
           createElement(
             Text,
             null,
-            `${active ? '>' : ' '} ${selected ? '(x)' : '( )'} ${option.title}`,
+            `${line.active ? '>' : ' '} ${
+              selectionStep.marker === 'checkbox'
+                ? line.selected
+                  ? '[x]'
+                  : '[ ]'
+                : line.selected
+                  ? '(x)'
+                  : '( )'
+            } ${line.title}`,
           ),
-          createElement(Text, null, `    ${option.description}`),
-        )
-      })
+          createElement(Text, null, `    ${line.description}`),
+        ),
+      ) ?? []
 
-      const scheduledUpdateLines = setupWizardScheduledUpdateOptions.map(
-        (option, index) => {
-          const active = index === scheduledUpdateIndex
-          const selected = selectedScheduledUpdates.includes(option.id)
+    const publicUrlTargetLines = publicUrlReview.targets.flatMap((target) => [
+      createElement(Text, { key: `${target.label}:url` }, `${target.label}: ${target.url}`),
+      createElement(Text, { key: `${target.label}:detail` }, `    ${target.detail}`),
+    ])
 
-          return createElement(
+    return createElement(
+      Box,
+      {
+        flexDirection: 'column',
+        paddingX: 1,
+        paddingY: 1,
+      },
+      createElement(Text, null, 'Healthy Bob onboarding'),
+      createElement(Text, null, formatSetupWizardStepper(step, includePublicUrlStep)),
+      createElement(Text, null, ''),
+      createElement(Text, null, `Vault: ${input.vault}`),
+      createElement(Text, null, `Assistant: ${assistantSummary}`),
+      createElement(Text, null, `Schedules: ${selectedScheduledUpdateSummary}`),
+      createElement(Text, null, `Channels: ${selectedChannelSummary}`),
+      createElement(Text, null, `Wearables: ${selectedWearableSummary}`),
+      createElement(Text, null, ''),
+      step === 'intro'
+        ? createElement(
             Box,
-            {
-              flexDirection: 'column',
-              key: option.id,
-              marginBottom: 1,
-            },
+            { flexDirection: 'column' },
             createElement(
               Text,
               null,
-              `${active ? '>' : ' '} ${selected ? '[x]' : '[ ]'} ${option.title} · ${option.scheduleLabel}`,
+              'Set your default assistant, review a small starter bundle of scheduled-update presets, choose message channels, and optionally connect wearables in the same onboarding flow.',
             ),
-            createElement(Text, null, `    ${option.description}`),
-          )
-        },
-      )
-
-      const channelLines = setupWizardChannelOptions.map((option, index) => {
-        const active = index === channelIndex
-        const selected = selectedChannels.includes(option.channel)
-        const status = getChannelStatus(option.channel)
-
-        return createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            key: option.channel,
-            marginBottom: 1,
-          },
-          createElement(
-            Text,
-            null,
-            `${active ? '>' : ' '} ${selected ? '[x]' : '[ ]'} ${option.title} · ${status.badge}`,
-          ),
-          createElement(Text, null, `    ${option.description} ${status.detail}`),
-        )
-      })
-
-      const wearableLines = setupWizardWearableOptions.map((option, index) => {
-        const active = index === wearableIndex
-        const selected = selectedWearables.includes(option.wearable)
-        const status = getWearableStatus(option.wearable)
-
-        return createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            key: option.wearable,
-            marginBottom: 1,
-          },
-          createElement(
-            Text,
-            null,
-            `${active ? '>' : ' '} ${selected ? '[x]' : '[ ]'} ${option.title} · ${status.badge}`,
-          ),
-          createElement(Text, null, `    ${option.description} ${status.detail}`),
-        )
-      })
-
-      const publicUrlOptionLines = setupWizardPublicUrlOptions.map((option, index) => {
-        const active = index === publicUrlIndex
-        const selected = option.value === selectedPublicUrlStrategy
-
-        return createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            key: option.value,
-            marginBottom: 1,
-          },
-          createElement(
-            Text,
-            null,
-            `${active ? '>' : ' '} ${selected ? '(x)' : '( )'} ${option.title}`,
-          ),
-          createElement(Text, null, `    ${option.description}`),
-        )
-      })
-
-      const publicUrlTargetLines = publicUrlReview.targets.flatMap((target) => [
-        createElement(Text, { key: `${target.label}:url` }, `${target.label}: ${target.url}`),
-        createElement(Text, { key: `${target.label}:detail` }, `    ${target.detail}`),
-      ])
-
-      return createElement(
-        Box,
-        {
-          flexDirection: 'column',
-          paddingX: 1,
-          paddingY: 1,
-        },
-        createElement(Text, null, 'Healthy Bob onboarding'),
-        createElement(Text, null, formatSetupWizardStepper(step, includePublicUrlStep)),
-        createElement(Text, null, ''),
-        createElement(Text, null, `Vault: ${input.vault}`),
-        createElement(Text, null, `Assistant: ${assistantSummary}`),
-        createElement(Text, null, `Schedules: ${selectedScheduledUpdateSummary}`),
-        createElement(Text, null, `Channels: ${selectedChannelSummary}`),
-        createElement(Text, null, `Wearables: ${selectedWearableSummary}`),
-        publicUrlStrategySummary
-          ? createElement(
+            createElement(Text, null, ''),
+            createElement(
               Text,
               null,
-              `Public URL plan: ${formatSetupPublicUrlStrategy(selectedPublicUrlStrategy)}`,
-            )
-          : null,
-        createElement(Text, null, ''),
-        step === 'intro'
-          ? createElement(
-              Box,
-              { flexDirection: 'column' },
-              createElement(
-                Text,
-                null,
-                'Set your default assistant, review a small starter bundle of scheduled-update presets, choose message channels, and optionally connect wearables in the same onboarding flow.',
-              ),
-              createElement(Text, null, ''),
-              createElement(
-                Text,
-                null,
-                'The next screens highlight preset-backed scheduled updates like weekly health compass summaries, environment checks, ingestible watchlists, and research roundups. Cron jobs now require an explicit outbound destination, so onboarding leaves these for later installation with `assistant cron preset install --channel ...`.',
-              ),
-              createElement(Text, null, ''),
-              createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),
-              createElement(Text, null, ''),
-              createElement(
-                Text,
-                null,
-                'Missing credentials can be entered after review for this run only, or left for later.',
-              ),
-              createElement(Text, null, ''),
-              createElement(
-                Text,
-                null,
-                `Press Enter to continue with ${commandName}, or q to cancel.`,
-              ),
-            )
-          : null,
-        step === 'assistant'
-          ? createElement(
-              Box,
-              { flexDirection: 'column' },
-              createElement(
-                Text,
-                null,
-                formatSetupWizardStepTitle('assistant', includePublicUrlStep),
-              ),
-              createElement(Text, null, ''),
-              ...assistantLines,
-              createElement(
-                Text,
-                null,
-                'Use ↑/↓ to move, Space to select, Enter to continue, or Esc to go back.',
-              ),
-            )
-          : null,
-        step === 'scheduled-updates'
-          ? createElement(
-              Box,
-              { flexDirection: 'column' },
-              createElement(
-                Text,
-                null,
-                formatSetupWizardStepTitle('scheduled-updates', includePublicUrlStep),
-              ),
-              createElement(Text, null, ''),
-              createElement(
-                Text,
-                null,
-                'Two broad starter updates are selected by default. Onboarding will not install them automatically because cron jobs now require an explicit outbound destination; use this screen to review what you may want to install later with `assistant cron preset install --channel ...`.',
-              ),
-              createElement(Text, null, ''),
-              ...scheduledUpdateLines,
-              createElement(
-                Text,
-                null,
-                'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
-              ),
-            )
-          : null,
-        step === 'channels'
-          ? createElement(
-              Box,
-              { flexDirection: 'column' },
-              createElement(
-                Text,
-                null,
-                formatSetupWizardStepTitle('channels', includePublicUrlStep),
-              ),
-              createElement(Text, null, ''),
-              ...channelLines,
-              createElement(
-                Text,
-                null,
-                'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
-              ),
-            )
-          : null,
-        step === 'wearables'
-          ? createElement(
-              Box,
-              { flexDirection: 'column' },
-              createElement(
-                Text,
-                null,
-                formatSetupWizardStepTitle('wearables', includePublicUrlStep),
-              ),
-              createElement(Text, null, ''),
-              ...wearableLines,
-              createElement(
-                Text,
-                null,
-                'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
-              ),
-            )
-          : null,
-        step === 'public-url'
-          ? createElement(
-              Box,
-              { flexDirection: 'column' },
-              createElement(
-                Text,
-                null,
-                formatSetupWizardStepTitle('public-url', includePublicUrlStep),
-              ),
-              createElement(Text, null, ''),
-              createElement(Text, null, publicUrlReview.summary),
-              createElement(Text, null, ''),
-              ...publicUrlOptionLines,
-              createElement(Text, null, 'Local targets for tunnel mode or smoke tests:'),
-              createElement(Text, null, ''),
-              ...publicUrlTargetLines,
-              createElement(Text, null, ''),
-              createElement(
-                Text,
-                null,
-                'Use ↑/↓ to move, Space to select, Enter to continue, or Esc to go back.',
-              ),
-            )
-          : null,
-        step === 'confirm'
-          ? createElement(
-              Box,
-              { flexDirection: 'column' },
-              createElement(
-                Text,
-                null,
-                formatSetupWizardStepTitle('confirm', includePublicUrlStep),
-              ),
-              createElement(Text, null, ''),
-              createElement(Text, null, `Ready now: ${formatSelectionSummary(selectedReadyNow)}`),
-              createElement(
-                Text,
-                null,
-                `Still needs env: ${formatSelectionSummary(selectedNeedsEnv)}`,
-              ),
-              createElement(
-                Text,
-                null,
-                `Scheduled updates: ${selectedScheduledUpdateSummary}`,
-              ),
-              publicUrlStrategySummary
-                ? createElement(Text, null, `Public URL strategy: ${publicUrlStrategySummary}`)
-                : null,
-              createElement(Text, null, ''),
-              createElement(
-                Text,
-                null,
-                selectedNeedsEnv.length > 0
-                  ? selectedScheduledUpdates.length > 0
-                    ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup, leave the selected scheduled updates for explicit later installation, and open any ready wearable connect flows.'
-                    : 'Healthy Bob will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
-                  : selectedScheduledUpdates.length > 0
-                    ? 'Healthy Bob will finish setup, leave the selected scheduled updates for explicit later installation, and open any selected wearable connect flows that are ready.'
-                    : 'Healthy Bob will finish setup and open any selected wearable connect flows that are ready.',
-              ),
-              createElement(Text, null, ''),
-              createElement(
-                Text,
-                null,
-                'Press Enter to run setup, or Esc to change the selection.',
-              ),
-            )
-          : null,
-      )
+              'The next screens highlight preset-backed scheduled updates like weekly health compass summaries, environment checks, ingestible watchlists, and research roundups. Cron jobs now require an explicit outbound destination, so onboarding leaves these for later installation with `assistant cron preset install --channel ...`.',
+            ),
+            createElement(Text, null, ''),
+            createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              'Missing credentials can be entered after review for this run only, or left for later.',
+            ),
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              `Press Enter to continue with ${commandName}, or q to cancel.`,
+            ),
+          )
+        : null,
+      selectionStep
+        ? createElement(
+            Box,
+            { flexDirection: 'column' },
+            createElement(
+              Text,
+              null,
+              formatSetupWizardStepTitle(selectionStep.step, includePublicUrlStep),
+            ),
+            createElement(Text, null, ''),
+            selectionStep.stepIntro
+              ? createElement(Text, null, selectionStep.stepIntro)
+              : null,
+            selectionStep.stepIntro ? createElement(Text, null, '') : null,
+            ...selectionStepLines,
+            createElement(Text, null, selectionStep.instructions),
+          )
+        : null,
+      step === 'public-url'
+        ? createElement(
+            Box,
+            { flexDirection: 'column' },
+            createElement(
+              Text,
+              null,
+              formatSetupWizardStepTitle('public-url', includePublicUrlStep),
+            ),
+            createElement(Text, null, ''),
+            createElement(Text, null, publicUrlReview.summary),
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              `Recommended starting point: ${formatSetupPublicUrlStrategy(publicUrlReview.recommendedStrategy)}`,
+            ),
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              publicUrlReview.recommendedStrategy === 'hosted'
+                ? 'Hosted app first keeps WHOOP/Oura callbacks and webhook ingress on the hosted `apps/web` surface, which is the easier stable base when you need public device-sync ingress.'
+                : 'Tunnel first keeps ingress local and exposes callback or webhook routes through a tunnel, which is the recommended starting point for Linq today.',
+            ),
+            createElement(Text, null, ''),
+            createElement(Text, null, 'Local targets for tunnel mode or smoke tests:'),
+            createElement(Text, null, ''),
+            ...publicUrlTargetLines,
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              'This screen is informational only. Healthy Bob does not save a public URL mode yet.',
+            ),
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              'Press Enter to continue, or Esc to go back.',
+            ),
+          )
+        : null,
+      step === 'confirm'
+        ? createElement(
+            Box,
+            { flexDirection: 'column' },
+            createElement(
+              Text,
+              null,
+              formatSetupWizardStepTitle('confirm', includePublicUrlStep),
+            ),
+            createElement(Text, null, ''),
+            createElement(Text, null, `Ready now: ${formatSelectionSummary(selectedReadyNow)}`),
+            createElement(
+              Text,
+              null,
+              `Still needs env: ${formatSelectionSummary(selectedNeedsEnv)}`,
+            ),
+            createElement(
+              Text,
+              null,
+              `Scheduled updates: ${selectedScheduledUpdateSummary}`,
+            ),
+            publicUrlGuidance
+              ? createElement(Text, null, `Public URL note: ${publicUrlGuidance}`)
+              : null,
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              selectedNeedsEnv.length > 0
+                ? selectedScheduledUpdates.length > 0
+                  ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup, leave the selected scheduled updates for explicit later installation, and open any ready wearable connect flows.'
+                  : 'Healthy Bob will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
+                : selectedScheduledUpdates.length > 0
+                  ? 'Healthy Bob will finish setup, leave the selected scheduled updates for explicit later installation, and open any selected wearable connect flows that are ready.'
+                  : 'Healthy Bob will finish setup and open any selected wearable connect flows that are ready.',
+            ),
+            createElement(Text, null, ''),
+            createElement(
+              Text,
+              null,
+              'Press Enter to run setup, or Esc to change the selection.',
+            ),
+          )
+        : null,
+    )
 
     function getChannelStatus(channel: SetupChannel): SetupWizardRuntimeStatus {
       return normalizeSetupWizardRuntimeStatus(input.channelStatuses?.[channel])
@@ -1188,15 +1003,6 @@ function formatMissingEnv(values: readonly string[]): string {
   return values.join(' + ')
 }
 
-function findSetupWizardPublicUrlOptionIndex(
-  strategy: SetupPublicUrlStrategy,
-): number {
-  const index = setupWizardPublicUrlOptions.findIndex(
-    (option) => option.value === strategy,
-  )
-  return index >= 0 ? index : 0
-}
-
 function formatSetupPublicUrlStrategy(strategy: SetupPublicUrlStrategy): string {
   return strategy === 'hosted' ? 'Hosted app first' : 'Tunnel first'
 }
@@ -1288,7 +1094,6 @@ export function buildSetupWizardPublicUrlReview(input: {
   if (!needsPublicStrategy || publicBaseUrl) {
     return {
       enabled: false,
-      options: setupWizardPublicUrlOptions,
       recommendedStrategy: 'hosted',
       summary: '',
       targets: [],
@@ -1297,7 +1102,6 @@ export function buildSetupWizardPublicUrlReview(input: {
 
   return {
     enabled: true,
-    options: setupWizardPublicUrlOptions,
     recommendedStrategy:
       selectedWearables.length > 0 ? 'hosted' : 'tunnel',
     summary: describeSetupWizardPublicUrlSummary({

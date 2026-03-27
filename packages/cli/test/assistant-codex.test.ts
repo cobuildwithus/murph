@@ -229,6 +229,124 @@ test('executeCodexPrompt emits progress events and can fall back to the last age
   ])
 })
 
+test('executeCodexPrompt projects progress and trace updates from the same normalized Codex item', async () => {
+  installSpawnMock((child) => {
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        type: 'item.completed',
+        itemId: 'assistant-shared-1',
+        item: {
+          type: 'agentMessage',
+          parts: [{ text: 'shared normalized reply' }],
+        },
+      })}\n`,
+    )
+    child.emit('close', 0, null)
+  })
+
+  const progressEvents: Array<{
+    id: string | null
+    kind: string
+    state: string
+    text: string
+  }> = []
+  const traceUpdates: Array<{
+    kind: string
+    mode?: string
+    streamKey?: string | null
+    text: string
+  }> = []
+
+  const result = await executeCodexPrompt({
+    prompt: 'Trace the shared normalization path.',
+    workingDirectory: '/tmp/vault',
+    onProgress(event) {
+      progressEvents.push({
+        id: event.id,
+        kind: event.kind,
+        state: event.state,
+        text: event.text,
+      })
+    },
+    onTraceEvent(event) {
+      for (const update of event.updates) {
+        traceUpdates.push({
+          kind: update.kind,
+          mode: 'mode' in update ? update.mode : undefined,
+          streamKey: 'streamKey' in update ? update.streamKey : undefined,
+          text: update.text,
+        })
+      }
+    },
+  })
+
+  assert.equal(result.finalMessage, 'shared normalized reply')
+  assert.deepEqual(progressEvents, [
+    {
+      id: 'assistant-shared-1',
+      kind: 'message',
+      state: 'completed',
+      text: 'shared normalized reply',
+    },
+  ])
+  assert.deepEqual(traceUpdates, [
+    {
+      kind: 'assistant',
+      mode: 'replace',
+      streamKey: 'assistant:assistant-shared-1',
+      text: 'shared normalized reply',
+    },
+  ])
+})
+
+test('executeCodexPrompt keeps plan progress item-first while plan.updated traces stay event-first', async () => {
+  installSpawnMock((child) => {
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'plan-progress-1',
+          type: 'plan',
+          explanation: 'nested item plan text',
+        },
+        explanation: 'top-level event plan text',
+      })}\n`,
+    )
+    child.emit('close', 0, null)
+  })
+
+  const progressEvents: Array<{
+    id: string | null
+    kind: string
+    state: string
+    text: string
+  }> = []
+
+  await executeCodexPrompt({
+    prompt: 'Show the current plan.',
+    workingDirectory: '/tmp/vault',
+    onProgress(event) {
+      progressEvents.push({
+        id: event.id,
+        kind: event.kind,
+        state: event.state,
+        text: event.text,
+      })
+    },
+  })
+
+  assert.deepEqual(progressEvents, [
+    {
+      id: 'plan-progress-1',
+      kind: 'plan',
+      state: 'completed',
+      text: 'Plan:\nnested item plan text',
+    },
+  ])
+})
+
 test('executeCodexPrompt ignores a blank last-message file and falls back to assistant output', async () => {
   installSpawnMock(async (child, args) => {
     const outputFile = readOutputFilePath(args)
@@ -638,6 +756,26 @@ test('extractCodexTraceUpdates normalizes assistant, thinking, and reconnect sta
         mode: 'append',
         streamKey: 'assistant:assistant-1',
         text: 'Hello',
+      },
+    ],
+  )
+
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'plan.updated',
+      explanation: 'top-level plan text',
+      item: {
+        id: 'plan-1',
+        type: 'plan',
+        explanation: 'nested item plan text',
+      },
+    }),
+    [
+      {
+        kind: 'thinking',
+        mode: 'replace',
+        streamKey: 'thinking:plan-1',
+        text: 'top-level plan text',
       },
     ],
   )

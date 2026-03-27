@@ -56,6 +56,10 @@ import {
   redactNullableHomePath,
 } from './setup-services/shell.js'
 import {
+  assistantProviderConfigsEqual,
+  serializeAssistantProviderOperatorDefaults,
+} from './assistant/provider-config.js'
+import {
   buildBaseFormulaSpecs,
   buildPythonFormulaSpec,
   createStep,
@@ -368,11 +372,10 @@ export function createSetupServices(
     const scheduledUpdates =
       input.scheduledUpdatePresetIds == null
         ? []
-        : await configureSetupScheduledUpdates({
+        : configureSetupScheduledUpdates({
             dryRun,
             presetIds: input.scheduledUpdatePresetIds,
             steps,
-            vault,
           })
 
     return {
@@ -1239,16 +1242,7 @@ function assistantSelectionToOperatorDefaults(
 ): Partial<AssistantOperatorDefaults> {
   return {
     provider: assistant.provider,
-    codexCommand: assistant.codexCommand,
-    model: assistant.model,
-    reasoningEffort: assistant.reasoningEffort,
-    sandbox: assistant.sandbox,
-    approvalPolicy: assistant.approvalPolicy,
-    profile: assistant.profile,
-    oss: assistant.oss,
-    baseUrl: assistant.baseUrl,
-    apiKeyEnv: assistant.apiKeyEnv,
-    providerName: assistant.providerName,
+    ...serializeAssistantProviderOperatorDefaults(assistant),
     account: assistant.account ?? null,
   }
 }
@@ -1260,27 +1254,9 @@ function assistantOperatorDefaultsMatch(
   return (
     normalizeNullableConfigField(existing?.provider) ===
       normalizeNullableConfigField(next.provider) &&
-    normalizeNullableConfigField(existing?.codexCommand) ===
-      normalizeNullableConfigField(next.codexCommand) &&
-    normalizeNullableConfigField(existing?.model) ===
-      normalizeNullableConfigField(next.model) &&
-    normalizeNullableConfigField(existing?.reasoningEffort) ===
-      normalizeNullableConfigField(next.reasoningEffort) &&
-    normalizeNullableConfigField(existing?.sandbox) ===
-      normalizeNullableConfigField(next.sandbox) &&
-    normalizeNullableConfigField(existing?.approvalPolicy) ===
-      normalizeNullableConfigField(next.approvalPolicy) &&
-    normalizeNullableConfigField(existing?.profile) ===
-      normalizeNullableConfigField(next.profile) &&
-    normalizeNullableConfigField(existing?.baseUrl) ===
-      normalizeNullableConfigField(next.baseUrl) &&
-    normalizeNullableConfigField(existing?.apiKeyEnv) ===
-      normalizeNullableConfigField(next.apiKeyEnv) &&
-    normalizeNullableConfigField(existing?.providerName) ===
-      normalizeNullableConfigField(next.providerName) &&
+    assistantProviderConfigsEqual(existing, next) &&
     JSON.stringify(existing?.account ?? null) ===
-      JSON.stringify(next.account ?? null) &&
-    (existing?.oss ?? null) === (next.oss ?? null)
+      JSON.stringify(next.account ?? null)
   )
 }
 

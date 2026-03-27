@@ -20,7 +20,6 @@ import {
 import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderOptions,
   type AssistantProviderProgressEvent,
   type AssistantProviderTurnResult,
 } from '../chat-provider.js'
@@ -70,6 +69,10 @@ import {
   createAssistantTurnReceipt,
   finalizeAssistantTurnReceipt,
 } from './turns.js'
+import {
+  mergeAssistantProviderConfigs,
+  serializeAssistantProviderSessionOptions,
+} from './provider-config.js'
 import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
@@ -201,6 +204,7 @@ export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
   defaults: AssistantOperatorDefaults | null,
 ): ResolveAssistantSessionInput {
+  const providerConfig = mergeAssistantProviderConfigs(input, defaults)
   const sessionId = input.conversation?.sessionId ?? input.sessionId
   const alias = input.conversation?.alias ?? input.alias
   const channel = input.conversation?.channel ?? input.channel
@@ -240,19 +244,15 @@ export function buildResolveAssistantSessionInput(
             ? false
             : undefined,
     provider: input.provider ?? defaults?.provider ?? undefined,
-    model: input.model ?? defaults?.model ?? null,
-    sandbox: input.sandbox ?? defaults?.sandbox ?? 'workspace-write',
-    approvalPolicy:
-      input.approvalPolicy ?? defaults?.approvalPolicy ?? 'on-request',
-    oss: input.oss ?? defaults?.oss ?? false,
-    profile: input.profile ?? defaults?.profile ?? null,
-    baseUrl: input.baseUrl ?? defaults?.baseUrl ?? null,
-    apiKeyEnv: input.apiKeyEnv ?? defaults?.apiKeyEnv ?? null,
-    providerName: input.providerName ?? defaults?.providerName ?? null,
-    reasoningEffort:
-      input.reasoningEffort ??
-      defaults?.reasoningEffort ??
-      null,
+    model: providerConfig.model,
+    sandbox: providerConfig.sandbox ?? 'workspace-write',
+    approvalPolicy: providerConfig.approvalPolicy ?? 'on-request',
+    oss: providerConfig.oss ?? false,
+    profile: providerConfig.profile,
+    baseUrl: providerConfig.baseUrl,
+    apiKeyEnv: providerConfig.apiKeyEnv,
+    providerName: providerConfig.providerName,
+    reasoningEffort: providerConfig.reasoningEffort,
     maxSessionAgeMs: input.maxSessionAgeMs ?? null,
   }
 }
@@ -440,44 +440,17 @@ function resolveAssistantTurnRoutes(
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
   const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
-  const providerOptions = resolveAssistantProviderOptions({
-    model: input.model ?? resolved.session.providerOptions.model ?? defaults?.model,
-    reasoningEffort:
-      input.reasoningEffort ??
-      resolved.session.providerOptions.reasoningEffort ??
-      defaults?.reasoningEffort,
-    sandbox:
-      input.sandbox ??
-      resolved.session.providerOptions.sandbox ??
-      defaults?.sandbox,
-    approvalPolicy:
-      input.approvalPolicy ??
-      resolved.session.providerOptions.approvalPolicy ??
-      defaults?.approvalPolicy,
-    profile:
-      input.profile ??
-      resolved.session.providerOptions.profile ??
-      defaults?.profile,
-    oss:
-      input.oss ??
-      resolved.session.providerOptions.oss ??
-      defaults?.oss,
-    baseUrl:
-      input.baseUrl ??
-      resolved.session.providerOptions.baseUrl ??
-      defaults?.baseUrl,
-    apiKeyEnv:
-      input.apiKeyEnv ??
-      resolved.session.providerOptions.apiKeyEnv ??
-      defaults?.apiKeyEnv,
-    providerName:
-      input.providerName ??
-      resolved.session.providerOptions.providerName ??
-      defaults?.providerName,
-  })
+  const providerOptions = serializeAssistantProviderSessionOptions(
+    mergeAssistantProviderConfigs(
+      input,
+      resolved.session.providerOptions,
+      defaults,
+    ),
+  )
+  const executionConfig = mergeAssistantProviderConfigs(input, defaults)
   return buildAssistantFailoverRoutes({
     backups: input.failoverRoutes ?? defaults?.failoverRoutes ?? null,
-    codexCommand: input.codexCommand ?? defaults?.codexCommand ?? null,
+    codexCommand: executionConfig.codexCommand,
     defaults,
     provider,
     providerOptions,
@@ -550,7 +523,9 @@ async function resolveAssistantRouteTurnPlan(input: {
     conversationMessages,
     continuityContext,
     provider: input.route.provider,
-    providerOptions: normalizeAssistantProviderOptions(input.route.providerOptions),
+    providerOptions: serializeAssistantProviderSessionOptions(
+      input.route.providerOptions,
+    ),
     resumeProviderSessionId:
       input.route.provider === input.session.provider &&
       !shouldResetCodexProviderSession
@@ -945,7 +920,9 @@ async function executeProviderTurnWithRecovery(input: {
       return {
         ...result,
         attemptCount,
-        providerOptions: normalizeAssistantProviderOptions(route.providerOptions),
+        providerOptions: serializeAssistantProviderSessionOptions(
+          route.providerOptions,
+        ),
         route,
         session: workingSession,
       }
@@ -1020,17 +997,6 @@ async function executeProviderTurnWithRecovery(input: {
   }
 
   throw (lastError ?? new Error('Assistant provider routes were exhausted.'))
-}
-
-function normalizeAssistantProviderOptions(
-  providerOptions: AssistantSession['providerOptions'],
-): AssistantSession['providerOptions'] {
-  return {
-    ...providerOptions,
-    baseUrl: providerOptions.baseUrl ?? undefined,
-    apiKeyEnv: providerOptions.apiKeyEnv ?? undefined,
-    providerName: providerOptions.providerName ?? undefined,
-  }
 }
 
 async function persistAssistantTurnAndSession(input: {

@@ -876,6 +876,28 @@ describe("cloudflare worker routes", () => {
     expect(request.method).toBe("GET");
   });
 
+  it("forwards operator status reads to the durable object", async () => {
+    const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/status", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      createWorkerEnv(stubFetch, {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(stubFetch).toHaveBeenCalledTimes(1);
+    const request = stubFetch.mock.calls[0]?.[0] as Request;
+    expect(request.url).toBe("https://runner.internal/status?userId=member_123");
+    expect(request.method).toBe("GET");
+  });
+
   it("forwards operator env clears to the durable object", async () => {
     const stubFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
 
@@ -896,6 +918,185 @@ describe("cloudflare worker routes", () => {
     const request = stubFetch.mock.calls[0]?.[0] as Request;
     expect(request.url).toBe("https://runner.internal/env?userId=member_123");
     expect(request.method).toBe("DELETE");
+  });
+
+  it("returns HTTP 405 for unsupported methods on matched worker routes", async () => {
+    const runResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/run", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      createWorkerEnv(vi.fn(), {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(runResponse.status).toBe(405);
+    await expect(runResponse.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
+
+    const outboxResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
+        headers: {
+          authorization: "Bearer runner-token",
+        },
+        method: "POST",
+      }),
+      createWorkerEnv(vi.fn(), {
+        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      }),
+    );
+
+    expect(outboxResponse.status).toBe(405);
+    await expect(outboxResponse.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
+  });
+
+  it("keeps auth checks ahead of wrong-method responses on protected worker routes", async () => {
+    const runResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "GET",
+      }),
+      createWorkerEnv(vi.fn(), {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(runResponse.status).toBe(401);
+    await expect(runResponse.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+
+    const outboxResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
+        method: "POST",
+      }),
+      createWorkerEnv(vi.fn(), {
+        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      }),
+    );
+
+    expect(outboxResponse.status).toBe(401);
+    await expect(outboxResponse.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
+  it("keeps malformed encoded route params behind existing auth and hidden-method boundaries", async () => {
+    const controlResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/%E0%A4%A/run", {
+        method: "GET",
+      }),
+      createWorkerEnv(vi.fn(), {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(controlResponse.status).toBe(401);
+    await expect(controlResponse.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+
+    const runnerEventResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/%E0%A4%A/evt_commit/commit", {
+        method: "GET",
+      }),
+      createWorkerEnv(vi.fn(), {
+        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      }),
+    );
+
+    expect(runnerEventResponse.status).toBe(404);
+    await expect(runnerEventResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
+  it("preserves hidden not-found responses for wrong methods on worker routes that were never public", async () => {
+    const dispatchResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/events", {
+        method: "GET",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(dispatchResponse.status).toBe(404);
+    await expect(dispatchResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
+  it("preserves not-found responses for unsupported durable-object methods", async () => {
+    const durableObject = createUserRunnerDurableObject();
+
+    const envResponse = await durableObject.durableObject.fetch(
+      new Request("https://runner.internal/env?userId=member_123", {
+        method: "POST",
+      }),
+    );
+
+    expect(envResponse.status).toBe(404);
+    await expect(envResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+
+    const statusResponse = await durableObject.durableObject.fetch(
+      new Request("https://runner.internal/status?userId=member_123", {
+        method: "POST",
+      }),
+    );
+
+    expect(statusResponse.status).toBe(404);
+    await expect(statusResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
+  it("preserves durable-object env validation ahead of wrong-method not-found responses", async () => {
+    const durableObject = createUserRunnerDurableObject();
+
+    const response = await durableObject.durableObject.fetch(
+      new Request("https://runner.internal/env", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "userId is required.",
+    });
+  });
+
+  it("keeps durable-object commit and finalize parameter validation ahead of body parsing", async () => {
+    const durableObject = createUserRunnerDurableObject();
+
+    const commitResponse = await durableObject.durableObject.fetch(
+      new Request("https://runner.internal/commit?userId=member_123", {
+        body: "{",
+        method: "POST",
+      }),
+    );
+
+    expect(commitResponse.status).toBe(400);
+    await expect(commitResponse.json()).resolves.toEqual({
+      error: "userId and eventId are required.",
+    });
+
+    const finalizeResponse = await durableObject.durableObject.fetch(
+      new Request("https://runner.internal/finalize?eventId=evt_123", {
+        body: "{",
+        method: "POST",
+      }),
+    );
+
+    expect(finalizeResponse.status).toBe(400);
+    await expect(finalizeResponse.json()).resolves.toEqual({
+      error: "userId and eventId are required.",
+    });
   });
 
   it("returns HTTP 429 when dispatch backpressures a full per-user queue", async () => {

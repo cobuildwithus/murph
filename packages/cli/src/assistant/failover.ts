@@ -13,11 +13,22 @@ import type { AssistantOperatorDefaults } from '../operator-config.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
+import {
+  mergeAssistantProviderConfigs,
+  normalizeAssistantProviderConfig,
+  serializeAssistantProviderSessionOptions,
+} from './provider-config.js'
 import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
 
 const ASSISTANT_FAILOVER_STATE_SCHEMA = 'healthybob.assistant-failover-state.v1'
 const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000
 const RATE_LIMIT_FAILOVER_COOLDOWN_MS = 5 * 60_000
+type AssistantFailoverRouteHashProviderOptions = Omit<
+  ReturnType<typeof normalizeAssistantProviderConfig>,
+  'codexCommand' | 'oss'
+> & {
+  oss: boolean
+}
 
 export interface ResolvedAssistantFailoverRoute {
   codexCommand: string | null
@@ -72,7 +83,10 @@ export function buildAssistantFailoverRoutes(input: {
   const primary = createResolvedAssistantFailoverRoute({
     name: 'primary',
     provider: input.provider,
-    codexCommand: input.codexCommand ?? input.defaults?.codexCommand ?? null,
+    codexCommand: mergeAssistantProviderConfigs({
+      codexCommand: input.codexCommand,
+    }, input.defaults).codexCommand,
+    hashProviderOptions: input.providerOptions,
     providerOptions: input.providerOptions,
     cooldownMs: null,
   })
@@ -80,19 +94,15 @@ export function buildAssistantFailoverRoutes(input: {
     createResolvedAssistantFailoverRoute({
       name: route.name,
       provider: route.provider,
-      codexCommand:
-        route.codexCommand ?? input.defaults?.codexCommand ?? input.codexCommand ?? null,
-      providerOptions: normalizeAssistantProviderSessionOptions({
-        approvalPolicy: route.approvalPolicy,
-        apiKeyEnv: route.apiKeyEnv,
-        baseUrl: route.baseUrl,
-        model: route.model,
-        oss: route.oss,
-        profile: route.profile,
-        providerName: route.providerName,
-        reasoningEffort: route.reasoningEffort,
-        sandbox: route.sandbox,
-      }),
+      codexCommand: mergeAssistantProviderConfigs(
+        { codexCommand: route.codexCommand },
+        input.defaults,
+        { codexCommand: input.codexCommand },
+      ).codexCommand,
+      hashProviderOptions: normalizeAssistantFailoverRouteHashProviderOptions(
+        route,
+      ),
+      providerOptions: serializeAssistantProviderSessionOptions(route),
       cooldownMs: route.cooldownMs,
     }),
   )
@@ -233,28 +243,36 @@ export function shouldAttemptAssistantProviderFailover(input: {
 function createResolvedAssistantFailoverRoute(input: {
   codexCommand: string | null
   cooldownMs: number | null | undefined
+  hashProviderOptions:
+    | AssistantFailoverRouteHashProviderOptions
+    | AssistantProviderSessionOptions
   name: string | null | undefined
   provider: AssistantChatProvider
   providerOptions: AssistantProviderSessionOptions
 }): ResolvedAssistantFailoverRoute {
+  const providerConfig = normalizeAssistantProviderConfig({
+    ...input.providerOptions,
+    codexCommand: input.codexCommand,
+  })
+  const providerOptions = serializeAssistantProviderSessionOptions(providerConfig)
   const label = buildAssistantFailoverRouteLabel({
     name: input.name,
     provider: input.provider,
-    providerOptions: input.providerOptions,
+    providerOptions,
   })
   const routeId = hashAssistantFailoverRoute({
+    codexCommand: providerConfig.codexCommand,
     label,
     provider: input.provider,
-    providerOptions: input.providerOptions,
-    codexCommand: input.codexCommand,
+    providerOptions: input.hashProviderOptions,
   })
 
   return {
     routeId,
     label,
     provider: input.provider,
-    providerOptions: input.providerOptions,
-    codexCommand: normalizeNullableString(input.codexCommand),
+    providerOptions,
+    codexCommand: providerConfig.codexCommand,
     cooldownMs:
       normalizePositiveInt(input.cooldownMs) ?? DEFAULT_FAILOVER_COOLDOWN_MS,
   }
@@ -277,30 +295,6 @@ async function readAssistantFailoverStateAtPath(
     updatedAt: new Date(0).toISOString(),
     routes: [],
   })
-}
-
-function normalizeAssistantProviderSessionOptions(input: {
-  approvalPolicy?: AssistantProviderSessionOptions['approvalPolicy']
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  model?: string | null
-  oss?: boolean
-  profile?: string | null
-  providerName?: string | null
-  reasoningEffort?: string | null
-  sandbox?: AssistantProviderSessionOptions['sandbox']
-}): AssistantProviderSessionOptions {
-  return {
-    model: normalizeNullableString(input.model),
-    reasoningEffort: normalizeNullableString(input.reasoningEffort),
-    sandbox: input.sandbox ?? null,
-    approvalPolicy: input.approvalPolicy ?? null,
-    profile: normalizeNullableString(input.profile),
-    oss: input.oss ?? false,
-    baseUrl: normalizeNullableString(input.baseUrl) ?? null,
-    apiKeyEnv: normalizeNullableString(input.apiKeyEnv) ?? null,
-    providerName: normalizeNullableString(input.providerName) ?? null,
-  }
 }
 
 function dedupeAssistantFailoverRoutes(
@@ -340,11 +334,30 @@ function buildAssistantFailoverRouteLabel(input: {
   return parts.join(':') || input.provider
 }
 
+function normalizeAssistantFailoverRouteHashProviderOptions(
+  input: Parameters<typeof normalizeAssistantProviderConfig>[0],
+): AssistantFailoverRouteHashProviderOptions {
+  const normalized = normalizeAssistantProviderConfig(input)
+  return {
+    model: normalized.model,
+    reasoningEffort: normalized.reasoningEffort,
+    sandbox: normalized.sandbox,
+    approvalPolicy: normalized.approvalPolicy,
+    profile: normalized.profile,
+    oss: normalized.oss ?? false,
+    baseUrl: normalized.baseUrl,
+    apiKeyEnv: normalized.apiKeyEnv,
+    providerName: normalized.providerName,
+  }
+}
+
 function hashAssistantFailoverRoute(input: {
   codexCommand: string | null
   label: string
   provider: AssistantChatProvider
-  providerOptions: AssistantProviderSessionOptions
+  providerOptions:
+    | AssistantFailoverRouteHashProviderOptions
+    | AssistantProviderSessionOptions
 }): string {
   return createHash('sha1')
     .update(

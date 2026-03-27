@@ -31,6 +31,16 @@ interface GuardSnapshot {
   operationMetadataPaths: Set<string>
 }
 
+interface GuardAuditStateFailure {
+  actionKind?: 'jsonl_append' | 'text_write'
+  causeCode?: string
+  causeMessage: string
+  metadataPath: string
+  operationId?: string
+  reason: 'invalid_committed_payload' | 'invalid_write_operation_metadata'
+  targetRelativePath?: string
+}
+
 type ExpectedFileState =
   | {
       exists: false
@@ -47,6 +57,19 @@ type ExpectedFileState =
     }
 
 type StoredWriteOperation = Awaited<ReturnType<typeof readWriteOperationMetadata>>
+interface GuardRecoveredOperation {
+  actions: StoredWriteOperation['actions']
+  createdAt: string
+  operationId: string
+  status: string
+  updatedAt: string
+}
+
+interface GuardOperationEntry {
+  guardFailure: GuardAuditStateFailure | null
+  operation: GuardRecoveredOperation | null
+  relativePath: string
+}
 const PROTECTED_ROOT_FILES = new Set<string>([
   VAULT_LAYOUT.metadata,
   VAULT_LAYOUT.coreDocument,
@@ -70,13 +93,14 @@ export async function executeWithCanonicalWriteGuard<TResult>(
   }
 
   try {
-    const violations = await restoreUnexpectedCanonicalWrites({
+    const { guardFailure, reverted: violations } = await restoreUnexpectedCanonicalWrites({
       snapshot,
       vaultRoot: input.vaultRoot,
     })
 
-    if (violations.length > 0) {
+    if (guardFailure || violations.length > 0) {
       throw buildCanonicalWriteGuardError({
+        guardFailure,
         paths: violations,
         providerError,
       })
@@ -128,8 +152,11 @@ async function captureCanonicalWriteSnapshot(
 async function restoreUnexpectedCanonicalWrites(input: {
   snapshot: GuardSnapshot
   vaultRoot: string
-}): Promise<string[]> {
-  await applyCommittedOperationEffects(input)
+}): Promise<{
+  guardFailure: GuardAuditStateFailure | null
+  reverted: string[]
+}> {
+  const guardFailure = await applyCommittedOperationEffects(input)
 
   const currentPaths = new Set(await listProtectedCanonicalPaths(input.vaultRoot))
   const candidatePaths = new Set<string>([
@@ -170,33 +197,61 @@ async function restoreUnexpectedCanonicalWrites(input: {
     }
   }
 
-  return reverted
+  return {
+    guardFailure,
+    reverted,
+  }
 }
 
 async function applyCommittedOperationEffects(input: {
   snapshot: GuardSnapshot
   vaultRoot: string
-}): Promise<void> {
+}): Promise<GuardAuditStateFailure | null> {
   const operationMetadataPaths = await listWriteOperationMetadataPaths(input.vaultRoot)
   const newOperationPaths = operationMetadataPaths
     .filter((relativePath) => !input.snapshot.operationMetadataPaths.has(relativePath))
     .sort()
-  const operations = await Promise.all(
-    newOperationPaths.map(async (relativePath) => ({
-      operation: await tryReadStoredWriteOperation(input.vaultRoot, relativePath),
-      relativePath,
-    })),
+  let guardFailure: GuardAuditStateFailure | null = null
+  const operations: GuardOperationEntry[] = await Promise.all(
+    newOperationPaths.map(async (relativePath) => {
+      try {
+        return {
+          guardFailure: null,
+          operation: await readStoredWriteOperationIfPresent(input.vaultRoot, relativePath),
+          relativePath,
+        }
+      } catch (error) {
+        const failure = createGuardAuditStateFailure({
+          cause: error,
+          metadataPath: relativePath,
+          reason: 'invalid_write_operation_metadata',
+        })
+        const recovered = await recoverStoredWriteOperationForGuard(input.vaultRoot, relativePath)
+        return {
+          guardFailure: failure,
+          operation: recovered,
+          relativePath,
+        }
+      }
+    }),
   )
+
+  for (const operationEntry of operations) {
+    if (operationEntry.guardFailure && !guardFailure) {
+      guardFailure = operationEntry.guardFailure
+    }
+  }
+
   const committedOperations = operations
     .filter(
-      (entry): entry is { operation: StoredWriteOperation; relativePath: string } =>
+      (entry): entry is GuardOperationEntry & { operation: GuardRecoveredOperation } =>
         entry.operation !== null,
     )
     .sort((left, right) =>
       compareOperationOrder(left.operation, right.operation, left.relativePath, right.relativePath),
     )
 
-  for (const { operation } of committedOperations) {
+  for (const { operation, relativePath } of committedOperations) {
     if (operation.status !== 'committed') {
       continue
     }
@@ -217,8 +272,19 @@ async function applyCommittedOperationEffects(input: {
         continue
       }
 
-      const payloadBuffer = decodeCommittedPayload(action.committedPayloadBase64)
-      if (!payloadBuffer) {
+      const payload = await resolveCommittedPayload({
+        actionKind: action.kind,
+        metadataPath: relativePath,
+        operationId: operation.operationId,
+        stageRelativePath: action.stageRelativePath,
+        targetRelativePath: action.targetRelativePath,
+        value: action.committedPayloadBase64,
+        vaultRoot: input.vaultRoot,
+      })
+      if (payload.guardFailure && !guardFailure) {
+        guardFailure = payload.guardFailure
+      }
+      if (!payload.buffer) {
         continue
       }
 
@@ -231,7 +297,7 @@ async function applyCommittedOperationEffects(input: {
         input.snapshot.expectedStates.set(action.targetRelativePath, {
           exists: true,
           kind: 'buffer',
-          buffer: Buffer.concat([previousBuffer, payloadBuffer]),
+          buffer: Buffer.concat([previousBuffer, payload.buffer]),
         })
         continue
       }
@@ -239,15 +305,17 @@ async function applyCommittedOperationEffects(input: {
       input.snapshot.expectedStates.set(action.targetRelativePath, {
         exists: true,
         kind: 'buffer',
-        buffer: payloadBuffer,
+        buffer: payload.buffer,
       })
     }
   }
+
+  return guardFailure
 }
 
 function compareOperationOrder(
-  left: StoredWriteOperation,
-  right: StoredWriteOperation,
+  left: GuardRecoveredOperation,
+  right: GuardRecoveredOperation,
   leftPath: string,
   rightPath: string,
 ): number {
@@ -332,7 +400,7 @@ function isProtectedCanonicalPath(relativePath: string): boolean {
   )
 }
 
-async function tryReadStoredWriteOperation(
+async function readStoredWriteOperationIfPresent(
   vaultRoot: string,
   relativePath: string,
 ): Promise<StoredWriteOperation | null> {
@@ -343,8 +411,74 @@ async function tryReadStoredWriteOperation(
       return null
     }
 
+    throw error
+  }
+}
+
+async function recoverStoredWriteOperationForGuard(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<GuardRecoveredOperation | null> {
+  try {
+    const raw = JSON.parse(
+      await readFile(resolveVaultPath(vaultRoot, relativePath).absolutePath, 'utf8'),
+    ) as unknown
+    if (!isPlainObject(raw)) {
+      return null
+    }
+
+    const actions = Array.isArray(raw.actions)
+      ? raw.actions.map(parseRecoverableStoredAction)
+      : null
+    if (
+      typeof raw.operationId !== 'string' ||
+      typeof raw.createdAt !== 'string' ||
+      typeof raw.updatedAt !== 'string' ||
+      typeof raw.status !== 'string' ||
+      !actions ||
+      actions.some((action) => action === null)
+    ) {
+      return null
+    }
+
+    return {
+      actions: actions as StoredWriteOperation['actions'],
+      createdAt: raw.createdAt,
+      operationId: raw.operationId,
+      status: raw.status,
+      updatedAt: raw.updatedAt,
+    }
+  } catch {
     return null
   }
+}
+
+function parseRecoverableStoredAction(
+  value: unknown,
+): StoredWriteOperation['actions'][number] | null {
+  if (!isPlainObject(value) || typeof value.kind !== 'string') {
+    return null
+  }
+
+  if (typeof value.targetRelativePath !== 'string' || typeof value.state !== 'string') {
+    return null
+  }
+
+  if (
+    value.kind === 'raw_copy' ||
+    value.kind === 'text_write' ||
+    value.kind === 'jsonl_append'
+  ) {
+    return typeof value.stageRelativePath === 'string'
+      ? (value as StoredWriteOperation['actions'][number])
+      : null
+  }
+
+  if (value.kind === 'delete') {
+    return value as StoredWriteOperation['actions'][number]
+  }
+
+  return null
 }
 
 async function protectedPathExists(
@@ -406,26 +540,96 @@ async function unlinkProtectedFile(
   }
 }
 
-function decodeCommittedPayload(value: string | undefined): Buffer | null {
-  if (typeof value !== 'string' || value.length === 0) {
-    return null
+async function resolveCommittedPayload(input: {
+  actionKind: 'jsonl_append' | 'text_write'
+  metadataPath: string
+  operationId: string
+  stageRelativePath: string
+  targetRelativePath: string
+  value: string | undefined
+  vaultRoot: string
+}): Promise<{
+  buffer: Buffer | null
+  guardFailure: GuardAuditStateFailure | null
+}> {
+  const decoded = decodeCommittedPayloadBase64(input.value)
+  if (decoded) {
+    return {
+      buffer: decoded,
+      guardFailure: null,
+    }
   }
 
+  const guardFailure = createGuardAuditStateFailure({
+    cause:
+      typeof input.value === 'string'
+        ? new Error('Committed write payload is not valid canonical base64.')
+        : new Error('Committed write payload is missing.'),
+    metadataPath: input.metadataPath,
+    operationId: input.operationId,
+    reason: 'invalid_committed_payload',
+    targetRelativePath: input.targetRelativePath,
+    actionKind: input.actionKind,
+  })
+
   try {
-    return Buffer.from(value, 'base64')
+    return {
+      buffer: await readFile(
+        resolveVaultPath(input.vaultRoot, input.stageRelativePath).absolutePath,
+      ),
+      guardFailure,
+    }
   } catch {
-    return null
+    return {
+      buffer: null,
+      guardFailure,
+    }
   }
 }
 
+function decodeCommittedPayloadBase64(value: string | undefined): Buffer | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const decoded = Buffer.from(value, 'base64')
+  if (decoded.toString('base64') !== value) {
+    return null
+  }
+
+  return Buffer.from(decoded.toString('utf8')).equals(decoded) ? decoded : null
+}
+
 function buildCanonicalWriteGuardError(input: {
+  guardFailure?: GuardAuditStateFailure | null
   paths: string[]
   providerError: unknown
 }): VaultCliError {
-  const preview = formatProtectedPathPreview(input.paths)
   const details: Record<string, unknown> = {
     pathCount: input.paths.length,
     paths: input.paths,
+  }
+
+  if (input.guardFailure) {
+    details.guardFailureReason = input.guardFailure.reason
+    details.guardFailurePath = input.guardFailure.metadataPath
+    details.guardFailureMessage = input.guardFailure.causeMessage
+
+    if (input.guardFailure.causeCode) {
+      details.guardFailureCode = input.guardFailure.causeCode
+    }
+
+    if (input.guardFailure.operationId) {
+      details.guardFailureOperationId = input.guardFailure.operationId
+    }
+
+    if (input.guardFailure.targetRelativePath) {
+      details.guardFailureTargetPath = input.guardFailure.targetRelativePath
+    }
+
+    if (input.guardFailure.actionKind) {
+      details.guardFailureActionKind = input.guardFailure.actionKind
+    }
   }
 
   if (input.providerError instanceof Error) {
@@ -443,9 +647,20 @@ function buildCanonicalWriteGuardError(input: {
 
   return new VaultCliError(
     'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
-    `Rolled back unauthorized direct canonical vault edits: ${preview}. Use vault-cli or audited core mutations for canonical files.`,
+    formatCanonicalWriteGuardMessage(input),
     details,
   )
+}
+
+function formatCanonicalWriteGuardMessage(input: {
+  guardFailure?: GuardAuditStateFailure | null
+  paths: string[]
+}): string {
+  if (input.guardFailure) {
+    return `Blocked canonical write guard because audited write state is corrupted (${formatGuardFailureSummary(input.guardFailure)}). Use vault-cli or audited core mutations for canonical files.`
+  }
+
+  return `Rolled back unauthorized direct canonical vault edits: ${formatProtectedPathPreview(input.paths)}. Use vault-cli or audited core mutations for canonical files.`
 }
 
 function formatProtectedPathPreview(paths: string[]): string {
@@ -454,4 +669,54 @@ function formatProtectedPathPreview(paths: string[]): string {
   return remainder > 0
     ? `${visible.join(', ')}, +${remainder} more`
     : visible.join(', ')
+}
+
+function formatGuardFailureSummary(failure: GuardAuditStateFailure): string {
+  const suffix = failure.targetRelativePath
+    ? ` for ${failure.targetRelativePath}`
+    : ''
+  return `${failure.reason} at ${failure.metadataPath}${suffix}`
+}
+
+function createGuardAuditStateFailure(input: {
+  actionKind?: 'jsonl_append' | 'text_write'
+  cause: unknown
+  metadataPath: string
+  operationId?: string
+  reason: GuardAuditStateFailure['reason']
+  targetRelativePath?: string
+}): GuardAuditStateFailure {
+  return {
+    actionKind: input.actionKind,
+    causeCode:
+      input.cause &&
+      typeof input.cause === 'object' &&
+      'code' in input.cause &&
+      typeof (input.cause as { code?: unknown }).code === 'string'
+        ? (input.cause as { code: string }).code
+        : undefined,
+    causeMessage:
+      input.cause instanceof Error ? input.cause.message : String(input.cause),
+    metadataPath: input.metadataPath,
+    operationId: input.operationId,
+    reason: input.reason,
+    targetRelativePath: input.targetRelativePath,
+  }
+}
+
+function isGuardAuditStateFailure(value: unknown): value is GuardAuditStateFailure {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    'reason' in value &&
+    (value as { reason?: unknown }).reason !== undefined &&
+    'metadataPath' in value &&
+    typeof (value as { metadataPath?: unknown }).metadataPath === 'string' &&
+    'causeMessage' in value &&
+    typeof (value as { causeMessage?: unknown }).causeMessage === 'string'
+  )
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
