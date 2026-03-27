@@ -64,14 +64,7 @@ export function readHostedExecutionDispatchRef(
   const nestedRef = toHostedExecutionObject(payloadObject.dispatchRef);
   const schemaVersion = readHostedExecutionText(payloadObject.schemaVersion);
 
-  if (
-    schemaVersion
-    && schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION
-  ) {
-    return null;
-  }
-
-  if (!schemaVersion && Object.keys(nestedRef).length === 0) {
+  if (schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION) {
     return null;
   }
 
@@ -94,30 +87,13 @@ export function readHostedExecutionDispatchRef(
   };
 }
 
-export function readLegacyHostedExecutionDispatch(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): HostedExecutionDispatchRequest | null {
-  const payloadObject = toHostedExecutionObject(payloadJson);
-  const event = toHostedExecutionObject(payloadObject.event);
-  const eventId = readHostedExecutionText(payloadObject.eventId);
-  const occurredAt = readHostedExecutionText(payloadObject.occurredAt);
-  const eventKind = readHostedExecutionEventKind(event.kind);
-  const userId = readHostedExecutionText(event.userId);
-
-  if (!eventId || !occurredAt || !eventKind || !userId) {
-    return null;
-  }
-
-  return payloadObject as unknown as HostedExecutionDispatchRequest;
-}
-
 function readHostedExecutionEventKind(value: unknown): HostedExecutionEventKind | null {
   return typeof value === "string" && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
     ? value as HostedExecutionEventKind
     : null;
 }
 
-function readHostedExecutionShareReference(value: unknown): HostedExecutionShareReference | undefined {
+function readHostedExecutionShareReference(value: unknown): HostedExecutionShareRefJson | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -133,7 +109,7 @@ function readHostedExecutionShareReference(value: unknown): HostedExecutionShare
   return {
     shareCode,
     shareId,
-  };
+  } satisfies HostedExecutionShareRefJson;
 }
 
 function readHostedExecutionText(value: unknown): string | null {

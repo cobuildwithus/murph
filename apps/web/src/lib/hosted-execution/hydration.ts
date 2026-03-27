@@ -6,7 +6,6 @@ import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/
 import {
   type HostedExecutionDispatchRef,
   readHostedExecutionDispatchRef,
-  readLegacyHostedExecutionDispatch,
 } from "./outbox-payload";
 
 type HostedExecutionHydrationClient = PrismaClient;
@@ -15,12 +14,6 @@ export async function hydrateHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: HostedExecutionHydrationClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  const legacyDispatch = readLegacyHostedExecutionDispatch(record.payloadJson);
-
-  if (legacyDispatch) {
-    return validateHydratedHostedExecutionDispatch(legacyDispatch, record);
-  }
-
   const dispatchRef = readHostedExecutionDispatchRef(record.payloadJson, {
     eventId: record.eventId,
     eventKind: record.eventKind,
@@ -86,20 +79,6 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
   );
 
   if (!dispatch) {
-    if (record.eventKind === "member.activated") {
-      return validateHydratedHostedExecutionDispatch(
-        {
-          event: {
-            kind: "member.activated",
-            userId: record.userId,
-          },
-          eventId: record.eventId,
-          occurredAt,
-        },
-        record,
-      );
-    }
-
     throw new Error(
       `Hosted webhook receipt ${sourceKey.source}:${sourceKey.eventId} did not retain dispatch ${record.eventId}.`,
     );

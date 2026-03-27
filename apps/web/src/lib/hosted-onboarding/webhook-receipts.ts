@@ -6,6 +6,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   buildHostedExecutionDispatchRef,
+  serializeHostedExecutionOutboxPayload,
   readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRef,
 } from "../hosted-execution/outbox-payload";
@@ -31,6 +32,7 @@ type HostedWebhookDispatchSideEffectPayload =
       dispatch: HostedExecutionDispatchRequest;
     }
   | {
+      schemaVersion: string;
       dispatchRef: HostedExecutionDispatchRef;
       linqEvent?: Record<string, unknown> | null;
     };
@@ -235,13 +237,17 @@ function readHostedWebhookDispatchPayloadDispatch(
 function minimizeHostedWebhookDispatchPayload(
   dispatch: HostedExecutionDispatchRequest,
 ): HostedWebhookDispatchSideEffect["payload"] {
+  const serializedDispatch = serializeHostedExecutionOutboxPayload(dispatch);
+
   return dispatch.event.kind === "linq.message.received"
     ? {
         dispatchRef: buildHostedExecutionDispatchRef(dispatch),
         linqEvent: { ...dispatch.event.linqEvent },
+        schemaVersion: serializedDispatch.schemaVersion as string,
       }
     : {
         dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+        schemaVersion: serializedDispatch.schemaVersion as string,
       };
 }
 
@@ -715,34 +721,21 @@ function serializeHostedWebhookReceiptState(
 function readHostedWebhookReceiptState(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
 ): HostedWebhookReceiptState {
-  const payloadObject = toHostedWebhookReceiptObject(payloadJson);
-  const nestedState = toHostedWebhookReceiptObject(payloadObject.receiptState);
-  const attemptId = readHostedWebhookReceiptString(
-    nestedState.attemptId ?? payloadObject.receiptAttemptId,
+  const nestedState = toHostedWebhookReceiptObject(
+    toHostedWebhookReceiptObject(payloadJson).receiptState,
   );
-  const attemptCount = readHostedWebhookReceiptNumber(
-    nestedState.attemptCount ?? payloadObject.receiptAttemptCount,
-  );
-  const status = readHostedWebhookReceiptStatusValue(
-    nestedState.status ?? payloadObject.receiptStatus,
-  );
+  const attemptId = readHostedWebhookReceiptString(nestedState.attemptId);
+  const attemptCount = readHostedWebhookReceiptNumber(nestedState.attemptCount);
+  const status = readHostedWebhookReceiptStatusValue(nestedState.status);
 
   return {
     attemptCount: Math.max(attemptCount, 0),
     attemptId,
-    completedAt: readHostedWebhookReceiptString(
-      nestedState.completedAt ?? payloadObject.receiptCompletedAt,
-    ),
+    completedAt: readHostedWebhookReceiptString(nestedState.completedAt),
     eventPayload: readHostedWebhookReceiptEventPayload(payloadJson),
-    lastError: readHostedWebhookReceiptError(
-      nestedState.lastError ?? payloadObject.receiptLastError,
-    ),
-    lastReceivedAt: readHostedWebhookReceiptString(
-      nestedState.lastReceivedAt ?? payloadObject.receiptLastReceivedAt,
-    ),
-    sideEffects: readHostedWebhookReceiptSideEffects(
-      nestedState.sideEffects ?? payloadObject.receiptSideEffects,
-    ),
+    lastError: readHostedWebhookReceiptError(nestedState.lastError),
+    lastReceivedAt: readHostedWebhookReceiptString(nestedState.lastReceivedAt),
+    sideEffects: readHostedWebhookReceiptSideEffects(nestedState.sideEffects),
     status,
   };
 }
@@ -757,18 +750,6 @@ function readHostedWebhookReceiptEventPayload(
     if (nestedEventPayload && typeof nestedEventPayload === "object" && !Array.isArray(nestedEventPayload)) {
       return nestedEventPayload as HostedWebhookEventPayload;
     }
-
-    const legacyEventPayload = { ...payloadObject };
-    delete legacyEventPayload.receiptAttemptCount;
-    delete legacyEventPayload.receiptAttemptId;
-    delete legacyEventPayload.receiptCompletedAt;
-    delete legacyEventPayload.receiptLastError;
-    delete legacyEventPayload.receiptLastReceivedAt;
-    delete legacyEventPayload.receiptSideEffects;
-    delete legacyEventPayload.receiptState;
-    delete legacyEventPayload.receiptStatus;
-
-    return legacyEventPayload as HostedWebhookEventPayload;
   }
 
   return {};
@@ -983,9 +964,7 @@ function readHostedWebhookSideEffect(
       }
 
       const dispatchRef = readHostedExecutionDispatchRef(
-        {
-          dispatchRef: payload.dispatchRef ?? null,
-        },
+        payload,
         {
           eventId: "",
           eventKind: "",
@@ -1005,6 +984,7 @@ function readHostedWebhookSideEffect(
         lastAttemptAt,
         lastError,
         payload: {
+          schemaVersion: payload.schemaVersion as string,
           dispatchRef,
           linqEvent: toHostedWebhookReceiptRecord(payload.linqEvent),
         },

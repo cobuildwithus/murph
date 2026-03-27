@@ -4,10 +4,7 @@ import {
   type HostedExecutionDispatchRequest,
 } from "@murph/hosted-execution";
 
-import {
-  readHostedExecutionDispatchRef,
-  readLegacyHostedExecutionDispatch,
-} from "../hosted-execution/outbox-payload";
+import { readHostedExecutionDispatchRef } from "../hosted-execution/outbox-payload";
 import { normalizePhoneNumber } from "./phone";
 
 export function readHostedWebhookReceiptDispatchByEventId(
@@ -28,20 +25,12 @@ export function readHostedWebhookReceiptDispatchByEventId(
     }
 
     const payloadObject = toHostedWebhookReceiptObject(effectObject.payload);
-    const dispatch = readLegacyHostedExecutionDispatch(payloadObject.dispatch);
-
-    if (dispatch?.eventId === eventId) {
-      return dispatch;
-    }
-
     if (!fallback) {
       continue;
     }
 
     const dispatchRef = readHostedExecutionDispatchRef(
-      {
-        dispatchRef: payloadObject.dispatchRef ?? null,
-      },
+      payloadObject,
       {
         eventId,
         eventKind: fallback.eventKind,
@@ -92,12 +81,8 @@ function readHostedWebhookReceiptSideEffects(
   const payloadObject = toHostedWebhookReceiptObject(payloadJson);
   const nestedState = toHostedWebhookReceiptObject(payloadObject.receiptState);
 
-  if (Array.isArray(nestedState.sideEffects)) {
-    return nestedState.sideEffects;
-  }
-
-  return Array.isArray(payloadObject.receiptSideEffects)
-    ? payloadObject.receiptSideEffects
+  return Array.isArray(nestedState.sideEffects)
+    ? nestedState.sideEffects
     : [];
 }
 

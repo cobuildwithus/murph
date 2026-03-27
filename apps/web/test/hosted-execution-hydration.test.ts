@@ -113,58 +113,23 @@ describe("hydrateHostedExecutionDispatch", () => {
     });
   });
 
-  it("hydrates legacy full-payload outbox rows without requiring a dispatch ref", async () => {
+  it("rejects share outbox payloads when the schemaVersion is missing", async () => {
     const share = buildShareReference();
 
     await expect(
       hydrateHostedExecutionDispatch(
         buildShareOutboxRecord({
-          event: {
-            kind: "vault.share.accepted",
+          dispatchRef: {
+            eventId: "evt_share_123",
+            eventKind: "vault.share.accepted",
+            occurredAt: "2026-03-26T12:30:00.000Z",
             share,
             userId: "member_123",
           },
-          eventId: "evt_share_123",
-          occurredAt: "2026-03-26T12:30:00.000Z",
         }) as never,
         {} as never,
       ),
-    ).resolves.toEqual({
-      event: {
-        kind: "vault.share.accepted",
-        share,
-        userId: "member_123",
-      },
-      eventId: "evt_share_123",
-      occurredAt: "2026-03-26T12:30:00.000Z",
-    });
-  });
-
-  it("hydrates ref payloads that omit schemaVersion when dispatchRef is present", async () => {
-    const share = buildShareReference();
-
-    const dispatch = await hydrateHostedExecutionDispatch(
-      buildShareOutboxRecord({
-        dispatchRef: {
-          eventId: "evt_share_123",
-          eventKind: "vault.share.accepted",
-          occurredAt: "2026-03-26T12:30:00.000Z",
-          share,
-          userId: "member_123",
-        },
-      }) as never,
-      {} as never,
-    );
-
-    expect(dispatch).toEqual({
-      event: {
-        kind: "vault.share.accepted",
-        share,
-        userId: "member_123",
-      },
-      eventId: "evt_share_123",
-      occurredAt: "2026-03-26T12:30:00.000Z",
-    });
+    ).rejects.toThrow("missing a dispatch ref");
   });
 
   it("rehydrates hosted webhook dispatches from minimized sent receipt payloads", async () => {
@@ -210,6 +175,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    schemaVersion: "murph.execution-outbox.ref.v1",
                     dispatchRef: {
                       eventId: "evt_linq_123",
                       eventKind: "linq.message.received",
@@ -234,6 +200,7 @@ describe("hydrateHostedExecutionDispatch", () => {
 
     const dispatch = await hydrateHostedExecutionDispatch(
       buildWebhookOutboxRecord({
+        schemaVersion: "murph.execution-outbox.ref.v1",
         dispatchRef: {
           eventId: "evt_linq_123",
           eventKind: "linq.message.received",
@@ -278,6 +245,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    schemaVersion: "murph.execution-outbox.ref.v1",
                     dispatchRef: {
                       eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
                       eventKind: "member.activated",
@@ -302,6 +270,7 @@ describe("hydrateHostedExecutionDispatch", () => {
     const dispatch = await hydrateHostedExecutionDispatch(
       buildWebhookOutboxRecord(
         {
+          schemaVersion: "murph.execution-outbox.ref.v1",
           dispatchRef: {
             eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
             eventKind: "member.activated",
