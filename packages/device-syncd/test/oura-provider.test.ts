@@ -340,6 +340,40 @@ test("Oura provider validates webhook signatures and turns notifications into re
   assert.equal(parsed?.jobs[0]?.dedupeKey, `oura-webhook:${parsed?.traceId}`);
 });
 
+test("Oura provider accepts uppercase hexadecimal webhook signatures", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "daily_sleep",
+      object_id: "daily-sleep-1",
+      user_id: "oura-user-1",
+      timestamp: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+  const timestamp = "2026-03-16T09:58:10.000Z";
+  const signature = createHmac("sha256", "oura-client-secret")
+    .update(`${timestamp}${rawBody.toString("utf8")}`)
+    .digest("hex")
+    .toUpperCase();
+
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: new Headers({
+      "x-oura-signature": signature,
+      "x-oura-timestamp": timestamp,
+    }),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  assert.equal(parsed?.eventType, "update");
+  assert.equal(parsed?.payload?.dataType, "daily_sleep");
+});
+
 test("Oura webhook verification challenge helper returns the challenge only for the configured token", () => {
   const challenge = resolveOuraWebhookVerificationChallenge({
     url: new URL(

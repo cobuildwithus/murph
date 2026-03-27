@@ -244,7 +244,9 @@ const DEVICE_SYNC_HTTP_ROUTES = [
       const challenge = resolveWebhookVerificationChallenge(provider, url, config);
 
       if (challenge !== null) {
-        sendText(response, 200, challenge);
+        sendJson(response, 200, {
+          challenge,
+        });
         return;
       }
 

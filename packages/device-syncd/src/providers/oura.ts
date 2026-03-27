@@ -118,7 +118,8 @@ function tokenResponseToAuthTokens(payload: OuraTokenResponse): ProviderAuthToke
 function buildOuraSignatureCandidates(timestamp: string, rawBody: Buffer, secret: string): string[] {
   const signatureBase = `${timestamp}${rawBody.toString("utf8")}`;
   const digest = createHmac("sha256", secret).update(signatureBase).digest();
-  return [digest.toString("hex"), digest.toString("base64"), digest.toString("base64url")];
+  const hex = digest.toString("hex");
+  return [hex, hex.toUpperCase(), digest.toString("base64"), digest.toString("base64url")];
 }
 
 function constantTimeMatchSignature(expectedCandidates: readonly string[], actual: string): boolean {

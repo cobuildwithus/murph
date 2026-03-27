@@ -12,6 +12,21 @@ export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";
 export { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
+export {
+  createOuraWebhookSubscriptionClient,
+  OURA_DEFAULT_WEBHOOK_DATA_TYPES,
+  OURA_DEFAULT_WEBHOOK_TARGETS,
+  OURA_WEBHOOK_EVENT_TYPES,
+} from "./providers/oura-webhooks.ts";
+export type {
+  CreateOuraWebhookSubscriptionClientInput,
+  OuraWebhookDataType,
+  OuraWebhookEnsureResult,
+  OuraWebhookOperation,
+  OuraWebhookSubscription,
+  OuraWebhookSubscriptionClient,
+  OuraWebhookTarget,
+} from "./providers/oura-webhooks.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
 export * from "./types.ts";

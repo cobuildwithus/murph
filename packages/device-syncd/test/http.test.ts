@@ -462,8 +462,10 @@ test("device sync http server serves the Oura webhook verification challenge on 
     );
 
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "text/plain; charset=utf-8");
-    assert.equal(await response.text(), "random-challenge");
+    assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.deepEqual(await response.json(), {
+      challenge: "random-challenge",
+    });
   } finally {
     await server.close();
   }
