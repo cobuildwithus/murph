@@ -5,24 +5,23 @@ import { usePrivy, useUpdateEmail, useUser } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
 
 import {
-  extractHostedPrivyEmailAccount,
-  extractHostedPrivyVerifiedEmailAccount,
   isHostedPrivyEmailAccountVerified,
-  resolveHostedPrivyLinkedAccounts,
   type HostedPrivyEmailAccount,
+  resolveHostedPrivyLinkedAccounts,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { HostedPrivyProvider } from "../hosted-onboarding/privy-provider";
+import {
+  isValidEmailAddress,
+  normalizeComparableEmail,
+  normalizeEmailAddress,
+  resolveHostedEmailSettingsDisplayState,
+  syncHostedVerifiedEmailAddress,
+} from "./hosted-email-settings-helpers";
 
 interface HostedEmailSettingsProps {
   expectedPrivyUserId: string;
   privyAppId: string;
-}
-
-interface HostedEmailSyncResult {
-  emailAddress: string;
-  runTriggered: boolean;
-  verifiedAt: string;
 }
 
 export function HostedEmailSettings({ privyAppId, ...props }: HostedEmailSettingsProps) {
@@ -48,9 +47,13 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
 
   const linkedAccounts = resolveHostedPrivyLinkedAccounts(user);
-  const currentEmail = extractHostedPrivyEmailAccount(linkedAccounts);
-  const effectiveCurrentEmail = verifiedEmailOverride ?? currentEmail;
-  const normalizedCurrentEmail = normalizeComparableEmail(effectiveCurrentEmail?.address ?? null);
+  const displayState = resolveHostedEmailSettingsDisplayState({
+    linkedAccounts,
+    verifiedEmailOverride,
+  });
+  const effectiveCurrentEmail = displayState.currentEmail;
+  const effectiveVerifiedEmail = displayState.currentVerifiedEmail;
+  const normalizedCurrentEmail = displayState.normalizedCurrentEmail;
   const canManageEmail = ready && authenticated && user?.id === expectedPrivyUserId;
   const isLoadingAuthenticatedUser = ready && authenticated && !user;
   const isAwaitingCode = state.status === "awaiting-code-input";
@@ -155,9 +158,9 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
     try {
       const result = await verifyCode({ code: normalizedCode });
       const nextUser = result?.user ?? user;
-      const nextEmail = extractHostedPrivyVerifiedEmailAccount(
-        resolveHostedPrivyLinkedAccounts(nextUser),
-      );
+      const nextEmail = resolveHostedEmailSettingsDisplayState({
+        linkedAccounts: resolveHostedPrivyLinkedAccounts(nextUser),
+      }).currentVerifiedEmail;
 
       verifiedEmailAddress = nextEmail?.address ?? pendingEmailAddress ?? normalizeEmailAddress(emailAddress);
 
@@ -184,21 +187,19 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       return;
     }
 
-    setIsSyncingEmailRoute(true);
+    await syncVerifiedEmailAddress(verifiedEmailAddress, "verify");
+  }
 
-    try {
-      const syncResult = await syncHostedEmailConnectionWithRetry(verifiedEmailAddress);
-      setSuccessMessage(
-        syncResult.runTriggered
-          ? `Email verified and connected: ${syncResult.emailAddress}`
-          : `Email verified and saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it on the next hosted run.`,
-      );
-    } catch (error) {
-      setSuccessMessage(`Email verified: ${verifiedEmailAddress}`);
-      setErrorMessage(toHostedEmailSyncErrorMessage(error));
-    } finally {
-      setIsSyncingEmailRoute(false);
+  async function handleSyncVerifiedEmail() {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!effectiveVerifiedEmail?.address) {
+      setErrorMessage("Verify an email address before you try to sync it.");
+      return;
     }
+
+    await syncVerifiedEmailAddress(effectiveVerifiedEmail.address, "resync");
   }
 
   async function handleLogout() {
@@ -211,6 +212,21 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       setErrorMessage(toErrorMessage(error, "We could not sign out of the current Privy session."));
     } finally {
       setLoggingOut(false);
+    }
+  }
+
+  async function syncVerifiedEmailAddress(verifiedEmailAddress: string, mode: "resync" | "verify") {
+    setIsSyncingEmailRoute(true);
+
+    try {
+      const syncPresentation = await syncHostedVerifiedEmailAddress({
+        mode,
+        verifiedEmailAddress,
+      });
+      setSuccessMessage(syncPresentation.successMessage);
+      setErrorMessage(syncPresentation.errorMessage);
+    } finally {
+      setIsSyncingEmailRoute(false);
     }
   }
 
@@ -273,6 +289,22 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
                 ?? "Add an email address and we will verify it with a one-time code before saving it."}
             </p>
           </div>
+
+          {effectiveVerifiedEmail ? (
+            <div className="flex flex-wrap items-center gap-3 rounded border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-600">
+              <span>
+                Use this to retry the hosted assistant sync without requesting another verification code.
+              </span>
+              <button
+                type="button"
+                onClick={handleSyncVerifiedEmail}
+                disabled={isBusy}
+                className={secondaryButtonClasses}
+              >
+                {isSyncingEmailRoute ? "Syncing..." : "Sync current verified email"}
+              </button>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
             <div className="space-y-2">
@@ -414,121 +446,6 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
   );
 }
 
-function normalizeEmailAddress(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized ? normalized : null;
-}
-
-function normalizeComparableEmail(value: string | null | undefined): string | null {
-  const normalized = normalizeEmailAddress(value);
-  return normalized ? normalized.toLowerCase() : null;
-}
-
-function isValidEmailAddress(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
-}
-
-async function syncHostedEmailConnectionWithRetry(
-  expectedEmailAddress: string,
-): Promise<HostedEmailSyncResult> {
-  const retryDelaysMs = [0, 250, 500, 1_000];
-  let lastError: unknown = null;
-
-  for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
-    if (retryDelaysMs[attempt] > 0) {
-      await sleep(retryDelaysMs[attempt]);
-    }
-
-    try {
-      return await syncHostedEmailConnection(expectedEmailAddress);
-    } catch (error) {
-      lastError = error;
-
-      if (!(error instanceof HostedEmailSyncError) || error.code !== "PRIVY_EMAIL_NOT_READY") {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new HostedEmailSyncError(
-        null,
-        "We verified your email, but the hosted assistant could not confirm it yet. Refresh and try again.",
-      );
-}
-
-async function syncHostedEmailConnection(expectedEmailAddress: string): Promise<HostedEmailSyncResult> {
-  const response = await fetch("/api/settings/email/sync", {
-    body: JSON.stringify({
-      expectedEmailAddress,
-    }),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    method: "POST",
-  });
-  const payload = await readOptionalJsonObject(response);
-
-  if (!response.ok) {
-    const errorPayload = isRecord(payload) && isRecord(payload.error) ? payload.error : null;
-
-    throw new HostedEmailSyncError(
-      typeof errorPayload?.code === "string" ? errorPayload.code : null,
-      typeof errorPayload?.message === "string"
-        ? errorPayload.message
-        : "We could not sync your verified email to the hosted assistant yet.",
-    );
-  }
-
-  if (
-    !isRecord(payload)
-    || payload.ok !== true
-    || typeof payload.emailAddress !== "string"
-    || typeof payload.verifiedAt !== "string"
-  ) {
-    throw new HostedEmailSyncError(
-      null,
-      "We verified your email, but the hosted assistant returned an unexpected sync response.",
-    );
-  }
-
-  return {
-    emailAddress: payload.emailAddress,
-    runTriggered: payload.runTriggered !== false,
-    verifiedAt: payload.verifiedAt,
-  };
-}
-
-async function readOptionalJsonObject(response: Response): Promise<Record<string, unknown> | null> {
-  const text = await response.text();
-
-  if (!text.trim()) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(text) as unknown;
-    return isRecord(payload) ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function sleep(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, delayMs);
-  });
-}
-
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -539,27 +456,6 @@ function toErrorMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
-}
-
-function toHostedEmailSyncErrorMessage(error: unknown): string {
-  if (error instanceof HostedEmailSyncError) {
-    return error.message;
-  }
-
-  return toErrorMessage(
-    error,
-    "We verified your email, but we could not sync it to the hosted assistant yet. Refresh and try again.",
-  );
-}
-
-class HostedEmailSyncError extends Error {
-  readonly code: string | null;
-
-  constructor(code: string | null, message: string) {
-    super(message);
-    this.name = "HostedEmailSyncError";
-    this.code = code;
-  }
 }
 
 const inputClasses =

@@ -1,9 +1,7 @@
-import { readFile } from "node:fs/promises";
-
 import {
   readHostedVerifiedEmailFromEnv,
-  resolveRuntimePaths,
 } from "@murph/runtime-state";
+import { resolveHostedEmailSenderIdentity } from "@murph/hosted-execution";
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
@@ -13,31 +11,11 @@ import {
   saveAssistantSelfDeliveryTarget,
 } from "murph/operator-config";
 
-const HOSTED_EMAIL_SETUP_CONNECTOR_ID = "email:agentmail";
-
 type HostedEmailSelfTargetStatus =
-  | "ambiguous-email-connectors"
-  | "missing-email-connector"
+  | "missing-sender-identity"
   | "no-verified-email"
   | "saved"
   | "unchanged";
-
-interface InboxConnectorConfigLike {
-  accountId?: unknown;
-  enabled?: unknown;
-  id?: unknown;
-  source?: unknown;
-}
-
-type HostedEmailConnectorIdentity =
-  | {
-      identityId: null;
-      status: "ambiguous-email-connectors" | "missing-email-connector";
-    }
-  | {
-      identityId: string;
-      status: "selected";
-    };
 
 export interface HostedEmailSelfTargetReconciliationResult {
   emailAddress: string | null;
@@ -64,23 +42,21 @@ export async function reconcileHostedVerifiedEmailSelfTarget(input: {
     };
   }
 
-  const connectors = await readInboxConnectors(input.vaultRoot);
-  const connectorIdentity = resolveHostedEmailConnectorIdentityId(connectors);
-
-  if (connectorIdentity.status !== "selected") {
+  const senderIdentity = resolveHostedEmailSenderIdentity(input.source);
+  if (!senderIdentity) {
     return {
       emailAddress: verifiedEmail.address,
       identityId: null,
       preferredChannelsUpdated: false,
       selfTargetUpdated: false,
-      status: connectorIdentity.status,
+      status: "missing-sender-identity",
     };
   }
 
   const nextTarget = {
     channel: "email",
     deliveryTarget: verifiedEmail.address,
-    identityId: connectorIdentity.identityId,
+    identityId: senderIdentity,
     participantId: verifiedEmail.address,
     sourceThreadId: null,
   };
@@ -107,66 +83,10 @@ export async function reconcileHostedVerifiedEmailSelfTarget(input: {
 
   return {
     emailAddress: verifiedEmail.address,
-    identityId: connectorIdentity.identityId,
+    identityId: senderIdentity,
     preferredChannelsUpdated,
     selfTargetUpdated,
     status: selfTargetUpdated || preferredChannelsUpdated ? "saved" : "unchanged",
-  };
-}
-
-async function readInboxConnectors(vaultRoot: string): Promise<InboxConnectorConfigLike[]> {
-  try {
-    const raw = await readFile(resolveRuntimePaths(vaultRoot).inboxConfigPath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      connectors?: unknown;
-    };
-
-    return Array.isArray(parsed.connectors)
-      ? parsed.connectors.filter((value): value is InboxConnectorConfigLike => isRecord(value))
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function resolveHostedEmailConnectorIdentityId(
-  connectors: readonly InboxConnectorConfigLike[],
-): HostedEmailConnectorIdentity {
-  const emailConnectors = connectors.filter((connector) => {
-    const source = normalizeText(connector.source);
-    const accountId = normalizeText(connector.accountId);
-
-    return source === "email" && connector.enabled !== false && Boolean(accountId);
-  });
-
-  if (emailConnectors.length === 0) {
-    return {
-      identityId: null,
-      status: "missing-email-connector",
-    };
-  }
-
-  const preferredConnector = emailConnectors.find(
-    (connector) => normalizeText(connector.id) === HOSTED_EMAIL_SETUP_CONNECTOR_ID,
-  );
-
-  if (preferredConnector) {
-    return {
-      identityId: normalizeText(preferredConnector.accountId) as string,
-      status: "selected",
-    };
-  }
-
-  if (emailConnectors.length === 1) {
-    return {
-      identityId: normalizeText(emailConnectors[0]?.accountId) as string,
-      status: "selected",
-    };
-  }
-
-  return {
-    identityId: null,
-    status: "ambiguous-email-connectors",
   };
 }
 
@@ -193,17 +113,4 @@ function isAssistantSelfDeliveryTargetEqual(
     && left?.participantId === right.participantId
     && left?.sourceThreadId === right.sourceThreadId
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeText(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized ? normalized : null;
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   extractHostedPrivyEmailAccount,
+  extractHostedPrivyPreferredEmailAccount,
   extractHostedPrivyPhoneAccount,
   extractHostedPrivyVerifiedEmailAccount,
   extractHostedPrivyWalletAccount,
@@ -129,6 +130,41 @@ describe("hosted Privy identity helpers", () => {
     ).toEqual({
       address: "user@example.com",
       verifiedAt: 1741194420,
+    });
+  });
+
+  it("prefers the best verified email account when one is available", () => {
+    expect(
+      extractHostedPrivyPreferredEmailAccount([
+        {
+          address: "first@example.com",
+          type: "email",
+        },
+        {
+          address: "verified@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ]),
+    ).toEqual({
+      address: "verified@example.com",
+      verifiedAt: 1741194420,
+    });
+
+    expect(
+      extractHostedPrivyPreferredEmailAccount([
+        {
+          address: "first@example.com",
+          type: "email",
+        },
+        {
+          address: "second@example.com",
+          type: "email",
+        },
+      ]),
+    ).toEqual({
+      address: "first@example.com",
+      verifiedAt: null,
     });
   });
 

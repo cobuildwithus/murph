@@ -119,6 +119,12 @@ export function extractHostedPrivyEmailAccount(
   return null;
 }
 
+export function extractHostedPrivyPreferredEmailAccount(
+  linkedAccounts: readonly PrivyLinkedAccountLike[],
+): HostedPrivyEmailAccount | null {
+  return extractHostedPrivyVerifiedEmailAccount(linkedAccounts) ?? extractHostedPrivyEmailAccount(linkedAccounts);
+}
+
 export function isHostedPrivyEmailAccountVerified(
   account: HostedPrivyEmailAccount | null | undefined,
 ): account is HostedPrivyEmailAccount & { verifiedAt: number } {
