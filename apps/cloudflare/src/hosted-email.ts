@@ -7,6 +7,7 @@ import {
   serializeHostedEmailThreadTarget,
   type HostedEmailThreadTarget,
 } from "@murph/runtime-state";
+import { resolveHostedEmailSenderIdentity } from "@murph/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
@@ -68,17 +69,14 @@ export interface HostedEmailSendRequest {
 }
 
 const HOSTED_EMAIL_THREAD_ROUTE_SCHEMA = "murph.hosted-email-thread-route.v1";
-const LEGACY_HOSTED_EMAIL_THREAD_ROUTE_SCHEMA = "healthybob.hosted-email-thread-route.v1";
 const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v1";
-const LEGACY_HOSTED_EMAIL_USER_ROUTE_SCHEMA = "healthybob.hosted-email-user-route.v1";
 
 export function readHostedEmailConfig(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): HostedEmailConfig {
   const domain = normalizeHostedEmailAddressComponent(source.HOSTED_EMAIL_DOMAIN);
   const localPart = normalizeHostedEmailAddressComponent(source.HOSTED_EMAIL_LOCAL_PART) ?? "assistant";
-  const fromAddress = normalizeHostedEmailAddress(source.HOSTED_EMAIL_FROM_ADDRESS)
-    ?? (domain ? `${localPart}@${domain}` : null);
+  const fromAddress = resolveHostedEmailSenderIdentity(source);
 
   return {
     apiBaseUrl: normalizeHostedEmailApiBaseUrl(source.HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL),
@@ -236,7 +234,6 @@ export async function sendHostedEmailMessage(input: {
   });
   const prepared = await prepareHostedEmailSend({
     config: input.config,
-    identityId: input.request.identityId,
     message: input.request.message,
     target: input.request.target,
     targetKind: input.request.targetKind,
@@ -382,7 +379,6 @@ function createHostedEmailRouteStore(input: {
 
 async function prepareHostedEmailSend(input: {
   config: HostedEmailConfig;
-  identityId: string | null;
   message: string;
   target: string;
   targetKind: HostedEmailSendRequest["targetKind"];
@@ -393,8 +389,7 @@ async function prepareHostedEmailSend(input: {
   replyKey: string;
   threadTarget: HostedEmailThreadTarget;
 }> {
-  const fromAddress = normalizeHostedEmailAddress(input.identityId)
-    ?? input.config.fromAddress;
+  const fromAddress = input.config.fromAddress;
   if (!fromAddress) {
     throw new Error("Hosted email sender identity is not configured.");
   }
@@ -677,10 +672,7 @@ function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRe
   }
 
   const record = value as Partial<HostedEmailUserRouteRecord>;
-  if (
-    record.schema !== HOSTED_EMAIL_USER_ROUTE_SCHEMA
-    && record.schema !== LEGACY_HOSTED_EMAIL_USER_ROUTE_SCHEMA
-  ) {
+  if (record.schema !== HOSTED_EMAIL_USER_ROUTE_SCHEMA) {
     throw new TypeError("Hosted email user route schema is invalid.");
   }
   if (!record.aliasKey || !record.identityId || !record.userId) {
@@ -702,10 +694,7 @@ function parseHostedEmailThreadRouteRecord(value: unknown): HostedEmailThreadRou
   }
 
   const record = value as Partial<HostedEmailThreadRouteRecord>;
-  if (
-    record.schema !== HOSTED_EMAIL_THREAD_ROUTE_SCHEMA
-    && record.schema !== LEGACY_HOSTED_EMAIL_THREAD_ROUTE_SCHEMA
-  ) {
+  if (record.schema !== HOSTED_EMAIL_THREAD_ROUTE_SCHEMA) {
     throw new TypeError("Hosted email thread route schema is invalid.");
   }
   if (!record.identityId || !record.replyKey || !record.userId) {

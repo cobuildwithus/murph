@@ -85,8 +85,9 @@ assert(
   'package.json must expose murph from dist/bin.js as the setup alias.',
 )
 assert(
-  !('healthybob' in (packageJson.bin ?? {})),
-  'package.json must not expose a healthybob compatibility alias once the CLI surface is murph-only.',
+  JSON.stringify(Object.keys(packageJson.bin ?? {}).sort()) ===
+    JSON.stringify(['murph', 'vault-cli']),
+  'package.json must expose only the murph and vault-cli binaries.',
 )
 assert(
   packageJson.exports?.['.']?.default === './dist/index.js',

@@ -2160,7 +2160,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const pythonCommand = path.join(formulaPrefixes['python@3.12'], 'bin', 'python3.12')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const healthybobShimPath = path.join(homeRoot, '.local', 'bin', 'healthybob')
   const murphShimPath = path.join(homeRoot, '.local', 'bin', 'murph')
   const vaultCliShimPath = path.join(homeRoot, '.local', 'bin', 'vault-cli')
   const shellProfilePath = path.join(homeRoot, '.zshrc')
@@ -2375,7 +2374,11 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
             } | null
           } | null
         } | null
-        model?: string | null
+        defaultsByProvider?: {
+          'codex-cli'?: {
+            model?: string | null
+          } | null
+        } | null
         provider?: string | null
       } | null
       defaultVault: string | null
@@ -2386,13 +2389,12 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     assert.equal(modelText, 'model')
     assert.equal(operatorConfig.defaultVault, '~/vault')
     assert.equal(operatorConfig.assistant?.provider, 'codex-cli')
-    assert.equal(operatorConfig.assistant?.model, 'gpt-5.4')
+    assert.equal(operatorConfig.assistant?.defaultsByProvider?.['codex-cli']?.model, 'gpt-5.4')
     assert.equal(operatorConfig.assistant?.account?.kind, 'account')
     assert.equal(operatorConfig.assistant?.account?.planCode, 'plus')
     assert.equal(operatorConfig.assistant?.account?.planName, 'Plus')
     assert.equal(operatorConfig.assistant?.account?.quota?.creditsRemaining, 18)
     assert.equal(operatorConfig.assistant?.account?.quota?.primaryWindow?.remainingPercent, 55)
-    await assert.rejects(readFile(healthybobShimPath, 'utf8'), /ENOENT/u)
     assert.equal(murphShim, buildExpectedCliShimScript(cliBinPath, 'murph'))
     assert.equal(vaultCliShim, buildExpectedCliShimScript(cliBinPath, 'vault-cli'))
     assert.match(shellProfile, /export PATH="\$HOME\/\.local\/bin:\$PATH"/u)
@@ -2401,128 +2403,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
         ({ args, file }) => path.basename(file) === 'brew' && args.join(' ') === 'install ffmpeg',
       ),
       true,
-    )
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('setup service removes a legacy healthybob shim and keeps the active Murph shims', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-shim-reuse-'))
-  const homeRoot = path.join(tempRoot, 'home')
-  const vaultRoot = path.join(tempRoot, 'vault')
-  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
-  const formulaPrefixes = {
-    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
-    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
-  }
-  const brewCommand = path.join(homebrewBin, 'brew')
-  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
-  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const userBinDirectory = path.join(homeRoot, '.local', 'bin')
-  const legacyShimPath = path.join(userBinDirectory, 'healthybob')
-  const shellProfilePath = path.join(homeRoot, '.zshrc')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
-  let bootstrapCalls = 0
-
-  await mkdir(vaultRoot, { recursive: true })
-  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
-  await writeExecutable(brewCommand)
-  await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
-  await writeExecutable(whisperCommand)
-  await mkdir(userBinDirectory, { recursive: true })
-  await writeExecutable(legacyShimPath, '#!/usr/bin/env bash\nprintf \'legacy\\n\'\n')
-  await writeExecutable(
-    path.join(userBinDirectory, 'murph'),
-    buildExpectedCliShimScript(cliBinPath, 'murph'),
-  )
-  await writeExecutable(
-    path.join(userBinDirectory, 'vault-cli'),
-    buildExpectedCliShimScript(cliBinPath, 'vault-cli'),
-  )
-  await writeFile(
-    shellProfilePath,
-    `# >>> Murph PATH >>>
-export PATH="$HOME/.local/bin:$PATH"
-# <<< Murph PATH <<<
-`,
-    'utf8',
-  )
-  await saveDefaultVaultConfig(vaultRoot, homeRoot)
-
-  const services = createSetupServices({
-    arch: () => 'x64',
-    downloadFile: async (_url, destinationPath) => {
-      await mkdir(path.dirname(destinationPath), { recursive: true })
-      await writeFile(destinationPath, 'model', 'utf8')
-    },
-    env: () => ({ PATH: `${userBinDirectory}${path.delimiter}${homebrewBin}`, SHELL: '/bin/zsh' }),
-    getHomeDirectory: () => homeRoot,
-    inboxServices: {
-      async bootstrap() {
-        bootstrapCalls += 1
-        return makeBootstrapResult(vaultRoot)
-      },
-    },
-    log() {},
-    platform: () => 'darwin',
-    resolveCliBinPath: () => cliBinPath,
-    runCommand: async ({ file, args }) => {
-      const baseName = path.basename(file)
-
-      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
-        const formula = args[2] ?? ''
-        return {
-          exitCode: installedFormulas.has(formula) ? 0 : 1,
-          stderr: '',
-          stdout: installedFormulas.has(formula) ? `${formula} 1.0.0\n` : '',
-        }
-      }
-
-      if (baseName === 'brew' && args[0] === '--prefix') {
-        const formula = args[1] as keyof typeof formulaPrefixes
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: `${formulaPrefixes[formula]}\n`,
-        }
-      }
-
-      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
-    },
-    vaultServices: {
-      core: {
-        async init() {
-          throw new Error('init should not be called for an existing vault')
-        },
-      },
-    } as any,
-  })
-
-  try {
-    const result = await services.setupMacos({
-      skipOcr: true,
-      vault: vaultRoot,
-      whisperModel: 'base.en',
-    })
-
-    assert.equal(bootstrapCalls, 1)
-    assert.equal(
-      result.steps.some((step) => step.id === 'cli-shims' && step.status === 'completed'),
-      true,
-    )
-    assert.equal(
-      result.steps.some((step) => step.id === 'default-vault' && step.status === 'reused'),
-      true,
-    )
-    await assert.rejects(readFile(legacyShimPath, 'utf8'), /ENOENT/u)
-    assert.equal(
-      result.notes.includes('Open a new shell or run source ~/.zshrc to use murph immediately.'),
-      false,
     )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -3173,14 +3053,6 @@ test('setup routing helpers keep the setup alias stable', () => {
   assert.equal(
     detectSetupProgramName('/usr/local/bin/murph'),
     'murph',
-  )
-  assert.equal(
-    detectSetupProgramName('/usr/local/bin/healthybob'),
-    'vault-cli',
-  )
-  assert.equal(
-    detectSetupProgramName('/tmp/packages/cli/dist/bin.js', 'healthybob'),
-    'vault-cli',
   )
   assert.equal(
     detectSetupProgramName('/tmp/packages/cli/dist/bin.js'),

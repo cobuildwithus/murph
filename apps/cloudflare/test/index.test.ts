@@ -6,6 +6,7 @@ import {
   type HostedExecutionDispatchRequest,
 } from "@murph/runtime-state";
 import { encryptHostedBundle } from "../src/crypto.ts";
+import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
@@ -648,6 +649,25 @@ describe("cloudflare worker routes", () => {
     expect(secondPayload.address).toBe(firstPayload.address);
   });
 
+  it("returns 503 from the hosted email address route when ingress is not configured", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      createWorkerEnv(createUserRunnerStub(), {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted email ingress is not configured.",
+    });
+  });
+
   it("routes inbound hosted email through the stable alias and stores the raw message for the runner", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
@@ -712,6 +732,21 @@ describe("cloudflare worker routes", () => {
     await expect(readResponse.text()).resolves.toBe(raw);
   });
 
+  it("rejects inbound hosted email before route lookup when ingress is not configured", async () => {
+    const stub = createUserRunnerStub();
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: "alice@example.test",
+      raw: "From: alice@example.test\r\nTo: assistant@example.test\r\n\r\nhello\r\n",
+      setReject,
+      to: "assistant@example.test",
+    } as never, createWorkerEnv(stub) as never);
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email ingress is not configured.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
+  });
+
   it("sends hosted email through email.worker and returns a canonical serialized thread target", async () => {
     const env = createWorkerEnv(createUserRunnerStub(), {
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
@@ -751,7 +786,7 @@ describe("cloudflare worker routes", () => {
     const response = await callRunnerOutbound(
       new Request("http://email.worker/send", {
         body: JSON.stringify({
-          identityId: "assistant@mail.example.test",
+          identityId: "different@example.test",
           message: "Hosted email hello.",
           target: "user@example.test",
           targetKind: "participant",
@@ -777,6 +812,96 @@ describe("cloudflare worker routes", () => {
     expect(threadTarget?.replyAliasAddress?.endsWith("@mail.example.test")).toBe(true);
     expect(threadTarget?.lastMessageId).toMatch(/^<hosted\./u);
     expect(threadTarget?.subject).toBe("Murph update");
+  });
+
+  it("routes replies to a hosted send alias back through the configured sender identity", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({
+          result: {
+            queued: ["user@example.test"],
+          },
+          success: true,
+        }), { status: 200 })),
+    );
+
+    const sendResponse = await callRunnerOutbound(
+      new Request("http://email.worker/send", {
+        body: JSON.stringify({
+          identityId: "different@example.test",
+          message: "Hosted email hello.",
+          target: "user@example.test",
+          targetKind: "participant",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    const sendPayload = await sendResponse.json() as {
+      ok: boolean;
+      target: string;
+    };
+    const threadTarget = parseHostedEmailThreadTarget(sendPayload.target);
+    const threadRouteKey = env.__bucketStore.keys().find((key) =>
+      key.startsWith("transient/hosted-email/threads/"),
+    );
+
+    expect(threadTarget?.replyAliasAddress).toBeTruthy();
+    if (!threadRouteKey || !threadTarget) {
+      throw new Error("Expected the hosted email thread route object to be written.");
+    }
+
+    await writeEncryptedR2Json({
+      bucket: env.BUNDLES,
+      cryptoKey: Buffer.alloc(32, 9),
+      key: threadRouteKey,
+      keyId: "v1",
+      value: {
+        identityId: "assistant@mail.example.test",
+        replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),
+        schema: "murph.hosted-email-thread-route.v1",
+        target: threadTarget,
+        updatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "member_123",
+      },
+    });
+
+    await worker.email?.({
+      from: "user@example.test",
+      raw: [
+        'From: user@example.test',
+        `To: ${threadTarget?.replyAliasAddress}`,
+        'Subject: Re: Murph update',
+        '',
+        'Replying to the hosted alias.',
+        '',
+      ].join('\r\n'),
+      to: threadTarget?.replyAliasAddress ?? "",
+    } as never, env as never);
+
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        identityId: "assistant@mail.example.test",
+        kind: "email.message.received",
+        threadTarget: sendPayload.target,
+        userId: "member_123",
+      }),
+    }));
   });
 
   it("returns method and auth errors on protected routes in the same order as before", async () => {
@@ -951,8 +1076,11 @@ function createWorkerEnv(
   userRunnerStub: UserRunnerStub = createUserRunnerStub(),
   overrides: Partial<Record<string, unknown>> = {},
 ) {
+  const bucketStore = createBucketStore();
+
   return {
-    BUNDLES: createBucketStore().api,
+    __bucketStore: bucketStore,
+    BUNDLES: bucketStore.api,
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
@@ -1226,6 +1354,9 @@ type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
 
 function createUserRunnerStub() {
   return {
+    bootstrapUser: vi.fn(async (userId: string) => ({
+      userId,
+    })),
     clearUserEnv: vi.fn(async (userId: string) => ({
       configuredUserEnvKeys: [],
       userId,

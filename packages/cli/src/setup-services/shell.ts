@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { SetupStepResult } from '../setup-cli-contracts.js'
 import { createStep, DEFAULT_USER_BIN_DIRECTORY } from './steps.js'
@@ -6,8 +6,6 @@ import { defaultFileExists, isExecutable } from './process.js'
 
 const PATH_BLOCK_BEGIN = '# >>> Murph PATH >>>'
 const PATH_BLOCK_END = '# <<< Murph PATH <<<'
-const LEGACY_PATH_BLOCK_BEGIN = '# >>> Healthy Bob PATH >>>'
-const LEGACY_PATH_BLOCK_END = '# <<< Healthy Bob PATH <<<'
 
 export async function ensureCliShims(input: {
   cliBinPath: string
@@ -30,7 +28,6 @@ export async function ensureCliShims(input: {
       path: path.join(userBinDirectory, 'vault-cli'),
     },
   ]
-  const legacyShimPaths = [path.join(userBinDirectory, 'healthybob')]
   const pathPresent = pathIncludesSegment(input.env.PATH, userBinDirectory)
   const pathBlockStatus = pathPresent
     ? 'reused'
@@ -46,19 +43,13 @@ export async function ensureCliShims(input: {
     }),
   )
   const hasAllShims = shimsReady.every(Boolean)
-  const legacyShimsPresent = (
-    await Promise.all(legacyShimPaths.map(async (shimPath) => await input.fileExists(shimPath)))
-  ).some(Boolean)
-
   if (input.dryRun) {
     const status =
       hasAllShims &&
-      !legacyShimsPresent &&
       (pathPresent || pathBlockStatus === 'reused')
         ? 'reused'
         : 'planned'
     const detail = hasAllShims &&
-      !legacyShimsPresent &&
       (pathPresent || pathBlockStatus === 'reused')
       ? `Reusing Murph CLI shims from ${userBinDirectory}.`
       : pathPresent
@@ -87,12 +78,6 @@ export async function ensureCliShims(input: {
       shimPath: shim.path,
     })
     wroteShim = wroteShim || changed
-  }
-  for (const shimPath of legacyShimPaths) {
-    if (await input.fileExists(shimPath)) {
-      await rm(shimPath, { force: true })
-      wroteShim = true
-    }
   }
 
   let pathUpdated = false
@@ -272,15 +257,7 @@ async function ensurePathBlock(profilePath: string): Promise<boolean> {
 }
 
 function hasManagedPathBlock(contents: string): boolean {
-  return (
-    (
-      contents.includes(PATH_BLOCK_BEGIN) &&
-      contents.includes(PATH_BLOCK_END)
-    ) || (
-      contents.includes(LEGACY_PATH_BLOCK_BEGIN) &&
-      contents.includes(LEGACY_PATH_BLOCK_END)
-    )
-  )
+  return contents.includes(PATH_BLOCK_BEGIN) && contents.includes(PATH_BLOCK_END)
 }
 
 function buildManagedPathBlock(): string {

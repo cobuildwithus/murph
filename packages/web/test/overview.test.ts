@@ -117,33 +117,6 @@ test("resolveConfiguredVaultRoot keeps explicit env precedence over the saved de
   }
 });
 
-test("resolveConfiguredVaultRoot ignores the legacy saved default vault path", async () => {
-  const operatorHome = await mkdtemp(path.join(os.tmpdir(), "murph-web-home-"));
-
-  try {
-    await mkdir(path.join(operatorHome, ".healthybob"), { recursive: true });
-    await writeFile(
-      path.join(operatorHome, ".healthybob", "config.json"),
-      `${JSON.stringify({
-        schema: "healthybob.operator-config.v1",
-        defaultVault: "~/vault",
-        assistant: null,
-        updatedAt: "2026-03-23T00:00:00.000Z",
-      })}\n`,
-      "utf8",
-    );
-
-    assert.equal(
-      await resolveConfiguredVaultRoot({
-        HOME: operatorHome,
-      }, "/repo/packages/web"),
-      null,
-    );
-  } finally {
-    await rm(operatorHome, { force: true, recursive: true });
-  }
-});
-
 test("resolveConfiguredVaultRoot ignores invalid saved operator config", async () => {
   const operatorHome = await mkdtemp(path.join(os.tmpdir(), "murph-web-home-"));
 
