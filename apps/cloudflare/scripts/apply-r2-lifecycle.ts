@@ -2,46 +2,30 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  buildHostedLifecycleWranglerArgs,
+  createHostedLifecycleWranglerError,
+  resolveHostedLifecycleBucketNames,
+} from "../src/r2-lifecycle.js";
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const lifecycleConfigPath = path.join(appDir, "r2-bundles-lifecycle.json");
-
-const configuredBuckets = dedupe([
-  normalizeString(process.env.CF_BUNDLES_BUCKET),
-  normalizeString(process.env.CF_BUNDLES_PREVIEW_BUCKET),
-]);
-
-if (configuredBuckets.length === 0) {
-  throw new Error("CF_BUNDLES_BUCKET or CF_BUNDLES_PREVIEW_BUCKET must be configured.");
-}
+const configuredBuckets = resolveHostedLifecycleBucketNames(process.env);
 
 for (const bucketName of configuredBuckets) {
   console.log(`Applying transient lifecycle rules to R2 bucket ${bucketName}...`);
-  await runWranglerCommand([
-    "exec",
-    "wrangler",
-    "r2",
-    "bucket",
-    "lifecycle",
-    "set",
-    bucketName,
-    "--file",
-    lifecycleConfigPath,
-  ]);
+  await runWranglerCommand(
+    buildHostedLifecycleWranglerArgs({
+      bucketName,
+      lifecycleConfigPath,
+    }),
+  );
 }
 
 console.log(
   `Applied transient lifecycle rules from ${path.relative(process.cwd(), lifecycleConfigPath) || path.basename(lifecycleConfigPath)}.`,
 );
-
-function normalizeString(value: string | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized ? normalized : null;
-}
-
-function dedupe(values: Array<string | null>): string[] {
-  return [...new Set(values.filter((value): value is string => value !== null))];
-}
 
 function runWranglerCommand(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -58,13 +42,7 @@ function runWranglerCommand(args: string[]): Promise<void> {
         return;
       }
 
-      reject(
-        new Error(
-          signal
-            ? `wrangler exited from signal ${signal}.`
-            : `wrangler exited with code ${code ?? "unknown"}.`,
-        ),
-      );
+      reject(createHostedLifecycleWranglerError({ code, signal }));
     });
   });
 }

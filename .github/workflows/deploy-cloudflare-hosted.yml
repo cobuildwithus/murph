@@ -128,25 +128,9 @@ jobs:
           cache: pnpm
 
       - name: Validate required deploy environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=()
-
-          for name in CF_WORKER_NAME CF_BUNDLES_BUCKET CF_BUNDLES_PREVIEW_BUCKET; do
-            if [[ -z "${!name:-}" ]]; then
-              missing+=("${name}")
-            fi
-          done
-
-          if [[ "${{ inputs.deploy_worker }}" == "true" && -z "${CF_PUBLIC_BASE_URL:-}" ]]; then
-            missing+=("CF_PUBLIC_BASE_URL")
-          fi
-
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing required GitHub environment variables for deploy workflow: %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
+        env:
+          HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
+        run: pnpm --dir apps/cloudflare deploy:preflight
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile

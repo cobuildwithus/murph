@@ -14,6 +14,7 @@
     "test:workers": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.workers.config.ts --no-coverage --maxWorkers 1",
     "verify": "pnpm typecheck && pnpm test:node && pnpm test:workers",
     "deploy:config:render": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/render-deploy-config.ts",
+    "deploy:preflight": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/validate-deploy-env.ts",
     "images:cleanup": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/cleanup-container-images.ts",
     "r2:lifecycle:apply": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/apply-r2-lifecycle.ts",
     "deploy:rollout": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/deploy-worker-version.ts",
