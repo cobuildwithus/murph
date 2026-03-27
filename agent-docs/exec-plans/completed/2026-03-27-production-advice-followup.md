@@ -37,3 +37,21 @@ Close the remaining actionable gaps from the hosted-production advice review wit
 - `pnpm --dir apps/web typecheck`
 - targeted hosted-web and Cloudflare Vitest coverage for any changed helpers
 - required repo checks after integration: `pnpm typecheck`, `pnpm test`, `pnpm test:coverage`
+
+## Outcome
+
+- preferred generic hosted dispatch env names while keeping the Cloudflare-branded aliases as compatibility fallbacks
+- reframed hosted committed side-effect helpers/docs as generic-first without claiming new concrete side-effect kinds beyond `assistant.delivery`
+- added explicit Cloudflare container-image cleanup parsing helpers, tests, a dry-run-first CLI wrapper, and deploy/docs guidance
+
+## Verification
+
+- passed: `pnpm --dir apps/web typecheck`
+- passed: `pnpm exec vitest run packages/hosted-execution/test/hosted-execution.test.ts --no-coverage --maxWorkers 1`
+- passed: `pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-execution-dispatch.test.ts --no-coverage --maxWorkers 1`
+- passed: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/deploy-automation.test.ts apps/cloudflare/test/index.test.ts apps/cloudflare/test/node-runner.test.ts --no-coverage --maxWorkers 1`
+- passed: direct dry-run CLI proof via stubbed `wrangler`: `PATH=\"$tmpdir/bin:$PATH\" ./node_modules/.bin/tsx apps/cloudflare/scripts/cleanup-container-images.ts --filter 'registry/repo' --keep 1`
+- failed, unrelated dirty-tree blocker: `pnpm --dir apps/cloudflare test` in `apps/cloudflare/test/user-runner.test.ts` next-wake assertions
+- failed, unrelated dirty-tree blocker: `pnpm typecheck` in `packages/cli` on missing `@healthybob/core` imports / implicit-any fallout
+- failed, unrelated dirty-tree blocker: `pnpm test` on `ENOTEMPTY` while removing `packages/hosted-execution/dist`
+- `pnpm test:coverage` was still running at handoff time; rerun from a quieter tree for a truthful repo-wide result
