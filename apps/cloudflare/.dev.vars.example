@@ -1,9 +1,10 @@
 # Copy to apps/cloudflare/.dev.vars for wrangler dev or set these as real Cloudflare secrets/vars.
+# The control tokens are required for protected worker and container routes; local dev now fails closed
+# when either token is missing.
 
 HOSTED_EXECUTION_SIGNING_SECRET=replace-me-with-a-random-shared-secret
 HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=replace-me-with-a-base64-32-byte-key
 HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID=v1
-HOSTED_EXECUTION_CLOUDFLARE_BASE_URL=http://127.0.0.1:8787
 HOSTED_EXECUTION_CONTROL_TOKEN=replace-me-with-an-operator-token
 HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS=21600000
 HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3
@@ -11,6 +12,17 @@ HOSTED_EXECUTION_RETRY_DELAY_MS=30000
 HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=replace-me-with-a-runner-token
 HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000
 HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
+
+# Optional explicit native-container size for local/generated Wrangler config.
+# Supported values are the named Wrangler presets such as `basic` or a JSON object like:
+# CF_CONTAINER_INSTANCE_TYPE={"vcpu":0.5,"memory_mib":2048,"disk_mb":8192}
+# CF_CONTAINER_INSTANCE_TYPE=basic
+
+# Add any optional provider/runtime vars or secrets you need for wrangler dev here. The checked-in
+# local scaffold no longer filters `.dev.vars` through `secrets.required`.
+# OPENAI_API_KEY=...
+# AGENTMAIL_API_KEY=...
+# TELEGRAM_BOT_TOKEN=...
 
 # Optional allowlist extensions for encrypted per-user runner env overrides.
 # Keep these in sync with the native container runtime when you extend the allowlist.

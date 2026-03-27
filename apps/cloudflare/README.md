@@ -37,8 +37,8 @@ Current worker env/config names read directly by `src/env.ts`:
 
 - required secret: `HOSTED_EXECUTION_SIGNING_SECRET` (the worker also accepts the historical alias `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`)
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
-- optional secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes
-- optional secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the private container HTTP server
+- required secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes; missing values now fail those routes closed instead of leaving them open
+- required secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the private container HTTP server and native container invoke path; missing values now fail closed instead of silently skipping auth
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the per-user encrypted env key allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` extends the per-user encrypted env prefix allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
@@ -55,8 +55,8 @@ Current worker routes:
 - `GET /` returns the service banner payload
 - `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web`
 - `POST /internal/events` is an alias for the same signed internal dispatch contract
-- `GET /internal/users/:userId/status` is an operator/internal status route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN` when that token is configured
-- `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN` when that token is configured
+- `GET /internal/users/:userId/status` is an operator/internal status route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN`
+- `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
 - `PUT /internal/users/:userId/env` merges or replaces the user's separately encrypted hosted env object
 - `DELETE /internal/users/:userId/env` clears the user's separately encrypted hosted env object without rewriting `agent-state`
@@ -76,7 +76,7 @@ That means:
 - the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, per-run env injection, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
 - the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://outbox.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
-- the queue Durable Object still destroys the companion container after each drained batch instead of keeping its own lease manager
+- the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's short `sleepAfter` idle timeout instead of forcing immediate teardown after every run
 
 The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, and uses `instance_type: "basic"` in the checked-in scaffold. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `basic` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
@@ -139,7 +139,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys still require a direct `wrangler deploy`, and the rollout helper now refuses gradual mode when the rendered config introduces a newer Durable Object migration tag than the currently allowed gradual-deploy set.
 - Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
-- The local `wrangler dev` scaffold no longer uses `secrets.required`, so optional provider vars/secrets in `apps/cloudflare/.dev.vars` stay visible during local container runs. Deploy-time required-secret enforcement still happens through `deploy:secrets:render`.
+- The local `wrangler dev` scaffold no longer uses `secrets.required`, so optional provider vars/secrets in `apps/cloudflare/.dev.vars` stay visible during local container runs. The control tokens are still required for protected worker/container routes, and deploy-time required-secret enforcement still happens through `deploy:secrets:render`.
 
 ## Runtime boundary
 
@@ -148,4 +148,4 @@ The Cloudflare app now keeps two focused Vitest lanes:
 ## Known follow-ups
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
-- Cloudflare container lifecycle is currently "start on demand, destroy after drained batch." If you later want keep-warm or pool behavior, that should be a separate follow-up rather than an implicit background contract.
+- Cloudflare container lifecycle is currently "start on demand, keep warm until `sleepAfter` expires." If you later want explicit pooling or lease management, that should be a separate follow-up rather than an implicit background contract.

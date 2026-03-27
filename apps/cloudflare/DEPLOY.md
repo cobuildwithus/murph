@@ -69,6 +69,7 @@ Optional tuning variables:
 
 - `CF_BUNDLE_KEY_ID` (default `v1`)
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
+- `CF_CONTAINER_INSTANCE_TYPE` (default `basic`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `1000`)
 - `INSTALL_PADDLEOCR` (default `0`, passed to Wrangler as a container `image_vars` build-time input)
 - `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
@@ -110,6 +111,11 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN`
+
+Both control tokens are treated as required runtime inputs now, not just deploy-time placeholders:
+
+- missing `HOSTED_EXECUTION_CONTROL_TOKEN` makes `/internal/users/:userId/{status,run,env}` fail closed
+- missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` makes native container invoke requests fail closed before the runner job starts
 
 ### Optional provider/runtime secrets
 
@@ -281,6 +287,7 @@ Before the first real production deploy, confirm all of these are true:
 - the Worker answers `GET /health`
 - `HOSTED_EXECUTION_CONTROL_TOKEN` is set
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` is set and stable
+- local `wrangler dev` also has those two tokens set before you test protected control flows
 - `HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL` is set when you plan to run smoke checks against a non-default public Worker URL
 - `CF_CONTAINER_INSTANCE_TYPE` is set explicitly to at least `basic`, or to a custom JSON object if you have an enterprise plan and need higher fixed limits
 - Workers Logs and Workers Traces are enabled and visible in the Cloudflare dashboard for the target Worker

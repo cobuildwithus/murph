@@ -279,9 +279,6 @@ export function buildHostedWranglerDeployConfig(
       },
     },
     vars,
-    secrets: {
-      required: [...HOSTED_WORKER_REQUIRED_SECRET_NAMES],
-    },
   };
 }
 

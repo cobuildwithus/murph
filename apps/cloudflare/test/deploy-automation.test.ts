@@ -60,8 +60,8 @@ describe("hosted deploy automation helpers", () => {
           head_sampling_rate: number;
         };
       };
-      secrets: { required: string[] };
       vars: Record<string, string>;
+      secrets?: { required?: string[] };
     };
 
     expect(config.name).toBe("hb-worker");
@@ -110,12 +110,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.AGENTMAIL_BASE_URL).toBe("https://mail.example.test/v0");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hb_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
-    expect(config.secrets.required).toEqual([
-      "HOSTED_EXECUTION_SIGNING_SECRET",
-      "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
-      "HOSTED_EXECUTION_CONTROL_TOKEN",
-      "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
-    ]);
+    expect(config.secrets).toBeUndefined();
   });
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {
