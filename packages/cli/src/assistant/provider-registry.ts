@@ -445,17 +445,20 @@ function buildOpenAICompatibleDiscoveryHeaders(input: {
   env?: NodeJS.ProcessEnv
 }): Record<string, string> {
   const headers: Record<string, string> = {
-    accept: 'application/json',
+    Accept: 'application/json',
     ...(input.config.headers ?? {}),
   }
-  const env = input.env ?? process.env
+  const env = {
+    ...process.env,
+    ...(input.env ?? {}),
+  }
   const apiKeyEnv = normalizeNullableString(input.config.apiKeyEnv)
   const apiKeyValue =
     apiKeyEnv && typeof env[apiKeyEnv] === 'string' && env[apiKeyEnv].trim().length > 0
       ? env[apiKeyEnv].trim()
       : null
 
-  if (apiKeyValue && !('Authorization' in headers) && !('authorization' in headers)) {
+  if (apiKeyValue && !('Authorization' in headers)) {
     headers.Authorization = `Bearer ${apiKeyValue}`
   }
 

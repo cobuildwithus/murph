@@ -16,7 +16,10 @@ import {
 } from './provider-registry.js'
 import { normalizeNullableString } from './shared.js'
 
-export type { AssistantModelDiscoveryResult } from './provider-registry.js'
+export type {
+  AssistantCatalogModel,
+  AssistantModelDiscoveryResult,
+} from './provider-registry.js'
 
 export interface AssistantModelOption {
   description: string
@@ -150,9 +153,7 @@ export function resolveAssistantModelCatalog(input: {
     models,
     provider: profile.provider,
     providerLabel: profile.providerLabel,
-    reasoningOptions: selectedModel?.capabilities.reasoning
-      ? DEFAULT_ASSISTANT_REASONING_OPTIONS
-      : [],
+    reasoningOptions: resolveAssistantCatalogReasoningOptions(selectedModel),
     selectedModel,
   }
 }
@@ -187,6 +188,12 @@ export async function defaultDiscoverOpenAICompatibleModels(
   })
 
   return result.models.map((model) => model.id)
+}
+
+export function resolveAssistantCatalogReasoningOptions(
+  model: AssistantCatalogModel | null | undefined,
+): readonly AssistantReasoningOption[] {
+  return model?.capabilities.reasoning ? DEFAULT_ASSISTANT_REASONING_OPTIONS : []
 }
 
 export function findAssistantCatalogModelOptionIndex(

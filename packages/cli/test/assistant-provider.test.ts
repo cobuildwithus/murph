@@ -40,12 +40,14 @@ vi.mock('node:readline/promises', () => ({
 import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderOptions,
 } from '../src/chat-provider.js'
 import {
   defaultDiscoverOpenAICompatibleModels,
+  type AssistantModelDiscoveryResult,
   resolveAssistantModelCatalog,
 } from '../src/assistant/provider-catalog.js'
+import { buildAssistantProviderDefaultsPatch } from '../src/operator-config.js'
+import { serializeAssistantProviderSessionOptions } from '../src/assistant/provider-config.js'
 import { createSetupAssistantResolver } from '../src/setup-assistant.js'
 
 beforeEach(() => {
@@ -57,9 +59,9 @@ beforeEach(() => {
   vi.unstubAllGlobals()
 })
 
-test('resolveAssistantProviderOptions sanitizes settings for the selected provider', () => {
+test('serializeAssistantProviderSessionOptions sanitizes settings for the selected provider', () => {
   assert.deepEqual(
-    resolveAssistantProviderOptions({
+    serializeAssistantProviderSessionOptions({
       provider: 'openai-compatible',
       model: ' gpt-oss:20b ',
       sandbox: 'read-only',
@@ -86,6 +88,87 @@ test('resolveAssistantProviderOptions sanitizes settings for the selected provid
       providerName: 'ollama',
       headers: {
         'X-Bar': 'baz',
+        'X-Foo': 'bar',
+      },
+    },
+  )
+})
+
+test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth and headers when only the model changes', () => {
+  assert.deepEqual(
+    buildAssistantProviderDefaultsPatch({
+      defaults: {
+        provider: 'openai-compatible',
+        defaultsByProvider: {
+          'openai-compatible': {
+            codexCommand: null,
+            model: 'llama3.2:latest',
+            reasoningEffort: null,
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: 'http://127.0.0.1:11434/v1',
+            apiKeyEnv: 'OLLAMA_API_KEY',
+            providerName: 'ollama',
+            headers: {
+              Authorization: 'Bearer override-token',
+              'X-Foo': 'bar',
+            },
+          },
+        },
+        codexCommand: null,
+        model: 'llama3.2:latest',
+        reasoningEffort: null,
+        identityId: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        headers: {
+          Authorization: 'Bearer override-token',
+          'X-Foo': 'bar',
+        },
+        failoverRoutes: null,
+        account: null,
+        selfDeliveryTargets: null,
+      },
+      provider: 'openai-compatible',
+      providerOptions: {
+        model: 'llama3.2:latest',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        headers: {
+          Authorization: 'Bearer override-token',
+          'X-Foo': 'bar',
+        },
+      },
+      model: 'gpt-oss:20b',
+      reasoningEffort: null,
+    }),
+    {
+      provider: 'openai-compatible',
+      codexCommand: null,
+      model: 'gpt-oss:20b',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
+      headers: {
+        Authorization: 'Bearer override-token',
         'X-Foo': 'bar',
       },
     },
@@ -220,8 +303,49 @@ test('defaultDiscoverOpenAICompatibleModels respects explicit Authorization head
 
   const headers = (fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined)
     ?.headers
-  assert.equal(headers?.authorization, 'Bearer override-token')
-  assert.equal('Authorization' in (headers ?? {}), false)
+  assert.equal(headers?.Authorization, 'Bearer override-token')
+  assert.equal('authorization' in (headers ?? {}), false)
+})
+
+test('defaultDiscoverOpenAICompatibleModels merges process env lookup with normalized header dedupe', async () => {
+  const originalApiKey = process.env.MERGED_OLLAMA_API_KEY
+  process.env.MERGED_OLLAMA_API_KEY = 'process-token'
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      data: [],
+    }),
+  } as Response)
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    await defaultDiscoverOpenAICompatibleModels('http://127.0.0.1:11434/v1', {
+      apiKeyEnv: 'MERGED_OLLAMA_API_KEY',
+      env: {
+        LOCAL_ONLY: '1',
+      },
+      headers: {
+        ' x-foo ': 'one',
+        'X-Foo': 'two',
+      },
+    })
+  } finally {
+    if (originalApiKey === undefined) {
+      delete process.env.MERGED_OLLAMA_API_KEY
+    } else {
+      process.env.MERGED_OLLAMA_API_KEY = originalApiKey
+    }
+  }
+
+  assert.deepEqual(
+    (fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined)
+      ?.headers,
+    {
+      Accept: 'application/json',
+      Authorization: 'Bearer process-token',
+      'X-Foo': 'two',
+    },
+  )
 })
 
 test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefined', async () => {
@@ -440,7 +564,7 @@ test('executeAssistantProviderTurn throws a base-url error before attempting Ope
 })
 
 test('createSetupAssistantResolver refuses to pick a fake OpenAI-compatible model in non-interactive mode when discovery is empty', async () => {
-  const discoverModels = vi.fn().mockResolvedValue([])
+  const discoverModels = vi.fn().mockResolvedValue(createDiscoveryResult([]))
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -464,7 +588,9 @@ test('createSetupAssistantResolver refuses to pick a fake OpenAI-compatible mode
 })
 
 test('createSetupAssistantResolver chooses the first discovered OpenAI-compatible model in non-interactive mode', async () => {
-  const discoverModels = vi.fn().mockResolvedValue(['llama3.3:70b', 'gpt-oss:20b'])
+  const discoverModels = vi
+    .fn()
+    .mockResolvedValue(createDiscoveryResult(['llama3.3:70b', 'gpt-oss:20b']))
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -486,7 +612,7 @@ test('createSetupAssistantResolver chooses the first discovered OpenAI-compatibl
 })
 
 test('createSetupAssistantResolver requires a non-empty OpenAI-compatible model when discovery is empty', async () => {
-  const discoverModels = vi.fn().mockResolvedValue([])
+  const discoverModels = vi.fn().mockResolvedValue(createDiscoveryResult([]))
   promptMocks.answers.push('', '', '', 'custom-model')
   const input = new PassThrough()
   const output = new PassThrough()
@@ -521,6 +647,30 @@ test('createSetupAssistantResolver requires a non-empty OpenAI-compatible model 
   ])
 })
 
+test('createSetupAssistantResolver rejects unsupported OpenAI-compatible reasoning effort overrides', async () => {
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    input: new PassThrough(),
+    output: new PassThrough(),
+  })
+
+  await assert.rejects(
+    () =>
+      resolver.resolve({
+        allowPrompt: false,
+        commandName: 'setup',
+        preset: 'openai-compatible',
+        options: {
+          assistantModel: 'gpt-oss:20b',
+          assistantReasoningEffort: 'high',
+        } as any,
+      }),
+    /does not support assistantReasoningEffort/u,
+  )
+})
+
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {
   const onTraceEvent = vi.fn()
   providerMocks.executeCodexPrompt.mockResolvedValue({
@@ -548,3 +698,26 @@ test('executeAssistantProviderTurn enables reasoning summary traces when request
   ])
   assert.equal(call?.onTraceEvent, onTraceEvent)
 })
+
+function createDiscoveryResult(
+  models: readonly string[],
+  input?: Partial<AssistantModelDiscoveryResult>,
+): AssistantModelDiscoveryResult {
+  return {
+    status: input?.status ?? 'ok',
+    message: input?.message ?? null,
+    models: models.map((id) => ({
+      id,
+      label: id,
+      description: `Discovered ${id}.`,
+      source: 'discovered',
+      capabilities: {
+        images: false,
+        pdf: false,
+        reasoning: false,
+        streaming: true,
+        tools: true,
+      },
+    })),
+  }
+}

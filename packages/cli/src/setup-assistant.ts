@@ -1,7 +1,8 @@
 import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
 import {
-  defaultDiscoverOpenAICompatibleModels,
+  discoverAssistantProviderModels,
+  type AssistantModelDiscoveryResult,
 } from './assistant/provider-catalog.js'
 import { normalizeNullableString } from './assistant/shared.js'
 import {
@@ -41,7 +42,7 @@ interface SetupAssistantResolverDependencies {
     apiKeyEnv?: string | null
     baseUrl: string
     providerName?: string | null
-  }) => Promise<string[]>
+  }) => Promise<AssistantModelDiscoveryResult>
   input?: NodeJS.ReadableStream
   output?: NodeJS.WritableStream
 }
@@ -122,7 +123,9 @@ export function createSetupAssistantResolver(
       baseUrl: string
       providerName?: string | null
     }) =>
-      await defaultDiscoverOpenAICompatibleModels(input.baseUrl, {
+      await discoverAssistantProviderModels({
+        provider: 'openai-compatible',
+        baseUrl: input.baseUrl,
         apiKeyEnv: input.apiKeyEnv,
         providerName: input.providerName,
       }))
@@ -243,6 +246,15 @@ export function createSetupAssistantResolver(
         }
 
         case 'openai-compatible': {
+          const explicitReasoningEffort = normalizeNullableString(
+            resolutionInput.options.assistantReasoningEffort,
+          )
+          if (explicitReasoningEffort) {
+            throw new Error(
+              'OpenAI-compatible setup does not support assistantReasoningEffort.',
+            )
+          }
+
           const baseUrl = await resolvePromptedValue({
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
@@ -269,18 +281,18 @@ export function createSetupAssistantResolver(
             normalizeNullableString(
               resolutionInput.options.assistantProviderName,
             ) ?? null
-          const discoveredModels =
+          const discovery =
             normalizeNullableString(resolutionInput.options.assistantModel) === null
               ? await discoverModels({
                   baseUrl,
                   apiKeyEnv,
                   providerName,
                 })
-              : []
+              : null
 
           const model = await resolveOpenAICompatibleModel({
             allowPrompt: resolutionInput.allowPrompt,
-            discoveredModels,
+            discovery,
             explicitModel: normalizeNullableString(
               resolutionInput.options.assistantModel,
             ),
@@ -298,10 +310,7 @@ export function createSetupAssistantResolver(
             providerName,
             codexCommand: null,
             profile: null,
-            reasoningEffort:
-              normalizeNullableString(
-                resolutionInput.options.assistantReasoningEffort,
-              ) ?? null,
+            reasoningEffort: null,
             sandbox: null,
             approvalPolicy: null,
             oss: false,
@@ -336,29 +345,37 @@ export function createSetupAssistantResolver(
 
 async function resolveOpenAICompatibleModel(input: {
   allowPrompt: boolean
-  discoveredModels: readonly string[]
+  discovery: AssistantModelDiscoveryResult | null
   explicitModel: string | null
   input: NodeJS.ReadableStream
   output: NodeJS.WritableStream
 }): Promise<string> {
+  const discoveredModels = input.discovery?.models.map((model) => model.id) ?? []
+
   if (input.explicitModel) {
     return input.explicitModel
   }
 
   if (!input.allowPrompt) {
-    const discoveredModel = input.discoveredModels[0] ?? null
+    const discoveredModel = discoveredModels[0] ?? null
     if (discoveredModel) {
       return discoveredModel
     }
 
     throw new Error(
-      'OpenAI-compatible setup requires an explicit model when discovery does not return any models.',
+      input.discovery?.message
+        ? `OpenAI-compatible setup requires an explicit model when discovery does not return any models. ${input.discovery.message}`
+        : 'OpenAI-compatible setup requires an explicit model when discovery does not return any models.',
     )
   }
 
-  if (input.discoveredModels.length > 0) {
+  if (input.discovery?.message) {
+    input.output.write(`\n${input.discovery.message}\n`)
+  }
+
+  if (discoveredModels.length > 0) {
     input.output.write('\nDiscovered OpenAI-compatible models:\n')
-    for (const [index, model] of input.discoveredModels.entries()) {
+    for (const [index, model] of discoveredModels.entries()) {
       input.output.write(`  ${index + 1}. ${model}\n`)
     }
 
@@ -375,9 +392,9 @@ async function resolveOpenAICompatibleModel(input: {
       if (
         Number.isFinite(numericIndex) &&
         numericIndex >= 1 &&
-        numericIndex <= input.discoveredModels.length
+        numericIndex <= discoveredModels.length
       ) {
-        return input.discoveredModels[numericIndex - 1] ?? input.discoveredModels[0] ?? ''
+        return discoveredModels[numericIndex - 1] ?? discoveredModels[0] ?? ''
       }
 
       return choice

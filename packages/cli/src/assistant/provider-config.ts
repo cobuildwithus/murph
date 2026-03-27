@@ -296,7 +296,7 @@ export function resolveAssistantModelSpecFromProviderConfig(
   const apiKeyEnv = normalizeNullableString(normalized.apiKeyEnv)
   const apiKeyValue =
     apiKeyEnv && typeof env[apiKeyEnv] === 'string' && env[apiKeyEnv].trim().length > 0
-      ? env[apiKeyEnv]
+      ? env[apiKeyEnv].trim()
       : undefined
 
   return {
@@ -316,15 +316,39 @@ export function normalizeAssistantHeaders(
     return null
   }
 
-  const normalizedEntries = Object.entries(headers)
-    .map(([key, value]) => [normalizeNullableString(key), normalizeNullableString(value)] as const)
-    .filter(
-      (entry): entry is readonly [string, string] =>
-        entry[0] !== null && entry[1] !== null,
-    )
-    .sort(([left], [right]) => left.localeCompare(right))
+  const dedupedEntries = new Map<string, readonly [string, string]>()
+
+  for (const [rawKey, rawValue] of Object.entries(headers)) {
+    const key = normalizeNullableString(rawKey)
+    const value = normalizeNullableString(rawValue)
+    if (!key || !value) {
+      continue
+    }
+
+    const normalizedKey = canonicalizeAssistantHeaderName(key)
+    dedupedEntries.set(normalizedKey.toLowerCase(), [normalizedKey, value])
+  }
+
+  const normalizedEntries = [...dedupedEntries.values()].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )
 
   return normalizedEntries.length > 0
     ? Object.fromEntries(normalizedEntries)
     : null
+}
+
+function canonicalizeAssistantHeaderName(key: string): string {
+  return key
+    .split('-')
+    .map((part) => {
+      const normalizedPart = part.trim().toLowerCase()
+      if (normalizedPart.length === 0) {
+        return ''
+      }
+
+      return `${normalizedPart[0]?.toUpperCase() ?? ''}${normalizedPart.slice(1)}`
+    })
+    .filter((part) => part.length > 0)
+    .join('-')
 }

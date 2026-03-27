@@ -20,7 +20,9 @@ import {
 import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
 import {
   discoverAssistantProviderModels,
+  resolveAssistantCatalogReasoningOptions,
   resolveAssistantModelCatalog,
+  type AssistantCatalogModel,
   type AssistantModelDiscoveryResult,
 } from '../provider-catalog.js'
 import type {
@@ -29,6 +31,7 @@ import type {
 } from '../provider-traces.js'
 import { resolveCodexDisplayOptions } from '../../assistant-codex.js'
 import {
+  buildAssistantProviderDefaultsPatch,
   resolveAssistantOperatorDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '../../operator-config.js'
@@ -105,6 +108,7 @@ interface ModelSwitcherProps {
 }
 
 interface ModelSwitcherState {
+  models: readonly AssistantCatalogModel[]
   mode: 'model' | 'reasoning'
   modelIndex: number
   reasoningIndex: number
@@ -2956,7 +2960,11 @@ export async function runAssistantChatWithInk(
       )
 
       const openModelSwitcher = () => {
+        const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+          modelCatalog.models[findAssistantModelOptionIndex(activeModel, modelCatalog.modelOptions)],
+        )
         setModelSwitcherState({
+          models: modelCatalog.models,
           mode: 'model',
           modelIndex: findAssistantModelOptionIndex(
             activeModel,
@@ -2964,10 +2972,10 @@ export async function runAssistantChatWithInk(
           ),
           reasoningIndex: findAssistantReasoningOptionIndex(
             activeReasoningEffort,
-            modelCatalog.reasoningOptions,
+            reasoningOptions,
           ),
           modelOptions: modelCatalog.modelOptions,
-          reasoningOptions: modelCatalog.reasoningOptions,
+          reasoningOptions,
         })
       }
 
@@ -2978,12 +2986,21 @@ export async function runAssistantChatWithInk(
           }
 
           if (previous.mode === 'model') {
+            const modelIndex = wrapPickerIndex(
+              previous.modelIndex + delta,
+              previous.modelOptions.length,
+            )
+            const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+              previous.models[modelIndex],
+            )
             return {
               ...previous,
-              modelIndex: wrapPickerIndex(
-                previous.modelIndex + delta,
-                previous.modelOptions.length,
+              modelIndex,
+              reasoningIndex: findAssistantReasoningOptionIndex(
+                activeReasoningEffort,
+                reasoningOptions,
               ),
+              reasoningOptions,
             }
           }
 
@@ -3054,11 +3071,15 @@ export async function runAssistantChatWithInk(
             latestSessionRef.current = updatedSession
             setSession(updatedSession)
 
-            await saveAssistantOperatorDefaultsPatch({
-              provider: updatedSession.provider,
-              model: nextModel,
-              reasoningEffort: nextReasoningEffort,
-            })
+            await saveAssistantOperatorDefaultsPatch(
+              buildAssistantProviderDefaultsPatch({
+                defaults,
+                provider: updatedSession.provider,
+                providerOptions: updatedSession.providerOptions,
+                model: nextModel,
+                reasoningEffort: nextReasoningEffort,
+              }),
+            )
           } catch (error) {
             setStatus({
               kind: 'error',

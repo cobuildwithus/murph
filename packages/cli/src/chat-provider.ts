@@ -7,7 +7,6 @@ import type {
 import { getAssistantBindingContextLines } from './assistant/bindings.js'
 import {
   sanitizeAssistantProviderConfig,
-  serializeAssistantProviderSessionOptions,
 } from './assistant/provider-config.js'
 import {
   executeAssistantProviderTurnWithDefinition,
@@ -56,22 +55,6 @@ export interface AssistantProviderTurnInput {
 }
 
 export type AssistantProviderTurnResult = AssistantProviderTurnExecutionResult
-
-export function resolveAssistantProviderOptions(input: {
-  approvalPolicy?: AssistantApprovalPolicy | null
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  headers?: Record<string, string> | null
-  model?: string | null
-  oss?: boolean
-  profile?: string | null
-  provider?: AssistantChatProvider | null
-  providerName?: string | null
-  reasoningEffort?: string | null
-  sandbox?: AssistantSandbox | null
-}) {
-  return serializeAssistantProviderSessionOptions(input)
-}
 
 export function resolveAssistantProviderCapabilities(
   provider: AssistantChatProvider,

@@ -508,7 +508,7 @@ test('buildAssistantFailoverRoutes dedupes routes that only differ by null versu
   assert.equal(routes[1]?.providerOptions.providerName, undefined)
 })
 
-test('buildAssistantFailoverRoutes dedupes equivalent primary and backup routes when optional identifiers differ only by undefined versus null and labels match', () => {
+test('buildAssistantFailoverRoutes dedupes identical routes even when their names differ', () => {
   const routes = buildAssistantFailoverRoutes({
     provider: 'openai-compatible',
     providerOptions: {
@@ -522,7 +522,7 @@ test('buildAssistantFailoverRoutes dedupes equivalent primary and backup routes 
     },
     backups: [
       {
-        name: 'primary',
+        name: 'backup-ollama',
         provider: 'openai-compatible',
         codexCommand: null,
         model: 'gpt-oss:20b',
@@ -544,6 +544,7 @@ test('buildAssistantFailoverRoutes dedupes equivalent primary and backup routes 
   assert.equal(routes[0]?.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
   assert.equal(routes[0]?.providerOptions.apiKeyEnv, undefined)
   assert.equal(routes[0]?.providerOptions.providerName, undefined)
+  assert.match(routes[0]?.label ?? '', /127\.0\.0\.1:11434/u)
 })
 
 test('sendAssistantMessage fails over across provider routes and records cooldown and receipt state', async () => {

@@ -184,6 +184,11 @@ function normalizeAssistantSessionRecord(raw: unknown): unknown {
   }
 
   const source = raw as Record<string, unknown>
+  const legacyCodexPromptVersion =
+    typeof source.codexPromptVersion === 'string' &&
+    source.codexPromptVersion.trim().length > 0
+      ? source.codexPromptVersion.trim()
+      : null
   const provider: AssistantChatProvider =
     typeof source.provider === 'string' && source.provider.trim().length > 0
       ? ((assistantChatProviderValues as readonly string[]).includes(source.provider)
@@ -196,11 +201,24 @@ function normalizeAssistantSessionRecord(raw: unknown): unknown {
     !Array.isArray(source.providerOptions)
       ? (source.providerOptions as Record<string, unknown>)
       : {}
+  const rawProviderState =
+    source.providerState &&
+    typeof source.providerState === 'object' &&
+    !Array.isArray(source.providerState)
+      ? source.providerState
+      : legacyCodexPromptVersion
+        ? {
+            codexCli: {
+              promptVersion: legacyCodexPromptVersion,
+            },
+          }
+        : undefined
   const { codexPromptVersion: _legacyCodexPromptVersion, ...rest } = source
 
   return {
     ...rest,
     provider,
+    ...(rawProviderState === undefined ? {} : { providerState: rawProviderState }),
     providerOptions: serializeAssistantProviderSessionOptions({
       provider,
       ...rawProviderOptions,

@@ -20,6 +20,7 @@ import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
+import { resolveAssistantProviderLabel } from './provider-registry.js'
 import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
 
 const ASSISTANT_FAILOVER_STATE_SCHEMA = 'murph.assistant-failover-state.v1'
@@ -243,12 +244,10 @@ function createResolvedAssistantFailoverRoute(input: {
   const providerOptions = serializeAssistantProviderSessionOptions(input.providerConfig)
   const label = buildAssistantFailoverRouteLabel({
     name: input.name,
-    provider: input.provider,
-    providerOptions,
+    providerConfig: input.providerConfig,
   })
   const routeId = hashAssistantFailoverRoute({
     codexCommand: input.providerConfig.codexCommand,
-    label,
     provider: input.provider,
     providerOptions,
   })
@@ -302,22 +301,19 @@ function dedupeAssistantFailoverRoutes(
 
 function buildAssistantFailoverRouteLabel(input: {
   name: string | null | undefined
-  provider: AssistantChatProvider
-  providerOptions: AssistantProviderSessionOptions
+  providerConfig: ReturnType<typeof resolveAssistantFailoverRouteProviderConfig>
 }): string {
   const explicitName = normalizeNullableString(input.name)
-  if (explicitName) {
-    return explicitName
-  }
+  const providerLabel = resolveAssistantProviderLabel(input.providerConfig)
 
   const parts = [
-    input.provider,
-    normalizeNullableString(input.providerOptions.model),
-    normalizeNullableString(input.providerOptions.profile),
-    normalizeNullableString(input.providerOptions.providerName),
+    explicitName,
+    providerLabel,
+    normalizeNullableString(input.providerConfig.model),
+    normalizeNullableString(input.providerConfig.profile),
   ].filter((value): value is string => value !== null)
 
-  return parts.join(':') || input.provider
+  return parts.join(':') || input.providerConfig.provider
 }
 
 function resolveAssistantFailoverRouteProviderConfig(input: {
@@ -339,14 +335,12 @@ function resolveAssistantFailoverRouteProviderConfig(input: {
 
 function hashAssistantFailoverRoute(input: {
   codexCommand: string | null
-  label: string
   provider: AssistantChatProvider
   providerOptions: AssistantProviderSessionOptions
 }): string {
   return createHash('sha1')
     .update(
       JSON.stringify({
-        label: input.label,
         provider: input.provider,
         providerOptions: input.providerOptions,
         codexCommand: input.codexCommand,

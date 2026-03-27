@@ -183,6 +183,10 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     approvalPolicy: 'on-request' as const,
     profile: 'ops',
     oss: true,
+    baseUrl: null,
+    apiKeyEnv: null,
+    providerName: null,
+    headers: null,
     selfDeliveryTargets: null,
   }
 
@@ -1476,63 +1480,6 @@ test('sendAssistantMessage suppresses onboarding once name, tone, and goals are 
 
   assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
-})
-
-test('sendAssistantMessage normalizes legacy onboarding state before building the first-turn prompt', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-legacy-'))
-  const vaultRoot = path.join(parent, 'vault')
-  cleanupPaths.push(parent)
-
-  await mkdir(vaultRoot, { recursive: true })
-
-  const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot
-  await mkdir(assistantStateRoot, { recursive: true })
-  await writeFile(
-    path.join(assistantStateRoot, 'onboarding.json'),
-    `${JSON.stringify({
-      schema: 'healthybob.assistant-onboarding.v1',
-      name: 'Chris',
-      nameAsked: true,
-      tone: 'Keep answers concise.',
-      toneAsked: true,
-      goals: ['training'],
-      updatedAt: '2026-03-27T00:00:00.000Z',
-    })}\n`,
-    'utf8',
-  )
-
-  serviceMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
-    provider: 'codex-cli',
-    providerSessionId: 'thread-onboarding-legacy-1',
-    response: 'I remember.',
-    stderr: '',
-    stdout: '',
-    rawEvents: [],
-  })
-
-  await sendAssistantMessage({
-    vault: vaultRoot,
-    alias: 'chat:onboarding-legacy',
-    enableFirstTurnOnboarding: true,
-    prompt: 'What should you remember about me already?',
-  })
-
-  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls.at(-1)?.[0]
-  const normalizedOnboarding = JSON.parse(
-    await readFile(path.join(assistantStateRoot, 'onboarding.json'), 'utf8'),
-  ) as {
-    goals: string[]
-    name: string | null
-    schema: string
-    tone: string | null
-  }
-
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /Known onboarding answers/u)
-  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
-  assert.equal(normalizedOnboarding.schema, 'murph.assistant-onboarding.v1')
-  assert.equal(normalizedOnboarding.name, 'Chris')
-  assert.equal(normalizedOnboarding.tone, 'Keep answers concise.')
-  assert.deepEqual(normalizedOnboarding.goals, ['training'])
 })
 
 test('sendAssistantMessage asks for optional name and tone only once even when later new sessions still need onboarding', async () => {

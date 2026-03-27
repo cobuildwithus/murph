@@ -6,6 +6,7 @@ import { Box, Static, type Key } from 'ink'
 import * as React from 'react'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
+  getAssistantSession,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
@@ -13,6 +14,7 @@ import {
 import { VaultCliError } from '../src/vault-cli-errors.js'
 import {
   resolveOperatorConfigPath,
+  resolveAssistantOperatorDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '../src/operator-config.js'
 import {
@@ -70,8 +72,6 @@ import { bridgeAbortSignals } from '../src/assistant/automation/shared.js'
 import {
   CHAT_BANNER,
   CHAT_COMPOSER_HINT,
-  CHAT_MODEL_OPTIONS,
-  CHAT_REASONING_OPTIONS,
   CHAT_SLASH_COMMANDS,
   CHAT_STARTER_SUGGESTIONS,
   applyInkChatTraceUpdates,
@@ -89,6 +89,10 @@ import {
   shouldShowChatComposerGuidance,
   shouldClearComposerForSubmitAction,
 } from '../src/assistant/ui/view-model.js'
+import {
+  DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
+  DEFAULT_ASSISTANT_REASONING_OPTIONS,
+} from '../src/assistant/provider-catalog.js'
 import {
   applyComposerEditingInput,
   formatFooterBadgeText,
@@ -905,6 +909,147 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
       captureId: 'cap-show-fail',
     },
   ])
+})
+
+test('legacy flat assistant operator config survives unrelated writes and rewrites to nested provider defaults', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-legacy-config-'))
+  const homeRoot = path.join(parent, 'home')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  const configPath = resolveOperatorConfigPath(homeRoot)
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(
+    configPath,
+    `${JSON.stringify(
+      {
+        schema: 'murph.operator-config.v1',
+        defaultVault: null,
+        assistant: {
+          provider: 'openai-compatible',
+          model: 'llama3.2:latest',
+          reasoningEffort: null,
+          identityId: 'assistant:primary',
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+            'X-Foo': 'bar',
+          },
+          failoverRoutes: null,
+          account: null,
+          selfDeliveryTargets: null,
+        },
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      selfDeliveryTargets: {
+        telegram: {
+          channel: 'telegram',
+          identityId: null,
+          participantId: 'contact:alice',
+          sourceThreadId: 'chat-1',
+          deliveryTarget: 'chat-1',
+        },
+      },
+    },
+    homeRoot,
+  )
+
+  const defaults = await resolveAssistantOperatorDefaults(homeRoot)
+  assert.equal(defaults?.provider, 'openai-compatible')
+  assert.equal(defaults?.model, 'llama3.2:latest')
+  assert.equal(defaults?.baseUrl, 'http://127.0.0.1:11434/v1')
+  assert.equal(defaults?.apiKeyEnv, 'OLLAMA_API_KEY')
+  assert.equal(defaults?.providerName, 'ollama')
+  assert.deepEqual(defaults?.headers, {
+    Authorization: 'Bearer override-token',
+    'X-Foo': 'bar',
+  })
+  assert.equal(defaults?.selfDeliveryTargets?.telegram?.deliveryTarget, 'chat-1')
+
+  const stored = JSON.parse(await readFile(configPath, 'utf8')) as {
+    assistant?: Record<string, unknown> & {
+      defaultsByProvider?: Record<string, unknown>
+    }
+  }
+  assert.equal('model' in (stored.assistant ?? {}), false)
+  assert.equal('baseUrl' in (stored.assistant ?? {}), false)
+  assert.equal('apiKeyEnv' in (stored.assistant ?? {}), false)
+  assert.deepEqual(stored.assistant?.defaultsByProvider, {
+    'openai-compatible': {
+      codexCommand: null,
+      model: 'llama3.2:latest',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
+      headers: {
+        Authorization: 'Bearer override-token',
+        'X-Foo': 'bar',
+      },
+    },
+  })
+})
+
+test('legacy session codexPromptVersion migrates into providerState on read', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-legacy-session-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:legacy-codex-version',
+    provider: 'codex-cli',
+  })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const sessionPath = path.join(
+    paths.sessionsDirectory,
+    `${resolved.session.sessionId}.json`,
+  )
+  await writeFile(
+    sessionPath,
+    `${JSON.stringify(
+      {
+        ...resolved.session,
+        provider: 'codex-cli',
+        providerState: undefined,
+        providerOptions: {
+          model: 'gpt-5.4',
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          approvalPolicy: 'on-request',
+          profile: null,
+          oss: false,
+        },
+        codexPromptVersion: '2026-03-20.1',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  const migrated = await getAssistantSession(vaultRoot, resolved.session.sessionId)
+  assert.equal(migrated.providerState?.codexCli?.promptVersion, '2026-03-20.1')
 })
 
 
@@ -4294,12 +4439,27 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     }),
     ' vault: ~/vault ',
   )
-  assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
-  assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
+  assert.equal(DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
+  assert.equal(DEFAULT_ASSISTANT_REASONING_OPTIONS[3]?.value, 'xhigh')
   assert.equal(CHAT_SLASH_COMMANDS[0]?.command, '/model')
-  assert.equal(findAssistantModelOptionIndex('gpt-5.3-codex'), 2)
-  assert.equal(findAssistantReasoningOptionIndex('xhigh'), 3)
-  assert.equal(findAssistantReasoningOptionIndex(null), 1)
+  assert.equal(
+    findAssistantModelOptionIndex(
+      'gpt-5.3-codex',
+      DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
+    ),
+    2,
+  )
+  assert.equal(
+    findAssistantReasoningOptionIndex(
+      'xhigh',
+      DEFAULT_ASSISTANT_REASONING_OPTIONS,
+    ),
+    3,
+  )
+  assert.equal(
+    findAssistantReasoningOptionIndex(null, DEFAULT_ASSISTANT_REASONING_OPTIONS),
+    1,
+  )
   assert.deepEqual(
     getMatchingSlashCommands('/m').map((command) => command.command),
     ['/model'],
