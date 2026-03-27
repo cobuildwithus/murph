@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -1691,7 +1692,7 @@ test("direct and batched raw copies reuse identical files and reject divergent f
   assert.equal(failedOperation.status, "rolled_back");
 });
 
-test("committed raw-copy actions omit payload blobs while replayable text and jsonl actions keep them", async () => {
+test("committed raw-copy actions omit payload blobs while replayable text and jsonl actions keep only receipts", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
@@ -1739,11 +1740,16 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
   assert.equal(operation.status, "committed");
   assert.equal(operation.actions.length, 3);
   assert.equal(operation.actions[0]?.kind, "raw_copy");
-  assert.equal("committedPayloadBase64" in (operation.actions[0] ?? {}), false);
+  assert.equal("committedPayloadReceipt" in (operation.actions[0] ?? {}), false);
   assert.equal(operation.actions[1]?.kind, "text_write");
-  assert.equal(typeof operation.actions[1]?.committedPayloadBase64, "string");
+  assert.deepEqual(operation.actions[1]?.committedPayloadReceipt, {
+    sha256: createHash("sha256").update("text payload\n").digest("hex"),
+    byteLength: Buffer.byteLength("text payload\n"),
+  });
   assert.equal(operation.actions[2]?.kind, "jsonl_append");
-  assert.equal(typeof operation.actions[2]?.committedPayloadBase64, "string");
+  assert.ok(operation.actions[2]?.committedPayloadReceipt);
+  assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.sha256, "string");
+  assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.byteLength, "number");
 });
 
 test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE_EMPTY", async () => {
@@ -1762,8 +1768,64 @@ test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE
   );
 });
 
-test("readRecoverableStoredWriteOperation tolerates malformed top-level metadata when actions stay recoverable", async () => {
+test("readRecoverableStoredWriteOperation tolerates malformed top-level metadata when staged actions stay recoverable", async () => {
   const vaultRoot = await makeTempDirectory("murph-recoverable-write-operation");
+  await initializeVault({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, ".runtime/operations/op_test/payloads"), { recursive: true });
+
+  const relativePath = ".runtime/operations/op_test.json";
+  await fs.writeFile(
+    path.join(vaultRoot, relativePath),
+    JSON.stringify(
+      {
+        operationId: "op_test",
+        status: "staged",
+        createdAt: "2026-03-27T00:00:00.000Z",
+        updatedAt: "2026-03-27T00:00:01.000Z",
+        actions: [
+          {
+            kind: "text_write",
+            state: "applied",
+            targetRelativePath: "bank/test.md",
+            stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const recovered = await readRecoverableStoredWriteOperation(vaultRoot, relativePath);
+
+  assert.deepEqual(recovered, {
+    operationId: "op_test",
+    status: "staged",
+    createdAt: "2026-03-27T00:00:00.000Z",
+    updatedAt: "2026-03-27T00:00:01.000Z",
+    actions: [
+      {
+        kind: "text_write",
+        state: "applied",
+        targetRelativePath: "bank/test.md",
+        stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+        overwrite: true,
+        allowExistingMatch: false,
+        allowRaw: false,
+        effect: undefined,
+        existedBefore: undefined,
+        backupRelativePath: undefined,
+        committedPayloadReceipt: undefined,
+        appliedAt: undefined,
+        rolledBackAt: undefined,
+      },
+    ],
+  });
+});
+
+test("readRecoverableStoredWriteOperation rejects committed text actions that omit committed payload receipts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-recoverable-write-operation-missing-receipt");
   await initializeVault({ vaultRoot });
   await fs.mkdir(path.join(vaultRoot, ".runtime/operations/op_test/payloads"), { recursive: true });
 
@@ -1791,22 +1853,7 @@ test("readRecoverableStoredWriteOperation tolerates malformed top-level metadata
     "utf8",
   );
 
-  const recovered = await readRecoverableStoredWriteOperation(vaultRoot, relativePath);
-
-  assert.deepEqual(recovered, {
-    operationId: "op_test",
-    status: "committed",
-    createdAt: "2026-03-27T00:00:00.000Z",
-    updatedAt: "2026-03-27T00:00:01.000Z",
-    actions: [
-      {
-        kind: "text_write",
-        state: "applied",
-        targetRelativePath: "bank/test.md",
-        stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
-      },
-    ],
-  });
+  assert.equal(await readRecoverableStoredWriteOperation(vaultRoot, relativePath), null);
 });
 
 test("listProtectedCanonicalPaths excludes symlinks under protected trees", async () => {

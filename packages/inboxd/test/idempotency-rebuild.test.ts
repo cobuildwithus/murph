@@ -263,7 +263,7 @@ test("persistRawCapture stores in-memory attachment bytes through audited raw op
       continue;
     }
 
-    assert.equal("committedPayloadBase64" in action, false);
+    assert.equal("committedPayloadReceipt" in action, false);
   }
 });
 
@@ -305,7 +305,10 @@ test("processCapture repairs a raw-only stored envelope by appending missing eve
   assert.equal(repairOperation.status, "committed");
   assert.equal(
     repairOperation.actions.every(
-      (action) => action.kind === "jsonl_append" && typeof action.committedPayloadBase64 === "string",
+      (action) =>
+        action.kind === "jsonl_append" &&
+        typeof action.committedPayloadReceipt?.sha256 === "string" &&
+        typeof action.committedPayloadReceipt?.byteLength === "number",
     ),
     true,
   );

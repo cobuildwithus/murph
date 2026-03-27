@@ -830,6 +830,30 @@ async function readJsonFile<T>(absolutePath: string): Promise<T> {
   return JSON.parse(await readFile(absolutePath, 'utf8')) as T
 }
 
+async function updateCaptureAttachmentRuntimeRecord(input: {
+  captureId: string
+  sha256?: string | null
+  storedPath?: string | null
+  vaultRoot: string
+}): Promise<void> {
+  const database = openSqliteRuntimeDatabase(inboxPaths(input.vaultRoot).inboxDbPath)
+  try {
+    database
+      .prepare(
+        `
+          update capture_attachment
+          set stored_path = coalesce(?, stored_path),
+              sha256 = coalesce(?, sha256)
+          where capture_id = ?
+            and ordinal = 1
+        `,
+      )
+      .run(input.storedPath ?? null, input.sha256 ?? null, input.captureId)
+  } finally {
+    database.close()
+  }
+}
+
 async function writeExecutableFile(
   directory: string,
   fileName: string,
@@ -4481,6 +4505,268 @@ test.sequential('promotion safeguards cover missing photos, invalid stored ids, 
       await rm(photoFixture.vaultRoot, { recursive: true, force: true })
       await rm(photoFixture.homeRoot, { recursive: true, force: true })
     }
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('meal and document promotions reject traversal and wrong-subtree stored paths before importing attachment bytes', async () => {
+  const mealFixture = await makeVaultFixture('murph-inbox-meal-promotion-path-guards')
+  const mealServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => mealFixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({ photoPath: mealFixture.photoPath }),
+  })
+
+  const documentFixture = await makeVaultFixture('murph-inbox-document-promotion-path-guards')
+  const documentPath = path.join(documentFixture.vaultRoot, 'lab-note.pdf')
+  const documentServices = createIntegratedInboxCliServices({
+    getHomeDirectory: () => documentFixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadImportersModule: loadBuiltImportersRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: documentFixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-doc-path-1',
+            fileName: 'lab-note.pdf',
+            path: documentPath,
+            mimeType: 'application/pdf',
+          },
+        ],
+      }),
+  })
+
+  try {
+    await initializeImessageSource({
+      services: mealServices,
+      vaultRoot: mealFixture.vaultRoot,
+    })
+    await mealServices.backfill({
+      vault: mealFixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+    const mealCaptureId = await captureSingleCaptureId({
+      services: mealServices,
+      vaultRoot: mealFixture.vaultRoot,
+    })
+
+    await updateCaptureAttachmentRuntimeRecord({
+      vaultRoot: mealFixture.vaultRoot,
+      captureId: mealCaptureId,
+      storedPath: '../../../../etc/hosts',
+    })
+    await expectVaultCliError(
+      mealServices.promoteMeal({
+        vault: mealFixture.vaultRoot,
+        requestId: null,
+        captureId: mealCaptureId,
+      }),
+      'INBOX_ATTACHMENT_PATH_INVALID',
+    )
+    assert.equal((await listMealManifestPaths(mealFixture.vaultRoot)).length, 0)
+
+    await mkdir(path.join(mealFixture.vaultRoot, 'bank'), { recursive: true })
+    await writeFile(path.join(mealFixture.vaultRoot, 'bank', 'secret.jpg'), 'secret', 'utf8')
+    await updateCaptureAttachmentRuntimeRecord({
+      vaultRoot: mealFixture.vaultRoot,
+      captureId: mealCaptureId,
+      storedPath: 'bank/secret.jpg',
+    })
+    await expectVaultCliError(
+      mealServices.promoteMeal({
+        vault: mealFixture.vaultRoot,
+        requestId: null,
+        captureId: mealCaptureId,
+      }),
+      'INBOX_ATTACHMENT_PATH_INVALID',
+    )
+    assert.equal((await listMealManifestPaths(mealFixture.vaultRoot)).length, 0)
+
+    await writeFile(documentPath, 'document body', 'utf8')
+    await initializeImessageSource({
+      services: documentServices,
+      vaultRoot: documentFixture.vaultRoot,
+    })
+    await documentServices.backfill({
+      vault: documentFixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+    const documentCaptureId = await captureSingleCaptureId({
+      services: documentServices,
+      vaultRoot: documentFixture.vaultRoot,
+    })
+
+    await updateCaptureAttachmentRuntimeRecord({
+      vaultRoot: documentFixture.vaultRoot,
+      captureId: documentCaptureId,
+      storedPath: '../../../../etc/hosts',
+    })
+    await expectVaultCliError(
+      documentServices.promoteDocument({
+        vault: documentFixture.vaultRoot,
+        requestId: null,
+        captureId: documentCaptureId,
+      }),
+      'INBOX_ATTACHMENT_PATH_INVALID',
+    )
+    assert.equal((await listDocumentManifestPaths(documentFixture.vaultRoot)).length, 0)
+
+    await mkdir(path.join(documentFixture.vaultRoot, 'bank'), { recursive: true })
+    await writeFile(path.join(documentFixture.vaultRoot, 'bank', 'secret.pdf'), 'secret', 'utf8')
+    await updateCaptureAttachmentRuntimeRecord({
+      vaultRoot: documentFixture.vaultRoot,
+      captureId: documentCaptureId,
+      storedPath: 'bank/secret.pdf',
+    })
+    await expectVaultCliError(
+      documentServices.promoteDocument({
+        vault: documentFixture.vaultRoot,
+        requestId: null,
+        captureId: documentCaptureId,
+      }),
+      'INBOX_ATTACHMENT_PATH_INVALID',
+    )
+    assert.equal((await listDocumentManifestPaths(documentFixture.vaultRoot)).length, 0)
+  } finally {
+    await rm(mealFixture.vaultRoot, { recursive: true, force: true })
+    await rm(mealFixture.homeRoot, { recursive: true, force: true })
+    await rm(documentFixture.vaultRoot, { recursive: true, force: true })
+    await rm(documentFixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('document promotion rehashes the verified attachment file instead of trusting runtime sha256 metadata', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-document-promotion-sha-guard')
+  const documentPathA = path.join(fixture.vaultRoot, 'lab-note-a.pdf')
+  const documentPathB = path.join(fixture.vaultRoot, 'lab-note-b.pdf')
+  const services = createIntegratedInboxCliServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadImportersModule: loadBuiltImportersRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        messages: [
+          {
+            guid: 'im-doc-a',
+            text: 'Document A',
+            date: '2026-03-13T08:00:00.000Z',
+            chatGuid: 'chat-1',
+            handleId: 'friend',
+            displayName: 'Friend',
+            isFromMe: false,
+            attachments: [
+              {
+                guid: 'att-doc-a',
+                fileName: 'lab-note.pdf',
+                path: documentPathA,
+                mimeType: 'application/pdf',
+              },
+            ],
+          },
+          {
+            guid: 'im-doc-b',
+            text: 'Document B',
+            date: '2026-03-13T08:05:00.000Z',
+            chatGuid: 'chat-1',
+            handleId: 'friend',
+            displayName: 'Friend',
+            isFromMe: false,
+            attachments: [
+              {
+                guid: 'att-doc-b',
+                fileName: 'lab-note.pdf',
+                path: documentPathB,
+                mimeType: 'application/pdf',
+              },
+            ],
+          },
+        ],
+      }),
+  })
+
+  try {
+    await writeFile(documentPathA, 'document body A', 'utf8')
+    await writeFile(documentPathB, 'document body B', 'utf8')
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+
+    const listed = await services.list({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      limit: 10,
+    })
+    assert.equal(listed.items.length, 2)
+
+    let captureAId: string | null = null
+    let captureBId: string | null = null
+    for (const item of listed.items) {
+      const shown = await services.show({
+        vault: fixture.vaultRoot,
+        requestId: null,
+        captureId: item.captureId,
+      })
+      if (shown.capture.externalId === 'im-doc-a') {
+        captureAId = shown.capture.captureId
+      } else if (shown.capture.externalId === 'im-doc-b') {
+        captureBId = shown.capture.captureId
+      }
+    }
+
+    assert.ok(captureAId)
+    assert.ok(captureBId)
+
+    const firstPromotion = await services.promoteDocument({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId: captureAId,
+    })
+    assert.equal(firstPromotion.created, true)
+    assert.equal((await listDocumentManifestPaths(fixture.vaultRoot)).length, 1)
+
+    const [firstManifestPath] = await listDocumentManifestPaths(fixture.vaultRoot)
+    assert.ok(firstManifestPath)
+    const firstManifest = await readJsonFile<{
+      artifacts: Array<{ role: string; sha256: string }>
+    }>(firstManifestPath)
+    const firstDocumentSha256 = firstManifest.artifacts.find(
+      (artifact) => artifact.role === 'source_document',
+    )?.sha256
+    assert.ok(firstDocumentSha256)
+
+    await updateCaptureAttachmentRuntimeRecord({
+      vaultRoot: fixture.vaultRoot,
+      captureId: captureBId,
+      sha256: firstDocumentSha256,
+    })
+
+    const secondPromotion = await services.promoteDocument({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId: captureBId,
+    })
+    assert.equal(secondPromotion.created, true)
+    assert.notEqual(secondPromotion.relatedId, firstPromotion.relatedId)
+    assert.equal((await listDocumentManifestPaths(fixture.vaultRoot)).length, 2)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

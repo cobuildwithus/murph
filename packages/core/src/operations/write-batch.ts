@@ -1,5 +1,5 @@
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { promises as fs } from "node:fs";
 
@@ -30,6 +30,33 @@ export const WRITE_OPERATION_DIRECTORY = ".runtime/operations";
 type WriteOperationStatus = "staged" | "committing" | "committed" | "rolled_back" | "failed";
 type WriteOperationActionState = "staged" | "applied" | "reused" | "rolled_back";
 const PROTECTED_CANONICAL_ROOT_FILES = new Set<string>([VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument]);
+const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV = "MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR";
+const WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION = "murph.write-operation-guard-receipt.v1";
+
+export interface CommittedPayloadReceipt {
+  sha256: string;
+  byteLength: number;
+}
+
+interface WriteOperationGuardReceipt {
+  schemaVersion: typeof WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION;
+  operationId: string;
+  createdAt: string;
+  updatedAt: string;
+  actions: WriteOperationGuardReceiptAction[];
+}
+
+type WriteOperationGuardReceiptAction =
+  | {
+      kind: "delete";
+      targetRelativePath: string;
+    }
+  | {
+      kind: "jsonl_append" | "text_write";
+      targetRelativePath: string;
+      committedPayloadReceipt: CommittedPayloadReceipt;
+      payloadRelativePath: string;
+    };
 
 interface CreateWriteBatchInput {
   vaultRoot: string;
@@ -113,7 +140,7 @@ type StoredWriteAction =
       effect?: "create" | "update" | "reuse";
       existedBefore?: boolean;
       backupRelativePath?: string;
-      committedPayloadBase64?: string;
+      committedPayloadReceipt?: CommittedPayloadReceipt;
       appliedAt?: string;
       rolledBackAt?: string;
     }
@@ -125,7 +152,7 @@ type StoredWriteAction =
       effect?: "append";
       existedBefore?: boolean;
       originalSize?: number;
-      committedPayloadBase64?: string;
+      committedPayloadReceipt?: CommittedPayloadReceipt;
       appliedAt?: string;
       rolledBackAt?: string;
     }
@@ -184,8 +211,54 @@ function generateOperationId(): string {
   return `op_${randomUUID().replace(/-/g, "")}`;
 }
 
-function encodeCommittedPayload(content: string | Uint8Array): string | undefined {
-  return Buffer.from(content).toString("base64");
+function createCommittedPayloadReceipt(content: string | Uint8Array): CommittedPayloadReceipt {
+  const buffer = Buffer.from(content);
+  return {
+    sha256: createHash("sha256").update(buffer).digest("hex"),
+    byteLength: buffer.byteLength,
+  };
+}
+
+function normalizeStoredRelativePath(candidate: unknown): string | null {
+  if (typeof candidate !== "string") {
+    return null;
+  }
+
+  try {
+    const normalized = normalizeRelativeVaultPath(candidate);
+    return normalized === candidate ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseCommittedPayloadReceipt(value: unknown): CommittedPayloadReceipt | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (
+    !isPlainRecord(value) ||
+    typeof value.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(value.sha256) ||
+    typeof value.byteLength !== "number" ||
+    !Number.isInteger(value.byteLength) ||
+    value.byteLength < 0
+  ) {
+    return null;
+  }
+
+  return {
+    sha256: value.sha256,
+    byteLength: value.byteLength,
+  };
+}
+
+function resolveGuardReceiptDirectoryFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const candidate = typeof env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV] === "string"
+    ? env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV]?.trim()
+    : "";
+  return candidate ? path.resolve(candidate) : null;
 }
 
 function metadataRelativePath(operationId: string): string {
@@ -256,7 +329,8 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
     return null;
   }
 
-  if (typeof value.targetRelativePath !== "string") {
+  const targetRelativePath = normalizeStoredRelativePath(value.targetRelativePath);
+  if (!targetRelativePath) {
     return null;
   }
 
@@ -269,7 +343,96 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
     return null;
   }
 
-  return value as StoredWriteAction;
+  if (value.kind === "delete") {
+    const backupRelativePath =
+      "backupRelativePath" in value && value.backupRelativePath !== undefined
+        ? (normalizeStoredRelativePath(value.backupRelativePath) ?? undefined)
+        : undefined;
+    if ("backupRelativePath" in value && value.backupRelativePath !== undefined && !backupRelativePath) {
+      return null;
+    }
+
+    return {
+      kind: "delete",
+      state: value.state as WriteOperationActionState,
+      targetRelativePath,
+      effect: value.effect === "delete" ? value.effect : undefined,
+      existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
+      backupRelativePath,
+      appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
+      rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
+    };
+  }
+
+  const stageRelativePath = normalizeStoredRelativePath(value.stageRelativePath);
+  if (!stageRelativePath) {
+    return null;
+  }
+
+  if (value.kind === "raw_copy") {
+    return {
+      kind: "raw_copy",
+      state: value.state as WriteOperationActionState,
+      targetRelativePath,
+      stageRelativePath,
+      allowExistingMatch: value.allowExistingMatch === true,
+      originalFileName: typeof value.originalFileName === "string" ? value.originalFileName : "",
+      mediaType: typeof value.mediaType === "string" ? value.mediaType : "",
+      effect: value.effect === "copy" || value.effect === "reuse" ? value.effect : undefined,
+      existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
+      appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
+      rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
+    };
+  }
+
+  const backupRelativePath =
+    "backupRelativePath" in value && value.backupRelativePath !== undefined
+      ? (normalizeStoredRelativePath(value.backupRelativePath) ?? undefined)
+      : undefined;
+  if ("backupRelativePath" in value && value.backupRelativePath !== undefined && !backupRelativePath) {
+    return null;
+  }
+  const committedPayloadReceipt = parseCommittedPayloadReceipt(value.committedPayloadReceipt);
+  if (committedPayloadReceipt === null) {
+    return null;
+  }
+
+  if (value.kind === "text_write") {
+    return {
+      kind: "text_write",
+      state: value.state as WriteOperationActionState,
+      targetRelativePath,
+      stageRelativePath,
+      overwrite: value.overwrite !== false,
+      allowExistingMatch: value.allowExistingMatch === true,
+      allowRaw: value.allowRaw === true,
+      effect:
+        value.effect === "create" || value.effect === "update" || value.effect === "reuse"
+          ? value.effect
+          : undefined,
+      existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
+      backupRelativePath,
+      committedPayloadReceipt,
+      appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
+      rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
+    };
+  }
+
+  return {
+    kind: "jsonl_append",
+    state: value.state as WriteOperationActionState,
+    targetRelativePath,
+    stageRelativePath,
+    effect: value.effect === "append" ? value.effect : undefined,
+    existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
+    originalSize:
+      typeof value.originalSize === "number" && Number.isFinite(value.originalSize)
+        ? value.originalSize
+        : undefined,
+    committedPayloadReceipt,
+    appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
+    rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
+  };
 }
 
 function parseRecoverableStoredAction(value: unknown): StoredWriteAction | null {
@@ -289,14 +452,22 @@ function parseRecoverableStoredAction(value: unknown): StoredWriteAction | null 
 }
 
 export function isProtectedCanonicalPath(relativePath: string): boolean {
+  let normalizedRelativePath: string;
+  try {
+    normalizedRelativePath = normalizeRelativeVaultPath(relativePath);
+  } catch {
+    return false;
+  }
+
   // Raw artifacts remain enforced by the isolated provider workspace +
   // sandbox boundary rather than full snapshot/replay in the assistant guard.
   return (
-    PROTECTED_CANONICAL_ROOT_FILES.has(relativePath) ||
-    relativePath.startsWith(`${VAULT_LAYOUT.journalDirectory}/`) ||
-    relativePath.startsWith("bank/") ||
-    (relativePath.startsWith("ledger/") && relativePath.endsWith(".jsonl")) ||
-    (relativePath.startsWith(`${VAULT_LAYOUT.auditDirectory}/`) && relativePath.endsWith(".jsonl"))
+    PROTECTED_CANONICAL_ROOT_FILES.has(normalizedRelativePath) ||
+    normalizedRelativePath.startsWith(`${VAULT_LAYOUT.journalDirectory}/`) ||
+    normalizedRelativePath.startsWith("bank/") ||
+    (normalizedRelativePath.startsWith("ledger/") && normalizedRelativePath.endsWith(".jsonl")) ||
+    (normalizedRelativePath.startsWith(`${VAULT_LAYOUT.auditDirectory}/`) &&
+      normalizedRelativePath.endsWith(".jsonl"))
   );
 }
 
@@ -376,6 +547,23 @@ export async function readStoredWriteOperation(
     });
   }
 
+  if (
+    raw.status === "committed" &&
+    (actions as StoredWriteAction[]).some(
+      (action) =>
+        (action.kind === "text_write" || action.kind === "jsonl_append") &&
+        action.committedPayloadReceipt === undefined,
+    )
+  ) {
+    throw new VaultError(
+      "OPERATION_INVALID",
+      "Committed write operation metadata is missing committed payload receipts.",
+      {
+        relativePath,
+      },
+    );
+  }
+
   return {
     schemaVersion: WRITE_OPERATION_SCHEMA_VERSION,
     operationId: raw.operationId,
@@ -416,6 +604,17 @@ export async function readRecoverableStoredWriteOperation(
       typeof raw.status !== "string" ||
       !actions ||
       actions.some((action) => action === null)
+    ) {
+      return null;
+    }
+
+    if (
+      raw.status === "committed" &&
+      (actions as StoredWriteAction[]).some(
+        (action) =>
+          (action.kind === "text_write" || action.kind === "jsonl_append") &&
+          action.committedPayloadReceipt === undefined,
+      )
     ) {
       return null;
     }
@@ -754,6 +953,7 @@ export class WriteBatch {
       this.record.status = "committed";
       this.record.updatedAt = nowIso();
       await this.persist();
+      await this.persistGuardReceiptIfConfigured();
       await this.cleanupStageArtifacts();
     } catch (error) {
       this.record.error = toStoredOperationError(error);
@@ -810,6 +1010,71 @@ export class WriteBatch {
 
   private async cleanupStageArtifacts(): Promise<void> {
     await fs.rm(this.stageRootAbsolutePath, { recursive: true, force: true });
+  }
+
+  private async persistGuardReceiptIfConfigured(): Promise<void> {
+    const receiptRoot = resolveGuardReceiptDirectoryFromEnv();
+    if (!receiptRoot) {
+      return;
+    }
+
+    const actions: WriteOperationGuardReceiptAction[] = [];
+    await ensureDirectory(receiptRoot);
+
+    for (const [index, action] of this.record.actions.entries()) {
+      if (!isProtectedCanonicalPath(action.targetRelativePath)) {
+        continue;
+      }
+
+      if (action.kind === "delete") {
+        actions.push({
+          kind: "delete",
+          targetRelativePath: action.targetRelativePath,
+        });
+        continue;
+      }
+
+      if (action.kind !== "text_write" && action.kind !== "jsonl_append") {
+        continue;
+      }
+
+      const payloadReceipt = action.committedPayloadReceipt;
+      if (!payloadReceipt) {
+        continue;
+      }
+
+      const payloadDirectory = path.join(receiptRoot, this.operationId);
+      const payloadFileName = `${String(index).padStart(4, "0")}.${action.kind === "text_write" ? "txt" : "jsonl"}`;
+      const payloadAbsolutePath = path.join(payloadDirectory, payloadFileName);
+      const payloadRelativePath = path.posix.join(this.operationId, payloadFileName);
+      const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
+      await ensureDirectory(payloadDirectory);
+      await fs.copyFile(stageAbsolutePath, payloadAbsolutePath);
+
+      actions.push({
+        kind: action.kind,
+        targetRelativePath: action.targetRelativePath,
+        committedPayloadReceipt: payloadReceipt,
+        payloadRelativePath,
+      });
+    }
+
+    if (actions.length === 0) {
+      return;
+    }
+
+    const receipt: WriteOperationGuardReceipt = {
+      schemaVersion: WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION,
+      operationId: this.operationId,
+      createdAt: this.record.createdAt,
+      updatedAt: this.record.updatedAt,
+      actions,
+    };
+    await fs.writeFile(
+      path.join(receiptRoot, `${this.operationId}.json`),
+      `${JSON.stringify(receipt, null, 2)}\n`,
+      "utf8",
+    );
   }
 
   private async applyAction(index: number, action: StoredWriteAction): Promise<void> {
@@ -886,7 +1151,7 @@ export class WriteBatch {
     action.state = result.effect === "reuse" ? "reused" : "applied";
     action.effect = result.effect;
     action.existedBefore = result.existedBefore;
-    action.committedPayloadBase64 = encodeCommittedPayload(stagedContent);
+    action.committedPayloadReceipt = createCommittedPayloadReceipt(stagedContent);
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();
@@ -908,7 +1173,7 @@ export class WriteBatch {
     action.effect = result.effect;
     action.existedBefore = result.existedBefore;
     action.originalSize = result.originalSize;
-    action.committedPayloadBase64 = encodeCommittedPayload(payload);
+    action.committedPayloadReceipt = createCommittedPayloadReceipt(payload);
     action.appliedAt = nowIso();
     this.record.updatedAt = action.appliedAt;
     await this.persist();

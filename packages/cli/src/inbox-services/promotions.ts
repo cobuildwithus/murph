@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
+import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murph/core'
+import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
   inboxPromotionStoreSchema,
   type InboxPromotionEntry,
@@ -329,22 +331,87 @@ export function requireExperimentPromotionEntry(
 
 export async function resolveAttachmentSha256(
   absoluteVaultRoot: string,
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
   attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
 ): Promise<string> {
-  if (typeof attachment.sha256 === 'string' && attachment.sha256.length > 0) {
-    return attachment.sha256
-  }
-  if (!attachment.storedPath) {
+  const content = await readFile(
+    await resolvePromotionAttachmentFilePath(
+      absoluteVaultRoot,
+      capture,
+      attachment,
+    ),
+  )
+  return createHash('sha256').update(content).digest('hex')
+}
+
+export async function resolvePromotionAttachmentFilePath(
+  absoluteVaultRoot: string,
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
+  attachment: RuntimeAttachmentRecord & { storedPath?: string | null },
+): Promise<string> {
+  const storedPath = normalizeNullableString(attachment.storedPath)
+  if (!storedPath) {
     throw new VaultCliError(
-      'INBOX_ATTACHMENT_HASH_MISSING',
-      'Attachment hash could not be resolved from the stored inbox artifact.',
+      'INBOX_ATTACHMENT_PATH_INVALID',
+      'Stored attachment path is missing or empty.',
     )
   }
 
-  const content = await readFile(
-    path.join(absoluteVaultRoot, attachment.storedPath),
+  const normalizedStoredPath = normalizeAnchoredPromotionAttachmentPath(
+    capture,
+    attachment,
+    storedPath,
   )
-  return createHash('sha256').update(content).digest('hex')
+  if (!normalizedStoredPath) {
+    throw new VaultCliError(
+      'INBOX_ATTACHMENT_PATH_INVALID',
+      'Stored attachment path is outside the capture attachment subtree.',
+      {
+        attachmentId: attachment.attachmentId ?? null,
+        captureId: capture.captureId,
+        storedPath,
+      },
+    )
+  }
+
+  return resolveAssistantVaultPath(
+    absoluteVaultRoot,
+    normalizedStoredPath,
+    'file path',
+  )
+}
+
+function normalizeAnchoredPromotionAttachmentPath(
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
+  attachment: RuntimeAttachmentRecord,
+  storedPath: string,
+): string | null {
+  try {
+    const normalizedStoredPath = normalizeRelativeVaultPath(storedPath)
+    const prefixes = buildAllowedPromotionAttachmentPrefixes(capture, attachment)
+    return prefixes.some((prefix) => normalizedStoredPath.startsWith(prefix))
+      ? normalizedStoredPath
+      : null
+  } catch {
+    return null
+  }
+}
+
+function buildAllowedPromotionAttachmentPrefixes(
+  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
+  attachment: RuntimeAttachmentRecord,
+): string[] {
+  const captureId = normalizeOpaquePathSegment(capture.captureId, 'Capture id')
+  const envelopePath = normalizeRelativeVaultPath(capture.envelopePath)
+  const prefixes = [
+    normalizeRelativeVaultPath(
+      path.posix.join(path.posix.dirname(envelopePath), 'attachments'),
+    ),
+    normalizeRelativeVaultPath(
+      path.posix.join('raw', 'inbox', 'captures', captureId, 'attachments'),
+    ),
+  ]
+  return prefixes.map((prefix) => `${prefix}/`)
 }
 
 const canonicalMealManifestSchema = z.object({

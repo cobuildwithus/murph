@@ -782,6 +782,206 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
   }
 })
 
+test('materializeInboxModelBundle ignores manifest entries that point at in-vault bank content outside the attachment subtree', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-bank-path-'))
+  const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_3', 'attachment-1')
+  await mkdir(derivedDirectory, { recursive: true })
+  await mkdir(path.join(vaultRoot, 'bank'), { recursive: true })
+  await writeFile(
+    path.join(vaultRoot, 'bank', 'secret.md'),
+    'bank secret text should never enter the routing bundle\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(derivedDirectory, 'notes.md'),
+    '# Parsed Markdown\n\nAllowed attachment notes.\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(derivedDirectory, 'manifest.json'),
+    JSON.stringify(
+      {
+        schema: 'murph.parser-manifest.v1',
+        paths: {
+          plainTextPath: 'bank/secret.md',
+          markdownPath: 'derived/inbox/cap_3/attachment-1/notes.md',
+          tablesPath: null,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_3',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-3',
+      threadId: 'thread-3',
+      threadTitle: 'Care team',
+      actorId: 'contact-3',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-13T10:00:00.000Z',
+      receivedAt: '2026-03-13T10:00:02.000Z',
+      text: 'Please route this document safely.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_3/envelope.json',
+      eventId: 'evt_3',
+      promotions: [],
+      createdAt: '2026-03-13T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_3',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'safe.pdf',
+          storedPath: 'raw/inbox/captures/cap_3/attachments/1/safe.pdf',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: 'derived/inbox/cap_3/attachment-1/manifest.json',
+          parserProviderId: 'text-file',
+          parseState: 'succeeded',
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_bank_path',
+      captureId: 'cap_3',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.doesNotMatch(result.bundle.routingText, /bank secret text should never enter/u)
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some(
+        (fragment) =>
+          fragment.kind === 'derived_plain_text' &&
+          /bank secret text should never enter/u.test(fragment.text),
+      ),
+      false,
+    )
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some(
+        (fragment) =>
+          fragment.kind === 'derived_markdown' &&
+          /Allowed attachment notes\./u.test(fragment.text),
+      ),
+      true,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeInboxModelBundle ignores derived manifests from another capture subtree inside the vault', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-cross-capture-'))
+  const otherDerivedDirectory = path.join(
+    vaultRoot,
+    'derived',
+    'inbox',
+    'cap_other',
+    'attachment-1',
+  )
+  await mkdir(otherDerivedDirectory, { recursive: true })
+  await writeFile(
+    path.join(otherDerivedDirectory, 'plain.txt'),
+    'other capture text should never enter this routing bundle\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(otherDerivedDirectory, 'notes.md'),
+    '# Other Capture\n\nCross-capture text.\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(otherDerivedDirectory, 'manifest.json'),
+    JSON.stringify(
+      {
+        schema: 'murph.parser-manifest.v1',
+        paths: {
+          plainTextPath: 'derived/inbox/cap_other/attachment-1/plain.txt',
+          markdownPath: 'derived/inbox/cap_other/attachment-1/notes.md',
+          tablesPath: null,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_4',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-4',
+      threadId: 'thread-4',
+      threadTitle: 'Care team',
+      actorId: 'contact-4',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-13T10:00:00.000Z',
+      receivedAt: '2026-03-13T10:00:02.000Z',
+      text: 'Please keep this capture isolated.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_4/envelope.json',
+      eventId: 'evt_4',
+      promotions: [],
+      createdAt: '2026-03-13T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_4',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'isolated.pdf',
+          storedPath: 'raw/inbox/captures/cap_4/attachments/1/isolated.pdf',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: 'derived/inbox/cap_other/attachment-1/manifest.json',
+          parserProviderId: 'text-file',
+          parseState: 'succeeded',
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_cross_capture',
+      captureId: 'cap_4',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some((fragment) =>
+        fragment.kind.startsWith('derived_'),
+      ),
+      false,
+    )
+    assert.doesNotMatch(result.bundle.routingText, /other capture text should never enter/u)
+    assert.doesNotMatch(result.bundle.routingText, /Cross-capture text/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('createDefaultAssistantToolCatalog exposes recipe and food query and write tools', () => {
   const catalog = createDefaultAssistantToolCatalog({
     vault: '/tmp/murph-vault',

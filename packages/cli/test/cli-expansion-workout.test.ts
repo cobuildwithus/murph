@@ -228,11 +228,12 @@ test.sequential(
       if (firstAction.kind !== 'text_write') {
         throw new Error('Expected workout_format_save to stage a text_write action.')
       }
-      assert.equal(typeof firstAction.committedPayloadBase64, 'string')
+      assert.equal(typeof firstAction.committedPayloadReceipt?.sha256, 'string')
+      assert.equal(typeof firstAction.committedPayloadReceipt?.byteLength, 'number')
 
       const savedMarkdownPath = path.join(vaultRoot, requireData(saveFormat).path)
       const savedMarkdown = await readFile(savedMarkdownPath, 'utf8')
-      assert.match(savedMarkdown, /schemaVersion: hb\.frontmatter\.workout-format\.v1/u)
+      assert.match(savedMarkdown, /schemaVersion: murph\.frontmatter\.workout-format\.v1/u)
       assert.match(savedMarkdown, /docType: workout_format/u)
       assert.match(savedMarkdown, /slug: push-day-a/u)
       assert.match(savedMarkdown, /## Saved workout text/u)

@@ -721,7 +721,13 @@ async function issueHostedShareLink(input: {
       senderMemberId: input.senderMemberId,
     }),
   })
-  const payload = await response.json()
+  const payload = (await response.json()) as
+    | ({
+        error?: {
+          message?: string
+        }
+      } & Record<string, unknown>)
+    | null
 
   if (!response.ok) {
     throw new Error(

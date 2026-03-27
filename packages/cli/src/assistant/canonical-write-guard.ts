@@ -2,6 +2,7 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   unlink,
@@ -9,16 +10,23 @@ import {
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import {
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
+  normalizeRelativeVaultPath,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation as readWriteOperationMetadata,
   resolveVaultPath,
 } from '@murph/core'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { isMissingFileError } from './shared.js'
+
+const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV =
+  'MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR'
+const WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION =
+  'murph.write-operation-guard-receipt.v1'
 
 interface GuardInput<TResult> {
   enabled: boolean
@@ -29,6 +37,7 @@ interface GuardInput<TResult> {
 interface GuardSnapshot {
   backupRoot: string
   expectedStates: Map<string, ExpectedFileState>
+  guardReceiptRoot: string
   operationMetadataStates: Map<string, GuardOperationSnapshot>
 }
 
@@ -67,10 +76,37 @@ type GuardRecoveredOperation = NonNullable<
 >
 
 interface GuardOperationEntry {
+  existedInSnapshot: boolean
   guardFailure: GuardAuditStateFailure | null
   operation: GuardRecoveredOperation | null
+  operationId: string | null
   relativePath: string
   snapshotStatus: string | null
+}
+
+interface GuardCommittedPayloadReceipt {
+  byteLength: number
+  sha256: string
+}
+
+type GuardReceiptAction =
+  | {
+      kind: 'delete'
+      targetRelativePath: string
+    }
+  | {
+      kind: 'jsonl_append' | 'text_write'
+      committedPayloadReceipt: GuardCommittedPayloadReceipt
+      payloadRelativePath: string
+      targetRelativePath: string
+    }
+
+interface GuardReceiptOperation {
+  actions: GuardReceiptAction[]
+  createdAt: string
+  operationId: string
+  receiptPath: string
+  updatedAt: string
 }
 
 export async function executeWithCanonicalWriteGuard<TResult>(
@@ -85,7 +121,10 @@ export async function executeWithCanonicalWriteGuard<TResult>(
   let providerError: unknown = null
 
   try {
-    providerResult = await input.execute()
+    providerResult = await withCanonicalGuardReceiptDirectory(
+      snapshot.guardReceiptRoot,
+      input.execute,
+    )
   } catch (error) {
     providerError = error
   }
@@ -114,6 +153,10 @@ export async function executeWithCanonicalWriteGuard<TResult>(
       force: true,
       recursive: true,
     }).catch(() => undefined)
+    await rm(snapshot.guardReceiptRoot, {
+      force: true,
+      recursive: true,
+    }).catch(() => undefined)
   }
 }
 
@@ -122,6 +165,9 @@ async function captureCanonicalWriteSnapshot(
 ): Promise<GuardSnapshot> {
   const backupRoot = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-canonical-guard-'),
+  )
+  const guardReceiptRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-canonical-guard-receipts-'),
   )
   const protectedPaths = await listProtectedCanonicalPaths(vaultRoot)
   const expectedStates = new Map<string, ExpectedFileState>()
@@ -143,6 +189,7 @@ async function captureCanonicalWriteSnapshot(
   return {
     backupRoot,
     expectedStates,
+    guardReceiptRoot,
     operationMetadataStates: await captureOperationMetadataSnapshot(vaultRoot),
   }
 }
@@ -222,16 +269,25 @@ async function applyCommittedOperationEffects(input: {
   vaultRoot: string
 }): Promise<GuardAuditStateFailure | null> {
   const operationMetadataPaths = await listWriteOperationMetadataPaths(input.vaultRoot)
+  const receipts = await readGuardReceiptOperations(input.snapshot.guardReceiptRoot)
+  const receiptByOperationId = new Map(
+    receipts.map((receipt) => [receipt.operationId, receipt] as const),
+  )
   let guardFailure: GuardAuditStateFailure | null = null
   const operations: GuardOperationEntry[] = await Promise.all(
     operationMetadataPaths.sort().map(async (relativePath) => {
       const snapshotStatus =
         input.snapshot.operationMetadataStates.get(relativePath)?.status ?? null
+      const existedInSnapshot =
+        input.snapshot.operationMetadataStates.has(relativePath)
 
       try {
+        const operation = await readStoredWriteOperationIfPresent(input.vaultRoot, relativePath)
         return {
+          existedInSnapshot,
           guardFailure: null,
-          operation: await readStoredWriteOperationIfPresent(input.vaultRoot, relativePath),
+          operation,
+          operationId: operation?.operationId ?? null,
           relativePath,
           snapshotStatus,
         }
@@ -246,16 +302,29 @@ async function applyCommittedOperationEffects(input: {
           relativePath,
         )
         return {
+          existedInSnapshot,
           guardFailure: failure,
           operation: recovered,
+          operationId: recovered?.operationId ?? null,
           relativePath,
           snapshotStatus,
         }
       }
     }),
   )
+  const operationById = new Map(
+    operations
+      .filter((operation): operation is GuardOperationEntry & { operationId: string } =>
+        typeof operation.operationId === 'string',
+      )
+      .map((operation) => [operation.operationId, operation] as const),
+  )
 
   for (const operationEntry of operations) {
+    if (!operationEntry.existedInSnapshot && operationEntry.guardFailure && !guardFailure) {
+      guardFailure = operationEntry.guardFailure
+    }
+
     if (
       operationEntry.snapshotStatus !== 'committed' &&
       operationEntry.operation?.status === 'committed' &&
@@ -264,23 +333,58 @@ async function applyCommittedOperationEffects(input: {
     ) {
       guardFailure = operationEntry.guardFailure
     }
+
+    if (
+      operationEntry.snapshotStatus !== 'committed' &&
+      operationEntry.operation?.status === 'committed' &&
+      operationTouchesProtectedCanonicalPath(operationEntry.operation) &&
+      operationEntry.operationId &&
+      !receiptByOperationId.has(operationEntry.operationId) &&
+      !guardFailure
+    ) {
+      guardFailure = createGuardAuditStateFailure({
+        cause: new Error(
+          'Committed write operation did not produce a trusted canonical-write guard receipt.',
+        ),
+        metadataPath: operationEntry.relativePath,
+        operationId: operationEntry.operationId,
+        reason: 'invalid_write_operation_metadata',
+      })
+    }
   }
 
-  const committedOperations = operations
-    .filter(
-      (
-        entry,
-      ): entry is GuardOperationEntry & { operation: GuardRecoveredOperation } =>
-        entry.operation !== null &&
-        entry.operation.status === 'committed' &&
-        entry.snapshotStatus !== 'committed',
-    )
+  const committedOperations = receipts
     .sort((left, right) =>
-      compareOperationOrder(left.operation, right.operation, left.relativePath, right.relativePath),
+      compareOperationOrder(left, right, left.receiptPath, right.receiptPath),
     )
 
-  for (const { operation, relativePath } of committedOperations) {
-    for (const action of operation.actions) {
+  for (const receipt of committedOperations) {
+    const operationEntry = operationById.get(receipt.operationId) ?? null
+    const transitionedToCommitted =
+      operationEntry?.snapshotStatus !== 'committed' ||
+      operationEntry === null
+    if (!transitionedToCommitted) {
+      continue
+    }
+
+    if (operationEntry?.guardFailure && !guardFailure) {
+      guardFailure = operationEntry.guardFailure
+    }
+    if (!operationEntry && !guardFailure) {
+      guardFailure = createGuardAuditStateFailure({
+        cause: new Error(
+          'Committed write guard receipt has no matching vault metadata file.',
+        ),
+        metadataPath: receipt.receiptPath,
+        operationId: receipt.operationId,
+        reason: 'invalid_write_operation_metadata',
+      })
+    }
+    if (!operationEntry || operationEntry.guardFailure) {
+      continue
+    }
+
+    for (const action of receipt.actions) {
       if (!isProtectedCanonicalPath(action.targetRelativePath)) {
         continue
       }
@@ -292,18 +396,13 @@ async function applyCommittedOperationEffects(input: {
         continue
       }
 
-      if (action.kind !== 'jsonl_append' && action.kind !== 'text_write') {
-        continue
-      }
-
-      const payload = await resolveCommittedPayload({
-        actionKind: action.kind,
-        metadataPath: relativePath,
-        operationId: operation.operationId,
-        stageRelativePath: action.stageRelativePath,
+      const payload = await readGuardReceiptPayload({
+        action,
+        metadataPath: operationEntry?.relativePath ?? receipt.receiptPath,
+        operationId: receipt.operationId,
+        receiptPath: receipt.receiptPath,
+        receiptRoot: input.snapshot.guardReceiptRoot,
         targetRelativePath: action.targetRelativePath,
-        value: action.committedPayloadBase64,
-        vaultRoot: input.vaultRoot,
       })
       if (payload.guardFailure && !guardFailure) {
         guardFailure = payload.guardFailure
@@ -337,9 +436,17 @@ async function applyCommittedOperationEffects(input: {
   return guardFailure
 }
 
+function operationTouchesProtectedCanonicalPath(
+  operation: GuardRecoveredOperation,
+): boolean {
+  return operation.actions.some((action) =>
+    isProtectedCanonicalPath(action.targetRelativePath),
+  )
+}
+
 function compareOperationOrder(
-  left: GuardRecoveredOperation,
-  right: GuardRecoveredOperation,
+  left: Pick<GuardRecoveredOperation, 'createdAt' | 'updatedAt' | 'operationId'>,
+  right: Pick<GuardRecoveredOperation, 'createdAt' | 'updatedAt' | 'operationId'>,
   leftPath: string,
   rightPath: string,
 ): number {
@@ -386,6 +493,168 @@ async function readStoredWriteOperationIfPresent(
   }
 }
 
+async function withCanonicalGuardReceiptDirectory<TResult>(
+  receiptRoot: string,
+  execute: () => Promise<TResult>,
+): Promise<TResult> {
+  const previous = process.env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV]
+  process.env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV] = receiptRoot
+
+  try {
+    return await execute()
+  } finally {
+    if (typeof previous === 'string') {
+      process.env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV] = previous
+    } else {
+      delete process.env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV]
+    }
+  }
+}
+
+async function readGuardReceiptOperations(
+  receiptRoot: string,
+): Promise<GuardReceiptOperation[]> {
+  try {
+    const entries = await readdir(receiptRoot, { withFileTypes: true })
+    const receiptFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map((entry) => path.join(receiptRoot, entry.name))
+      .sort((left, right) => left.localeCompare(right))
+    const receipts = await Promise.all(
+      receiptFiles.map((receiptPath) => readGuardReceiptOperation(receiptRoot, receiptPath)),
+    )
+    return receipts.filter((receipt): receipt is GuardReceiptOperation => receipt !== null)
+  } catch {
+    return []
+  }
+}
+
+async function readGuardReceiptOperation(
+  receiptRoot: string,
+  receiptPath: string,
+): Promise<GuardReceiptOperation | null> {
+  try {
+    const raw = JSON.parse(await readFile(receiptPath, 'utf8')) as unknown
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return null
+    }
+
+    const record = raw as Record<string, unknown>
+    if (
+      record.schemaVersion !== WRITE_OPERATION_GUARD_RECEIPT_SCHEMA_VERSION ||
+      typeof record.operationId !== 'string' ||
+      typeof record.createdAt !== 'string' ||
+      typeof record.updatedAt !== 'string' ||
+      !Array.isArray(record.actions)
+    ) {
+      return null
+    }
+
+    const actions = record.actions.map((action) => parseGuardReceiptAction(receiptRoot, action))
+    if (actions.some((action) => action === null)) {
+      return null
+    }
+
+    return {
+      actions: actions as GuardReceiptAction[],
+      createdAt: record.createdAt,
+      operationId: record.operationId,
+      receiptPath: path.relative(receiptRoot, receiptPath) || path.basename(receiptPath),
+      updatedAt: record.updatedAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+function parseGuardReceiptAction(
+  receiptRoot: string,
+  value: unknown,
+): GuardReceiptAction | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const action = value as Record<string, unknown>
+  const targetRelativePath = normalizeGuardRelativePath(action.targetRelativePath)
+  if (!targetRelativePath) {
+    return null
+  }
+
+  if (action.kind === 'delete') {
+    return {
+      kind: 'delete',
+      targetRelativePath,
+    }
+  }
+
+  if (action.kind !== 'jsonl_append' && action.kind !== 'text_write') {
+    return null
+  }
+
+  const payloadRelativePath = normalizeGuardRelativePath(action.payloadRelativePath)
+  const committedPayloadReceipt = parseGuardCommittedPayloadReceipt(
+    action.committedPayloadReceipt,
+  )
+  if (!payloadRelativePath || !committedPayloadReceipt) {
+    return null
+  }
+
+  const absolutePayloadPath = path.resolve(receiptRoot, payloadRelativePath)
+  const relativeToRoot = path.relative(receiptRoot, absolutePayloadPath)
+  if (
+    relativeToRoot === '..' ||
+    relativeToRoot.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeToRoot)
+  ) {
+    return null
+  }
+
+  return {
+    kind: action.kind,
+    committedPayloadReceipt,
+    payloadRelativePath,
+    targetRelativePath,
+  }
+}
+
+function parseGuardCommittedPayloadReceipt(
+  value: unknown,
+): GuardCommittedPayloadReceipt | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const receipt = value as Record<string, unknown>
+  if (
+    typeof receipt.sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(receipt.sha256) ||
+    typeof receipt.byteLength !== 'number' ||
+    !Number.isInteger(receipt.byteLength) ||
+    receipt.byteLength < 0
+  ) {
+    return null
+  }
+
+  return {
+    byteLength: receipt.byteLength,
+    sha256: receipt.sha256,
+  }
+}
+
+function normalizeGuardRelativePath(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  try {
+    const normalized = normalizeRelativeVaultPath(value)
+    return normalized === value ? normalized : null
+  } catch {
+    return null
+  }
+}
+
 async function readExpectedBuffer(
   state: Extract<ExpectedFileState, { exists: true }>,
 ): Promise<Buffer> {
@@ -429,64 +698,63 @@ async function unlinkProtectedFile(
   }
 }
 
-async function resolveCommittedPayload(input: {
-  actionKind: 'jsonl_append' | 'text_write'
+async function readGuardReceiptPayload(input: {
+  action: Extract<GuardReceiptAction, { kind: 'jsonl_append' | 'text_write' }>
   metadataPath: string
   operationId: string
-  stageRelativePath: string
+  receiptPath: string
+  receiptRoot: string
   targetRelativePath: string
-  value: string | undefined
-  vaultRoot: string
 }): Promise<{
   buffer: Buffer | null
   guardFailure: GuardAuditStateFailure | null
 }> {
-  const decoded = decodeCommittedPayloadBase64(input.value)
-  if (decoded) {
-    return {
-      buffer: decoded,
-      guardFailure: null,
-    }
-  }
-
-  const guardFailure = createGuardAuditStateFailure({
-    cause:
-      typeof input.value === 'string'
-        ? new Error('Committed write payload is not valid canonical base64.')
-        : new Error('Committed write payload is missing.'),
-    metadataPath: input.metadataPath,
-    operationId: input.operationId,
-    reason: 'invalid_committed_payload',
-    targetRelativePath: input.targetRelativePath,
-    actionKind: input.actionKind,
-  })
+  const absolutePayloadPath = path.resolve(
+    input.receiptRoot,
+    input.action.payloadRelativePath,
+  )
 
   try {
+    const buffer = await readFile(absolutePayloadPath)
+    if (
+      buffer.byteLength !== input.action.committedPayloadReceipt.byteLength ||
+      createHash('sha256').update(buffer).digest('hex') !==
+        input.action.committedPayloadReceipt.sha256
+    ) {
+      return {
+        buffer: null,
+        guardFailure: createGuardAuditStateFailure({
+          cause: new Error(
+            'Committed write payload receipt does not match the trusted payload copy.',
+          ),
+          metadataPath: input.metadataPath,
+          operationId: input.operationId,
+          reason: 'invalid_committed_payload',
+          targetRelativePath: input.targetRelativePath,
+          actionKind: input.action.kind,
+        }),
+      }
+    }
+
     return {
-      buffer: await readFile(
-        resolveVaultPath(input.vaultRoot, input.stageRelativePath).absolutePath,
-      ),
-      guardFailure,
+      buffer,
+      guardFailure: null,
     }
   } catch {
     return {
       buffer: null,
-      guardFailure,
+      guardFailure: createGuardAuditStateFailure({
+        cause: new Error(
+          `Committed write payload copy is missing from trusted receipt path "${input.receiptPath}".`,
+        ),
+        metadataPath: input.metadataPath,
+        operationId: input.operationId,
+        reason: 'invalid_committed_payload',
+        targetRelativePath: input.targetRelativePath,
+        actionKind: input.action.kind,
+      }),
     }
   }
-}
-
-function decodeCommittedPayloadBase64(value: string | undefined): Buffer | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const decoded = Buffer.from(value, 'base64')
-  if (decoded.toString('base64') !== value) {
-    return null
-  }
-
-  return Buffer.from(decoded.toString('utf8')).equals(decoded) ? decoded : null
 }
 
 function buildCanonicalWriteGuardError(input: {
