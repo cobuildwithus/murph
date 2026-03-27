@@ -19,17 +19,6 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.runnerTimeoutMs).toBe(60_000);
   });
 
-  it("normalizes the worker callback base url", () => {
-    const environment = readHostedExecutionEnvironment({
-      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-      HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://worker.example.test/",
-      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
-    });
-
-    expect(environment.cloudflareBaseUrl).toBe("https://worker.example.test");
-  });
-
-
   it("reads the runner timeout when configured", () => {
     const environment = readHostedExecutionEnvironment({
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),

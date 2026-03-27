@@ -1,6 +1,6 @@
 # Cloudflare Pre-Deploy Fixes
 
-Status: in_progress
+Status: completed
 Created: 2026-03-27
 Updated: 2026-03-27
 
@@ -47,19 +47,26 @@ Close the remaining concrete Cloudflare hosted-runner pre-deploy gaps without ch
 
 ## Current State
 
-- Worker B's deploy/config/smoke/local-dev/docs slice is complete:
+- The Cloudflare runtime slice is complete:
   - checked-in and generated Wrangler config pin explicit native-container sizing (`basic` by default, overrideable via `CF_CONTAINER_INSTANCE_TYPE`)
   - generated deploy config no longer emits Wrangler `secrets.required`
   - local dev/docs no longer describe a public callback loopback path and now describe the fail-closed control-token requirement truthfully
   - hosted deploy smoke now requires a manual `/run` to drain, advance `lastRunAt`, and expose durable bundle refs before passing
-- Remaining stale-next-wake and transient-journal runtime work stays with the runtime lanes that own those files; this shared plan stays open until that broader slice is done.
+  - stale past `nextWakeAt` values are cleared before alarm work resumes and new wake selection only retains future hints
+  - execution-journal entries move under a transient prefix, keep legacy-read compatibility, and are deleted after durable recovery/application succeeds
+  - side-effect journal keys now write under transient lifecycle-friendly prefixes while still reading legacy layouts
+  - the Worker/container path fails closed on missing control tokens and keeps containers warm until `sleepAfter` instead of forcing immediate teardown
 
 ## Verification Results
 
 - Passed: `pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/deploy-automation.test.ts apps/cloudflare/test/smoke-hosted-deploy.test.ts --no-coverage --maxWorkers 1`
 - Passed: `pnpm --dir apps/cloudflare verify`
 - Passed direct scenario proof: `pnpm --dir apps/cloudflare deploy:smoke` against a local mock worker/status server, confirming queue-drain polling plus durable bundle-ref checks.
-- Completion-workflow audit passes were launched for `simplify`, `test-coverage-audit`, and `task-finish-review`. They returned no blocking findings for this slice; follow-up output was limited to optional simplifications and additional characterization-test ideas.
+- Passed focused runner-container verification after the final simplify cleanup: `pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/runner-container.test.ts --no-coverage --maxWorkers 1`
+- Completion-workflow audit passes were completed for `simplify`, `test-coverage-audit`, and `task-finish-review`.
+  - `simplify`: one actionable cleanup was applied in `runner-container.ts` to narrow runner-control-token types and remove dead null branches
+  - `test-coverage-audit`: no additional high-impact test was required; current Cloudflare tests already cover the highest-risk deltas
+  - `task-finish-review`: no actionable issues remained in the bounded Cloudflare scope
 - Repo-wide required wrappers remain red for unrelated worktree issues outside this slice:
   - `pnpm typecheck`
   - `pnpm test`

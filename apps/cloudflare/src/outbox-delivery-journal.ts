@@ -31,7 +31,7 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 }): HostedExecutionSideEffectJournalStore {
   return {
     async read(query) {
-      const byEffect = await readRecordAtKeys(input, effectRecordObjectKeys(query.userId, query.effectId));
+      const byEffect = await readRecordAtKeys(input, effectRecordReadKeys(query.userId, query.effectId));
 
       if (byEffect) {
         return byEffect;
@@ -39,20 +39,16 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 
       return readRecordAtKeys(
         input,
-        fingerprintRecordObjectKeys(query.userId, query.kind, query.fingerprint),
+        fingerprintRecordReadKeys(query.userId, query.kind, query.fingerprint),
       );
     },
 
     async write(writeInput) {
       const record = parseHostedExecutionSideEffectRecord(writeInput.record);
-      await writeRecordAtKeys(
+      await writeRecordAtKey(input, effectRecordWriteKey(writeInput.userId, record.effectId), record);
+      await writeRecordAtKey(
         input,
-        effectRecordObjectKeys(writeInput.userId, record.effectId),
-        record,
-      );
-      await writeRecordAtKeys(
-        input,
-        fingerprintRecordObjectKeys(writeInput.userId, record.kind, record.fingerprint),
+        fingerprintRecordWriteKey(writeInput.userId, record.kind, record.fingerprint),
         record,
       );
       return record;
@@ -85,39 +81,51 @@ async function readRecordAtKeys(
   return null;
 }
 
-async function writeRecordAtKeys(
+async function writeRecordAtKey(
   input: {
     bucket: EncryptedR2BucketLike;
     key: Uint8Array;
     keyId: string;
   },
-  keys: readonly string[],
+  key: string,
   value: HostedExecutionSideEffectRecord,
 ): Promise<void> {
-  for (const key of keys) {
-    await writeEncryptedR2Json({
-      bucket: input.bucket,
-      cryptoKey: input.key,
-      key,
-      keyId: input.keyId,
-      value,
-    });
-  }
+  await writeEncryptedR2Json({
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    key,
+    keyId: input.keyId,
+    value,
+  });
 }
 
-function effectRecordObjectKeys(userId: string, effectId: string): string[] {
+function effectRecordWriteKey(userId: string, effectId: string): string {
+  return `transient/side-effects/by-effect/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+}
+
+function effectRecordReadKeys(userId: string, effectId: string): string[] {
   return [
+    effectRecordWriteKey(userId, effectId),
     `users/${encodeURIComponent(userId)}/side-effects/by-effect/${encodeURIComponent(effectId)}.json`,
     legacyIntentRecordObjectKey(userId, effectId),
   ];
 }
 
-function fingerprintRecordObjectKeys(
+function fingerprintRecordWriteKey(
+  userId: string,
+  kind: HostedExecutionSideEffectRecord["kind"],
+  fingerprint: string,
+): string {
+  return `transient/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}/${encodeURIComponent(userId)}.json`;
+}
+
+function fingerprintRecordReadKeys(
   userId: string,
   kind: HostedExecutionSideEffectRecord["kind"],
   fingerprint: string,
 ): string[] {
   return [
+    fingerprintRecordWriteKey(userId, kind, fingerprint),
     `users/${encodeURIComponent(userId)}/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}.json`,
     ...(kind === "assistant.delivery"
       ? [legacyDedupeRecordObjectKey(userId, fingerprint)]

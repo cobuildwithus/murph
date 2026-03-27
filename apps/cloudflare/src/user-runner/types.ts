@@ -4,8 +4,6 @@ import type {
   HostedExecutionUserStatus,
 } from "@healthybob/runtime-state";
 
-import type { HostedExecutionContainerStateLike } from "../runner-container.js";
-
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -36,7 +34,7 @@ export interface DurableObjectStorageLike {
   sql?: DurableObjectSqlStorageLike;
 }
 
-export interface DurableObjectStateLike extends HostedExecutionContainerStateLike {
+export interface DurableObjectStateLike {
   storage: DurableObjectStorageLike;
 }
 
