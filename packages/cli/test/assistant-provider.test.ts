@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { PassThrough } from 'node:stream'
 import { beforeEach, test, vi } from 'vitest'
 
 const providerMocks = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ import {
   defaultDiscoverOpenAICompatibleModels,
   resolveAssistantModelCatalog,
 } from '../src/assistant/provider-catalog.js'
+import { createSetupAssistantResolver } from '../src/setup-assistant.js'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
@@ -36,9 +38,10 @@ beforeEach(() => {
   vi.unstubAllGlobals()
 })
 
-test('resolveAssistantProviderOptions normalizes provider session settings', () => {
+test('resolveAssistantProviderOptions sanitizes settings for the selected provider', () => {
   assert.deepEqual(
     resolveAssistantProviderOptions({
+      provider: 'openai-compatible',
       model: ' gpt-oss:20b ',
       sandbox: 'read-only',
       approvalPolicy: 'never',
@@ -46,18 +49,26 @@ test('resolveAssistantProviderOptions normalizes provider session settings', () 
       baseUrl: ' http://127.0.0.1:11434/v1 ',
       apiKeyEnv: ' OLLAMA_API_KEY ',
       providerName: ' ollama ',
+      headers: {
+        'X-Foo ': ' bar ',
+        ' X-Bar': 'baz',
+      },
       oss: true,
     }),
     {
       model: 'gpt-oss:20b',
       reasoningEffort: null,
-      sandbox: 'read-only',
-      approvalPolicy: 'never',
-      profile: 'primary',
-      oss: true,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKeyEnv: 'OLLAMA_API_KEY',
       providerName: 'ollama',
+      headers: {
+        'X-Bar': 'baz',
+        'X-Foo': 'bar',
+      },
     },
   )
 })
@@ -109,7 +120,7 @@ test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and 
   assert.deepEqual(catalog.reasoningOptions, [])
 })
 
-test('resolveAssistantModelCatalog falls back to a local-model entry for undiscovered OpenAI-compatible endpoints', () => {
+test('resolveAssistantModelCatalog keeps undiscovered OpenAI-compatible endpoints empty until the operator chooses a model', () => {
   const catalog = resolveAssistantModelCatalog({
     provider: 'openai-compatible',
     baseUrl: 'http://127.0.0.1:11434/v1',
@@ -117,8 +128,19 @@ test('resolveAssistantModelCatalog falls back to a local-model entry for undisco
 
   assert.deepEqual(
     catalog.modelOptions.map((option) => option.value),
-    ['local-model'],
+    [],
   )
+  assert.deepEqual(catalog.reasoningOptions, [])
+})
+
+test('resolveAssistantModelCatalog keeps the current OpenAI-compatible model selectable even when discovery is empty', () => {
+  const catalog = resolveAssistantModelCatalog({
+    provider: 'openai-compatible',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    currentModel: 'llama3.3:70b',
+  })
+
+  assert.equal(catalog.modelOptions[0]?.value, 'llama3.3:70b')
   assert.deepEqual(catalog.reasoningOptions, [])
 })
 
@@ -138,6 +160,12 @@ test('defaultDiscoverOpenAICompatibleModels normalizes and dedupes model ids fro
 
   const models = await defaultDiscoverOpenAICompatibleModels(
     ' http://127.0.0.1:11434/v1 ',
+    {
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      env: {
+        OLLAMA_API_KEY: 'secret-token',
+      },
+    },
   )
 
   assert.deepEqual(models, ['gpt-oss:20b', 'llama3.3:70b'])
@@ -145,6 +173,36 @@ test('defaultDiscoverOpenAICompatibleModels normalizes and dedupes model ids fro
     String(fetchMock.mock.calls[0]?.[0]),
     'http://127.0.0.1:11434/v1/models',
   )
+  assert.equal(
+    (fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined)
+      ?.headers?.Authorization,
+    'Bearer secret-token',
+  )
+})
+
+test('defaultDiscoverOpenAICompatibleModels respects explicit Authorization headers over apiKeyEnv injection', async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      data: [],
+    }),
+  } as Response)
+  vi.stubGlobal('fetch', fetchMock)
+
+  await defaultDiscoverOpenAICompatibleModels('http://127.0.0.1:11434/v1', {
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    env: {
+      OLLAMA_API_KEY: 'secret-token',
+    },
+    headers: {
+      authorization: 'Bearer override-token',
+    },
+  })
+
+  const headers = (fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined)
+    ?.headers
+  assert.equal(headers?.authorization, 'Bearer override-token')
+  assert.equal('Authorization' in (headers ?? {}), false)
 })
 
 test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefined', async () => {
@@ -267,6 +325,9 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
     baseUrl: ' http://127.0.0.1:11434/v1 ',
     apiKeyEnv: ' OLLAMA_API_KEY ',
     providerName: ' ollama ',
+    headers: {
+      'X-Foo': 'bar',
+    },
     model: ' gpt-oss:20b ',
     conversationMessages: [
       {
@@ -301,6 +362,9 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
       apiKey: 'secret-token',
       apiKeyEnv: 'OLLAMA_API_KEY',
       baseUrl: 'http://127.0.0.1:11434/v1',
+      headers: {
+        'X-Foo': 'bar',
+      },
       model: 'gpt-oss:20b',
       providerName: 'ollama',
     },
@@ -334,6 +398,72 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
     stdout: '',
     rawEvents: [],
   })
+})
+
+test('executeAssistantProviderTurn throws a base-url error before attempting OpenAI-compatible execution', async () => {
+  providerMocks.resolveAssistantLanguageModel.mockImplementation(() => {
+    throw new Error('resolveAssistantLanguageModel should not be called')
+  })
+
+  await assert.rejects(
+    () =>
+      executeAssistantProviderTurn({
+        provider: 'openai-compatible',
+        workingDirectory: '/tmp/vault',
+        model: 'gpt-oss:20b',
+        userPrompt: 'hello',
+      }),
+    (error: unknown) => {
+      assert.equal((error as { code?: unknown } | null)?.code, 'ASSISTANT_BASE_URL_REQUIRED')
+      return true
+    },
+  )
+})
+
+test('createSetupAssistantResolver refuses to pick a fake OpenAI-compatible model in non-interactive mode when discovery is empty', async () => {
+  const discoverModels = vi.fn().mockResolvedValue([])
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    discoverModels,
+    input: new PassThrough(),
+    output: new PassThrough(),
+  })
+
+  await assert.rejects(
+    () =>
+      resolver.resolve({
+        allowPrompt: false,
+        commandName: 'setup',
+        preset: 'openai-compatible',
+        options: {} as any,
+      }),
+    /OpenAI-compatible setup requires an explicit model/u,
+  )
+  assert.equal(discoverModels.mock.calls.length, 1)
+})
+
+test('createSetupAssistantResolver chooses the first discovered OpenAI-compatible model in non-interactive mode', async () => {
+  const discoverModels = vi.fn().mockResolvedValue(['llama3.3:70b', 'gpt-oss:20b'])
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    discoverModels,
+    input: new PassThrough(),
+    output: new PassThrough(),
+  })
+
+  const resolved = await resolver.resolve({
+    allowPrompt: false,
+    commandName: 'setup',
+    preset: 'openai-compatible',
+    options: {} as any,
+  })
+
+  assert.equal(resolved.provider, 'openai-compatible')
+  assert.equal(resolved.model, 'llama3.3:70b')
 })
 
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {

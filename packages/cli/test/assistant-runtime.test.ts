@@ -488,6 +488,9 @@ test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', a
         baseUrl: 'http://127.0.0.1:11434/v1',
         apiKeyEnv: 'OLLAMA_API_KEY',
         providerName: 'ollama',
+        headers: {
+          'X-Test': 'hello',
+        },
       },
       homeRoot,
     )
@@ -503,11 +506,17 @@ test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', a
     assert.equal(providerCall.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(providerCall.apiKeyEnv, 'OLLAMA_API_KEY')
     assert.equal(providerCall.providerName, 'ollama')
+    assert.deepEqual(providerCall.headers, {
+      'X-Test': 'hello',
+    })
     assert.equal(result.session.provider, 'openai-compatible')
     assert.equal(result.session.providerOptions.model, 'gpt-oss:20b')
     assert.equal(result.session.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(result.session.providerOptions.apiKeyEnv, 'OLLAMA_API_KEY')
     assert.equal(result.session.providerOptions.providerName, 'ollama')
+    assert.deepEqual(result.session.providerOptions.headers, {
+      'X-Test': 'hello',
+    })
   } finally {
     restoreEnvironmentVariable('OLLAMA_API_KEY', originalApiKey)
     restoreEnvironmentVariable('HOME', originalHome)
@@ -641,8 +650,24 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
           defaultVault: null,
           assistant: {
             provider: 'codex-cli',
+            defaultsByProvider: {
+              'codex-cli': {
+                codexCommand: '/opt/bin/codex',
+                model: 'gpt-oss:20b',
+                reasoningEffort: null,
+                sandbox: 'workspace-write',
+                approvalPolicy: 'on-request',
+                profile: 'ops',
+                oss: true,
+                baseUrl: null,
+                apiKeyEnv: null,
+                providerName: null,
+                headers: null,
+              },
+            },
             codexCommand: '/opt/bin/codex',
             model: 'gpt-oss:20b',
+            reasoningEffort: null,
             identityId: 'assistant:primary',
             account: {
               source: 'codex-rpc+codex-auth-json',
@@ -665,6 +690,11 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
             approvalPolicy: 'on-request',
             profile: 'ops',
             oss: true,
+            baseUrl: null,
+            apiKeyEnv: null,
+            providerName: null,
+            headers: null,
+            selfDeliveryTargets: null,
           },
           updatedAt: '2026-03-17T00:00:00.000Z',
         },
