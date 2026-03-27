@@ -13,14 +13,13 @@ export interface HostedOnboardingEnvironment {
   privyAppSecret: string | null;
   publicBaseUrl: string | null;
   revnetChainId: number | null;
-  revnetPaymentCurrency: string | null;
-  revnetPaymentTokenAddress: string | null;
-  revnetPaymentTokenDecimals: number | null;
   revnetProjectId: string | null;
   revnetRpcUrl: string | null;
+  revnetStripeCurrency: string | null;
   revnetTerminalAddress: string | null;
   revnetTreasuryPrivateKey: string | null;
   revnetWaitConfirmations: number;
+  revnetWeiPerStripeMinorUnit: string | null;
   sessionCookieName: string;
   sessionTtlDays: number;
   stripeBillingMode: "payment" | "subscription";
@@ -74,14 +73,13 @@ export function readHostedOnboardingEnvironment(
     privyAppSecret: readEnv(source, ["PRIVY_APP_SECRET"]),
     publicBaseUrl,
     revnetChainId: revnet.chainId,
-    revnetPaymentCurrency: revnet.paymentCurrency,
-    revnetPaymentTokenAddress: revnet.paymentTokenAddress,
-    revnetPaymentTokenDecimals: revnet.paymentTokenDecimals,
     revnetProjectId: revnet.projectId,
     revnetRpcUrl: revnet.rpcUrl,
+    revnetStripeCurrency: revnet.stripeCurrency,
     revnetTerminalAddress: revnet.terminalAddress,
     revnetTreasuryPrivateKey: revnet.treasuryPrivateKey,
     revnetWaitConfirmations: revnet.waitConfirmations,
+    revnetWeiPerStripeMinorUnit: revnet.weiPerStripeMinorUnit,
     sessionCookieName: readEnv(source, ["HOSTED_ONBOARDING_SESSION_COOKIE_NAME"]) ?? "hb_hosted_session",
     sessionTtlDays: readPositiveInteger(
       readEnv(source, ["HOSTED_ONBOARDING_SESSION_TTL_DAYS"]),
@@ -168,31 +166,46 @@ function readBillingMode(value: string | null): "payment" | "subscription" {
   return normalized;
 }
 
+function readUnsignedIntegerString(value: string | null, label: string): string | null {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (!/^\d+$/u.test(normalized)) {
+    throw new TypeError(`${label} must be an unsigned integer string.`);
+  }
+
+  return normalized;
+}
+
 function readHostedRevnetEnvironment(source: HostedOnboardingEnvSource): {
   chainId: number | null;
   enabled: boolean;
-  paymentCurrency: string | null;
-  paymentTokenAddress: string | null;
-  paymentTokenDecimals: number | null;
   projectId: string | null;
   rpcUrl: string | null;
+  stripeCurrency: string | null;
   terminalAddress: string | null;
   treasuryPrivateKey: string | null;
   waitConfirmations: number;
+  weiPerStripeMinorUnit: string | null;
 } {
   const chainId = readEnv(source, ["HOSTED_ONBOARDING_REVNET_CHAIN_ID"]);
   const projectId = readEnv(source, ["HOSTED_ONBOARDING_REVNET_PROJECT_ID"]);
   const rpcUrl = normalizeRpcUrl(readEnv(source, ["HOSTED_ONBOARDING_REVNET_RPC_URL"]));
   const terminalAddress = readEnv(source, ["HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS"]);
-  const paymentTokenAddress = readEnv(source, ["HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_ADDRESS"]);
-  const paymentTokenDecimals = readEnv(source, ["HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_DECIMALS"]);
-  const paymentCurrency =
-    normalizeString(readEnv(source, ["HOSTED_ONBOARDING_REVNET_PAYMENT_CURRENCY"]))?.toLowerCase() ?? null;
+  const stripeCurrency =
+    normalizeString(readEnv(source, ["HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY"]))?.toLowerCase() ?? null;
   const treasuryPrivateKey = readEnv(source, ["HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY"]);
   const waitConfirmations = readNonNegativeInteger(
     readEnv(source, ["HOSTED_ONBOARDING_REVNET_WAIT_CONFIRMATIONS"]),
     1,
     "HOSTED_ONBOARDING_REVNET_WAIT_CONFIRMATIONS",
+  );
+  const weiPerStripeMinorUnit = readUnsignedIntegerString(
+    readEnv(source, ["HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT"]),
+    "HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT",
   );
 
   const enabled = [
@@ -200,24 +213,22 @@ function readHostedRevnetEnvironment(source: HostedOnboardingEnvSource): {
     projectId,
     rpcUrl,
     terminalAddress,
-    paymentTokenAddress,
-    paymentTokenDecimals,
-    paymentCurrency,
+    stripeCurrency,
     treasuryPrivateKey,
+    weiPerStripeMinorUnit,
   ].some((value) => Boolean(value));
 
   if (!enabled) {
     return {
       chainId: null,
       enabled: false,
-      paymentCurrency: null,
-      paymentTokenAddress: null,
-      paymentTokenDecimals: null,
       projectId: null,
       rpcUrl: null,
+      stripeCurrency: null,
       terminalAddress: null,
       treasuryPrivateKey: null,
       waitConfirmations,
+      weiPerStripeMinorUnit: null,
     };
   }
 
@@ -226,10 +237,9 @@ function readHostedRevnetEnvironment(source: HostedOnboardingEnvSource): {
     ["HOSTED_ONBOARDING_REVNET_PROJECT_ID", projectId],
     ["HOSTED_ONBOARDING_REVNET_RPC_URL", rpcUrl],
     ["HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS", terminalAddress],
-    ["HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_ADDRESS", paymentTokenAddress],
-    ["HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_DECIMALS", paymentTokenDecimals],
-    ["HOSTED_ONBOARDING_REVNET_PAYMENT_CURRENCY", paymentCurrency],
+    ["HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY", stripeCurrency],
     ["HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY", treasuryPrivateKey],
+    ["HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT", weiPerStripeMinorUnit],
   ]
     .filter(([, value]) => !value)
     .map(([label]) => label);
@@ -241,17 +251,12 @@ function readHostedRevnetEnvironment(source: HostedOnboardingEnvSource): {
   return {
     chainId: readPositiveInteger(chainId, 0, "HOSTED_ONBOARDING_REVNET_CHAIN_ID"),
     enabled: true,
-    paymentCurrency,
-    paymentTokenAddress,
-    paymentTokenDecimals: readPositiveInteger(
-      paymentTokenDecimals,
-      6,
-      "HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_DECIMALS",
-    ),
     projectId,
     rpcUrl,
+    stripeCurrency,
     terminalAddress,
     treasuryPrivateKey,
     waitConfirmations,
+    weiPerStripeMinorUnit,
   };
 }

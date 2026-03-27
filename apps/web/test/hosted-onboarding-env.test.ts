@@ -21,7 +21,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.privyAppSecret).toBe("privy-secret");
     expect(environment.revnetChainId).toBeNull();
-    expect(environment.revnetPaymentCurrency).toBeNull();
+    expect(environment.revnetStripeCurrency).toBeNull();
     expect(environment.sessionCookieName).toBe("hb_hosted_session");
     expect(environment.stripeBillingMode).toBe("payment");
     expect(environment.inviteTtlHours).toBe(24 * 7);
@@ -46,25 +46,23 @@ describe("readHostedOnboardingEnvironment", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
       HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
-      HOSTED_ONBOARDING_REVNET_PAYMENT_CURRENCY: "USD",
-      HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_ADDRESS: "0x0000000000000000000000000000000000000002",
-      HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_DECIMALS: "6",
       HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
       HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
+      HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY: "USD",
       HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS: "0x0000000000000000000000000000000000000001",
       HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY: `0x${"11".repeat(32)}`,
       HOSTED_ONBOARDING_REVNET_WAIT_CONFIRMATIONS: "0",
+      HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT: "2000000000000",
       HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
     }));
 
     expect(environment.revnetChainId).toBe(8453);
-    expect(environment.revnetPaymentCurrency).toBe("usd");
-    expect(environment.revnetPaymentTokenAddress).toBe("0x0000000000000000000000000000000000000002");
-    expect(environment.revnetPaymentTokenDecimals).toBe(6);
     expect(environment.revnetProjectId).toBe("1");
     expect(environment.revnetRpcUrl).toBe("https://rpc.example.test/base");
+    expect(environment.revnetStripeCurrency).toBe("usd");
     expect(environment.revnetTerminalAddress).toBe("0x0000000000000000000000000000000000000001");
     expect(environment.revnetWaitConfirmations).toBe(0);
+    expect(environment.revnetWeiPerStripeMinorUnit).toBe("2000000000000");
   });
 
   it("rejects partial hosted RevNet configuration", () => {
@@ -82,16 +80,31 @@ describe("readHostedOnboardingEnvironment", () => {
       readHostedOnboardingEnvironment(createProcessEnv({
         DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
         HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
-        HOSTED_ONBOARDING_REVNET_PAYMENT_CURRENCY: "usd",
-        HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_ADDRESS: "0x0000000000000000000000000000000000000002",
-        HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_DECIMALS: "6",
         HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
         HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
+        HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY: "usd",
         HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS: "0x0000000000000000000000000000000000000001",
         HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY: `0x${"11".repeat(32)}`,
+        HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT: "2000000000000",
         HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "payment",
       })),
     ).toThrow(/requires HOSTED_ONBOARDING_STRIPE_BILLING_MODE=subscription/u);
+  });
+
+  it("rejects a non-numeric RevNet wei pricing multiplier", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment(createProcessEnv({
+        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        HOSTED_ONBOARDING_REVNET_CHAIN_ID: "8453",
+        HOSTED_ONBOARDING_REVNET_PROJECT_ID: "1",
+        HOSTED_ONBOARDING_REVNET_RPC_URL: "https://rpc.example.test/base",
+        HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY: "usd",
+        HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS: "0x0000000000000000000000000000000000000001",
+        HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY: `0x${"11".repeat(32)}`,
+        HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT: "not-a-number",
+        HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
+      })),
+    ).toThrow(/HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT must be an unsigned integer string/u);
   });
 
   it("ignores removed branded Linq aliases", () => {

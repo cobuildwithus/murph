@@ -3,38 +3,28 @@ import {
   createWalletClient,
   getAddress,
   http,
-  parseAbi,
   type Address,
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
+import {
+  cobuildCommunityTerminalAbi,
+  JBX_NATIVE_TOKEN_ADDRESS,
+} from "./cobuild-community-terminal-abi";
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
-const erc20Abi = parseAbi([
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
-]);
-
-const jbMultiTerminalAbi = parseAbi([
-  "function pay(uint256 projectId, address token, uint256 amount, address beneficiary, uint256 minReturnedTokens, string memo, bytes metadata) external payable returns (uint256 beneficiaryTokenCount)",
-]);
-
-const MAX_UINT256 = (1n << 256n) - 1n;
-const STRIPE_MINOR_UNIT_DECIMALS = 2;
-
 export interface HostedRevnetConfig {
   chainId: number;
-  paymentCurrency: string;
-  paymentTokenAddress: Address;
-  paymentTokenDecimals: number;
   projectId: bigint;
   rpcUrl: string;
+  stripeCurrency: string;
   terminalAddress: Address;
   treasuryPrivateKey: Hex;
   waitConfirmations: number;
+  weiPerStripeMinorUnit: bigint;
 }
 
 export function isHostedOnboardingRevnetEnabled(): boolean {
@@ -45,10 +35,9 @@ export function isHostedOnboardingRevnetEnabled(): boolean {
       environment.revnetProjectId &&
       environment.revnetRpcUrl &&
       environment.revnetTerminalAddress &&
-      environment.revnetPaymentTokenAddress &&
-      environment.revnetPaymentTokenDecimals !== null &&
-      environment.revnetPaymentCurrency &&
-      environment.revnetTreasuryPrivateKey,
+      environment.revnetStripeCurrency &&
+      environment.revnetTreasuryPrivateKey &&
+      environment.revnetWeiPerStripeMinorUnit,
   );
 }
 
@@ -71,39 +60,26 @@ export function normalizeHostedWalletAddress(value: string | null | undefined): 
   return address ? address.toLowerCase() : null;
 }
 
-export function convertStripeMinorAmountToRevnetTokenAmount(
+export function convertStripeMinorAmountToRevnetPaymentAmount(
   amountMinor: number,
-  tokenDecimals: number,
+  weiPerStripeMinorUnit: bigint,
 ): bigint {
   if (!Number.isInteger(amountMinor) || amountMinor < 0) {
     throw new RangeError("Stripe payment amounts must be expressed as a non-negative integer minor-unit amount.");
   }
 
-  if (!Number.isInteger(tokenDecimals) || tokenDecimals < 0) {
-    throw new RangeError("RevNet payment token decimals must be a non-negative integer.");
+  if (weiPerStripeMinorUnit < 1n) {
+    throw new RangeError("Hosted RevNet wei-per-minor-unit pricing must be a positive integer.");
   }
 
-  const amount = BigInt(amountMinor);
-  const decimalDelta = tokenDecimals - STRIPE_MINOR_UNIT_DECIMALS;
-
-  if (decimalDelta >= 0) {
-    return amount * 10n ** BigInt(decimalDelta);
-  }
-
-  const divisor = 10n ** BigInt(Math.abs(decimalDelta));
-
-  if (amount % divisor !== 0n) {
-    throw new RangeError("Stripe amount cannot be represented exactly in the configured RevNet payment token decimals.");
-  }
-
-  return amount / divisor;
+  return BigInt(amountMinor) * weiPerStripeMinorUnit;
 }
 
 export async function submitHostedRevnetPayment(input: {
   amountMinor: number;
   beneficiaryAddress: Address;
   memo: string;
-}): Promise<{ approvalTxHash: Hex | null; payTxHash: Hex; terminalTokenAmount: bigint }> {
+}): Promise<{ payTxHash: Hex; paymentAmount: bigint }> {
   const config = requireHostedRevnetConfig();
   const account = privateKeyToAccount(config.treasuryPrivateKey);
   const transport = http(config.rpcUrl);
@@ -114,9 +90,9 @@ export async function submitHostedRevnetPayment(input: {
     account,
     transport,
   });
-  const terminalTokenAmount = convertStripeMinorAmountToRevnetTokenAmount(
+  const paymentAmount = convertStripeMinorAmountToRevnetPaymentAmount(
     input.amountMinor,
-    config.paymentTokenDecimals,
+    config.weiPerStripeMinorUnit,
   );
 
   const writeRequestWithNonceRetry = async (
@@ -148,47 +124,21 @@ export async function submitHostedRevnetPayment(input: {
     throw new Error("Hosted RevNet transaction could not be submitted after retrying nonce conflicts.");
   };
 
-  const currentAllowance = await publicClient.readContract({
-    abi: erc20Abi,
-    address: config.paymentTokenAddress,
-    args: [account.address, config.terminalAddress],
-    functionName: "allowance",
-  }) as bigint;
-
-  let approvalTxHash: Hex | null = null;
-
-  if (currentAllowance < terminalTokenAmount) {
-    const approvalSimulation = await publicClient.simulateContract({
-      abi: erc20Abi,
-      account,
-      address: config.paymentTokenAddress,
-      args: [config.terminalAddress, MAX_UINT256],
-      functionName: "approve",
-    });
-
-    approvalTxHash = await writeRequestWithNonceRetry(
-      approvalSimulation.request as Parameters<typeof walletClient.writeContract>[0],
-    );
-    await publicClient.waitForTransactionReceipt({
-      confirmations: 1,
-      hash: approvalTxHash,
-    });
-  }
-
   const paySimulation = await publicClient.simulateContract({
-    abi: jbMultiTerminalAbi,
+    abi: cobuildCommunityTerminalAbi,
     account,
     address: config.terminalAddress,
     args: [
       config.projectId,
-      config.paymentTokenAddress,
-      terminalTokenAmount,
+      JBX_NATIVE_TOKEN_ADDRESS,
+      paymentAmount,
       input.beneficiaryAddress,
       0n,
       sanitizeMemo(input.memo),
       "0x" as Hex,
     ],
     functionName: "pay",
+    value: paymentAmount,
   });
 
   const payTxHash = await writeRequestWithNonceRetry(
@@ -196,9 +146,8 @@ export async function submitHostedRevnetPayment(input: {
   );
 
   return {
-    approvalTxHash,
     payTxHash,
-    terminalTokenAmount,
+    paymentAmount,
   };
 }
 
@@ -246,10 +195,6 @@ export function requireHostedRevnetConfig(): HostedRevnetConfig {
     environment.revnetTerminalAddress,
     "HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS",
   );
-  const paymentTokenAddress = parseAddress(
-    environment.revnetPaymentTokenAddress,
-    "HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_ADDRESS",
-  );
 
   if (!environment.revnetChainId) {
     throw hostedOnboardingError({
@@ -275,32 +220,44 @@ export function requireHostedRevnetConfig(): HostedRevnetConfig {
     });
   }
 
-  if (!environment.revnetPaymentCurrency) {
+  if (!environment.revnetStripeCurrency) {
     throw hostedOnboardingError({
-      code: "REVNET_PAYMENT_CURRENCY_REQUIRED",
-      message: "HOSTED_ONBOARDING_REVNET_PAYMENT_CURRENCY must be configured for Hosted RevNet issuance.",
+      code: "REVNET_STRIPE_CURRENCY_REQUIRED",
+      message: "HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY must be configured for Hosted RevNet issuance.",
       httpStatus: 500,
     });
   }
 
-  if (environment.revnetPaymentTokenDecimals === null) {
+  if (!environment.revnetWeiPerStripeMinorUnit) {
     throw hostedOnboardingError({
-      code: "REVNET_PAYMENT_TOKEN_DECIMALS_REQUIRED",
-      message: "HOSTED_ONBOARDING_REVNET_PAYMENT_TOKEN_DECIMALS must be configured for Hosted RevNet issuance.",
+      code: "REVNET_WEI_RATE_REQUIRED",
+      message: "HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT must be configured for Hosted RevNet issuance.",
+      httpStatus: 500,
+    });
+  }
+
+  const weiPerStripeMinorUnit = parseUnsignedBigInt(
+    environment.revnetWeiPerStripeMinorUnit,
+    "HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT",
+  );
+
+  if (weiPerStripeMinorUnit < 1n) {
+    throw hostedOnboardingError({
+      code: "REVNET_WEI_RATE_INVALID",
+      message: "HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT must be a positive integer.",
       httpStatus: 500,
     });
   }
 
   return {
     chainId: environment.revnetChainId,
-    paymentCurrency: environment.revnetPaymentCurrency,
-    paymentTokenAddress,
-    paymentTokenDecimals: environment.revnetPaymentTokenDecimals,
     projectId,
     rpcUrl: environment.revnetRpcUrl,
+    stripeCurrency: environment.revnetStripeCurrency,
     terminalAddress,
     treasuryPrivateKey: parsePrivateKey(environment.revnetTreasuryPrivateKey),
     waitConfirmations: environment.revnetWaitConfirmations,
+    weiPerStripeMinorUnit,
   };
 }
 

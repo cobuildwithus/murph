@@ -51,9 +51,10 @@ import {
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
+import { JBX_NATIVE_TOKEN_ADDRESS } from "./cobuild-community-terminal-abi";
 import {
   coerceHostedWalletAddress,
-  convertStripeMinorAmountToRevnetTokenAmount,
+  convertStripeMinorAmountToRevnetPaymentAmount,
   isHostedOnboardingRevnetEnabled,
   normalizeHostedWalletAddress,
   requireHostedRevnetConfig,
@@ -1160,19 +1161,19 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
   const config = requireHostedRevnetConfig();
   const invoiceCurrency = normalizeNullableString(input.invoice.currency)?.toLowerCase() ?? null;
 
-  if (invoiceCurrency && invoiceCurrency !== config.paymentCurrency) {
+  if (invoiceCurrency && invoiceCurrency !== config.stripeCurrency) {
     throw hostedOnboardingError({
       code: "REVNET_PAYMENT_CURRENCY_MISMATCH",
-      message: `Stripe invoice ${input.invoice.id} used ${invoiceCurrency}, but Hosted RevNet issuance is configured for ${config.paymentCurrency}.`,
+      message: `Stripe invoice ${input.invoice.id} used ${invoiceCurrency}, but Hosted RevNet issuance is configured for ${config.stripeCurrency}.`,
       httpStatus: 502,
     });
   }
 
   const beneficiaryAddress = requireHostedMemberWalletAddressForRevnet(input.member);
   const idempotencyKey = `stripe:invoice:${input.invoice.id}`;
-  const terminalTokenAmount = convertStripeMinorAmountToRevnetTokenAmount(
+  const paymentAmount = convertStripeMinorAmountToRevnetPaymentAmount(
     amountPaid,
-    config.paymentTokenDecimals,
+    config.weiPerStripeMinorUnit,
   );
   const paymentIntentId = coerceStripeObjectId(
     (input.invoice as Stripe.Invoice & { payment_intent?: string | { id?: unknown } | null }).payment_intent ??
@@ -1196,20 +1197,21 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
       chainId: config.chainId,
       projectId: config.projectId.toString(),
       terminalAddress: config.terminalAddress,
-      tokenAddress: config.paymentTokenAddress,
+      paymentAssetAddress: JBX_NATIVE_TOKEN_ADDRESS,
       beneficiaryAddress: beneficiaryAddress.toLowerCase(),
-      paymentAmountMinor: amountPaid,
-      paymentCurrency: config.paymentCurrency,
-      terminalTokenAmount: terminalTokenAmount.toString(),
+      stripePaymentAmountMinor: amountPaid,
+      stripePaymentCurrency: config.stripeCurrency,
+      paymentAmount: paymentAmount.toString(),
       status: HostedRevnetIssuanceStatus.pending,
     },
     update: {
       stripePaymentIntentId: paymentIntentId ?? undefined,
       stripeChargeId: chargeId ?? undefined,
       beneficiaryAddress: beneficiaryAddress.toLowerCase(),
-      paymentAmountMinor: amountPaid,
-      paymentCurrency: config.paymentCurrency,
-      terminalTokenAmount: terminalTokenAmount.toString(),
+      paymentAssetAddress: JBX_NATIVE_TOKEN_ADDRESS,
+      stripePaymentAmountMinor: amountPaid,
+      stripePaymentCurrency: config.stripeCurrency,
+      paymentAmount: paymentAmount.toString(),
     },
   });
 
@@ -1297,11 +1299,10 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
         id: issuance.id,
       },
       data: {
-        approvalTxHash: submission.approvalTxHash ?? undefined,
         payTxHash: submission.payTxHash,
         status: HostedRevnetIssuanceStatus.submitted,
         submittedAt: new Date(),
-        terminalTokenAmount: submission.terminalTokenAmount.toString(),
+        paymentAmount: submission.paymentAmount.toString(),
       },
     });
   } catch (error) {

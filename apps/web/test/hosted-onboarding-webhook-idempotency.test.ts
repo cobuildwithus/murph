@@ -1,6 +1,8 @@
 import { HostedBillingMode, HostedBillingStatus, Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { JBX_NATIVE_TOKEN_ADDRESS } from "@/src/lib/hosted-onboarding/cobuild-community-terminal-abi";
+
 const mocks = vi.hoisted(() => {
   const stripeConstructEvent = vi.fn();
 
@@ -41,14 +43,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqWebhookSecret: null,
     publicBaseUrl: "https://join.example.test",
     revnetChainId: null,
-    revnetPaymentCurrency: null,
-    revnetPaymentTokenAddress: null,
-    revnetPaymentTokenDecimals: null,
     revnetProjectId: null,
     revnetRpcUrl: null,
+    revnetStripeCurrency: null,
     revnetTerminalAddress: null,
     revnetTreasuryPrivateKey: null,
     revnetWaitConfirmations: 1,
+    revnetWeiPerStripeMinorUnit: null,
     sessionCookieName: "hb_hosted_session",
     sessionTtlDays: 30,
     stripeBillingMode: "payment",
@@ -74,8 +75,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
   coerceHostedWalletAddress: (value: string | null | undefined) => value ?? null,
-  convertStripeMinorAmountToRevnetTokenAmount: (amountMinor: number, tokenDecimals: number) =>
-    BigInt(amountMinor) * 10n ** BigInt(Math.max(tokenDecimals - 2, 0)),
+  convertStripeMinorAmountToRevnetPaymentAmount: (amountMinor: number, weiPerStripeMinorUnit: bigint) =>
+    BigInt(amountMinor) * weiPerStripeMinorUnit,
   isHostedOnboardingRevnetEnabled: mocks.isHostedOnboardingRevnetEnabled,
   normalizeHostedWalletAddress: mocks.normalizeHostedWalletAddress,
   requireHostedRevnetConfig: mocks.requireHostedRevnetConfig,
@@ -94,19 +95,17 @@ describe("hosted onboarding webhook retry safety", () => {
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
     mocks.requireHostedRevnetConfig.mockReturnValue({
       chainId: 8453,
-      paymentCurrency: "usd",
-      paymentTokenAddress: "0x0000000000000000000000000000000000000002",
-      paymentTokenDecimals: 6,
       projectId: 1n,
       rpcUrl: "https://rpc.example.test",
+      stripeCurrency: "usd",
       terminalAddress: "0x0000000000000000000000000000000000000001",
       treasuryPrivateKey: `0x${"11".repeat(32)}`,
       waitConfirmations: 1,
+      weiPerStripeMinorUnit: 2_000_000_000_000n,
     });
     mocks.submitHostedRevnetPayment.mockResolvedValue({
-      approvalTxHash: null,
       payTxHash: "0xabc123",
-      terminalTokenAmount: 5_000_000n,
+      paymentAmount: 1_000_000_000_000_000n,
     });
     mocks.waitForHostedRevnetPaymentConfirmation.mockResolvedValue(undefined);
   });
@@ -520,10 +519,12 @@ describe("hosted onboarding webhook retry safety", () => {
       expect.objectContaining({
         create: expect.objectContaining({
           beneficiaryAddress: "0x00000000000000000000000000000000000000aa",
-          paymentAmountMinor: 500,
-          paymentCurrency: "usd",
+          paymentAmount: "1000000000000000",
+          paymentAssetAddress: JBX_NATIVE_TOKEN_ADDRESS,
           stripeInvoiceId: "in_123",
           stripePaymentIntentId: "pi_123",
+          stripePaymentAmountMinor: 500,
+          stripePaymentCurrency: "usd",
         }),
         where: {
           idempotencyKey: "stripe:invoice:in_123",
