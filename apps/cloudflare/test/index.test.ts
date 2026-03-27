@@ -327,6 +327,267 @@ describe("cloudflare worker routes", () => {
     ]);
   });
 
+  it("persists finalized runner bundles through the internal finalize route", async () => {
+    const bucket = createBucketStore();
+    const storage = createStorage();
+    const env = {
+      BUNDLES: bucket.api,
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+      USER_RUNNER: {
+        getByName() {
+          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
+          return {
+            fetch(request: Request) {
+              return durableObject.fetch(request);
+            },
+          };
+        },
+      },
+    };
+
+    await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize/commit", {
+        body: JSON.stringify({
+          bundles: {
+            agentState: Buffer.from("agent-state-committed").toString("base64"),
+            vault: Buffer.from("vault-committed").toString("base64"),
+          },
+          currentBundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "committed",
+          },
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env as never,
+    );
+
+    const finalizeResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize/finalize", {
+        body: JSON.stringify({
+          bundles: {
+            agentState: Buffer.from("agent-state-final").toString("base64"),
+            vault: Buffer.from("vault-final").toString("base64"),
+          },
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env as never,
+    );
+    const journalStore = createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: Buffer.alloc(32, 9),
+      keyId: "v1",
+    });
+
+    expect(finalizeResponse.status).toBe(200);
+    await expect(finalizeResponse.json()).resolves.toMatchObject({
+      finalized: {
+        eventId: "evt_finalize",
+        finalizedAt: expect.any(String),
+        result: {
+          summary: "committed",
+        },
+      },
+      ok: true,
+    });
+    await expect(journalStore.readCommittedResult("member_123", "evt_finalize")).resolves.toMatchObject({
+      bundleRefs: {
+        agentState: {
+          size: "agent-state-final".length,
+        },
+        vault: {
+          size: "vault-final".length,
+        },
+      },
+      finalizedAt: expect.any(String),
+      result: {
+        summary: "committed",
+      },
+    });
+  });
+
+  it("rejects unauthorized runner finalization without mutating durable state", async () => {
+    const bucket = createBucketStore();
+    const storage = createStorage();
+    const env = {
+      BUNDLES: bucket.api,
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+      USER_RUNNER: {
+        getByName() {
+          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
+          return {
+            fetch(request: Request) {
+              return durableObject.fetch(request);
+            },
+          };
+        },
+      },
+    };
+    const journalStore = createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: Buffer.alloc(32, 9),
+      keyId: "v1",
+    });
+
+    await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_auth/commit", {
+        body: JSON.stringify({
+          bundles: {
+            agentState: Buffer.from("agent-state-committed").toString("base64"),
+            vault: Buffer.from("vault-committed").toString("base64"),
+          },
+          currentBundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "committed",
+          },
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env as never,
+    );
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_auth/finalize", {
+        body: JSON.stringify({
+          bundles: {
+            agentState: Buffer.from("agent-state-final").toString("base64"),
+            vault: Buffer.from("vault-final").toString("base64"),
+          },
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env as never,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(journalStore.readCommittedResult("member_123", "evt_finalize_auth")).resolves.toMatchObject({
+      bundleRefs: {
+        agentState: {
+          size: "agent-state-committed".length,
+        },
+        vault: {
+          size: "vault-committed".length,
+        },
+      },
+      finalizedAt: null,
+      result: {
+        summary: "committed",
+      },
+    });
+  });
+
+  it("rejects malformed runner finalization without mutating durable state", async () => {
+    const bucket = createBucketStore();
+    const storage = createStorage();
+    const env = {
+      BUNDLES: bucket.api,
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+      USER_RUNNER: {
+        getByName() {
+          const durableObject = new UserRunnerDurableObject(storage.state, env as never);
+          return {
+            fetch(request: Request) {
+              return durableObject.fetch(request);
+            },
+          };
+        },
+      },
+    };
+    const journalStore = createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: Buffer.alloc(32, 9),
+      keyId: "v1",
+    });
+
+    await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_bad/commit", {
+        body: JSON.stringify({
+          bundles: {
+            agentState: Buffer.from("agent-state-committed").toString("base64"),
+            vault: Buffer.from("vault-committed").toString("base64"),
+          },
+          currentBundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "committed",
+          },
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env as never,
+    );
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_finalize_bad/finalize", {
+        body: JSON.stringify({
+          bundles: {
+            agentState: 42,
+            vault: Buffer.from("vault-final").toString("base64"),
+          },
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env as never,
+    );
+
+    expect(response.status).toBe(500);
+    await expect(journalStore.readCommittedResult("member_123", "evt_finalize_bad")).resolves.toMatchObject({
+      bundleRefs: {
+        agentState: {
+          size: "agent-state-committed".length,
+        },
+        vault: {
+          size: "vault-committed".length,
+        },
+      },
+      finalizedAt: null,
+      result: {
+        summary: "committed",
+      },
+    });
+  });
+
   it("rejects malformed runner commits without writing durable state", async () => {
     const bucket = createBucketStore();
     const storage = createStorage();
@@ -490,6 +751,77 @@ describe("cloudflare worker routes", () => {
         summary: "first",
       },
     });
+  });
+
+  it("persists and reads hosted outbox delivery journal records through the runner route", async () => {
+    const bucket = createBucketStore();
+    const env = {
+      BUNDLES: bucket.api,
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+      HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
+      USER_RUNNER: {
+        getByName() {
+          return {
+            fetch: vi.fn(),
+          };
+        },
+      },
+    };
+
+    const putResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
+        body: JSON.stringify({
+          dedupeKey: "dedupe_123",
+          delivery: {
+            channel: "linq",
+            sentAt: "2026-03-26T12:00:00.000Z",
+            target: "chat_123",
+            targetKind: "thread",
+            messageLength: 21,
+          },
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env as never,
+    );
+
+    expect(putResponse.status).toBe(200);
+    await expect(putResponse.json()).resolves.toMatchObject({
+      delivery: {
+        channel: "linq",
+        target: "chat_123",
+      },
+      intentId: "outbox_123",
+    });
+
+    const getResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123?dedupeKey=dedupe_123", {
+        headers: {
+          authorization: "Bearer runner-token",
+        },
+        method: "GET",
+      }),
+      env as never,
+    );
+
+    expect(getResponse.status).toBe(200);
+    await expect(getResponse.json()).resolves.toMatchObject({
+      delivery: {
+        channel: "linq",
+        target: "chat_123",
+      },
+      intentId: "outbox_123",
+    });
+    expect(bucket.keys()).toHaveLength(2);
+    expect(bucket.keys()).toContain("users/member_123/outbox-deliveries/by-intent/outbox_123.json");
+    expect(
+      bucket.keys().some((key) => key.startsWith("users/member_123/outbox-deliveries/by-dedupe/")),
+    ).toBe(true);
   });
 
   it("forwards operator env config updates to the durable object", async () => {
@@ -739,12 +1071,34 @@ function createBucketStore(input: {
 function createStorage() {
   const values = new Map<string, unknown>();
   let transition = Promise.resolve();
+  const portFetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url) === "http://container/health") {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+
+    return globalThis.fetch(url, init);
+  });
+  const container = {
+    running: false,
+    start: vi.fn(async () => {
+      container.running = true;
+    }),
+    getTcpPort() {
+      return {
+        fetch: portFetch,
+      };
+    },
+    destroy: vi.fn(async () => {
+      container.running = false;
+    }),
+  };
   const state = {
     async blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
       const result = transition.then(callback, callback);
       transition = result.then(() => undefined, () => undefined);
       return result;
     },
+    container,
     storage: {
       async get<T>(key: string): Promise<T | undefined> {
         return values.get(key) as T | undefined;
@@ -761,6 +1115,8 @@ function createStorage() {
   };
 
   return {
+    container,
+    portFetch,
     state,
   };
 }
@@ -848,7 +1204,6 @@ function createUserRunnerDurableObject() {
     BUNDLES: bucket.api,
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://worker.example.test",
-    HOSTED_EXECUTION_RUNNER_BASE_URL: "https://runner.example.test",
     HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
   };

@@ -546,7 +546,8 @@ describe("runHostedExecutionJob", () => {
     hostedCliMocks.runAssistantAutomation.mockImplementationOnce(async ({ vault }) => {
       await writePendingIntent(vault);
     });
-    hostedCliMocks.drainAssistantOutbox.mockImplementationOnce(async ({ dispatchHooks, vault }) => {
+    hostedCliMocks.drainAssistantOutbox.mockImplementationOnce(async ({ dispatchHooks, limit, vault }) => {
+      expect(limit).toBe(20);
       const statePaths = resolveAssistantStatePaths(vault);
       const intentPath = path.join(statePaths.outboxDirectory, `${intentId}.json`);
       const pendingIntent = assistantOutboxIntentSchema.parse(

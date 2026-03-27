@@ -26,12 +26,17 @@ export interface HostedExecutionCommittedResult {
   };
   committedAt: string;
   eventId: string;
+  finalizedAt: string | null;
   result: HostedExecutionRunnerResult["result"];
 }
 
 export interface HostedExecutionCommitPayload {
   bundles: HostedExecutionRunnerResult["bundles"];
   result: HostedExecutionRunnerResult["result"];
+}
+
+export interface HostedExecutionFinalizePayload {
+  bundles: HostedExecutionRunnerResult["bundles"];
 }
 
 export interface HostedExecutionJournalStore {
@@ -62,7 +67,9 @@ export function createHostedExecutionJournalStore(input: {
         key: input.key,
       });
 
-      return JSON.parse(Buffer.from(plaintext).toString("utf8")) as HostedExecutionCommittedResult;
+      return normalizeHostedExecutionCommittedResult(
+        JSON.parse(Buffer.from(plaintext).toString("utf8")) as HostedExecutionCommittedResult,
+      );
     },
 
     async writeCommittedResult(userId, eventId, value) {
@@ -125,6 +132,7 @@ export async function persistHostedExecutionCommit(input: {
     },
     committedAt,
     eventId: input.eventId,
+    finalizedAt: null,
     result: input.payload.result,
   };
 
@@ -135,6 +143,66 @@ export async function persistHostedExecutionCommit(input: {
   }).writeCommittedResult(input.userId, input.eventId, committedResult);
 
   return committedResult;
+}
+
+export async function persistHostedExecutionFinalBundles(input: {
+  bucket: R2BucketLike;
+  eventId: string;
+  key: Uint8Array;
+  keyId: string;
+  payload: HostedExecutionFinalizePayload;
+  userId: string;
+}): Promise<HostedExecutionCommittedResult> {
+  const journalStore = createHostedExecutionJournalStore({
+    bucket: input.bucket,
+    key: input.key,
+    keyId: input.keyId,
+  });
+  const existing = await journalStore.readCommittedResult(input.userId, input.eventId);
+
+  if (!existing) {
+    throw new Error(
+      `Hosted execution commit ${input.userId}/${input.eventId} was not found before finalize.`,
+    );
+  }
+
+  const bundleStore = createHostedBundleStore({
+    bucket: input.bucket,
+    key: input.key,
+    keyId: input.keyId,
+  });
+  const nextBundleRefs = {
+    agentState: await writeCommittedBundle({
+      bundleStore,
+      currentRef: existing.bundleRefs.agentState,
+      kind: "agent-state",
+      userId: input.userId,
+      value: input.payload.bundles.agentState,
+    }),
+    vault: await writeCommittedBundle({
+      bundleStore,
+      currentRef: existing.bundleRefs.vault,
+      kind: "vault",
+      userId: input.userId,
+      value: input.payload.bundles.vault,
+    }),
+  };
+
+  if (
+    sameHostedBundleRef(nextBundleRefs.agentState, existing.bundleRefs.agentState)
+    && sameHostedBundleRef(nextBundleRefs.vault, existing.bundleRefs.vault)
+    && existing.finalizedAt !== null
+  ) {
+    return existing;
+  }
+
+  const finalizedResult: HostedExecutionCommittedResult = {
+    ...existing,
+    bundleRefs: nextBundleRefs,
+    finalizedAt: existing.finalizedAt ?? new Date().toISOString(),
+  };
+  await journalStore.writeCommittedResult(input.userId, input.eventId, finalizedResult);
+  return finalizedResult;
 }
 
 async function writeCommittedBundle(input: {
@@ -169,4 +237,33 @@ async function writeCommittedBundle(input: {
 
 function committedResultObjectKey(userId: string, eventId: string): string {
   return `users/${encodeURIComponent(userId)}/execution-journal/${encodeURIComponent(eventId)}.json`;
+}
+
+function normalizeHostedExecutionCommittedResult(
+  value: HostedExecutionCommittedResult,
+): HostedExecutionCommittedResult {
+  return {
+    ...value,
+    finalizedAt: value.finalizedAt ?? null,
+  };
+}
+
+function sameHostedBundleRef(
+  left: HostedExecutionBundleRef | null,
+  right: HostedExecutionBundleRef | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.hash === right.hash
+    && left.key === right.key
+    && left.size === right.size
+    && left.updatedAt === right.updatedAt
+  );
 }

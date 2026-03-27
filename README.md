@@ -2,7 +2,7 @@
 
 Healthy Bob is a file-native health vault. It keeps human-reviewable truth in Markdown, machine-readable truth in append-only JSONL ledgers, and exposes a typed `vault-cli` surface over a shared TypeScript workspace.
 
-The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, a local-only Next.js web surface, a hosted Next.js control plane, a hosted Cloudflare runner, and the CLI, along with deterministic fixtures and repo-level verification.
+The workspace includes buildable packages for contracts, shared runtime-state helpers, core mutations, importer adapters, inbox capture/runtime indexing, local-first parser workers, query/export helpers, a local-only Next.js web surface, a hosted Next.js control plane, a hosted Cloudflare execution plane, and the CLI, along with deterministic fixtures and repo-level verification.
 
 ## Install (recommended)
 
@@ -92,11 +92,11 @@ The current repo implements:
 - a read model and export-pack builder in `packages/query`
 - a local-only Next.js observability app in `packages/web`
 - a hosted Next.js control plane in `apps/web` for onboarding, billing, hosted device sync, and hosted Linq ingress
-- a hosted Cloudflare execution app in `apps/cloudflare` for signed internal dispatch, per-user coordination, encrypted hosted bundle storage, one-shot inbox/parser/assistant/device-sync runs, and a worker-plus-runner deploy scaffold with generated config/secrets helpers plus a manual GitHub Actions workflow
+- a hosted Cloudflare execution app in `apps/cloudflare` for signed internal dispatch, per-user coordination, encrypted hosted bundle storage, native Durable Object + Container execution, and generated Cloudflare deploy helpers plus a manual GitHub Actions workflow
 - a typed `vault-cli` command surface in `packages/cli`, including provider-backed assistant chat/session commands plus an always-on inbox triage loop
 - deterministic fixtures and smoke manifests under `fixtures/` and `e2e/`
 
-The hosted apps define an initial deployment shape, and the repo now includes generated deploy-artifact helpers plus a manual GitHub Actions workflow for the Cloudflare worker and runner image publication. `apps/cloudflare/DEPLOY.md` is the end-to-end guide. Account-specific names, secrets wiring, and the separate runner-service rollout target still remain explicit operator choices. Verification remains package/runtime-truthful and fixture-based rather than a live hosted environment proof.
+The hosted apps define an initial deployment shape, and the repo now includes generated deploy-artifact helpers plus a manual GitHub Actions workflow for the Cloudflare worker/native-container deploy path. `apps/cloudflare/DEPLOY.md` is the end-to-end guide. Account-specific names, secrets wiring, and broader rollout automation still remain explicit operator choices. Verification remains package/runtime-truthful and fixture-based rather than a live hosted environment proof.
 
 ## Mental Model
 

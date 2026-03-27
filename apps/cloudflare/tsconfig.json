@@ -23,9 +23,8 @@
     "src/**/*.ts"
   ],
   "exclude": [
+    "src/container-entrypoint.ts",
     "src/node-runner.ts",
-    "src/runner-local.ts",
-    "src/runner-server.ts",
     "src/runtime-adapter.ts",
     "node_modules"
   ]

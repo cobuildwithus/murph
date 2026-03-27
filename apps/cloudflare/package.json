@@ -8,15 +8,12 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "runner:local": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/src/runner-local.ts",
     "typecheck": "tsc -p tsconfig.json --pretty false",
     "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1",
     "deploy:config:render": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/render-deploy-config.ts",
     "deploy:secrets:render": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/render-worker-secrets.ts",
-    "deploy:runner-env:render": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/render-runner-env.ts",
     "deploy:smoke": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/smoke-hosted-deploy.ts",
     "runner:docker:build": "docker build -f ../../Dockerfile.cloudflare-hosted-runner -t healthybob-cloudflare-runner ../..",
-    "runner:docker:run": "docker run --rm -p 8080:8080 --env-file .runner.env healthybob-cloudflare-runner",
     "worker:deploy": "pnpm exec wrangler deploy",
     "worker:dev": "pnpm exec wrangler dev",
     "worker:secret:bulk": "pnpm exec wrangler secret bulk"

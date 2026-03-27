@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { writeHostedBundleTextFile } from "@healthybob/runtime-state";
 
-import { persistHostedExecutionCommit } from "../src/execution-journal.js";
+import {
+  persistHostedExecutionCommit,
+  persistHostedExecutionFinalBundles,
+} from "../src/execution-journal.js";
 import { HostedUserRunner } from "../src/user-runner.js";
 
 describe("HostedUserRunner", () => {
@@ -19,7 +22,6 @@ describe("HostedUserRunner", () => {
     dispatchSigningSecret: "dispatch-secret",
     maxEventAttempts: 3,
     retryDelayMs: 10_000,
-    runnerBaseUrl: "https://runner.example.test",
     runnerControlToken: "runner-token",
     runnerTimeoutMs: 60_000,
   };
@@ -84,6 +86,212 @@ describe("HostedUserRunner", () => {
       "users/member_123/execution-journal/evt_123.json",
       "users/member_123/vault.bundle.json",
     ]);
+  });
+
+  it("starts the native container runner and applies the next wake hint", async () => {
+    const resultPayload = {
+      bundles: {
+        agentState: Buffer.from("agent-state").toString("base64"),
+        vault: Buffer.from("vault").toString("base64"),
+      },
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: "2026-03-27T18:00:00.000Z",
+        summary: "ok",
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: resultPayload,
+          requestBody: JSON.parse(String(init?.body)),
+        });
+
+        return new Response(JSON.stringify(resultPayload), {
+          status: 200,
+        });
+      }),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const status = await runner.dispatch(createDispatch("evt_native_container"));
+
+    expect(storage.container.start).toHaveBeenCalledTimes(1);
+    expect(storage.container.destroy).toHaveBeenCalledTimes(1);
+    expect(storage.container.running).toBe(false);
+    expect(status.lastEventId).toBe("evt_native_container");
+    expect(status.nextWakeAt).toBe("2026-03-27T18:00:00.000Z");
+    expect(bucket.keys()).toContain("users/member_123/vault.bundle.json");
+  });
+
+  it("reconciles final runner bundles after the durable commit path advances earlier bundle refs", async () => {
+    const committedPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-committed").toString("base64"),
+      summary: "committed",
+      vault: Buffer.from("vault-committed").toString("base64"),
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-final").toString("base64"),
+      summary: "final",
+      vault: Buffer.from("vault-final").toString("base64"),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: committedPayload,
+          requestBody: JSON.parse(String(init?.body)),
+        });
+
+        return new Response(JSON.stringify(finalPayload), {
+          status: 200,
+        });
+      }),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const status = await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        linqChatId: "chat_123",
+        normalizedPhoneNumber: "+15551234567",
+        userId: "member_123",
+      },
+      eventId: "evt_final_bundles",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
+    expect(status.bundleRefs.vault?.size).toBe("vault-final".length);
+  });
+
+  it("recovers finalized bundle refs when the runner fails after durable finalize but before returning", async () => {
+    const committedPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-committed").toString("base64"),
+      summary: "committed",
+      vault: Buffer.from("vault-committed").toString("base64"),
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-finalized").toString("base64"),
+      summary: "finalized",
+      vault: Buffer.from("vault-finalized").toString("base64"),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        const requestBody = JSON.parse(String(init?.body));
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: committedPayload,
+          requestBody,
+        });
+        await finalizeResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: finalPayload,
+          requestBody,
+        });
+        throw new Error("runner connection dropped after finalize");
+      }),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const status = await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        linqChatId: "chat_123",
+        normalizedPhoneNumber: "+15551234567",
+        userId: "member_123",
+      },
+      eventId: "evt_finalized_recovery",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(status.lastError).toBeNull();
+    expect(status.pendingEventCount).toBe(0);
+    expect(status.bundleRefs.agentState?.size).toBe("agent-state-finalized".length);
+    expect(status.bundleRefs.vault?.size).toBe("vault-finalized".length);
+  });
+
+  it("keeps committed events retryable until durable finalize succeeds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const committedPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-committed").toString("base64"),
+      summary: "committed",
+      vault: Buffer.from("vault-committed").toString("base64"),
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-final").toString("base64"),
+      summary: "final",
+      vault: Buffer.from("vault-final").toString("base64"),
+    });
+    const fetchSpy = vi.fn()
+      .mockImplementationOnce(async (_url, init) => {
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: committedPayload,
+          requestBody: JSON.parse(String(init?.body)),
+        });
+        throw new Error("finalize failed");
+      })
+      .mockImplementationOnce(async (_url, init) => {
+        const requestBody = JSON.parse(String(init?.body));
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: committedPayload,
+          requestBody,
+        });
+        await finalizeResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: finalPayload,
+          requestBody,
+        });
+
+        return new Response(JSON.stringify(finalPayload), {
+          status: 200,
+        });
+      });
+    vi.stubGlobal("fetch", fetchSpy);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const firstStatus = await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        linqChatId: "chat_123",
+        normalizedPhoneNumber: "+15551234567",
+        userId: "member_123",
+      },
+      eventId: "evt_finalize_retry",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(firstStatus.pendingEventCount).toBe(1);
+    expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
+    expect(firstStatus.bundleRefs.agentState?.size).toBe("agent-state-committed".length);
+    expect(firstStatus.bundleRefs.vault?.size).toBe("vault-committed".length);
+    expect(storage.container.destroy).toHaveBeenCalledTimes(1);
+    expect(storage.container.running).toBe(false);
+
+    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
+    await runner.alarm();
+
+    const finalStatus = await runner.status("member_123");
+    expect(finalStatus.pendingEventCount).toBe(0);
+    expect(finalStatus.retryingEventId).toBeNull();
+    expect(finalStatus.bundleRefs.agentState?.size).toBe("agent-state-final".length);
+    expect(finalStatus.bundleRefs.vault?.size).toBe("vault-final".length);
+    expect(storage.container.destroy).toHaveBeenCalledTimes(2);
+    expect(storage.container.running).toBe(false);
   });
 
 
@@ -484,7 +692,7 @@ describe("HostedUserRunner", () => {
     expect(readDispatchedEventIds(fetchMock)).not.toContain("evt_fail_backpressured");
   });
 
-  it("recovers a durable commit when the runner response is lost", async () => {
+  it("recovers a durable finalize when the runner response is lost", async () => {
     let sideEffects = 0;
     const resultPayload = {
       bundles: {
@@ -500,11 +708,18 @@ describe("HostedUserRunner", () => {
       "fetch",
       vi.fn(async (_url, init) => {
         sideEffects += 1;
+        const requestBody = JSON.parse(String(init?.body));
         await commitResultForRunnerRequest({
           bucket,
           environment,
           payload: resultPayload,
-          requestBody: JSON.parse(String(init?.body)),
+          requestBody,
+        });
+        await finalizeResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: resultPayload,
+          requestBody,
         });
         throw new Error("network timeout");
       }),
@@ -588,6 +803,19 @@ describe("HostedUserRunner", () => {
       },
       userId: dispatch.event.userId,
     });
+    await persistHostedExecutionFinalBundles({
+      bucket: bucket.api,
+      eventId: dispatch.eventId,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state").toString("base64"),
+          vault: Buffer.from("vault").toString("base64"),
+        },
+      },
+      userId: dispatch.event.userId,
+    });
 
     const second = await runner.dispatch(dispatch);
 
@@ -597,7 +825,7 @@ describe("HostedUserRunner", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("applies a precommitted event on retry without rerunning side effects", async () => {
+  it("applies a prefinalized event on retry without rerunning side effects", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     const dispatch = {
       event: {
@@ -650,6 +878,19 @@ describe("HostedUserRunner", () => {
         result: {
           eventsHandled: 1,
           summary: "ok",
+        },
+      },
+      userId: dispatch.event.userId,
+    });
+    await persistHostedExecutionFinalBundles({
+      bucket: bucket.api,
+      eventId: dispatch.eventId,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state").toString("base64"),
+          vault: Buffer.from("vault").toString("base64"),
         },
       },
       userId: dispatch.event.userId,
@@ -1105,12 +1346,34 @@ function createBucket() {
 function createStorage() {
   const values = new Map<string, unknown>();
   let transition = Promise.resolve();
+  const portFetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url) === "http://container/health") {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+
+    return globalThis.fetch(url, init);
+  });
+  const container = {
+    running: false,
+    start: vi.fn(async () => {
+      container.running = true;
+    }),
+    getTcpPort() {
+      return {
+        fetch: portFetch,
+      };
+    },
+    destroy: vi.fn(async () => {
+      container.running = false;
+    }),
+  };
   const state = {
     async blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
       const result = transition.then(callback, callback);
       transition = result.then(() => undefined, () => undefined);
       return result;
     },
+    container,
     storage: {
       async get<T>(key: string): Promise<T | undefined> {
         return values.get(key) as T | undefined;
@@ -1133,8 +1396,14 @@ function createStorage() {
     clear() {
       values.clear();
       storage.lastAlarm = null;
+      container.running = false;
+      portFetch.mockClear();
+      container.start.mockClear();
+      container.destroy.mockClear();
     },
+    container,
     lastAlarm: null as number | null,
+    portFetch,
     state,
   };
 
@@ -1255,6 +1524,39 @@ async function commitResultForRunnerRequest(input: {
     key: input.environment.bundleEncryptionKey,
     keyId: input.environment.bundleEncryptionKeyId,
     payload: input.payload,
+    userId: input.requestBody.dispatch.event.userId,
+  });
+}
+
+async function finalizeResultForRunnerRequest(input: {
+  bucket: ReturnType<typeof createBucket>;
+  environment: {
+    bundleEncryptionKey: Uint8Array;
+    bundleEncryptionKeyId: string;
+  };
+  payload: {
+    bundles: {
+      agentState: string | null;
+      vault: string | null;
+    };
+  };
+  requestBody: {
+    dispatch: {
+      event: {
+        userId: string;
+      };
+      eventId: string;
+    };
+  };
+}): Promise<void> {
+  await persistHostedExecutionFinalBundles({
+    bucket: input.bucket.api,
+    eventId: input.requestBody.dispatch.eventId,
+    key: input.environment.bundleEncryptionKey,
+    keyId: input.environment.bundleEncryptionKeyId,
+    payload: {
+      bundles: input.payload.bundles,
+    },
     userId: input.requestBody.dispatch.event.userId,
   });
 }

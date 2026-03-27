@@ -76,6 +76,7 @@ export interface HostedExecutionRunnerResult {
   };
   result: {
     eventsHandled: number;
+    nextWakeAt?: string | null;
     summary: string;
   };
 }

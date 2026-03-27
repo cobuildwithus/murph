@@ -2,8 +2,15 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "healthybob-hosted-runner",
   "main": "src/index.ts",
-  "compatibility_date": "2026-03-26",
+  "compatibility_date": "2026-03-27",
   "compatibility_flags": ["nodejs_compat"],
+  "containers": [
+    {
+      "class_name": "UserRunnerDurableObject",
+      "image": "../../Dockerfile.cloudflare-hosted-runner",
+      "max_instances": 1000
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
@@ -28,10 +35,10 @@
   "vars": {
     "HOSTED_EXECUTION_CLOUDFLARE_BASE_URL": "https://REPLACE_ME-cloudflare-worker.example.invalid",
     "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID": "v1",
-    "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS": "900000",
+    "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS": "21600000",
     "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
     "HOSTED_EXECUTION_RETRY_DELAY_MS": "30000",
-    "HOSTED_EXECUTION_RUNNER_BASE_URL": "https://REPLACE_ME-hosted-runner.example.invalid",
+    "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS": "30000",
     "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "60000"
   },
   "secrets": {
@@ -45,4 +52,6 @@
   // - HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY
   // - HOSTED_EXECUTION_CONTROL_TOKEN
   // - HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN
+  // Optional provider/toolchain vars and secrets must be configured on the Worker so the
+  // Durable Object can forward them into the native container at runtime.
 }

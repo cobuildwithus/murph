@@ -9,7 +9,10 @@ import {
 import {
   createIntegratedInboxCliServices,
   createIntegratedVaultCliServices,
+  drainAssistantOutbox,
+  getAssistantCronStatus,
   readAssistantAutomationState,
+  refreshAssistantStatusSnapshot,
   runAssistantAutomation,
   saveAssistantAutomationState,
 } from "healthybob";
@@ -29,7 +32,10 @@ export function createHostedCliRuntime() {
   return {
     createIntegratedInboxCliServices,
     createIntegratedVaultCliServices,
+    drainAssistantOutbox,
+    getAssistantCronStatus,
     readAssistantAutomationState,
+    refreshAssistantStatusSnapshot,
     runAssistantAutomation,
     saveAssistantAutomationState,
   };

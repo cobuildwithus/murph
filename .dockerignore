@@ -24,7 +24,6 @@ audit-packages
 output-packages
 chatgpt-artifacts
 apps/cloudflare/.dev.vars*
-apps/cloudflare/.runner.env*
 apps/cloudflare/.deploy
 *.zip
 *.patch

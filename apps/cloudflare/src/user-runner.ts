@@ -1,10 +1,12 @@
 import {
+  decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   sha256HostedBundleHex,
   type HostedExecutionBundleKind,
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunnerRequest,
+  type HostedExecutionRunnerResult,
   type HostedExecutionUserStatus,
 } from "@healthybob/runtime-state";
 
@@ -12,10 +14,18 @@ import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import {
   createHostedExecutionJournalStore,
+  persistHostedExecutionFinalBundles,
   persistHostedExecutionCommit,
   type HostedExecutionCommittedResult,
   type HostedExecutionCommitPayload,
+  type HostedExecutionFinalizePayload,
 } from "./execution-journal.js";
+import {
+  destroyHostedExecutionContainer,
+  type HostedExecutionContainerStateLike,
+  hasHostedExecutionContainer,
+  invokeHostedExecutionContainerRunner,
+} from "./runner-container.js";
 import {
   applyHostedUserEnvUpdate,
   listHostedUserEnvKeys,
@@ -32,7 +42,7 @@ export interface DurableObjectStorageLike {
   setAlarm(scheduledTime: number | Date): Promise<void>;
 }
 
-export interface DurableObjectStateLike {
+export interface DurableObjectStateLike extends HostedExecutionContainerStateLike {
   blockConcurrencyWhile?<T>(callback: () => Promise<T>): Promise<T>;
   storage: DurableObjectStorageLike;
 }
@@ -75,11 +85,13 @@ const RETRY_MAX_DELAY_MS = 5 * 60_000;
 
 export class HostedUserRunner {
   private readonly commitLocks = new Map<string, Promise<HostedExecutionCommittedResult>>();
+  private readonly finalizeLocks = new Map<string, Promise<HostedExecutionCommittedResult>>();
 
   constructor(
     private readonly state: DurableObjectStateLike,
     private readonly env: HostedExecutionEnvironment,
     private readonly bucket: R2BucketLike,
+    private readonly runnerContainerEnvironment: Readonly<Record<string, string>> = {},
   ) {}
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
@@ -94,6 +106,10 @@ export class HostedUserRunner {
         || isCommittedResultFresh(committed)
       )
     ) {
+      if (!isCommittedResultFinalized(committed)) {
+        return toUserStatus(await this.syncCommittedBundlesWithoutConsuming(record, committed));
+      }
+
       return toUserStatus(
         hasPendingDispatch(record, input.eventId)
           ? await this.applyCommittedDispatch(record, committed)
@@ -148,6 +164,10 @@ export class HostedUserRunner {
         || isCommittedResultFresh(committed)
       )
     ) {
+      if (!isCommittedResultFinalized(committed)) {
+        return toUserStatus(await this.syncCommittedBundlesWithoutConsuming(record, committed));
+      }
+
       return toUserStatus(
         hasPendingDispatch(record, input.eventId)
           ? await this.applyCommittedDispatch(record, committed)
@@ -320,6 +340,25 @@ export class HostedUserRunner {
     return commitPromise;
   }
 
+  async finalizeCommit(input: {
+    eventId: string;
+    payload: HostedExecutionFinalizePayload;
+    userId: string;
+  }): Promise<HostedExecutionCommittedResult> {
+    const existingLock = this.finalizeLocks.get(input.eventId);
+
+    if (existingLock) {
+      return existingLock;
+    }
+
+    const finalizePromise = this.finalizeOnce(input).finally(() => {
+      this.finalizeLocks.delete(input.eventId);
+    });
+
+    this.finalizeLocks.set(input.eventId, finalizePromise);
+    return finalizePromise;
+  }
+
   private async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
     let record = await this.readState(userId);
     const recovered = await this.recoverCommittedPendingDispatch(record);
@@ -328,61 +367,78 @@ export class HostedUserRunner {
       record = recovered;
     }
 
-    while (true) {
-      const recoveredPending = await this.recoverCommittedPendingDispatch(record);
+    try {
+      while (true) {
+        const recoveredPending = await this.recoverCommittedPendingDispatch(record);
 
-      if (recoveredPending) {
-        record = recoveredPending;
-        continue;
-      }
+        if (recoveredPending) {
+          record = recoveredPending;
+          continue;
+        }
 
-      const claim = await this.claimNextDuePendingDispatch(userId);
-      const nextPending = claim.pendingDispatch;
-      record = claim.record;
+        const claim = await this.claimNextDuePendingDispatch(userId);
+        const nextPending = claim.pendingDispatch;
+        record = claim.record;
 
-      if (!nextPending) {
-        return toUserStatus(record);
-      }
+        if (!nextPending) {
+          return toUserStatus(record);
+        }
 
-      try {
-        await this.invokeRunner(record, nextPending.dispatch);
-        record = await this.requireCommittedDispatch(record.userId, nextPending.dispatch.eventId);
+        try {
+          const runnerResult = await this.invokeRunner(record, nextPending.dispatch);
+          record = await this.requireCommittedDispatch(record.userId, nextPending.dispatch.eventId);
+          record = await this.applyRunnerResultBundles(record.userId, runnerResult);
       } catch (error) {
         const committed = await this.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
 
         if (committed) {
-          record = await this.applyCommittedDispatch(record, committed);
-          continue;
+          if (isCommittedResultFinalized(committed)) {
+            record = await this.applyCommittedDispatch(record, committed);
+            continue;
+          }
+
+          record = await this.rescheduleCommittedFinalizeRetry({
+            attempts: nextPending.attempts + 1,
+            committed,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            record,
+          });
+          return toUserStatus(record);
         }
 
         const errorMessage = error instanceof Error ? error.message : String(error);
         const nextAttempts = nextPending.attempts + 1;
 
-        record = await this.withStateTransition(async () => {
-          const latestRecord = await this.readState(record.userId);
-          const nextRecordBase = nextAttempts >= this.env.maxEventAttempts
-            ? markPendingDispatchPoisoned(latestRecord, nextPending.dispatch.eventId, errorMessage)
-            : reschedulePendingDispatch(latestRecord, nextPending.dispatch.eventId, {
-                attempts: nextAttempts,
-                availableAt: new Date(Date.now() + computeRetryDelayMs(this.env.retryDelayMs, nextAttempts)).toISOString(),
-                lastError: errorMessage,
-              });
+          record = await this.withStateTransition(async () => {
+            const latestRecord = await this.readState(record.userId);
+            const nextRecordBase = nextAttempts >= this.env.maxEventAttempts
+              ? markPendingDispatchPoisoned(latestRecord, nextPending.dispatch.eventId, errorMessage)
+              : reschedulePendingDispatch(latestRecord, nextPending.dispatch.eventId, {
+                  attempts: nextAttempts,
+                  availableAt: new Date(Date.now() + computeRetryDelayMs(this.env.retryDelayMs, nextAttempts)).toISOString(),
+                  lastError: errorMessage,
+                });
 
-          const nextRecord = await this.scheduleNextWake({
-            ...nextRecordBase,
-            inFlight: false,
-            lastError: errorMessage,
-            lastEventId: nextPending.dispatch.eventId,
-            retryingEventId: nextAttempts >= this.env.maxEventAttempts
-              ? findRetryingEventId(nextRecordBase)
-              : nextPending.dispatch.eventId,
+            const nextRecord = await this.scheduleNextWake({
+              ...nextRecordBase,
+              inFlight: false,
+              lastError: errorMessage,
+              lastEventId: nextPending.dispatch.eventId,
+              retryingEventId: nextAttempts >= this.env.maxEventAttempts
+                ? findRetryingEventId(nextRecordBase)
+                : nextPending.dispatch.eventId,
+            });
+            await this.writeState(nextRecord);
+            return nextRecord;
           });
-          await this.writeState(nextRecord);
-          return nextRecord;
-        });
 
-        return toUserStatus(record);
+          return toUserStatus(record);
+        }
       }
+    } finally {
+      await destroyHostedExecutionContainer({
+        state: this.state,
+      });
     }
   }
 
@@ -431,13 +487,13 @@ export class HostedUserRunner {
   private async invokeRunner(
     record: UserRunnerRecord,
     dispatch: HostedExecutionDispatchRequest,
-  ): Promise<void> {
-    if (!this.env.cloudflareBaseUrl) {
-      throw new Error("HOSTED_EXECUTION_CLOUDFLARE_BASE_URL is not configured.");
+  ): Promise<HostedExecutionRunnerResult> {
+    if (!hasHostedExecutionContainer(this.state)) {
+      throw new Error("Native hosted execution requires a Durable Object container.");
     }
 
-    if (!this.env.runnerBaseUrl) {
-      throw new Error("HOSTED_EXECUTION_RUNNER_BASE_URL is not configured.");
+    if (!this.env.cloudflareBaseUrl) {
+      throw new Error("HOSTED_EXECUTION_CLOUDFLARE_BASE_URL is not configured.");
     }
 
     const store = this.createBundleStore();
@@ -459,23 +515,14 @@ export class HostedUserRunner {
       },
       dispatch,
     };
-    const response = await fetch(`${this.env.runnerBaseUrl}/__internal/run`, {
-      body: JSON.stringify(requestBody),
-      headers: {
-        ...(this.env.runnerControlToken
-          ? {
-              authorization: `Bearer ${this.env.runnerControlToken}`,
-            }
-          : {}),
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(this.env.runnerTimeoutMs),
-    });
 
-    if (!response.ok) {
-      throw new Error(`Hosted runner returned HTTP ${response.status}.`);
-    }
+    return invokeHostedExecutionContainerRunner({
+      request: requestBody,
+      runnerControlToken: this.env.runnerControlToken,
+      runnerEnvironment: this.runnerContainerEnvironment,
+      state: this.state,
+      timeoutMs: this.env.runnerTimeoutMs,
+    });
   }
 
   private async readUserEnv(userId: string): Promise<Record<string, string>> {
@@ -505,13 +552,74 @@ export class HostedUserRunner {
     };
   }
 
-  private async scheduleNextWake(record: UserRunnerRecord): Promise<UserRunnerRecord> {
+  private async applyRunnerResultBundles(
+    userId: string,
+    result: HostedExecutionRunnerResult,
+  ): Promise<UserRunnerRecord> {
+    return this.withStateTransition(async () => {
+      const latestRecord = await this.readState(userId);
+      const nextBundleRefs = {
+        agentState: await this.writeReturnedBundle(
+          userId,
+          "agent-state",
+          result.bundles.agentState,
+          latestRecord.bundleRefs.agentState,
+        ),
+        vault: await this.writeReturnedBundle(
+          userId,
+          "vault",
+          result.bundles.vault,
+          latestRecord.bundleRefs.vault,
+        ),
+      };
+
+      if (
+        sameBundleRef(nextBundleRefs.agentState, latestRecord.bundleRefs.agentState)
+        && sameBundleRef(nextBundleRefs.vault, latestRecord.bundleRefs.vault)
+      ) {
+        return latestRecord;
+      }
+
+      const nextRecord = {
+        ...latestRecord,
+        bundleRefs: nextBundleRefs,
+      };
+      await this.writeState(nextRecord);
+      return nextRecord;
+    });
+  }
+
+  private async writeReturnedBundle(
+    userId: string,
+    kind: HostedExecutionBundleKind,
+    encodedBundle: string | null,
+    currentRef: HostedExecutionBundleRef | null,
+  ): Promise<HostedExecutionBundleRef | null> {
+    if (encodedBundle === null) {
+      return null;
+    }
+
+    return this.writeBundleBytes(
+      userId,
+      kind,
+      decodeHostedBundleBase64(encodedBundle) ?? new Uint8Array(),
+      currentRef,
+    );
+  }
+
+  private async scheduleNextWake(
+    record: UserRunnerRecord,
+    preferredWakeAt: string | null = null,
+  ): Promise<UserRunnerRecord> {
     const nextPending = findNextPendingDispatch(record);
-    const nextWakeAt = nextPending
-      ? nextPending.availableAt
-      : record.activated
-        ? new Date(Date.now() + this.env.defaultAlarmDelayMs).toISOString()
-        : null;
+    const fallbackWakeAt = record.activated
+      ? new Date(Date.now() + this.env.defaultAlarmDelayMs).toISOString()
+      : null;
+    const nextWakeAt = earliestIsoTimestamp(
+      nextPending?.availableAt ?? null,
+      preferredWakeAt ?? record.nextWakeAt,
+      fallbackWakeAt,
+    );
 
     if (nextWakeAt) {
       await this.state.storage.setAlarm(new Date(nextWakeAt));
@@ -625,6 +733,21 @@ export class HostedUserRunner {
     });
   }
 
+  private async finalizeOnce(input: {
+    eventId: string;
+    payload: HostedExecutionFinalizePayload;
+    userId: string;
+  }): Promise<HostedExecutionCommittedResult> {
+    return persistHostedExecutionFinalBundles({
+      bucket: this.bucket,
+      eventId: input.eventId,
+      key: this.env.bundleEncryptionKey,
+      keyId: this.env.bundleEncryptionKeyId,
+      payload: input.payload,
+      userId: input.userId,
+    });
+  }
+
   private async recoverCommittedPendingDispatch(
     record: UserRunnerRecord,
   ): Promise<UserRunnerRecord | null> {
@@ -634,7 +757,11 @@ export class HostedUserRunner {
       const committed = await this.readCommittedDispatch(record.userId, pending.dispatch.eventId);
 
       if (committed) {
-        return this.applyCommittedDispatch(record, committed);
+        if (isCommittedResultFinalized(committed)) {
+          return this.applyCommittedDispatch(record, committed);
+        }
+
+        await this.syncCommittedBundlesWithoutConsuming(record, committed);
       }
     }
 
@@ -672,7 +799,77 @@ export class HostedUserRunner {
         lastRunAt: committed.committedAt,
         recentEventIds: [...latestRecord.recentEventIds, committed.eventId].slice(-MAX_RECENT_EVENT_IDS),
         retryingEventId: null,
-      });
+      }, committed.result.nextWakeAt ?? null);
+
+      await this.writeState(nextRecord);
+      return nextRecord;
+    });
+  }
+
+  private async syncCommittedBundlesWithoutConsuming(
+    record: UserRunnerRecord,
+    committed: HostedExecutionCommittedResult,
+  ): Promise<UserRunnerRecord> {
+    return this.withStateTransition(async () => {
+      const latestRecord = await this.readState(record.userId);
+      const nextRecord = await this.scheduleNextWake({
+        ...latestRecord,
+        bundleRefs: committed.bundleRefs,
+        inFlight: false,
+        lastEventId: committed.eventId,
+        lastRunAt: committed.committedAt,
+        retryingEventId: hasPendingDispatch(latestRecord, committed.eventId)
+          ? committed.eventId
+          : latestRecord.retryingEventId,
+      }, committed.result.nextWakeAt ?? null);
+
+      if (
+        sameBundleRef(nextRecord.bundleRefs.agentState, latestRecord.bundleRefs.agentState)
+        && sameBundleRef(nextRecord.bundleRefs.vault, latestRecord.bundleRefs.vault)
+        && nextRecord.inFlight === latestRecord.inFlight
+        && nextRecord.lastEventId === latestRecord.lastEventId
+        && nextRecord.lastRunAt === latestRecord.lastRunAt
+        && nextRecord.retryingEventId === latestRecord.retryingEventId
+        && nextRecord.nextWakeAt === latestRecord.nextWakeAt
+      ) {
+        return latestRecord;
+      }
+
+      await this.writeState(nextRecord);
+      return nextRecord;
+    });
+  }
+
+  private async rescheduleCommittedFinalizeRetry(input: {
+    attempts: number;
+    committed: HostedExecutionCommittedResult;
+    errorMessage: string;
+    record: UserRunnerRecord;
+  }): Promise<UserRunnerRecord> {
+    return this.withStateTransition(async () => {
+      const latestRecord = await this.readState(input.record.userId);
+      const nextRecord = await this.scheduleNextWake(
+        reschedulePendingDispatch(
+          {
+            ...latestRecord,
+            bundleRefs: input.committed.bundleRefs,
+            inFlight: false,
+            lastError: input.errorMessage,
+            lastEventId: input.committed.eventId,
+            lastRunAt: input.committed.committedAt,
+            retryingEventId: input.committed.eventId,
+          },
+          input.committed.eventId,
+          {
+            attempts: input.attempts,
+            availableAt: new Date(
+              Date.now() + computeRetryDelayMs(this.env.retryDelayMs, input.attempts),
+            ).toISOString(),
+            lastError: input.errorMessage,
+          },
+        ),
+        input.committed.result.nextWakeAt ?? null,
+      );
 
       await this.writeState(nextRecord);
       return nextRecord;
@@ -710,6 +907,12 @@ export class HostedUserRunner {
 
 function computeRetryDelayMs(baseDelayMs: number, attempts: number): number {
   return Math.min(RETRY_MAX_DELAY_MS, baseDelayMs * (2 ** Math.max(0, attempts - 1)));
+}
+
+function earliestIsoTimestamp(...values: Array<string | null | undefined>): string | null {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
 }
 
 function normalizeUserRunnerRecord(
@@ -759,6 +962,21 @@ function normalizeUserRunnerRecord(
       userId: record.userId ?? fallbackUserId,
     },
   };
+}
+
+function sameBundleRef(
+  left: HostedExecutionBundleRef | null,
+  right: HostedExecutionBundleRef | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.hash === right.hash && left.key === right.key && left.size === right.size;
 }
 
 function enqueuePendingDispatch(
@@ -931,6 +1149,10 @@ function isCommittedResultFresh(committed: HostedExecutionCommittedResult): bool
   const committedMs = Date.parse(committed.committedAt);
 
   return Number.isFinite(committedMs) && (Date.now() - committedMs) < CONSUMED_EVENT_TTL_MS;
+}
+
+function isCommittedResultFinalized(committed: HostedExecutionCommittedResult): boolean {
+  return committed.finalizedAt !== null;
 }
 
 function toUserStatus(record: UserRunnerRecord): HostedExecutionUserStatus {

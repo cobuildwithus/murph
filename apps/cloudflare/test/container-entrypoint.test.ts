@@ -2,10 +2,10 @@ import { once } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { startHostedContainerEntrypoint } from "../src/container-entrypoint.js";
 import * as nodeRunner from "../src/node-runner.js";
-import { startHostedRunnerServer } from "../src/runner-server.js";
 
-const servers: Array<Awaited<ReturnType<typeof startHostedRunnerServer>>> = [];
+const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(async (server) => {
@@ -14,9 +14,9 @@ afterEach(async () => {
   }));
 });
 
-describe("startHostedRunnerServer", () => {
+describe("startHostedContainerEntrypoint", () => {
   it("serves a lightweight health endpoint", async () => {
-    const server = await startHostedRunnerServer({
+    const server = await startHostedContainerEntrypoint({
       controlToken: null,
       port: 0,
     });
@@ -24,7 +24,7 @@ describe("startHostedRunnerServer", () => {
     const address = server.address();
 
     if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted runner server to expose a TCP port.");
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
     const response = await fetch(`http://127.0.0.1:${address.port}/health`);
@@ -36,7 +36,7 @@ describe("startHostedRunnerServer", () => {
     });
   });
 
-  it("serializes concurrent hosted jobs inside one runner process", async () => {
+  it("serializes concurrent hosted jobs inside one container process", async () => {
     const started: string[] = [];
     const finished: string[] = [];
     let inFlight = 0;
@@ -61,12 +61,12 @@ describe("startHostedRunnerServer", () => {
     });
 
     try {
-      const server = await startHostedRunnerServer({ controlToken: null, port: 0 });
+      const server = await startHostedContainerEntrypoint({ controlToken: null, port: 0 });
       servers.push(server);
       const address = server.address();
 
       if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted runner server to expose a TCP port.");
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
       const url = `http://127.0.0.1:${address.port}/__internal/run`;
@@ -133,12 +133,12 @@ describe("startHostedRunnerServer", () => {
     });
 
     try {
-      const server = await startHostedRunnerServer({ controlToken: null, port: 0 });
+      const server = await startHostedContainerEntrypoint({ controlToken: null, port: 0 });
       servers.push(server);
       const address = server.address();
 
       if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted runner server to expose a TCP port.");
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
       const url = `http://127.0.0.1:${address.port}/__internal/run`;

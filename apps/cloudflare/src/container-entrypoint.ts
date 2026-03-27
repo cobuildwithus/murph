@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
+import { pathToFileURL } from "node:url";
 
 import { runHostedExecutionJob, type HostedExecutionRunnerJobRequest } from "./node-runner.js";
 
-export async function startHostedRunnerServer(input: {
+export async function startHostedContainerEntrypoint(input: {
   controlToken: string | null;
   port?: number;
 }): Promise<ReturnType<typeof createServer>> {
@@ -40,7 +41,9 @@ export async function startHostedRunnerServer(input: {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
 
-      const job = JSON.parse(Buffer.concat(chunks).toString("utf8")) as HostedExecutionRunnerJobRequest;
+      const job = JSON.parse(
+        Buffer.concat(chunks).toString("utf8"),
+      ) as HostedExecutionRunnerJobRequest;
       const result = await enqueueHostedRunnerJob(() => runHostedExecutionJob(job));
 
       response.statusCode = 200;
@@ -69,4 +72,15 @@ export async function startHostedRunnerServer(input: {
   });
 
   return server;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
+
+  await startHostedContainerEntrypoint({
+    controlToken: process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN ?? null,
+    port,
+  });
+
+  await new Promise(() => {});
 }
