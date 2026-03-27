@@ -1,3 +1,4 @@
+import { buildRevnetPayIntent } from "@cobuild/wire";
 import {
   createPublicClient,
   createWalletClient,
@@ -8,10 +9,6 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import {
-  cobuildCommunityTerminalAbi,
-  JBX_NATIVE_TOKEN_ADDRESS,
-} from "./cobuild-community-terminal-abi";
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -125,20 +122,14 @@ export async function submitHostedRevnetPayment(input: {
   };
 
   const paySimulation = await publicClient.simulateContract({
-    abi: cobuildCommunityTerminalAbi,
     account,
-    address: config.terminalAddress,
-    args: [
-      config.projectId,
-      JBX_NATIVE_TOKEN_ADDRESS,
-      paymentAmount,
-      input.beneficiaryAddress,
-      0n,
-      sanitizeMemo(input.memo),
-      "0x" as Hex,
-    ],
-    functionName: "pay",
-    value: paymentAmount,
+    ...buildRevnetPayIntent({
+      amount: paymentAmount,
+      beneficiary: input.beneficiaryAddress,
+      memo: sanitizeMemo(input.memo),
+      projectId: config.projectId,
+      terminalAddress: config.terminalAddress,
+    }),
   });
 
   const payTxHash = await writeRequestWithNonceRetry(

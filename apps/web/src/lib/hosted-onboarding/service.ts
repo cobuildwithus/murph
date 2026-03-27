@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { Prisma, type HostedInvite, type HostedMember, type PrismaClient } from "@prisma/client";
+import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {
   HostedBillingCheckoutStatus,
   HostedBillingMode,
@@ -51,7 +52,6 @@ import {
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
-import { JBX_NATIVE_TOKEN_ADDRESS } from "./cobuild-community-terminal-abi";
 import {
   coerceHostedWalletAddress,
   convertStripeMinorAmountToRevnetPaymentAmount,
@@ -70,6 +70,30 @@ type HostedRevnetIssuanceRecord = {
   payTxHash: string | null;
   status: HostedRevnetIssuanceStatus;
   updatedAt: Date;
+};
+
+type HostedWebhookEventPayload = Prisma.InputJsonObject;
+
+type HostedWebhookReceiptErrorState = {
+  message: string;
+  name: string;
+};
+
+type HostedWebhookReceiptStatus = "completed" | "failed" | "processing";
+
+type HostedWebhookReceiptState = {
+  attemptCount: number;
+  attemptId: string | null;
+  completedAt: string | null;
+  eventPayload: HostedWebhookEventPayload;
+  lastError: HostedWebhookReceiptErrorState | null;
+  lastReceivedAt: string | null;
+  status: HostedWebhookReceiptStatus | null;
+};
+
+type HostedWebhookReceiptClaim = {
+  payloadJson: Prisma.InputJsonValue;
+  state: HostedWebhookReceiptState;
 };
 
 const HOSTED_REVNET_SUBMITTING_STALE_MS = 5 * 60 * 1000;
@@ -204,7 +228,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   const event = parseHostedLinqWebhookEvent(input.rawBody);
   const claimedReceipt = await recordHostedWebhookReceipt({
     eventId: event.event_id,
-    payloadJson: {
+    eventPayload: {
       eventType: event.event_type,
     },
     prisma,
@@ -343,7 +367,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     await markHostedWebhookReceiptCompleted({
       claimedReceipt,
       eventId: event.event_id,
-      payloadJson: {
+      eventPayload: {
         eventType: event.event_type,
       },
       prisma,
@@ -356,7 +380,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       claimedReceipt,
       error,
       eventId: event.event_id,
-      payloadJson: {
+      eventPayload: {
         eventType: event.event_type,
       },
       prisma,
@@ -591,7 +615,7 @@ export async function handleHostedStripeWebhook(input: {
 
   const claimedReceipt = await recordHostedWebhookReceipt({
     eventId: event.id,
-    payloadJson: {
+    eventPayload: {
       type: event.type,
     },
     prisma,
@@ -632,7 +656,7 @@ export async function handleHostedStripeWebhook(input: {
     await markHostedWebhookReceiptCompleted({
       claimedReceipt,
       eventId: event.id,
-      payloadJson: {
+      eventPayload: {
         type: event.type,
       },
       prisma,
@@ -648,7 +672,7 @@ export async function handleHostedStripeWebhook(input: {
       claimedReceipt,
       error,
       eventId: event.id,
-      payloadJson: {
+      eventPayload: {
         type: event.type,
       },
       prisma,
@@ -1197,7 +1221,7 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
       chainId: config.chainId,
       projectId: config.projectId.toString(),
       terminalAddress: config.terminalAddress,
-      paymentAssetAddress: JBX_NATIVE_TOKEN_ADDRESS,
+      paymentAssetAddress: REVNET_NATIVE_TOKEN,
       beneficiaryAddress: beneficiaryAddress.toLowerCase(),
       stripePaymentAmountMinor: amountPaid,
       stripePaymentCurrency: config.stripeCurrency,
@@ -1208,7 +1232,7 @@ async function maybeIssueHostedRevnetForStripeInvoice(input: {
       stripePaymentIntentId: paymentIntentId ?? undefined,
       stripeChargeId: chargeId ?? undefined,
       beneficiaryAddress: beneficiaryAddress.toLowerCase(),
-      paymentAssetAddress: JBX_NATIVE_TOKEN_ADDRESS,
+      paymentAssetAddress: REVNET_NATIVE_TOKEN,
       stripePaymentAmountMinor: amountPaid,
       stripePaymentCurrency: config.stripeCurrency,
       paymentAmount: paymentAmount.toString(),
@@ -1409,14 +1433,13 @@ function serializeHostedRevnetIssuanceFailure(error: unknown): {
 
 async function recordHostedWebhookReceipt(input: {
   eventId: string;
-  payloadJson: Prisma.InputJsonValue;
+  eventPayload: HostedWebhookEventPayload;
   prisma: PrismaClient;
   source: string;
-}): Promise<{ payloadJson: Prisma.InputJsonValue } | null> {
+}): Promise<HostedWebhookReceiptClaim | null> {
   const now = new Date();
-  const receiptPayloadJson = buildHostedWebhookProcessingPayload({
-    attemptCount: 1,
-    payloadJson: input.payloadJson,
+  const receipt = buildHostedWebhookProcessingReceipt({
+    eventPayload: input.eventPayload,
     receivedAt: now,
   });
 
@@ -1426,12 +1449,10 @@ async function recordHostedWebhookReceipt(input: {
         source: input.source,
         eventId: input.eventId,
         firstReceivedAt: now,
-        payloadJson: receiptPayloadJson,
+        payloadJson: receipt.payloadJson,
       },
     });
-    return {
-      payloadJson: receiptPayloadJson,
-    };
+    return receipt;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return reclaimHostedWebhookReceipt(input, now);
@@ -1444,12 +1465,12 @@ async function recordHostedWebhookReceipt(input: {
 async function reclaimHostedWebhookReceipt(
   input: {
     eventId: string;
-    payloadJson: Prisma.InputJsonValue;
+    eventPayload: HostedWebhookEventPayload;
     prisma: PrismaClient;
     source: string;
   },
   receivedAt: Date,
-): Promise<{ payloadJson: Prisma.InputJsonValue } | null> {
+): Promise<HostedWebhookReceiptClaim | null> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const existingReceipt = await input.prisma.hostedWebhookReceipt.findUnique({
       where: {
@@ -1464,9 +1485,8 @@ async function reclaimHostedWebhookReceipt(
     });
 
     if (!existingReceipt) {
-      const receiptPayloadJson = buildHostedWebhookProcessingPayload({
-        attemptCount: 1,
-        payloadJson: input.payloadJson,
+      const receipt = buildHostedWebhookProcessingReceipt({
+        eventPayload: input.eventPayload,
         receivedAt,
       });
       try {
@@ -1475,12 +1495,10 @@ async function reclaimHostedWebhookReceipt(
             source: input.source,
             eventId: input.eventId,
             firstReceivedAt: receivedAt,
-            payloadJson: receiptPayloadJson,
+            payloadJson: receipt.payloadJson,
           },
         });
-        return {
-          payloadJson: receiptPayloadJson,
-        };
+        return receipt;
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
           continue;
@@ -1490,15 +1508,15 @@ async function reclaimHostedWebhookReceipt(
       }
     }
 
-    const existingStatus = readHostedWebhookReceiptStatus(existingReceipt.payloadJson);
-    if (existingStatus === "completed" || existingStatus === "processing") {
+    const existingState = readHostedWebhookReceiptState(existingReceipt.payloadJson);
+
+    if (existingState.status === "completed" || existingState.status === "processing") {
       return null;
     }
 
-    const nextPayloadJson = buildHostedWebhookProcessingPayload({
-      attemptCount: readHostedWebhookReceiptAttemptCount(existingReceipt.payloadJson) + 1,
-      payloadJson: input.payloadJson,
-      previousPayloadJson: existingReceipt.payloadJson,
+    const nextReceipt = buildHostedWebhookProcessingReceipt({
+      eventPayload: input.eventPayload,
+      previousState: existingState,
       receivedAt,
     });
     const updatedReceipt = await input.prisma.hostedWebhookReceipt.updateMany({
@@ -1510,14 +1528,12 @@ async function reclaimHostedWebhookReceipt(
         },
       },
       data: {
-        payloadJson: nextPayloadJson,
+        payloadJson: nextReceipt.payloadJson,
       },
     });
 
     if (updatedReceipt.count === 1) {
-      return {
-        payloadJson: nextPayloadJson,
-      };
+      return nextReceipt;
     }
   }
 
@@ -1530,18 +1546,16 @@ async function reclaimHostedWebhookReceipt(
 }
 
 async function markHostedWebhookReceiptCompleted(input: {
-  claimedReceipt: {
-    payloadJson: Prisma.InputJsonValue;
-  };
+  claimedReceipt: HostedWebhookReceiptClaim;
   eventId: string;
-  payloadJson: Prisma.InputJsonValue;
+  eventPayload: HostedWebhookEventPayload;
   prisma: PrismaClient;
   source: string;
 }): Promise<void> {
   await updateHostedWebhookReceiptStatus({
     claimedReceipt: input.claimedReceipt,
     eventId: input.eventId,
-    payloadJson: input.payloadJson,
+    eventPayload: input.eventPayload,
     prisma: input.prisma,
     source: input.source,
     status: "completed",
@@ -1549,12 +1563,10 @@ async function markHostedWebhookReceiptCompleted(input: {
 }
 
 async function markHostedWebhookReceiptFailed(input: {
-  claimedReceipt: {
-    payloadJson: Prisma.InputJsonValue;
-  };
+  claimedReceipt: HostedWebhookReceiptClaim;
   error: unknown;
   eventId: string;
-  payloadJson: Prisma.InputJsonValue;
+  eventPayload: HostedWebhookEventPayload;
   prisma: PrismaClient;
   source: string;
 }): Promise<void> {
@@ -1562,7 +1574,7 @@ async function markHostedWebhookReceiptFailed(input: {
     claimedReceipt: input.claimedReceipt,
     error: input.error,
     eventId: input.eventId,
-    payloadJson: input.payloadJson,
+    eventPayload: input.eventPayload,
     prisma: input.prisma,
     source: input.source,
     status: "failed",
@@ -1570,16 +1582,31 @@ async function markHostedWebhookReceiptFailed(input: {
 }
 
 async function updateHostedWebhookReceiptStatus(input: {
-  claimedReceipt: {
-    payloadJson: Prisma.InputJsonValue;
-  };
+  claimedReceipt: HostedWebhookReceiptClaim;
   error?: unknown;
   eventId: string;
-  payloadJson: Prisma.InputJsonValue;
+  eventPayload: HostedWebhookEventPayload;
   prisma: PrismaClient;
   source: string;
   status: "completed" | "failed";
 }): Promise<void> {
+  const receivedAt = new Date().toISOString();
+  const nextState = buildHostedWebhookReceiptState({
+    attemptCount: input.claimedReceipt.state.attemptCount,
+    attemptId: input.claimedReceipt.state.attemptId,
+    completedAt: input.status === "completed" ? receivedAt : null,
+    eventPayload: mergeHostedWebhookEventPayload(
+      input.eventPayload,
+      input.claimedReceipt.state.eventPayload,
+    ),
+    lastError:
+      input.status === "failed"
+        ? serializeHostedWebhookReceiptError(input.error)
+        : null,
+    lastReceivedAt: receivedAt,
+    status: input.status,
+  });
+
   await input.prisma.hostedWebhookReceipt.updateMany({
     where: {
       source: input.source,
@@ -1589,125 +1616,197 @@ async function updateHostedWebhookReceiptStatus(input: {
       },
     },
     data: {
-      payloadJson: buildHostedWebhookReceiptPayload({
-        attemptCount: 0,
-        attemptId:
-          readHostedWebhookReceiptAttemptId(input.claimedReceipt.payloadJson) ??
-          undefined,
-        error: input.error,
-        payloadJson: input.payloadJson,
-        previousPayloadJson: input.claimedReceipt.payloadJson,
-        receivedAt: new Date(),
-        status: input.status,
-      }),
+      payloadJson: serializeHostedWebhookReceiptState(nextState),
     },
   });
 }
 
-function buildHostedWebhookProcessingPayload(input: {
-  attemptCount: number;
-  attemptId?: string;
-  payloadJson: Prisma.InputJsonValue;
-  previousPayloadJson?: Prisma.InputJsonValue | Prisma.JsonValue | null;
+function buildHostedWebhookProcessingReceipt(input: {
+  eventPayload: HostedWebhookEventPayload;
+  previousState?: HostedWebhookReceiptState | null;
   receivedAt: Date;
-}): Prisma.InputJsonValue {
-  return buildHostedWebhookReceiptPayload({
-    attemptCount: input.attemptCount,
-    attemptId: input.attemptId ?? generateHostedWebhookReceiptAttemptId(),
-    payloadJson: input.payloadJson,
-    previousPayloadJson: input.previousPayloadJson,
-    receivedAt: input.receivedAt,
+}): HostedWebhookReceiptClaim {
+  const state = buildHostedWebhookReceiptState({
+    attemptCount: Math.max(input.previousState?.attemptCount ?? 0, 0) + 1,
+    attemptId: generateHostedWebhookReceiptAttemptId(),
+    completedAt: null,
+    eventPayload: mergeHostedWebhookEventPayload(
+      input.eventPayload,
+      input.previousState?.eventPayload ?? null,
+    ),
+    lastError: null,
+    lastReceivedAt: input.receivedAt.toISOString(),
     status: "processing",
   });
-}
-
-function buildHostedWebhookReceiptPayload(input: {
-  attemptCount: number;
-  attemptId?: string;
-  error?: unknown;
-  payloadJson: Prisma.InputJsonValue;
-  previousPayloadJson?: Prisma.InputJsonValue | Prisma.JsonValue | null;
-  receivedAt: Date;
-  status: "completed" | "failed" | "processing";
-}): Prisma.InputJsonValue {
-  const basePayload = readHostedWebhookReceiptBasePayload(input.payloadJson, input.previousPayloadJson);
-  const previousAttemptCount = readHostedWebhookReceiptAttemptCount(input.previousPayloadJson ?? null);
-  const attemptCount = input.attemptCount > 0 ? input.attemptCount : previousAttemptCount;
 
   return {
-    ...basePayload,
-    receiptAttemptId:
-      input.attemptId ??
-      readHostedWebhookReceiptAttemptId(input.previousPayloadJson ?? null) ??
-      generateHostedWebhookReceiptAttemptId(),
-    receiptAttemptCount: Math.max(attemptCount, 1),
-    receiptCompletedAt: input.status === "completed" ? input.receivedAt.toISOString() : null,
-    receiptLastError: input.status === "failed" ? serializeHostedWebhookReceiptError(input.error) : null,
-    receiptLastReceivedAt: input.receivedAt.toISOString(),
-    receiptStatus: input.status,
-  } satisfies Prisma.InputJsonObject;
-}
-
-function readHostedWebhookReceiptBasePayload(
-  payloadJson: Prisma.InputJsonValue,
-  previousPayloadJson?: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): Prisma.InputJsonObject {
-  const currentPayload = toHostedWebhookReceiptObject(payloadJson);
-  const previousPayload = toHostedWebhookReceiptObject(previousPayloadJson);
-
-  return {
-    ...previousPayload,
-    ...currentPayload,
+    payloadJson: serializeHostedWebhookReceiptState(state),
+    state,
   };
 }
 
-function readHostedWebhookReceiptAttemptCount(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): number {
-  const rawAttemptCount = toHostedWebhookReceiptObject(payloadJson).receiptAttemptCount;
+function buildHostedWebhookReceiptState(input: {
+  attemptCount: number;
+  attemptId: string | null;
+  completedAt: string | null;
+  eventPayload: HostedWebhookEventPayload;
+  lastError: HostedWebhookReceiptErrorState | null;
+  lastReceivedAt: string | null;
+  status: HostedWebhookReceiptStatus;
+}): HostedWebhookReceiptState {
+  return {
+    attemptCount: Math.max(Math.trunc(input.attemptCount), 1),
+    attemptId: input.attemptId,
+    completedAt: input.status === "completed" ? input.completedAt : null,
+    eventPayload: input.eventPayload,
+    lastError: input.status === "failed" ? input.lastError : null,
+    lastReceivedAt: input.lastReceivedAt,
+    status: input.status,
+  };
+}
 
-  return typeof rawAttemptCount === "number" && Number.isFinite(rawAttemptCount)
-    ? Math.max(Math.trunc(rawAttemptCount), 0)
+function serializeHostedWebhookReceiptState(
+  receiptState: HostedWebhookReceiptState,
+): Prisma.InputJsonValue {
+  return {
+    eventPayload: receiptState.eventPayload,
+    receiptState: {
+      attemptCount: Math.max(Math.trunc(receiptState.attemptCount), 1),
+      attemptId: receiptState.attemptId ?? generateHostedWebhookReceiptAttemptId(),
+      completedAt: receiptState.status === "completed" ? receiptState.completedAt : null,
+      lastError: receiptState.status === "failed" ? receiptState.lastError : null,
+      lastReceivedAt: receiptState.lastReceivedAt,
+      status: receiptState.status,
+    },
+  } satisfies Prisma.InputJsonObject;
+}
+
+function readHostedWebhookReceiptState(
+  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
+): HostedWebhookReceiptState {
+  const payloadObject = toHostedWebhookReceiptObject(payloadJson);
+  const nestedState = toHostedWebhookReceiptObject(payloadObject.receiptState);
+  const attemptId = readHostedWebhookReceiptString(
+    nestedState.attemptId ?? payloadObject.receiptAttemptId,
+  );
+  const attemptCount = readHostedWebhookReceiptNumber(
+    nestedState.attemptCount ?? payloadObject.receiptAttemptCount,
+  );
+  const status = readHostedWebhookReceiptStatusValue(
+    nestedState.status ?? payloadObject.receiptStatus,
+  );
+
+  return {
+    attemptCount: Math.max(attemptCount, 0),
+    attemptId,
+    completedAt: readHostedWebhookReceiptString(
+      nestedState.completedAt ?? payloadObject.receiptCompletedAt,
+    ),
+    eventPayload: readHostedWebhookReceiptEventPayload(payloadJson),
+    lastError: readHostedWebhookReceiptError(
+      nestedState.lastError ?? payloadObject.receiptLastError,
+    ),
+    lastReceivedAt: readHostedWebhookReceiptString(
+      nestedState.lastReceivedAt ?? payloadObject.receiptLastReceivedAt,
+    ),
+    status,
+  };
+}
+
+function readHostedWebhookReceiptEventPayload(
+  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
+): HostedWebhookEventPayload {
+  if (payloadJson && typeof payloadJson === "object" && !Array.isArray(payloadJson)) {
+    const payloadObject = payloadJson as Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>;
+    const nestedEventPayload = payloadObject.eventPayload;
+
+    if (nestedEventPayload && typeof nestedEventPayload === "object" && !Array.isArray(nestedEventPayload)) {
+      return nestedEventPayload as HostedWebhookEventPayload;
+    }
+
+    const legacyEventPayload = { ...payloadObject };
+    delete legacyEventPayload.receiptAttemptCount;
+    delete legacyEventPayload.receiptAttemptId;
+    delete legacyEventPayload.receiptCompletedAt;
+    delete legacyEventPayload.receiptLastError;
+    delete legacyEventPayload.receiptLastReceivedAt;
+    delete legacyEventPayload.receiptState;
+    delete legacyEventPayload.receiptStatus;
+
+    return legacyEventPayload as HostedWebhookEventPayload;
+  }
+
+  return {};
+}
+
+function readHostedWebhookReceiptError(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): HostedWebhookReceiptErrorState | null {
+  const errorObject = toHostedWebhookReceiptObject(value);
+  const message = readHostedWebhookReceiptString(errorObject.message);
+  const name = readHostedWebhookReceiptString(errorObject.name);
+
+  return message && name
+    ? {
+      message,
+      name,
+    }
+    : null;
+}
+
+function mergeHostedWebhookEventPayload(
+  eventPayload: HostedWebhookEventPayload,
+  previousEventPayload: HostedWebhookEventPayload | null,
+): HostedWebhookEventPayload {
+  return {
+    ...(previousEventPayload ?? {}),
+    ...eventPayload,
+  };
+}
+
+function readHostedWebhookReceiptNumber(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(Math.trunc(value), 0)
     : 0;
 }
 
-function readHostedWebhookReceiptAttemptId(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
+function readHostedWebhookReceiptString(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): string | null {
-  const rawAttemptId = toHostedWebhookReceiptObject(payloadJson).receiptAttemptId;
-
-  return typeof rawAttemptId === "string" && rawAttemptId.trim().length > 0
-    ? rawAttemptId
+  return typeof value === "string" && value.trim().length > 0
+    ? value
     : null;
 }
 
-function readHostedWebhookReceiptStatus(payloadJson: Prisma.JsonValue | null): "completed" | "failed" | "processing" | null {
-  const rawStatus = toHostedWebhookReceiptObject(payloadJson).receiptStatus;
-
-  return rawStatus === "completed" || rawStatus === "failed" || rawStatus === "processing"
-    ? rawStatus
+function readHostedWebhookReceiptStatusValue(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): HostedWebhookReceiptStatus | null {
+  return value === "completed" || value === "failed" || value === "processing"
+    ? value
     : null;
 }
 
-function serializeHostedWebhookReceiptError(error: unknown): Prisma.InputJsonValue {
+function serializeHostedWebhookReceiptError(error: unknown): HostedWebhookReceiptErrorState {
   if (error instanceof Error) {
     return {
       message: error.message,
       name: error.name,
-    } satisfies Prisma.InputJsonObject;
+    };
   }
 
   if (typeof error === "string") {
     return {
       message: error,
       name: "Error",
-    } satisfies Prisma.InputJsonObject;
+    };
   }
 
   return {
     message: "Unknown hosted webhook failure.",
     name: "UnknownError",
-  } satisfies Prisma.InputJsonObject;
+  };
 }
 
 function generateHostedWebhookReceiptAttemptId(): string {

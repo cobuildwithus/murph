@@ -75,6 +75,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@cobuild/wire':
+        specifier: ^0.3.6
+        version: 0.3.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
       '@healthybob/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -453,6 +456,11 @@ packages:
 
   '@cobuild/review-gpt@0.5.1':
     resolution: {integrity: sha512-kgrRY4O3Z2RYrH3+6rxrj1rSZ1PjB6DmpKeqr/u6BL3mVj2dNOapZ05+WzZuof/v0dGdnBQCDf39/yqwSwLmIw==}
+    hasBin: true
+
+  '@cobuild/wire@0.3.6':
+    resolution: {integrity: sha512-NygZfMLvrSQpaFkPU1rXg14pW5dBz3YQ8XTRWfBggyxPPgo+CkglGxKzl5xFG7rX66DRVJpcULou+Z3vdWuvFg==}
+    engines: {node: '>=20'}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.45.0':
@@ -5553,6 +5561,15 @@ snapshots:
       - '@cfworker/json-schema'
       - openapi-types
       - supports-color
+
+  '@cobuild/wire@0.3.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)':
+    dependencies:
+      viem: 2.47.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
 
   '@coinbase/cdp-sdk@1.45.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)':
     dependencies:

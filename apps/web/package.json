@@ -18,6 +18,7 @@
     "prisma:migrate:dev": "prisma migrate dev"
   },
   "dependencies": {
+    "@cobuild/wire": "^0.3.6",
     "@healthybob/contracts": "workspace:*",
     "@healthybob/core": "workspace:*",
     "@healthybob/device-syncd": "workspace:*",
