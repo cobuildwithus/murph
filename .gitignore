@@ -5,6 +5,7 @@ coverage/
 .turbo/
 .next/
 .next-dev/
+.next-smoke/
 .agents/
 .claude/
 .windsurf/
@@ -17,6 +18,8 @@ coverage/
 .test-dist/
 .codex-runs/
 .codex-audit/
+.codex-simplify-audit.txt
+.codex-worktrees/
 .codex-worker-prompts/
 assistant-state/
 audit-packages/
