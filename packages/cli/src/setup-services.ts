@@ -194,14 +194,9 @@ export function createSetupServices(
     const homeDirectory = path.resolve(getHomeDirectory())
     const cliBinPath = path.resolve(resolveCliBinPath())
     const defaultToolchainRoot = path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY)
-    const legacyToolchainRoot = path.join(homeDirectory, '.healthybob', 'toolchain')
     const toolchainRoot = path.resolve(
       getCwd(),
-      input.toolchainRoot ?? (
-        !(await fileExists(defaultToolchainRoot)) && await fileExists(legacyToolchainRoot)
-          ? legacyToolchainRoot
-          : defaultToolchainRoot
-      ),
+      input.toolchainRoot ?? defaultToolchainRoot,
     )
     const notes: string[] = []
     const steps: SetupStepResult[] = []

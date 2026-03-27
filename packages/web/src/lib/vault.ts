@@ -12,7 +12,6 @@ export const FIXTURE_VAULT_EXAMPLE = "../../fixtures/demo-web-vault";
 const INIT_CWD_ENV = "INIT_CWD";
 const OPERATOR_CONFIG_RELATIVE_PATHS = [
   path.join(".murph", "config.json"),
-  path.join(".healthybob", "config.json"),
 ] as const;
 
 export function getConfiguredVaultRoot(

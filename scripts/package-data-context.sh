@@ -62,9 +62,6 @@ resolve_saved_default_vault() {
   home_dir="${HOME:-}"
   [[ -n "$home_dir" ]] || return 1
   config_path="$home_dir/.murph/config.json"
-  if [[ ! -f "$config_path" ]]; then
-    config_path="$home_dir/.healthybob/config.json"
-  fi
   [[ -f "$config_path" ]] || return 1
 
   node --input-type=module - "$config_path" "$home_dir" <<'EOF'

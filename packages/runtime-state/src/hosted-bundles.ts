@@ -138,7 +138,5 @@ function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): bool
   return (
     relativePath === ".murph"
     || relativePath === ".murph/config.json"
-    || relativePath === ".healthybob"
-    || relativePath === ".healthybob/config.json"
   );
 }

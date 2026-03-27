@@ -118,16 +118,11 @@ download_file() {
 bootstrap_linux_node() {
   local home_dir="${HOME:-$repo_root}"
   local bootstrap_root="${home_dir}/.murph/bootstrap"
-  local legacy_bootstrap_root="${home_dir}/.healthybob/bootstrap"
   local linux_arch
   linux_arch="$(normalize_linux_arch)" || {
     printf 'scripts/setup-host.sh currently supports Linux x64 and arm64 only.\n' >&2
     exit 1
   }
-
-  if [ ! -d "$bootstrap_root" ] && [ -d "$legacy_bootstrap_root" ]; then
-    bootstrap_root="$legacy_bootstrap_root"
-  fi
 
   if command -v node >/dev/null 2>&1 && has_required_node node; then
     log "Using Node $(node -p 'process.versions.node')"

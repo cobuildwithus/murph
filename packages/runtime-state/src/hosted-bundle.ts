@@ -6,7 +6,6 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import type { HostedExecutionBundleKind } from "./hosted-execution.ts";
 
 export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v1";
-const LEGACY_HOSTED_BUNDLE_SCHEMA = "healthybob.hosted-bundle.v1";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 
 interface HostedBundleArchiveFile {
@@ -192,10 +191,7 @@ function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundle
   const buffer = Buffer.from(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes);
   const parsed = JSON.parse(gunzipSync(buffer).toString("utf8")) as Partial<HostedBundleArchive>;
 
-  if (
-    (parsed.schema !== HOSTED_BUNDLE_SCHEMA && parsed.schema !== LEGACY_HOSTED_BUNDLE_SCHEMA)
-    || !Array.isArray(parsed.files)
-  ) {
+  if (parsed.schema !== HOSTED_BUNDLE_SCHEMA || !Array.isArray(parsed.files)) {
     throw new Error("Hosted bundle archive is invalid.");
   }
 
