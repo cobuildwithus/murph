@@ -181,6 +181,20 @@ interface ComposerEditingResult extends ComposerEditingState {
   handled: boolean
 }
 
+interface ComposerControlledSyncInput {
+  cursorOffset: number
+  currentValue: string
+  nextControlledValue: string
+  pendingValues: readonly string[]
+  previousControlledValue: string
+}
+
+interface ComposerControlledSyncResult {
+  cursorOffset: number
+  nextValue: string
+  pendingValues: string[]
+}
+
 type ComposerTerminalAction =
   | {
       kind: 'edit'
@@ -939,11 +953,16 @@ export function formatQueuedFollowUpPreview(prompt: string): string {
 function ComposerInput(props: ComposerInputProps): React.ReactElement {
   const createElement = React.createElement
   const theme = useAssistantInkTheme()
+  const [displayValue, setDisplayValue] = React.useState(props.value)
   const [cursorOffset, setCursorOffset] = React.useState(props.value.length)
   const valueRef = React.useRef(props.value)
   const cursorOffsetRef = React.useRef(props.value.length)
   const killBufferRef = React.useRef('')
   const preferredColumnRef = React.useRef<number | null>(null)
+  const lastPropValueRef = React.useRef(props.value)
+  // Keep a queue of locally emitted draft values so older controlled echoes
+  // cannot clobber a newer in-flight paste or mid-buffer edit.
+  const pendingControlledValuesRef = React.useRef<string[]>([])
   const onChangeRef = React.useRef(props.onChange)
   const onEditLastQueuedPromptRef = React.useRef(props.onEditLastQueuedPrompt)
   const onSubmitRef = React.useRef(props.onSubmit)
@@ -954,19 +973,26 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
   onSubmitRef.current = props.onSubmit
   disabledRef.current = props.disabled
 
-  React.useEffect(() => {
-    valueRef.current = props.value
+  React.useLayoutEffect(() => {
+    const syncResult = reconcileComposerControlledValue({
+      cursorOffset: cursorOffsetRef.current,
+      currentValue: valueRef.current,
+      nextControlledValue: props.value,
+      pendingValues: pendingControlledValuesRef.current,
+      previousControlledValue: lastPropValueRef.current,
+    })
 
-    const clampedCursorOffset = clampComposerCursorOffset(
-      cursorOffsetRef.current,
-      props.value.length,
+    lastPropValueRef.current = props.value
+    pendingControlledValuesRef.current = syncResult.pendingValues
+    valueRef.current = syncResult.nextValue
+    setDisplayValue((previous) =>
+      previous === syncResult.nextValue ? previous : syncResult.nextValue,
     )
 
-    if (clampedCursorOffset !== cursorOffsetRef.current) {
-      cursorOffsetRef.current = clampedCursorOffset
+    if (syncResult.cursorOffset !== cursorOffsetRef.current) {
+      cursorOffsetRef.current = syncResult.cursorOffset
+      setCursorOffset(syncResult.cursorOffset)
     }
-
-    setCursorOffset(clampedCursorOffset)
   }, [props.value])
 
   const handleComposerInput = React.useCallback((input: string, key: Key) => {
@@ -1011,9 +1037,14 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
     if (action.kind === 'submit') {
       if (onSubmitRef.current(currentValue, action.mode) === 'clear') {
         valueRef.current = ''
+        pendingControlledValuesRef.current = enqueuePendingComposerValue(
+          pendingControlledValuesRef.current,
+          '',
+        )
         cursorOffsetRef.current = 0
         killBufferRef.current = ''
         preferredColumnRef.current = null
+        setDisplayValue('')
         setCursorOffset(0)
         onChangeRef.current('')
       }
@@ -1048,6 +1079,11 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
     }
 
     if (editingResult.value !== currentValue) {
+      pendingControlledValuesRef.current = enqueuePendingComposerValue(
+        pendingControlledValuesRef.current,
+        editingResult.value,
+      )
+      setDisplayValue(editingResult.value)
       onChangeRef.current(editingResult.value)
     }
   }, [])
@@ -1055,12 +1091,6 @@ function ComposerInput(props: ComposerInputProps): React.ReactElement {
   useInput(handleComposerInput, {
     isActive: !props.disabled,
   })
-
-  const displayValue =
-    props.value.length < valueRef.current.length &&
-    valueRef.current.startsWith(props.value)
-      ? valueRef.current
-      : props.value
 
   return createElement(
     Box,
@@ -1718,6 +1748,57 @@ const ChatFooter = React.memo(function ChatFooter(
     ),
   )
 })
+
+function enqueuePendingComposerValue(
+  pendingValues: readonly string[],
+  nextValue: string,
+): string[] {
+  return pendingValues[pendingValues.length - 1] === nextValue
+    ? [...pendingValues]
+    : [...pendingValues, nextValue]
+}
+
+export function reconcileComposerControlledValue(
+  input: ComposerControlledSyncInput,
+): ComposerControlledSyncResult {
+  // Controlled updates that match a queued local value are only acknowledgements
+  // from the parent state, so keep the newest local draft visible until the last
+  // pending value is observed. Anything else is an external restore/reset and
+  // should replace the live draft immediately.
+  const nextControlledValue = input.nextControlledValue
+  const currentValue = input.currentValue
+  const clampedCursorOffset = clampComposerCursorOffset(
+    input.cursorOffset,
+    currentValue.length,
+  )
+
+  if (nextControlledValue === input.previousControlledValue) {
+    return {
+      cursorOffset: clampedCursorOffset,
+      nextValue: currentValue,
+      pendingValues: [...input.pendingValues],
+    }
+  }
+
+  const matchedPendingIndex = input.pendingValues.indexOf(nextControlledValue)
+  if (matchedPendingIndex >= 0) {
+    const remainingPendingValues = input.pendingValues.slice(matchedPendingIndex + 1)
+    const nextValue =
+      remainingPendingValues.length === 0 ? nextControlledValue : currentValue
+
+    return {
+      cursorOffset: clampComposerCursorOffset(clampedCursorOffset, nextValue.length),
+      nextValue,
+      pendingValues: remainingPendingValues,
+    }
+  }
+
+  return {
+    cursorOffset: nextControlledValue.length,
+    nextValue: nextControlledValue,
+    pendingValues: [],
+  }
+}
 
 function clampComposerCursorOffset(offset: number, valueLength: number): number {
   return Math.max(0, Math.min(offset, valueLength))

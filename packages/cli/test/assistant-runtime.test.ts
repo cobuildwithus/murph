@@ -110,6 +110,7 @@ import {
   resolveAssistantHyperlinkTarget,
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
+  reconcileComposerControlledValue,
   shouldShowBusyStatus,
   splitAssistantMarkdownLinks,
   supportsAssistantInkRawMode,
@@ -4741,6 +4742,57 @@ test('assistant Ink composer editing normalizes pasted carriage returns to newli
       handled: true,
       killBuffer: '',
       value: 'alpha\nbeta\ngamma',
+    },
+  )
+})
+
+test('assistant Ink composer controlled sync keeps the latest local draft visible while older controlled paste chunks catch up', () => {
+  assert.deepEqual(
+    reconcileComposerControlledValue({
+      cursorOffset: 15,
+      currentValue: 'hello brave new world',
+      nextControlledValue: 'hello brave world',
+      pendingValues: ['hello brave world', 'hello brave new world'],
+      previousControlledValue: 'hello world',
+    }),
+    {
+      cursorOffset: 15,
+      nextValue: 'hello brave new world',
+      pendingValues: ['hello brave new world'],
+    },
+  )
+})
+
+test('assistant Ink composer controlled sync treats unrelated controlled updates as external draft restores and moves the cursor to the end', () => {
+  assert.deepEqual(
+    reconcileComposerControlledValue({
+      cursorOffset: 0,
+      currentValue: '',
+      nextControlledValue: 'queued follow-up',
+      pendingValues: [],
+      previousControlledValue: '',
+    }),
+    {
+      cursorOffset: 16,
+      nextValue: 'queued follow-up',
+      pendingValues: [],
+    },
+  )
+})
+
+test('assistant Ink composer controlled sync clears pending local values once the parent catches up fully', () => {
+  assert.deepEqual(
+    reconcileComposerControlledValue({
+      cursorOffset: 21,
+      currentValue: 'hello brave new world',
+      nextControlledValue: 'hello brave new world',
+      pendingValues: ['hello brave world', 'hello brave new world'],
+      previousControlledValue: 'hello brave world',
+    }),
+    {
+      cursorOffset: 21,
+      nextValue: 'hello brave new world',
+      pendingValues: [],
     },
   )
 })
