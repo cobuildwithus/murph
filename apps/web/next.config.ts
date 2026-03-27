@@ -34,6 +34,7 @@ const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@healthybob/contracts": "../../packages/contracts/src/index.ts",
+  "@healthybob/hosted-execution": "../../packages/hosted-execution/src/index.ts",
   "@healthybob/runtime-state": "../../packages/runtime-state/src/index.ts",
   "@healthybob/core": "../../packages/core/src/index.ts",
   "@healthybob/importers": "../../packages/importers/src/index.ts",

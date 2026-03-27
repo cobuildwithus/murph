@@ -21,6 +21,10 @@ test("resolveWorkspaceSourceEntries points at hosted source package entries", ()
     resolveWorkspaceSourceEntries("/repo/apps/web")["@healthybob/core"],
     path.resolve("/repo/packages/core/src/index.ts"),
   );
+  assert.equal(
+    resolveWorkspaceSourceEntries("/repo/apps/web")["@healthybob/hosted-execution"],
+    path.resolve("/repo/packages/hosted-execution/src/index.ts"),
+  );
 });
 
 test("next.config transpiles hosted workspace source packages instead of pinning dist aliases", () => {
